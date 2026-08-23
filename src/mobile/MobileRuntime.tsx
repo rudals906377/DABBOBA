@@ -1,19 +1,23 @@
 import { useEffect, type PropsWithChildren } from "react";
-import { MobileDeviceProvider, useMobileDevice } from "./Device";
+import { MobileDeviceProvider, useMobileDevice, type MobileDeviceId } from "./Device";
 import { KeyboardDock, KeyboardProvider, useKeyboard } from "./Keyboard";
 import { PhoneFrame } from "./PhoneFrame";
 import { HomeIndicator, StatusBar } from "./components";
 
 export function MobileRuntime({ children }: PropsWithChildren) {
+  const params = new URLSearchParams(window.location.search);
+  const embedded = params.get("embed") === "1";
+  const initialDeviceId: MobileDeviceId = params.get("platform") === "android" ? "pixel-10" : "iphone";
+
   return (
-    <MobileDeviceProvider>
-      <PhoneFrame>
-        <KeyboardProvider>
+    <MobileDeviceProvider embedded={embedded} initialDeviceId={initialDeviceId}>
+      <PhoneFrame embedded={embedded}>
+        <KeyboardProvider nativeKeyboard={embedded}>
           <KeyboardPreview />
-          <StatusBar />
+          {embedded ? null : <StatusBar />}
           <MobileAppViewport>{children}</MobileAppViewport>
-          <HomeIndicator />
-          <KeyboardDock />
+          {embedded ? null : <HomeIndicator />}
+          {embedded ? null : <KeyboardDock />}
         </KeyboardProvider>
       </PhoneFrame>
     </MobileDeviceProvider>

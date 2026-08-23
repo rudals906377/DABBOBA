@@ -240,3 +240,33 @@ test("FlowStack pushes and pops screens while dismissing the keyboard", async ({
   await page.getByRole("button", { name: "Done" }).click();
   await expect(page.getByRole("heading", { name: "Flow root" })).toBeVisible();
 });
+
+test("Expo embed mode fills the native WebView without preview chrome", async ({ page }) => {
+  await page.setViewportSize({ width: 427, height: 952 });
+  await page.goto("/?embed=1&platform=android");
+
+  const screen = page.getByTestId("device-screen");
+  await expect(screen).toHaveAttribute("data-platform", "android");
+  await expect(screen).toHaveClass(/device-screen-embedded/);
+  await expect(page.getByTestId("phone-frame")).toHaveCount(0);
+  await expect(page.getByTestId("device-picker")).toHaveCount(0);
+  await expect(page.getByTestId("status-time")).toHaveCount(0);
+  await expect(page.getByTestId("home-indicator")).toHaveCount(0);
+  await expect(page.getByTestId("android-navigation-bar")).toHaveCount(0);
+  await expect(page.getByTestId("keyboard-dock")).toHaveCount(0);
+
+  const geometry = await screen.evaluate((element) => ({
+    width: element.getBoundingClientRect().width,
+    height: element.getBoundingClientRect().height,
+    scrollWidth: element.scrollWidth,
+    cursor: getComputedStyle(element).cursor,
+  }));
+
+  expect(geometry.width).toBe(427);
+  expect(geometry.height).toBe(952);
+  expect(geometry.scrollWidth).toBe(427);
+  expect(geometry.cursor).not.toBe("none");
+
+  await page.getByRole("navigation", { name: "주요 메뉴" }).getByRole("button", { name: "샵" }).click();
+  await expect(page.getByRole("main", { name: "DABBOBA 샵" })).toBeVisible();
+});

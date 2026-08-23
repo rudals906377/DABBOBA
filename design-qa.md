@@ -125,6 +125,7 @@
 - Pixel check: profile detail and card purchase completion report `scrollWidth === clientWidth` at 427 × 952, and the purchase footer clears the Android navigation surface.
 - Fresh browser reload console check after navigation implementation: zero error and warning entries.
 - Capsule animation check: iPhone ready/mix/drop/open/result captures and Pixel open capture passed; both machine bounds remained inside the stage, the result sheet appeared after the full 3.2-second sequence, and the protected device chrome remained intact.
+- Expo embed check: `work/qa/expo-embed-pixel.png` confirms the app fills a 427 × 952 native WebView without the browser-preview bezel, device picker, simulated status bar, simulated keyboard, or Android navigation asset. The same root navigation and Shop transition remain interactive in embed mode.
 - `npm run check:runtime`: passed, 28 protected runtime files unchanged.
 - `npm run build`: passed; only the existing non-blocking Vite chunk-size advisory remains.
 - `npm run test:runtime`: 8/8 passed.

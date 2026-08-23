@@ -1,0 +1,17 @@
+{
+  "expo": {
+    "name": "DABBOBA",
+    "slug": "dabboba-mobile",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "scheme": "dabboba",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.dabboba.mobile"
+    },
+    "android": {
+      "package": "com.dabboba.mobile"
+    }
+  }
+}
