@@ -1,0 +1,1703 @@
+[
+  {
+    "slug": "one-piece",
+    "nameKo": "원피스",
+    "search": "One Piece",
+    "kitsuId": "12",
+    "sourceUrl": "https://kitsu.io/anime/one-piece",
+    "canonicalTitle": "One Piece",
+    "titles": {
+      "en": "One Piece",
+      "en_jp": "One Piece",
+      "ja_jp": "ONE PIECE"
+    },
+    "abbreviatedTitles": [
+      "ワンピース"
+    ],
+    "synopsis": "Gol D. Roger was known as the \"Pirate King,\" the strongest and most infamous being to have sailed the Grand Line. The capture and death of Roger by the World Government brought a change throughout the world. His last words before his death revealed the existence of the greatest treasure in the world, One Piece. It was this revelation that brought about the Grand Age of Pirates, men who dreamed of finding One Piece—which promises an unlimited amount of riches and fame—and quite possibly the pinnacle of glory and the title of the Pirate King.\nEnter Monkey D. Luffy, a 17-year-old boy who defies your standard definition of a pirate. Rather than the popular persona of a wicked, hardened, toothless pirate ransacking villages for fun, Luffy’s reason for being a pirate is one of pure wonder: the thought of an exciting adventure that leads him to intriguing people and ultimately, the promised treasure. Following in the footsteps of his childhood hero, Luffy and his crew travel across the Grand Line, experiencing crazy adventures, unveiling dark mysteries and battling strong enemies, all in order to reach the most coveted of all fortunes—One Piece.\n[Written by MAL Rewrite]",
+    "posterImage": {
+      "tiny": "https://media.kitsu.app/anime/poster_images/12/tiny.jpg",
+      "large": "https://media.kitsu.app/anime/poster_images/12/large.jpg",
+      "small": "https://media.kitsu.app/anime/poster_images/12/small.jpg",
+      "medium": "https://media.kitsu.app/anime/poster_images/12/medium.jpg",
+      "original": "https://media.kitsu.app/anime/poster_images/12/original.png",
+      "meta": {
+        "dimensions": {
+          "tiny": {
+            "width": 110,
+            "height": 156
+          },
+          "large": {
+            "width": 550,
+            "height": 780
+          },
+          "small": {
+            "width": 284,
+            "height": 402
+          },
+          "medium": {
+            "width": 390,
+            "height": 554
+          }
+        }
+      }
+    },
+    "coverImage": {
+      "tiny": "https://media.kitsu.app/anime/12/cover_image/tiny-cd1b0729d5c15400bfa2441ea3751e86.jpeg",
+      "large": "https://media.kitsu.app/anime/12/cover_image/large-3e72f400a87b5241780c5082f0582611.jpeg",
+      "small": "https://media.kitsu.app/anime/12/cover_image/small-8d0cbc39cac65d5d7c4db5f5b3742ae7.jpeg",
+      "original": "https://media.kitsu.app/anime/12/cover_image/21ecb556255bd46b95aea4779d19789f.jpg",
+      "meta": {
+        "dimensions": {
+          "tiny": {
+            "width": 840,
+            "height": 200
+          },
+          "large": {
+            "width": 3360,
+            "height": 800
+          },
+          "small": {
+            "width": 1680,
+            "height": 400
+          }
+        }
+      }
+    }
+  },
+  {
+    "slug": "dragon-ball",
+    "nameKo": "드래곤볼",
+    "search": "Dragon Ball",
+    "kitsuId": "720",
+    "sourceUrl": "https://kitsu.io/anime/dragon-ball-z",
+    "canonicalTitle": "Dragon Ball Z",
+    "titles": {
+      "en": "Dragon Ball Z",
+      "en_jp": "Dragon Ball Z",
+      "ja_jp": "ドラゴンボールZ"
+    },
+    "abbreviatedTitles": [
+      "DBZ",
+      "Dragonball Z"
+    ],
+    "synopsis": "Five years after winning the World Martial Arts tournament, Gokuu is now living a peaceful life with his wife and son. This changes, however, with the arrival of a mysterious enemy named Raditz who presents himself as Gokuu's long-lost brother. He reveals that Gokuu is a warrior from the once powerful but now virtually extinct Saiyan race, whose homeworld was completely annihilated. When he was sent to Earth as a baby, Gokuu's sole purpose was to conquer and destroy the planet; but after suffering amnesia from a head injury, his violent and savage nature changed, and instead was raised as a kind and well-mannered boy, now fighting to protect others.\nWith his failed attempt at forcibly recruiting Gokuu as an ally, Raditz warns Gokuu's friends of a new threat that's rapidly approaching Earth—one that could plunge Earth into an intergalactic conflict and cause the heavens themselves to shake. A war will be fought over the seven mystical dragon balls, and only the strongest will survive in Dragon Ball Z.\n[Written by MAL Rewrite]",
+    "posterImage": {
+      "tiny": "https://media.kitsu.app/anime/720/poster_image/tiny-f68d380554c43803d8c8b706d65f2842.jpeg",
+      "large": "https://media.kitsu.app/anime/720/poster_image/large-5cfc7e2756852e708c822df0a9f59871.jpeg",
+      "small": "https://media.kitsu.app/anime/720/poster_image/small-c68f67afe0e3cf8a7c1c3996788dcc03.jpeg",
+      "medium": "https://media.kitsu.app/anime/720/poster_image/medium-05eada51035c41796b6ed65fc5add636.jpeg",
+      "original": "https://media.kitsu.app/anime/720/poster_image/905a5906c43d2123fa3ec081be85ebba.png",
+      "meta": {
+        "dimensions": {
+          "tiny": {
+            "width": 110,
+            "height": 156
+          },
+          "large": {
+            "width": 550,
+            "height": 780
+          },
+          "small": {
+            "width": 284,
+            "height": 402
+          },
+          "medium": {
+            "width": 390,
+            "height": 554
+          }
+        }
+      }
+    },
+    "coverImage": {
+      "tiny": "https://media.kitsu.app/anime/cover_images/720/tiny.jpg",
+      "large": "https://media.kitsu.app/anime/cover_images/720/large.jpg",
+      "small": "https://media.kitsu.app/anime/cover_images/720/small.jpg",
+      "original": "https://media.kitsu.app/anime/cover_images/720/original.png",
+      "meta": {
+        "dimensions": {
+          "tiny": {
+            "width": null,
+            "height": null
+          },
+          "large": {
+            "width": null,
+            "height": null
+          },
+          "small": {
+            "width": null,
+            "height": null
+          }
+        }
+      }
+    }
+  },
+  {
+    "slug": "demon-slayer",
+    "nameKo": "귀멸의 칼날",
+    "search": "Kimetsu no Yaiba",
+    "kitsuId": "41370",
+    "sourceUrl": "https://kitsu.io/anime/kimetsu-no-yaiba",
+    "canonicalTitle": "Kimetsu no Yaiba",
+    "titles": {
+      "en": "Demon Slayer: Kimetsu no Yaiba",
+      "en_jp": "Kimetsu no Yaiba",
+      "ja_jp": "鬼滅の刃"
+    },
+    "abbreviatedTitles": [
+      "Blade of Demon Destruction",
+      "KnY",
+      "Kimetsu no Yaiba: Kyoudai no Kizuna",
+      "Demon Slayer: Kimetsu no Yaiba: Bonds of Siblings",
+      "Demon Slayer: Kimetsu no Yaiba - Tanjiro Kamado, Unwavering Resolve Arc",
+      "鬼滅の刃-兄妹の絆-",
+      "鬼灭之刃",
+      "הלהב קוטל השדים",
+      "قاتل الشياطين",
+      "ดาบพิฆาตอสูร",
+      "Miecz zabójcy demonów – Kimetsu no Yaiba",
+      "Guardians de la nit: Kimetsu no Yaiba",
+      "İblis Keser"
+    ],
+    "synopsis": "It is the Taisho Period in Japan. Tanjiro, a kindhearted boy who sells charcoal for a living, finds his family slaughtered by a demon. To make matters worse, his younger sister Nezuko, the sole survivor, has been transformed into a demon herself. Though devastated by this grim reality, Tanjiro resolves to become a “demon slayer” so that he can turn his sister back into a human, and kill the demon that massacred his family.\n\n(Source: Crunchyroll)",
+    "posterImage": {
+      "tiny": "https://media.kitsu.app/anime/poster_images/41370/tiny.jpg",
+      "large": "https://media.kitsu.app/anime/poster_images/41370/large.jpg",
+      "small": "https://media.kitsu.app/anime/poster_images/41370/small.jpg",
+      "medium": "https://media.kitsu.app/anime/poster_images/41370/medium.jpg",
+      "original": "https://media.kitsu.app/anime/poster_images/41370/original.jpg",
+      "meta": {
+        "dimensions": {
+          "tiny": {
+            "width": 110,
+            "height": 156
+          },
+          "large": {
+            "width": 550,
+            "height": 780
+          },
+          "small": {
+            "width": 284,
+            "height": 402
+          },
+          "medium": {
+            "width": 390,
+            "height": 554
+          }
+        }
+      }
+    },
+    "coverImage": {
+      "tiny": "https://media.kitsu.app/anime/41370/cover_image/tiny-6c8c4f050e1706993ddb1285ccbf4ba7.jpeg",
+      "large": "https://media.kitsu.app/anime/41370/cover_image/large-3de3cc6d2b33162c928de10aa201e4ba.jpeg",
+      "small": "https://media.kitsu.app/anime/41370/cover_image/small-2fa71a7b014fd4b5629f3100789f9da8.jpeg",
+      "original": "https://media.kitsu.app/anime/41370/cover_image/7958f9c01b57c980636386d124553791.jpg",
+      "meta": {
+        "dimensions": {
+          "tiny": {
+            "width": 840,
+            "height": 200
+          },
+          "large": {
+            "width": 3360,
+            "height": 800
+          },
+          "small": {
+            "width": 1680,
+            "height": 400
+          }
+        }
+      }
+    }
+  },
+  {
+    "slug": "jujutsu-kaisen",
+    "nameKo": "주술회전",
+    "search": "Jujutsu Kaisen",
+    "kitsuId": "42765",
+    "sourceUrl": "https://kitsu.io/anime/jujutsu-kaisen",
+    "canonicalTitle": "Jujutsu Kaisen",
+    "titles": {
+      "en_jp": "Jujutsu Kaisen",
+      "ja_jp": "呪術廻戦"
+    },
+    "abbreviatedTitles": [
+      "Sorcery Fight"
+    ],
+    "synopsis": "Yuji Itadori is a boy with tremendous physical strength, though he lives a completely ordinary high school life. One day, to save a classmate who has been attacked by curses, he eats the finger of Ryomen Sukuna, taking the curse into his own soul. From then on, he shares one body with Ryomen Sukuna. Guided by the most powerful of sorcerers, Satoru Gojo, Itadori is admitted to Tokyo Jujutsu High School, an organization that fights the curses... and thus begins the heroic tale of a boy who became a curse to exorcise a curse, a life from which he could never turn back.\n\n(Source: Crunchyroll)",
+    "posterImage": {
+      "tiny": "https://media.kitsu.app/anime/42765/poster_image/tiny-7ffb92f0ca6df86a6d9e63b48583405c.jpeg",
+      "large": "https://media.kitsu.app/anime/42765/poster_image/large-5ce19551c1a6cf995b378205b9149b5c.jpeg",
+      "small": "https://media.kitsu.app/anime/42765/poster_image/small-08cb06fd4250de4d435041861d026a8c.jpeg",
+      "medium": "https://media.kitsu.app/anime/42765/poster_image/medium-d34c203fcd7c3a03a29645f1e44ce747.jpeg",
+      "original": "https://media.kitsu.app/anime/42765/poster_image/5f099d83883544fc6200be91706d70e0.jpg",
+      "meta": {
+        "dimensions": {
+          "tiny": {
+            "width": 110,
+            "height": 156
+          },
+          "large": {
+            "width": 550,
+            "height": 780
+          },
+          "small": {
+            "width": 284,
+            "height": 402
+          },
+          "medium": {
+            "width": 390,
+            "height": 554
+          }
+        }
+      }
+    },
+    "coverImage": {
+      "tiny": "https://media.kitsu.app/anime/cover_images/42765/tiny.jpg",
+      "large": "https://media.kitsu.app/anime/cover_images/42765/large.jpg",
+      "small": "https://media.kitsu.app/anime/cover_images/42765/small.jpg",
+      "original": "https://media.kitsu.app/anime/cover_images/42765/original.jpeg",
+      "meta": {
+        "dimensions": {
+          "tiny": {
+            "width": 840,
+            "height": 200
+          },
+          "large": {
+            "width": 3360,
+            "height": 800
+          },
+          "small": {
+            "width": 1680,
+            "height": 400
+          }
+        }
+      }
+    }
+  },
+  {
+    "slug": "naruto",
+    "nameKo": "나루토",
+    "search": "Naruto",
+    "kitsuId": "1555",
+    "sourceUrl": "https://kitsu.io/anime/naruto-shippuden",
+    "canonicalTitle": "Naruto: Shippuuden",
+    "titles": {
+      "en": "Naruto: Shippuden",
+      "en_jp": "Naruto: Shippuuden",
+      "en_us": "Naruto: Shippuden",
+      "ja_jp": "ナルト- 疾風伝"
+    },
+    "abbreviatedTitles": [
+      "Naruto Hurricane Chronicles"
+    ],
+    "synopsis": "It has been two and a half years since Naruto Uzumaki left Konohagakure, the Hidden Leaf Village, for intense training following events which fueled his desire to be stronger. Now Akatsuki, the mysterious organization of elite rogue ninja, is closing in on their grand plan which may threaten the safety of the entire shinobi world.\n\nAlthough Naruto is older and sinister events loom on the horizon, he has changed little in personality—still rambunctious and childish—though he is now far more confident and possesses an even greater determination to protect his friends and home. Come whatever may, Naruto will carry on with the fight for what is important to him, even at the expense of his own body, in the continuation of the saga about the boy who wishes to become Hokage.\n\n(Source: MAL Rewrite)",
+    "posterImage": {
+      "tiny": "https://media.kitsu.app/anime/poster_images/1555/tiny.jpg",
+      "large": "https://media.kitsu.app/anime/poster_images/1555/large.jpg",
+      "small": "https://media.kitsu.app/anime/poster_images/1555/small.jpg",
+      "medium": "https://media.kitsu.app/anime/poster_images/1555/medium.jpg",
+      "original": "https://media.kitsu.app/anime/poster_images/1555/original.jpg",
+      "meta": {
+        "dimensions": {
+          "tiny": {
+            "width": 110,
+            "height": 156
+          },
+          "large": {
+            "width": 550,
+            "height": 780
+          },
+          "small": {
+            "width": 284,
+            "height": 402
+          },
+          "medium": {
+            "width": 390,
+            "height": 554
+          }
+        }
+      }
+    },
+    "coverImage": {
+      "tiny": "https://media.kitsu.app/anime/cover_images/1555/tiny.jpg",
+      "large": "https://media.kitsu.app/anime/cover_images/1555/large.jpg",
+      "small": "https://media.kitsu.app/anime/cover_images/1555/small.jpg",
+      "original": "https://media.kitsu.app/anime/cover_images/1555/original.jpg",
+      "meta": {
+        "dimensions": {
+          "tiny": {
+            "width": 840,
+            "height": 200
+          },
+          "large": {
+            "width": 3360,
+            "height": 800
+          },
+          "small": {
+            "width": 1680,
+            "height": 400
+          }
+        }
+      }
+    }
+  },
+  {
+    "slug": "bleach",
+    "nameKo": "블리치",
+    "search": "Bleach",
+    "kitsuId": "244",
+    "sourceUrl": "https://kitsu.io/anime/bleach",
+    "canonicalTitle": "BLEACH",
+    "titles": {
+      "en": "Bleach",
+      "en_jp": "BLEACH",
+      "ja_jp": "BLEACH - ブリーチ -"
+    },
+    "abbreviatedTitles": [],
+    "synopsis": "Ichigo Kurosaki is an ordinary high schooler—until his family is attacked by a Hollow, a corrupt spirit that seeks to devour human souls. It is then that he meets a Soul Reaper named Rukia Kuchiki, who gets injured while protecting Ichigo's family from the assailant. To save his family, Ichigo accepts Rukia's offer of taking her powers and becomes a Soul Reaper as a result.\nHowever, as Rukia is unable to regain her powers, Ichigo is given the daunting task of hunting down the Hollows that plague their town. However, he is not alone in his fight, as he is later joined by his friends—classmates Orihime Inoue, Yasutora Sado, and Uryuu Ishida—who each have their own unique abilities. As Ichigo and his comrades get used to their new duties and support each other on and off the battlefield, the young Soul Reaper soon learns that the Hollows are not the only real threat to the human world.\n[Written by MAL Rewrite]",
+    "posterImage": {
+      "tiny": "https://media.kitsu.app/anime/poster_images/244/tiny.jpg",
+      "large": "https://media.kitsu.app/anime/poster_images/244/large.jpg",
+      "small": "https://media.kitsu.app/anime/poster_images/244/small.jpg",
+      "medium": "https://media.kitsu.app/anime/poster_images/244/medium.jpg",
+      "original": "https://media.kitsu.app/anime/poster_images/244/original.jpg",
+      "meta": {
+        "dimensions": {
+          "tiny": {
+            "width": 110,
+            "height": 156
+          },
+          "large": {
+            "width": 550,
+            "height": 780
+          },
+          "small": {
+            "width": 284,
+            "height": 402
+          },
+          "medium": {
+            "width": 390,
+            "height": 554
+          }
+        }
+      }
+    },
+    "coverImage": {
+      "tiny": "https://media.kitsu.app/anime/244/cover_image/tiny-58a958472e3b6c86c0bdbfc0224425ea.jpeg",
+      "large": "https://media.kitsu.app/anime/244/cover_image/large-b9e0a3066197f1115c773ff866a60873.jpeg",
+      "small": "https://media.kitsu.app/anime/244/cover_image/small-eab3de71a830ac6dc2e37372ea999b7e.jpeg",
+      "original": "https://media.kitsu.app/anime/244/cover_image/0af23c570a48f4ae40047e8fb36dd6d8.png",
+      "meta": {
+        "dimensions": {
+          "tiny": {
+            "width": 840,
+            "height": 200
+          },
+          "large": {
+            "width": 3360,
+            "height": 800
+          },
+          "small": {
+            "width": 1680,
+            "height": 400
+          }
+        }
+      }
+    }
+  },
+  {
+    "slug": "my-hero-academia",
+    "nameKo": "나의 히어로 아카데미아",
+    "search": "Boku no Hero Academia",
+    "kitsuId": "11469",
+    "sourceUrl": "https://kitsu.io/anime/boku-no-hero-academia",
+    "canonicalTitle": "Boku no Hero Academia",
+    "titles": {
+      "en": "My Hero Academia",
+      "en_jp": "Boku no Hero Academia",
+      "en_us": "My Hero Academia",
+      "ja_jp": "僕のヒーローアカデミア"
+    },
+    "abbreviatedTitles": [],
+    "synopsis": "What would the world be like if 80 percent of the population manifested extraordinary superpowers called “Quirks” at age four? Heroes and villains would be battling it out everywhere! Becoming a hero would mean learning to use your power, but where would you go to study? U.A. High's Hero Program of course! But what would you do if you were one of the 20 percent who were born Quirkless?\n\nMiddle school student Izuku Midoriya wants to be a hero more than anything, but he hasn't got an ounce of power in him. With no chance of ever getting into the prestigious U.A. High School for budding heroes, his life is looking more and more like a dead end. Then an encounter with All Might, the greatest hero of them all gives him a chance to change his destiny…\n\n(Source: Viz Media)",
+    "posterImage": {
+      "tiny": "https://media.kitsu.app/anime/poster_images/11469/tiny.jpg",
+      "large": "https://media.kitsu.app/anime/poster_images/11469/large.jpg",
+      "small": "https://media.kitsu.app/anime/poster_images/11469/small.jpg",
+      "medium": "https://media.kitsu.app/anime/poster_images/11469/medium.jpg",
+      "original": "https://media.kitsu.app/anime/poster_images/11469/original.png",
+      "meta": {
+        "dimensions": {
+          "tiny": {
+            "width": 110,
+            "height": 156
+          },
+          "large": {
+            "width": 550,
+            "height": 780
+          },
+          "small": {
+            "width": 284,
+            "height": 402
+          },
+          "medium": {
+            "width": 390,
+            "height": 554
+          }
+        }
+      }
+    },
+    "coverImage": {
+      "tiny": "https://media.kitsu.app/anime/cover_images/11469/tiny.jpg",
+      "large": "https://media.kitsu.app/anime/cover_images/11469/large.jpg",
+      "small": "https://media.kitsu.app/anime/cover_images/11469/small.jpg",
+      "original": "https://media.kitsu.app/anime/cover_images/11469/original.jpg",
+      "meta": {
+        "dimensions": {
+          "tiny": {
+            "width": 840,
+            "height": 200
+          },
+          "large": {
+            "width": 3360,
+            "height": 800
+          },
+          "small": {
+            "width": 1680,
+            "height": 400
+          }
+        }
+      }
+    }
+  },
+  {
+    "slug": "hunter-x-hunter",
+    "nameKo": "헌터×헌터",
+    "search": "Hunter x Hunter (2011)",
+    "kitsuId": "6448",
+    "sourceUrl": "https://kitsu.io/anime/hunter-x-hunter-2011",
+    "canonicalTitle": "Hunter x Hunter (2011)",
+    "titles": {
+      "en": "Hunter x Hunter (2011)",
+      "en_jp": "Hunter x Hunter (2011)",
+      "en_us": "Hunter x Hunter",
+      "ja_jp": "HUNTER×HUNTER ハンターハンター"
+    },
+    "abbreviatedTitles": [
+      "HUNTER×HUNTER ハンターハンター",
+      "HxH (2011)",
+      "Hantā Hantā (2011)"
+    ],
+    "synopsis": "Hunter x Hunter is set in a world where Hunters exist to perform all manner of dangerous tasks like capturing criminals and bravely searching for lost treasures in uncharted territories. Twelve-year-old Gon Freecss is determined to become the best Hunter possible in hopes of finding his father, who was a Hunter himself and had long ago abandoned his young son. However, Gon soon realizes the path to achieving his goals is far more challenging than he could have ever imagined.\n\nAlong the way to becoming an official Hunter, Gon befriends the lively doctor-in-training Leorio, vengeful Kurapika, and rebellious ex-assassin Killua. To attain their own goals and desires, together the four of them take the Hunter Exam, notorious for its low success rate and high probability of death. Throughout their journey, Gon and his friends embark on an adventure that puts them through many hardships and struggles. They will meet a plethora of monsters, creatures, and characters—all while learning what being a Hunter truly means.\n\n(Source: MAL Rewrite)",
+    "posterImage": {
+      "tiny": "https://media.kitsu.app/anime/poster_images/6448/tiny.jpg",
+      "large": "https://media.kitsu.app/anime/poster_images/6448/large.jpg",
+      "small": "https://media.kitsu.app/anime/poster_images/6448/small.jpg",
+      "medium": "https://media.kitsu.app/anime/poster_images/6448/medium.jpg",
+      "original": "https://media.kitsu.app/anime/poster_images/6448/original.png",
+      "meta": {
+        "dimensions": {
+          "tiny": {
+            "width": 110,
+            "height": 155
+          },
+          "large": {
+            "width": 550,
+            "height": 776
+          },
+          "small": {
+            "width": 284,
+            "height": 400
+          },
+          "medium": {
+            "width": 390,
+            "height": 551
+          }
+        }
+      }
+    },
+    "coverImage": {
+      "tiny": "https://media.kitsu.app/anime/cover_images/6448/tiny.jpg",
+      "large": "https://media.kitsu.app/anime/cover_images/6448/large.jpg",
+      "small": "https://media.kitsu.app/anime/cover_images/6448/small.jpg",
+      "original": "https://media.kitsu.app/anime/cover_images/6448/original.jpg",
+      "meta": {
+        "dimensions": {
+          "tiny": {
+            "width": 840,
+            "height": 200
+          },
+          "large": {
+            "width": 3360,
+            "height": 800
+          },
+          "small": {
+            "width": 1680,
+            "height": 400
+          }
+        }
+      }
+    }
+  },
+  {
+    "slug": "chainsaw-man",
+    "nameKo": "체인소 맨",
+    "search": "Chainsaw Man",
+    "kitsuId": "43806",
+    "sourceUrl": "https://kitsu.io/anime/chainsaw-man",
+    "canonicalTitle": "Chainsaw Man",
+    "titles": {
+      "en": "Chainsaw Man",
+      "en_jp": "Chainsaw Man",
+      "ja_jp": "チェンソーマン"
+    },
+    "abbreviatedTitles": [
+      "Chainsawman"
+    ],
+    "synopsis": "Denji is a teenage boy living with a Chainsaw Devil named Pochita. Due to the debt his father left behind, he has been living a rock-bottom life while repaying his debt by harvesting devil corpses with Pochita.\n\nOne day, Denji is betrayed and killed. As his consciousness fades, he makes a contract with Pochita and gets revived as \"Chainsaw Man\" — a man with a devil's heart.\n\n(Source: Crunchyroll)",
+    "posterImage": {
+      "tiny": "https://media.kitsu.app/anime/43806/poster_image/tiny-0d99c35a6835ebc72cae4e95da5dafa8.jpeg",
+      "large": "https://media.kitsu.app/anime/43806/poster_image/large-815d6008fb3b56f4291b9f0ffa05cd8f.jpeg",
+      "small": "https://media.kitsu.app/anime/43806/poster_image/small-a4fe7b02e127ba7f8041b1b35d6c4858.jpeg",
+      "medium": "https://media.kitsu.app/anime/43806/poster_image/medium-9bf5b331db48e9087ad34f88c2ad4fb3.jpeg",
+      "original": "https://media.kitsu.app/anime/43806/poster_image/cefec27a530ff9faac1b2fc238acad13.jpg",
+      "meta": {
+        "dimensions": {
+          "tiny": {
+            "width": 110,
+            "height": 156
+          },
+          "large": {
+            "width": 550,
+            "height": 780
+          },
+          "small": {
+            "width": 284,
+            "height": 402
+          },
+          "medium": {
+            "width": 390,
+            "height": 554
+          }
+        }
+      }
+    },
+    "coverImage": {
+      "tiny": "https://media.kitsu.app/anime/43806/cover_image/tiny-8bccada58f02d5bdbddf8640321c2103.jpeg",
+      "large": "https://media.kitsu.app/anime/43806/cover_image/large-964674a0f11524f62d65dde845ad8e1f.jpeg",
+      "small": "https://media.kitsu.app/anime/43806/cover_image/small-91ff593815cc66b5461b133020bb9800.jpeg",
+      "original": "https://media.kitsu.app/anime/43806/cover_image/1b642a40124b8cbb1b13b97597c0b6f1.jpg",
+      "meta": {
+        "dimensions": {
+          "tiny": {
+            "width": 840,
+            "height": 200
+          },
+          "large": {
+            "width": 3360,
+            "height": 800
+          },
+          "small": {
+            "width": 1680,
+            "height": 400
+          }
+        }
+      }
+    }
+  },
+  {
+    "slug": "attack-on-titan",
+    "nameKo": "진격의 거인",
+    "search": "Shingeki no Kyojin",
+    "kitsuId": "7442",
+    "sourceUrl": "https://kitsu.io/anime/attack-on-titan",
+    "canonicalTitle": "Attack on Titan",
+    "titles": {
+      "en": "Attack on Titan",
+      "en_jp": "Shingeki no Kyojin",
+      "en_us": "Attack on Titan",
+      "ja_jp": "進撃の巨人"
+    },
+    "abbreviatedTitles": [
+      "AoT"
+    ],
+    "synopsis": "Centuries ago, mankind was slaughtered to near extinction by monstrous humanoid creatures called titans, forcing humans to hide in fear behind enormous concentric walls. What makes these giants truly terrifying is that their taste for human flesh is not born out of hunger but what appears to be out of pleasure. To ensure their survival, the remnants of humanity began living within defensive barriers, resulting in one hundred years without a single titan encounter. However, that fragile calm is soon shattered when a colossal titan manages to breach the supposedly impregnable outer wall, reigniting the fight for survival against the man-eating abominations.\n\nAfter witnessing a horrific personal loss at the hands of the invading creatures, Eren Yeager dedicates his life to their eradication by enlisting into the Survey Corps, an elite military unit that combats the merciless humanoids outside the protection of the walls. Based on Hajime Isayama's award-winning manga, Shingeki no Kyojin follows Eren, along with his adopted sister Mikasa Ackerman and his childhood friend Armin Arlert, as they join the brutal war against the titans and race to discover a way of defeating them before the last walls are breached.\n\n(Source: MAL Rewrite)",
+    "posterImage": {
+      "tiny": "https://media.kitsu.app/anime/poster_images/7442/tiny.jpg",
+      "large": "https://media.kitsu.app/anime/poster_images/7442/large.jpg",
+      "small": "https://media.kitsu.app/anime/poster_images/7442/small.jpg",
+      "medium": "https://media.kitsu.app/anime/poster_images/7442/medium.jpg",
+      "original": "https://media.kitsu.app/anime/poster_images/7442/original.jpg",
+      "meta": {
+        "dimensions": {
+          "tiny": {
+            "width": 110,
+            "height": 156
+          },
+          "large": {
+            "width": 550,
+            "height": 780
+          },
+          "small": {
+            "width": 284,
+            "height": 402
+          },
+          "medium": {
+            "width": 390,
+            "height": 554
+          }
+        }
+      }
+    },
+    "coverImage": {
+      "tiny": "https://media.kitsu.app/anime/cover_images/7442/tiny.jpg",
+      "large": "https://media.kitsu.app/anime/cover_images/7442/large.jpg",
+      "small": "https://media.kitsu.app/anime/cover_images/7442/small.jpg",
+      "original": "https://media.kitsu.app/anime/cover_images/7442/original.png",
+      "meta": {
+        "dimensions": {
+          "tiny": {
+            "width": 840,
+            "height": 200
+          },
+          "large": {
+            "width": 3360,
+            "height": 800
+          },
+          "small": {
+            "width": 1680,
+            "height": 400
+          }
+        }
+      }
+    }
+  },
+  {
+    "slug": "jojos-bizarre-adventure",
+    "nameKo": "죠죠의 기묘한 모험",
+    "search": "JoJo no Kimyou na Bouken (TV)",
+    "kitsuId": "7158",
+    "sourceUrl": "https://kitsu.io/anime/jojo-s-bizarre-adventure-2012",
+    "canonicalTitle": "JoJo no Kimyou na Bouken (TV)",
+    "titles": {
+      "en": "JoJo's Bizarre Adventure (2012)",
+      "en_jp": "JoJo no Kimyou na Bouken (TV)",
+      "en_us": "JoJo's Bizarre Adventure",
+      "ja_jp": "ジョジョの奇妙な冒険"
+    },
+    "abbreviatedTitles": [
+      "JoJo no Kimyou na Bouken (2012)"
+    ],
+    "synopsis": "In 1868, Dario Brando saves the life of an English nobleman, George Joestar. By taking in Dario's son Dio when the boy becomes fatherless, George hopes to repay the debt he owes to his savior. However Dio, unsatisfied with his station in life, aspires to seize the Joestar house for his own. Wielding an Aztec stone mask with supernatural properties, he sets out to destroy George and his son, Jonathan \"JoJo\" Joestar, and triggers a chain of events that will continue to echo through the years to come.\n\nHalf a century later, in New York City, Jonathan's grandson Joseph Joestar discovers the legacy his grandfather left for him. When an archeological dig unearths the truth behind the stone mask, he realizes that he is the only one who can defeat the Pillar Men, mystical beings of immeasurable power who inadvertently began everything.\n\nAdapted from the first two arcs of Hirohiko Araki's outlandish manga series, JoJo no Kimyou na Bouken follows the many thrilling expeditions of JoJo and his descendants. Whether it's facing off with the evil Dio, or combatting the sinister Pillar Men, there's always plenty of bizarre adventures in store.\n\n(Source: MAL Rewrite)",
+    "posterImage": {
+      "tiny": "https://media.kitsu.app/anime/7158/poster_image/tiny-402631bab0dae9196b99c2759648ca7a.jpeg",
+      "large": "https://media.kitsu.app/anime/7158/poster_image/large-9e79f5c290ae821d2141473e6fdb6532.jpeg",
+      "small": "https://media.kitsu.app/anime/7158/poster_image/small-bde68eb96267be7833813f3a85b68df0.jpeg",
+      "medium": "https://media.kitsu.app/anime/7158/poster_image/medium-dc5b9aa567da90538903f8b0b329d585.jpeg",
+      "original": "https://media.kitsu.app/anime/7158/poster_image/86c1aa856e619b058a9dd008f83440ce.jpg",
+      "meta": {
+        "dimensions": {
+          "tiny": {
+            "width": 110,
+            "height": 156
+          },
+          "large": {
+            "width": 550,
+            "height": 780
+          },
+          "small": {
+            "width": 284,
+            "height": 402
+          },
+          "medium": {
+            "width": 390,
+            "height": 554
+          }
+        }
+      }
+    },
+    "coverImage": {
+      "tiny": "https://media.kitsu.app/anime/cover_images/7158/tiny.jpg",
+      "large": "https://media.kitsu.app/anime/cover_images/7158/large.jpg",
+      "small": "https://media.kitsu.app/anime/cover_images/7158/small.jpg",
+      "original": "https://media.kitsu.app/anime/cover_images/7158/original.png",
+      "meta": {
+        "dimensions": {
+          "tiny": {
+            "width": 840,
+            "height": 200
+          },
+          "large": {
+            "width": 3360,
+            "height": 800
+          },
+          "small": {
+            "width": 1680,
+            "height": 400
+          }
+        }
+      }
+    }
+  },
+  {
+    "slug": "spy-x-family",
+    "nameKo": "스파이 패밀리",
+    "search": "SPY x FAMILY",
+    "kitsuId": "45398",
+    "sourceUrl": "https://kitsu.io/anime/spy-x-family",
+    "canonicalTitle": "SPY×FAMILY",
+    "titles": {
+      "en": "SPY x FAMILY",
+      "en_jp": "SPY×FAMILY",
+      "ja_jp": "SPY×FAMILY"
+    },
+    "abbreviatedTitles": [
+      "SxF, 스파이 패밀리",
+      "SPY×FAMILY: WJ Special Extra Mission!!",
+      "间谍过家家"
+    ],
+    "synopsis": "Everyone has a part of themselves they cannot show to anyone else.\n\nAt a time when all nations of the world were involved in a fierce war of information happening behind closed doors, Ostania and Westalis had been in a state of cold war against one another for decades. The Westalis Intelligence Services' Eastern-Focused Division (WISE) sends their most talented spy, \"Twilight,\" on a top-secret mission to investigate the movements of Donovan Desmond, the chairman of Ostania's National Unity Party, who is threatening peace efforts between the two nations.\n\nThis mission is known as \"Operation Strix.\" It consists of \"putting together a family in one week in order to infiltrate social gatherings organized by the elite school that Desmond's son attends.\"\n\n\"Twilight\" takes on the identity of psychiatrist Loid Forger and starts looking for family members. But Anya, the daughter he adopts, turns out to have the ability to read people's minds, while his wife, Yor, is an assassin! With it being in each of their own interests to keep these facts hidden, they start living together while concealing their true identities from one another.\nWorld peace is now in the hands of this brand-new family as they embark on an adventure full of surprises.\n\n(Source: Crunchyroll)",
+    "posterImage": {
+      "tiny": "https://media.kitsu.app/anime/45398/poster_image/tiny-ecc79ffcea955906b4bb7a2cf71dccbc.jpeg",
+      "large": "https://media.kitsu.app/anime/45398/poster_image/large-c26c1e0b77e881fcd66475af6bd22c57.jpeg",
+      "small": "https://media.kitsu.app/anime/45398/poster_image/small-d2d2ddd1b7f5a9c20bbb69b2b476a0d6.jpeg",
+      "medium": "https://media.kitsu.app/anime/45398/poster_image/medium-f2f30d957a12e8269655c6036b460c90.jpeg",
+      "original": "https://media.kitsu.app/anime/45398/poster_image/cc0bbc0dd2a123fb79b041078fce6f89.jpg",
+      "meta": {
+        "dimensions": {
+          "tiny": {
+            "width": 110,
+            "height": 156
+          },
+          "large": {
+            "width": 550,
+            "height": 780
+          },
+          "small": {
+            "width": 284,
+            "height": 402
+          },
+          "medium": {
+            "width": 390,
+            "height": 554
+          }
+        }
+      }
+    },
+    "coverImage": {
+      "tiny": "https://media.kitsu.app/anime/45398/cover_image/tiny-80d6cf33d69fcc7500d815dc3a8fa575.jpeg",
+      "large": "https://media.kitsu.app/anime/45398/cover_image/large-1e81255ff9bde22c072c555cc5998805.jpeg",
+      "small": "https://media.kitsu.app/anime/45398/cover_image/small-775abf07cac8737f09192ee87e317db1.jpeg",
+      "original": "https://media.kitsu.app/anime/45398/cover_image/7584152e78b582a70fc68013d91aad67.jpg",
+      "meta": {
+        "dimensions": {
+          "tiny": {
+            "width": 840,
+            "height": 200
+          },
+          "large": {
+            "width": 3360,
+            "height": 800
+          },
+          "small": {
+            "width": 1680,
+            "height": 400
+          }
+        }
+      }
+    }
+  },
+  {
+    "slug": "haikyu",
+    "nameKo": "하이큐!!",
+    "search": "Haikyuu!!",
+    "kitsuId": "8133",
+    "sourceUrl": "https://kitsu.io/anime/haikyuu",
+    "canonicalTitle": "Haikyuu!!",
+    "titles": {
+      "en": "Haikyu!!",
+      "en_jp": "Haikyuu!!",
+      "en_us": "Haikyu!!",
+      "ja_jp": "ハイキュー!!"
+    },
+    "abbreviatedTitles": [
+      "High Kyuu!!",
+      "HQ!!"
+    ],
+    "synopsis": "Inspired after watching a volleyball ace nicknamed \"Little Giant\" in action, small-statured Shouyou Hinata revives the volleyball club at his middle school. The newly-formed team even makes it to a tournament; however, their first match turns out to be their last when they are brutally squashed by the \"King of the Court,\" Tobio Kageyama. Hinata vows to surpass Kageyama, and so after graduating from middle school, he joins Karasuno High School's volleyball team—only to find that his sworn rival, Kageyama, is now his teammate.\n\nThanks to his short height, Hinata struggles to find his role on the team, even with his superior jumping power. Surprisingly, Kageyama has his own problems that only Hinata can help with, and learning to work together appears to be the only way for the team to be successful. Based on Haruichi Furudate's popular shounen manga of the same name, Haikyuu!! is an exhilarating and emotional sports comedy following two determined athletes as they attempt to patch a heated rivalry in order to make their high school volleyball team the best in Japan.\n\n(Source: MAL)",
+    "posterImage": {
+      "tiny": "https://media.kitsu.app/anime/poster_images/8133/tiny.jpg",
+      "large": "https://media.kitsu.app/anime/poster_images/8133/large.jpg",
+      "small": "https://media.kitsu.app/anime/poster_images/8133/small.jpg",
+      "medium": "https://media.kitsu.app/anime/poster_images/8133/medium.jpg",
+      "original": "https://media.kitsu.app/anime/poster_images/8133/original.jpg",
+      "meta": {
+        "dimensions": {
+          "tiny": {
+            "width": 110,
+            "height": 156
+          },
+          "large": {
+            "width": 550,
+            "height": 780
+          },
+          "small": {
+            "width": 284,
+            "height": 402
+          },
+          "medium": {
+            "width": 390,
+            "height": 554
+          }
+        }
+      }
+    },
+    "coverImage": {
+      "tiny": "https://media.kitsu.app/anime/cover_images/8133/tiny.jpg",
+      "large": "https://media.kitsu.app/anime/cover_images/8133/large.jpg",
+      "small": "https://media.kitsu.app/anime/cover_images/8133/small.jpg",
+      "original": "https://media.kitsu.app/anime/cover_images/8133/original.jpg",
+      "meta": {
+        "dimensions": {
+          "tiny": {
+            "width": 840,
+            "height": 200
+          },
+          "large": {
+            "width": 3360,
+            "height": 800
+          },
+          "small": {
+            "width": 1680,
+            "height": 400
+          }
+        }
+      }
+    }
+  },
+  {
+    "slug": "blue-lock",
+    "nameKo": "블루 록",
+    "search": "Blue Lock",
+    "kitsuId": "44973",
+    "sourceUrl": "https://kitsu.io/anime/blue-lock",
+    "canonicalTitle": "BLUE LOCK",
+    "titles": {
+      "en": "BLUE LOCK",
+      "en_jp": "Blue Lock",
+      "ja_jp": "ブルーロック"
+    },
+    "abbreviatedTitles": [],
+    "synopsis": "Japan’s desire for World Cup glory leads the Japanese Football Association to launch a new rigorous training program to find the national team’s next striker. Three hundred high school players are pitted against each other for the position, but only one will come out on top. Who among them will be the striker to usher in a new era of Japanese soccer?\n\n(Source: Crunchyroll)",
+    "posterImage": {
+      "tiny": "https://media.kitsu.app/anime/44973/poster_image/tiny-e79f2d7b6fd332e7833a12c4aeb71cca.jpeg",
+      "large": "https://media.kitsu.app/anime/44973/poster_image/large-ca235304c71f4233e60f6efb3967654d.jpeg",
+      "small": "https://media.kitsu.app/anime/44973/poster_image/small-66cfb7db9f51b469edd6acdb9a7fdbc2.jpeg",
+      "medium": "https://media.kitsu.app/anime/44973/poster_image/medium-94be09e6ada10dc3e7a3839c66d27896.jpeg",
+      "original": "https://media.kitsu.app/anime/44973/poster_image/84ee75dbae67c4817c2bb4b9943fe90c.png",
+      "meta": {
+        "dimensions": {
+          "tiny": {
+            "width": 110,
+            "height": 156
+          },
+          "large": {
+            "width": 550,
+            "height": 780
+          },
+          "small": {
+            "width": 284,
+            "height": 402
+          },
+          "medium": {
+            "width": 390,
+            "height": 554
+          }
+        }
+      }
+    },
+    "coverImage": {
+      "tiny": "https://media.kitsu.app/anime/44973/cover_image/tiny-69e86527c795adae5190091d0f4c925f.jpeg",
+      "large": "https://media.kitsu.app/anime/44973/cover_image/large-66d831edcbc51002435b0d37ad34add8.jpeg",
+      "small": "https://media.kitsu.app/anime/44973/cover_image/small-407350ba35e8617d833c615d56ed7b3a.jpeg",
+      "original": "https://media.kitsu.app/anime/44973/cover_image/46d59e2fa0087c76ad47d3bea7207391.jpg",
+      "meta": {
+        "dimensions": {
+          "tiny": {
+            "width": 840,
+            "height": 200
+          },
+          "large": {
+            "width": 3360,
+            "height": 800
+          },
+          "small": {
+            "width": 1680,
+            "height": 400
+          }
+        }
+      }
+    }
+  },
+  {
+    "slug": "oshi-no-ko",
+    "nameKo": "최애의 아이",
+    "search": "[Oshi no Ko]",
+    "kitsuId": "46170",
+    "sourceUrl": "https://kitsu.io/anime/oshi-no-ko",
+    "canonicalTitle": "[Oshi no Ko]",
+    "titles": {
+      "en": "Oshi no Ko",
+      "en_jp": "[Oshi no Ko]",
+      "ja_jp": "【推しの子】"
+    },
+    "abbreviatedTitles": [
+      "【OSHI NO KO】",
+      "[Mein*Star]",
+      "Favorite Girl",
+      "My Idol's Child",
+      "เกิดใหม่เป็นลูกโอชิ",
+      "Anak Idola",
+      "【推しの子】Mother and Children",
+      "[Oshi no Ko] Mother and Children",
+      "【MOJA GWIAZDA】",
+      "我推的孩子"
+    ],
+    "synopsis": "When a pregnant young starlet appears in Gorou Amemiya’s countryside medical clinic, the doctor takes it upon himself to safely (and secretly) deliver Ai Hoshino’s child so she can make a scandal-free return to the stage. But no good deed goes unpunished, and on the eve of her delivery, he finds himself slain at the hands of Ai’s deluded stalker — and subsequently reborn as Ai’s child, Aquamarine Hoshino! The glitz and glamor of showbiz hide the dark underbelly of the entertainment industry, threatening to dull the shine of his favorite star. Can he help his new mother rise to the top of the charts? And what will he do when unthinkable disaster strikes?\n\n(Source: HIDIVE)\n\nNote: Episode 1【推しの子】Mother and Children was pre-screened in advance in Japanese theaters on March 17, 2023. The regular TV broadcast begins on April 12, 2023. The first episode has an extended runtime of ~90 minutes.",
+    "posterImage": {
+      "tiny": "https://media.kitsu.app/anime/46170/poster_image/tiny-28fbcacb3def9e9842ef07abf1f21682.jpeg",
+      "large": "https://media.kitsu.app/anime/46170/poster_image/large-0bad1050afcf9e5320ca46bf17ac007a.jpeg",
+      "small": "https://media.kitsu.app/anime/46170/poster_image/small-2ca797476e157e51a37ed6979c80bb14.jpeg",
+      "medium": "https://media.kitsu.app/anime/46170/poster_image/medium-3133b48296a3cd5dfcbe8c8f9205c936.jpeg",
+      "original": "https://media.kitsu.app/anime/46170/poster_image/69740efb4ce6d03bf1e8cee121ff77f8.jpg",
+      "meta": {
+        "dimensions": {
+          "tiny": {
+            "width": 110,
+            "height": 156
+          },
+          "large": {
+            "width": 550,
+            "height": 780
+          },
+          "small": {
+            "width": 284,
+            "height": 402
+          },
+          "medium": {
+            "width": 390,
+            "height": 554
+          }
+        }
+      }
+    },
+    "coverImage": {
+      "tiny": "https://media.kitsu.app/anime/46170/cover_image/tiny-1f62779a5c6c473caf5e5c11ec167bf0.jpeg",
+      "large": "https://media.kitsu.app/anime/46170/cover_image/large-49585dba0b824dbd0267d5c7ce8ef56f.jpeg",
+      "small": "https://media.kitsu.app/anime/46170/cover_image/small-916d65be16e38b8827875f2ea0a24ee7.jpeg",
+      "original": "https://media.kitsu.app/anime/46170/cover_image/b6f21b20a7413da4930af6dff99877ad.jpg",
+      "meta": {
+        "dimensions": {
+          "tiny": {
+            "width": 840,
+            "height": 200
+          },
+          "large": {
+            "width": 3360,
+            "height": 800
+          },
+          "small": {
+            "width": 1680,
+            "height": 400
+          }
+        }
+      }
+    }
+  },
+  {
+    "slug": "frieren",
+    "nameKo": "장송의 프리렌",
+    "search": "Sousou no Frieren",
+    "kitsuId": "46474",
+    "sourceUrl": "https://kitsu.io/anime/sousou-no-frieren",
+    "canonicalTitle": "Sousou no Frieren",
+    "titles": {
+      "en": "Frieren: Beyond Journey’s End",
+      "en_jp": "Sousou no Frieren",
+      "it_it": "Frieren: Oltre la Fine del Viaggio",
+      "ja_jp": "葬送のフリーレン",
+      "ko_kr": "장송의 프리렌",
+      "pt_br": "Frieren e a Jornada para o Além",
+      "th_th": "คำอธิษฐานในวันที่จากลา Frieren",
+      "zh_cn": "葬送的芙莉蓮"
+    },
+    "abbreviatedTitles": [
+      "Frieren at the Funeral"
+    ],
+    "synopsis": "After the party of heroes defeated the Demon King, they restored peace to the land and returned to lives of solitude. Generations pass, and the elven mage Frieren comes face to face with humanity’s mortality. She takes on a new apprentice and promises to fulfill old friends’ dying wishes. Can an elven mind make peace with the nature of life and death? Frieren embarks on her quest to find out.\n\n(Source: Crunchyroll)",
+    "posterImage": {
+      "tiny": "https://media.kitsu.app/anime/46474/poster_image/tiny-f77201d59d7f322510e3d28bc1930e29.jpeg",
+      "large": "https://media.kitsu.app/anime/46474/poster_image/large-ec9b98dd5fbf8f92532d1edb45f9e882.jpeg",
+      "small": "https://media.kitsu.app/anime/46474/poster_image/small-2dc1165f5acd773939c7befb0949d258.jpeg",
+      "medium": "https://media.kitsu.app/anime/46474/poster_image/medium-23e1293e41a0b54b6621eb589c3f0d62.jpeg",
+      "original": "https://media.kitsu.app/anime/46474/poster_image/99d7df09d8cb9360b1e02825372ce612.jpg",
+      "meta": {
+        "dimensions": {
+          "tiny": {
+            "width": 110,
+            "height": 156
+          },
+          "large": {
+            "width": 550,
+            "height": 780
+          },
+          "small": {
+            "width": 284,
+            "height": 402
+          },
+          "medium": {
+            "width": 390,
+            "height": 554
+          }
+        }
+      }
+    },
+    "coverImage": {
+      "tiny": "https://media.kitsu.app/anime/46474/cover_image/tiny-dccb49f6ea01f1fc1f93b10b6bc2608c.jpeg",
+      "large": "https://media.kitsu.app/anime/46474/cover_image/large-167edf3e01fac59ce6aacfeb47df5634.jpeg",
+      "small": "https://media.kitsu.app/anime/46474/cover_image/small-2467fb0c4f1283988febe4abd715a9b8.jpeg",
+      "original": "https://media.kitsu.app/anime/46474/cover_image/883c308356a4db76a9c0af900ada96ed.jpg",
+      "meta": {
+        "dimensions": {
+          "tiny": {
+            "width": 840,
+            "height": 200
+          },
+          "large": {
+            "width": 3360,
+            "height": 800
+          },
+          "small": {
+            "width": 1680,
+            "height": 400
+          }
+        }
+      }
+    }
+  },
+  {
+    "slug": "cyberpunk-edgerunners",
+    "nameKo": "사이버펑크: 엣지러너",
+    "search": "Cyberpunk: Edgerunners",
+    "kitsuId": "43248",
+    "sourceUrl": "https://kitsu.io/anime/cyberpunk-edgerunners",
+    "canonicalTitle": "Cyberpunk: Edgerunners",
+    "titles": {
+      "en": "CYBERPUNK: EDGERUNNERS",
+      "en_jp": "Cyberpunk: Edgerunners",
+      "ja_jp": "サイバーパンク エッジランナーズ"
+    },
+    "abbreviatedTitles": [],
+    "synopsis": "An original anime series set in the universe of Cyberpunk 2077.\n\nIn a dystopia riddled with corruption and cybernetic implants, a talented but reckless street kid strives to become a mercenary outlaw — an edgerunner.\n\n(Source: Netflix)\n\nNote: The first episode received a pre-screening at Anime Expo on July 2, 2022. The first 3 dubbed episodes were streamed on Twitch as part of a co-stream promotion on September 12, a day before the show’s premiere.",
+    "posterImage": {
+      "tiny": "https://media.kitsu.app/anime/43248/poster_image/tiny-cb55d927853db20b5235efe01eb3c9b9.jpeg",
+      "large": "https://media.kitsu.app/anime/43248/poster_image/large-a9fe312b804fd8067d13c5ca4bef3ae6.jpeg",
+      "small": "https://media.kitsu.app/anime/43248/poster_image/small-fdbda75792bdfdbfe89e2c2b507e1450.jpeg",
+      "medium": "https://media.kitsu.app/anime/43248/poster_image/medium-b6579dda46b596b2d2c3fa6d4618dc69.jpeg",
+      "original": "https://media.kitsu.app/anime/43248/poster_image/15bde2e7e34cfe1df761535a69faffb8.png",
+      "meta": {
+        "dimensions": {
+          "tiny": {
+            "width": 110,
+            "height": 156
+          },
+          "large": {
+            "width": 550,
+            "height": 780
+          },
+          "small": {
+            "width": 284,
+            "height": 402
+          },
+          "medium": {
+            "width": 390,
+            "height": 554
+          }
+        }
+      }
+    },
+    "coverImage": {
+      "tiny": "https://media.kitsu.app/anime/43248/cover_image/tiny-c23dd4b39f44cbecffff7738071bf029.jpeg",
+      "large": "https://media.kitsu.app/anime/43248/cover_image/large-0438973fb0b000f9782294827beea9dd.jpeg",
+      "small": "https://media.kitsu.app/anime/43248/cover_image/small-ceed8c1ad05ca2fefd2876fcd4c6a1b2.jpeg",
+      "original": "https://media.kitsu.app/anime/43248/cover_image/e58e4ae375916ea43e3bfd43371fd5b2.jpg",
+      "meta": {
+        "dimensions": {
+          "tiny": {
+            "width": 840,
+            "height": 200
+          },
+          "large": {
+            "width": 3360,
+            "height": 800
+          },
+          "small": {
+            "width": 1680,
+            "height": 400
+          }
+        }
+      }
+    }
+  },
+  {
+    "slug": "dandadan",
+    "nameKo": "단다단",
+    "search": "Dandadan",
+    "kitsuId": "48269",
+    "sourceUrl": "https://kitsu.io/anime/DAN-DA-DAN",
+    "canonicalTitle": "Dandadan",
+    "titles": {
+      "en": "DAN DA DAN",
+      "en_jp": "Dandadan",
+      "ja_jp": "ダンダダン"
+    },
+    "abbreviatedTitles": [
+      "ดันดาดัน",
+      "膽大黨",
+      "DAN DA DAN: FIRST ENCOUNTER",
+      "Dan Da Dan"
+    ],
+    "synopsis": "This is a story about Momo, a high school girl who comes from a family of spirit mediums, and her classmate Okarun, an occult fanatic. After Momo rescues Okarun from being bullied, they begin talking. However, an argument ensues between them since Momo believes in ghosts but denies aliens exist, and Okarun believes in aliens but denies ghosts exist.\n\nTo prove to each other what they believe in is real, Momo goes to an abandoned hospital where a UFO has been spotted and Okarun goes to a tunnel rumored to be haunted. To their surprise, they each encounter overwhelming paranormal activities that transcend comprehension. Amid these predicaments, Momo awakens her hidden power and Okarun gains the power of a curse to overcome these new dangers! Their fateful love begins as well!?\n\nThe story of the occult battle and adolescence starts!\n\n(Source: Crunchyroll)\n\nNotes:\n- Worldwide premiere of Episode 1 before the Japanese television premiere occurred at Anime Expo July 6, 2024.\n- Episodes 1-3 titled as DAN DA DAN: FIRST ENCOUNTER was pre-screened in advance in theaters on September 13, 2024. The regular TV broadcast begins October 2024.",
+    "posterImage": {
+      "tiny": "https://media.kitsu.app/anime/48269/poster_image/tiny-77fd84ff44308cdbb28f93bee30aed76.jpeg",
+      "large": "https://media.kitsu.app/anime/48269/poster_image/large-589c017798b98c69e3a615ca4191f49d.jpeg",
+      "small": "https://media.kitsu.app/anime/48269/poster_image/small-d19c18a776aa6d045ff51e054e5564db.jpeg",
+      "medium": "https://media.kitsu.app/anime/48269/poster_image/medium-9feb265c75b7016c63b21e122f69a84b.jpeg",
+      "original": "https://media.kitsu.app/anime/48269/poster_image/4ca623665992a9df00c5bb2a21063aaf.jpg",
+      "meta": {
+        "dimensions": {
+          "tiny": {
+            "width": 110,
+            "height": 156
+          },
+          "large": {
+            "width": 550,
+            "height": 780
+          },
+          "small": {
+            "width": 284,
+            "height": 402
+          },
+          "medium": {
+            "width": 390,
+            "height": 554
+          }
+        }
+      }
+    },
+    "coverImage": {
+      "tiny": "https://media.kitsu.app/anime/48269/cover_image/tiny-c9186dac0a665de5e098204eafad55b5.jpeg",
+      "large": "https://media.kitsu.app/anime/48269/cover_image/large-2a78bed2943524035cc0146c6633d1bf.jpeg",
+      "small": "https://media.kitsu.app/anime/48269/cover_image/small-5f0980feed8454bafa579f62018f3e2c.jpeg",
+      "original": "https://media.kitsu.app/anime/48269/cover_image/da32721ee7cba725cc2ddf6884f22bb1.jpg",
+      "meta": {
+        "dimensions": {
+          "tiny": {
+            "width": 840,
+            "height": 200
+          },
+          "large": {
+            "width": 3360,
+            "height": 800
+          },
+          "small": {
+            "width": 1680,
+            "height": 400
+          }
+        }
+      }
+    }
+  },
+  {
+    "slug": "kaiju-no-8",
+    "nameKo": "괴수 8호",
+    "search": "Kaijuu 8-gou",
+    "kitsuId": "46300",
+    "sourceUrl": "https://kitsu.io/anime/kaijuu-8-gou",
+    "canonicalTitle": "Kaijuu 8-gou",
+    "titles": {
+      "en": "Kaiju No. 8",
+      "en_jp": "Kaijuu 8-gou",
+      "ja_jp": "怪獣８号"
+    },
+    "abbreviatedTitles": [
+      "Monster #8",
+      "KAIJU No. EIGHT",
+      "8Kaijuu"
+    ],
+    "synopsis": "In a world plagued by creatures known as Kaiju, Kafka Hibino aspired to enlist in The Defense Force. He makes a promise to enlist with his childhood friend, Mina Ashiro. Soon, life takes them in separate ways. While employed cleaning up after Kaiju battles, Kafka meets Reno Ichikawa. Reno's determination to join The Defense Force reawakens Kafka's promise to join Mina and protect humanity.\n\n(Source: Crunchyroll)",
+    "posterImage": {
+      "tiny": "https://media.kitsu.app/anime/46300/poster_image/tiny-ee619186e427139c72e5d52af9884805.jpeg",
+      "large": "https://media.kitsu.app/anime/46300/poster_image/large-31cc66fd5854cc555d496ced7ab40c31.jpeg",
+      "small": "https://media.kitsu.app/anime/46300/poster_image/small-05a4916bc8cb12a0c77afbfd6fd00fbc.jpeg",
+      "medium": "https://media.kitsu.app/anime/46300/poster_image/medium-c1c025bbee42bed048e628b1eae278c0.jpeg",
+      "original": "https://media.kitsu.app/anime/46300/poster_image/c8a7d985608494c388e9aa1a5fa66428.jpg",
+      "meta": {
+        "dimensions": {
+          "tiny": {
+            "width": 110,
+            "height": 156
+          },
+          "large": {
+            "width": 550,
+            "height": 780
+          },
+          "small": {
+            "width": 284,
+            "height": 402
+          },
+          "medium": {
+            "width": 390,
+            "height": 554
+          }
+        }
+      }
+    },
+    "coverImage": {
+      "tiny": "https://media.kitsu.app/anime/46300/cover_image/tiny-9612f5b90f737c7f2399b96231c3a6df.jpeg",
+      "large": "https://media.kitsu.app/anime/46300/cover_image/large-beb78aec0cb2066bc44ea52f66311e04.jpeg",
+      "small": "https://media.kitsu.app/anime/46300/cover_image/small-12c717a67f38080dd9d9ef0900fb7cb7.jpeg",
+      "original": "https://media.kitsu.app/anime/46300/cover_image/59ece1982637fc545e04555b313f9db4.jpg",
+      "meta": {
+        "dimensions": {
+          "tiny": {
+            "width": 840,
+            "height": 200
+          },
+          "large": {
+            "width": 3360,
+            "height": 800
+          },
+          "small": {
+            "width": 1680,
+            "height": 400
+          }
+        }
+      }
+    }
+  },
+  {
+    "slug": "evangelion",
+    "nameKo": "신세기 에반게리온",
+    "search": "Neon Genesis Evangelion",
+    "kitsuId": "21",
+    "sourceUrl": "https://kitsu.io/anime/neon-genesis-evangelion",
+    "canonicalTitle": "Neon Genesis Evangelion",
+    "titles": {
+      "en": "Neon Genesis Evangelion",
+      "en_jp": "Shinseiki Evangelion",
+      "ja_jp": "新世紀エヴァンゲリオン"
+    },
+    "abbreviatedTitles": [],
+    "synopsis": "In the year 2015, the world stands on the brink of destruction. Humanity's last hope lies in the hands of Nerv, a special agency under the United Nations, and their Evangelions, giant machines capable of defeating the Angels who herald Earth's ruin. Gendou Ikari, head of the organization, seeks compatible pilots who can synchronize with the Evangelions and realize their true potential. Aiding in this defensive endeavor are talented personnel Misato Katsuragi, Head of Tactical Operations, and Ritsuko Akagi, Chief Scientist.\n\nFace to face with his father for the first time in years, 14-year-old Shinji Ikari's average life is irreversibly changed when he is whisked away into the depths of Nerv, and into a harrowing new destiny—he must become the pilot of Evangelion Unit-01 with the fate of mankind on his shoulders.\nWritten by Hideaki Anno, Neon Genesis Evangelion is a heroic tale of a young boy who will become a legend. But as this psychological drama unfolds, ancient secrets beneath the big picture begin to bubble to the surface...\n\n(Source: MAL Rewrite)",
+    "posterImage": {
+      "tiny": "https://media.kitsu.app/anime/21/poster_image/tiny-32b16200c25d370a90793f30ee8c940a.jpeg",
+      "large": "https://media.kitsu.app/anime/21/poster_image/large-9a3a9086a1b563e9e72d510118eb7d3c.jpeg",
+      "small": "https://media.kitsu.app/anime/21/poster_image/small-6662f66b53b64098d873e037b3f59bd2.jpeg",
+      "medium": "https://media.kitsu.app/anime/21/poster_image/medium-d98a2928c9eda0d71f0dab72c1a0124d.jpeg",
+      "original": "https://media.kitsu.app/anime/21/poster_image/077bf97dfb04853975a6e85694b861f4.jpg",
+      "meta": {
+        "dimensions": {
+          "tiny": {
+            "width": 110,
+            "height": 156
+          },
+          "large": {
+            "width": 550,
+            "height": 780
+          },
+          "small": {
+            "width": 284,
+            "height": 402
+          },
+          "medium": {
+            "width": 390,
+            "height": 554
+          }
+        }
+      }
+    },
+    "coverImage": {
+      "tiny": "https://media.kitsu.app/anime/cover_images/21/tiny.jpg",
+      "large": "https://media.kitsu.app/anime/cover_images/21/large.jpg",
+      "small": "https://media.kitsu.app/anime/cover_images/21/small.jpg",
+      "original": "https://media.kitsu.app/anime/cover_images/21/original.jpg",
+      "meta": {
+        "dimensions": {
+          "tiny": {
+            "width": 840,
+            "height": 200
+          },
+          "large": {
+            "width": 3360,
+            "height": 800
+          },
+          "small": {
+            "width": 1680,
+            "height": 400
+          }
+        }
+      }
+    }
+  },
+  {
+    "slug": "mobile-suit-gundam",
+    "nameKo": "기동전사 건담",
+    "search": "Mobile Suit Gundam",
+    "kitsuId": "2346",
+    "sourceUrl": "https://kitsu.io/anime/mobile-suit-gundam-00",
+    "canonicalTitle": "Mobile Suit Gundam 00",
+    "titles": {
+      "en": "Mobile Suit Gundam 00",
+      "en_jp": "Kidou Senshi Gundam 00",
+      "en_us": "Mobile Suit Gundam 00",
+      "ja_jp": "機動戦士ガンダム00"
+    },
+    "abbreviatedTitles": [
+      "Gundam Double O"
+    ],
+    "synopsis": "In the distant future, mankind's dependence on fossil fuels will lead to their complete depletion, an energy crisis unlike anything the world witnessed. Out of retaliation and fear, humanity began focusing at an alternative source of energy: solar power. Different nations have united together to form three major factions—the Union of Solar Energy and Free Nations, the Advanced European Union, and the Human Reform League. Each of these sectors has access to a solar power generator, which gives them limitless energy.\nAs a result, countries that were once dependent on the sale of fossil fuels are now plunged in poverty, leading to years of warfare and internal strife over the control of solar energy. Amid this chaos, an unknown paramilitary organization appeared identifying themselves as \"Celestial Being,\" aspire to end all warfare through armed intervention by using mysterious and technologically advanced Mobile Suits known as Gundams.Mobile Suit Gundam 00 follows the story of Celestial Being's Gundam Meisters Setsuna F. Seiei, Lockon Stratos, Allelujah Haptism, and Tieria Erde. These four dive into the devastating battle between the three superpowers to accomplish their goal of changing the world.\n[Written by MAL Rewrite]",
+    "posterImage": {
+      "tiny": "https://media.kitsu.app/anime/poster_images/2346/tiny.jpg",
+      "large": "https://media.kitsu.app/anime/poster_images/2346/large.jpg",
+      "small": "https://media.kitsu.app/anime/poster_images/2346/small.jpg",
+      "medium": "https://media.kitsu.app/anime/poster_images/2346/medium.jpg",
+      "original": "https://media.kitsu.app/anime/poster_images/2346/original.jpg",
+      "meta": {
+        "dimensions": {
+          "tiny": {
+            "width": 110,
+            "height": 156
+          },
+          "large": {
+            "width": 550,
+            "height": 780
+          },
+          "small": {
+            "width": 284,
+            "height": 402
+          },
+          "medium": {
+            "width": 390,
+            "height": 554
+          }
+        }
+      }
+    },
+    "coverImage": {
+      "tiny": "https://media.kitsu.app/anime/cover_images/2346/tiny.jpg",
+      "large": "https://media.kitsu.app/anime/cover_images/2346/large.jpg",
+      "small": "https://media.kitsu.app/anime/cover_images/2346/small.jpg",
+      "original": "https://media.kitsu.app/anime/cover_images/2346/original.jpg",
+      "meta": {
+        "dimensions": {
+          "tiny": {
+            "width": 840,
+            "height": 200
+          },
+          "large": {
+            "width": 3360,
+            "height": 800
+          },
+          "small": {
+            "width": 1680,
+            "height": 400
+          }
+        }
+      }
+    }
+  },
+  {
+    "slug": "pokemon",
+    "nameKo": "포켓몬스터",
+    "search": "Pokemon",
+    "kitsuId": "486",
+    "sourceUrl": "https://kitsu.io/anime/pokemon",
+    "canonicalTitle": "Pocket Monsters",
+    "titles": {
+      "en": "Pokémon",
+      "en_jp": "Pocket Monsters",
+      "ja_jp": "ポケットモンスター"
+    },
+    "abbreviatedTitles": [
+      "Pocket Monsters",
+      "Indigo League",
+      "Adventures on the Orange Islands",
+      "The Johto Journeys",
+      "Johto League Champions",
+      "Master Quest"
+    ],
+    "synopsis": "Pokemon are peculiar creatures with a vast array of different abilities and appearances; many people, known as Pokemon trainers, capture and train them, often with the intent of battling others. Young Satoshi has not only dreamed of becoming a Pokemon trainer but also a \"Pokemon Master,\" and on the arrival of his 10th birthday, he finally has a chance to make that dream a reality. Unfortunately for him, all three Pokemon available to beginning trainers have already been claimed and only Pikachu, a rebellious Electric type Pokemon, remains. However, this chance encounter would mark the start of a lifelong friendship and an epic adventure!\nSetting off on a journey to become the very best, Satoshi and Pikachu travel across beautiful, sprawling regions with their friends Kasumi, a Water type trainer, and Takeshi, a Rock type trainer. But danger lurks around every corner. The infamous Team Rocket is always nearby, seeking to steal powerful Pokemon through nefarious schemes. It'll be up to Satoshi and his friends to thwart their efforts as he also strives to earn the eight Pokemon Gym Badges he'll need to challenge the Pokemon League, and eventually claim the title of Pokemon Master. \n[Written by MAL Rewrite]",
+    "posterImage": {
+      "tiny": "https://media.kitsu.app/anime/486/poster_image/tiny-0220d335f742a96f117c32475b62b17f.jpeg",
+      "large": "https://media.kitsu.app/anime/486/poster_image/large-d7ec3ada948851369b7eb6726235cc0d.jpeg",
+      "small": "https://media.kitsu.app/anime/486/poster_image/small-8c04aaf14cc348468e7948e12efcd365.jpeg",
+      "medium": "https://media.kitsu.app/anime/486/poster_image/medium-25e3d01f2d2f0a81dc139e4993ed74d8.jpeg",
+      "original": "https://media.kitsu.app/anime/486/poster_image/2d1f1d138ff38d81057bb864b936e9bf.png",
+      "meta": {
+        "dimensions": {
+          "tiny": {
+            "width": 110,
+            "height": 156
+          },
+          "large": {
+            "width": 550,
+            "height": 780
+          },
+          "small": {
+            "width": 284,
+            "height": 402
+          },
+          "medium": {
+            "width": 390,
+            "height": 554
+          }
+        }
+      }
+    },
+    "coverImage": {
+      "tiny": "https://media.kitsu.app/anime/cover_images/486/tiny.jpg",
+      "large": "https://media.kitsu.app/anime/cover_images/486/large.jpg",
+      "small": "https://media.kitsu.app/anime/cover_images/486/small.jpg",
+      "original": "https://media.kitsu.app/anime/cover_images/486/original.jpg",
+      "meta": {
+        "dimensions": {
+          "tiny": {
+            "width": 840,
+            "height": 200
+          },
+          "large": {
+            "width": 3360,
+            "height": 800
+          },
+          "small": {
+            "width": 1680,
+            "height": 400
+          }
+        }
+      }
+    }
+  },
+  {
+    "slug": "detective-conan",
+    "nameKo": "명탐정 코난",
+    "search": "Detective Conan",
+    "kitsuId": "210",
+    "sourceUrl": "https://kitsu.io/anime/detective-conan",
+    "canonicalTitle": "Detective Conan",
+    "titles": {
+      "ar": "المحقق كونان",
+      "en": "Detective Conan",
+      "ca_es": "Detectiu Conan",
+      "da_dk": "Mesterdetektiven Conan",
+      "de_de": "Detektiv Conan",
+      "en_ar": "Al Mohackek Conan",
+      "en_jp": "Meitantei Conan",
+      "en_us": "Case Closed",
+      "es_es": "El Detective Conan",
+      "fi_fi": "Salapollisi Conan",
+      "fr_fr": "Détective Conan",
+      "id_id": "Detektif Conan",
+      "ja_jp": "名探偵コナン",
+      "ko_kr": "명탐정 코난",
+      "pl_pl": "Detektyw Conan",
+      "pt_pt": "Detetive Conan",
+      "ro_ro": "Detectivul Conan",
+      "ru_ru": "Детектив Конан",
+      "sv_se": "Mästerdetektiven Conan",
+      "vi_vn": "Thám tử lừng danh Conan",
+      "zh_tw": "名偵探柯南"
+    },
+    "abbreviatedTitles": [
+      "Case Closed: One Truth Prevails"
+    ],
+    "synopsis": "Shinichi Kudou, a great mystery expert at only seventeen, is already well known for having solved several challenging cases. One day, when Shinichi sees two suspicious men and decides to follow them, he inadvertently becomes witness to a disturbing illegal activity. When the men catch Shinichi, they dose him with an experimental drug formulated by their criminal organization and abandon him to die. However, to his own astonishment, Shinichi is still alive and soon wakes up, but now, he has the body of a seven-year-old, perfectly preserving his original intelligence. He hides his real identity from everyone, including his childhood friend Ran Mouri and her father, private detective Kogorou Mouri, and takes on the alias of Conan Edogawa (inspired by the mystery writers Arthur Conan Doyle and Ranpo Edogawa). Animated by TMS and adapted from the manga by Gosho Aoyama, Detective Conan follows Shinichi who, as Conan, starts secretly solving the senior Mouri's cases from behind the scenes with his still exceptional sleuthing skills, while covertly investigating the organization responsible for his current state, hoping to reverse the drug's effects someday. (Source: MAL Rewrite)",
+    "posterImage": {
+      "tiny": "https://media.kitsu.app/anime/poster_images/210/tiny.jpg",
+      "large": "https://media.kitsu.app/anime/poster_images/210/large.jpg",
+      "small": "https://media.kitsu.app/anime/poster_images/210/small.jpg",
+      "medium": "https://media.kitsu.app/anime/poster_images/210/medium.jpg",
+      "original": "https://media.kitsu.app/anime/poster_images/210/original.jpg",
+      "meta": {
+        "dimensions": {
+          "tiny": {
+            "width": 110,
+            "height": 156
+          },
+          "large": {
+            "width": 550,
+            "height": 780
+          },
+          "small": {
+            "width": 284,
+            "height": 402
+          },
+          "medium": {
+            "width": 390,
+            "height": 554
+          }
+        }
+      }
+    },
+    "coverImage": {
+      "tiny": "https://media.kitsu.app/anime/cover_images/210/tiny.jpg",
+      "large": "https://media.kitsu.app/anime/cover_images/210/large.jpg",
+      "small": "https://media.kitsu.app/anime/cover_images/210/small.jpg",
+      "original": "https://media.kitsu.app/anime/cover_images/210/original.jpg",
+      "meta": {
+        "dimensions": {
+          "tiny": {
+            "width": 840,
+            "height": 200
+          },
+          "large": {
+            "width": 3360,
+            "height": 800
+          },
+          "small": {
+            "width": 1680,
+            "height": 400
+          }
+        }
+      }
+    }
+  },
+  {
+    "slug": "tokyo-revengers",
+    "nameKo": "도쿄 리벤저스",
+    "search": "Tokyo Revengers",
+    "kitsuId": "43321",
+    "sourceUrl": "https://kitsu.io/anime/tokyo-revengers",
+    "canonicalTitle": "Tokyo Revengers",
+    "titles": {
+      "en_jp": "Tokyo Revengers",
+      "ja_jp": "東京リベンジャーズ"
+    },
+    "abbreviatedTitles": [],
+    "synopsis": "Takemichi Hanagaki is a freelancer that's reached the absolute pits of despair in his life. He finds out that the only girlfriend he ever had, in middle school, Hinata Tachibana, had been killed by the ruthless Tokyo Manji Gang. The day after hearing about her death, he's standing on the station platform and ends up being pushed over onto the tracks by a herd of people. He closes his eyes thinking he's about to die, but when he opens his eyes back up, he somehow had gone back in time 12 years. Now that he's back living the best days of his life, Takemichi decides to get revenge on his life\n\n(Source: Crunchyroll)",
+    "posterImage": {
+      "tiny": "https://media.kitsu.app/anime/poster_images/43321/tiny.jpg",
+      "large": "https://media.kitsu.app/anime/poster_images/43321/large.jpg",
+      "small": "https://media.kitsu.app/anime/poster_images/43321/small.jpg",
+      "medium": "https://media.kitsu.app/anime/poster_images/43321/medium.jpg",
+      "original": "https://media.kitsu.app/anime/poster_images/43321/original.jpg",
+      "meta": {
+        "dimensions": {
+          "tiny": {
+            "width": 110,
+            "height": 156
+          },
+          "large": {
+            "width": 550,
+            "height": 780
+          },
+          "small": {
+            "width": 284,
+            "height": 402
+          },
+          "medium": {
+            "width": 390,
+            "height": 554
+          }
+        }
+      }
+    },
+    "coverImage": {
+      "tiny": "https://media.kitsu.app/anime/cover_images/43321/tiny.jpg",
+      "large": "https://media.kitsu.app/anime/cover_images/43321/large.jpg",
+      "small": "https://media.kitsu.app/anime/cover_images/43321/small.jpg",
+      "original": "https://media.kitsu.app/anime/cover_images/43321/original.png",
+      "meta": {
+        "dimensions": {
+          "tiny": {
+            "width": 840,
+            "height": 200
+          },
+          "large": {
+            "width": 3360,
+            "height": 800
+          },
+          "small": {
+            "width": 1680,
+            "height": 400
+          }
+        }
+      }
+    }
+  },
+  {
+    "slug": "that-time-i-got-reincarnated-as-a-slime",
+    "nameKo": "전생했더니 슬라임이었던 건에 대하여",
+    "search": "Tensei Shitara Slime Datta Ken",
+    "kitsuId": "41024",
+    "sourceUrl": "https://kitsu.io/anime/tensei-shitara-slime-datta-ken",
+    "canonicalTitle": "Tensei shitara Slime Datta Ken",
+    "titles": {
+      "en": "That Time I Got Reincarnated as a Slime",
+      "en_jp": "Tensei shitara Slime Datta Ken",
+      "ja_jp": "転生したらスライムだった件"
+    },
+    "abbreviatedTitles": [],
+    "synopsis": "Corporate worker Mikami Satoru is stabbed by a random killer, and is reborn to an alternate world. But he turns out to be reborn a slime! Thrown into this new world with the name Rimuru, he begins his quest to create a world that’s welcoming to all races.\n\n(Source: Crunchyroll)",
+    "posterImage": {
+      "tiny": "https://media.kitsu.app/anime/poster_images/41024/tiny.jpg",
+      "large": "https://media.kitsu.app/anime/poster_images/41024/large.jpg",
+      "small": "https://media.kitsu.app/anime/poster_images/41024/small.jpg",
+      "medium": "https://media.kitsu.app/anime/poster_images/41024/medium.jpg",
+      "original": "https://media.kitsu.app/anime/poster_images/41024/original.jpg",
+      "meta": {
+        "dimensions": {
+          "tiny": {
+            "width": 110,
+            "height": 156
+          },
+          "large": {
+            "width": 550,
+            "height": 780
+          },
+          "small": {
+            "width": 284,
+            "height": 402
+          },
+          "medium": {
+            "width": 390,
+            "height": 554
+          }
+        }
+      }
+    },
+    "coverImage": {
+      "tiny": "https://media.kitsu.app/anime/cover_images/41024/tiny.jpg",
+      "large": "https://media.kitsu.app/anime/cover_images/41024/large.jpg",
+      "small": "https://media.kitsu.app/anime/cover_images/41024/small.jpg",
+      "original": "https://media.kitsu.app/anime/cover_images/41024/original.jpg",
+      "meta": {
+        "dimensions": {
+          "tiny": {
+            "width": 840,
+            "height": 200
+          },
+          "large": {
+            "width": 3360,
+            "height": 800
+          },
+          "small": {
+            "width": 1680,
+            "height": 400
+          }
+        }
+      }
+    }
+  }
+]

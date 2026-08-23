@@ -1,0 +1,281 @@
+{
+  "generatedAt": "2026-08-22T19:51:45.283Z",
+  "count": 25,
+  "sources": [
+    {
+      "id": "one-piece",
+      "nameKo": "원피스",
+      "categoryId": "tcg",
+      "category": "카드",
+      "file": "/assets/dabboba/products/ip/one-piece.jpg",
+      "sourceTitle": "BOOSTER PACK -Carrying on His Will- [OP-13]",
+      "sourcePage": "https://asia-en.onepiece-cardgame.com/products/boosters/op13.php",
+      "sourceImage": "https://asia-en.onepiece-cardgame.com/images/products/boosters/op13/mv_01.jpg?v3=",
+      "usage": "Temporary local prototype reference only; replace with licensed production artwork before commercial release."
+    },
+    {
+      "id": "dragon-ball",
+      "nameKo": "드래곤볼",
+      "categoryId": "figure",
+      "category": "피규어",
+      "file": "/assets/dabboba/products/ip/dragon-ball.jpg",
+      "sourceTitle": "S.H.Figuarts SON GOKU 〈THE KIND-HEARTED SAIYAN〉",
+      "sourcePage": "https://tamashiiweb.com/item/15572/?wovn=en",
+      "sourceImage": "https://tamashiiweb.com/storage/images/products/imported/item_0000015572_riFP7xnv_02.jpg",
+      "usage": "Official manufacturer imagery; temporary prototype display only. Confirm commercial image licensing and replace or obtain permission before production use."
+    },
+    {
+      "id": "demon-slayer",
+      "nameKo": "귀멸의 칼날",
+      "categoryId": "gacha",
+      "category": "가챠",
+      "file": "/assets/dabboba/products/ip/demon-slayer.jpg",
+      "sourceTitle": "鬼滅の刃 かぷせるん",
+      "sourcePage": "https://gashapon.jp/products/detail.php?jan_code=4549660801276000",
+      "sourceImage": "https://bandai-a.akamaihd.net/bc/img/model/xl/1000192579_1.jpg",
+      "usage": "아래 이미지는 공개적으로 접근 가능한 공식 상품 이미지 URL이지만 자유 이용 라이선스가 아닙니다. 저작권과 상표권은 각 권리자에게 있으며 로컬 임시 프로토타입 시안 확인용으로만 사용해야 합니다. 상용 서비스, 외부 테스트 또는 공개 배포 전에는 권리자 허락을 받거나 별도로 라이선스를 확보한 자산으로 교체해야 합니다."
+    },
+    {
+      "id": "jujutsu-kaisen",
+      "nameKo": "주술회전",
+      "categoryId": "gacha",
+      "category": "가챠",
+      "file": "/assets/dabboba/products/ip/jujutsu-kaisen.jpg",
+      "sourceTitle": "呪術廻戦 カプセルフィギュアコレクションDX01",
+      "sourcePage": "https://gashapon.jp/products/detail.php?jan_code=4549660709053000",
+      "sourceImage": "https://bandai-a.akamaihd.net/bc/img/model/xl/1000168897_1.jpg",
+      "usage": "아래 이미지는 공개적으로 접근 가능한 공식 상품 이미지 URL이지만 자유 이용 라이선스가 아닙니다. 저작권과 상표권은 각 권리자에게 있으며 로컬 임시 프로토타입 시안 확인용으로만 사용해야 합니다. 상용 서비스, 외부 테스트 또는 공개 배포 전에는 권리자 허락을 받거나 별도로 라이선스를 확보한 자산으로 교체해야 합니다."
+    },
+    {
+      "id": "naruto",
+      "nameKo": "나루토",
+      "categoryId": "figure",
+      "category": "피규어",
+      "file": "/assets/dabboba/products/ip/naruto.jpg",
+      "sourceTitle": "Nendoroid Naruto Uzumaki",
+      "sourcePage": "https://www.goodsmile.com/en/product/3724/Nendoroid%2BNaruto%2BUzumaki",
+      "sourceImage": "https://www.goodsmile.com/gsc-webrevo-sdk-storage-prd/product/image/3724/w6bqz1NTXLeyfvrB7JUmG2SgYi5xpZk3.jpg",
+      "usage": "Official manufacturer imagery; temporary prototype display only. Confirm commercial image licensing and replace or obtain permission before production use."
+    },
+    {
+      "id": "bleach",
+      "nameKo": "블리치",
+      "categoryId": "figure",
+      "category": "피규어",
+      "file": "/assets/dabboba/products/ip/bleach.jpg",
+      "sourceTitle": "Nendoroid Ichigo Kurosaki",
+      "sourcePage": "https://www.goodsmile.com/en/product/5297/Nendoroid%2BIchigo%2BKurosaki",
+      "sourceImage": "https://www.goodsmile.com/gsc-webrevo-sdk-storage-prd/product/image/product/20180831/7581/54250/large/a7b4ac16e7ea57610c867b5f7ac7dbd7.jpg",
+      "usage": "Official manufacturer imagery; temporary prototype display only. Confirm commercial image licensing and replace or obtain permission before production use."
+    },
+    {
+      "id": "my-hero-academia",
+      "nameKo": "나의 히어로 아카데미아",
+      "categoryId": "figure",
+      "category": "피규어",
+      "file": "/assets/dabboba/products/ip/my-hero-academia.jpg",
+      "sourceTitle": "Nendoroid Endeavor",
+      "sourcePage": "https://www.goodsmile.com/en/product/55075/Nendoroid%2BEndeavor",
+      "sourceImage": "https://www.goodsmile.com/gsc-webrevo-sdk-storage-prd/product/image/55075/Z3TNufG8a9xcBUArj6HqvDJwmFi2t0np.jpg",
+      "usage": "Official manufacturer imagery; temporary prototype display only. Confirm commercial image licensing and replace or obtain permission before production use."
+    },
+    {
+      "id": "hunter-x-hunter",
+      "nameKo": "헌터×헌터",
+      "categoryId": "kuji",
+      "category": "쿠지",
+      "file": "/assets/dabboba/products/ip/hunter-x-hunter.jpg",
+      "sourceTitle": "一番くじ HUNTER×HUNTER CHMERA ANT ➁",
+      "sourcePage": "https://1kuji.com/products/hxh8",
+      "sourceImage": "https://assets.1kuji.com/uploads/product/top_banner/10490/cadc9e9b-4ea7-494a-a069-24ed54382be3.jpg",
+      "usage": "Official BANDAI SPIRITS product page and public Ichiban Kuji CDN image; temporary prototype display only. Public accessibility does not grant commercial image rights, so obtain permission or replace with licensed production artwork before release. Remote URLs may change."
+    },
+    {
+      "id": "chainsaw-man",
+      "nameKo": "체인소 맨",
+      "categoryId": "figure",
+      "category": "피규어",
+      "file": "/assets/dabboba/products/ip/chainsaw-man.jpg",
+      "sourceTitle": "POP UP PARADE Chainsaw Man",
+      "sourcePage": "https://www.goodsmile.com/en/product/11152/POP%2BUP%2BPARADE%2BChainsaw%2BMan",
+      "sourceImage": "https://www.goodsmile.com/gsc-webrevo-sdk-storage-prd/product/image/product/20221026/13467/106787/large/3e05fd429d5e6685e9453ecb954c9b3d.jpg",
+      "usage": "Official manufacturer imagery; temporary prototype display only. Confirm commercial image licensing and replace or obtain permission before production use."
+    },
+    {
+      "id": "attack-on-titan",
+      "nameKo": "진격의 거인",
+      "categoryId": "figure",
+      "category": "피규어",
+      "file": "/assets/dabboba/products/ip/attack-on-titan.jpg",
+      "sourceTitle": "Nendoroid Eren Yeager: Attack Titan Ver.",
+      "sourcePage": "https://www.goodsmile.com/en/product/11349/Nendoroid%2BEren%2BYeager%2BAttack%2BTitan%2BVer.",
+      "sourceImage": "https://www.goodsmile.com/gsc-webrevo-sdk-storage-prd/product/image/product/20221212/13664/108436/large/d91e09b4b663b4d2d26be5d8e8eda40d.jpg",
+      "usage": "Official manufacturer imagery; temporary prototype display only. Confirm commercial image licensing and replace or obtain permission before production use."
+    },
+    {
+      "id": "jojos-bizarre-adventure",
+      "nameKo": "죠죠의 기묘한 모험",
+      "categoryId": "kuji",
+      "category": "쿠지",
+      "file": "/assets/dabboba/products/ip/jojos-bizarre-adventure.jpg",
+      "sourceTitle": "一番くじ ジョジョの奇妙な冒険 ダイヤモンドは砕けない -STAND RUSH!-",
+      "sourcePage": "https://1kuji.com/products/jojo_22",
+      "sourceImage": "https://assets.1kuji.com/uploads/product/top_banner/10601/469302a5-1586-4322-bc8d-cc29485384e2.jpg",
+      "usage": "Official BANDAI SPIRITS product page and public Ichiban Kuji CDN image; temporary prototype display only. Public accessibility does not grant commercial image rights, so obtain permission or replace with licensed production artwork before release. Remote URLs may change."
+    },
+    {
+      "id": "spy-x-family",
+      "nameKo": "스파이 패밀리",
+      "categoryId": "gacha",
+      "category": "가챠",
+      "file": "/assets/dabboba/products/ip/spy-x-family.jpg",
+      "sourceTitle": "SPY×FAMILY ぷにとっぷ♡ カプセルぬいぐるみこれくしょん２",
+      "sourcePage": "https://parks2.bandainamco-am.co.jp/item/PRE_4549660967354.html",
+      "sourceImage": "https://parks2.bandainamco-am.co.jp/client_info/BNAM_LBC_EC/itemimage/PRE_4549660967354/SPY-FAMILY_maindp.jpg",
+      "usage": "아래 이미지는 공개적으로 접근 가능한 공식 상품 이미지 URL이지만 자유 이용 라이선스가 아닙니다. 저작권과 상표권은 각 권리자에게 있으며 로컬 임시 프로토타입 시안 확인용으로만 사용해야 합니다. 상용 서비스, 외부 테스트 또는 공개 배포 전에는 권리자 허락을 받거나 별도로 라이선스를 확보한 자산으로 교체해야 합니다. 공식 판매처 페이지에 무단 전재 금지 안내가 있으므로 로컬 임시 시안 외 용도로 복제하거나 배포하지 않아야 합니다."
+    },
+    {
+      "id": "haikyu",
+      "nameKo": "하이큐!!",
+      "categoryId": "gacha",
+      "category": "가챠",
+      "file": "/assets/dabboba/products/ip/haikyu.jpg",
+      "sourceTitle": "ハイキュー!! ねむらせ隊",
+      "sourcePage": "https://gashapon.jp/products/detail.php?jan_code=4582769770050000",
+      "sourceImage": "https://bandai-a.akamaihd.net/bc/img/model/xl/1000226668_1.jpg",
+      "usage": "아래 이미지는 공개적으로 접근 가능한 공식 상품 이미지 URL이지만 자유 이용 라이선스가 아닙니다. 저작권과 상표권은 각 권리자에게 있으며 로컬 임시 프로토타입 시안 확인용으로만 사용해야 합니다. 상용 서비스, 외부 테스트 또는 공개 배포 전에는 권리자 허락을 받거나 별도로 라이선스를 확보한 자산으로 교체해야 합니다."
+    },
+    {
+      "id": "blue-lock",
+      "nameKo": "블루 록",
+      "categoryId": "gacha",
+      "category": "가챠",
+      "file": "/assets/dabboba/products/ip/blue-lock.jpg",
+      "sourceTitle": "ブルーロック カプセルフィギュアコレクション",
+      "sourcePage": "https://www.gashapon.jp/products/detail.php?jan_code=4549660772811000",
+      "sourceImage": "https://bandai-a.akamaihd.net/bc/img/model/xl/1000182862_1.jpg",
+      "usage": "아래 이미지는 공개적으로 접근 가능한 공식 상품 이미지 URL이지만 자유 이용 라이선스가 아닙니다. 저작권과 상표권은 각 권리자에게 있으며 로컬 임시 프로토타입 시안 확인용으로만 사용해야 합니다. 상용 서비스, 외부 테스트 또는 공개 배포 전에는 권리자 허락을 받거나 별도로 라이선스를 확보한 자산으로 교체해야 합니다."
+    },
+    {
+      "id": "oshi-no-ko",
+      "nameKo": "최애의 아이",
+      "categoryId": "gacha",
+      "category": "가챠",
+      "file": "/assets/dabboba/products/ip/oshi-no-ko.jpg",
+      "sourceTitle": "【推しの子】 カプセルラバーマスコット02",
+      "sourcePage": "https://gashapon.jp/products/detail.php?jan_code=4570118149299000",
+      "sourceImage": "https://bandai-a.akamaihd.net/bc/img/model/xl/1000208532_1.jpg",
+      "usage": "아래 이미지는 공개적으로 접근 가능한 공식 상품 이미지 URL이지만 자유 이용 라이선스가 아닙니다. 저작권과 상표권은 각 권리자에게 있으며 로컬 임시 프로토타입 시안 확인용으로만 사용해야 합니다. 상용 서비스, 외부 테스트 또는 공개 배포 전에는 권리자 허락을 받거나 별도로 라이선스를 확보한 자산으로 교체해야 합니다."
+    },
+    {
+      "id": "frieren",
+      "nameKo": "장송의 프리렌",
+      "categoryId": "figure",
+      "category": "피규어",
+      "file": "/assets/dabboba/products/ip/frieren.jpg",
+      "sourceTitle": "Nendoroid Frieren [Basic]",
+      "sourcePage": "https://www.goodsmile.com/en/product/1141244/Nendoroid%2BFrieren%2BBasic%2B",
+      "sourceImage": "https://www.goodsmile.com/gsc-webrevo-sdk-storage-prd/product/image/1141244/sRAEFUY5LPhv9QXMynGVBrCSudHz30i1.jpg",
+      "usage": "Official manufacturer imagery; temporary prototype display only. Confirm commercial image licensing and replace or obtain permission before production use."
+    },
+    {
+      "id": "cyberpunk-edgerunners",
+      "nameKo": "사이버펑크: 엣지러너",
+      "categoryId": "figure",
+      "category": "피규어",
+      "file": "/assets/dabboba/products/ip/cyberpunk-edgerunners.jpg",
+      "sourceTitle": "FigZero 1/6 Lucy",
+      "sourcePage": "https://www.goodsmile.com/en/product/1139500/FigZero%2B1%2B6%2BLucy",
+      "sourceImage": "https://www.goodsmile.com/gsc-webrevo-sdk-storage-prd/product/image/1139500/6h3nD48zqPipH5TuSjWe7BxE2YQm0GkZ.jpg",
+      "usage": "Official distributor/manufacturer imagery; temporary prototype display only. Confirm commercial image licensing and replace or obtain permission before production use."
+    },
+    {
+      "id": "dandadan",
+      "nameKo": "단다단",
+      "categoryId": "gacha",
+      "category": "가챠",
+      "file": "/assets/dabboba/products/ip/dandadan.jpg",
+      "sourceTitle": "TVアニメ『ダンダダン』 まちぼうけ2",
+      "sourcePage": "https://gashapon.jp/products/detail.php?jan_code=4582769854415000",
+      "sourceImage": "https://bandai-a.akamaihd.net/bc/img/model/xl/1000245289_1.jpg",
+      "usage": "아래 이미지는 공개적으로 접근 가능한 공식 상품 이미지 URL이지만 자유 이용 라이선스가 아닙니다. 저작권과 상표권은 각 권리자에게 있으며 로컬 임시 프로토타입 시안 확인용으로만 사용해야 합니다. 상용 서비스, 외부 테스트 또는 공개 배포 전에는 권리자 허락을 받거나 별도로 라이선스를 확보한 자산으로 교체해야 합니다."
+    },
+    {
+      "id": "kaiju-no-8",
+      "nameKo": "괴수 8호",
+      "categoryId": "kuji",
+      "category": "쿠지",
+      "file": "/assets/dabboba/products/ip/kaiju-no-8.jpg",
+      "sourceTitle": "一番くじ 怪獣８号 3弾",
+      "sourcePage": "https://1kuji.com/products/kaiju8_03",
+      "sourceImage": "https://assets.1kuji.com/uploads/product/top_banner/10450/223261e8-ea77-4cb5-9d88-de9cacabf285.jpg",
+      "usage": "Official BANDAI SPIRITS product page and public Ichiban Kuji CDN image; temporary prototype display only. Public accessibility does not grant commercial image rights, so obtain permission or replace with licensed production artwork before release. Remote URLs may change."
+    },
+    {
+      "id": "evangelion",
+      "nameKo": "신세기 에반게리온",
+      "categoryId": "kuji",
+      "category": "쿠지",
+      "file": "/assets/dabboba/products/ip/evangelion.jpg",
+      "sourceTitle": "一番くじ 新世紀エヴァンゲリオン 30th Anniversary",
+      "sourcePage": "https://1kuji.com/products/eva18",
+      "sourceImage": "https://assets.1kuji.com/uploads/product/top_banner/10603/e9a741a4-50e0-41a1-b795-07ceea0a1be0.jpg",
+      "usage": "Official BANDAI SPIRITS product page and public Ichiban Kuji CDN image; temporary prototype display only. Public accessibility does not grant commercial image rights, so obtain permission or replace with licensed production artwork before release. Remote URLs may change."
+    },
+    {
+      "id": "mobile-suit-gundam",
+      "nameKo": "기동전사 건담",
+      "categoryId": "kuji",
+      "category": "쿠지",
+      "file": "/assets/dabboba/products/ip/mobile-suit-gundam.jpg",
+      "sourceTitle": "一番くじ 機動戦士ガンダム UNIVERSAL CENTURY SAGA",
+      "sourcePage": "https://1kuji.com/products/gundam_ucs",
+      "sourceImage": "https://assets.1kuji.com/uploads/product/top_banner/10610/7aab1c0d-eca3-483d-96eb-9d113f22d3d5.jpg",
+      "usage": "Official BANDAI SPIRITS product page and public Ichiban Kuji CDN image; temporary prototype display only. Public accessibility does not grant commercial image rights, so obtain permission or replace with licensed production artwork before release. Remote URLs may change."
+    },
+    {
+      "id": "pokemon",
+      "nameKo": "포켓몬스터",
+      "categoryId": "tcg",
+      "category": "카드",
+      "file": "/assets/dabboba/products/ip/pokemon.jpg",
+      "sourceTitle": "拡張パック「ストームエメラルダ」",
+      "sourcePage": "https://www.pokemon-card.com/products/index.html?productType=expansion",
+      "sourceImage": "https://www.pokemon-card.com/products/2026/images/stormemeralda.jpg",
+      "usage": "Temporary local prototype reference only; replace with licensed production artwork before commercial release."
+    },
+    {
+      "id": "detective-conan",
+      "nameKo": "명탐정 코난",
+      "categoryId": "gacha",
+      "category": "가챠",
+      "file": "/assets/dabboba/products/ip/detective-conan.jpg",
+      "sourceTitle": "名探偵コナン まちぼうけ",
+      "sourcePage": "https://gashapon.jp/products/detail.php?jan_code=4582769738975000",
+      "sourceImage": "https://bandai-a.akamaihd.net/bc/img/model/xl/1000224828_1.jpg",
+      "usage": "아래 이미지는 공개적으로 접근 가능한 공식 상품 이미지 URL이지만 자유 이용 라이선스가 아닙니다. 저작권과 상표권은 각 권리자에게 있으며 로컬 임시 프로토타입 시안 확인용으로만 사용해야 합니다. 상용 서비스, 외부 테스트 또는 공개 배포 전에는 권리자 허락을 받거나 별도로 라이선스를 확보한 자산으로 교체해야 합니다."
+    },
+    {
+      "id": "tokyo-revengers",
+      "nameKo": "도쿄 리벤저스",
+      "categoryId": "kuji",
+      "category": "쿠지",
+      "file": "/assets/dabboba/products/ip/tokyo-revengers.jpg",
+      "sourceTitle": "一番くじ 東京リベンジャーズ 天竺編",
+      "sourcePage": "https://1kuji.com/products/tokyo-revengers5",
+      "sourceImage": "https://assets.1kuji.com/uploads/product/top_banner/10134/e62c0613-1b12-427b-a61b-eb4e943a65bb.jpg",
+      "usage": "Official BANDAI SPIRITS product page and public Ichiban Kuji CDN image; temporary prototype display only. Public accessibility does not grant commercial image rights, so obtain permission or replace with licensed production artwork before release. Remote URLs may change."
+    },
+    {
+      "id": "that-time-i-got-reincarnated-as-a-slime",
+      "nameKo": "전생했더니 슬라임이었던 건에 대하여",
+      "categoryId": "kuji",
+      "category": "쿠지",
+      "file": "/assets/dabboba/products/ip/that-time-i-got-reincarnated-as-a-slime.webp",
+      "sourceTitle": "一番くじ 劇場版 転生したらスライムだった件 蒼海の涙編",
+      "sourcePage": "https://1kuji.com/products/slime22",
+      "sourceImage": "https://assets.1kuji.com/uploads/product/top_banner/10611/b46d0bde-5aed-4331-8f67-ba34d87803a4.webp",
+      "usage": "Official BANDAI SPIRITS product page and public Ichiban Kuji CDN image; temporary prototype display only. Public accessibility does not grant commercial image rights, so obtain permission or replace with licensed production artwork before release. Remote URLs may change."
+    }
+  ]
+}

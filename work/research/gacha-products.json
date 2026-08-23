@@ -1,0 +1,232 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-23",
+  "category": "gacha",
+  "productCount": 8,
+  "research": {
+    "method": "공식 제조사 또는 공식 판매처의 실제 캡슐토이·랜덤 굿즈 상품 페이지를 우선 조사",
+    "sourcesReviewed": 40,
+    "selectedOfficialSources": 8,
+    "verification": "선정한 출처 페이지 8개와 대표 이미지 URL 8개 모두 2026-08-23 기준 HTTP 200 응답을 확인했으며, 이미지 응답 형식은 image/jpeg입니다."
+  },
+  "rightsNotice": "아래 이미지는 공개적으로 접근 가능한 공식 상품 이미지 URL이지만 자유 이용 라이선스가 아닙니다. 저작권과 상표권은 각 권리자에게 있으며 로컬 임시 프로토타입 시안 확인용으로만 사용해야 합니다. 상용 서비스, 외부 테스트 또는 공개 배포 전에는 권리자 허락을 받거나 별도로 라이선스를 확보한 자산으로 교체해야 합니다.",
+  "products": [
+    {
+      "id": "gacha-demon-slayer-capsulun",
+      "ipSlug": "demon-slayer",
+      "ipNameKo": "귀멸의 칼날",
+      "testProductNameKo": "귀멸의 칼날 캡슐룬 미니 피규어",
+      "descriptionKo": "귀멸의 칼날 캐릭터들이 캡슐 안에서 올려다보는 모습을 담은 전 4종 미니 피규어 컬렉션입니다.",
+      "recommendedPriceWon": 6000,
+      "recommendedStock": 28,
+      "sourceProductName": "鬼滅の刃 かぷせるん",
+      "sourcePrice": {
+        "amount": 500,
+        "currency": "JPY",
+        "taxIncluded": true
+      },
+      "sourceVariantCount": 4,
+      "sourceProvider": "BANDAI Gashapon",
+      "sourceType": "official-manufacturer-product-page",
+      "sourcePageUrl": "https://gashapon.jp/products/detail.php?jan_code=4549660801276000",
+      "publicImageUrl": "https://bandai-a.akamaihd.net/bc/img/model/xl/1000192579_1.jpg",
+      "accessVerification": {
+        "verifiedAt": "2026-08-23",
+        "sourcePageStatus": 200,
+        "imageStatus": 200,
+        "imageContentType": "image/jpeg"
+      },
+      "rightsStatus": "not-cleared-for-production"
+    },
+    {
+      "id": "gacha-jujutsu-kaisen-capsule-figure-dx01",
+      "ipSlug": "jujutsu-kaisen",
+      "ipNameKo": "주술회전",
+      "testProductNameKo": "주술회전 캡슐 피규어 컬렉션 DX 01",
+      "descriptionKo": "주술회전의 인기 캐릭터를 일반 캡슐 피규어보다 볼륨감 있는 크기로 구현한 전 4종 DX 컬렉션입니다.",
+      "recommendedPriceWon": 9000,
+      "recommendedStock": 20,
+      "sourceProductName": "呪術廻戦 カプセルフィギュアコレクションDX01",
+      "sourcePrice": {
+        "amount": 800,
+        "currency": "JPY",
+        "taxIncluded": true
+      },
+      "sourceVariantCount": 4,
+      "sourceProvider": "BANDAI Gashapon",
+      "sourceType": "official-manufacturer-product-page",
+      "sourcePageUrl": "https://gashapon.jp/products/detail.php?jan_code=4549660709053000",
+      "publicImageUrl": "https://bandai-a.akamaihd.net/bc/img/model/xl/1000168897_1.jpg",
+      "accessVerification": {
+        "verifiedAt": "2026-08-23",
+        "sourcePageStatus": 200,
+        "imageStatus": 200,
+        "imageContentType": "image/jpeg"
+      },
+      "rightsStatus": "not-cleared-for-production"
+    },
+    {
+      "id": "gacha-spy-x-family-punitop-plush-02",
+      "ipSlug": "spy-x-family",
+      "ipNameKo": "스파이 패밀리",
+      "testProductNameKo": "스파이 패밀리 푸니톱 캡슐 봉제 마스코트 2",
+      "descriptionKo": "머리 위 하트 프린트와 볼체인이 특징인 약 12cm 크기의 전 6종 캡슐 봉제 마스코트입니다.",
+      "recommendedPriceWon": 9000,
+      "recommendedStock": 18,
+      "sourceProductName": "SPY×FAMILY ぷにとっぷ♡ カプセルぬいぐるみこれくしょん２",
+      "sourcePrice": {
+        "amount": 800,
+        "currency": "JPY",
+        "taxIncluded": true
+      },
+      "sourceVariantCount": 6,
+      "sourceProvider": "NAMCO Parks / Bandai Namco Amusement",
+      "sourceType": "official-brand-online-store-product-page",
+      "sourcePageUrl": "https://parks2.bandainamco-am.co.jp/item/PRE_4549660967354.html",
+      "publicImageUrl": "https://parks2.bandainamco-am.co.jp/client_info/BNAM_LBC_EC/itemimage/PRE_4549660967354/SPY-FAMILY_maindp.jpg",
+      "accessVerification": {
+        "verifiedAt": "2026-08-23",
+        "sourcePageStatus": 200,
+        "imageStatus": 200,
+        "imageContentType": "image/jpeg"
+      },
+      "rightsStatus": "not-cleared-for-production",
+      "rightsCaution": "공식 판매처 페이지에 무단 전재 금지 안내가 있으므로 로컬 임시 시안 외 용도로 복제하거나 배포하지 않아야 합니다."
+    },
+    {
+      "id": "gacha-haikyu-nemurasetai",
+      "ipSlug": "haikyu",
+      "ipNameKo": "하이큐!!",
+      "testProductNameKo": "하이큐!! 네무라세타이 잠자는 미니 피규어",
+      "descriptionKo": "하이큐!! 캐릭터들의 편안하게 잠든 포즈를 귀엽게 표현한 전 5종 미니 피규어 컬렉션입니다.",
+      "recommendedPriceWon": 5000,
+      "recommendedStock": 32,
+      "sourceProductName": "ハイキュー!! ねむらせ隊",
+      "sourcePrice": {
+        "amount": 400,
+        "currency": "JPY",
+        "taxIncluded": true
+      },
+      "sourceVariantCount": 5,
+      "sourceProvider": "BANDAI Gashapon",
+      "sourceType": "official-manufacturer-product-page",
+      "sourcePageUrl": "https://gashapon.jp/products/detail.php?jan_code=4582769770050000",
+      "publicImageUrl": "https://bandai-a.akamaihd.net/bc/img/model/xl/1000226668_1.jpg",
+      "accessVerification": {
+        "verifiedAt": "2026-08-23",
+        "sourcePageStatus": 200,
+        "imageStatus": 200,
+        "imageContentType": "image/jpeg"
+      },
+      "rightsStatus": "not-cleared-for-production"
+    },
+    {
+      "id": "gacha-blue-lock-capsule-figure",
+      "ipSlug": "blue-lock",
+      "ipNameKo": "블루 록",
+      "testProductNameKo": "블루 록 캡슐 피규어 컬렉션",
+      "descriptionKo": "블루 록의 주요 캐릭터를 작은 데스크 피규어로 구성한 전 4종 캡슐 컬렉션입니다.",
+      "recommendedPriceWon": 6000,
+      "recommendedStock": 24,
+      "sourceProductName": "ブルーロック カプセルフィギュアコレクション",
+      "sourcePrice": {
+        "amount": 500,
+        "currency": "JPY",
+        "taxIncluded": true
+      },
+      "sourceVariantCount": 4,
+      "sourceProvider": "BANDAI Gashapon",
+      "sourceType": "official-manufacturer-product-page",
+      "sourcePageUrl": "https://www.gashapon.jp/products/detail.php?jan_code=4549660772811000",
+      "publicImageUrl": "https://bandai-a.akamaihd.net/bc/img/model/xl/1000182862_1.jpg",
+      "accessVerification": {
+        "verifiedAt": "2026-08-23",
+        "sourcePageStatus": 200,
+        "imageStatus": 200,
+        "imageContentType": "image/jpeg"
+      },
+      "rightsStatus": "not-cleared-for-production"
+    },
+    {
+      "id": "gacha-oshi-no-ko-rubber-mascot-02",
+      "ipSlug": "oshi-no-ko",
+      "ipNameKo": "최애의 아이",
+      "testProductNameKo": "최애의 아이 캡슐 러버 마스코트 02",
+      "descriptionKo": "애니메이션 최애의 아이 캐릭터를 휴대하기 좋은 러버 장식으로 만든 전 6종 캡슐 마스코트입니다.",
+      "recommendedPriceWon": 4000,
+      "recommendedStock": 36,
+      "sourceProductName": "【推しの子】 カプセルラバーマスコット02",
+      "sourcePrice": {
+        "amount": 300,
+        "currency": "JPY",
+        "taxIncluded": true
+      },
+      "sourceVariantCount": 6,
+      "sourceProvider": "BANDAI Gashapon",
+      "sourceType": "official-manufacturer-product-page",
+      "sourcePageUrl": "https://gashapon.jp/products/detail.php?jan_code=4570118149299000",
+      "publicImageUrl": "https://bandai-a.akamaihd.net/bc/img/model/xl/1000208532_1.jpg",
+      "accessVerification": {
+        "verifiedAt": "2026-08-23",
+        "sourcePageStatus": 200,
+        "imageStatus": 200,
+        "imageContentType": "image/jpeg"
+      },
+      "rightsStatus": "not-cleared-for-production"
+    },
+    {
+      "id": "gacha-dandadan-machibouke-02",
+      "ipSlug": "dandadan",
+      "ipNameKo": "단다단",
+      "testProductNameKo": "단다단 마치보케 2 미니 피규어",
+      "descriptionKo": "아이라와 지지, 세르포 성인 등 단다단 캐릭터의 기다리는 포즈를 담은 전 5종 미니 피규어입니다.",
+      "recommendedPriceWon": 6000,
+      "recommendedStock": 26,
+      "sourceProductName": "TVアニメ『ダンダダン』 まちぼうけ2",
+      "sourcePrice": {
+        "amount": 500,
+        "currency": "JPY",
+        "taxIncluded": true
+      },
+      "sourceVariantCount": 5,
+      "sourceProvider": "BANDAI Gashapon",
+      "sourceType": "official-manufacturer-product-page",
+      "sourcePageUrl": "https://gashapon.jp/products/detail.php?jan_code=4582769854415000",
+      "publicImageUrl": "https://bandai-a.akamaihd.net/bc/img/model/xl/1000245289_1.jpg",
+      "accessVerification": {
+        "verifiedAt": "2026-08-23",
+        "sourcePageStatus": 200,
+        "imageStatus": 200,
+        "imageContentType": "image/jpeg"
+      },
+      "rightsStatus": "not-cleared-for-production"
+    },
+    {
+      "id": "gacha-detective-conan-machibouke",
+      "ipSlug": "detective-conan",
+      "ipNameKo": "명탐정 코난",
+      "testProductNameKo": "명탐정 코난 마치보케 미니 피규어",
+      "descriptionKo": "명탐정 코난 캐릭터의 기다리는 순간을 사진으로 연출하기 좋은 전 5종 미니 피규어 컬렉션입니다.",
+      "recommendedPriceWon": 5000,
+      "recommendedStock": 30,
+      "sourceProductName": "名探偵コナン まちぼうけ",
+      "sourcePrice": {
+        "amount": 400,
+        "currency": "JPY",
+        "taxIncluded": true
+      },
+      "sourceVariantCount": 5,
+      "sourceProvider": "BANDAI Gashapon",
+      "sourceType": "official-manufacturer-product-page",
+      "sourcePageUrl": "https://gashapon.jp/products/detail.php?jan_code=4582769738975000",
+      "publicImageUrl": "https://bandai-a.akamaihd.net/bc/img/model/xl/1000224828_1.jpg",
+      "accessVerification": {
+        "verifiedAt": "2026-08-23",
+        "sourcePageStatus": 200,
+        "imageStatus": 200,
+        "imageContentType": "image/jpeg"
+      },
+      "rightsStatus": "not-cleared-for-production"
+    }
+  ]
+}

@@ -1,0 +1,231 @@
+{
+  "generatedAt": "2026-08-22T19:25:17.639Z",
+  "count": 25,
+  "sources": [
+    {
+      "id": "one-piece",
+      "nameKo": "원피스",
+      "file": "/assets/dabboba/ips/one-piece.jpg",
+      "sourcePage": "https://kitsu.io/anime/one-piece",
+      "sourceImage": "https://media.kitsu.app/anime/poster_images/12/large.jpg",
+      "provider": "Kitsu",
+      "usage": "temporary local prototype only; replace with licensed official assets before production"
+    },
+    {
+      "id": "dragon-ball",
+      "nameKo": "드래곤볼",
+      "file": "/assets/dabboba/ips/dragon-ball.jpg",
+      "sourcePage": "https://kitsu.io/anime/dragon-ball-z",
+      "sourceImage": "https://media.kitsu.app/anime/720/poster_image/large-5cfc7e2756852e708c822df0a9f59871.jpeg",
+      "provider": "Kitsu",
+      "usage": "temporary local prototype only; replace with licensed official assets before production"
+    },
+    {
+      "id": "demon-slayer",
+      "nameKo": "귀멸의 칼날",
+      "file": "/assets/dabboba/ips/demon-slayer.jpg",
+      "sourcePage": "https://kitsu.io/anime/kimetsu-no-yaiba",
+      "sourceImage": "https://media.kitsu.app/anime/poster_images/41370/large.jpg",
+      "provider": "Kitsu",
+      "usage": "temporary local prototype only; replace with licensed official assets before production"
+    },
+    {
+      "id": "jujutsu-kaisen",
+      "nameKo": "주술회전",
+      "file": "/assets/dabboba/ips/jujutsu-kaisen.jpg",
+      "sourcePage": "https://kitsu.io/anime/jujutsu-kaisen",
+      "sourceImage": "https://media.kitsu.app/anime/42765/poster_image/large-5ce19551c1a6cf995b378205b9149b5c.jpeg",
+      "provider": "Kitsu",
+      "usage": "temporary local prototype only; replace with licensed official assets before production"
+    },
+    {
+      "id": "naruto",
+      "nameKo": "나루토",
+      "file": "/assets/dabboba/ips/naruto.jpg",
+      "sourcePage": "https://kitsu.io/anime/naruto-shippuden",
+      "sourceImage": "https://media.kitsu.app/anime/poster_images/1555/large.jpg",
+      "provider": "Kitsu",
+      "usage": "temporary local prototype only; replace with licensed official assets before production"
+    },
+    {
+      "id": "bleach",
+      "nameKo": "블리치",
+      "file": "/assets/dabboba/ips/bleach.jpg",
+      "sourcePage": "https://kitsu.io/anime/bleach",
+      "sourceImage": "https://media.kitsu.app/anime/poster_images/244/large.jpg",
+      "provider": "Kitsu",
+      "usage": "temporary local prototype only; replace with licensed official assets before production"
+    },
+    {
+      "id": "my-hero-academia",
+      "nameKo": "나의 히어로 아카데미아",
+      "file": "/assets/dabboba/ips/my-hero-academia.jpg",
+      "sourcePage": "https://kitsu.io/anime/boku-no-hero-academia",
+      "sourceImage": "https://media.kitsu.app/anime/poster_images/11469/large.jpg",
+      "provider": "Kitsu",
+      "usage": "temporary local prototype only; replace with licensed official assets before production"
+    },
+    {
+      "id": "hunter-x-hunter",
+      "nameKo": "헌터×헌터",
+      "file": "/assets/dabboba/ips/hunter-x-hunter.jpg",
+      "sourcePage": "https://kitsu.io/anime/hunter-x-hunter-2011",
+      "sourceImage": "https://media.kitsu.app/anime/poster_images/6448/large.jpg",
+      "provider": "Kitsu",
+      "usage": "temporary local prototype only; replace with licensed official assets before production"
+    },
+    {
+      "id": "chainsaw-man",
+      "nameKo": "체인소 맨",
+      "file": "/assets/dabboba/ips/chainsaw-man.jpg",
+      "sourcePage": "https://kitsu.io/anime/chainsaw-man",
+      "sourceImage": "https://media.kitsu.app/anime/43806/poster_image/large-815d6008fb3b56f4291b9f0ffa05cd8f.jpeg",
+      "provider": "Kitsu",
+      "usage": "temporary local prototype only; replace with licensed official assets before production"
+    },
+    {
+      "id": "attack-on-titan",
+      "nameKo": "진격의 거인",
+      "file": "/assets/dabboba/ips/attack-on-titan.jpg",
+      "sourcePage": "https://kitsu.io/anime/attack-on-titan",
+      "sourceImage": "https://media.kitsu.app/anime/poster_images/7442/large.jpg",
+      "provider": "Kitsu",
+      "usage": "temporary local prototype only; replace with licensed official assets before production"
+    },
+    {
+      "id": "jojos-bizarre-adventure",
+      "nameKo": "죠죠의 기묘한 모험",
+      "file": "/assets/dabboba/ips/jojos-bizarre-adventure.jpg",
+      "sourcePage": "https://kitsu.io/anime/jojo-s-bizarre-adventure-2012",
+      "sourceImage": "https://media.kitsu.app/anime/7158/poster_image/large-9e79f5c290ae821d2141473e6fdb6532.jpeg",
+      "provider": "Kitsu",
+      "usage": "temporary local prototype only; replace with licensed official assets before production"
+    },
+    {
+      "id": "spy-x-family",
+      "nameKo": "스파이 패밀리",
+      "file": "/assets/dabboba/ips/spy-x-family.jpg",
+      "sourcePage": "https://kitsu.io/anime/spy-x-family",
+      "sourceImage": "https://media.kitsu.app/anime/45398/poster_image/large-c26c1e0b77e881fcd66475af6bd22c57.jpeg",
+      "provider": "Kitsu",
+      "usage": "temporary local prototype only; replace with licensed official assets before production"
+    },
+    {
+      "id": "haikyu",
+      "nameKo": "하이큐!!",
+      "file": "/assets/dabboba/ips/haikyu.jpg",
+      "sourcePage": "https://kitsu.io/anime/haikyuu",
+      "sourceImage": "https://media.kitsu.app/anime/poster_images/8133/large.jpg",
+      "provider": "Kitsu",
+      "usage": "temporary local prototype only; replace with licensed official assets before production"
+    },
+    {
+      "id": "blue-lock",
+      "nameKo": "블루 록",
+      "file": "/assets/dabboba/ips/blue-lock.jpg",
+      "sourcePage": "https://kitsu.io/anime/blue-lock",
+      "sourceImage": "https://media.kitsu.app/anime/44973/poster_image/large-ca235304c71f4233e60f6efb3967654d.jpeg",
+      "provider": "Kitsu",
+      "usage": "temporary local prototype only; replace with licensed official assets before production"
+    },
+    {
+      "id": "oshi-no-ko",
+      "nameKo": "최애의 아이",
+      "file": "/assets/dabboba/ips/oshi-no-ko.jpg",
+      "sourcePage": "https://kitsu.io/anime/oshi-no-ko",
+      "sourceImage": "https://media.kitsu.app/anime/46170/poster_image/large-0bad1050afcf9e5320ca46bf17ac007a.jpeg",
+      "provider": "Kitsu",
+      "usage": "temporary local prototype only; replace with licensed official assets before production"
+    },
+    {
+      "id": "frieren",
+      "nameKo": "장송의 프리렌",
+      "file": "/assets/dabboba/ips/frieren.jpg",
+      "sourcePage": "https://kitsu.io/anime/sousou-no-frieren",
+      "sourceImage": "https://media.kitsu.app/anime/46474/poster_image/large-ec9b98dd5fbf8f92532d1edb45f9e882.jpeg",
+      "provider": "Kitsu",
+      "usage": "temporary local prototype only; replace with licensed official assets before production"
+    },
+    {
+      "id": "cyberpunk-edgerunners",
+      "nameKo": "사이버펑크: 엣지러너",
+      "file": "/assets/dabboba/ips/cyberpunk-edgerunners.jpg",
+      "sourcePage": "https://kitsu.io/anime/cyberpunk-edgerunners",
+      "sourceImage": "https://media.kitsu.app/anime/43248/poster_image/large-a9fe312b804fd8067d13c5ca4bef3ae6.jpeg",
+      "provider": "Kitsu",
+      "usage": "temporary local prototype only; replace with licensed official assets before production"
+    },
+    {
+      "id": "dandadan",
+      "nameKo": "단다단",
+      "file": "/assets/dabboba/ips/dandadan.jpg",
+      "sourcePage": "https://kitsu.io/anime/DAN-DA-DAN",
+      "sourceImage": "https://media.kitsu.app/anime/48269/poster_image/large-589c017798b98c69e3a615ca4191f49d.jpeg",
+      "provider": "Kitsu",
+      "usage": "temporary local prototype only; replace with licensed official assets before production"
+    },
+    {
+      "id": "kaiju-no-8",
+      "nameKo": "괴수 8호",
+      "file": "/assets/dabboba/ips/kaiju-no-8.jpg",
+      "sourcePage": "https://kitsu.io/anime/kaijuu-8-gou",
+      "sourceImage": "https://media.kitsu.app/anime/46300/poster_image/large-31cc66fd5854cc555d496ced7ab40c31.jpeg",
+      "provider": "Kitsu",
+      "usage": "temporary local prototype only; replace with licensed official assets before production"
+    },
+    {
+      "id": "evangelion",
+      "nameKo": "신세기 에반게리온",
+      "file": "/assets/dabboba/ips/evangelion.jpg",
+      "sourcePage": "https://kitsu.io/anime/neon-genesis-evangelion",
+      "sourceImage": "https://media.kitsu.app/anime/21/poster_image/large-9a3a9086a1b563e9e72d510118eb7d3c.jpeg",
+      "provider": "Kitsu",
+      "usage": "temporary local prototype only; replace with licensed official assets before production"
+    },
+    {
+      "id": "mobile-suit-gundam",
+      "nameKo": "기동전사 건담",
+      "file": "/assets/dabboba/ips/mobile-suit-gundam.jpg",
+      "sourcePage": "https://kitsu.io/anime/mobile-suit-gundam-00",
+      "sourceImage": "https://media.kitsu.app/anime/poster_images/2346/large.jpg",
+      "provider": "Kitsu",
+      "usage": "temporary local prototype only; replace with licensed official assets before production"
+    },
+    {
+      "id": "pokemon",
+      "nameKo": "포켓몬스터",
+      "file": "/assets/dabboba/ips/pokemon.jpg",
+      "sourcePage": "https://kitsu.io/anime/pokemon",
+      "sourceImage": "https://media.kitsu.app/anime/486/poster_image/large-d7ec3ada948851369b7eb6726235cc0d.jpeg",
+      "provider": "Kitsu",
+      "usage": "temporary local prototype only; replace with licensed official assets before production"
+    },
+    {
+      "id": "detective-conan",
+      "nameKo": "명탐정 코난",
+      "file": "/assets/dabboba/ips/detective-conan.jpg",
+      "sourcePage": "https://kitsu.io/anime/detective-conan",
+      "sourceImage": "https://media.kitsu.app/anime/poster_images/210/large.jpg",
+      "provider": "Kitsu",
+      "usage": "temporary local prototype only; replace with licensed official assets before production"
+    },
+    {
+      "id": "tokyo-revengers",
+      "nameKo": "도쿄 리벤저스",
+      "file": "/assets/dabboba/ips/tokyo-revengers.jpg",
+      "sourcePage": "https://kitsu.io/anime/tokyo-revengers",
+      "sourceImage": "https://media.kitsu.app/anime/poster_images/43321/large.jpg",
+      "provider": "Kitsu",
+      "usage": "temporary local prototype only; replace with licensed official assets before production"
+    },
+    {
+      "id": "that-time-i-got-reincarnated-as-a-slime",
+      "nameKo": "전생했더니 슬라임이었던 건에 대하여",
+      "file": "/assets/dabboba/ips/that-time-i-got-reincarnated-as-a-slime.jpg",
+      "sourcePage": "https://kitsu.io/anime/tensei-shitara-slime-datta-ken",
+      "sourceImage": "https://media.kitsu.app/anime/poster_images/41024/large.jpg",
+      "provider": "Kitsu",
+      "usage": "temporary local prototype only; replace with licensed official assets before production"
+    }
+  ]
+}
