@@ -6,6 +6,11 @@
     "orientation": "portrait",
     "userInterfaceStyle": "light",
     "scheme": "dabboba",
+    "splash": {
+      "image": "./assets/dabboba-wordmark.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#F5F5F1"
+    },
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.dabboba.mobile"

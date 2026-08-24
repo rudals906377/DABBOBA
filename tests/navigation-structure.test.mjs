@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const prototypeSource = readFileSync(path.join(root, "src/Prototype.tsx"), "utf8");
+const prototypeStyles = readFileSync(path.join(root, "src/prototype.css"), "utf8");
 const navigationSource = readFileSync(path.join(root, "src/domain/navigation.ts"), "utf8");
 const bottomNavigationSource = readFileSync(
   path.join(root, "src/components/AppBottomNavigation.tsx"),
@@ -51,8 +52,8 @@ test("bottom navigation keeps the requested order and accessible current-page co
   )].map((match) => ({ id: match[1], label: match[2] }));
 
   assert.deepEqual(tabs, [
-    { id: "community", label: "커뮤니티" },
-    { id: "shop", label: "샵" },
+    { id: "community", label: "교환방" },
+    { id: "shop", label: "뽀바" },
     { id: "home", label: "홈" },
     { id: "duckroom", label: "덕룸" },
     { id: "profile", label: "프로필" },
@@ -71,9 +72,21 @@ test("bottom navigation keeps the requested order and accessible current-page co
   assert.match(bottomNavigationSource, /"aria-hidden":\s*true/);
 });
 
+test("뽀바 combines category filters with normalized product and IP search", () => {
+  const shopBlock = functionBlock(prototypeSource, "ShopPage");
+
+  assert.match(prototypeSource, /title="뽀바"/);
+  assert.match(shopBlock, /aria-label="DABBOBA 뽀바"/);
+  assert.match(shopBlock, /<KeyboardInput[\s\S]*?type="search"[\s\S]*?aria-label="뽀바 상품 검색"/);
+  assert.match(shopBlock, /placeholder="상품명·작품 IP 검색"/);
+  assert.match(shopBlock, /filter === "전체" \|\| product\.category === filter/);
+  assert.match(shopBlock, /productSearchIndex\.get\(product\.id\)\?\.includes\(normalizedQuery\)/);
+  assert.match(shopBlock, /찾는 상품이 없어요/);
+});
+
 test("all five root screens own the shared bottom navigation footer", () => {
   const rootScreens = [
-    ["createCommunityScreen", "root-community"],
+    ["createExchangeRoomScreen", "root-community"],
     ["createShopScreen", "root-shop"],
     ["createCatalogScreen", "root-home"],
     ["createDuckroomScreen", "root-duckroom"],
@@ -102,6 +115,37 @@ test("all five root screens own the shared bottom navigation footer", () => {
   );
   assert.match(footerBlock, /flow\.replace\(createRootScreen\(tab\)\)/);
   assert.match(prototypeSource, /useState<RootTabId>\("home"\)/);
+});
+
+test("root navigation collapses with scroll hysteresis while preserving access and layout", () => {
+  const footerBlock = functionBlock(prototypeSource, "RootTabFooter");
+
+  assert.match(prototypeSource, /const ROOT_NAVIGATION_TOP_THRESHOLD = 12/);
+  assert.match(prototypeSource, /const ROOT_NAVIGATION_COLLAPSE_THRESHOLD = 18/);
+  assert.match(prototypeSource, /const ROOT_NAVIGATION_EXPAND_THRESHOLD = 10/);
+  assert.match(footerBlock, /data-navigation-state=\{navigationState\}/);
+  assert.match(footerBlock, /scrollTarget\.scrollHeight <= scrollTarget\.clientHeight \+ 2/);
+  assert.match(footerBlock, /lastScrollTopRef\.current = Math\.max\(0, activeScrollTarget\?\.scrollTop \?\? 0\)/);
+  assert.match(footerBlock, /Math\.max\(0, directionDistanceRef\.current \+ delta\)/);
+  assert.match(footerBlock, /Math\.min\(0, directionDistanceRef\.current \+ delta\)/);
+  assert.match(footerBlock, /window\.requestAnimationFrame\(updateNavigation\)/);
+  assert.match(
+    footerBlock,
+    /document\.addEventListener\("scroll", handleScroll, \{ capture: true, passive: true \}\)/,
+  );
+  assert.match(footerBlock, /updateNavigationState\("expanded"\);[\s\S]*?flow\.replace\(createRootScreen\(tab\)\)/);
+  assert.doesNotMatch(footerBlock, /"hidden"/);
+
+  assert.match(prototypeStyles, /\.app-bottom-navigation > button \{[\s\S]*?min-height: 44px/);
+  assert.match(
+    prototypeStyles,
+    /\.root-tab-footer\[data-navigation-state="compact"\] \.app-bottom-navigation \{[\s\S]*?max\(220px,[\s\S]*?height: 52px/,
+  );
+  assert.match(
+    prototypeStyles,
+    /\.root-tab-footer\[data-navigation-state="compact"\] \.app-bottom-navigation > button > span \{[\s\S]*?max-height: 0;[\s\S]*?opacity: 0/,
+  );
+  assert.match(prototypeStyles, /@media \(prefers-reduced-motion: reduce\)/);
 });
 
 test("detail, checkout, and draw screens keep their action footers without the root nav", () => {

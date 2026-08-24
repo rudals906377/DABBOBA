@@ -72,20 +72,102 @@ When any text-entry control loses focus, dismiss the simulated keyboard. If the 
 
 ## DABBOBA Product Decisions
 
+- Use a guest-first launch: show a brief DABBOBA loading splash, then open the home screen without forcing login. Guests may browse the app, but opening or writing exchange posts, submitting exchange applications, creating product requests, or liking requests must show a clear `로그인이 필요합니다` prompt with a `로그인` action that leads to the app login screen and resumes the intended action after mock authentication.
 - Keep the shared commerce flow as catalog → product detail → quantity sheet → mock checkout, then branch by category: 가챠·쿠지 continue to the arcade draw, while 피규어·카드 finish on a normal purchase-complete screen without an app-side prize draw.
-- Keep the primary bottom-navigation order fixed as 커뮤니티 → 샵 → 홈 → 덕룸 → 프로필. Show this navigation only on those five root screens; hide it on pushed IP, product-detail, checkout, and draw screens so route-owned back controls and commerce action footers remain unambiguous.
-- Use 커뮤니티 for free-form posts, information sharing, and animation discussion; 샵 for choosing and purchasing 가챠·피규어·쿠지·카드; 홈 for the current DABBOBA discovery home; 덕룸 for collectors to show off their gacha and figure collections; and 프로필 for the existing account-oriented summary and menus.
-- Keep every Community feed post connected to a footer-free `FlowScreen` detail page with the full post, shared like state, visible example comments, and a keyboard-aware local comment composer. Hide the root navigation on the pushed detail screen and restore it when returning to the feed.
-- Treat Community, Dukroom, and Profile content as local frontend fixtures in the current prototype. Do not imply that posts, uploads, likes, collections, account edits, or profile state are authenticated or server-persisted until their backend contracts exist.
+- Keep the primary bottom-navigation order fixed as 교환방 → 뽀바 → 홈 → 덕룸 → 프로필. Show this navigation only on those five root screens; hide it on pushed exchange-detail, IP, product-detail, checkout, customer-center, request-room, and draw screens so route-owned back controls and commerce action footers remain unambiguous.
+- Treat the root navigation as a `스크롤 반응형 플로팅 하단 네비게이션`: keep icons and labels expanded at the top and while scrolling upward, then compact it to an icon-centered floating bar while scrolling downward. Never hide it completely, keep every tab target at least 44px, preserve the root footer reservation so content does not jump, and reset it to expanded whenever the root tab changes or keyboard focus enters the navigation.
+- Use 교환방 for product-for-product exchange listings and applications; 뽀바 for searching, choosing, and purchasing 가챠·피규어·쿠지·카드; 홈 for the current DABBOBA discovery home; 덕룸 for collectors to show off their collections; and 프로필 for the existing account summary plus customer-center entry.
+- Every exchange listing must include a title, category, IP, offered item, wanted item, and details. Connect each listing to a footer-free detail `FlowScreen` with visible exchange applications and a keyboard-aware application form. Hide the root navigation on the pushed detail screen and restore it when returning to the exchange feed.
+- Put 신청방 under 고객센터. A request records category, IP, desired item, and details, and other authenticated users can add a single local like through the shared request state.
+- Treat Exchange Room, Request Room, Dukroom, and Profile content as local frontend fixtures in the current prototype. Do not imply that listings, applications, requests, likes, collections, account edits, or profile state are authenticated or server-persisted until their backend contracts exist.
 - Treat edits made in the profile-detail screen as local browser state only. They may update the current prototype session, but they are not saved to an authenticated account or any server and may reset when the app reloads.
 - Use a warm off-white canvas instead of pure white. Show physical product photography with `object-fit: contain` on quiet light surfaces; reserve near-black for the arcade moment and sparse brand contrast.
-- Use the user's crystalline lime green reference as the primary action color.
+- For every visual or design change, use golden-ratio relationships as the proportional starting point, then prioritize optical stability over mathematically exact ratios. Alignment, visual weight, breathing room, safe areas, readable hierarchy, and comfortable touch targets win whenever a strict golden ratio would make the screen feel less balanced.
+- Use `#91E98E` as DABBOBA's canonical representative color and primary action color. Keep `--db-brand` as the source token and alias existing `--db-green` usage to it; do not substitute a more fluorescent lime without a new explicit decision.
+- Use the canonical `DABBOBA` pixel wordmark derived from the exact `Press Start 2P` construction already used by `IP SELECT`. Render every letter monochrome near-black `#111411`; do not color individual letters, stretch the wordmark, apply faux bold, outline it, add a glow, or substitute another arcade font. Reserve representative `#91E98E` for interaction, status, and the four-pixel opening loader effect.
+- Use `public/assets/dabboba/brand/dabboba-wordmark.png` (`1170 × 172`, transparent RGBA) as the canonical web wordmark and keep `apps/mobile/assets/dabboba-wordmark.png` byte-identical for Expo splash/loading/error surfaces. Reuse the shared asset from the web splash through home, login, and draw-header brand lockups. Keep semantic copy such as `나의 DABBOBA` as text instead of replacing ordinary sentences with the logo artwork.
 - Use retro arcade screenshots only as sparse, low-opacity texture. They must not determine the page layout or become a full-screen background.
-- Keep the 8-bit influence restrained to small brand labels, status details, and the draw moment so the overall product remains simple and adult-oriented.
+- Keep the 8-bit influence concentrated in the wordmark, fixed interface-title system, short status labels, and the draw moment. Body copy and dynamic commerce, exchange, and request content remain contemporary and highly readable so the overall product stays simple and adult-oriented.
 - Give gacha a capsule-specific finite draw sequence inside the arcade screen: use the compact matte-black DABBOBA capsule machine with an exact DABBOBA marquee, smoked-glass chamber, olive/lime and ivory DB-marked capsules, a large manual crank, and a lower outlet. The fixed sequence is crank → mix → drop → split-open with a restrained lime pixel bloom before the result sheet appears. Keep kuji on its separate non-capsule draw rhythm, avoid full-screen confetti, and provide a reduced-motion fallback.
+- Keep the gacha ready state front-facing even when its supplied cinematic uses a side angle. Build the crank from three independent layers: the restrained 8-bit/dot-art machine at `public/assets/dabboba/capsule-machine-front-pixel.png`, whose crank area is plain graphite with no square metal backing, screw, or slot; the fixed transparent circular plate at `public/assets/dabboba/capsule-crank-plate-pixel.png`, preserving its inner ring, dark recess, center socket, and four screws; and the transparent clean horizontal handle at `public/assets/dabboba/capsule-crank-pixel.png`. Keep the plate completely still and rotate only the handle continuously and in direct proportion to the `밀어서 뽑기` slider, mapping 0–100% travel to 0–360 degrees on the same pointer-update frames. Do not add a separate transform delay to the handle, and never layer the retired CSS/3D capsule machine underneath it. Hold the completed handle during the short transition, then continue with `public/assets/dabboba/video/dabboba-capsule-lower-chute.mp4`. Treat the supplied clip as temporary prototype media, not as a replacement for the final capsule-containment direction below.
+- Keep the selected gacha capsule physically contained throughout the reveal: it must fall vertically through the machine's internal chute, land and fully settle behind the walls and front safety lip of the bottom receiving tray, and open only inside that tray. Never launch it toward the camera, bounce it out of the machine, or open any capsule still inside the upper chamber.
 - Treat IP as a first-class catalog layer above 가챠·피규어·쿠지·카드. Keep the home exposure compact, and put complete discovery and multilingual alias search on a separate `FlowScreen`.
-- Keep the initial IP catalog in `src/fixtures/ip-seed.json` behind typed exports so it can later be replaced by a FastAPI/OpenAPI client without rewriting screens.
+- Keep the initial IP catalog in `src/fixtures/ip-seed.json` behind typed exports so it can later be replaced by the shared TypeScript REST/OpenAPI client without rewriting screens.
 - IP artwork under `public/assets/dabboba/ips` is temporary prototype material with provenance in `sources.json`; replace it with licensed production assets before public commercial distribution.
 - Keep Phase 1 test products at exactly one per IP: 가챠 8, 피규어 8, 쿠지 7, 카드 2. The card category is limited to 원피스 and 포켓몬스터 until the user changes this decision.
 - Product imagery under `public/assets/dabboba/products/ip` is locally frozen prototype reference material. Preserve its `sources.json` provenance and replace or license it before any public or commercial release.
 - Keep the Vite web app as the UI source of truth and the Expo Go client in `apps/mobile` as a thin TypeScript WebView shell. The shell must open the web app with `?embed=1&platform=<ios|android>` so the preview bezel, simulated status bar, simulated keyboard, and home indicator are removed while normal browser preview behavior stays unchanged. Use a LAN URL only for local Expo Go testing and an HTTPS deployment URL for production builds.
+
+## DABBOBA Pixel Wordmark And Title Rules
+
+### Source Of Truth
+
+- Treat the supplied `IP SELECT` reference and the current `DABBOBA` wordmark as one typography family. Their defining characteristics are square counters, stepped diagonal and curved terminals, a single-weight bitmap stroke, tight uppercase rhythm, and no decorative effects.
+- Use the bundled `Press Start 2P` font for Latin letters, numbers, short codes, and fixed English title labels. Keep the import centralized; do not download or embed a second copy of the same font in individual screens.
+- The canonical logo is an image asset, not ordinary heading text. Always consume the shared wordmark asset for `DABBOBA`; never rebuild the logo independently with HTML, CSS shapes, an inline SVG, or a different font declaration.
+- If Korean display text must itself become pixel-styled, first choose and license one Korean bitmap font with comparable stroke density, add it as the single `--db-font-pixel-ko` token, and verify every required Hangul glyph. Until that font is approved, pair the pixel English title label with the existing Korean sans-serif title rather than allowing a silent system-font fallback inside a pixel heading.
+
+### Where The Pixel Title System Is Required
+
+- Apply the shared pixel-title treatment to every short, app-authored display title: app and page identifiers, section eyebrows, hero labels, sheet and dialog titles, empty-state titles, result grades, arcade status labels, and short tab/step headings.
+- Every major screen or section title block should expose the pixel system consistently. Prefer a short uppercase English or alphanumeric label such as `IP SELECT`, `SHOP`, `EXCHANGE`, `WISH BOARD`, `PROFILE`, `RESULT`, or `STEP 01`, followed by the readable Korean title when Korean explanation is needed.
+- Keep dynamic or potentially long content out of the bitmap display font: product names, exchange/request titles, usernames, prices, quantities, descriptions, legal notices, form labels, button labels, navigation labels, and body copy continue to use the established Korean UI font. These are content, not fixed interface-title artwork.
+- Do not rasterize each title as a new image. Only the DABBOBA wordmark remains a canonical image asset; other fixed titles must use shared text styles so accessibility, localization, truncation, and large-text behavior remain intact.
+
+### Typography Tokens And Hierarchy
+
+- Define Latin pixel titles from one stack: `"Press Start 2P", ui-monospace, monospace`, weight `400`. The font has no legitimate bold weight, so never apply synthetic `font-weight: 700/900`.
+- Use these starting sizes and adjust only when optical balance or device width requires it:
+  - micro eyebrow/status: `7px` size, `12px` line-height, `-0.2px` tracking;
+  - section title/step label: `9px` size, `14px` line-height, `-0.2px` tracking;
+  - page/sheet/dialog title: `11px` size, `17px` line-height, `-0.25px` tracking;
+  - hero/result display title: `14px` size, `21px` line-height, `-0.3px` tracking.
+- Keep pixel titles at weight `400`, uppercase for Latin, and one line whenever possible. For a short controlled title that must wrap, limit it to two lines and preserve whole words; never compress the font horizontally to make it fit.
+- Use golden-ratio relationships only as a starting guide between title and supporting text. Optical centering, safe-area clearance, line wrapping, Korean readability, and a stable title block always take priority over mathematical ratios.
+
+### Color And Surface Rules
+
+- Default pixel titles and the DABBOBA wordmark use `#111411` on `#F5F5F1` or `#FCFCF8` light surfaces.
+- Small section eyebrows and status labels may use `--db-green-ink` (`#176F2A`) when the contrast remains sufficient. Use `#91E98E` primarily as a background, indicator, selection, or loader accent—not as the main color for a long pixel title.
+- On the near-black arcade surface, use the established high-contrast light title color and reserve `#91E98E` for a small state cue. Do not add neon glow, multi-color letters, gradients, bevels, drop shadows, or blinking text.
+- Never place the dark wordmark directly on a dark or busy image. Use a quiet light surface, an approved light inverse asset, or an explicit accessible container.
+
+### Layout And Responsive Rules
+
+- Align pixel titles to the same content grid as the Korean title or content below them. Do not visually center a title that belongs to a left-aligned information hierarchy.
+- Use `4–6px` between a pixel eyebrow and its Korean title, `10–14px` from that title block to supporting content, and preserve at least the current screen gutter on both sides.
+- The wordmark must retain its intrinsic aspect ratio. The approved slots are `26px` high on the web opening screen, `16px` high in the home header, `20px` high on login, and `11px` high in the draw header unless a new screen-specific visual check approves a change.
+- Pixel titles must not collide with search, points, back buttons, Safe Area, bottom sheets, or keyboard-attached surfaces. At narrow widths, reduce the approved size tier or shorten the controlled English label before allowing clipping or horizontal scrolling.
+- Preserve actual text semantics: use the correct heading level for page and section titles, keep screen-reader text available, and do not rely on pixel styling or color alone to communicate state.
+
+### Prohibited Variations
+
+- Do not mix Press Start 2P with another Latin arcade font on the same screen.
+- Do not use lowercase Latin in the fixed pixel-title system unless a later brand decision explicitly introduces a lowercase set.
+- Do not manually redraw individual glyphs, replace letters with icons, alter only selected DABBOBA letters, or introduce a `DBB` abbreviation as the primary wordmark without explicit approval.
+- Do not use pixel typography for paragraphs, dense lists, checkout totals, accessibility-critical instructions, or any text whose primary job is fast reading.
+- Do not create one-off font sizes, letter spacing, shadows, or colors in individual components. Extend the shared token or shared pixel-title class only after checking every existing title surface.
+
+### Implementation And Verification Contract
+
+- Keep the reusable DABBOBA wordmark consumer centralized in `DabbobaWordmark`. Keep reusable text-title styles centralized in `src/prototype.css`; components should select a semantic size variant instead of duplicating font declarations.
+- Any wordmark asset update must change both the web and Expo PNGs together and verify that they remain byte-identical, transparent, uncropped, and readable at the smallest approved slot.
+- For any title-system change, verify once at the end on opening, home, one long page title, one section title, one sheet/dialog title, and the draw screen. Include a narrow mobile width, iPhone and Android Safe Area, large-text behavior for surrounding copy, and reduced-motion mode when the title participates in animation.
+- Run `git diff --check`, `npm run check:runtime`, `npm run build`, and the Expo TypeScript check before handoff. Browser evidence must distinguish the app's simulated iPhone/Pixel frames from proof on a physical device.
+
+## DABBOBA Scalable Production Architecture Rule
+
+- Preserve the approved DABBOBA UI, product flows, domain IDs, and the category rule that 가챠·쿠지 are `draw` while 피규어·카드 are `purchase`. Migrate behind those screens in verified slices instead of rewriting the prototype wholesale.
+- Use TypeScript end to end. The production target is a pnpm Workspace + Turborepo with `apps/web`, `apps/mobile`, `apps/api`, and `apps/worker`, plus shared `packages/domain`, `packages/contracts`, `packages/api-client`, `packages/db`, `packages/ui`, and `packages/config`.
+- Start with a modular monolith, not microservices. Keep explicit modules for identity/session, exchange, product requests, media, moderation, notifications, catalog, orders, payments, inventory, points/coupons, draw/kuji, shipping, and admin. Split services only after measured load or ownership boundaries justify it.
+- Use PostgreSQL as the only source of truth for accounts, posts, orders, money, points, inventory, draw entitlements, draw results, probability-table versions, and audit records. Use Redis only for cache, rate limiting, short-lived coordination, and job delivery; never treat Redis or client state as the ledger for money, inventory, or draw outcomes.
+- All authoritative commerce work belongs to the API and database: recalculate prices and discounts server-side, reserve and decrement inventory atomically, require idempotency keys, verify signed PG webhooks, deduplicate provider events, reconcile uncertain payments, and append compensating ledger records for refunds or corrections.
+- All authoritative gacha/kuji work belongs to the server. A paid order issues one-time draw entitlements; the server atomically locks and consumes an entitlement, fixes the odds/pool version, selects and reserves the prize, records the immutable result and audit event, and returns that result. The client slider and video only present a result already committed by the server.
+- Build Exchange Room and Request Room on authenticated canonical user IDs with cursor pagination, listing/application ownership and permission checks, unique request likes, exchange lifecycle states, soft-delete/moderation states, reports, blocks, rate limits, admin actions, and audit logs. Upload exchange media directly to object storage through short-lived signed URLs, then scan, strip metadata, resize, and serve variants through a CDN.
+- Use REST + OpenAPI as the client/server contract and generate shared TypeScript API types. Keep server state out of the broad prototype Context; use a query cache for remote data, an isolated auth/session provider, focused checkout state, and local state machines for transient animation/UI state.
+- Replace the in-memory `FlowStack` as the production source of navigation truth with URL-addressable routes and deep links while retaining its approved transition behavior as presentation. Avoid keeping unbounded hidden screens mounted. Lists of exchange listings, applications, requests, products, and IPs must use server pagination and, when needed, virtualization.
+- Keep the Expo WebView shell for the early MVP only while it remains operationally useful. Restrict it to approved HTTPS origins and use a typed, validated native/web bridge. Move login, secure token storage, payment SDKs, push notifications, deep links, camera/file upload, or other native-critical flows into Expo-native surfaces when required.
+- Use Google Cloud Storage plus a CDN for production media, Redis + BullMQ for asynchronous jobs, and a transactional outbox for notifications, media processing, reservation expiry, payment reconciliation, shipping, and cache invalidation. Add structured logs, request/order/payment/draw correlation IDs, error tracking, metrics, alerts, backups, point-in-time recovery, and periodic restore drills before public launch.
+- Begin search with PostgreSQL full-text search and `pg_trgm`. Add read replicas, OpenSearch, feed fan-out, partitioning, or independent services only when production metrics show a real need.
+- Apply the migration in this order: split the large prototype by feature and standardize the workspace; establish contracts and canonical identity; add persistent exchange, request, media, and moderation modules; move catalog to the database; implement transactional order/payment/inventory/draw ledgers; then add workers, observability, native integrations, and measured scale optimizations.
+- Do not describe fixture data, mock login, timer-based checkout, client-generated order codes, browser point balances, static stock, or `Math.random()` draw results as production-ready. No real payment or public UGC launch may rely on those prototype mechanisms.

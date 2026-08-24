@@ -267,6 +267,15 @@ test("Expo embed mode fills the native WebView without preview chrome", async ({
   expect(geometry.scrollWidth).toBe(427);
   expect(geometry.cursor).not.toBe("none");
 
-  await page.getByRole("navigation", { name: "주요 메뉴" }).getByRole("button", { name: "샵" }).click();
-  await expect(page.getByRole("main", { name: "DABBOBA 샵" })).toBeVisible();
+  await page.getByRole("navigation", { name: "주요 메뉴" }).getByRole("button", { name: "뽀바" }).click();
+  const ppoba = page.getByRole("main", { name: "DABBOBA 뽀바" });
+  await expect(ppoba).toBeVisible();
+
+  const search = ppoba.getByRole("searchbox", { name: "뽀바 상품 검색" });
+  await search.fill("JJK");
+  await expect(ppoba.getByRole("button", { name: /주술회전 캡슐 피규어 컬렉션 DX 01/ })).toBeVisible();
+  await expect(ppoba.getByText("1개", { exact: true })).toBeVisible();
+
+  await ppoba.getByRole("button", { name: "피규어", exact: true }).click();
+  await expect(ppoba.getByText("찾는 상품이 없어요", { exact: true })).toBeVisible();
 });

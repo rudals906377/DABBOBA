@@ -1,6 +1,6 @@
 import {
-  IconDot3HorizontalChatbubbleLeftFill,
-  IconDot3HorizontalChatbubbleLeftLine,
+  IconArrowDownRightArrowUpLeftFill,
+  IconArrowDownRightArrowUpLeftLine,
   IconGridHeartFill,
   IconGridHeartLine,
   IconHouseFill,
@@ -16,7 +16,7 @@ function NavigationIcon({ id, selected }: { id: RootTabId; selected: boolean }) 
   const props = { size: 23, "aria-hidden": true } as const;
 
   if (id === "community") {
-    return selected ? <IconDot3HorizontalChatbubbleLeftFill {...props} /> : <IconDot3HorizontalChatbubbleLeftLine {...props} />;
+    return selected ? <IconArrowDownRightArrowUpLeftFill {...props} /> : <IconArrowDownRightArrowUpLeftLine {...props} />;
   }
   if (id === "shop") {
     return selected ? <IconShoppingbagFill {...props} /> : <IconShoppingbagLine {...props} />;

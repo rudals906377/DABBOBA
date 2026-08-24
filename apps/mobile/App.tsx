@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   BackHandler,
+  Image,
   Platform,
   Pressable,
   StyleSheet,
@@ -13,6 +14,7 @@ import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import { WebView, type WebViewNavigation } from "react-native-webview";
 
 const WEB_PORT = 4174;
+const DABBOBA_WORDMARK = require("./assets/dabboba-wordmark.png");
 
 function withEmbedParams(baseUrl: string) {
   const separator = baseUrl.includes("?") ? "&" : "?";
@@ -74,7 +76,13 @@ export default function App() {
         />
         {loadError ? (
           <View style={styles.errorLayer}>
-            <Text style={styles.brand}>DABBOBA</Text>
+            <Image
+              source={DABBOBA_WORDMARK}
+              style={styles.errorWordmark}
+              resizeMode="contain"
+              fadeDuration={0}
+              accessibilityLabel="DABBOBA"
+            />
             <Text style={styles.errorTitle}>웹앱에 연결할 수 없어요.</Text>
             <Text style={styles.errorBody}>{loadError}</Text>
             <Text style={styles.errorUrl}>{webUrl}</Text>
@@ -98,7 +106,13 @@ export default function App() {
 function LoadingView({ label }: { label: string }) {
   return (
     <View style={styles.loadingLayer}>
-      <Text style={styles.brand}>DABBOBA</Text>
+      <Image
+        source={DABBOBA_WORDMARK}
+        style={styles.loadingWordmark}
+        resizeMode="contain"
+        fadeDuration={0}
+        accessibilityLabel="DABBOBA"
+      />
       <Text style={styles.loadingLabel}>{label}</Text>
     </View>
   );
@@ -120,11 +134,13 @@ const styles = StyleSheet.create({
     gap: 14,
     backgroundColor: "#F5F5F1",
   },
-  brand: {
-    color: "#141714",
-    fontSize: 20,
-    fontWeight: "900",
-    letterSpacing: 4,
+  loadingWordmark: {
+    width: 195,
+    height: 26,
+  },
+  errorWordmark: {
+    width: 180,
+    height: 24,
   },
   loadingLabel: {
     color: "#687068",

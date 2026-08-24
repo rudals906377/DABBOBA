@@ -115,7 +115,7 @@ test("profile detail uses keyboard-aware fields and saves before returning", () 
   assert.match(prototypeSource, /<p className="profile-message" role="status">\{profileSaveNotice \|\| profileMessage\}<\/p>/);
 });
 
-test("checkout branches random draws from direct purchases", () => {
+test("checkout confirms payment before an explicit draw or catalog action", () => {
   const checkoutFooter = functionBlock(prototypeSource, "CheckoutFooter");
 
   assert.match(
@@ -124,23 +124,30 @@ test("checkout branches random draws from direct purchases", () => {
   );
   assert.match(
     checkoutFooter,
-    /if \(drawMode\)\s*\{[\s\S]*?prepareDraw\(quantity\);[\s\S]*?flow\.replace\(createDrawScreen\(product, quantity\)\);[\s\S]*?\}\s*else\s*\{[\s\S]*?flow\.replace\(createPurchaseCompleteScreen\(product, quantity, total\)\);[\s\S]*?\}/,
+    /if \(drawMode\) prepareDraw\(quantity\);[\s\S]*?flow\.replace\(createPurchaseCompleteScreen\(product, quantity, total\)\);/,
   );
+  assert.doesNotMatch(checkoutFooter, /createDrawScreen/);
 });
 
-test("purchase completion cannot render draw UI or the root tab footer", () => {
+test("purchase completion exposes the draw CTA only after confirmation and never mounts the root footer", () => {
   const screen = functionBlock(prototypeSource, "createPurchaseCompleteScreen");
   const page = functionBlock(prototypeSource, "PurchaseCompletePage");
   const footer = functionBlock(prototypeSource, "PurchaseCompleteFooter");
 
   assert.match(screen, /id:\s*`purchase-complete-\$\{product\.id\}`/);
-  assert.match(screen, /footer:\s*\(flow\)\s*=>\s*<PurchaseCompleteFooter\s+flow=\{flow\}\s*\/>/);
+  assert.match(screen, /footer:\s*\(flow\)\s*=>\s*<PurchaseCompleteFooter\s+flow=\{flow\}\s+product=\{product\}\s+quantity=\{quantity\}\s*\/>/);
   assert.match(
     screen,
     /render:\s*\(\)\s*=>\s*<PurchaseCompletePage\s+product=\{product\}\s+quantity=\{quantity\}\s+paidTotal=\{paidTotal\}\s*\/>/,
   );
 
+  assert.match(page, /product\.categoryId === "gacha" \? "가챠하러 가기" : "쿠지 추첨하러 가기"/);
+  assert.match(footer, /if \(drawMode\) \{[\s\S]*?flow\.replace\(createDrawScreen\(product, quantity\)\);[\s\S]*?return;/);
+  assert.match(footer, /returnToCatalog\(flow\)/);
+  assert.match(footer, /\{drawMode \? drawActionLabel : "상품 목록으로"\}/);
+
   for (const block of [screen, page, footer]) {
-    assert.doesNotMatch(block, /DrawPage|DrawFooter|createDrawScreen|RootTabFooter|AppBottomNavigation/);
+    assert.doesNotMatch(block, /RootTabFooter|AppBottomNavigation/);
   }
+  assert.doesNotMatch(page, /DrawPage|DrawFooter|createDrawScreen/);
 });

@@ -12,6 +12,7 @@ import {
   type SetStateAction,
 } from "react";
 import { ActionButton } from "@seed-design/react";
+import { useDrag } from "@use-gesture/react";
 import "@seed-design/css/all.css";
 import "@fontsource/press-start-2p/latin-400.css";
 import {
@@ -49,19 +50,23 @@ import {
   type FlowScreen,
 } from "./mobile";
 import { AppBottomNavigation } from "./components/AppBottomNavigation";
+import {
+  DEFAULT_EXCHANGE_APPLICATIONS,
+  DEFAULT_EXCHANGE_POSTS,
+  DEFAULT_PRODUCT_REQUESTS,
+  EXCHANGE_FILTERS,
+  REQUEST_CATEGORY_IDS,
+  type ExchangeApplication,
+  type ExchangeFilter,
+  type ExchangePost,
+  type ProductRequest,
+} from "./data/exchangeRequestFixtures";
 import { FEATURED_IPS, IP_CATALOG } from "./data/ipCatalog";
 import { PRODUCTS, productsForIp, type CatalogProduct } from "./data/productCatalog";
 import {
-  COMMUNITY_TOPICS,
-  DEFAULT_COMMUNITY_COMMENTS,
-  DEFAULT_COMMUNITY_POSTS,
   DUCKROOM_FILTERS,
   DUCKROOM_SHOWCASES,
-  type CommunityComment,
-  type CommunityPost,
-  type CommunityTopic,
   type DuckroomFilter,
-  type PostTopic,
 } from "./data/socialFixtures";
 import {
   PRODUCT_CATEGORIES,
@@ -69,6 +74,7 @@ import {
   categoryLabel,
   isRandomDrawCategory,
   matchesIpSearch,
+  normalizeCatalogSearch,
   type IpRecord,
   type ProductCategoryId,
   type ProductCategoryLabel,
@@ -77,10 +83,18 @@ import type { RootTabId } from "./domain/navigation";
 
 type Category = ProductCategoryLabel;
 type CategoryFilter = "전체" | Category;
+type RequestFilter = "all" | ProductCategoryId;
 type PaymentMethod = "간편카드" | "카카오페이" | "네이버페이";
-type DrawState = "ready" | "drawing" | "result" | "done";
+type DrawState = "ready" | "transitioning" | "drawing" | "result" | "done";
 type PrizeGrade = "S" | "A" | "B";
-type IpDetailTab = "상품" | "캐릭터" | "스냅" | "커뮤니티";
+type IpDetailTab = "상품" | "캐릭터" | "스냅" | "교환방";
+type SplashState = "visible" | "leaving" | "hidden";
+type RootNavigationState = "expanded" | "compact";
+type AuthIntent =
+  | { kind: "exchange-post"; postId: string }
+  | { kind: "exchange-compose" }
+  | { kind: "request-compose" }
+  | { kind: "request-like"; requestId: string };
 type UserProfile = {
   nickname: string;
   bio: string;
@@ -90,22 +104,32 @@ type UserProfile = {
 type Product = CatalogProduct;
 
 const products: Product[] = PRODUCTS;
+const productSearchIndex = new Map(products.map((product) => {
+  const ip = IP_CATALOG.find((item) => item.id === product.ipId);
+  const searchableText = [
+    product.title,
+    product.line,
+    product.description,
+    product.edition,
+    product.reward,
+    product.category,
+    ip?.nameKo,
+    ip?.nameEn,
+    ip?.nameJa,
+    ...(ip?.aliases ?? []),
+  ].filter((value): value is string => Boolean(value));
+
+  return [product.id, normalizeCatalogSearch(searchableText.join(" "))] as const;
+}));
 
 const filters: CategoryFilter[] = ["전체", ...PRODUCT_CATEGORY_LABELS];
 const paymentMethods: PaymentMethod[] = ["간편카드", "카카오페이", "네이버페이"];
 const couponOptions = [1_000, 0] as const;
-const ipDetailTabs: IpDetailTab[] = ["상품", "캐릭터", "스냅", "커뮤니티"];
-const postTopics: readonly PostTopic[] = ["정보", "질문", "애니 이야기"];
-
-const CAPSULE_LAYOUT = [
-  { left: "5%", top: "54%", mixX: "48px", mixY: "-34px", rotate: "215deg", tone: "ivory" },
-  { left: "25%", top: "63%", mixX: "-17px", mixY: "-51px", rotate: "-188deg", tone: "olive" },
-  { left: "47%", top: "57%", mixX: "-42px", mixY: "-24px", rotate: "164deg", tone: "ivory" },
-  { left: "69%", top: "64%", mixX: "-49px", mixY: "-42px", rotate: "-240deg", tone: "olive" },
-  { left: "15%", top: "35%", mixX: "39px", mixY: "26px", rotate: "-172deg", tone: "olive" },
-  { left: "40%", top: "30%", mixX: "37px", mixY: "34px", rotate: "198deg", tone: "ivory" },
-  { left: "65%", top: "38%", mixX: "-43px", mixY: "20px", rotate: "228deg", tone: "olive" },
-] as const;
+const ipDetailTabs: IpDetailTab[] = ["상품", "캐릭터", "스냅", "교환방"];
+const DABBOBA_WORDMARK_SRC = "/assets/dabboba/brand/dabboba-wordmark.png";
+const ROOT_NAVIGATION_TOP_THRESHOLD = 12;
+const ROOT_NAVIGATION_COLLAPSE_THRESHOLD = 18;
+const ROOT_NAVIGATION_EXPAND_THRESHOLD = 10;
 
 function formatWon(value: number) {
   return `${value.toLocaleString("ko-KR")}원`;
@@ -115,9 +139,9 @@ function formatPoints(value: number) {
   return `${value.toLocaleString("ko-KR")}P`;
 }
 
-function communityCommentCount(post: CommunityPost, comments: readonly CommunityComment[]) {
-  const seededVisibleCount = DEFAULT_COMMUNITY_COMMENTS[post.id]?.length ?? 0;
-  return post.comments + Math.max(0, comments.length - seededVisibleCount);
+function exchangeApplicationCount(post: ExchangePost, applications: readonly ExchangeApplication[]) {
+  const seededVisibleCount = DEFAULT_EXCHANGE_APPLICATIONS[post.id]?.length ?? 0;
+  return post.applications + Math.max(0, applications.length - seededVisibleCount);
 }
 
 function useScreenEntryFocus() {
@@ -221,18 +245,28 @@ function returnToCatalog(flow: FlowControls) {
 }
 
 type DabbobaContextValue = {
+  isAuthenticated: boolean;
+  setIsAuthenticated: Dispatch<SetStateAction<boolean>>;
+  authIntent: AuthIntent | null;
+  setAuthIntent: Dispatch<SetStateAction<AuthIntent | null>>;
+  exchangeComposerRequested: boolean;
+  setExchangeComposerRequested: Dispatch<SetStateAction<boolean>>;
+  requestComposerRequested: boolean;
+  setRequestComposerRequested: Dispatch<SetStateAction<boolean>>;
   activeRootTab: RootTabId;
   setActiveRootTab: Dispatch<SetStateAction<RootTabId>>;
   profile: UserProfile;
   setProfile: Dispatch<SetStateAction<UserProfile>>;
   profileSaveNotice: string;
   setProfileSaveNotice: Dispatch<SetStateAction<string>>;
-  communityPosts: CommunityPost[];
-  addCommunityPost: (post: { title: string; body: string; topic: PostTopic }) => void;
-  communityComments: Record<string, CommunityComment[]>;
-  addCommunityComment: (postId: string, body: string) => void;
-  likedCommunityPostIds: Set<string>;
-  toggleCommunityPostLike: (postId: string) => void;
+  exchangePosts: ExchangePost[];
+  addExchangePost: (post: Omit<ExchangePost, "id" | "author" | "time" | "applications">) => void;
+  exchangeApplications: Record<string, ExchangeApplication[]>;
+  addExchangeApplication: (postId: string, application: Pick<ExchangeApplication, "offeredItem" | "message">) => void;
+  productRequests: ProductRequest[];
+  addProductRequest: (request: Omit<ProductRequest, "id" | "author" | "time" | "likes">) => void;
+  likedProductRequestIds: Set<string>;
+  toggleProductRequestLike: (requestId: string) => void;
   pointBalance: number;
   setPointBalance: Dispatch<SetStateAction<number>>;
   couponDiscount: number;
@@ -251,6 +285,8 @@ type DabbobaContextValue = {
   setResultOpen: Dispatch<SetStateAction<boolean>>;
   resultGrade: PrizeGrade;
   setResultGrade: Dispatch<SetStateAction<PrizeGrade>>;
+  drawControlProgress: number;
+  setDrawControlProgress: Dispatch<SetStateAction<number>>;
   prepareCheckout: () => void;
   prepareDraw: (count: number) => void;
 };
@@ -263,7 +299,24 @@ function useDabboba() {
   return context;
 }
 
+function DabbobaWordmark({ className = "", alt = "DABBOBA" }: { className?: string; alt?: string }) {
+  return (
+    <img
+      src={DABBOBA_WORDMARK_SRC}
+      className={`dabboba-wordmark ${className}`.trim()}
+      alt={alt}
+      draggable={false}
+      decoding="async"
+    />
+  );
+}
+
 export default function Prototype() {
+  const [splashState, setSplashState] = useState<SplashState>("visible");
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [authIntent, setAuthIntent] = useState<AuthIntent | null>(null);
+  const [exchangeComposerRequested, setExchangeComposerRequested] = useState(false);
+  const [requestComposerRequested, setRequestComposerRequested] = useState(false);
   const [activeRootTab, setActiveRootTab] = useState<RootTabId>("home");
   const [profile, setProfile] = useState<UserProfile>({
     nickname: "다뽑러 01",
@@ -271,13 +324,14 @@ export default function Prototype() {
     favoriteIpId: "one-piece",
   });
   const [profileSaveNotice, setProfileSaveNotice] = useState("");
-  const [communityPosts, setCommunityPosts] = useState<CommunityPost[]>(DEFAULT_COMMUNITY_POSTS);
-  const [communityComments, setCommunityComments] = useState<Record<string, CommunityComment[]>>(() => (
+  const [exchangePosts, setExchangePosts] = useState<ExchangePost[]>(DEFAULT_EXCHANGE_POSTS);
+  const [exchangeApplications, setExchangeApplications] = useState<Record<string, ExchangeApplication[]>>(() => (
     Object.fromEntries(
-      Object.entries(DEFAULT_COMMUNITY_COMMENTS).map(([postId, comments]) => [postId, [...comments]]),
+      Object.entries(DEFAULT_EXCHANGE_APPLICATIONS).map(([postId, applications]) => [postId, [...applications]]),
     )
   ));
-  const [likedCommunityPostIds, setLikedCommunityPostIds] = useState<Set<string>>(() => new Set());
+  const [productRequests, setProductRequests] = useState<ProductRequest[]>(DEFAULT_PRODUCT_REQUESTS);
+  const [likedProductRequestIds, setLikedProductRequestIds] = useState<Set<string>>(() => new Set());
   const [pointBalance, setPointBalance] = useState(12_500);
   const [couponDiscount, setCouponDiscount] = useState(0);
   const [points, setPoints] = useState(0);
@@ -287,10 +341,22 @@ export default function Prototype() {
   const [drawRemaining, setDrawRemaining] = useState(1);
   const [resultOpen, setResultOpen] = useState(false);
   const [resultGrade, setResultGrade] = useState<PrizeGrade>("B");
+  const [drawControlProgress, setDrawControlProgress] = useState(0);
   const initialScreen = useMemo(() => createCatalogScreen(), []);
 
   useEffect(() => {
     document.title = "DABBOBA — 원하는 거 다 뽑아";
+  }, []);
+
+  useEffect(() => {
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const leaveTimer = window.setTimeout(() => setSplashState("leaving"), reducedMotion ? 260 : 1_050);
+    const hideTimer = window.setTimeout(() => setSplashState("hidden"), reducedMotion ? 320 : 1_380);
+
+    return () => {
+      window.clearTimeout(leaveTimer);
+      window.clearTimeout(hideTimer);
+    };
   }, []);
 
   const prepareCheckout = useCallback(() => {
@@ -305,58 +371,85 @@ export default function Prototype() {
     setDrawState("ready");
     setResultOpen(false);
     setResultGrade("B");
+    setDrawControlProgress(0);
   }, []);
 
-  const addCommunityPost = useCallback((post: { title: string; body: string; topic: PostTopic }) => {
-    setCommunityPosts((current) => [
+  const addExchangePost = useCallback((post: Omit<ExchangePost, "id" | "author" | "time" | "applications">) => {
+    setExchangePosts((current) => [
       {
-        id: `community-${Date.now()}`,
+        id: `exchange-user-${Date.now()}`,
         author: profile.nickname,
         time: "방금 전",
-        likes: 0,
-        comments: 0,
+        applications: 0,
         ...post,
       },
       ...current,
     ]);
   }, [profile.nickname]);
 
-  const addCommunityComment = useCallback((postId: string, body: string) => {
-    const nextComment: CommunityComment = {
-      id: `community-comment-${Date.now()}`,
+  const addExchangeApplication = useCallback((
+    postId: string,
+    application: Pick<ExchangeApplication, "offeredItem" | "message">,
+  ) => {
+    const nextApplication: ExchangeApplication = {
+      id: `exchange-application-${Date.now()}`,
       author: profile.nickname,
-      body,
       time: "방금 전",
-      likes: 0,
+      ...application,
     };
-    setCommunityComments((current) => ({
+    setExchangeApplications((current) => ({
       ...current,
-      [postId]: [...(current[postId] ?? []), nextComment],
+      [postId]: [...(current[postId] ?? []), nextApplication],
     }));
   }, [profile.nickname]);
 
-  const toggleCommunityPostLike = useCallback((postId: string) => {
-    setLikedCommunityPostIds((current) => {
+  const addProductRequest = useCallback((
+    request: Omit<ProductRequest, "id" | "author" | "time" | "likes">,
+  ) => {
+    setProductRequests((current) => [
+      {
+        id: `request-user-${Date.now()}`,
+        author: profile.nickname,
+        time: "방금 전",
+        likes: 0,
+        ...request,
+      },
+      ...current,
+    ]);
+  }, [profile.nickname]);
+
+  const toggleProductRequestLike = useCallback((requestId: string) => {
+    setLikedProductRequestIds((current) => {
       const next = new Set(current);
-      if (next.has(postId)) next.delete(postId);
-      else next.add(postId);
+      if (next.has(requestId)) next.delete(requestId);
+      else next.add(requestId);
       return next;
     });
   }, []);
 
   const contextValue: DabbobaContextValue = {
+    isAuthenticated,
+    setIsAuthenticated,
+    authIntent,
+    setAuthIntent,
+    exchangeComposerRequested,
+    setExchangeComposerRequested,
+    requestComposerRequested,
+    setRequestComposerRequested,
     activeRootTab,
     setActiveRootTab,
     profile,
     setProfile,
     profileSaveNotice,
     setProfileSaveNotice,
-    communityPosts,
-    addCommunityPost,
-    communityComments,
-    addCommunityComment,
-    likedCommunityPostIds,
-    toggleCommunityPostLike,
+    exchangePosts,
+    addExchangePost,
+    exchangeApplications,
+    addExchangeApplication,
+    productRequests,
+    addProductRequest,
+    likedProductRequestIds,
+    toggleProductRequestLike,
     pointBalance,
     setPointBalance,
     couponDiscount,
@@ -375,6 +468,8 @@ export default function Prototype() {
     setResultOpen,
     resultGrade,
     setResultGrade,
+    drawControlProgress,
+    setDrawControlProgress,
     prepareCheckout,
     prepareDraw,
   };
@@ -383,8 +478,21 @@ export default function Prototype() {
     <DabbobaContext.Provider value={contextValue}>
       <div className="dabboba-root">
         <FlowStack initial={initialScreen} />
+        {splashState !== "hidden" ? <DabbobaSplash state={splashState} /> : null}
       </div>
     </DabbobaContext.Provider>
+  );
+}
+
+function DabbobaSplash({ state }: { state: Exclude<SplashState, "hidden"> }) {
+  return (
+    <div className="dabboba-splash" data-state={state} role="status" aria-label="DABBOBA 불러오는 중">
+      <div className="dabboba-splash-lockup">
+        <DabbobaWordmark className="dabboba-splash-wordmark" alt="" />
+        <small>원하는 거 다 뽑아</small>
+        <span className="dabboba-splash-loader" aria-hidden="true"><i /><i /><i /><i /></span>
+      </div>
+    </div>
   );
 }
 
@@ -399,30 +507,39 @@ function createCatalogScreen(): FlowScreen {
   };
 }
 
-function createCommunityScreen(): FlowScreen {
+function createExchangeRoomScreen(): FlowScreen {
   return {
     id: "root-community",
-    header: () => <RootTabHeader title="커뮤니티" subtitle="정보와 애니 이야기를 나누는 곳" />,
+    header: () => <RootTabHeader title="교환방" subtitle="내 굿즈와 원하는 교환을 연결하는 곳" />,
     headerHeight: 58,
     footer: (flow) => <RootTabFooter flow={flow} />,
     footerHeight: 70,
-    render: (flow) => <CommunityPage flow={flow} />,
+    render: (flow) => <ExchangeRoomPage flow={flow} />,
   };
 }
 
-function createCommunityPostScreen(postId: string): FlowScreen {
+function createExchangeDetailScreen(postId: string): FlowScreen {
   return {
-    id: `community-post-${postId}`,
-    header: (flow) => <BackHeader title="게시글" onBack={flow.pop} />,
+    id: `exchange-post-${postId}`,
+    header: (flow) => <BackHeader title="교환 상세" onBack={flow.pop} />,
     headerHeight: 56,
-    render: () => <CommunityPostDetailPage postId={postId} />,
+    render: () => <ExchangeDetailPage postId={postId} />,
+  };
+}
+
+function createLoginScreen(): FlowScreen {
+  return {
+    id: "login",
+    header: (flow) => <LoginHeader flow={flow} />,
+    headerHeight: 56,
+    render: (flow) => <LoginPage flow={flow} />,
   };
 }
 
 function createShopScreen(): FlowScreen {
   return {
     id: "root-shop",
-    header: () => <RootTabHeader title="샵" subtitle="가챠 · 피규어 · 쿠지 · 카드" showPoints />,
+    header: () => <RootTabHeader title="뽀바" subtitle="가챠 · 피규어 · 쿠지 · 카드" showPoints />,
     headerHeight: 58,
     footer: (flow) => <RootTabFooter flow={flow} />,
     footerHeight: 70,
@@ -461,8 +578,26 @@ function createProfileDetailScreen(): FlowScreen {
   };
 }
 
+function createCustomerCenterScreen(): FlowScreen {
+  return {
+    id: "customer-center",
+    header: (flow) => <BackHeader title="고객센터" onBack={flow.pop} />,
+    headerHeight: 56,
+    render: (flow) => <CustomerCenterPage flow={flow} />,
+  };
+}
+
+function createRequestRoomScreen(): FlowScreen {
+  return {
+    id: "request-room",
+    header: (flow) => <BackHeader title="신청방" onBack={flow.pop} />,
+    headerHeight: 56,
+    render: (flow) => <RequestRoomPage flow={flow} />,
+  };
+}
+
 function createRootScreen(tab: RootTabId) {
-  if (tab === "community") return createCommunityScreen();
+  if (tab === "community") return createExchangeRoomScreen();
   if (tab === "shop") return createShopScreen();
   if (tab === "duckroom") return createDuckroomScreen();
   if (tab === "profile") return createProfileScreen();
@@ -512,7 +647,7 @@ function createCheckoutScreen(product: Product, quantity: number): FlowScreen {
 function createDrawScreen(product: Product, quantity: number): FlowScreen {
   return {
     id: `draw-${product.id}`,
-    header: () => <StaticHeader title="DABBOBA ARCADE" pixel />,
+    header: () => <DrawHeader />,
     headerHeight: 56,
     footer: (flow) => <DrawFooter flow={flow} product={product} />,
     footerHeight: 94,
@@ -521,11 +656,13 @@ function createDrawScreen(product: Product, quantity: number): FlowScreen {
 }
 
 function createPurchaseCompleteScreen(product: Product, quantity: number, paidTotal: number): FlowScreen {
+  const drawMode = isRandomDrawCategory(product.categoryId);
+
   return {
     id: `purchase-complete-${product.id}`,
-    header: () => <StaticHeader title="주문 완료" />,
+    header: () => <StaticHeader title={drawMode ? "결제 완료" : "주문 완료"} />,
     headerHeight: 56,
-    footer: (flow) => <PurchaseCompleteFooter flow={flow} />,
+    footer: (flow) => <PurchaseCompleteFooter flow={flow} product={product} quantity={quantity} />,
     footerHeight: 82,
     render: () => <PurchaseCompletePage product={product} quantity={quantity} paidTotal={paidTotal} />,
   };
@@ -537,7 +674,7 @@ function CatalogHeader({ flow }: { flow: FlowControls }) {
   return (
     <div className="app-toolbar catalog-toolbar">
       <div className="brand-lockup">
-        <strong>DABBOBA</strong>
+        <DabbobaWordmark className="catalog-wordmark" />
         <span>원하는 거 다 뽑아</span>
       </div>
       <div className="catalog-toolbar-actions">
@@ -569,11 +706,40 @@ function BackHeader({ title, onBack, pixel = false }: { title: string; onBack: (
   );
 }
 
+function LoginHeader({ flow }: { flow: FlowControls }) {
+  const { setAuthIntent } = useDabboba();
+
+  return (
+    <BackHeader
+      title="로그인"
+      onBack={() => {
+        setAuthIntent(null);
+        flow.pop();
+      }}
+    />
+  );
+}
+
 function StaticHeader({ title, pixel = false }: { title: string; pixel?: boolean }) {
   return (
     <div className="app-toolbar back-toolbar">
       <span className="toolbar-spacer" aria-hidden="true" />
       <strong className={pixel ? "toolbar-title pixel-title" : "toolbar-title"}>{title}</strong>
+      <span className="toolbar-spacer" aria-hidden="true" />
+    </div>
+  );
+}
+
+function DrawHeader() {
+  const { drawState } = useDabboba();
+
+  return (
+    <div className="app-toolbar back-toolbar draw-toolbar" data-state={drawState}>
+      <span className="toolbar-spacer" aria-hidden="true" />
+      <div className="draw-brand-lockup" role="img" aria-label="DABBOBA ARCADE">
+        <DabbobaWordmark className="draw-wordmark" alt="" />
+        <span>ARCADE</span>
+      </div>
       <span className="toolbar-spacer" aria-hidden="true" />
     </div>
   );
@@ -607,160 +773,335 @@ function RootTabHeader({
 
 function RootTabFooter({ flow }: { flow: FlowControls }) {
   const { activeRootTab, setActiveRootTab } = useDabboba();
+  const [navigationState, setNavigationState] = useState<RootNavigationState>("expanded");
+  const navigationStateRef = useRef<RootNavigationState>("expanded");
+  const lastScrollTopRef = useRef(0);
+  const directionDistanceRef = useRef(0);
+  const scrollTargetRef = useRef<HTMLElement | null>(null);
+  const scrollFrameRef = useRef<number | null>(null);
+
+  const updateNavigationState = useCallback((nextState: RootNavigationState) => {
+    if (navigationStateRef.current === nextState) return;
+    navigationStateRef.current = nextState;
+    setNavigationState(nextState);
+  }, []);
+
+  useEffect(() => {
+    updateNavigationState("expanded");
+    directionDistanceRef.current = 0;
+    const activeScrollTarget = document.querySelector<HTMLElement>(
+      '.dabboba-root .flow-screen[data-flow-current="true"] .mobile-scroll',
+    );
+    scrollTargetRef.current = activeScrollTarget;
+    lastScrollTopRef.current = Math.max(0, activeScrollTarget?.scrollTop ?? 0);
+
+    const updateNavigation = () => {
+      scrollFrameRef.current = null;
+      const scrollTarget = scrollTargetRef.current;
+      if (!scrollTarget) return;
+
+      if (scrollTarget.scrollHeight <= scrollTarget.clientHeight + 2) {
+        lastScrollTopRef.current = 0;
+        directionDistanceRef.current = 0;
+        updateNavigationState("expanded");
+        return;
+      }
+
+      const nextScrollTop = Math.max(0, scrollTarget.scrollTop);
+      const delta = nextScrollTop - lastScrollTopRef.current;
+      lastScrollTopRef.current = nextScrollTop;
+
+      if (nextScrollTop <= ROOT_NAVIGATION_TOP_THRESHOLD) {
+        directionDistanceRef.current = 0;
+        updateNavigationState("expanded");
+        return;
+      }
+
+      if (delta === 0) return;
+
+      if (navigationStateRef.current === "expanded") {
+        directionDistanceRef.current = Math.max(0, directionDistanceRef.current + delta);
+      } else {
+        directionDistanceRef.current = Math.min(0, directionDistanceRef.current + delta);
+      }
+
+      if (
+        navigationStateRef.current === "expanded" &&
+        directionDistanceRef.current >= ROOT_NAVIGATION_COLLAPSE_THRESHOLD
+      ) {
+        directionDistanceRef.current = 0;
+        updateNavigationState("compact");
+      } else if (
+        navigationStateRef.current === "compact" &&
+        directionDistanceRef.current <= -ROOT_NAVIGATION_EXPAND_THRESHOLD
+      ) {
+        directionDistanceRef.current = 0;
+        updateNavigationState("expanded");
+      }
+    };
+
+    const handleScroll = (event: Event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLElement)) return;
+      if (!target.classList.contains("mobile-scroll")) return;
+      if (!target.closest('.dabboba-root .flow-screen[data-flow-current="true"]')) return;
+
+      if (scrollTargetRef.current !== target) {
+        scrollTargetRef.current = target;
+        lastScrollTopRef.current = Math.max(0, target.scrollTop);
+        directionDistanceRef.current = 0;
+        return;
+      }
+
+      scrollTargetRef.current = target;
+      if (scrollFrameRef.current === null) {
+        scrollFrameRef.current = window.requestAnimationFrame(updateNavigation);
+      }
+    };
+
+    document.addEventListener("scroll", handleScroll, { capture: true, passive: true });
+
+    return () => {
+      document.removeEventListener("scroll", handleScroll, true);
+      if (scrollFrameRef.current !== null) {
+        window.cancelAnimationFrame(scrollFrameRef.current);
+        scrollFrameRef.current = null;
+      }
+    };
+  }, [activeRootTab, updateNavigationState]);
 
   const selectTab = (tab: RootTabId) => {
     if (tab === activeRootTab) return;
+    updateNavigationState("expanded");
     setActiveRootTab(tab);
     flow.replace(createRootScreen(tab));
   };
 
-  return <AppBottomNavigation activeTab={activeRootTab} onSelect={selectTab} />;
+  return (
+    <div
+      className="root-tab-footer"
+      data-navigation-state={navigationState}
+      onFocusCapture={() => updateNavigationState("expanded")}
+    >
+      <AppBottomNavigation activeTab={activeRootTab} onSelect={selectTab} />
+    </div>
+  );
 }
 
-function CommunityPage({ flow }: { flow: FlowControls }) {
+function ExchangeRoomPage({ flow }: { flow: FlowControls }) {
   const {
-    communityPosts,
-    addCommunityPost,
-    communityComments,
-    likedCommunityPostIds,
-    toggleCommunityPostLike,
+    isAuthenticated,
+    authIntent,
+    setAuthIntent,
+    exchangeComposerRequested,
+    setExchangeComposerRequested,
+    exchangePosts,
+    addExchangePost,
+    exchangeApplications,
   } = useDabboba();
   const keyboard = useKeyboard();
   const screenFocusRef = useScreenEntryFocus();
-  const [filter, setFilter] = useState<CommunityTopic>("전체");
+  const [filter, setFilter] = useState<ExchangeFilter>("전체");
   const [composerOpen, setComposerOpen] = useState(false);
-  const [draftTopic, setDraftTopic] = useState<PostTopic>("정보");
+  const [draftCategoryId, setDraftCategoryId] = useState<ProductCategoryId>("gacha");
+  const [draftIpId, setDraftIpId] = useState(IP_CATALOG[0]?.id ?? "one-piece");
   const [draftTitle, setDraftTitle] = useState("");
+  const [draftOfferedItem, setDraftOfferedItem] = useState("");
+  const [draftWantedItem, setDraftWantedItem] = useState("");
   const [draftBody, setDraftBody] = useState("");
   const visiblePosts = filter === "전체"
-    ? communityPosts
-    : communityPosts.filter((post) => post.topic === filter);
+    ? exchangePosts
+    : exchangePosts.filter((post) => categoryLabel(post.categoryId) === filter);
+
+  useEffect(() => {
+    if (!isAuthenticated || !exchangeComposerRequested) return;
+    setExchangeComposerRequested(false);
+    setComposerOpen(true);
+  }, [exchangeComposerRequested, isAuthenticated, setExchangeComposerRequested]);
+
+  const requestExchangeAccess = (intent: AuthIntent) => {
+    if (isAuthenticated) {
+      if (intent.kind === "exchange-post") flow.push(createExchangeDetailScreen(intent.postId));
+      else setComposerOpen(true);
+      return;
+    }
+
+    keyboard.hide();
+    setAuthIntent(intent);
+  };
 
   const submitPost = () => {
     const title = draftTitle.trim();
+    const offeredItem = draftOfferedItem.trim();
+    const wantedItem = draftWantedItem.trim();
     const body = draftBody.trim();
-    if (!title || !body) return;
-    addCommunityPost({ title, body, topic: draftTopic });
+    if (!title || !offeredItem || !wantedItem || !body) return;
+    addExchangePost({
+      categoryId: draftCategoryId,
+      ipId: draftIpId,
+      title,
+      offeredItem,
+      wantedItem,
+      body,
+    });
     keyboard.hide();
     setDraftTitle("");
+    setDraftOfferedItem("");
+    setDraftWantedItem("");
     setDraftBody("");
     setFilter("전체");
     setComposerOpen(false);
   };
 
+  const handleComposerOpenChange = (open: boolean) => {
+    if (!open) keyboard.hide();
+    setComposerOpen(open);
+  };
+
   return (
     <>
       <MobileScroll className="app-screen dabboba-screen">
-        <main ref={screenFocusRef} tabIndex={-1} className="root-tab-page community-page" aria-label="커뮤니티 피드">
-          <button type="button" className="community-composer-callout" onClick={() => setComposerOpen(true)}>
-            <span className="community-composer-icon"><IconPencilLine size={21} aria-hidden="true" /></span>
-            <span><strong>새 글 쓰기</strong><small>정보, 질문, 애니 이야기를 자유롭게 남겨보세요.</small></span>
+        <main ref={screenFocusRef} tabIndex={-1} className="root-tab-page exchange-page" aria-label="교환방 목록">
+          <button
+            type="button"
+            className="exchange-composer-callout"
+            onClick={() => requestExchangeAccess({ kind: "exchange-compose" })}
+          >
+            <span className="exchange-composer-icon"><IconPencilLine size={21} aria-hidden="true" /></span>
+            <span><strong>교환 상품 올리기</strong><small>내 상품과 원하는 교환품을 함께 등록해 주세요.</small></span>
             <IconChevronRightLine size={21} aria-hidden="true" />
           </button>
 
-          <Carousel className="community-topic-carousel" contentClassName="community-topic-rail" ariaLabel="커뮤니티 주제">
-            {COMMUNITY_TOPICS.map((topic) => (
+          <Carousel className="exchange-filter-carousel" contentClassName="exchange-filter-rail" ariaLabel="교환 상품 카테고리">
+            {EXCHANGE_FILTERS.map((category) => (
               <button
-                key={topic}
+                key={category}
                 type="button"
                 className="filter-chip"
-                data-selected={filter === topic ? "true" : "false"}
-                aria-pressed={filter === topic}
-                onClick={() => setFilter(topic)}
+                data-selected={filter === category ? "true" : "false"}
+                aria-pressed={filter === category}
+                onClick={() => setFilter(category)}
               >
-                {topic}
+                {category}
               </button>
             ))}
           </Carousel>
 
-          <section className="community-feed" aria-labelledby="community-feed-title">
+          <section className="exchange-feed" aria-labelledby="exchange-feed-title">
             <div className="section-heading">
-              <h1 id="community-feed-title">지금 나누는 이야기</h1>
+              <h1 id="exchange-feed-title">교환을 기다리고 있어요</h1>
               <span>{visiblePosts.length}개</span>
             </div>
             {visiblePosts.map((post) => {
-              const liked = likedCommunityPostIds.has(post.id);
-              const commentCount = communityCommentCount(post, communityComments[post.id] ?? []);
+              const ip = IP_CATALOG.find((item) => item.id === post.ipId);
+              const applicationCount = exchangeApplicationCount(post, exchangeApplications[post.id] ?? []);
               return (
-                <article key={post.id} className="community-post">
-                  <div className="community-post-summary">
-                    <div className="community-post-meta">
-                      <span>{post.topic}</span>
+                <article key={post.id} className="exchange-post">
+                  <div className="exchange-post-summary">
+                    <div className="exchange-post-meta">
+                      <span>{categoryLabel(post.categoryId)}</span>
                       <small>{post.author} · {post.time}</small>
                     </div>
                     <h2>{post.title}</h2>
+                    <div className="exchange-pair-preview" aria-label={`올린 상품 ${post.offeredItem}, 원하는 교환 ${post.wantedItem}`}>
+                      <span><small>올린 상품</small><strong>{post.offeredItem}</strong></span>
+                      <i aria-hidden="true">↔</i>
+                      <span><small>원하는 교환</small><strong>{post.wantedItem}</strong></span>
+                    </div>
                     <p>{post.body}</p>
                     <button
                       type="button"
-                      className="community-post-open"
-                      aria-label={`${post.title} 상세 보기`}
-                      onClick={() => flow.push(createCommunityPostScreen(post.id))}
+                      className="exchange-post-open"
+                      aria-label={`${post.title} 교환 상세 보기`}
+                      onClick={() => requestExchangeAccess({ kind: "exchange-post", postId: post.id })}
                     />
                   </div>
-                  <div className="community-post-actions">
-                    <button
-                      type="button"
-                      aria-label={liked ? `${post.title} 좋아요 취소` : `${post.title} 좋아요`}
-                      aria-pressed={liked}
-                      onClick={() => toggleCommunityPostLike(post.id)}
-                    >
-                      {liked ? <IconHeartFill size={18} aria-hidden="true" /> : <IconHeartLine size={18} aria-hidden="true" />}
-                      <span>{post.likes + (liked ? 1 : 0)}</span>
-                    </button>
-                    <button
-                      type="button"
-                      aria-label={`${post.title} 댓글 ${commentCount}개 보기`}
-                      onClick={() => flow.push(createCommunityPostScreen(post.id))}
-                    >
-                      <IconDot3HorizontalChatbubbleLeftLine size={18} aria-hidden="true" />
-                      <span>{commentCount}</span>
-                    </button>
+                  <div className="exchange-post-actions" aria-label={`${post.title} 교환 현황`}>
+                    <span>{ip?.nameKo ?? "작품 미지정"}</span>
+                    <span><IconDot3HorizontalChatbubbleLeftLine size={18} aria-hidden="true" /> 교환 신청 {applicationCount}건</span>
                   </div>
                 </article>
               );
             })}
           </section>
+          <p className="prototype-disclosure exchange-disclosure">교환 글과 신청은 화면 확인용 테스트 데이터이며 새로고침하면 작성 내용이 초기화됩니다.</p>
         </main>
       </MobileScroll>
 
+      {!isAuthenticated && authIntent ? (
+        <GuestAuthPrompt
+          intent={authIntent}
+          onDismiss={() => setAuthIntent(null)}
+          onLogin={() => flow.push(createLoginScreen())}
+        />
+      ) : null}
+
       <BottomSheet
         open={composerOpen}
-        onOpenChange={setComposerOpen}
-        title="새 글 쓰기"
-        description="DABBOBA 커뮤니티에 이야기를 남겨보세요."
-        snap={0.76}
+        onOpenChange={handleComposerOpenChange}
+        title="교환 상품 올리기"
+        description="내 상품과 원하는 교환품을 정확히 적어주세요."
+        snap={0.88}
       >
-        <div className="community-compose-form">
-          <div className="compose-topic-list" role="radiogroup" aria-label="글 주제">
-            {postTopics.map((topic) => (
+        <div className="exchange-compose-form">
+          <div className="compose-category-list" role="radiogroup" aria-label="상품 카테고리">
+            {PRODUCT_CATEGORIES.map((category, index) => (
               <button
-                key={topic}
+                key={category.id}
                 type="button"
                 role="radio"
-                aria-checked={draftTopic === topic}
-                data-selected={draftTopic === topic ? "true" : "false"}
-                onClick={() => setDraftTopic(topic)}
+                aria-checked={draftCategoryId === category.id}
+                tabIndex={draftCategoryId === category.id ? 0 : -1}
+                data-selected={draftCategoryId === category.id ? "true" : "false"}
+                onKeyDown={(event) => handleRadioArrow(event, PRODUCT_CATEGORIES, index, (nextCategory) => setDraftCategoryId(nextCategory.id))}
+                onClick={() => setDraftCategoryId(category.id)}
               >
-                {topic}
+                {category.label}
               </button>
             ))}
           </div>
           <label>
-            <span>제목</span>
+            <span>작품 IP</span>
+            <select value={draftIpId} onChange={(event) => setDraftIpId(event.currentTarget.value)}>
+              {IP_CATALOG.map((ip) => <option key={ip.id} value={ip.id}>{ip.nameKo}</option>)}
+            </select>
+          </label>
+          <label>
+            <span>글 제목</span>
             <KeyboardInput
               value={draftTitle}
               maxLength={48}
-              placeholder="제목을 입력해 주세요"
+              placeholder="어떤 교환인지 한눈에 적어주세요"
               onChange={(event) => setDraftTitle(event.currentTarget.value)}
               onBlur={() => keyboard.hide()}
             />
           </label>
           <label>
-            <span>내용</span>
+            <span>올릴 상품</span>
+            <KeyboardInput
+              value={draftOfferedItem}
+              maxLength={60}
+              placeholder="내가 교환할 상품 이름과 상태"
+              onChange={(event) => setDraftOfferedItem(event.currentTarget.value)}
+              onBlur={() => keyboard.hide()}
+            />
+          </label>
+          <label>
+            <span>원하는 교환품</span>
+            <KeyboardInput
+              value={draftWantedItem}
+              maxLength={60}
+              placeholder="무엇으로 교환하고 싶은지 적어주세요"
+              onChange={(event) => setDraftWantedItem(event.currentTarget.value)}
+              onBlur={() => keyboard.hide()}
+            />
+          </label>
+          <label>
+            <span>상세 설명</span>
             <KeyboardTextarea
               value={draftBody}
               maxLength={500}
-              placeholder="정보를 공유하거나 좋아하는 작품 이야기를 남겨보세요."
+              placeholder="상품 상태, 교환 방법, 확인할 내용을 적어주세요."
               onChange={(event) => setDraftBody(event.currentTarget.value)}
               onBlur={() => keyboard.hide()}
             />
@@ -770,10 +1111,11 @@ function CommunityPage({ flow }: { flow: FlowControls }) {
             variant="brandSolid"
             size="large"
             className="sheet-primary-button"
-            disabled={!draftTitle.trim() || !draftBody.trim()}
+            disabled={!draftTitle.trim() || !draftOfferedItem.trim() || !draftWantedItem.trim() || !draftBody.trim()}
+            onPointerDown={(event) => event.preventDefault()}
             onClick={submitPost}
           >
-            등록하기
+            교환 글 등록하기
           </ActionButton>
         </div>
       </BottomSheet>
@@ -781,135 +1123,285 @@ function CommunityPage({ flow }: { flow: FlowControls }) {
   );
 }
 
-function CommunityPostDetailPage({ postId }: { postId: string }) {
+function GuestAuthPrompt({
+  intent,
+  onDismiss,
+  onLogin,
+}: {
+  intent: AuthIntent;
+  onDismiss: () => void;
+  onLogin: () => void;
+}) {
+  const description = intent.kind === "exchange-compose"
+    ? "교환 상품을 올리려면 로그인해 주세요."
+    : intent.kind === "exchange-post"
+      ? "교환 상세와 신청을 보려면 로그인해 주세요."
+      : intent.kind === "request-compose"
+        ? "원하는 상품을 신청하려면 로그인해 주세요."
+        : "신청에 좋아요를 남기려면 로그인해 주세요.";
+
+  return (
+    <aside
+      className="guest-auth-prompt"
+      role="dialog"
+      aria-live="polite"
+      aria-labelledby="guest-auth-title"
+      aria-describedby="guest-auth-description"
+    >
+      <div className="guest-auth-prompt-copy">
+        <span aria-hidden="true"><IconLockLine size={20} /></span>
+        <div>
+          <strong id="guest-auth-title">로그인이 필요합니다</strong>
+          <p id="guest-auth-description">{description}</p>
+        </div>
+        <button type="button" className="guest-auth-dismiss" onClick={onDismiss} aria-label="로그인 안내 닫기">
+          <IconXmarkLine size={20} aria-hidden="true" />
+        </button>
+      </div>
+      <ActionButton type="button" variant="brandSolid" size="large" className="guest-auth-login-button" onClick={onLogin}>
+        로그인
+      </ActionButton>
+    </aside>
+  );
+}
+
+function LoginPage({ flow }: { flow: FlowControls }) {
   const {
-    communityPosts,
-    communityComments,
-    addCommunityComment,
-    likedCommunityPostIds,
-    toggleCommunityPostLike,
+    authIntent,
+    setAuthIntent,
+    setIsAuthenticated,
+    setExchangeComposerRequested,
+    setRequestComposerRequested,
+    toggleProductRequestLike,
+  } = useDabboba();
+  const screenFocusRef = useScreenEntryFocus();
+  const timer = useRef<number | null>(null);
+  const [loggingIn, setLoggingIn] = useState(false);
+  const intentCopy = authIntent?.kind === "exchange-compose"
+    ? "로그인하면 교환 글 작성으로 바로 이어집니다."
+    : authIntent?.kind === "exchange-post"
+      ? "로그인하면 선택한 교환 상세로 바로 이동합니다."
+      : authIntent?.kind === "request-compose"
+        ? "로그인하면 원하는 상품 신청으로 바로 이어집니다."
+        : "로그인하면 선택한 신청에 좋아요가 반영됩니다.";
+
+  useEffect(() => () => {
+    if (timer.current !== null) window.clearTimeout(timer.current);
+  }, []);
+
+  const returnToGuest = () => {
+    if (loggingIn) return;
+    setAuthIntent(null);
+    flow.pop();
+  };
+
+  const completeMockLogin = () => {
+    if (loggingIn) return;
+    setLoggingIn(true);
+    timer.current = window.setTimeout(() => {
+      const completedIntent = authIntent;
+      setIsAuthenticated(true);
+      setAuthIntent(null);
+      setLoggingIn(false);
+      timer.current = null;
+
+      if (completedIntent?.kind === "exchange-post") {
+        flow.replace(createExchangeDetailScreen(completedIntent.postId));
+        return;
+      }
+
+      flow.pop();
+      if (completedIntent?.kind === "exchange-compose") {
+        window.setTimeout(() => setExchangeComposerRequested(true), 260);
+      } else if (completedIntent?.kind === "request-compose") {
+        window.setTimeout(() => setRequestComposerRequested(true), 260);
+      } else if (completedIntent?.kind === "request-like") {
+        toggleProductRequestLike(completedIntent.requestId);
+      }
+    }, 520);
+  };
+
+  return (
+    <MobileScroll className="app-screen dabboba-screen">
+      <main ref={screenFocusRef} tabIndex={-1} className="login-page" aria-label="DABBOBA 로그인">
+        <section className="login-brand-panel">
+          <DabbobaWordmark className="login-wordmark" />
+          <h1>좋아하는 굿즈를<br />안전하게 이어보세요.</h1>
+          <p>상품과 컬렉션은 로그인 없이 둘러볼 수 있어요.<br />교환과 상품 신청을 시작할 때만 로그인이 필요합니다.</p>
+        </section>
+
+        <section className="login-action-panel" aria-label="로그인 선택">
+          <div className="login-intent-note">
+            <IconLockLine size={19} aria-hidden="true" />
+            <span>{intentCopy}</span>
+          </div>
+          <ActionButton
+            type="button"
+            variant="brandSolid"
+            size="large"
+            className="login-primary-button"
+            disabled={loggingIn}
+            aria-busy={loggingIn}
+            onClick={completeMockLogin}
+          >
+            {loggingIn ? "로그인 중..." : "테스트 계정으로 로그인"}
+          </ActionButton>
+          <button type="button" className="login-guest-button" disabled={loggingIn} onClick={returnToGuest}>
+            둘러보기로 돌아가기
+          </button>
+          <small>현재는 화면 흐름 확인용 로그인입니다. 실제 계정이나 개인정보는 사용하지 않습니다.</small>
+        </section>
+      </main>
+    </MobileScroll>
+  );
+}
+
+function ExchangeDetailPage({ postId }: { postId: string }) {
+  const {
+    exchangePosts,
+    exchangeApplications,
+    addExchangeApplication,
   } = useDabboba();
   const keyboard = useKeyboard();
   const screenFocusRef = useScreenEntryFocus();
-  const [draftComment, setDraftComment] = useState("");
+  const [draftOfferedItem, setDraftOfferedItem] = useState("");
+  const [draftMessage, setDraftMessage] = useState("");
   const [submitMessage, setSubmitMessage] = useState("");
-  const post = communityPosts.find((item) => item.id === postId);
+  const post = exchangePosts.find((item) => item.id === postId);
 
   if (!post) {
     return (
       <MobileScroll className="app-screen dabboba-screen">
-        <main ref={screenFocusRef} tabIndex={-1} className="community-detail-page community-detail-missing" aria-label="게시글을 찾을 수 없음">
+        <main ref={screenFocusRef} tabIndex={-1} className="exchange-detail-page exchange-detail-missing" aria-label="교환 글을 찾을 수 없음">
           <IconDot3HorizontalChatbubbleLeftLine size={32} aria-hidden="true" />
-          <h1>게시글을 찾을 수 없어요.</h1>
-          <p>새로고침으로 임시 게시글이 초기화됐을 수 있습니다.</p>
+          <h1>교환 글을 찾을 수 없어요.</h1>
+          <p>새로고침으로 임시 교환 글이 초기화됐을 수 있습니다.</p>
         </main>
       </MobileScroll>
     );
   }
 
-  const comments = communityComments[post.id] ?? [];
-  const commentCount = communityCommentCount(post, comments);
-  const liked = likedCommunityPostIds.has(post.id);
+  const applications = exchangeApplications[post.id] ?? [];
+  const applicationCount = exchangeApplicationCount(post, applications);
+  const ip = IP_CATALOG.find((item) => item.id === post.ipId);
+  const isOwnPost = post.id.startsWith("exchange-user-");
 
-  const submitComment = () => {
-    const body = draftComment.trim();
-    if (!body) return;
-    addCommunityComment(post.id, body);
+  const submitApplication = () => {
+    const offeredItem = draftOfferedItem.trim();
+    const message = draftMessage.trim();
+    if (!offeredItem || !message || isOwnPost) return;
+    addExchangeApplication(post.id, { offeredItem, message });
     keyboard.hide();
-    setDraftComment("");
-    setSubmitMessage("댓글을 등록했어요.");
+    setDraftOfferedItem("");
+    setDraftMessage("");
+    setSubmitMessage("교환 신청을 보냈어요.");
   };
 
   return (
     <MobileScroll className="app-screen dabboba-screen">
-      <main ref={screenFocusRef} tabIndex={-1} className="community-detail-page" aria-label={`${post.title} 게시글 상세`}>
-        <article className="community-detail-article">
-          <div className="community-detail-meta">
-            <span>{post.topic}</span>
+      <main ref={screenFocusRef} tabIndex={-1} className="exchange-detail-page" aria-label={`${post.title} 교환 상세`}>
+        <article className="exchange-detail-article">
+          <div className="exchange-detail-meta">
+            <span>{categoryLabel(post.categoryId)} · {ip?.nameKo ?? "작품 미지정"}</span>
             <small>{post.time}</small>
           </div>
 
-          <div className="community-detail-author">
+          <div className="exchange-detail-author">
             <span aria-hidden="true"><IconPerson2Line size={20} /></span>
-            <div><strong>{post.author}</strong><small>DABBOBA 커뮤니티</small></div>
+            <div><strong>{post.author}</strong><small>DABBOBA 교환방</small></div>
           </div>
 
           <h1>{post.title}</h1>
+          <div className="exchange-pair-detail" aria-label={`올린 상품 ${post.offeredItem}, 원하는 교환 ${post.wantedItem}`}>
+            <div><small>올린 상품</small><strong>{post.offeredItem}</strong></div>
+            <span aria-hidden="true">↕</span>
+            <div><small>원하는 교환품</small><strong>{post.wantedItem}</strong></div>
+          </div>
           <p>{post.body}</p>
 
-          <div className="community-detail-actions" aria-label="게시글 반응">
-            <button
-              type="button"
-              aria-label={liked ? "좋아요 취소" : "좋아요"}
-              aria-pressed={liked}
-              onClick={() => toggleCommunityPostLike(post.id)}
-            >
-              {liked ? <IconHeartFill size={19} aria-hidden="true" /> : <IconHeartLine size={19} aria-hidden="true" />}
-              <span>좋아요 {post.likes + (liked ? 1 : 0)}</span>
-            </button>
-            <span><IconDot3HorizontalChatbubbleLeftLine size={19} aria-hidden="true" /> 댓글 {commentCount}</span>
+          <div className="exchange-detail-actions" aria-label="교환 신청 현황">
+            <span><IconDot3HorizontalChatbubbleLeftLine size={19} aria-hidden="true" /> 교환 신청 {applicationCount}건</span>
+            <span>교환 가능</span>
           </div>
         </article>
 
-        <section className="community-comment-section" aria-labelledby="community-comment-title">
-          <div className="community-comment-heading">
-            <h2 id="community-comment-title">댓글 {commentCount}</h2>
-            <span>함께 이야기해요</span>
+        <section className="exchange-application-section" aria-labelledby="exchange-application-title">
+          <div className="exchange-application-heading">
+            <h2 id="exchange-application-title">교환 신청 {applicationCount}</h2>
+            <span>제안 상품을 확인해 보세요</span>
           </div>
 
-          <div className="community-comment-list">
-            {comments.length > 0 ? comments.map((comment) => (
-              <article key={comment.id} className="community-comment">
-                <div className="community-comment-avatar" aria-hidden="true">{comment.author.slice(0, 1)}</div>
+          <div className="exchange-application-list">
+            {applications.length > 0 ? applications.map((application) => (
+              <article key={application.id} className="exchange-application">
+                <div className="exchange-application-avatar" aria-hidden="true">{application.author.slice(0, 1)}</div>
                 <div>
-                  <header><strong>{comment.author}</strong><small>{comment.time}</small></header>
-                  <p>{comment.body}</p>
-                  <span><IconHeartLine size={14} aria-hidden="true" /> {comment.likes}</span>
+                  <header><strong>{application.author}</strong><small>{application.time}</small></header>
+                  <span>제안 상품</span>
+                  <b>{application.offeredItem}</b>
+                  <p>{application.message}</p>
                 </div>
               </article>
             )) : (
-              <div className="community-comment-empty">
+              <div className="exchange-application-empty">
                 <IconDot3HorizontalChatbubbleLeftLine size={28} aria-hidden="true" />
-                <strong>아직 댓글이 없어요.</strong>
-                <span>첫 댓글을 남겨보세요.</span>
+                <strong>아직 교환 신청이 없어요.</strong>
+                <span>첫 교환을 제안해 보세요.</span>
               </div>
             )}
           </div>
 
-          {commentCount > comments.length ? (
-            <p className="community-comment-disclosure">현재 화면에는 확인용 예시 댓글 일부만 표시됩니다.</p>
+          {applicationCount > applications.length ? (
+            <p className="exchange-application-disclosure">현재 화면에는 확인용 예시 신청 일부만 표시됩니다.</p>
           ) : null}
 
-          <form className="community-comment-form" onSubmit={(event) => { event.preventDefault(); submitComment(); }}>
-            <label htmlFor="community-comment-input">댓글 작성</label>
-            <KeyboardTextarea
-              id="community-comment-input"
-              value={draftComment}
-              maxLength={300}
-              placeholder="이 글에 대한 이야기를 남겨보세요."
-              onChange={(event) => {
-                setDraftComment(event.currentTarget.value);
-                setSubmitMessage("");
-              }}
-              onBlur={() => keyboard.hide()}
-            />
-            <div>
-              <small>{draftComment.length}/300</small>
-              <ActionButton
-                type="submit"
-                variant="brandSolid"
-                size="medium"
-                disabled={!draftComment.trim()}
-              >
-                댓글 등록
-              </ActionButton>
-            </div>
-          </form>
-          {submitMessage ? <p className="community-comment-status" role="status">{submitMessage}</p> : null}
+          {isOwnPost ? (
+            <p className="exchange-owner-notice" role="status">내가 올린 교환 글입니다. 받은 신청을 확인해 주세요.</p>
+          ) : (
+            <form className="exchange-application-form" onSubmit={(event) => { event.preventDefault(); submitApplication(); }}>
+              <label htmlFor="exchange-offered-item">내가 제안할 상품</label>
+              <KeyboardInput
+                id="exchange-offered-item"
+                value={draftOfferedItem}
+                maxLength={60}
+                placeholder="교환으로 제안할 상품을 적어주세요"
+                onChange={(event) => {
+                  setDraftOfferedItem(event.currentTarget.value);
+                  setSubmitMessage("");
+                }}
+                onBlur={() => keyboard.hide()}
+              />
+              <label htmlFor="exchange-application-message">신청 메시지</label>
+              <KeyboardTextarea
+                id="exchange-application-message"
+                value={draftMessage}
+                maxLength={300}
+                placeholder="상품 상태와 교환 방법을 간단히 알려주세요."
+                onChange={(event) => {
+                  setDraftMessage(event.currentTarget.value);
+                  setSubmitMessage("");
+                }}
+                onBlur={() => keyboard.hide()}
+              />
+              <div>
+                <small>{draftMessage.length}/300</small>
+                <ActionButton
+                  type="submit"
+                  variant="brandSolid"
+                  size="medium"
+                  disabled={!draftOfferedItem.trim() || !draftMessage.trim()}
+                  onPointerDown={(event) => event.preventDefault()}
+                >
+                  교환 신청하기
+                </ActionButton>
+              </div>
+            </form>
+          )}
+          {submitMessage ? <p className="exchange-application-status" role="status">{submitMessage}</p> : null}
         </section>
 
-        <p className="prototype-disclosure community-detail-disclosure">
-          게시글과 댓글은 화면 확인용 테스트 데이터이며 새로고침하면 작성 내용이 초기화됩니다.
+        <p className="prototype-disclosure exchange-detail-disclosure">
+          교환 글과 신청은 화면 확인용 테스트 데이터이며 새로고침하면 작성 내용이 초기화됩니다.
         </p>
       </main>
     </MobileScroll>
@@ -918,17 +1410,47 @@ function CommunityPostDetailPage({ postId }: { postId: string }) {
 
 function ShopPage({ flow }: { flow: FlowControls }) {
   const [filter, setFilter] = useState<CategoryFilter>("전체");
+  const [query, setQuery] = useState("");
+  const keyboard = useKeyboard();
   const screenFocusRef = useScreenEntryFocus();
-  const visibleProducts = filter === "전체" ? products : products.filter((product) => product.category === filter);
+  const normalizedQuery = normalizeCatalogSearch(query);
+  const visibleProducts = useMemo(() => products.filter((product) => (
+    (filter === "전체" || product.category === filter) &&
+    (!normalizedQuery || productSearchIndex.get(product.id)?.includes(normalizedQuery))
+  )), [filter, normalizedQuery]);
 
   return (
     <MobileScroll className="app-screen dabboba-screen">
-      <main ref={screenFocusRef} tabIndex={-1} className="root-tab-page shop-page" aria-label="DABBOBA 샵">
+      <main ref={screenFocusRef} tabIndex={-1} className="root-tab-page shop-page" aria-label="DABBOBA 뽀바">
         <section className="shop-lead" aria-labelledby="shop-lead-title">
           <h1 id="shop-lead-title">원하는 방식으로 골라보세요.</h1>
           <p>가챠, 피규어, 쿠지, 카드를 한곳에서 확인할 수 있어요.</p>
         </section>
-        <Carousel className="category-carousel shop-category-carousel" contentClassName="category-rail" ariaLabel="샵 카테고리">
+        <div className="shop-search-box ip-search-box">
+          <IconMagnifyingglassLine size={21} aria-hidden="true" />
+          <KeyboardInput
+            type="search"
+            value={query}
+            placeholder="상품명·작품 IP 검색"
+            aria-label="뽀바 상품 검색"
+            autoComplete="off"
+            spellCheck={false}
+            onChange={(event) => setQuery(event.currentTarget.value)}
+            onBlur={() => keyboard.hide()}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                setQuery("");
+                keyboard.hide();
+              }
+            }}
+          />
+          {query ? (
+            <button type="button" className="ip-search-clear" onClick={() => setQuery("")} aria-label="상품 검색어 지우기">
+              <IconXmarkLine size={19} aria-hidden="true" />
+            </button>
+          ) : null}
+        </div>
+        <Carousel className="category-carousel shop-category-carousel" contentClassName="category-rail" ariaLabel="뽀바 카테고리">
           {filters.map((item) => (
             <button
               key={item}
@@ -945,9 +1467,17 @@ function ShopPage({ flow }: { flow: FlowControls }) {
         <section className="shop-products" aria-labelledby="shop-products-title">
           <div className="section-heading">
             <h2 id="shop-products-title">상품</h2>
-            <span>{visibleProducts.length}개</span>
+            <span aria-live="polite">{visibleProducts.length}개</span>
           </div>
-          <ProductGrid flow={flow} items={visibleProducts} />
+          {visibleProducts.length > 0 ? (
+            <ProductGrid flow={flow} items={visibleProducts} />
+          ) : (
+            <div className="ip-empty-state shop-empty-state" role="status">
+              <IconMagnifyingglassLine size={30} aria-hidden="true" />
+              <strong>찾는 상품이 없어요</strong>
+              <span>검색어나 카테고리를 바꿔보세요.</span>
+            </div>
+          )}
         </section>
       </main>
     </MobileScroll>
@@ -1024,11 +1554,257 @@ function DuckroomPage() {
   );
 }
 
+function CustomerCenterPage({ flow }: { flow: FlowControls }) {
+  const screenFocusRef = useScreenEntryFocus();
+
+  return (
+    <MobileScroll className="app-screen dabboba-screen">
+      <main ref={screenFocusRef} tabIndex={-1} className="customer-center-page" aria-label="고객센터">
+        <section className="customer-center-lead">
+          <span>VOICE DESK</span>
+          <h1>찾는 상품을<br />DABBOBA에 알려주세요.</h1>
+          <p>원하는 카테고리와 작품 IP, 상품을 남기면 다른 이용자의 관심도 함께 확인할 수 있어요.</p>
+        </section>
+
+        <button type="button" className="request-room-entry" onClick={() => flow.push(createRequestRoomScreen())}>
+          <span aria-hidden="true"><IconPlusLine size={23} /></span>
+          <div><strong>신청방</strong><small>가챠 · 카드 · 피규어 · 쿠지 입고 요청</small></div>
+          <IconChevronRightLine size={22} aria-hidden="true" />
+        </button>
+
+        <section className="customer-center-guide" aria-label="신청방 이용 안내">
+          <h2>신청방 이용 안내</h2>
+          <ol>
+            <li><span>01</span><p>카테고리와 작품 IP를 선택해 주세요.</p></li>
+            <li><span>02</span><p>원하는 상품명을 구체적으로 적어주세요.</p></li>
+            <li><span>03</span><p>같은 상품을 원하는 사람은 좋아요로 관심을 모을 수 있어요.</p></li>
+          </ol>
+        </section>
+        <p className="prototype-disclosure">신청 내용과 좋아요는 현재 화면 확인용 데이터이며 실제 입고를 보장하지 않습니다.</p>
+      </main>
+    </MobileScroll>
+  );
+}
+
+function RequestRoomPage({ flow }: { flow: FlowControls }) {
+  const {
+    isAuthenticated,
+    authIntent,
+    setAuthIntent,
+    requestComposerRequested,
+    setRequestComposerRequested,
+    productRequests,
+    addProductRequest,
+    likedProductRequestIds,
+    toggleProductRequestLike,
+  } = useDabboba();
+  const keyboard = useKeyboard();
+  const screenFocusRef = useScreenEntryFocus();
+  const [filter, setFilter] = useState<RequestFilter>("all");
+  const [composerOpen, setComposerOpen] = useState(false);
+  const [draftCategoryId, setDraftCategoryId] = useState<ProductCategoryId>(REQUEST_CATEGORY_IDS[0] ?? "gacha");
+  const [draftIpId, setDraftIpId] = useState(IP_CATALOG[0]?.id ?? "one-piece");
+  const [draftDesiredItem, setDraftDesiredItem] = useState("");
+  const [draftDetails, setDraftDetails] = useState("");
+  const [submitMessage, setSubmitMessage] = useState("");
+  const visibleRequests = filter === "all"
+    ? productRequests
+    : productRequests.filter((request) => request.categoryId === filter);
+
+  useEffect(() => {
+    if (!isAuthenticated || !requestComposerRequested) return;
+    setRequestComposerRequested(false);
+    setComposerOpen(true);
+  }, [isAuthenticated, requestComposerRequested, setRequestComposerRequested]);
+
+  const requestAccess = (intent: Extract<AuthIntent, { kind: "request-compose" | "request-like" }>) => {
+    if (isAuthenticated) {
+      if (intent.kind === "request-compose") setComposerOpen(true);
+      else toggleProductRequestLike(intent.requestId);
+      return;
+    }
+    keyboard.hide();
+    setAuthIntent(intent);
+  };
+
+  const handleComposerOpenChange = (open: boolean) => {
+    if (!open) keyboard.hide();
+    setComposerOpen(open);
+  };
+
+  const submitRequest = () => {
+    const desiredItem = draftDesiredItem.trim();
+    const details = draftDetails.trim();
+    if (!desiredItem || !details) return;
+    addProductRequest({
+      categoryId: draftCategoryId,
+      ipId: draftIpId,
+      desiredItem,
+      details,
+    });
+    keyboard.hide();
+    setDraftDesiredItem("");
+    setDraftDetails("");
+    setFilter("all");
+    setComposerOpen(false);
+    setSubmitMessage("상품 신청을 등록했어요.");
+  };
+
+  return (
+    <>
+      <MobileScroll className="app-screen dabboba-screen">
+        <main ref={screenFocusRef} tabIndex={-1} className="request-room-page" aria-label="상품 신청방">
+          <section className="request-room-lead">
+            <span>WISH BOARD</span>
+            <h1>어떤 상품을<br />만나고 싶나요?</h1>
+            <p>원하는 굿즈를 신청하고, 같은 상품을 기다리는 사람과 좋아요를 모아보세요.</p>
+          </section>
+
+          <button type="button" className="request-composer-callout" onClick={() => requestAccess({ kind: "request-compose" })}>
+            <span aria-hidden="true"><IconPencilLine size={21} /></span>
+            <div><strong>원하는 상품 신청하기</strong><small>카테고리 · 작품 IP · 상품명을 알려주세요.</small></div>
+            <IconChevronRightLine size={21} aria-hidden="true" />
+          </button>
+          {submitMessage ? <p className="request-submit-status" role="status">{submitMessage}</p> : null}
+
+          <Carousel className="request-filter-carousel" contentClassName="request-filter-rail" ariaLabel="신청 상품 카테고리">
+            <button
+              type="button"
+              className="filter-chip"
+              data-selected={filter === "all" ? "true" : "false"}
+              aria-pressed={filter === "all"}
+              onClick={() => setFilter("all")}
+            >
+              전체
+            </button>
+            {REQUEST_CATEGORY_IDS.map((categoryId) => (
+              <button
+                key={categoryId}
+                type="button"
+                className="filter-chip"
+                data-selected={filter === categoryId ? "true" : "false"}
+                aria-pressed={filter === categoryId}
+                onClick={() => setFilter(categoryId)}
+              >
+                {categoryLabel(categoryId)}
+              </button>
+            ))}
+          </Carousel>
+
+          <section className="request-list" aria-labelledby="request-list-title">
+            <div className="section-heading">
+              <h2 id="request-list-title">모인 신청</h2>
+              <span>{visibleRequests.length}개</span>
+            </div>
+            {visibleRequests.map((request) => {
+              const ip = IP_CATALOG.find((item) => item.id === request.ipId);
+              const liked = likedProductRequestIds.has(request.id);
+              return (
+                <article key={request.id} className="request-card">
+                  {ip ? <img src={ip.image} alt="" loading="lazy" decoding="async" draggable={false} /> : <span className="request-card-image-placeholder" aria-hidden="true" />}
+                  <div className="request-card-copy">
+                    <div><span>{categoryLabel(request.categoryId)}</span><small>{request.author} · {request.time}</small></div>
+                    <em>{ip?.nameKo ?? "작품 미지정"}</em>
+                    <h3>{request.desiredItem}</h3>
+                    <p>{request.details}</p>
+                    <button
+                      type="button"
+                      aria-label={liked ? `${request.desiredItem} 좋아요 취소` : `${request.desiredItem} 좋아요`}
+                      aria-pressed={liked}
+                      onClick={() => requestAccess({ kind: "request-like", requestId: request.id })}
+                    >
+                      {liked ? <IconHeartFill size={18} aria-hidden="true" /> : <IconHeartLine size={18} aria-hidden="true" />}
+                      <span>같이 원해요 {request.likes + (liked ? 1 : 0)}</span>
+                    </button>
+                  </div>
+                </article>
+              );
+            })}
+          </section>
+          <p className="prototype-disclosure request-room-disclosure">신청과 좋아요는 화면 확인용 테스트 데이터이며 새로고침하면 초기화됩니다.</p>
+        </main>
+      </MobileScroll>
+
+      {!isAuthenticated && (authIntent?.kind === "request-compose" || authIntent?.kind === "request-like") ? (
+        <GuestAuthPrompt
+          intent={authIntent}
+          onDismiss={() => setAuthIntent(null)}
+          onLogin={() => flow.push(createLoginScreen())}
+        />
+      ) : null}
+
+      <BottomSheet
+        open={composerOpen}
+        onOpenChange={handleComposerOpenChange}
+        title="상품 신청하기"
+        description="DABBOBA에서 만나고 싶은 상품을 알려주세요."
+        snap={0.86}
+      >
+        <div className="request-compose-form">
+          <div className="compose-category-list" role="radiogroup" aria-label="신청 카테고리">
+            {REQUEST_CATEGORY_IDS.map((categoryId, index) => (
+              <button
+                key={categoryId}
+                type="button"
+                role="radio"
+                aria-checked={draftCategoryId === categoryId}
+                tabIndex={draftCategoryId === categoryId ? 0 : -1}
+                data-selected={draftCategoryId === categoryId ? "true" : "false"}
+                onKeyDown={(event) => handleRadioArrow(event, REQUEST_CATEGORY_IDS, index, setDraftCategoryId)}
+                onClick={() => setDraftCategoryId(categoryId)}
+              >
+                {categoryLabel(categoryId)}
+              </button>
+            ))}
+          </div>
+          <label>
+            <span>작품 IP</span>
+            <select value={draftIpId} onChange={(event) => setDraftIpId(event.currentTarget.value)}>
+              {IP_CATALOG.map((ip) => <option key={ip.id} value={ip.id}>{ip.nameKo}</option>)}
+            </select>
+          </label>
+          <label>
+            <span>원하는 상품</span>
+            <KeyboardInput
+              value={draftDesiredItem}
+              maxLength={70}
+              placeholder="상품명, 캐릭터, 에디션 등을 적어주세요"
+              onChange={(event) => setDraftDesiredItem(event.currentTarget.value)}
+              onBlur={() => keyboard.hide()}
+            />
+          </label>
+          <label>
+            <span>신청 내용</span>
+            <KeyboardTextarea
+              value={draftDetails}
+              maxLength={300}
+              placeholder="원하는 크기, 버전, 판매 방식 등을 알려주세요."
+              onChange={(event) => setDraftDetails(event.currentTarget.value)}
+              onBlur={() => keyboard.hide()}
+            />
+          </label>
+          <ActionButton
+            type="button"
+            variant="brandSolid"
+            size="large"
+            className="sheet-primary-button"
+            disabled={!draftDesiredItem.trim() || !draftDetails.trim()}
+            onPointerDown={(event) => event.preventDefault()}
+            onClick={submitRequest}
+          >
+            신청 등록하기
+          </ActionButton>
+        </div>
+      </BottomSheet>
+    </>
+  );
+}
+
 function ProfilePage({ flow }: { flow: FlowControls }) {
-  const { pointBalance, communityPosts, profile, profileSaveNotice, setProfileSaveNotice } = useDabboba();
+  const { pointBalance, exchangePosts, profile, profileSaveNotice, setProfileSaveNotice } = useDabboba();
   const screenFocusRef = useScreenEntryFocus();
   const [profileMessage, setProfileMessage] = useState("");
-  const myPostCount = communityPosts.filter((post) => post.id.startsWith("community-")).length;
+  const myPostCount = exchangePosts.filter((post) => post.id.startsWith("exchange-user-")).length;
   const menus = ["내 찜 목록", "보관함", "배송 신청", "구매 내역", "포인트 내역", "고객센터"];
 
   return (
@@ -1056,7 +1832,7 @@ function ProfilePage({ flow }: { flow: FlowControls }) {
         <section className="profile-activity" aria-label="나의 활동">
           <div><strong>6</strong><span>찜</span></div>
           <div><strong>3</strong><span>보관함</span></div>
-          <div><strong>{myPostCount}</strong><span>작성글</span></div>
+          <div><strong>{myPostCount}</strong><span>교환글</span></div>
         </section>
 
         <section className="profile-menu" aria-label="프로필 메뉴">
@@ -1066,6 +1842,10 @@ function ProfilePage({ flow }: { flow: FlowControls }) {
               type="button"
               onClick={() => {
                 setProfileSaveNotice("");
+                if (menu === "고객센터") {
+                  flow.push(createCustomerCenterScreen());
+                  return;
+                }
                 setProfileMessage(`${menu} 기능은 다음 단계에서 연결됩니다.`);
               }}
             >
@@ -1490,6 +2270,8 @@ function IpDetailPage({ flow, ip }: { flow: FlowControls; ip: IpRecord }) {
 }
 
 function IpTabContent({ flow, ip, tab }: { flow: FlowControls; ip: IpRecord; tab: IpDetailTab }) {
+  const { setActiveRootTab } = useDabboba();
+
   if (tab === "상품") {
     const linkedProducts = productsForIp(ip.id);
 
@@ -1550,16 +2332,31 @@ function IpTabContent({ flow, ip, tab }: { flow: FlowControls; ip: IpRecord; tab
     );
   }
 
-  const isSnap = tab === "스냅";
+  if (tab === "스냅") {
+    return (
+      <div className="ip-empty-state ip-tab-empty">
+        <IconCameraLine size={32} aria-hidden="true" />
+        <strong>아직 등록된 스냅이 없어요</strong>
+        <span>수집 사진과 후기 기능은 다음 단계에서 연결됩니다.</span>
+      </div>
+    );
+  }
+
   return (
     <div className="ip-empty-state ip-tab-empty">
-      {isSnap ? (
-        <IconCameraLine size={32} aria-hidden="true" />
-      ) : (
-        <IconDot3HorizontalChatbubbleLeftLine size={32} aria-hidden="true" />
-      )}
-      <strong>{isSnap ? "아직 등록된 스냅이 없어요" : "첫 이야기를 준비하고 있어요"}</strong>
-      <span>{isSnap ? "수집 사진과 후기 기능은 다음 단계에서 연결됩니다." : "작품별 게시판은 계정·게시글 API와 함께 열립니다."}</span>
+      <IconDot3HorizontalChatbubbleLeftLine size={32} aria-hidden="true" />
+      <strong>{ip.nameKo} 교환을 찾아보세요</strong>
+      <span>교환방에서 올린 상품과 원하는 교환품을 한 번에 확인할 수 있어요.</span>
+      <button
+        type="button"
+        className="ip-exchange-link"
+        onClick={() => {
+          setActiveRootTab("community");
+          flow.replace(createExchangeRoomScreen());
+        }}
+      >
+        교환방으로 이동
+      </button>
     </div>
   );
 }
@@ -1914,12 +2711,8 @@ function CheckoutFooter({
     timer.current = window.setTimeout(() => {
       setPointBalance((current) => Math.max(0, current - points));
       setPaying(false);
-      if (drawMode) {
-        prepareDraw(quantity);
-        flow.replace(createDrawScreen(product, quantity));
-      } else {
-        flow.replace(createPurchaseCompleteScreen(product, quantity, total));
-      }
+      if (drawMode) prepareDraw(quantity);
+      flow.replace(createPurchaseCompleteScreen(product, quantity, total));
       timer.current = null;
     }, 900);
   };
@@ -1957,18 +2750,29 @@ function PurchaseCompletePage({
   const screenFocusRef = useScreenEntryFocus();
   const unit = commerceUnit(product);
   const orderCode = `DBB-DEMO-${product.id.slice(0, 8).toUpperCase()}`;
+  const drawMode = isRandomDrawCategory(product.categoryId);
+  const drawActionLabel = product.categoryId === "gacha" ? "가챠하러 가기" : "쿠지 추첨하러 가기";
 
   return (
     <MobileScroll className="app-screen dabboba-screen">
-      <main ref={screenFocusRef} tabIndex={-1} className="purchase-complete-page" aria-label="일반 상품 주문 완료">
+      <main
+        ref={screenFocusRef}
+        tabIndex={-1}
+        className="purchase-complete-page"
+        aria-label={drawMode ? `${product.line} 결제 완료` : "일반 상품 주문 완료"}
+      >
         <section className="purchase-complete-heading">
           <span><IconCheckmarkCircleFill size={36} aria-hidden="true" /></span>
-          <h1>구매가 완료됐어요.</h1>
-          <p>{product.category} · {quantity}{unit} 구매 내역이 준비됐습니다.</p>
+          <h1>{drawMode ? "결제가 완료됐어요." : "구매가 완료됐어요."}</h1>
+          <p>
+            {drawMode
+              ? `${product.category} · ${quantity}${unit} 이용권이 준비됐습니다.`
+              : `${product.category} · ${quantity}${unit} 구매 내역이 준비됐습니다.`}
+          </p>
         </section>
 
         <section className="purchase-complete-product" aria-labelledby="purchase-complete-product-title">
-          <h2 id="purchase-complete-product-title">주문 상품</h2>
+          <h2 id="purchase-complete-product-title">{drawMode ? "결제 상품" : "주문 상품"}</h2>
           <div>
             <img src={product.asset} alt="" decoding="async" draggable={false} />
             <span>
@@ -1981,22 +2785,39 @@ function PurchaseCompletePage({
 
         <dl className="purchase-complete-meta">
           <div><dt>결제 금액</dt><dd>{formatWon(paidTotal)}</dd></div>
-          <div><dt>주문 상태</dt><dd>결제 완료</dd></div>
-          <div><dt>배송 상태</dt><dd>배송 신청 전</dd></div>
-          <div><dt>테스트 주문번호</dt><dd>{orderCode}</dd></div>
+          <div><dt>{drawMode ? "결제 상태" : "주문 상태"}</dt><dd>결제 완료</dd></div>
+          <div><dt>{drawMode ? "이용 상태" : "배송 상태"}</dt><dd>{drawMode ? "뽑기 대기" : "배송 신청 전"}</dd></div>
+          <div><dt>테스트 {drawMode ? "결제" : "주문"}번호</dt><dd>{orderCode}</dd></div>
         </dl>
 
         <div className="purchase-complete-note">
-          <IconTruckLine size={21} aria-hidden="true" />
-          <span>배송지 입력과 실제 주문 접수는 정식 결제·배송 시스템 연결 후 제공됩니다.</span>
+          {drawMode ? <IconReceiptLine size={21} aria-hidden="true" /> : <IconTruckLine size={21} aria-hidden="true" />}
+          <span>
+            {drawMode
+              ? `아직 상품은 확정되지 않았어요. 아래 ${drawActionLabel} 버튼을 눌러 뽑기를 진행해 주세요.`
+              : "배송지 입력과 실제 주문 접수는 정식 결제·배송 시스템 연결 후 제공됩니다."}
+          </span>
         </div>
-        <p className="prototype-disclosure">현재 화면은 구매 흐름 확인용이며 실제 결제·주문·배송은 발생하지 않았습니다.</p>
+        <p className="prototype-disclosure">
+          현재 화면은 {drawMode ? "결제·뽑기" : "구매"} 흐름 확인용이며 실제 결제{drawMode ? "" : "·주문·배송"}는 발생하지 않았습니다.
+        </p>
       </main>
     </MobileScroll>
   );
 }
 
-function PurchaseCompleteFooter({ flow }: { flow: FlowControls }) {
+function PurchaseCompleteFooter({
+  flow,
+  product,
+  quantity,
+}: {
+  flow: FlowControls;
+  product: Product;
+  quantity: number;
+}) {
+  const drawMode = isRandomDrawCategory(product.categoryId);
+  const drawActionLabel = product.categoryId === "gacha" ? "가챠하러 가기" : "쿠지 추첨하러 가기";
+
   return (
     <div className="route-footer purchase-complete-footer">
       <ActionButton
@@ -2004,88 +2825,114 @@ function PurchaseCompleteFooter({ flow }: { flow: FlowControls }) {
         variant="brandSolid"
         size="large"
         className="primary-action"
-        onClick={() => returnToCatalog(flow)}
+        onClick={() => {
+          if (drawMode) {
+            flow.replace(createDrawScreen(product, quantity));
+            return;
+          }
+          returnToCatalog(flow);
+        }}
       >
-        상품 목록으로
+        {drawMode ? drawActionLabel : "상품 목록으로"}
       </ActionButton>
     </div>
   );
 }
 
-function CapsuleDrawAnimation({ state }: { state: DrawState }) {
+const CAPSULE_CINEMATIC_SCRUB_END = 0.7;
+
+function CapsuleDrawAnimation({ state, controlProgress }: { state: DrawState; controlProgress: number }) {
+  const cinematicRef = useRef<HTMLVideoElement | null>(null);
+  const crankAngle = controlProgress * 360;
+  const cinematicActive = state === "drawing" || state === "result";
+  const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  const syncCinematic = useCallback((video: HTMLVideoElement) => {
+    if (video.readyState === 0) return;
+
+    if (state === "drawing") {
+      if (reducedMotion) {
+        video.pause();
+        if (Number.isFinite(video.duration)) video.currentTime = Math.max(0, video.duration - 0.04);
+        return;
+      }
+
+      if (
+        video.ended
+        || video.currentTime < CAPSULE_CINEMATIC_SCRUB_END - 0.08
+        || video.currentTime > CAPSULE_CINEMATIC_SCRUB_END + 0.24
+      ) {
+        video.currentTime = CAPSULE_CINEMATIC_SCRUB_END;
+      }
+      void video.play().catch(() => undefined);
+      return;
+    }
+
+    video.pause();
+    if (state === "result" && Number.isFinite(video.duration)) {
+      video.currentTime = Math.max(0, video.duration - 0.04);
+    }
+  }, [reducedMotion, state]);
+
+  useEffect(() => {
+    if (cinematicRef.current) syncCinematic(cinematicRef.current);
+  }, [syncCinematic]);
+
   return (
-    <div className="capsule-animation" data-state={state} aria-hidden="true">
-      <span className="capsule-machine-glow" />
-      <div className="capsule-machine">
-        <div className="capsule-marquee"><span>DABBOBA</span></div>
-
-        <div className="capsule-chamber">
-          <span className="capsule-glass-shine" />
-          <div className="capsule-pool">
-            {CAPSULE_LAYOUT.map((capsule, index) => (
-              <span
-                className={`capsule-ball capsule-ball-${capsule.tone}`}
-                key={`${capsule.left}-${capsule.top}`}
-                style={{
-                  "--capsule-left": capsule.left,
-                  "--capsule-top": capsule.top,
-                  "--capsule-mix-x": capsule.mixX,
-                  "--capsule-mix-y": capsule.mixY,
-                  "--capsule-rotate": capsule.rotate,
-                  "--capsule-delay": `${index * 31}ms`,
-                } as CSSProperties}
-              >
-                <b>DB</b>
-              </span>
-            ))}
+    <div
+      className="capsule-animation"
+      data-state={state}
+      style={{
+        "--crank-drag-angle": `${crankAngle}deg`,
+      } as CSSProperties}
+      aria-hidden="true"
+    >
+      {cinematicActive ? (
+        <video
+          ref={cinematicRef}
+          className="capsule-cinematic"
+          src="/assets/dabboba/video/dabboba-capsule-lower-chute.mp4"
+          poster="/assets/dabboba/video/dabboba-capsule-machine-poster.jpg"
+          muted
+          playsInline
+          preload="auto"
+          controls={false}
+          disablePictureInPicture
+          onLoadedMetadata={(event) => syncCinematic(event.currentTarget)}
+        />
+      ) : (
+        <div className="capsule-ready-cinematic">
+          <div className="capsule-ready-machine">
+            <img
+              className="capsule-ready-machine-art"
+              src="/assets/dabboba/capsule-machine-front-pixel.png"
+              alt=""
+              draggable={false}
+              decoding="async"
+            />
+            <img
+              className="capsule-ready-crank-plate"
+              src="/assets/dabboba/capsule-crank-plate-pixel.png"
+              alt=""
+              draggable={false}
+              decoding="async"
+            />
+            <img
+              className="capsule-ready-crank-handle"
+              src="/assets/dabboba/capsule-crank-pixel.png"
+              alt=""
+              draggable={false}
+              decoding="async"
+            />
           </div>
-          <span className="capsule-speed-line capsule-speed-line-left" />
-          <span className="capsule-speed-line capsule-speed-line-right" />
-          <span className="capsule-speed-line capsule-speed-line-bottom" />
         </div>
-
-        <div className="capsule-machine-body">
-          <span className="capsule-coin-slot" />
-          <div className="capsule-crank">
-            <span className="capsule-crank-hub" />
-            <span className="capsule-crank-arm"><i /></span>
-          </div>
-          <div className="capsule-outlet"><span /></div>
-        </div>
-        <span className="capsule-machine-foot capsule-machine-foot-left" />
-        <span className="capsule-machine-foot capsule-machine-foot-right" />
-      </div>
-
-      <div className="capsule-selected capsule-selected-drop">
-        <span className="capsule-shell capsule-shell-top" />
-        <span className="capsule-shell capsule-shell-bottom"><b>DB</b></span>
-      </div>
-
-      <div className="capsule-reveal">
-        <span className="capsule-reveal-glow" />
-        <span className="capsule-pixel capsule-pixel-1" />
-        <span className="capsule-pixel capsule-pixel-2" />
-        <span className="capsule-pixel capsule-pixel-3" />
-        <span className="capsule-pixel capsule-pixel-4" />
-        <span className="capsule-pixel capsule-pixel-5" />
-        <span className="capsule-pixel capsule-pixel-6" />
-        <span className="capsule-card"><i /></span>
-        <span className="capsule-open-half capsule-open-half-left" />
-        <span className="capsule-open-half capsule-open-half-right"><b>DB</b></span>
-      </div>
-
-      <div className="capsule-phase-copy">
-        <span>TURN</span>
-        <span>MIX</span>
-        <span>DROP</span>
-        <span>OPEN</span>
-      </div>
+      )}
     </div>
   );
 }
 
 function DrawPage({ product, quantity }: { product: Product; quantity: number }) {
-  const { drawState, drawRemaining } = useDabboba();
+  const { drawState, drawRemaining, drawControlProgress } = useDabboba();
   const [oddsOpen, setOddsOpen] = useState(false);
   const screenFocusRef = useScreenEntryFocus();
   const unit = commerceUnit(product);
@@ -2095,11 +2942,11 @@ function DrawPage({ product, quantity }: { product: Product; quantity: number })
   return (
     <>
       <MobileScroll className="app-screen dabboba-screen">
-        <main ref={screenFocusRef} tabIndex={-1} className="draw-page" aria-label={`${product.line} ${drawLabel}`}>
+        <main ref={screenFocusRef} tabIndex={-1} className="draw-page" data-state={drawState} aria-label={`${product.line} ${drawLabel}`}>
           <div className="paid-ticket">
             <IconCheckmarkCircleFill size={22} aria-hidden="true" />
             <div>
-              <strong>결제 완료</strong>
+              <strong>{product.categoryId === "gacha" ? "가챠 준비 완료" : "쿠지 준비 완료"}</strong>
               <span>{quantity}{unit} 추첨권이 준비됐어요</span>
             </div>
           </div>
@@ -2107,12 +2954,16 @@ function DrawPage({ product, quantity }: { product: Product; quantity: number })
           <div className="draw-heading">
             <span>{product.edition}</span>
             <h1>{product.line}</h1>
-            <p>{drawLabel} 버튼을 눌러 추첨을 시작하세요.</p>
+            <p>
+              {product.categoryId === "gacha"
+                ? "하단 바를 끝까지 밀면 레버가 돌아가고 뽑기가 시작돼요."
+                : `${drawLabel} 버튼을 눌러 추첨을 시작하세요.`}
+            </p>
           </div>
 
           <section className="arcade-stage" data-state={drawState} aria-label={`DABBOBA 오락실 ${drawLabel} 기계`}>
             {product.categoryId === "gacha" ? (
-              <CapsuleDrawAnimation state={drawState} />
+              <CapsuleDrawAnimation state={drawState} controlProgress={drawControlProgress} />
             ) : (
               <img
                 src="/assets/dabboba/arcade-cabinet.png"
@@ -2124,6 +2975,7 @@ function DrawPage({ product, quantity }: { product: Product; quantity: number })
             <span className="draw-status" aria-live="polite">
               {drawState === "drawing"
                 ? product.categoryId === "gacha" ? "CAPSULE RUN" : "DRAWING"
+                : drawState === "transitioning" ? "SYSTEM ON"
                 : drawRemaining > 0 ? "READY" : "CLEAR"}
             </span>
           </section>
@@ -2178,34 +3030,141 @@ function DrawFooter({ flow, product }: { flow: FlowControls; product: Product })
     setResultOpen,
     resultGrade,
     setResultGrade,
+    drawControlProgress,
+    setDrawControlProgress,
   } = useDabboba();
-  const timer = useRef<number | null>(null);
+  const drawTimer = useRef<number | null>(null);
+  const transitionTimer = useRef<number | null>(null);
+  const activationLockRef = useRef(false);
+  const sliderTrackRef = useRef<HTMLDivElement | null>(null);
+  const sliderThumbRef = useRef<HTMLButtonElement | null>(null);
+  const [sliderX, setSliderX] = useState(0);
   const unit = commerceUnit(product);
   const drawNoun = product.categoryId === "kuji" ? "쿠지" : "뽑기";
+  const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   const drawDuration = product.categoryId === "gacha"
-    ? window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 420 : 3_200
+    ? reducedMotion ? 420 : 3_350
     : 1_250;
 
   useEffect(() => () => {
-    if (timer.current !== null) window.clearTimeout(timer.current);
+    if (drawTimer.current !== null) window.clearTimeout(drawTimer.current);
+    if (transitionTimer.current !== null) window.clearTimeout(transitionTimer.current);
   }, []);
 
-  const startDraw = () => {
-    if (drawState === "drawing" || drawRemaining < 1) return;
-    setDrawState("drawing");
-    timer.current = window.setTimeout(() => {
+  const resetSlider = useCallback(() => {
+    activationLockRef.current = false;
+    setSliderX(0);
+    setDrawControlProgress(0);
+  }, [setDrawControlProgress]);
+
+  useEffect(() => {
+    if (drawState === "ready") resetSlider();
+  }, [drawState, resetSlider]);
+
+  const finishDraw = useCallback(() => {
       setResultGrade(rollPrizeGrade());
       setDrawRemaining((current) => Math.max(0, current - 1));
       setDrawState("result");
       setResultOpen(true);
-      timer.current = null;
-    }, drawDuration);
+      drawTimer.current = null;
+  }, [setDrawRemaining, setDrawState, setResultGrade, setResultOpen]);
+
+  const startDraw = useCallback(() => {
+    if (activationLockRef.current || drawState === "transitioning" || drawState === "drawing" || drawRemaining < 1) return;
+    activationLockRef.current = true;
+
+    if (product.categoryId === "gacha") {
+      setDrawState("transitioning");
+      transitionTimer.current = window.setTimeout(() => {
+        setDrawState("drawing");
+        transitionTimer.current = null;
+        drawTimer.current = window.setTimeout(finishDraw, drawDuration);
+      }, reducedMotion ? 40 : 400);
+      return;
+    }
+
+    setDrawState("drawing");
+    drawTimer.current = window.setTimeout(finishDraw, drawDuration);
+  }, [drawDuration, drawRemaining, drawState, finishDraw, product.categoryId, reducedMotion, setDrawState]);
+
+  const getSliderGeometry = useCallback(() => {
+    const track = sliderTrackRef.current;
+    const thumb = sliderThumbRef.current;
+    const sliderStartInset = 16;
+    const sliderEndInset = 4;
+    const localMax = Math.max(
+      1,
+      (track?.offsetWidth ?? 0) - (thumb?.offsetWidth ?? 52) - sliderStartInset - sliderEndInset,
+    );
+    const visualScale = track?.offsetWidth ? track.getBoundingClientRect().width / track.offsetWidth : 1;
+
+    return {
+      localMax,
+      visualMax: Math.max(1, localMax * visualScale),
+    };
+  }, []);
+
+  const completeSlider = useCallback(() => {
+    if (drawState !== "ready" || drawRemaining < 1) return;
+    const { localMax } = getSliderGeometry();
+    setSliderX(localMax);
+    setDrawControlProgress(1);
+    startDraw();
+  }, [drawRemaining, drawState, getSliderGeometry, setDrawControlProgress, startDraw]);
+
+  const bindSlider = useDrag(
+    (gesture) => {
+      gesture.event.stopPropagation();
+      if (product.categoryId !== "gacha" || drawState !== "ready" || drawRemaining < 1) return;
+      const { localMax, visualMax } = getSliderGeometry();
+      const nextProgress = Math.max(0, Math.min(1, gesture.movement[0] / visualMax));
+      const nextX = localMax * nextProgress;
+
+      setSliderX(nextX);
+      setDrawControlProgress(nextProgress);
+
+      if (!gesture.last) return;
+      if (nextProgress >= 0.92) {
+        setSliderX(localMax);
+        setDrawControlProgress(1);
+        startDraw();
+      } else {
+        resetSlider();
+      }
+    },
+    {
+      axis: "x",
+      eventOptions: { capture: true, passive: false },
+      filterTaps: true,
+      pointer: { touch: true },
+    },
+  );
+
+  const handleSliderKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
+    if (drawState !== "ready" || drawRemaining < 1) return;
+    if (["Enter", " ", "End"].includes(event.key)) {
+      event.preventDefault();
+      completeSlider();
+      return;
+    }
+    if (!["ArrowRight", "ArrowLeft", "Home"].includes(event.key)) return;
+    event.preventDefault();
+    const currentProgress = event.key === "Home"
+      ? 0
+      : Math.max(0, Math.min(1, drawControlProgress + (event.key === "ArrowRight" ? 0.1 : -0.1)));
+    setDrawControlProgress(currentProgress);
+    setSliderX(getSliderGeometry().localMax * currentProgress);
+    if (currentProgress >= 1) completeSlider();
   };
 
   const handleResultOpen = (open: boolean) => {
     setResultOpen(open);
-    if (!open && drawRemaining > 0) setDrawState("ready");
+    if (!open && drawRemaining > 0) {
+      resetSlider();
+      setDrawState("ready");
+    }
     if (!open && drawRemaining < 1) {
+      resetSlider();
       setDrawState("done");
       returnToCatalog(flow);
     }
@@ -2214,27 +3173,60 @@ function DrawFooter({ flow, product }: { flow: FlowControls; product: Product })
   const nextAction = () => {
     setResultOpen(false);
     if (drawRemaining > 0) {
+      resetSlider();
       setDrawState("ready");
       return;
     }
+    resetSlider();
     setDrawState("done");
     returnToCatalog(flow);
   };
 
   return (
     <>
-      <div className="route-footer draw-footer">
-        <ActionButton
-          type="button"
-          variant="brandSolid"
-          size="large"
-          className="primary-action draw-action"
-          loading={drawState === "drawing"}
-          disabled={drawState === "drawing" || drawRemaining < 1}
-          onClick={startDraw}
-        >
-          {drawState === "drawing" ? "추첨 중" : drawRemaining > 0 ? `${drawNoun} · ${drawRemaining}${unit}` : "추첨 완료"}
-        </ActionButton>
+      <div className="route-footer draw-footer" data-state={drawState}>
+        {product.categoryId === "gacha" ? (
+          <div
+            ref={sliderTrackRef}
+            className="draw-slider"
+            data-state={drawState}
+            style={{ "--draw-slider-progress": drawControlProgress } as CSSProperties}
+          >
+            <span className="draw-slider-fill" style={{ width: `${Math.max(7, drawControlProgress * 100)}%` }} />
+            <span className="draw-slider-copy" aria-hidden="true">
+              {drawState === "transitioning" ? "ARCADE LOADING" : drawState === "drawing" ? "CAPSULE RUN" : drawRemaining > 0 ? "밀어서 뽑기" : "뽑기 완료"}
+            </span>
+            <button
+              {...bindSlider()}
+              ref={sliderThumbRef}
+              type="button"
+              role="slider"
+              className="draw-slider-thumb"
+              style={{ transform: `translate3d(${sliderX}px, 0, 0)` }}
+              aria-label="밀어서 가챠 뽑기"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={Math.round(drawControlProgress * 100)}
+              aria-valuetext={`${Math.round(drawControlProgress * 100)}% 진행`}
+              aria-disabled={drawState !== "ready" || drawRemaining < 1}
+              onKeyDown={handleSliderKeyDown}
+            >
+              <span aria-hidden="true">››</span>
+            </button>
+          </div>
+        ) : (
+          <ActionButton
+            type="button"
+            variant="brandSolid"
+            size="large"
+            className="primary-action draw-action"
+            loading={drawState === "drawing"}
+            disabled={drawState === "drawing" || drawRemaining < 1}
+            onClick={startDraw}
+          >
+            {drawState === "drawing" ? "추첨 중" : drawRemaining > 0 ? `${drawNoun} · ${drawRemaining}${unit}` : "추첨 완료"}
+          </ActionButton>
+        )}
       </div>
 
       <BottomSheet
