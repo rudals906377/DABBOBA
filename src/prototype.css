@@ -637,6 +637,7 @@
 .category-carousel {
   width: calc(100% + 32px);
   margin: 18px 0 0 -16px;
+  container-type: inline-size;
 }
 
 .category-rail {
@@ -648,12 +649,12 @@
 .filter-chip {
   flex: 0 0 auto;
   min-width: 58px;
-  min-height: 44px;
+  min-height: 36px;
   border: 1px solid var(--db-line);
-  border-radius: 999px;
+  border-radius: 8px;
   background: var(--db-surface);
   color: var(--db-muted);
-  padding: 0 16px;
+  padding: 0 14px;
   font-family: inherit;
   font-size: 14px;
   font-weight: 750;
@@ -1099,6 +1100,7 @@
 .duckroom-filter-carousel {
   width: calc(100% + 32px);
   margin: 18px 0 0 -16px;
+  container-type: inline-size;
 }
 
 .exchange-filter-rail,
@@ -3769,6 +3771,23 @@
 .request-filter-carousel {
   width: calc(100% + 32px);
   margin: 18px 0 0 -16px;
+  container-type: inline-size;
+}
+
+@container (min-width: 520px) {
+  .category-rail,
+  .exchange-filter-rail,
+  .duckroom-filter-rail,
+  .request-filter-rail {
+    width: 100%;
+  }
+
+  .category-rail > .filter-chip,
+  .exchange-filter-rail > .filter-chip,
+  .duckroom-filter-rail > .filter-chip,
+  .request-filter-rail > .filter-chip {
+    flex: 1 1 0;
+  }
 }
 
 .request-filter-rail {

@@ -11,6 +11,14 @@ const mobilePackage = JSON.parse(readFileSync(path.join(root, "apps/mobile/packa
 const mobileAppConfig = JSON.parse(readFileSync(path.join(root, "apps/mobile/app.json"), "utf8"));
 const mobileSource = readFileSync(path.join(root, "apps/mobile/App.tsx"), "utf8");
 const webShellSource = readFileSync(path.join(root, "apps/mobile/webShell.ts"), "utf8");
+const rootLayoutSource = readFileSync(path.join(root, "apps/mobile/app/_layout.tsx"), "utf8");
+const tabsLayoutSource = readFileSync(path.join(root, "apps/mobile/app/(tabs)/_layout.tsx"), "utf8");
+const homeSource = readFileSync(path.join(root, "apps/mobile/src/features/home/HomeScreen.tsx"), "utf8");
+const prototypeCss = readFileSync(path.join(root, "src/prototype.css"), "utf8");
+const catalogApiSource = readFileSync(path.join(root, "apps/mobile/src/features/catalog/catalog-api.ts"), "utf8");
+const localDatabaseSource = readFileSync(path.join(root, "apps/mobile/src/lib/local-database.ts"), "utf8");
+const sessionStoreSource = readFileSync(path.join(root, "apps/mobile/src/lib/session-store.ts"), "utf8");
+const runtimeConfigSource = readFileSync(path.join(root, "apps/mobile/src/lib/runtime-config.ts"), "utf8");
 const runtimeSource = readFileSync(path.join(root, "src/mobile/MobileRuntime.tsx"), "utf8");
 const requireFromMobile = createRequire(path.join(root, "apps/mobile/package.json"));
 const ts = requireFromMobile("typescript");
@@ -30,12 +38,104 @@ function loadWebShellModule() {
 
 const webShell = loadWebShellModule();
 
-test("Expo Go shell stays TypeScript-only and uses the supported WebView stack", () => {
+function loadRuntimeConfigModule() {
+  const output = ts.transpileModule(runtimeConfigSource, {
+    compilerOptions: {
+      module: ts.ModuleKind.CommonJS,
+      target: ts.ScriptTarget.ES2022,
+    },
+    fileName: "runtime-config.ts",
+  }).outputText;
+  const module = { exports: {} };
+  vm.runInNewContext(output, { module, exports: module.exports, URL });
+  return module.exports;
+}
+
+const runtimeConfig = loadRuntimeConfigModule();
+
+test("Expo entry is native-first with typed routes, API contracts, secure tokens, and disposable cache", () => {
   assert.equal(mobilePackage.dependencies.expo, "~54.0.37");
-  assert.equal(mobilePackage.dependencies["react-native-webview"], "13.15.0");
+  assert.equal(mobilePackage.main, "expo-router/entry");
+  assert.equal(mobilePackage.dependencies["@dabboba/api-client"], "workspace:*");
+  assert.equal(mobilePackage.dependencies["expo-secure-store"], "~15.0.8");
+  assert.equal(mobilePackage.dependencies["expo-sqlite"], "~16.0.10");
   assert.equal(mobilePackage.scripts.start, "expo start --go");
   assert.equal(mobilePackage.scripts.test, "node --test ../../tests/expo-shell-structure.test.mjs");
   assert.equal(mobileAppConfig.expo.scheme, "dabboba");
+  assert.equal(mobileAppConfig.expo.experiments.typedRoutes, true);
+  assert.deepEqual(Array.from(mobileAppConfig.expo.plugins), [
+    "expo-router",
+    "expo-secure-store",
+    "expo-sqlite",
+    "expo-font",
+  ]);
+  assert.match(rootLayoutSource, /SQLiteProvider/);
+  assert.match(tabsLayoutSource, /name="exchange"/);
+  assert.match(tabsLayoutSource, /name="ppoba"/);
+  assert.match(tabsLayoutSource, /name="index"/);
+  assert.match(tabsLayoutSource, /name="dukroom"/);
+  assert.match(tabsLayoutSource, /name="profile"/);
+  assert.match(catalogApiSource, /createDabbobaClient/);
+  assert.match(homeSource, /fetchHomeCatalog/);
+  assert.match(homeSource, /readHomeCatalogCache/);
+  assert.match(homeSource, /header:\s*\{[\s\S]*?minHeight:\s*60,[\s\S]*?paddingHorizontal:\s*22,/);
+  assert.match(homeSource, /wordmark:\s*\{\s*width:\s*136,\s*height:\s*20\s*\}/);
+  assert.match(homeSource, /categoryChip:\s*\{\s*minHeight:\s*36,\s*paddingHorizontal:\s*14,\s*borderRadius:\s*8,[\s\S]*?borderWidth:\s*1,/);
+  assert.match(localDatabaseSource, /CREATE TABLE IF NOT EXISTS catalog_cache/);
+  assert.match(localDatabaseSource, /CREATE TABLE IF NOT EXISTS recent_searches/);
+  assert.match(localDatabaseSource, /CREATE TABLE IF NOT EXISTS post_drafts/);
+  assert.match(localDatabaseSource, /CREATE TABLE IF NOT EXISTS upload_queue/);
+  assert.match(localDatabaseSource, /CREATE TABLE IF NOT EXISTS sync_state/);
+  assert.doesNotMatch(localDatabaseSource, /orders|payments|points|draw_results/i);
+  assert.match(sessionStoreSource, /SecureStore\.setItemAsync/);
+  assert.match(sessionStoreSource, /access-token/);
+  assert.match(sessionStoreSource, /refresh-token/);
+  assert.doesNotMatch(`${rootLayoutSource}\n${tabsLayoutSource}\n${homeSource}`, /WebView/);
+});
+
+test("category toggles keep the compact app geometry and expand responsively on wider web containers", () => {
+  assert.match(prototypeCss, /\.filter-chip\s*\{[\s\S]*?min-height:\s*36px;[\s\S]*?border:\s*1px solid var\(--db-line\);[\s\S]*?border-radius:\s*8px;[\s\S]*?padding:\s*0 14px;/);
+  assert.match(prototypeCss, /@container \(min-width:\s*520px\)\s*\{[\s\S]*?\.category-rail[\s\S]*?width:\s*100%;[\s\S]*?\.category-rail > \.filter-chip[\s\S]*?flex:\s*1 1 0;/);
+});
+
+test("native runtime config requires HTTPS in production and derives the Metro host in development", () => {
+  const production = runtimeConfig.resolveMobileRuntimeConfig({
+    configuredApiUrl: "https://api.dabboba.test",
+    configuredAssetBaseUrl: "https://media.dabboba.test",
+    platform: "ios",
+    development: false,
+  });
+  assert.deepEqual({ ...production }, {
+    apiBaseUrl: "https://api.dabboba.test",
+    assetBaseUrl: "https://media.dabboba.test",
+  });
+
+  const development = runtimeConfig.resolveMobileRuntimeConfig({
+    metroHostUri: "192.168.219.100:8081",
+    platform: "ios",
+    development: true,
+  });
+  assert.equal(development.apiBaseUrl, "http://192.168.219.100:8788");
+  assert.equal(development.assetBaseUrl, null);
+  assert.equal(
+    runtimeConfig.resolveCatalogImageUrl("/assets/item.jpg", "http://192.168.219.100:4174"),
+    "http://192.168.219.100:4174/assets/item.jpg",
+  );
+  assert.equal(runtimeConfig.resolveCatalogImageUrl("/assets/item.jpg", null), null);
+
+  assert.throws(
+    () =>
+      runtimeConfig.resolveMobileRuntimeConfig({
+        configuredApiUrl: "http://api.dabboba.test",
+        platform: "android",
+        development: false,
+      }),
+    /HTTPS/,
+  );
+});
+
+test("legacy WebView compatibility remains bounded while screens migrate", () => {
+  assert.equal(mobilePackage.dependencies["react-native-webview"], "13.15.0");
   assert.match(mobileSource, /EXPO_PUBLIC_DABBOBA_WEB_URL/);
   assert.match(mobileSource, /EXPO_PUBLIC_DABBOBA_ALLOWED_ORIGINS/);
   assert.match(mobileSource, /Constants\.expoConfig\?\.hostUri/);

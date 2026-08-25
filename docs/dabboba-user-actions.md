@@ -15,7 +15,9 @@
 
 - [ ] `미결정` 운영 고객 웹, API, 관리자 웹 hostname 결정
 - [ ] `계정 필요` DNS/TLS/CDN/WAF를 제공할 클라우드 계정과 결제 수단 준비
-- [ ] `계정 필요` 서울 리전 또는 확정 리전의 관리형 PostgreSQL과 Redis 생성
+- [ ] `계정 필요` 서울 또는 확정 region의 Supabase 조직·project와 billing 준비
+- [ ] `검증 필요` Supabase PostgreSQL backup/PITR, connection 방식과 application 최소 권한 role 확인
+- [ ] `검증 필요` Supabase Queues(`pgmq`) 활성화와 worker 전용 접근 권한 확인. Redis는 실제 필요가 측정되기 전 만들지 않음
 - [ ] `미결정` DB RPO, RTO, backup 보존 기간, 삭제 보호, 복구 승인자 결정
 - [ ] `검증 필요` production CORS allowlist에 정확한 HTTPS origin만 입력
 - [ ] `계정 필요` 중앙 로그, 오류 추적, metric/alert, on-call 알림 destination 준비
@@ -31,14 +33,15 @@
 
 ## 2. 사용자 로그인과 계정
 
-- [ ] `계정 필요` 본인 확인에 사용할 휴대폰/SMS 공급자 계약과 발신 정보 준비
-- [ ] `계정 필요` Google OAuth client와 production redirect URI 등록
-- [ ] `계정 필요` Kakao Developers 앱, 동의항목, production redirect URI 등록
+- [ ] `계정 필요` Supabase Auth project 설정과 publishable key 준비. secret/service-role key는 앱에 입력하지 않음
+- [ ] `계정 필요` 본인 확인에 사용할 휴대폰/SMS 공급자 계약과 Supabase Auth 발신 정보 준비
+- [ ] `계정 필요` Google OAuth client와 Supabase callback/production redirect URI 등록
+- [ ] `계정 필요` Kakao Developers 앱, 동의항목, Supabase callback/production redirect URI 등록
 - [ ] `미결정` 하나의 검증된 휴대폰 번호를 Google/Kakao/휴대폰 로그인에 어떻게 연결하고 중복 계정을 병합할지 운영 정책 승인
 - [ ] `미결정` 연령 제한, 보호자 동의, 계정 복구, 휴대폰 번호 변경, 탈퇴/보존 정책 승인
 - [ ] `검증 필요` 신규 가입, 기존 계정 연결, 재인증, 정지, 탈퇴, 계정 복구를 실제 provider sandbox에서 확인
 
-현재 저장소의 customer `dev-session`은 개발용이다. provider credential만 입력한다고 production 로그인이 완성되는 것은 아니며, 실제 provider callback과 검증 구현 및 통합 테스트가 추가로 필요하다.
+현재 저장소의 customer `dev-session`은 개발용 legacy 경계다. Supabase credential만 입력한다고 production 로그인이 완성되는 것은 아니며, JWT 검증, canonical user 연결, 정지·탈퇴 session 폐기와 실제 provider callback 통합 테스트가 추가로 필요하다.
 
 ## 3. 관리자 계정과 운영 조직
 
@@ -69,10 +72,10 @@
 
 ## 5. 미디어, IP, 상품 데이터
 
-- [ ] `계정 필요` Google Cloud project, 비공개 GCS bucket, CDN, 최소 권한 service account 준비
+- [ ] `계정 필요` private Supabase Storage bucket, server-only secret key 보관 위치, 필요 시 CDN 준비
 - [ ] `미결정` 원본/변형 파일 보존 기간, 바이러스/유해물 검사와 이미지 변형 공급자 결정
-- [ ] `검증 필요` 현재 구현된 durable intent/complete same-key replay·다른 payload 충돌·만료 `410 MEDIA_UPLOAD_INTENT_EXPIRED`, exact-size signed POST upload·활성/일일/누적 사용자 쿼터·크기/checksum/MIME/generation 고정·decode 제한·orientation/metadata 제거·WebP resize·staging 재삭제를 실제 GCS에서 확인
-- [ ] `검증 필요` 실제 GCS에서 미연결 소유 미디어 삭제가 객체까지 지우고 worker가 실패를 재시도하는지, 타인 미디어는 404로 숨고 게시물·문의 등에 연결된 미디어는 409로 보존되는지 확인한 뒤 유해물 검사·CDN·삭제/보존 정책 확정
+- [ ] `검증 필요` durable intent/complete same-key replay·다른 payload 충돌·만료 처리, 제한된 signed upload, 사용자 쿼터, 크기/checksum/MIME 검증, orientation/EXIF 제거·압축·thumbnail·staging 재삭제를 실제 Supabase Storage에서 확인
+- [ ] `검증 필요` 실제 Supabase Storage에서 미연결 소유 미디어 삭제와 worker 재시도, 타인 object 차단, 연결 미디어 보존, RLS/최소 권한, 유해물 검사·CDN·삭제 정책을 확인
 - [ ] `승인 필요` 모든 애니메이션·게임 IP, 캐릭터, 상품명, 이미지, 로고의 상업 이용 권리 확보
 - [ ] `승인 필요` `public/assets/dabboba/**/sources.json`의 prototype 참고 이미지를 승인 자산으로 교체
 - [ ] `미결정` 상품 SKU, 판매가, 세금, 실재고, 배송 크기/무게의 승인 담당자 지정

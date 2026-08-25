@@ -25,7 +25,7 @@ corepack pnpm run workspace:assert
 
 API, DB CLI, worker는 `.env`를 자동으로 읽지 않는다. 로컬 셸에 값을 export하거나 승인된 환경 주입 도구를 사용한다. 관리자 Next 앱은 `apps/admin/.env.local`을 읽는다. 실서비스 비밀을 로컬 파일, Git, 이슈, 채팅에 복사하지 않는다.
 
-### PostgreSQL과 Redis
+### PostgreSQL과 전환용 Redis
 
 ```sh
 corepack pnpm run local:services
@@ -33,6 +33,8 @@ corepack pnpm run db:migrate
 ```
 
 `db:migrate`는 advisory lock, 파일 순서, 체크섬, `schema_migrations`를 사용한다. 이미 적용한 SQL 파일을 수정하면 체크섬 오류로 중단된다. 적용된 migration을 고치지 말고 새 번호의 forward migration을 추가한다.
+
+현재 로컬 worker와 outbox 전달기는 Redis/BullMQ를 사용하므로 기존 기능 검증을 위해 함께 기동한다. 신규 운영 목표는 Supabase PostgreSQL·Queues·Storage이며, 이 전환이 끝난 뒤에는 측정된 필요가 없는 Redis를 별도 운영 의존성으로 남기지 않는다. 현재 구현과 목표 구조를 혼동하지 말고 `docs/dabboba-production-architecture.md`와 `docs/dabboba-mobile-first-migration.md`를 함께 따른다.
 
 탈퇴 승인과 고객 변경 요청은 사용자별 advisory lock으로 직렬화된다. 운영자가 승인에 성공한 뒤에는 해당 사용자의 활성 세션이 폐기되고 새 idempotent 변경이 DB trigger에서 거부된다. 승인 계정을 다시 활성화하거나 DB에서 탈퇴 상태를 직접 되돌리지 말고, 보존·재가입 정책에 따른 별도 운영 절차를 사용한다.
 
@@ -104,12 +106,13 @@ Fastify의 일반 `trustProxy`는 의도적으로 `false`를 유지한다. 배�
 corepack pnpm run dev:api
 corepack pnpm run dev:worker
 corepack pnpm run dev:admin
-corepack pnpm run dev
+corepack pnpm --filter @dabboba/mobile start
 ```
 
 기본 주소:
 
-- 고객 웹: `http://127.0.0.1:4174` (`dev:lan` 기준) 또는 Vite가 출력한 loopback 주소
+- 고객 앱: Expo 개발 서버가 표시하는 iOS Simulator·Android Emulator·실기기 연결 주소
+- 이전 고객 웹: `http://127.0.0.1:4174` (`dev:lan` 기준). 마이그레이션 참고·웹 확장 채널이며 앱 완성 증거가 아님
 - API liveness/readiness: `http://127.0.0.1:8788/healthz`, `http://127.0.0.1:8788/readyz`
 - 관리자 웹: `http://localhost:4180`
 - worker liveness/readiness/metrics: `http://127.0.0.1:8791/live`, `/ready`, `/metrics`
@@ -156,10 +159,10 @@ DABBOBA_TEST_DATABASE_URL="$DABBOBA_DISPOSABLE_TEST_DATABASE_URL" \
 4. 단일 migration job에서 `corepack pnpm run db:migrate`를 실행한다. API/worker replica 각각에서 migration을 자동 실행하지 않는다.
 5. 이전 앱 버전과 새 schema가 함께 동작하는 expand/contract 방식인지 확인한 뒤 API를 점진 배포한다.
 6. worker를 배포하고 `/ready`, unpublished outbox depth, failed job 수를 확인한다.
-7. 관리자 웹과 고객 웹을 배포하고 정확한 HTTPS origin/CORS를 확인한다.
+7. 관리자 웹을 배포하고 정확한 HTTPS origin/CORS를 확인한다. 고객 Expo 앱은 서명된 iOS·Android 후보 빌드로 만들고, 이전 고객 웹은 필요한 마이그레이션 참고·웹 확장 범위만 배포한다.
 8. 읽기 smoke test 후 공지 작성→공개 조회, 문의 작성→관리자 답변→사용자 조회, 신고→처리→감사 로그의 sandbox 흐름을 확인한다.
 9. PG sandbox에서 주문 idempotency, webhook 서명 거부, 중복 event, 재고 확정, 환불 검토, 추첨권 단일 소비를 확인한다.
-10. 고객 계정에서 배송 목록→상세/송장, 취소된 신청의 재신청 복구와 배송 완료 상품 제외, 새로고침 후 `AVAILABLE` 추첨권 재개, 알림 선택 해제 후 인앱 기록 유지·외부 전달 차단을 확인한다. session refresh 중 일시적 장애는 만료 전 재시도되고 401은 session을 폐기하는지도 확인한다. 실제 GCS에서는 intent/complete replay, 만료 410 뒤 같은 client action key가 폐기되는지, 미연결 미디어 삭제와 연결 미디어 409, worker 재정리를 확인한다.
+10. 실제 iPhone·Android 고객 계정에서 배송 목록→상세/송장, 취소된 신청의 재신청 복구와 배송 완료 상품 제외, 새로고침 후 `AVAILABLE` 추첨권 재개, 알림 선택 해제 후 인앱 기록 유지·외부 전달 차단을 확인한다. session refresh 중 일시적 장애는 만료 전 재시도되고 401은 session을 폐기하는지도 확인한다. Storage 전환 전에는 실제 GCS에서, 전환 후에는 실제 Supabase Storage에서 intent/complete replay, 만료 뒤 같은 client action key가 폐기되는지, 미연결 미디어 삭제와 연결 미디어 충돌, worker 재정리를 확인한다.
 11. 오류율, latency, DB lock, outbox, queue, 결제 조정 지표를 관찰한 뒤 release를 완료한다.
 
 ### 롤백
@@ -176,9 +179,9 @@ DABBOBA_TEST_DATABASE_URL="$DABBOBA_DISPOSABLE_TEST_DATABASE_URL" \
 ### 운영 요구
 
 - PostgreSQL: 암호화 자동 백업, PITR, 별도 장애 도메인 복제, 삭제 보호
-- GCS: 비공개 bucket, `uploads/` staging prefix의 짧은 lifecycle, 최종 object 보존 lifecycle, 접근·요청 로그. V4 form POST는 만료 전 동일 조건 재전송이 가능하므로 create-only 요청으로 간주하지 않음. 미연결 소유 미디어 삭제의 즉시 삭제와 worker 재시도도 실제 bucket에서 확인
-- 비용·abuse: GCS operation/request 급증과 저장 용량에 Cloud Monitoring·Billing budget alert를 설정하고, edge WAF/IP rate limit·계정 생성 속도 제한·비정상 업로드 계정 차단을 운영 정책으로 연결
-- Redis: persistence와 고가용성. 단, Redis backup을 업무 원장 복구 수단으로 사용하지 않음
+- Supabase Storage: 비공개 bucket, 소유자·경로 제한 정책, staging의 짧은 lifecycle, 처리 완료 object 보존, 접근·요청 로그. 서명된 업로드 권한은 재전송될 수 있으므로 API의 업로드 intent와 완료 처리를 멱등하게 유지
+- 비용·abuse: Storage 요청·저장량 급증과 비정상 업로드를 관측하고, edge WAF/IP rate limit·계정 생성 속도 제한·비정상 계정 차단을 운영 정책으로 연결
+- 전환 중 GCS/Redis: 현재 구현 검증에만 해당하는 운영 요구를 유지한다. 전환 완료 뒤 원본 복구 수단이나 불필요한 신규 운영 의존성으로 남기지 않음
 - secret: 버전 관리와 감사 가능한 secret manager; 코드/DB dump/log에 평문 포함 금지
 
 RPO, RTO, 보존 기간, 복구 승인자는 사용자가 정해야 한다. 설정 화면을 캡처한 것만으로 끝내지 말고 최소 분기마다 별도 복원 환경에서 훈련한다.
@@ -211,11 +214,11 @@ dump 파일에는 개인정보, 알림 동의 변경 evidence와 업무 원장�
 
 ### 현재 노출된 신호
 
-- API: `/healthz`는 PostgreSQL/Redis 상태를 반환하고 `/readyz`는 PostgreSQL 실패 시 503
+- API: 현재 `/healthz`는 PostgreSQL/전환용 Redis 상태를 반환하고 `/readyz`는 PostgreSQL 실패 시 503
 - worker: `/live`, `/ready`, `/health`, process-local JSON `/metrics`
 - 구조화 로그: request/correlation, 작업 ID, aggregate ID; 인증 header/cookie/password/token redaction
 - PostgreSQL: unpublished/failed outbox, 오래된 예약, 결제 조정 대상, 감사 로그
-- BullMQ: waiting/active/delayed/failed 수와 반복 실패
+- 현재 BullMQ: waiting/active/delayed/failed 수와 반복 실패. Supabase Queues 전환 뒤에는 queue depth, visibility timeout, retry·dead-letter 지표로 교체
 
 ### 출시 전 반드시 연결할 알림
 
@@ -247,7 +250,7 @@ dump 파일에는 개인정보, 알림 동의 변경 evidence와 업무 원장�
 - 복구 후 schema version과 최근 provider event/order ledger를 대조한다.
 - outbox publication을 재개하고 backlog가 0으로 수렴하는지 본다.
 
-### Redis/BullMQ 장애
+### 전환용 Redis/BullMQ 장애
 
 - PostgreSQL 업무 트랜잭션은 계속 outbox를 남길 수 있지만 queue 의존 작업은 지연됨을 공지한다.
 - Redis 복구 후 worker를 재기동하고 동일한 stable job ID로 unpublished outbox를 재게시한다.

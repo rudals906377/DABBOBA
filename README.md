@@ -1,6 +1,8 @@
 # DABBOBA
 
-DABBOBA는 고객용 React/Vite 웹, Expo WebView 셸, Fastify API, PostgreSQL, Redis/BullMQ worker, Next.js 관리자 웹을 한 pnpm workspace로 관리합니다. 화면 확인용 prototype 모드와 서버 데이터를 사용하는 remote 모드를 분리하며, 운영 결제·인증·클라우드 공급자가 연결되지 않은 상태를 출시 완료로 간주하지 않습니다.
+DABBOBA는 Expo + React Native 고객 앱, Fastify API, PostgreSQL, worker, Next.js 관리자 웹과 고객 웹 확장 채널을 한 pnpm workspace로 관리합니다. 제품의 기준은 `apps/mobile` 네이티브 앱이며, 기존 React/Vite 화면과 WebView 셸은 화면별 이전이 끝날 때까지 보존하는 참고·호환 구현입니다. 운영 결제·인증·클라우드 공급자가 연결되지 않은 상태를 출시 완료로 간주하지 않습니다.
+
+앱 중심 전환의 유지/이전/신규 범위와 의존성 순서는 [앱 중심 전환 기준](docs/dabboba-mobile-first-migration.md)을 따릅니다.
 
 ## 전체 로컬 실행
 
@@ -100,15 +102,18 @@ prototype의 fixture, 모의 결제, 화면용 확률은 운영 데이터가 아
 - 알림 수신 설정은 PostgreSQL에 version과 변경 불가 동의 이력을 저장하고, remote 고객 화면은 조회·저장과 409 충돌 뒤 최신값 재동기화를 수행합니다. worker는 인앱 기록을 유지한 채 선택 알림의 외부 전달 거부를 반영합니다. APNs/FCM 같은 실제 외부 전달은 별도 준비가 필요합니다.
 - 저장된 고객 세션은 401이면 폐기하지만 일시적인 refresh 실패는 만료 전에 다시 시도합니다. 이 복구 로직은 실제 production 인증 provider나 장시간 background/네트워크 전환 검증을 대신하지 않습니다.
 
-## Expo Go
+## Expo 네이티브 앱
 
 ```sh
 corepack pnpm install --frozen-lockfile
-corepack pnpm run dev:lan
+set -a; source .env; set +a
+corepack pnpm run dev:api
 corepack pnpm run mobile
 ```
 
-컴퓨터와 휴대폰을 같은 Wi-Fi에 연결한 뒤 Expo QR을 스캔합니다. 현재 기본 설정은 API를 `127.0.0.1`에만 연결하므로 이 절차는 Expo Go/WebView 화면 확인용입니다. 실물 휴대폰에서 로그인과 remote 데이터를 함께 확인하려면 API bind 주소, 고객 API URL, CORS 허용 origin을 Mac의 현재 LAN IP로 별도 설정해야 합니다. 이 확인은 standalone 서명 빌드나 실제 스토어 기기 검증을 의미하지 않습니다.
+컴퓨터와 휴대폰을 같은 Wi-Fi에 연결한 뒤 Expo QR을 스캔합니다. 앱은 Expo Router 기반 네이티브 탭을 열고, 첫 이전 화면인 홈은 Fastify 공개 카탈로그를 읽어 Expo SQLite의 삭제 가능한 cache에 저장합니다. 개발 환경에서 `EXPO_PUBLIC_DABBOBA_API_URL`이 없으면 Metro host의 `8788`을 사용합니다. API가 `127.0.0.1`에만 bind돼 있으면 실물 휴대폰에서는 접근할 수 없으므로 `API_HOST`와 방화벽·LAN 경계를 별도로 확인해야 합니다.
+
+현재 `App.tsx`/`webShell.ts` WebView 코드는 이전되지 않은 화면을 비교하기 위한 legacy 호환 자료로 남아 있으며 Expo entry가 아닙니다. Expo Go 확인은 standalone 서명 build, custom native module, TestFlight/Play internal testing 또는 실제 스토어 기기 검증을 의미하지 않습니다.
 
 ## 통합 검증
 
