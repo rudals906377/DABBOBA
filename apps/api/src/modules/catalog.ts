@@ -51,6 +51,7 @@ type ProductRow = {
   metadata: Record<string, unknown>;
   image_url: string | null;
   is_active: boolean;
+  is_prize_only: boolean;
   character_ids: string[];
   version: number;
   created_at: Date;
@@ -113,6 +114,7 @@ const mapProduct = (row: ProductRow) => ({
   metadata: row.metadata,
   imageUrl: row.image_url,
   isActive: row.is_active,
+  isPrizeOnly: row.is_prize_only,
   version: row.version,
   createdAt: iso(row.created_at),
   updatedAt: iso(row.updated_at),
@@ -161,6 +163,14 @@ function ipInput(body: unknown) {
   };
 }
 
+function booleanQuery(input: Record<string, unknown>, key: string): boolean | undefined {
+  const value = input[key];
+  if (value === undefined || value === "") return undefined;
+  if (value === true || value === "true") return true;
+  if (value === false || value === "false") return false;
+  throw badRequest(`${key} 값은 true 또는 false여야 합니다.`);
+}
+
 function characterInput(body: unknown) {
   const input = objectInput(body);
   return {
@@ -194,6 +204,7 @@ function productInput(body: unknown) {
     metadata: metadata as Record<string, unknown>,
     imageUrl: nullableStringInput(input, "imageUrl", { max: 2000 }),
     isActive: booleanInput(input, "isActive")!,
+    isPrizeOnly: booleanInput(input, "isPrizeOnly", true),
     expectedVersion: integerInput(input, "expectedVersion", { min: 1, optional: true }),
   };
 }
@@ -272,7 +283,7 @@ export async function registerCatalogRoutes(app: FastifyInstance, context: ApiCo
     const ipId = query.ipId === undefined ? undefined : slugIdInput(query.ipId, "ipId");
     const characterId = query.characterId === undefined ? undefined : uuidInput(query.characterId, "characterId");
     const values: unknown[] = [limit + 1];
-    const filters = ["p.is_active = true", "i.is_active = true"];
+    const filters = ["p.is_active = true", "p.is_prize_only = false", "i.is_active = true"];
     if (search) { values.push(`%${search}%`); filters.push(`(p.name ILIKE $${values.length} OR p.sku ILIKE $${values.length})`); }
     if (category) { values.push(category); filters.push(`p.category = $${values.length}`); }
     if (ipId) { values.push(ipId); filters.push(`p.ip_id = $${values.length}`); }
@@ -399,11 +410,13 @@ export async function registerCatalogRoutes(app: FastifyInstance, context: ApiCo
     const category = query.category === undefined ? undefined : enumInput(query, "category", PRODUCT_CATEGORIES);
     const ipId = query.ipId === undefined ? undefined : slugIdInput(query.ipId, "ipId");
     const characterId = query.characterId === undefined ? undefined : uuidInput(query.characterId, "characterId");
+    const prizeOnly = booleanQuery(query, "prizeOnly");
     const values: unknown[] = [limit + 1]; const filters: string[] = [];
     if (search) { values.push(`%${search}%`); filters.push(`(p.name ILIKE $${values.length} OR p.sku ILIKE $${values.length} OR COALESCE(p.manufacturer,'') ILIKE $${values.length})`); }
     if (category) { values.push(category); filters.push(`p.category=$${values.length}`); }
     if (ipId) { values.push(ipId); filters.push(`p.ip_id=$${values.length}`); }
     if (characterId) { values.push(characterId); filters.push(`EXISTS (SELECT 1 FROM product_characters pc_filter WHERE pc_filter.product_id=p.id AND pc_filter.character_id=$${values.length})`); }
+    if (prizeOnly !== undefined) { values.push(prizeOnly); filters.push(`p.is_prize_only=$${values.length}`); }
     if (cursor) { values.push(cursor.createdAt,cursor.id); filters.push(`(p.created_at,p.id)<($${values.length-1},$${values.length})`); }
     const result = await context.pool.query<ProductRow>(
       `SELECT p.*,COALESCE(s.on_hand-s.reserved,0) AS available_quantity,
@@ -414,15 +427,27 @@ export async function registerCatalogRoutes(app: FastifyInstance, context: ApiCo
     return cursorPage(result.rows, limit, mapProduct);
   });
 
+  app.get("/v1/admin/products/:productId", { preHandler: context.auth.requirePermission("catalog.read") }, async (request) => {
+    const id = slugIdInput((request.params as Record<string, unknown>).productId, "productId");
+    const result = await context.pool.query<ProductRow>(
+      `SELECT p.*,COALESCE(s.on_hand-s.reserved,0) AS available_quantity,
+         COALESCE((SELECT array_agg(pc.character_id::text ORDER BY pc.character_id) FROM product_characters pc WHERE pc.product_id=p.id),'{}'::text[]) AS character_ids
+       FROM catalog_products p LEFT JOIN product_stock s ON s.product_id=p.id WHERE p.id=$1`,
+      [id],
+    );
+    if (!result.rowCount) throw notFound("상품을 찾을 수 없습니다.");
+    return mapProduct(result.rows[0]!);
+  });
+
   app.post("/v1/admin/products", { preHandler: context.auth.requirePermission("catalog.write") }, async (request, reply) => {
     const input = productInput(request.body); const id = input.id || input.sku.toLocaleLowerCase("en-US").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
     if (!id) throw badRequest("상품 id를 생성할 수 없습니다.");
     const mutation = await adminIdempotentMutation(context, request, { target: { type: "PRODUCT", id }, work: async (client) => {
       await assertCharactersBelongToIp(client, input.ipId, input.characterIds || []);
       const result = await client.query<ProductRow>(
-        `INSERT INTO catalog_products (id,sku,ip_id,category,name,manufacturer,release_date,price,image_url,metadata,is_active)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *, $12::integer AS available_quantity, $13::text[] AS character_ids`,
-        [id,input.sku,input.ipId,input.category,input.name,input.manufacturer || null,input.releaseDate || null,input.price,input.imageUrl || null,JSON.stringify(input.metadata),input.isActive,input.availableQuantity,input.characterIds || []],
+        `INSERT INTO catalog_products (id,sku,ip_id,category,name,manufacturer,release_date,price,image_url,metadata,is_active,is_prize_only)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *, $13::integer AS available_quantity, $14::text[] AS character_ids`,
+        [id,input.sku,input.ipId,input.category,input.name,input.manufacturer || null,input.releaseDate || null,input.price,input.imageUrl || null,JSON.stringify(input.metadata),input.isActive,input.isPrizeOnly ?? false,input.availableQuantity,input.characterIds || []],
       );
       await client.query("INSERT INTO product_stock (product_id,on_hand,reserved) VALUES ($1,$2,0)", [id,input.availableQuantity]);
       for (const characterId of input.characterIds || []) await client.query("INSERT INTO product_characters (product_id,character_id) VALUES ($1,$2)", [id,uuidInput(characterId,"characterId")]);
@@ -445,6 +470,9 @@ export async function registerCatalogRoutes(app: FastifyInstance, context: ApiCo
       if (!before.rowCount) throw notFound();
       if (input.category !== before.rows[0]!.category) {
         throw conflict("판매·추첨 자산의 의미를 보존하기 위해 상품 카테고리는 생성 후 변경할 수 없습니다. 새 SKU를 등록해 주세요.");
+      }
+      if (input.isPrizeOnly !== undefined && input.isPrizeOnly !== before.rows[0]!.is_prize_only) {
+        throw conflict("경품 전용 여부는 생성 후 변경할 수 없습니다. 새 SKU를 등록해 주세요.");
       }
       if (input.characterIds !== undefined) await assertCharactersBelongToIp(client, input.ipId, input.characterIds);
       const stock = await client.query<{ on_hand: number; reserved: number }>("SELECT on_hand,reserved FROM product_stock WHERE product_id=$1 FOR UPDATE", [id]);
@@ -492,7 +520,7 @@ export async function registerCatalogRoutes(app: FastifyInstance, context: ApiCo
     const mutation=await adminIdempotentMutation(context,request,{target:{type:"CATALOG_REQUEST",id},bodyReason:reason,work:async(client)=>{
       const before=await client.query<CatalogRequestRow>("SELECT * FROM catalog_requests WHERE id=$1 FOR UPDATE",[id]); if(!before.rowCount)throw notFound();
       if(!["PENDING","ON_HOLD"].includes(before.rows[0]!.status))throw conflict();
-      if(canonicalTargetId){const target=before.rows[0]!.kind==="PRODUCT"?await client.query<{is_active:boolean}>("SELECT p.is_active AND i.is_active AS is_active FROM catalog_products p JOIN catalog_ips i ON i.id=p.ip_id WHERE p.id=$1 FOR SHARE OF p,i",[canonicalTargetId]):await client.query<{is_active:boolean}>("SELECT is_active FROM catalog_ips WHERE id=$1 FOR SHARE",[canonicalTargetId]);if(!target.rowCount)throw badRequest("승인 또는 병합 대상을 찾을 수 없습니다.");if(!target.rows[0]!.is_active)throw conflict("사용자 검색에 노출되는 활성 정규 대상만 승인 또는 병합할 수 있습니다.");}
+      if(canonicalTargetId){const target=before.rows[0]!.kind==="PRODUCT"?await client.query<{is_active:boolean}>("SELECT p.is_active AND NOT p.is_prize_only AND i.is_active AS is_active FROM catalog_products p JOIN catalog_ips i ON i.id=p.ip_id WHERE p.id=$1 FOR SHARE OF p,i",[canonicalTargetId]):await client.query<{is_active:boolean}>("SELECT is_active FROM catalog_ips WHERE id=$1 FOR SHARE",[canonicalTargetId]);if(!target.rowCount)throw badRequest("승인 또는 병합 대상을 찾을 수 없습니다.");if(!target.rows[0]!.is_active)throw conflict("사용자 검색에 노출되는 활성 정규 대상만 승인 또는 병합할 수 있습니다.");}
       const updated=await client.query<CatalogRequestRow>(
         `UPDATE catalog_requests SET status=$2,canonical_target_id=$3,decision_reason=$4,decided_by=$5,decided_at=now() WHERE id=$1 RETURNING *`,
         [id,decision,canonicalTargetId||null,reason,request.actor!.userId],

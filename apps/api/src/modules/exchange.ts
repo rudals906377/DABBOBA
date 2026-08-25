@@ -37,6 +37,7 @@ type InventoryRow = {
   acquired_at: Date;
   sku: string;
   ip_id: string;
+  character_ids: string[];
   category: "gacha" | "figure" | "kuji" | "tcg";
   product_name: string;
   manufacturer: string | null;
@@ -46,6 +47,7 @@ type InventoryRow = {
   metadata: Record<string, unknown>;
   image_url: string | null;
   product_active: boolean;
+  is_prize_only: boolean;
   product_version: number;
   product_created_at: Date;
   product_updated_at: Date;
@@ -146,9 +148,10 @@ export function orderedInventoryIds(ids: readonly string[]): string[] {
 
 const inventorySelect = `
   iu.id,iu.owner_id,iu.product_id,iu.source_type,iu.status AS inventory_status,iu.acquired_at,
-  p.sku,p.ip_id,p.category,p.name AS product_name,p.manufacturer,p.release_date,p.price,
+  p.sku,p.ip_id,COALESCE((SELECT array_agg(pc.character_id::text ORDER BY pc.character_id) FROM product_characters pc WHERE pc.product_id=p.id),'{}'::text[]) AS character_ids,
+  p.category,p.name AS product_name,p.manufacturer,p.release_date,p.price,
   COALESCE(s.on_hand-s.reserved,0) AS available_quantity,p.metadata,p.image_url,p.is_active AS product_active,
-  p.version AS product_version,p.created_at AS product_created_at,p.updated_at AS product_updated_at,
+  p.is_prize_only,p.version AS product_version,p.created_at AS product_created_at,p.updated_at AS product_updated_at,
   iu.acquired_at AS created_at`;
 
 const listingSelect = `SELECT
@@ -172,6 +175,7 @@ const mapProduct = (row: InventoryRow) => ({
   id: row.product_id,
   sku: row.sku,
   ipId: row.ip_id,
+  characterIds: row.character_ids,
   category: row.category,
   name: row.product_name,
   manufacturer: row.manufacturer,
@@ -181,6 +185,7 @@ const mapProduct = (row: InventoryRow) => ({
   metadata: row.metadata,
   imageUrl: row.image_url,
   isActive: row.product_active,
+  isPrizeOnly: row.is_prize_only,
   version: row.product_version,
   createdAt: iso(row.product_created_at),
   updatedAt: iso(row.product_updated_at),

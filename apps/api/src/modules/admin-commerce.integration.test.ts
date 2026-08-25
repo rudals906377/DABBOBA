@@ -99,7 +99,7 @@ test(
       payload: {
         sku: `FIGURE-${suffix}`.toUpperCase(), ipId, characterIds: [], category: "figure",
         name: `운영 피규어 ${suffix}`, manufacturer: null, releaseDate: null, price: 10_000,
-        availableQuantity: 11, metadata: {}, imageUrl: null, isActive: true, expectedVersion: 1,
+        availableQuantity: 11, metadata: {}, imageUrl: null, isActive: true, isPrizeOnly: false, expectedVersion: 1,
       },
     });
     assert.equal(legacyStockMutation.statusCode, 409, legacyStockMutation.body);
@@ -195,23 +195,126 @@ test(
 
     const drawProductId = `gacha-${suffix}`;
     const prizeProductId = `prize-${suffix}`;
+    const drawProductName = `운영 가챠 ${suffix}`;
+    const prizeProductName = `경품 ${suffix}`;
+    const prizeProductSku = `PRIZE-${suffix}`.toUpperCase();
+    const prizeProductImageUrl = `https://cdn.example.test/prizes/${suffix}.png`;
     await pool.query(
-      "INSERT INTO catalog_products(id,sku,ip_id,category,name,price) VALUES($1,$2,$3,'gacha',$4,3000),($5,$6,$3,'figure',$7,0)",
-      [drawProductId, `GACHA-${suffix}`.toUpperCase(), ipId, `운영 가챠 ${suffix}`, prizeProductId, `PRIZE-${suffix}`.toUpperCase(), `경품 ${suffix}`],
+      `INSERT INTO catalog_products(id,sku,ip_id,category,name,price,image_url,is_prize_only)
+       VALUES($1,$2,$3,'gacha',$4,3000,NULL,false),($5,$6,$3,'figure',$7,0,$8,true)`,
+      [drawProductId, `GACHA-${suffix}`.toUpperCase(), ipId, drawProductName, prizeProductId, prizeProductSku, prizeProductName, prizeProductImageUrl],
     );
     await pool.query("INSERT INTO product_stock(product_id,on_hand,reserved) VALUES($1,2,0),($2,100,0)", [drawProductId, prizeProductId]);
-    const drawVersion = await pool.query<{ id: string }>(
-      "INSERT INTO draw_probability_versions(product_id,version) VALUES($1,1) RETURNING id",
+    type DrawDraftResponse = {
+      id: string;
+      version: number;
+      status: string;
+      entries: Array<{
+        id: string;
+        prizeProductId: string;
+        prizeName: string;
+        prizeImageUrl: string | null;
+        prizeSku: string;
+        prizeIpId: string;
+        prizeCategory: string;
+        rarity: string;
+        weight: number;
+        initialQuantity: number | null;
+        remainingQuantity: number | null;
+      }>;
+    };
+    const createDrawDraft = async (reason: string) => app.inject({
+      method: "POST",
+      url: `/v1/admin/products/${drawProductId}/draw-versions`,
+      headers: mutation(superAdmin.token, reason),
+      payload: { entries: [{ prizeProductId, rarity: "A", weight: 1, quantity: 3 }] },
+    });
+    const createdDrawDraft = await createDrawDraft("유한 추첨 확률표 초안 생성");
+    assert.equal(createdDrawDraft.statusCode, 201, createdDrawDraft.body);
+    const drawDraft = createdDrawDraft.json() as DrawDraftResponse;
+    assert.equal(drawDraft.version, 1);
+    const { id: drawEntryId, ...drawEntrySnapshot } = drawDraft.entries[0]!;
+    assert.match(drawEntryId, /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i);
+    assert.deepEqual(drawEntrySnapshot, {
+      prizeProductId,
+      prizeName: prizeProductName,
+      prizeImageUrl: prizeProductImageUrl,
+      prizeSku: prizeProductSku,
+      prizeIpId: ipId,
+      prizeCategory: "figure",
+      rarity: "A",
+      weight: 1,
+      initialQuantity: 3,
+      remainingQuantity: 3,
+    });
+    const publishReason = "유한 추첨 확률표 공개";
+    const publishedDraw = await app.inject({
+      method: "POST",
+      url: `/v1/admin/products/${drawProductId}/draw-versions/${drawDraft.id}/publish`,
+      headers: mutation(superAdmin.token, publishReason),
+      payload: { reason: publishReason },
+    });
+    assert.equal(publishedDraw.statusCode, 200, publishedDraw.body);
+    assert.equal((publishedDraw.json() as { status: string }).status, "ACTIVE");
+
+    const renamedPrizeName = `변경된 경품 ${suffix}`;
+    const renamedPrizeImageUrl = `https://cdn.example.test/prizes/${suffix}-changed.png`;
+    await pool.query(
+      "UPDATE catalog_products SET name=$2,image_url=$3 WHERE id=$1",
+      [prizeProductId, renamedPrizeName, renamedPrizeImageUrl],
+    );
+    const publicOdds = await app.inject({ method: "GET", url: `/v1/catalog/products/${drawProductId}/draw-odds` });
+    assert.equal(publicOdds.statusCode, 200, publicOdds.body);
+    const publicOddsEntry = (publicOdds.json() as { entries: Array<Record<string, unknown>> }).entries[0]!;
+    assert.deepEqual({
+      prizeName: publicOddsEntry.prizeName,
+      prizeImageUrl: publicOddsEntry.prizeImageUrl,
+      prizeSku: publicOddsEntry.prizeSku,
+      prizeIpId: publicOddsEntry.prizeIpId,
+      prizeCategory: publicOddsEntry.prizeCategory,
+    }, {
+      prizeName: prizeProductName,
+      prizeImageUrl: prizeProductImageUrl,
+      prizeSku: prizeProductSku,
+      prizeIpId: ipId,
+      prizeCategory: "figure",
+    });
+    const adminDrawVersions = await app.inject({
+      method: "GET",
+      url: `/v1/admin/products/${drawProductId}/draw-versions`,
+      headers: auth(superAdmin.token),
+    });
+    assert.equal(adminDrawVersions.statusCode, 200, adminDrawVersions.body);
+    const adminSnapshot = (adminDrawVersions.json() as { items: Array<{ entries: Array<Record<string, unknown>> }> }).items[0]!.entries[0]!;
+    assert.equal(adminSnapshot.prizeName, prizeProductName);
+    assert.equal(adminSnapshot.prizeImageUrl, prizeProductImageUrl);
+
+    const staleDraftResponse = await createDrawDraft("교체 확률표 초안 생성");
+    assert.equal(staleDraftResponse.statusCode, 201, staleDraftResponse.body);
+    const staleDraft = staleDraftResponse.json() as DrawDraftResponse;
+    const latestDraftResponse = await createDrawDraft("최신 확률표 초안 생성");
+    assert.equal(latestDraftResponse.statusCode, 201, latestDraftResponse.body);
+    const latestDraft = latestDraftResponse.json() as DrawDraftResponse;
+    assert.equal(staleDraft.version, 2);
+    assert.equal(latestDraft.version, 3);
+    const stalePublishReason = "오래된 확률표 공개 거부";
+    const stalePublish = await app.inject({
+      method: "POST",
+      url: `/v1/admin/products/${drawProductId}/draw-versions/${staleDraft.id}/publish`,
+      headers: mutation(superAdmin.token, stalePublishReason),
+      payload: { reason: stalePublishReason },
+    });
+    assert.equal(stalePublish.statusCode, 409, stalePublish.body);
+    assert.match(stalePublish.body, /더 최신 확률표 버전/);
+    const drawVersionStates = await pool.query<{ id: string; status: string }>(
+      "SELECT id,status FROM draw_probability_versions WHERE product_id=$1 ORDER BY version",
       [drawProductId],
     );
-    await pool.query(
-      "INSERT INTO draw_pool_entries(probability_version_id,prize_product_id,rarity,weight,initial_quantity,remaining_quantity) VALUES($1,$2,'A',1,3,3)",
-      [drawVersion.rows[0]!.id, prizeProductId],
-    );
-    await pool.query(
-      "UPDATE draw_probability_versions SET status='ACTIVE',published_by=$2,published_at=now() WHERE id=$1",
-      [drawVersion.rows[0]!.id, superAdmin.id],
-    );
+    assert.deepEqual(drawVersionStates.rows, [
+      { id: drawDraft.id, status: "ACTIVE" },
+      { id: staleDraft.id, status: "DRAFT" },
+      { id: latestDraft.id, status: "DRAFT" },
+    ]);
     const overCapacity = await app.inject({
       method: "POST",
       url: `/v1/admin/commerce/inventory/${drawProductId}/adjustments`,

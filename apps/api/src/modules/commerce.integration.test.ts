@@ -95,12 +95,13 @@ test(
       price: number,
       onHand: number,
       label: string,
+      isPrizeOnly = false,
     ) => {
       const productId = `${label}-${suffix}-${sequence++}`.toLowerCase();
       await pool.query(
-        `INSERT INTO catalog_products(id,sku,ip_id,category,name,price)
-         VALUES($1,$2,$3,$4,$5,$6)`,
-        [productId, `${label}-${suffix}-${sequence}`.toUpperCase(), ipId, category, `${label} ${suffix}`, price],
+        `INSERT INTO catalog_products(id,sku,ip_id,category,name,price,is_prize_only)
+         VALUES($1,$2,$3,$4,$5,$6,$7)`,
+        [productId, `${label}-${suffix}-${sequence}`.toUpperCase(), ipId, category, `${label} ${suffix}`, price, isPrizeOnly],
       );
       await pool.query("INSERT INTO product_stock(product_id,on_hand,reserved) VALUES($1,$2,0)", [productId, onHand]);
       return productId;
@@ -246,7 +247,52 @@ test(
     assert.deepEqual(movedAfterReview.rows[0], { owner_id: newOwner.actor.userId, status: "OWNED" });
 
     const drawProduct = await createProduct("gacha", 3_000, 1, "draw");
-    const prizeProduct = await createProduct("figure", 0, 200, "prize");
+    const prizeProduct = await createProduct("figure", 0, 200, "prize", true);
+    const prizeBoundaryUser = await createSession("prize-boundary");
+    const publicCatalog = await app.inject({
+      method: "GET",
+      url: `/v1/catalog/products?ipId=${encodeURIComponent(ipId)}&limit=100`,
+    });
+    assert.equal(publicCatalog.statusCode, 200, publicCatalog.body);
+    assert.equal(
+      (publicCatalog.json() as { items: Array<{ id: string }> }).items.some((item) => item.id === prizeProduct),
+      false,
+    );
+    const prizeWishlist = await app.inject({
+      method: "POST",
+      url: `/v1/account/wishlist/${prizeProduct}`,
+      headers: {
+        authorization: `Bearer ${prizeBoundaryUser.token}`,
+        "idempotency-key": `wishlist-prize-${randomUUID()}`,
+      },
+    });
+    assert.equal(prizeWishlist.statusCode, 404, prizeWishlist.body);
+    await pool.query(
+      "INSERT INTO wishlist_items(user_id,product_id) VALUES($1,$2)",
+      [prizeBoundaryUser.actor.userId, prizeProduct],
+    );
+    const prizeWishlistRead = await app.inject({
+      method: "GET",
+      url: "/v1/account/wishlist",
+      headers: { authorization: `Bearer ${prizeBoundaryUser.token}` },
+    });
+    assert.equal(prizeWishlistRead.statusCode, 200, prizeWishlistRead.body);
+    assert.equal(
+      (prizeWishlistRead.json() as { items: Array<{ productId: string }> }).items
+        .some((item) => item.productId === prizeProduct),
+      false,
+    );
+    const prizeOrder = await app.inject({
+      method: "POST",
+      url: "/v1/orders",
+      headers: {
+        authorization: `Bearer ${prizeBoundaryUser.token}`,
+        "idempotency-key": `order-prize-${randomUUID()}`,
+      },
+      payload: { items: [{ productId: prizeProduct, quantity: 1 }], pointAmount: 0 },
+    });
+    assert.equal(prizeOrder.statusCode, 409, prizeOrder.body);
+    assert.match(prizeOrder.body, /경품 전용 상품은 직접 구매할 수 없습니다/);
     const publisher = await createSession("draw-publisher");
     const createDrawVersion = async (version: number, quantity: number) => {
       const created = await pool.query<{ id: string }>(
@@ -254,11 +300,24 @@ test(
         [drawProduct, version],
       );
       const versionId = created.rows[0]!.id;
+      const prizeSnapshot = await pool.query<{
+        name: string; image_url: string | null; sku: string; ip_id: string; category: string;
+      }>("SELECT name,image_url,sku,ip_id,category FROM catalog_products WHERE id=$1", [prizeProduct]);
       await pool.query(
         `INSERT INTO draw_pool_entries
-          (probability_version_id,prize_product_id,rarity,weight,initial_quantity,remaining_quantity)
-         VALUES($1,$2,'A',1,$3,$3)`,
-        [versionId, prizeProduct, quantity],
+          (probability_version_id,prize_product_id,prize_name_snapshot,prize_image_url_snapshot,
+           prize_sku_snapshot,prize_ip_id_snapshot,prize_category_snapshot,rarity,weight,initial_quantity,remaining_quantity)
+         VALUES($1,$2,$3,$4,$5,$6,$7,'A',1,$8,$8)`,
+        [
+          versionId,
+          prizeProduct,
+          prizeSnapshot.rows[0]!.name,
+          prizeSnapshot.rows[0]!.image_url,
+          prizeSnapshot.rows[0]!.sku,
+          prizeSnapshot.rows[0]!.ip_id,
+          prizeSnapshot.rows[0]!.category,
+          quantity,
+        ],
       );
       await pool.query(
         `UPDATE draw_probability_versions

@@ -616,7 +616,7 @@ paths:
           schema: { type: string, format: uuid }
       responses:
         "200":
-          description: Active products with server-owned price and availability.
+          description: Active, customer-sellable products with server-owned price and availability. Prize-only records are excluded.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/CatalogProductPage" }
@@ -2054,6 +2054,10 @@ paths:
         - name: characterId
           in: query
           schema: { type: string, format: uuid }
+        - name: prizeOnly
+          in: query
+          description: Filter by immutable prize-only catalog role.
+          schema: { type: boolean }
       responses:
         "200":
           description: Full product catalog including inactive rows.
@@ -2079,6 +2083,22 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/CatalogProduct" }
   /v1/admin/products/{productId}:
+    get:
+      tags: [Admin]
+      operationId: getAdminProduct
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: productId
+          in: path
+          required: true
+          schema: { type: string, maxLength: 120 }
+      responses:
+        "200":
+          description: Product detail including inactive and prize-only records.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CatalogProduct" }
+        "404": { $ref: "#/components/responses/NotFound" }
     patch:
       tags: [Admin]
       operationId: updateAdminProduct
@@ -3279,7 +3299,7 @@ components:
     CatalogProduct:
       type: object
       additionalProperties: false
-      required: [id, sku, ipId, characterIds, category, name, manufacturer, price, availableQuantity, metadata, imageUrl, isActive, version, createdAt, updatedAt]
+      required: [id, sku, ipId, characterIds, category, name, manufacturer, price, availableQuantity, metadata, imageUrl, isActive, isPrizeOnly, version, createdAt, updatedAt]
       properties:
         id: { type: string, pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$" }
         sku: { type: string }
@@ -3294,6 +3314,7 @@ components:
         metadata: { type: object, additionalProperties: true }
         imageUrl: { type: [string, "null"], format: uri }
         isActive: { type: boolean }
+        isPrizeOnly: { type: boolean }
         version: { type: integer, minimum: 1 }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
@@ -3316,6 +3337,9 @@ components:
         metadata: { type: object, additionalProperties: true }
         imageUrl: { type: [string, "null"], format: uri }
         isActive: { type: boolean }
+        isPrizeOnly:
+          type: boolean
+          description: 경품 전용 카탈로그 레코드입니다. 생략 시 false이며 생성 후 변경할 수 없습니다.
         expectedVersion: { type: integer, minimum: 1 }
     CatalogProductPage:
       allOf:
@@ -3574,12 +3598,17 @@ components:
     DrawResult:
       type: object
       additionalProperties: false
-      required: [id, entitlementId, productId, prizeProductId, prizeInventoryUnitId, probabilityVersion, rarity, committedAt]
+      required: [id, entitlementId, productId, prizeProductId, prizeName, prizeImageUrl, prizeSku, prizeIpId, prizeCategory, prizeInventoryUnitId, probabilityVersion, rarity, committedAt]
       properties:
         id: { type: string, format: uuid }
         entitlementId: { type: string, format: uuid }
         productId: { type: string, maxLength: 120 }
         prizeProductId: { type: string, maxLength: 120 }
+        prizeName: { type: string, maxLength: 240 }
+        prizeImageUrl: { type: [string, "null"], format: uri }
+        prizeSku: { type: string, maxLength: 80 }
+        prizeIpId: { type: string, maxLength: 120 }
+        prizeCategory: { $ref: "#/components/schemas/ProductCategory" }
         prizeInventoryUnitId: { type: string, format: uuid }
         probabilityVersion: { type: integer, minimum: 1 }
         rarity: { type: string }
@@ -3587,10 +3616,15 @@ components:
     DrawPoolEntry:
       type: object
       additionalProperties: false
-      required: [id, prizeProductId, rarity, weight, initialQuantity, remainingQuantity]
+      required: [id, prizeProductId, prizeName, prizeImageUrl, prizeSku, prizeIpId, prizeCategory, rarity, weight, initialQuantity, remainingQuantity]
       properties:
         id: { type: string, format: uuid }
         prizeProductId: { type: string, maxLength: 120 }
+        prizeName: { type: string, maxLength: 240 }
+        prizeImageUrl: { type: [string, "null"], format: uri }
+        prizeSku: { type: string, maxLength: 80 }
+        prizeIpId: { type: string, maxLength: 120 }
+        prizeCategory: { $ref: "#/components/schemas/ProductCategory" }
         rarity: { type: string, minLength: 1, maxLength: 40 }
         weight: { type: integer, minimum: 1, maximum: 1000000 }
         initialQuantity: { type: [integer, "null"], minimum: 1, maximum: 10000 }
@@ -3826,12 +3860,15 @@ components:
     PublicDrawOddsEntry:
       type: object
       additionalProperties: false
-      required: [id, prizeProductId, prizeName, prizeImageUrl, rarity, weight, initialQuantity, remainingQuantity, effectiveWeight, probabilityNumerator, probabilityDenominator, probabilityPercent]
+      required: [id, prizeProductId, prizeName, prizeImageUrl, prizeSku, prizeIpId, prizeCategory, rarity, weight, initialQuantity, remainingQuantity, effectiveWeight, probabilityNumerator, probabilityDenominator, probabilityPercent]
       properties:
         id: { type: string, format: uuid }
         prizeProductId: { type: string, maxLength: 120 }
         prizeName: { type: string }
         prizeImageUrl: { type: [string, "null"], format: uri }
+        prizeSku: { type: string, maxLength: 80 }
+        prizeIpId: { type: string, maxLength: 120 }
+        prizeCategory: { $ref: "#/components/schemas/ProductCategory" }
         rarity: { type: string }
         weight: { type: integer, minimum: 1 }
         initialQuantity: { type: [integer, "null"], minimum: 1 }

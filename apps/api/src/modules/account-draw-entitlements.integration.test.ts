@@ -58,13 +58,15 @@ test(
     const productId = `draw-ticket-${suffix}`;
     const prizeProductId = `draw-prize-${suffix}`;
     const imageUrl = `https://cdn.example.test/${productId}.png`;
+    const prizeSku = `PRIZE-${suffix}`.toUpperCase();
+    const prizeName = `복원 테스트 경품 ${suffix}`;
     await pool.query(
       "INSERT INTO catalog_ips(id,slug,name_ko,name_en) VALUES($1,$2,$3,$4)",
       [ipId, ipId, `추첨권 복원 IP ${suffix}`, `Draw Restore ${suffix}`],
     );
     await pool.query(
-      `INSERT INTO catalog_products(id,sku,ip_id,category,name,price,image_url)
-       VALUES($1,$2,$3,'gacha',$4,1000,$5),($6,$7,$3,'figure',$8,0,NULL)`,
+      `INSERT INTO catalog_products(id,sku,ip_id,category,name,price,image_url,is_prize_only)
+       VALUES($1,$2,$3,'gacha',$4,1000,$5,false),($6,$7,$3,'figure',$8,0,NULL,true)`,
       [
         productId,
         `DRAW-${suffix}`.toUpperCase(),
@@ -72,8 +74,8 @@ test(
         `새로고침 복원 추첨 ${suffix}`,
         imageUrl,
         prizeProductId,
-        `PRIZE-${suffix}`.toUpperCase(),
-        `복원 테스트 경품 ${suffix}`,
+        prizeSku,
+        prizeName,
       ],
     );
     await pool.query(
@@ -86,9 +88,10 @@ test(
     );
     await pool.query(
       `INSERT INTO draw_pool_entries(
-        probability_version_id,prize_product_id,rarity,weight,initial_quantity,remaining_quantity
-      ) VALUES($1,$2,'A',1,NULL,NULL)`,
-      [version.rows[0]!.id, prizeProductId],
+        probability_version_id,prize_product_id,prize_name_snapshot,prize_image_url_snapshot,
+        prize_sku_snapshot,prize_ip_id_snapshot,prize_category_snapshot,rarity,weight,initial_quantity,remaining_quantity
+      ) VALUES($1,$2,$3,NULL,$4,$5,'figure','A',1,NULL,NULL)`,
+      [version.rows[0]!.id, prizeProductId, prizeName, prizeSku, ipId],
     );
     await pool.query(
       `UPDATE draw_probability_versions

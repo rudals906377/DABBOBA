@@ -1438,7 +1438,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        get: operations["getAdminProduct"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2328,6 +2328,7 @@ export interface components {
             /** Format: uri */
             imageUrl: string | null;
             isActive: boolean;
+            isPrizeOnly: boolean;
             version: number;
             /** Format: date-time */
             createdAt: string;
@@ -2352,6 +2353,8 @@ export interface components {
             /** Format: uri */
             imageUrl?: string | null;
             isActive: boolean;
+            /** @description 경품 전용 카탈로그 레코드입니다. 생략 시 false이며 생성 후 변경할 수 없습니다. */
+            isPrizeOnly?: boolean;
             expectedVersion?: number;
         };
         CatalogProductPage: components["schemas"]["PageMeta"] & {
@@ -2581,6 +2584,12 @@ export interface components {
             entitlementId: string;
             productId: string;
             prizeProductId: string;
+            prizeName: string;
+            /** Format: uri */
+            prizeImageUrl: string | null;
+            prizeSku: string;
+            prizeIpId: string;
+            prizeCategory: components["schemas"]["ProductCategory"];
             /** Format: uuid */
             prizeInventoryUnitId: string;
             probabilityVersion: number;
@@ -2592,6 +2601,12 @@ export interface components {
             /** Format: uuid */
             id: string;
             prizeProductId: string;
+            prizeName: string;
+            /** Format: uri */
+            prizeImageUrl: string | null;
+            prizeSku: string;
+            prizeIpId: string;
+            prizeCategory: components["schemas"]["ProductCategory"];
             rarity: string;
             weight: number;
             initialQuantity: number | null;
@@ -2774,6 +2789,9 @@ export interface components {
             prizeName: string;
             /** Format: uri */
             prizeImageUrl: string | null;
+            prizeSku: string;
+            prizeIpId: string;
+            prizeCategory: components["schemas"]["ProductCategory"];
             rarity: string;
             weight: number;
             initialQuantity: number | null;
@@ -4330,7 +4348,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Active products with server-owned price and availability. */
+            /** @description Active, customer-sellable products with server-owned price and availability. Prize-only records are excluded. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -6322,6 +6340,8 @@ export interface operations {
                 category?: components["schemas"]["ProductCategory"];
                 ipId?: string;
                 characterId?: string;
+                /** @description Filter by immutable prize-only catalog role. */
+                prizeOnly?: boolean;
             };
             header?: never;
             path?: never;
@@ -6365,6 +6385,29 @@ export interface operations {
                     "application/json": components["schemas"]["CatalogProduct"];
                 };
             };
+        };
+    };
+    getAdminProduct: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                productId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Product detail including inactive and prize-only records. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CatalogProduct"];
+                };
+            };
+            404: components["responses"]["NotFound"];
         };
     };
     updateAdminProduct: {

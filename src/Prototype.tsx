@@ -10138,10 +10138,10 @@ function DrawFooter({
         ownerId: currentUserId,
         catalogItemId: serverResult ? `catalog-${serverResult.prizeProductId}` : `draw-result-${product.id}-${grade.toLowerCase()}`,
         productId: serverResult?.prizeProductId ?? product.id,
-        ipId: prizeProduct?.ipId ?? product.ipId,
-        categoryId: prizeProduct?.categoryId ?? product.categoryId,
-        itemName: prizeProduct?.title ?? (serverResult ? `${grade} · ${serverResult.prizeProductId}` : `${grade}상 · ${rewardForGrade(product, grade as PrizeGrade)}`),
-        itemImage: prizeProduct?.asset ?? product.asset,
+        ipId: serverResult?.prizeIpId ?? prizeProduct?.ipId ?? product.ipId,
+        categoryId: serverResult?.prizeCategory ?? prizeProduct?.categoryId ?? product.categoryId,
+        itemName: serverResult?.prizeName ?? prizeProduct?.title ?? `${grade}상 · ${rewardForGrade(product, grade as PrizeGrade)}`,
+        itemImage: serverResult?.prizeImageUrl ?? prizeProduct?.asset ?? product.asset,
         appReferenceValue: prizeProduct?.price ?? product.price,
         source: product.categoryId === "kuji" ? "kuji" : "gacha",
         acquiredAt: serverResult ? serverDateLabel(serverResult.committedAt) : sessionDateLabel(),
@@ -10380,12 +10380,13 @@ function DrawFooter({
       >
         <div className="result-card">
           <span className="result-grade">{resultGrade}</span>
-          <img src={committedPrizeProduct?.asset ?? product.asset} alt="" decoding="async" draggable={false} />
+          <img src={committedDrawResult?.prizeImageUrl ?? committedPrizeProduct?.asset ?? product.asset} alt="" decoding="async" draggable={false} />
           <div>
             <small>{committedPrizeProduct?.line ?? product.line}</small>
             <strong>
-              {committedPrizeProduct?.title
-                ?? (committedDrawResult ? `${committedDrawResult.rarity} · ${committedDrawResult.prizeProductId}` : rewardForGrade(product, localResultGrade))}
+              {committedDrawResult?.prizeName
+                ?? committedPrizeProduct?.title
+                ?? rewardForGrade(product, localResultGrade)}
             </strong>
           </div>
         </div>

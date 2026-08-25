@@ -34,12 +34,18 @@ export function CharacterForm({ item, returnTo }: { item?: Character; returnTo: 
   </form>;
 }
 
-export function ProductForm({ item, returnTo, initialName }: { item?: CatalogProduct; returnTo: string; initialName?: string }) {
+export function ProductForm({ item, returnTo, initialName, initialIpId, initialPrizeOnly = false }: {
+  item?: CatalogProduct;
+  returnTo: string;
+  initialName?: string;
+  initialIpId?: string;
+  initialPrizeOnly?: boolean;
+}) {
   const action = item ? updateProduct : createProduct;
   return <form className="stack-form" action={action}>
     {item ? <><input type="hidden" name="productId" value={item.id} /><input type="hidden" name="expectedVersion" value={item.version} /></> : null}<ReturnTo value={returnTo} />
     <div className="field-grid">
-      <label>SKU<input name="sku" defaultValue={item?.sku} maxLength={80} required /></label><label>IP ID<input name="ipId" defaultValue={item?.ipId} maxLength={120} required /></label>
+      <label>SKU<input name="sku" defaultValue={item?.sku} maxLength={80} required /></label><label>IP ID<input name="ipId" defaultValue={item?.ipId || initialIpId} maxLength={120} required /></label>
       {item ? <>
         <label>카테고리<input value={item.category} readOnly aria-readonly="true" title="카테고리 변경은 새 SKU 등록으로 처리합니다." /></label>
         <input type="hidden" name="category" value={item.category} />
@@ -53,6 +59,15 @@ export function ProductForm({ item, returnTo, initialName }: { item?: CatalogPro
       <label className="span-2">메타데이터 JSON<textarea name="metadata" defaultValue={JSON.stringify(item?.metadata || {}, null, 2)} required /></label>
       <label className="span-2">이미지 URL<input type="url" name="imageUrl" defaultValue={item?.imageUrl || ""} maxLength={2000} /></label>
       <label className="check-field"><input type="checkbox" name="isActive" defaultChecked={item?.isActive ?? true} /> 활성</label>
+      {item ? <div className="span-2 immutable-field">
+        <input type="hidden" name="isPrizeOnly" value={item.isPrizeOnly ? "on" : "off"} />
+        <span>상품 용도</span>
+        <strong>{item.isPrizeOnly ? "경품 전용 SKU" : "판매 상품 SKU"}</strong>
+        <small>상품 용도는 생성 후 바꿀 수 없습니다. 용도가 달라지면 새 SKU를 등록하세요.</small>
+      </div> : <label className="span-2 check-field product-kind-field">
+        <input type="checkbox" name="isPrizeOnly" defaultChecked={initialPrizeOnly} />
+        <span><strong>경품 전용 SKU</strong><small>체크하면 공개 상품 목록과 일반 주문에서 제외되고, 같은 IP의 가챠·쿠지 경품 후보로만 사용됩니다. 생성 후 변경할 수 없습니다.</small></span>
+      </label>}
     </div>
     <ReasonField label={item ? "수정 사유" : "등록 사유"} /><div className="form-actions"><button className="primary">{item ? "상품 수정" : "상품 등록"}</button></div>
   </form>;

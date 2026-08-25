@@ -570,7 +570,7 @@ export async function registerAccountRoutes(app: FastifyInstance, context: ApiCo
   app.get("/v1/account/wishlist", { preHandler: context.auth.requireUser }, async (request) => {
     const { limit, cursor } = pagination(queryOf(request));
     const values: unknown[] = [request.actor!.userId, limit + 1];
-    const filters = ["w.user_id=$1"];
+    const filters = ["w.user_id=$1", "p.is_prize_only=false"];
     if (cursor) {
       values.push(cursor.createdAt, cursor.id);
       filters.push(`(w.created_at,w.id)<($${values.length - 1},$${values.length})`);
@@ -591,7 +591,10 @@ export async function registerAccountRoutes(app: FastifyInstance, context: ApiCo
       key: idempotencyKey(request.headers),
       payload: { productId },
       work: async (client) => {
-        const product = await client.query("SELECT 1 FROM catalog_products WHERE id=$1 AND is_active=true", [productId]);
+        const product = await client.query(
+          "SELECT 1 FROM catalog_products WHERE id=$1 AND is_active=true AND is_prize_only=false",
+          [productId],
+        );
         if (!product.rowCount) throw notFound("상품을 찾을 수 없습니다.");
         await client.query(
           "INSERT INTO wishlist_items(user_id,product_id) VALUES($1,$2) ON CONFLICT (user_id,product_id) DO NOTHING",

@@ -1,30 +1,94 @@
+import { randomUUID } from "node:crypto";
 import Link from "next/link";
-import { PageHeader, ReasonField, ReturnTo, StatusBadge, formatDate, shortId } from "../../../../../../components/operations";
-import { createDrawVersion, publishDrawVersion } from "../../../../../../lib/actions";
-import { adminApi } from "../../../../../../lib/api";
+import { DrawVersionForm } from "../../../../../../components/draw-version-form";
+import { EmptyState, Feedback, PageHeader, ReasonField, ReturnTo, StatusBadge, formatDate } from "../../../../../../components/operations";
+import { publishDrawVersion } from "../../../../../../lib/actions";
+import { adminApi, queryString } from "../../../../../../lib/api";
 import { requireCapability } from "../../../../../../lib/auth";
-import type { DrawProbabilityVersionList, SearchParams } from "../../../../../../lib/admin-types";
+import type { CatalogProduct, CursorPage, DrawProbabilityVersionList, SearchParams } from "../../../../../../lib/admin-types";
 
-const EXAMPLE_ENTRIES = JSON.stringify([
-  { prizeProductId: "prize-product-a", rarity: "A", weight: 10, quantity: 5 },
-  { prizeProductId: "prize-product-b", rarity: "B", weight: 30, quantity: 20 },
-], null, 2);
+async function loadPrizeProducts(token: string, ipId: string) {
+  const items: CatalogProduct[] = [];
+  const seenCursors = new Set<string>();
+  let cursor: string | null = null;
+  do {
+    const candidatePage: CursorPage<CatalogProduct> = await adminApi<CursorPage<CatalogProduct>>(`/v1/admin/products${queryString({
+      ipId,
+      prizeOnly: "true",
+      limit: "100",
+      cursor,
+    })}`, { token });
+    items.push(...candidatePage.items);
+    cursor = candidatePage.nextCursor;
+    if (cursor && seenCursors.has(cursor)) throw new Error("경품 SKU 목록 페이지가 반복되었습니다. 잠시 후 다시 시도하세요.");
+    if (cursor) seenCursors.add(cursor);
+  } while (cursor);
+  return items;
+}
 
-export default async function DrawVersionsPage({ params }: { params: Promise<{ productId: string }>; searchParams: Promise<SearchParams> }) {
-  const { productId } = await params;
+export default async function DrawVersionsPage({ params, searchParams }: {
+  params: Promise<{ productId: string }>;
+  searchParams: Promise<SearchParams>;
+}) {
+  const [{ productId }, query] = await Promise.all([params, searchParams]);
   const session = await requireCapability("catalog.manage");
-  const result = await adminApi<DrawProbabilityVersionList>(`/v1/admin/products/${encodeURIComponent(productId)}/draw-versions`, { token: session.token });
+  const [product, result] = await Promise.all([
+    adminApi<CatalogProduct>(`/v1/admin/products/${encodeURIComponent(productId)}`, { token: session.token }),
+    adminApi<DrawProbabilityVersionList>(`/v1/admin/products/${encodeURIComponent(productId)}/draw-versions`, { token: session.token }),
+  ]);
+  const candidates = await loadPrizeProducts(session.token, product.ipId);
+  const prizeProducts = candidates.filter((candidate) => (
+    candidate.id !== product.id
+    && candidate.isPrizeOnly
+    && candidate.isActive
+    && candidate.ipId === product.ipId
+  ));
   const returnTo = `/catalog/products/${encodeURIComponent(productId)}/draws`;
+
   return <>
-    <PageHeader eyebrow="IMMUTABLE DRAW CONFIG" title="가챠·쿠지 확률표" description={`상품 ${shortId(productId)} · 공개 후 구성은 변경할 수 없고 새 버전으로만 교체합니다.`} actions={<Link className="button-link" href="/catalog/products">상품 목록</Link>} />
-    <section className="panel"><div className="panel-heading"><div><h2>새 초안</h2><p>weight와 현재 남은 수량을 곱한 값이 실제 추첨 가중치입니다. 무제한 경품은 quantity를 null로 입력하세요.</p></div></div>
-      <form className="stack-form" action={createDrawVersion}><input type="hidden" name="productId" value={productId} /><ReturnTo value={returnTo} />
-        <label>경품 구성 JSON<textarea name="entries" defaultValue={EXAMPLE_ENTRIES} maxLength={100000} required /></label><ReasonField label="초안 생성 사유" /><div className="form-actions"><button className="primary">확률표 초안 생성</button></div>
-      </form>
+    <PageHeader
+      eyebrow="IMMUTABLE DRAW CONFIG"
+      title="가챠·쿠지 확률표"
+      description={`${product.name} · 공개 후 구성은 변경할 수 없고 새 버전으로만 교체합니다. 판매 가용 수량 ${product.availableQuantity.toLocaleString("ko-KR")}개`}
+      actions={<Link className="button-link" href="/catalog/products">상품 목록</Link>}
+    />
+    <Feedback searchParams={query} />
+    <section className="panel">
+      <div className="panel-heading"><div><h2>새 초안</h2><p>동일 IP의 활성 경품 전용 SKU만 선택할 수 있습니다. 기본 가중치 × 남은 수량이 현재 유효 가중치입니다.</p></div></div>
+      <DrawVersionForm
+        product={product}
+        prizeProducts={prizeProducts}
+        returnTo={returnTo}
+        idempotencyKey={randomUUID()}
+      />
     </section>
-    {result.items.map((version) => <section className="panel" key={version.id}><div className="panel-heading"><div><h2>버전 {version.version} <StatusBadge value={version.status} /></h2><p>생성 {formatDate(version.createdAt)}{version.publishedAt ? ` · 공개 ${formatDate(version.publishedAt)}` : ""} · 유효 가중치 {version.totalEffectiveWeight.toLocaleString("ko-KR")}</p></div></div>
-      <div className="data-panel"><table className="data-table"><thead><tr><th>경품 상품</th><th>등급</th><th>기본 가중치</th><th>초기/남은 수량</th><th>현재 비율</th></tr></thead><tbody>{version.entries.map((entry) => { const effective = entry.weight * (entry.remainingQuantity ?? 1); const percentage = version.totalEffectiveWeight ? effective / version.totalEffectiveWeight * 100 : 0; return <tr key={entry.id}><td>{entry.prizeProductId}<br /><span className="muted">{shortId(entry.id)}</span></td><td>{entry.rarity}</td><td>{entry.weight.toLocaleString("ko-KR")}</td><td>{entry.initialQuantity === null ? "무제한" : `${entry.initialQuantity} / ${entry.remainingQuantity}`}</td><td>{percentage.toFixed(4)}%</td></tr>; })}</tbody></table></div>
-      {version.status === "DRAFT" ? <form className="stack-form" action={publishDrawVersion}><input type="hidden" name="productId" value={productId} /><input type="hidden" name="versionId" value={version.id} /><ReturnTo value={returnTo} /><ReasonField label="공개 사유" /><div className="form-actions"><button className="danger">이 버전 공개</button></div></form> : null}
+    {result.items.length === 0 ? <section className="data-panel"><EmptyState title="아직 확률표 버전이 없습니다." description="경품 SKU와 실제 검수 재고를 확인한 뒤 첫 초안을 만드세요." /></section> : null}
+    {result.items.map((version) => <section className="panel" key={version.id}>
+      <div className="panel-heading"><div><h2>버전 {version.version} <StatusBadge value={version.status} /></h2><p>생성 {formatDate(version.createdAt)}{version.publishedAt ? ` · 공개 ${formatDate(version.publishedAt)}` : ""} · 유효 가중치 {version.totalEffectiveWeight.toLocaleString("ko-KR")}</p></div></div>
+      <div className="data-panel"><table className="data-table">
+        <thead><tr><th>경품 상품</th><th>등급</th><th>기본 가중치</th><th>초기/남은 수량</th><th>현재 비율</th></tr></thead>
+        <tbody>{version.entries.map((entry) => {
+          const effective = entry.weight * (entry.remainingQuantity ?? 1);
+          const percentage = version.totalEffectiveWeight ? effective / version.totalEffectiveWeight * 100 : 0;
+          return <tr key={entry.id}>
+            <td className="wide-cell"><span className="draw-version-prize">
+              {entry.prizeImageUrl ? <img src={entry.prizeImageUrl} alt="" /> : <span className="draw-prize-image-placeholder" aria-hidden="true" />}
+              <span><strong>{entry.prizeName}</strong><small>SKU {entry.prizeSku} · IP {entry.prizeIpId}</small></span>
+            </span></td>
+            <td>{entry.rarity}</td>
+            <td>{entry.weight.toLocaleString("ko-KR")}</td>
+            <td>{entry.initialQuantity === null ? "무제한" : `${entry.initialQuantity.toLocaleString("ko-KR")} / ${entry.remainingQuantity?.toLocaleString("ko-KR") ?? 0}`}</td>
+            <td>{percentage.toLocaleString("ko-KR", { maximumFractionDigits: 6 })}%</td>
+          </tr>;
+        })}</tbody>
+      </table></div>
+      {version.status === "DRAFT" ? <form className="stack-form" action={publishDrawVersion}>
+        <input type="hidden" name="productId" value={productId} />
+        <input type="hidden" name="versionId" value={version.id} />
+        <ReturnTo value={returnTo} />
+        <ReasonField label="공개 사유" />
+        <div className="form-actions"><button className="danger">이 버전 공개</button></div>
+      </form> : null}
     </section>)}
   </>;
 }

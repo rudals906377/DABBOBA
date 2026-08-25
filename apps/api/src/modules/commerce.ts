@@ -13,7 +13,7 @@ import type { ApiContext } from "../types.js";
 
 type ProductOrderRow = {
   id: string; name: string; category: "gacha" | "figure" | "kuji" | "tcg"; price: number;
-  is_active: boolean; on_hand: number; reserved: number; probability_version_id: string | null;
+  is_active: boolean; is_prize_only: boolean; on_hand: number; reserved: number; probability_version_id: string | null;
   probability_version: number | null;
 };
 type OrderRow = {
@@ -35,6 +35,11 @@ type DrawVersionRow = {
   entries: Array<{
     id: string;
     prizeProductId: string;
+    prizeName: string;
+    prizeImageUrl: string | null;
+    prizeSku: string;
+    prizeIpId: string;
+    prizeCategory: "gacha" | "figure" | "kuji" | "tcg";
     rarity: string;
     weight: number;
     initialQuantity: number | null;
@@ -44,6 +49,112 @@ type DrawVersionRow = {
 
 function isDrawCategory(category: "gacha" | "figure" | "kuji" | "tcg") {
   return commerceModeForCategory(category) === "draw";
+}
+
+type DrawPrizeCatalogRow = {
+  id: string;
+  name: string;
+  image_url: string | null;
+  sku: string;
+  ip_id: string;
+  category: "gacha" | "figure" | "kuji" | "tcg";
+  is_active: boolean;
+  is_prize_only: boolean;
+};
+
+export type DrawPrizeSnapshot = {
+  id: string;
+  name: string;
+  imageUrl: string | null;
+  sku: string;
+  ipId: string;
+  category: DrawPrizeCatalogRow["category"];
+};
+
+type DrawPrizeSnapshotRow = {
+  prize_name_snapshot: string;
+  prize_image_url_snapshot: string | null;
+  prize_sku_snapshot: string;
+  prize_ip_id_snapshot: string;
+  prize_category_snapshot: DrawPrizeCatalogRow["category"];
+};
+
+export function assertDirectPurchaseAllowed(product: { name: string; isPrizeOnly: boolean }) {
+  if (product.isPrizeOnly) throw conflict(`경품 전용 상품은 직접 구매할 수 없습니다: ${product.name}`);
+}
+
+export function assertUniqueDrawPrizeProductIds(prizeProductIds: readonly string[]) {
+  const seen = new Set<string>();
+  for (const prizeProductId of prizeProductIds) {
+    if (seen.has(prizeProductId)) throw badRequest(`같은 경품 상품은 확률표에 한 번만 등록할 수 있습니다: ${prizeProductId}`);
+    seen.add(prizeProductId);
+  }
+}
+
+export async function loadValidatedDrawPrizeSnapshots(
+  client: Queryable,
+  input: { drawIpId: string; prizeProductIds: readonly string[] },
+): Promise<DrawPrizeSnapshot[]> {
+  assertUniqueDrawPrizeProductIds(input.prizeProductIds);
+  if (!input.prizeProductIds.length) throw conflict("경품 구성이 비어 있습니다.");
+  const sortedIds = [...input.prizeProductIds].sort();
+  const products = await client.query<DrawPrizeCatalogRow>(`SELECT p.id,p.name,p.image_url,p.sku,p.ip_id,p.category,p.is_active,p.is_prize_only
+    FROM catalog_products p
+    WHERE p.id=ANY($1::text[])
+    ORDER BY p.id
+    FOR SHARE OF p`, [sortedIds]);
+  const byId = new Map(products.rows.map((product) => [product.id, product]));
+  return input.prizeProductIds.map((prizeProductId) => {
+    const product = byId.get(prizeProductId);
+    if (!product) throw conflict(`경품 상품을 찾을 수 없습니다: ${prizeProductId}`);
+    if (!product.is_prize_only) throw conflict(`경품 전용 상품만 확률표 경품으로 등록할 수 있습니다: ${product.name} (${product.id})`);
+    if (!product.is_active) throw conflict(`비활성 경품 상품은 확률표에 등록하거나 공개할 수 없습니다: ${product.name} (${product.id})`);
+    if (product.ip_id !== input.drawIpId) throw conflict(`추첨 상품과 동일한 IP의 경품만 사용할 수 있습니다: ${product.name} (${product.id})`);
+    return { id: product.id, name: product.name, imageUrl: product.image_url, sku: product.sku, ipId: product.ip_id, category: product.category };
+  });
+}
+
+export async function assertLatestDrawDraft(
+  client: Queryable,
+  input: { productId: string; version: number },
+) {
+  const newer = await client.query<{ version: number }>(`SELECT version FROM draw_probability_versions
+    WHERE product_id=$1 AND version>$2
+    ORDER BY version DESC
+    LIMIT 1
+    FOR UPDATE`, [input.productId, input.version]);
+  if (newer.rowCount) {
+    const latestVersion = numberValue(newer.rows[0]!.version);
+    throw conflict(`더 최신 확률표 버전(v${latestVersion})이 있어 v${input.version} 초안을 공개할 수 없습니다.`);
+  }
+}
+
+export function drawPrizeSnapshotFields(row: DrawPrizeSnapshotRow) {
+  return {
+    prizeName: row.prize_name_snapshot,
+    prizeImageUrl: row.prize_image_url_snapshot,
+    prizeSku: row.prize_sku_snapshot,
+    prizeIpId: row.prize_ip_id_snapshot,
+    prizeCategory: row.prize_category_snapshot,
+  };
+}
+
+export function assertDrawPrizeSnapshotsCurrent(
+  entries: ReadonlyArray<{ prize_product_id: string } & DrawPrizeSnapshotRow>,
+  currentSnapshots: readonly DrawPrizeSnapshot[],
+) {
+  const currentById = new Map(currentSnapshots.map((snapshot) => [snapshot.id, snapshot]));
+  for (const entry of entries) {
+    const current = currentById.get(entry.prize_product_id);
+    if (!current
+      || entry.prize_name_snapshot !== current.name
+      || entry.prize_image_url_snapshot !== current.imageUrl
+      || entry.prize_sku_snapshot !== current.sku
+      || entry.prize_ip_id_snapshot !== current.ipId
+      || entry.prize_category_snapshot !== current.category) {
+      throw conflict(`경품 정보가 초안 생성 후 변경되었습니다. 최신 정보로 새 확률표 초안을 만들어 주세요: ${entry.prize_product_id}`);
+    }
+  }
 }
 
 export function refundRequiresReview(input:{unsafeAssetCount:number;expectedPurchaseUnits:number;actualPurchaseUnits:number;expectedDrawUnits?:number;actualDrawUnits?:number}){
@@ -204,18 +315,17 @@ export async function registerCommerceRoutes(app:FastifyInstance,context:ApiCont
     const version=await context.pool.query<{id:string;product_id:string;version:number;published_at:Date}>(`SELECT v.id,v.product_id,v.version,v.published_at
       FROM draw_probability_versions v
       JOIN catalog_products p ON p.id=v.product_id
-      WHERE v.product_id=$1 AND v.status='ACTIVE' AND p.is_active=true AND p.category IN ('gacha','kuji')`,[productId]);
+      WHERE v.product_id=$1 AND v.status='ACTIVE' AND p.is_active=true AND p.is_prize_only=false AND p.category IN ('gacha','kuji')`,[productId]);
     if(!version.rowCount)throw notFound("공개 중인 가챠·쿠지 확률표를 찾을 수 없습니다.");
     const active=version.rows[0]!;
-    const entries=await context.pool.query<{id:string;prize_product_id:string;prize_name:string;prize_image_url:string|null;rarity:string;weight:number;initial_quantity:number|null;remaining_quantity:number|null}>(`SELECT e.id,e.prize_product_id,p.name AS prize_name,p.image_url AS prize_image_url,e.rarity,e.weight,e.initial_quantity,e.remaining_quantity
+    const entries=await context.pool.query<{id:string;prize_product_id:string;rarity:string;weight:number;initial_quantity:number|null;remaining_quantity:number|null} & DrawPrizeSnapshotRow>(`SELECT e.id,e.prize_product_id,e.prize_name_snapshot,e.prize_image_url_snapshot,e.prize_sku_snapshot,e.prize_ip_id_snapshot,e.prize_category_snapshot,e.rarity,e.weight,e.initial_quantity,e.remaining_quantity
       FROM draw_pool_entries e
-      JOIN catalog_products p ON p.id=e.prize_product_id
       WHERE e.probability_version_id=$1
       ORDER BY e.rarity,e.id`,[active.id]);
     const weighted=entries.rows.map((entry)=>({entry,effectiveWeight:numberValue(entry.weight)*(entry.remaining_quantity===null?1:numberValue(entry.remaining_quantity))}));
     const totalEffectiveWeight=weighted.reduce((sum,item)=>sum+item.effectiveWeight,0);
     if(!Number.isSafeInteger(totalEffectiveWeight)||totalEffectiveWeight<=0)throw conflict("현재 확률표를 안전하게 계산할 수 없습니다.");
-    return{id:active.id,productId:active.product_id,version:numberValue(active.version),publishedAt:iso(active.published_at),calculatedAt:new Date().toISOString(),calculation:"WEIGHT_X_REMAINING_QUANTITY",totalEffectiveWeight,entries:weighted.map(({entry,effectiveWeight})=>({id:entry.id,prizeProductId:entry.prize_product_id,prizeName:entry.prize_name,prizeImageUrl:entry.prize_image_url,rarity:entry.rarity,weight:numberValue(entry.weight),initialQuantity:entry.initial_quantity===null?null:numberValue(entry.initial_quantity),remainingQuantity:entry.remaining_quantity===null?null:numberValue(entry.remaining_quantity),effectiveWeight,probabilityNumerator:effectiveWeight,probabilityDenominator:totalEffectiveWeight,probabilityPercent:Math.round((effectiveWeight/totalEffectiveWeight)*100_000_000)/1_000_000}))};
+    return{id:active.id,productId:active.product_id,version:numberValue(active.version),publishedAt:iso(active.published_at),calculatedAt:new Date().toISOString(),calculation:"WEIGHT_X_REMAINING_QUANTITY",totalEffectiveWeight,entries:weighted.map(({entry,effectiveWeight})=>({id:entry.id,prizeProductId:entry.prize_product_id,...drawPrizeSnapshotFields(entry),rarity:entry.rarity,weight:numberValue(entry.weight),initialQuantity:entry.initial_quantity===null?null:numberValue(entry.initial_quantity),remainingQuantity:entry.remaining_quantity===null?null:numberValue(entry.remaining_quantity),effectiveWeight,probabilityNumerator:effectiveWeight,probabilityDenominator:totalEffectiveWeight,probabilityPercent:Math.round((effectiveWeight/totalEffectiveWeight)*100_000_000)/1_000_000}))};
   });
 
   app.post("/v1/orders",{preHandler:context.auth.requireUser},async(request,reply)=>{
@@ -228,10 +338,10 @@ export async function registerCommerceRoutes(app:FastifyInstance,context:ApiCont
         (SELECT COALESCE(sum(r.quantity),0) FROM stock_reservations r JOIN orders o ON o.id=r.order_id WHERE o.user_id=$1 AND o.status='PENDING_PAYMENT' AND r.status='ACTIVE' AND r.expires_at>now()) AS active_unit_count`,[request.actor!.userId]);
       const activeProducts=await client.query<{product_id:string;quantity:string}>(`SELECT r.product_id,sum(r.quantity) AS quantity FROM stock_reservations r JOIN orders o ON o.id=r.order_id WHERE o.user_id=$1 AND o.status='PENDING_PAYMENT' AND r.status='ACTIVE' AND r.expires_at>now() GROUP BY r.product_id`,[request.actor!.userId]);const activeByProduct=new Map(activeProducts.rows.map((row)=>[row.product_id,numberValue(row.quantity)]));const pressureRow=pressure.rows[0]!;const violation=checkoutReservationViolation({attemptCount:numberValue(pressureRow.attempt_count),activeOrderCount:numberValue(pressureRow.active_order_count),activeUnitCount:numberValue(pressureRow.active_unit_count),requestedUnitCount:input.items.reduce((sum,item)=>sum+item.quantity,0),productQuantities:input.items.map((item)=>({active:activeByProduct.get(item.productId)||0,requested:item.quantity}))});
       if(violation==="ATTEMPT_RATE")throw new AppError(429,"CHECKOUT_RATE_LIMITED","15분 뒤 다시 주문해 주세요.");if(violation)throw conflict("미결제 재고 예약 한도를 초과했습니다. 기존 주문을 결제하거나 만료 후 다시 시도해 주세요.");
-      const productRows:ProductOrderRow[]=[];for(const item of input.items){const product=await client.query<ProductOrderRow>(`SELECT p.id,p.name,p.category,p.price,p.is_active,s.on_hand,s.reserved,
+      const productRows:ProductOrderRow[]=[];for(const item of input.items){const product=await client.query<ProductOrderRow>(`SELECT p.id,p.name,p.category,p.price,p.is_active,p.is_prize_only,s.on_hand,s.reserved,
           (SELECT v.id FROM draw_probability_versions v WHERE v.product_id=p.id AND v.status='ACTIVE') AS probability_version_id,
           (SELECT v.version FROM draw_probability_versions v WHERE v.product_id=p.id AND v.status='ACTIVE') AS probability_version
-          FROM catalog_products p JOIN product_stock s ON s.product_id=p.id WHERE p.id=$1 FOR UPDATE OF p,s`,[item.productId]);if(!product.rowCount||!product.rows[0]!.is_active)throw notFound(`판매 중인 상품을 찾을 수 없습니다: ${item.productId}`);const row=product.rows[0]!;if(row.on_hand-row.reserved<item.quantity)throw conflict(`${row.name} 재고가 부족합니다.`);if(isDrawCategory(row.category)){if(!row.probability_version_id||row.probability_version===null)throw conflict(`${row.name} 추첨 확률표가 아직 공개되지 않았습니다.`);if(item.expectedDrawVersion===null)throw badRequest(`${row.name} 결제 전 확인한 확률표 버전이 필요합니다.`);if(numberValue(row.probability_version)!==item.expectedDrawVersion)throw conflict(`${row.name} 확률표가 변경됐습니다. 최신 경품·확률을 다시 확인해 주세요.`);}else if(item.expectedDrawVersion!==null)throw badRequest("일반 구매 상품에는 확률표 버전을 보낼 수 없습니다.");if(row.probability_version_id)await assertDrawCapacity(client,{probabilityVersionId:row.probability_version_id,productId:row.id,onHand:numberValue(row.on_hand)});productRows.push(row);}
+          FROM catalog_products p JOIN product_stock s ON s.product_id=p.id WHERE p.id=$1 FOR UPDATE OF p,s`,[item.productId]);if(!product.rowCount||!product.rows[0]!.is_active)throw notFound(`판매 중인 상품을 찾을 수 없습니다: ${item.productId}`);const row=product.rows[0]!;assertDirectPurchaseAllowed({name:row.name,isPrizeOnly:row.is_prize_only});if(row.on_hand-row.reserved<item.quantity)throw conflict(`${row.name} 재고가 부족합니다.`);if(isDrawCategory(row.category)){if(!row.probability_version_id||row.probability_version===null)throw conflict(`${row.name} 추첨 확률표가 아직 공개되지 않았습니다.`);if(item.expectedDrawVersion===null)throw badRequest(`${row.name} 결제 전 확인한 확률표 버전이 필요합니다.`);if(numberValue(row.probability_version)!==item.expectedDrawVersion)throw conflict(`${row.name} 확률표가 변경됐습니다. 최신 경품·확률을 다시 확인해 주세요.`);}else if(item.expectedDrawVersion!==null)throw badRequest("일반 구매 상품에는 확률표 버전을 보낼 수 없습니다.");if(row.probability_version_id)await assertDrawCapacity(client,{probabilityVersionId:row.probability_version_id,productId:row.id,onHand:numberValue(row.on_hand)});productRows.push(row);}
       const subtotal=input.items.reduce((sum,item)=>sum+productRows.find((product)=>product.id===item.productId)!.price*item.quantity,0);let couponId:string|null=null;let discountTotal=0;
       if(input.couponCode){const coupon=await client.query<{id:string;discount_type:"FIXED"|"PERCENT";discount_value:number;maximum_discount:number|null;minimum_order:number;usage_limit:number|null;used_count:number}>(`SELECT id,discount_type,discount_value,maximum_discount,minimum_order,usage_limit,used_count FROM coupons WHERE code=$1 AND is_active=true AND starts_at<=now() AND ends_at>now() FOR UPDATE`,[input.couponCode]);if(!coupon.rowCount)throw conflict("사용할 수 없는 쿠폰입니다.");const value=coupon.rows[0]!;if(subtotal<value.minimum_order||value.usage_limit!==null&&value.used_count>=value.usage_limit)throw conflict("쿠폰 사용 조건을 충족하지 못했습니다.");discountTotal=value.discount_type==="FIXED"?value.discount_value:Math.floor(subtotal*value.discount_value/100);if(value.maximum_discount!==null)discountTotal=Math.min(discountTotal,value.maximum_discount);discountTotal=Math.min(discountTotal,subtotal);couponId=value.id;await client.query("UPDATE coupons SET used_count=used_count+1 WHERE id=$1",[value.id]);}
       const afterDiscount=subtotal-discountTotal;if(input.pointAmount>afterDiscount)throw conflict("주문 금액보다 많은 포인트를 사용할 수 없습니다.");const orderTotal=afterDiscount-input.pointAmount;const paymentProvider=paymentProviderForOrder(context.config.paymentProvider,orderTotal);if(input.pointAmount>0){await client.query("INSERT INTO point_accounts(user_id,balance) VALUES($1,0) ON CONFLICT DO NOTHING",[request.actor!.userId]);const spent=await client.query("UPDATE point_accounts SET balance=balance-$2,version=version+1 WHERE user_id=$1 AND balance>=$2 RETURNING balance",[request.actor!.userId,input.pointAmount]);if(!spent.rowCount)throw conflict("사용 가능한 포인트가 부족합니다.");}
@@ -286,14 +396,14 @@ export async function registerCommerceRoutes(app:FastifyInstance,context:ApiCont
       const ticket=entitlement.rows[0]!;
       if(ticket.user_id!==request.actor!.userId)throw forbidden();
       if(ticket.status==="CONSUMED"){
-        const existing=await client.query<{id:string;entitlement_id:string;product_id:string;prize_product_id:string;prize_inventory_unit_id:string;probability_version:number;rarity:string;committed_at:Date}>(`SELECT r.*,e.rarity FROM draw_results r JOIN draw_pool_entries e ON e.id=r.pool_entry_id WHERE r.entitlement_id=$1`,[entitlementId]);
+        const existing=await client.query<{id:string;entitlement_id:string;product_id:string;prize_product_id:string;prize_inventory_unit_id:string;probability_version:number;rarity:string;committed_at:Date} & DrawPrizeSnapshotRow>(`SELECT r.*,e.rarity,e.prize_name_snapshot,e.prize_image_url_snapshot,e.prize_sku_snapshot,e.prize_ip_id_snapshot,e.prize_category_snapshot FROM draw_results r JOIN draw_pool_entries e ON e.id=r.pool_entry_id WHERE r.entitlement_id=$1`,[entitlementId]);
         const row=existing.rows[0]!;
-        const body={id:row.id,entitlementId:row.entitlement_id,productId:row.product_id,prizeProductId:row.prize_product_id,prizeInventoryUnitId:row.prize_inventory_unit_id,probabilityVersion:row.probability_version,rarity:row.rarity,committedAt:iso(row.committed_at)};
+        const body={id:row.id,entitlementId:row.entitlement_id,productId:row.product_id,prizeProductId:row.prize_product_id,...drawPrizeSnapshotFields(row),prizeInventoryUnitId:row.prize_inventory_unit_id,probabilityVersion:row.probability_version,rarity:row.rarity,committedAt:iso(row.committed_at)};
         await completeIdempotency(client,idem.id,{statusCode:200,body,resourceType:"DRAW_RESULT",resourceId:row.id});
         return {replay:true,statusCode:200,body};
       }
       if(ticket.status!=="AVAILABLE")throw conflict("사용할 수 없는 추첨권입니다.");
-      const entries=await client.query<{id:string;prize_product_id:string;rarity:string;weight:number;remaining_quantity:number|null}>("SELECT id,prize_product_id,rarity,weight,remaining_quantity FROM draw_pool_entries WHERE probability_version_id=$1 AND (remaining_quantity IS NULL OR remaining_quantity>0) ORDER BY id FOR UPDATE",[ticket.probability_version_id]);
+      const entries=await client.query<{id:string;prize_product_id:string;rarity:string;weight:number;remaining_quantity:number|null} & DrawPrizeSnapshotRow>("SELECT id,prize_product_id,prize_name_snapshot,prize_image_url_snapshot,prize_sku_snapshot,prize_ip_id_snapshot,prize_category_snapshot,rarity,weight,remaining_quantity FROM draw_pool_entries WHERE probability_version_id=$1 AND (remaining_quantity IS NULL OR remaining_quantity>0) ORDER BY id FOR UPDATE",[ticket.probability_version_id]);
       if(!entries.rowCount)throw conflict("남은 경품이 없습니다.");
       const weighted=entries.rows.map((entry)=>({entry,effective:numberValue(entry.weight)*(entry.remaining_quantity===null?1:numberValue(entry.remaining_quantity))}));
       const totalWeight=weighted.reduce((sum,item)=>sum+item.effective,0);
@@ -315,7 +425,7 @@ export async function registerCommerceRoutes(app:FastifyInstance,context:ApiCont
         ticket.version,evidence.algorithm,evidence.entropyHex,evidence.entropyDigest,evidence.roll,evidence.totalWeight,JSON.stringify(selectionSnapshot),
       ]);
       await client.query("UPDATE draw_entitlements SET status='CONSUMED',consumed_at=now() WHERE id=$1",[entitlementId]);
-      const body={id:created.rows[0]!.id,entitlementId,productId:ticket.product_id,prizeProductId:selected.prize_product_id,prizeInventoryUnitId:inventory.rows[0]!.id,probabilityVersion:ticket.version,rarity:selected.rarity,committedAt:iso(created.rows[0]!.committed_at)};
+      const body={id:created.rows[0]!.id,entitlementId,productId:ticket.product_id,prizeProductId:selected.prize_product_id,...drawPrizeSnapshotFields(selected),prizeInventoryUnitId:inventory.rows[0]!.id,probabilityVersion:ticket.version,rarity:selected.rarity,committedAt:iso(created.rows[0]!.committed_at)};
       await writeOutbox(client,request.id,{aggregateType:"DRAW_RESULT",aggregateId:body.id,eventType:"draw.committed",payload:{...body,userId:request.actor!.userId}});
       await completeIdempotency(client,idem.id,{statusCode:200,body,resourceType:"DRAW_RESULT",resourceId:body.id});
       return {replay:false,statusCode:200,body};
@@ -324,19 +434,83 @@ export async function registerCommerceRoutes(app:FastifyInstance,context:ApiCont
     return reply.code(result.statusCode).send(result.body);
   });
 
-  app.get("/v1/admin/products/:productId/draw-versions",{preHandler:context.auth.requirePermission("catalog.read")},async(request)=>{const productId=slugIdInput((request.params as Record<string,unknown>).productId,"productId");const product=await context.pool.query("SELECT 1 FROM catalog_products WHERE id=$1 AND category IN ('gacha','kuji')",[productId]);if(!product.rowCount)throw notFound("가챠·쿠지 상품을 찾을 수 없습니다.");const result=await context.pool.query<DrawVersionRow>(`SELECT v.id,v.product_id,v.version,v.status,v.published_by,v.published_at,v.created_at,
+  app.get("/v1/admin/products/:productId/draw-versions",{preHandler:context.auth.requirePermission("catalog.read")},async(request)=>{const productId=slugIdInput((request.params as Record<string,unknown>).productId,"productId");const product=await context.pool.query("SELECT 1 FROM catalog_products WHERE id=$1 AND category IN ('gacha','kuji') AND is_prize_only=false",[productId]);if(!product.rowCount)throw notFound("가챠·쿠지 판매 상품을 찾을 수 없습니다.");const result=await context.pool.query<DrawVersionRow>(`SELECT v.id,v.product_id,v.version,v.status,v.published_by,v.published_at,v.created_at,
       COALESCE(jsonb_agg(jsonb_build_object(
-        'id',e.id,'prizeProductId',e.prize_product_id,'rarity',e.rarity,'weight',e.weight,
+        'id',e.id,'prizeProductId',e.prize_product_id,
+        'prizeName',e.prize_name_snapshot,'prizeImageUrl',e.prize_image_url_snapshot,
+        'prizeSku',e.prize_sku_snapshot,'prizeIpId',e.prize_ip_id_snapshot,'prizeCategory',e.prize_category_snapshot,
+        'rarity',e.rarity,'weight',e.weight,
         'initialQuantity',e.initial_quantity,'remainingQuantity',e.remaining_quantity
       ) ORDER BY e.created_at,e.id) FILTER (WHERE e.id IS NOT NULL),'[]'::jsonb) AS entries
     FROM draw_probability_versions v LEFT JOIN draw_pool_entries e ON e.probability_version_id=v.id
     WHERE v.product_id=$1 GROUP BY v.id ORDER BY v.version DESC`,[productId]);return{items:result.rows.map((row)=>{const entries=row.entries.map((entry)=>({...entry,weight:numberValue(entry.weight),initialQuantity:entry.initialQuantity===null?null:numberValue(entry.initialQuantity),remainingQuantity:entry.remainingQuantity===null?null:numberValue(entry.remainingQuantity)}));const totalEffectiveWeight=entries.reduce((sum,entry)=>sum+entry.weight*(entry.remainingQuantity===null?1:entry.remainingQuantity),0);return{id:row.id,productId:row.product_id,version:row.version,status:row.status,publishedBy:row.published_by,publishedAt:nullableIso(row.published_at),createdAt:iso(row.created_at),totalEffectiveWeight,entries};})};});
 
-  app.post("/v1/admin/products/:productId/draw-versions",{preHandler:context.auth.requirePermission("catalog.write")},async(request,reply)=>{const productId=slugIdInput((request.params as Record<string,unknown>).productId,"productId");const body=objectInput(request.body);if(!Array.isArray(body.entries)||body.entries.length<1||body.entries.length>200)throw badRequest("경품 구성을 확인해 주세요.");const entries=body.entries.map((raw)=>{const item=objectInput(raw);return{prizeProductId:slugIdInput(item.prizeProductId,"prizeProductId"),rarity:stringInput(item,"rarity",{max:40})!,weight:integerInput(item,"weight",{min:1,max:1_000_000})!,quantity:item.quantity===null||item.quantity===undefined?null:integerInput(item,"quantity",{min:1,max:10_000})!};});
-    const mutation=await adminIdempotentMutation(context,request,{target:{type:"PRODUCT_DRAW_VERSION",productId},work:async(client)=>{const product=await client.query<{category:string}>("SELECT category FROM catalog_products WHERE id=$1 FOR UPDATE",[productId]);if(!product.rowCount)throw notFound();if(!["gacha","kuji"].includes(product.rows[0]!.category))throw badRequest("가챠·쿠지 상품만 확률표를 가질 수 있습니다.");const next=await client.query<{version:number}>("SELECT COALESCE(max(version),0)+1 AS version FROM draw_probability_versions WHERE product_id=$1",[productId]);const created=await client.query<{id:string;version:number;created_at:Date}>("INSERT INTO draw_probability_versions(product_id,version) VALUES($1,$2) RETURNING id,version,created_at",[productId,next.rows[0]!.version]);const savedEntries=[];for(const entry of entries){const saved=await client.query<{id:string}>("INSERT INTO draw_pool_entries(probability_version_id,prize_product_id,rarity,weight,initial_quantity,remaining_quantity) VALUES($1,$2,$3,$4,$5,$5) RETURNING id",[created.rows[0]!.id,entry.prizeProductId,entry.rarity,entry.weight,entry.quantity]);savedEntries.push({id:saved.rows[0]!.id,prizeProductId:entry.prizeProductId,rarity:entry.rarity,weight:entry.weight,initialQuantity:entry.quantity,remainingQuantity:entry.quantity});}await writeAdminAudit(client,request,request.actor!,{action:"DRAW_VERSION_CREATED",targetType:"DRAW_PROBABILITY_VERSION",targetId:created.rows[0]!.id,after:{productId,version:created.rows[0]!.version,entries:entries.length}});const totalEffectiveWeight=savedEntries.reduce((sum,entry)=>sum+entry.weight*(entry.remainingQuantity===null?1:entry.remainingQuantity),0);const response={id:created.rows[0]!.id,productId,version:created.rows[0]!.version,status:"DRAFT" as const,publishedBy:null,publishedAt:null,createdAt:iso(created.rows[0]!.created_at),totalEffectiveWeight,entries:savedEntries};return{statusCode:201,body:response,resourceType:"DRAW_PROBABILITY_VERSION",resourceId:created.rows[0]!.id};}});return sendAdminMutation(reply,mutation);});
+  app.post("/v1/admin/products/:productId/draw-versions",{preHandler:context.auth.requirePermission("catalog.write")},async(request,reply)=>{
+    const productId=slugIdInput((request.params as Record<string,unknown>).productId,"productId");
+    const body=objectInput(request.body);
+    if(!Array.isArray(body.entries)||body.entries.length<1||body.entries.length>200)throw badRequest("경품 구성을 확인해 주세요.");
+    const entries=body.entries.map((raw)=>{const item=objectInput(raw);return{prizeProductId:slugIdInput(item.prizeProductId,"prizeProductId"),rarity:stringInput(item,"rarity",{max:40})!,weight:integerInput(item,"weight",{min:1,max:1_000_000})!,quantity:item.quantity===null||item.quantity===undefined?null:integerInput(item,"quantity",{min:1,max:10_000})!};});
+    assertUniqueDrawPrizeProductIds(entries.map((entry)=>entry.prizeProductId));
+    const mutation=await adminIdempotentMutation(context,request,{target:{type:"PRODUCT_DRAW_VERSION",productId},work:async(client)=>{
+      const product=await client.query<{ip_id:string;category:string;is_active:boolean;is_prize_only:boolean}>("SELECT ip_id,category,is_active,is_prize_only FROM catalog_products WHERE id=$1 FOR UPDATE",[productId]);
+      if(!product.rowCount)throw notFound("가챠·쿠지 상품을 찾을 수 없습니다.");
+      if(!["gacha","kuji"].includes(product.rows[0]!.category))throw badRequest("가챠·쿠지 상품만 확률표를 가질 수 있습니다.");
+      if(!product.rows[0]!.is_active||product.rows[0]!.is_prize_only)throw conflict("활성 판매용 가챠·쿠지 상품만 확률표를 만들 수 있습니다.");
+      const prizeSnapshots=await loadValidatedDrawPrizeSnapshots(client,{drawIpId:product.rows[0]!.ip_id,prizeProductIds:entries.map((entry)=>entry.prizeProductId)});
+      const snapshotsById=new Map(prizeSnapshots.map((snapshot)=>[snapshot.id,snapshot]));
+      const next=await client.query<{version:number}>("SELECT COALESCE(max(version),0)+1 AS version FROM draw_probability_versions WHERE product_id=$1",[productId]);
+      const created=await client.query<{id:string;version:number;created_at:Date}>("INSERT INTO draw_probability_versions(product_id,version) VALUES($1,$2) RETURNING id,version,created_at",[productId,next.rows[0]!.version]);
+      const savedEntries=[];
+      for(const entry of entries){
+        const snapshot=snapshotsById.get(entry.prizeProductId)!;
+        const saved=await client.query<{id:string}>(`INSERT INTO draw_pool_entries(
+          probability_version_id,prize_product_id,prize_name_snapshot,prize_image_url_snapshot,
+          prize_sku_snapshot,prize_ip_id_snapshot,prize_category_snapshot,rarity,weight,initial_quantity,remaining_quantity
+        ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$10) RETURNING id`,[
+          created.rows[0]!.id,entry.prizeProductId,snapshot.name,snapshot.imageUrl,snapshot.sku,snapshot.ipId,snapshot.category,entry.rarity,entry.weight,entry.quantity,
+        ]);
+        savedEntries.push({id:saved.rows[0]!.id,prizeProductId:entry.prizeProductId,prizeName:snapshot.name,prizeImageUrl:snapshot.imageUrl,prizeSku:snapshot.sku,prizeIpId:snapshot.ipId,prizeCategory:snapshot.category,rarity:entry.rarity,weight:entry.weight,initialQuantity:entry.quantity,remainingQuantity:entry.quantity});
+      }
+      await writeAdminAudit(client,request,request.actor!,{action:"DRAW_VERSION_CREATED",targetType:"DRAW_PROBABILITY_VERSION",targetId:created.rows[0]!.id,after:{productId,version:created.rows[0]!.version,entries:entries.length}});
+      const totalEffectiveWeight=savedEntries.reduce((sum,entry)=>sum+entry.weight*(entry.remainingQuantity===null?1:entry.remainingQuantity),0);
+      const response={id:created.rows[0]!.id,productId,version:created.rows[0]!.version,status:"DRAFT" as const,publishedBy:null,publishedAt:null,createdAt:iso(created.rows[0]!.created_at),totalEffectiveWeight,entries:savedEntries};
+      return{statusCode:201,body:response,resourceType:"DRAW_PROBABILITY_VERSION",resourceId:created.rows[0]!.id};
+    }});
+    return sendAdminMutation(reply,mutation);
+  });
 
-  app.post("/v1/admin/products/:productId/draw-versions/:versionId/publish",{preHandler:context.auth.requirePermission("catalog.write")},async(request,reply)=>{const params=request.params as Record<string,unknown>;const productId=slugIdInput(params.productId,"productId");const versionId=uuidInput(params.versionId,"versionId");const body=objectInput(request.body);const reason=stringInput(body,"reason",{max:1000})!;const mutation=await adminIdempotentMutation(context,request,{target:{type:"DRAW_PROBABILITY_VERSION",productId,versionId},bodyReason:reason,work:async(client)=>{const stock=await client.query<{on_hand:number}>("SELECT s.on_hand FROM catalog_products p JOIN product_stock s ON s.product_id=p.id WHERE p.id=$1 AND p.category IN ('gacha','kuji') FOR UPDATE OF p,s",[productId]);if(!stock.rowCount)throw notFound("가챠·쿠지 상품을 찾을 수 없습니다.");const version=await client.query<{id:string;status:string;version:number}>("SELECT id,status,version FROM draw_probability_versions WHERE id=$1 AND product_id=$2 FOR UPDATE",[versionId,productId]);if(!version.rowCount)throw notFound();if(version.rows[0]!.status!=="DRAFT")throw conflict("초안 확률표만 공개할 수 있습니다.");const count=await client.query<{count:string;drawable_count:string;effective_weight:string}>(`SELECT count(*) AS count,
+  app.post("/v1/admin/products/:productId/draw-versions/:versionId/publish",{preHandler:context.auth.requirePermission("catalog.write")},async(request,reply)=>{
+    const params=request.params as Record<string,unknown>;
+    const productId=slugIdInput(params.productId,"productId");
+    const versionId=uuidInput(params.versionId,"versionId");
+    const body=objectInput(request.body);
+    const reason=stringInput(body,"reason",{max:1000})!;
+    const mutation=await adminIdempotentMutation(context,request,{target:{type:"DRAW_PROBABILITY_VERSION",productId,versionId},bodyReason:reason,work:async(client)=>{
+      const stock=await client.query<{ip_id:string;on_hand:number}>("SELECT p.ip_id,s.on_hand FROM catalog_products p JOIN product_stock s ON s.product_id=p.id WHERE p.id=$1 AND p.category IN ('gacha','kuji') AND p.is_active=true AND p.is_prize_only=false FOR UPDATE OF p,s",[productId]);
+      if(!stock.rowCount)throw notFound("활성 가챠·쿠지 판매 상품을 찾을 수 없습니다.");
+      const version=await client.query<{id:string;status:string;version:number}>("SELECT id,status,version FROM draw_probability_versions WHERE id=$1 AND product_id=$2 FOR UPDATE",[versionId,productId]);
+      if(!version.rowCount)throw notFound("확률표 버전을 찾을 수 없습니다.");
+      if(version.rows[0]!.status!=="DRAFT")throw conflict("초안 확률표만 공개할 수 있습니다.");
+      const versionNumber=numberValue(version.rows[0]!.version);
+      await assertLatestDrawDraft(client,{productId,version:versionNumber});
+      const prizeEntries=await client.query<{prize_product_id:string} & DrawPrizeSnapshotRow>("SELECT prize_product_id,prize_name_snapshot,prize_image_url_snapshot,prize_sku_snapshot,prize_ip_id_snapshot,prize_category_snapshot FROM draw_pool_entries WHERE probability_version_id=$1 ORDER BY created_at,id FOR UPDATE",[versionId]);
+      const currentPrizeSnapshots=await loadValidatedDrawPrizeSnapshots(client,{drawIpId:stock.rows[0]!.ip_id,prizeProductIds:prizeEntries.rows.map((entry)=>entry.prize_product_id)});
+      assertDrawPrizeSnapshotsCurrent(prizeEntries.rows,currentPrizeSnapshots);
+      const count=await client.query<{count:string;drawable_count:string;effective_weight:string}>(`SELECT count(*) AS count,
         count(*) FILTER (WHERE remaining_quantity IS NULL OR remaining_quantity > 0) AS drawable_count,
         COALESCE(sum(weight::bigint * COALESCE(remaining_quantity::bigint,1)),0) AS effective_weight
-        FROM draw_pool_entries WHERE probability_version_id=$1`,[versionId]);const pool=count.rows[0]!;if(Number(pool.count)<1)throw conflict("경품 구성이 비어 있습니다.");if(Number(pool.drawable_count)!==Number(pool.count))throw conflict("수량이 0인 경품은 공개할 수 없습니다.");const effectiveWeight=Number(pool.effective_weight);if(!Number.isSafeInteger(effectiveWeight)||effectiveWeight<=0)throw conflict("경품 가중치 합계를 확인해 주세요.");await assertDrawCapacity(client,{probabilityVersionId:versionId,productId,onHand:numberValue(stock.rows[0]!.on_hand)});await client.query("UPDATE draw_probability_versions SET status='RETIRED' WHERE product_id=$1 AND status='ACTIVE'",[productId]);await client.query("UPDATE draw_probability_versions SET status='ACTIVE',published_by=$2,published_at=now() WHERE id=$1",[versionId,request.actor!.userId]);await writeAdminAudit(client,request,request.actor!,{action:"DRAW_VERSION_PUBLISHED",targetType:"DRAW_PROBABILITY_VERSION",targetId:versionId,reason,after:{productId,version:version.rows[0]!.version}});return{statusCode:200,body:{id:versionId,productId,version:version.rows[0]!.version,status:"ACTIVE" as const},resourceType:"DRAW_PROBABILITY_VERSION",resourceId:versionId};}});return sendAdminMutation(reply,mutation);});
+        FROM draw_pool_entries WHERE probability_version_id=$1`,[versionId]);
+      const pool=count.rows[0]!;
+      if(Number(pool.count)<1)throw conflict("경품 구성이 비어 있습니다.");
+      if(Number(pool.drawable_count)!==Number(pool.count))throw conflict("수량이 0인 경품은 공개할 수 없습니다.");
+      const effectiveWeight=Number(pool.effective_weight);
+      if(!Number.isSafeInteger(effectiveWeight)||effectiveWeight<=0)throw conflict("경품 가중치 합계를 확인해 주세요.");
+      await assertDrawCapacity(client,{probabilityVersionId:versionId,productId,onHand:numberValue(stock.rows[0]!.on_hand)});
+      await client.query("UPDATE draw_probability_versions SET status='RETIRED' WHERE product_id=$1 AND status='ACTIVE'",[productId]);
+      await client.query("UPDATE draw_probability_versions SET status='ACTIVE',published_by=$2,published_at=now() WHERE id=$1",[versionId,request.actor!.userId]);
+      await writeAdminAudit(client,request,request.actor!,{action:"DRAW_VERSION_PUBLISHED",targetType:"DRAW_PROBABILITY_VERSION",targetId:versionId,reason,after:{productId,version:versionNumber}});
+      return{statusCode:200,body:{id:versionId,productId,version:versionNumber,status:"ACTIVE" as const},resourceType:"DRAW_PROBABILITY_VERSION",resourceId:versionId};
+    }});
+    return sendAdminMutation(reply,mutation);
+  });
 }

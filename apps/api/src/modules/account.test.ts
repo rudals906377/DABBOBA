@@ -101,6 +101,24 @@ test("account deletion remains review-only and reports any authoritative blocker
   assert.equal(accountDeletionStatus({ ...clear, activeExchangeOfferCount: 1 }), "BLOCKED");
 });
 
+test("wishlist reads hide prize-only catalog items", async () => {
+  const { app, routes } = routeCapture();
+  let capturedSql = "";
+  const pool = {
+    async query(sql: string) {
+      capturedSql = sql;
+      return { rowCount: 0, rows: [] };
+    },
+  };
+  await registerAccountRoutes(app, testContext(pool));
+  const handler = routes.get("/v1/account/wishlist");
+  assert.ok(handler);
+
+  await handler({ actor: { userId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" }, query: {} }, {});
+
+  assert.match(capturedSql, /p\.is_prize_only=false/);
+});
+
 test("draw entitlements default to AVAILABLE and are scoped to the authenticated owner", async () => {
   const actorId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
   const entitlementId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";

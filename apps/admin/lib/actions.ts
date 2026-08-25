@@ -353,6 +353,7 @@ function productBody(form: FormData) {
     manufacturer: optionalText(form, "manufacturer", 160), releaseDate: optionalText(form, "releaseDate", 10),
     price: integer(form, "price"), availableQuantity: integer(form, "availableQuantity"), metadata: metadata(form),
     imageUrl: optionalText(form, "imageUrl", 2_000), isActive: form.get("isActive") === "on",
+    isPrizeOnly: form.get("isPrizeOnly") === "on",
   };
 }
 export async function createProduct(form: FormData) {
@@ -370,7 +371,34 @@ function drawEntries(form: FormData) {
   const raw = text(form, "entries", 100_000);
   const value: unknown = JSON.parse(raw);
   if (!Array.isArray(value) || value.length < 1 || value.length > 200) throw new Error("경품 구성은 1~200개 배열이어야 합니다.");
-  return value;
+  const prizeProductIds = new Set<string>();
+  return value.map((entry, index) => {
+    if (!entry || Array.isArray(entry) || typeof entry !== "object") {
+      throw new Error(`경품 ${index + 1}의 입력 형식이 올바르지 않습니다.`);
+    }
+    const record = entry as Record<string, unknown>;
+    const prizeProductId = typeof record.prizeProductId === "string" ? record.prizeProductId.trim() : "";
+    const rarity = typeof record.rarity === "string" ? record.rarity.trim() : "";
+    const weight = record.weight;
+    const quantity = record.quantity;
+    if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/.test(prizeProductId)) {
+      throw new Error(`경품 ${index + 1}의 상품 ID가 올바르지 않습니다.`);
+    }
+    if (!rarity || rarity.length > 40 || /[\u0000-\u001f\u007f]/.test(rarity)) {
+      throw new Error(`경품 ${index + 1}의 등급은 1~40자로 입력하세요.`);
+    }
+    if (!Number.isSafeInteger(weight) || (weight as number) < 1 || (weight as number) > 1_000_000) {
+      throw new Error(`경품 ${index + 1}의 가중치는 1~1,000,000 정수여야 합니다.`);
+    }
+    if (!Number.isSafeInteger(quantity) || (quantity as number) < 1 || (quantity as number) > 10_000) {
+      throw new Error(`경품 ${index + 1}의 유한 수량은 1~10,000 정수여야 합니다.`);
+    }
+    if (prizeProductIds.has(prizeProductId)) {
+      throw new Error("같은 경품 SKU를 두 번 이상 입력할 수 없습니다.");
+    }
+    prizeProductIds.add(prizeProductId);
+    return { prizeProductId, rarity, weight: weight as number, quantity: quantity as number };
+  });
 }
 
 export async function createDrawVersion(form: FormData) {

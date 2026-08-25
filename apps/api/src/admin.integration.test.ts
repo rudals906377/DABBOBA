@@ -198,6 +198,7 @@ test(
         metadata: { source: "catalog-request-integration" },
         imageUrl: null,
         isActive: false,
+        isPrizeOnly: false,
       },
     });
     assert.equal(createdProduct.statusCode, 201, createdProduct.body);
@@ -219,6 +220,7 @@ test(
         metadata: { source: "catalog-request-integration" },
         imageUrl: null,
         isActive: true,
+        isPrizeOnly: false,
         expectedVersion: createdProductBody.version,
       },
     });
@@ -251,6 +253,7 @@ test(
         metadata: { source: "catalog-request-integration" },
         imageUrl: null,
         isActive: true,
+        isPrizeOnly: false,
         expectedVersion: createdProductBody.version,
       },
     });

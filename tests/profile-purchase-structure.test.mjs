@@ -284,8 +284,8 @@ test("each draw result records one exact inventory unit and completes its existi
   assert.match(drawScreen, /<DrawFooter\s+flow=\{flow\}\s+product=\{product\}\s+quantity=\{quantity\}\s+orderId=\{orderId\}/);
   assert.match(drawFooter, /const grade = serverResult\?\.rarity \?\? rollPrizeGrade\(\)/);
   assert.match(drawFooter, /id:\s*serverResult\?\.prizeInventoryUnitId \?\? `\$\{orderId\}-draw-\$\{drawNumber\}`/);
-  assert.match(drawFooter, /itemName:\s*prizeProduct\?\.title \?\? \(serverResult \? `\$\{grade\} · \$\{serverResult\.prizeProductId\}` : `\$\{grade\}상 · \$\{rewardForGrade\(product, grade as PrizeGrade\)\}`\)/);
-  assert.match(drawFooter, /itemImage:\s*prizeProduct\?\.asset \?\? product\.asset/);
+  assert.match(drawFooter, /itemName:\s*serverResult\?\.prizeName \?\? prizeProduct\?\.title/);
+  assert.match(drawFooter, /itemImage:\s*serverResult\?\.prizeImageUrl \?\? prizeProduct\?\.asset \?\? product\.asset/);
   assert.match(drawFooter, /recordInventoryUnit\(\{/);
   assert.match(drawFooter, /if \(apiMode === "prototype" && drawRemaining <= 1\) updateOrderStatus\(orderId, "뽑기 완료"\)/);
   assert.match(drawFooter, /consumeDrawEntitlement\(entitlementId, `draw-entitlement-\$\{entitlementId\}`\)/);

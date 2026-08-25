@@ -128,6 +128,7 @@ export type ApiCatalogProduct = {
   metadata: Record<string, unknown>;
   imageUrl: string | null;
   isActive: boolean;
+  isPrizeOnly: boolean;
   version: number;
   createdAt: string;
   updatedAt: string;
@@ -408,6 +409,11 @@ export type ApiDrawResult = {
   entitlementId: string;
   productId: string;
   prizeProductId: string;
+  prizeSku: string;
+  prizeName: string;
+  prizeImageUrl: string | null;
+  prizeIpId: string;
+  prizeCategory: ApiCatalogProduct["category"];
   prizeInventoryUnitId: string;
   probabilityVersion: number;
   rarity: string;
@@ -425,8 +431,11 @@ export type ApiDrawOdds = {
   entries: Array<{
     id: string;
     prizeProductId: string;
+    prizeSku: string;
     prizeName: string;
     prizeImageUrl: string | null;
+    prizeIpId: string;
+    prizeCategory: ApiCatalogProduct["category"];
     rarity: string;
     weight: number;
     initialQuantity: number | null;

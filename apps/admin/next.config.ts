@@ -15,6 +15,7 @@ const securityHeaders = [
 ] as const;
 
 const nextConfig: NextConfig = {
+  allowedDevOrigins: ["127.0.0.1"],
   output: "standalone",
   poweredByHeader: false,
   transpilePackages: ["@dabboba/api-client", "@dabboba/config", "@dabboba/contracts", "@dabboba/ui"],

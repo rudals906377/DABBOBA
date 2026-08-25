@@ -88,7 +88,7 @@ export async function seedCatalog(
         await client.query(
           `INSERT INTO product_stock (product_id, on_hand, reserved)
            VALUES ($1,$2,0)
-           ${production ? "ON CONFLICT (product_id) DO NOTHING" : "ON CONFLICT (product_id) DO UPDATE SET on_hand = EXCLUDED.on_hand, updated_at = now()"}`,
+           ON CONFLICT (product_id) DO NOTHING`,
           [product.id, product.stock],
         );
       }
