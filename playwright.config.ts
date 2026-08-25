@@ -11,7 +11,10 @@ export default defineConfig({
     viewport: { width: 1100, height: 1100 },
   },
   webServer: {
-    command: `npm run dev -- --port ${testPort}`,
+    command: `pnpm run dev --port ${testPort}`,
+    env: {
+      VITE_DABBOBA_API_URL: "",
+    },
     url: `http://127.0.0.1:${testPort}/tests/runtime-fixture.html`,
     reuseExistingServer: process.env.MOBILE_RUNTIME_TEST_PORT == null,
   },

@@ -1,5 +1,7 @@
 # DABBOBA IP 시스템 아키텍처
 
+> **역사 문서:** 아래 내용은 서버 도입 전 Phase 1 프런트엔드 기준선이다. 현재 구현 상태와 운영 판단은 [`dabboba-production-architecture.md`](./dabboba-production-architecture.md)를 우선한다. 현재 백엔드는 FastAPI가 아니라 Fastify 기반 TypeScript 모듈러 모놀리스이며 PostgreSQL migration, API, worker, 관리자 웹이 추가되어 있다.
+
 ## 1. 문서 목적
 
 이 문서는 현재 `dabboba-app`의 실제 구현 범위와, 향후 애니메이션·게임 IP 중심 수집 플랫폼으로 확장할 때의 경계를 정의한다.
@@ -174,7 +176,7 @@ IP 상세는 `FlowStack.push()`로 열고 별도 라우터를 도입하지 않�
 - IP 카드 탭과 뒤로 가기가 iPhone/Pixel 프레임에서 동작한다.
 - 기존 상품 카테고리 필터와 공통 결제 흐름, 카테고리별 추첨·일반 구매 완료 분기가 유지된다.
 - 가로 오버플로, 고정 헤더 이동, 키보드 겹침이 없다.
-- `npm run check:runtime`, `npm run build`, `npm run test:runtime`, `npm run test:sites`가 통과한다.
+- 현재 단일 workspace 기준 명령인 `pnpm run check:runtime`, `pnpm run build`, `pnpm run test:runtime`, `pnpm run test:sites`가 통과한다.
 - 인앱 브라우저에서 새 IP 검색·상세 탭, 공통 결제 진입, 가챠·쿠지 추첨과 피규어·카드 구매 완료 분기를 확인한다.
 
 ## 4. 프런트엔드와 향후 API의 경계

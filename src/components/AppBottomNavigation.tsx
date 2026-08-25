@@ -1,33 +1,27 @@
 import {
-  IconArrowDownRightArrowUpLeftFill,
   IconArrowDownRightArrowUpLeftLine,
-  IconGridHeartFill,
   IconGridHeartLine,
-  IconHouseFill,
   IconHouseLine,
-  IconPersonCircleFill,
   IconPersonCircleLine,
-  IconShoppingbagFill,
-  IconShoppingbagLine,
 } from "@karrotmarket/react-monochrome-icon";
 import { ROOT_TABS, type RootTabId } from "../domain/navigation";
 
-function NavigationIcon({ id, selected }: { id: RootTabId; selected: boolean }) {
+function NavigationIcon({ id }: { id: RootTabId }) {
   const props = { size: 23, "aria-hidden": true } as const;
 
   if (id === "community") {
-    return selected ? <IconArrowDownRightArrowUpLeftFill {...props} /> : <IconArrowDownRightArrowUpLeftLine {...props} />;
+    return <IconArrowDownRightArrowUpLeftLine {...props} />;
   }
   if (id === "shop") {
-    return selected ? <IconShoppingbagFill {...props} /> : <IconShoppingbagLine {...props} />;
+    return <i className="app-bottom-navigation-machine-icon" aria-hidden="true" />;
   }
   if (id === "home") {
-    return selected ? <IconHouseFill {...props} /> : <IconHouseLine {...props} />;
+    return <IconHouseLine {...props} />;
   }
   if (id === "duckroom") {
-    return selected ? <IconGridHeartFill {...props} /> : <IconGridHeartLine {...props} />;
+    return <IconGridHeartLine {...props} />;
   }
-  return selected ? <IconPersonCircleFill {...props} /> : <IconPersonCircleLine {...props} />;
+  return <IconPersonCircleLine {...props} />;
 }
 
 export function AppBottomNavigation({
@@ -49,7 +43,7 @@ export function AppBottomNavigation({
             aria-current={selected ? "page" : undefined}
             onClick={() => onSelect(tab.id)}
           >
-            <NavigationIcon id={tab.id} selected={selected} />
+            <NavigationIcon id={tab.id} />
             <span>{tab.label}</span>
           </button>
         );

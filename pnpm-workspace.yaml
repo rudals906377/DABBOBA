@@ -1,0 +1,12 @@
+packages:
+  - "."
+  - "apps/*"
+  - "packages/*"
+
+allowBuilds:
+  esbuild: true
+  msgpackr-extract: false
+
+overrides:
+  metro@0.83.3: 0.83.8
+  postcss@<=8.5.22: 8.5.26

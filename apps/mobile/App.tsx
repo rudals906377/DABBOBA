@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   BackHandler,
   Image,
+  Linking,
   Platform,
   Pressable,
   StyleSheet,
@@ -11,32 +12,130 @@ import {
 import Constants from "expo-constants";
 import { StatusBar } from "expo-status-bar";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
-import { WebView, type WebViewNavigation } from "react-native-webview";
+import {
+  WebView,
+  type WebViewMessageEvent,
+  type WebViewNavigation,
+} from "react-native-webview";
+import {
+  APP_READY_INJECTION_SCRIPT,
+  classifyNavigationRequest,
+  createDeepLinkTarget,
+  isAllowedWebUrl,
+  parseDabbobaDeepLink,
+  parseWebBridgeMessage,
+  resolveShellConfiguration,
+  serializeDeepLinkMessage,
+  type DeepLinkTarget,
+  type ShellConfiguration,
+  type ShellPlatform,
+} from "./webShell";
 
-const WEB_PORT = 4174;
 const DABBOBA_WORDMARK = require("./assets/dabboba-wordmark.png");
+const SHELL_PLATFORM: ShellPlatform = Platform.OS === "android" ? "android" : "ios";
 
-function withEmbedParams(baseUrl: string) {
-  const separator = baseUrl.includes("?") ? "&" : "?";
-  return `${baseUrl}${separator}embed=1&platform=${Platform.OS}`;
-}
+type ShellResolution =
+  | { configuration: ShellConfiguration; error: "" }
+  | { configuration: null; error: string };
 
-function resolveWebUrl() {
-  const configuredUrl = process.env.EXPO_PUBLIC_DABBOBA_WEB_URL?.trim();
-  if (configuredUrl) return withEmbedParams(configuredUrl.replace(/\/$/, ""));
-
-  const metroHost = Constants.expoConfig?.hostUri?.split(":")[0];
-  if (metroHost) return withEmbedParams(`http://${metroHost}:${WEB_PORT}`);
-
-  const simulatorHost = Platform.OS === "android" ? "10.0.2.2" : "127.0.0.1";
-  return withEmbedParams(`http://${simulatorHost}:${WEB_PORT}`);
+function resolveConfiguration(): ShellResolution {
+  try {
+    return {
+      configuration: resolveShellConfiguration({
+        configuredUrl: process.env.EXPO_PUBLIC_DABBOBA_WEB_URL,
+        configuredAllowedOrigins: process.env.EXPO_PUBLIC_DABBOBA_ALLOWED_ORIGINS,
+        metroHostUri: Constants.expoConfig?.hostUri,
+        platform: SHELL_PLATFORM,
+        development: __DEV__,
+      }),
+      error: "",
+    };
+  } catch (error) {
+    return {
+      configuration: null,
+      error: error instanceof Error ? error.message : "DABBOBA 웹 주소 설정을 확인해 주세요.",
+    };
+  }
 }
 
 export default function App() {
   const webViewRef = useRef<WebView>(null);
+  const webViewReadyRef = useRef(false);
+  const pendingDeepLinkRef = useRef<DeepLinkTarget | null>(null);
   const [canGoBack, setCanGoBack] = useState(false);
-  const [loadError, setLoadError] = useState("");
-  const webUrl = useMemo(resolveWebUrl, []);
+  const shellResolution = useMemo(resolveConfiguration, []);
+  const shellConfiguration = shellResolution.configuration;
+  const [loadError, setLoadError] = useState(shellResolution.error);
+  const webUrl = shellConfiguration?.webUrl ?? "";
+
+  const deliverDeepLink = useCallback((target: DeepLinkTarget) => {
+    pendingDeepLinkRef.current = target;
+    if (!webViewReadyRef.current || !webViewRef.current) return;
+    webViewRef.current.postMessage(serializeDeepLinkMessage(target));
+    pendingDeepLinkRef.current = null;
+  }, []);
+
+  const markWebViewReady = useCallback(() => {
+    webViewReadyRef.current = true;
+    const pendingTarget = pendingDeepLinkRef.current;
+    if (pendingTarget) deliverDeepLink(pendingTarget);
+  }, [deliverDeepLink]);
+
+  const openExternalUrl = useCallback((url: string) => {
+    void Linking.openURL(url).catch(() => {
+      setLoadError("외부 링크를 열 수 없습니다.");
+    });
+  }, []);
+
+  const handleRequestedNavigation = useCallback(
+    (rawUrl: string) => {
+      if (!shellConfiguration) return false;
+      const decision = classifyNavigationRequest(
+        rawUrl,
+        shellConfiguration.allowedOrigins,
+        shellConfiguration.baseOrigin,
+        SHELL_PLATFORM,
+      );
+
+      if (decision.action === "allow") return true;
+      if (decision.action === "open-external") {
+        openExternalUrl(decision.url);
+      } else if (decision.action === "dispatch-deep-link") {
+        deliverDeepLink(decision.target);
+      }
+      return false;
+    },
+    [deliverDeepLink, openExternalUrl, shellConfiguration],
+  );
+
+  const handleBridgeMessage = useCallback(
+    (event: WebViewMessageEvent) => {
+      if (
+        !shellConfiguration ||
+        !isAllowedWebUrl(event.nativeEvent.url, [shellConfiguration.baseOrigin])
+      ) {
+        return;
+      }
+
+      const message = parseWebBridgeMessage(event.nativeEvent.data);
+      if (!message) return;
+
+      if (message.type === "APP_READY") {
+        markWebViewReady();
+      } else if (message.type === "OPEN_EXTERNAL_URL") {
+        openExternalUrl(message.payload.url);
+      } else if (message.type === "NAVIGATE") {
+        deliverDeepLink(
+          createDeepLinkTarget(
+            message.payload.route,
+            shellConfiguration.baseOrigin,
+            SHELL_PLATFORM,
+          ),
+        );
+      }
+    },
+    [deliverDeepLink, markWebViewReady, openExternalUrl, shellConfiguration],
+  );
 
   useEffect(() => {
     if (Platform.OS !== "android") return;
@@ -50,7 +149,39 @@ export default function App() {
     return () => subscription.remove();
   }, [canGoBack]);
 
+  useEffect(() => {
+    if (!shellConfiguration) return;
+
+    let active = true;
+    const handleDeepLink = (rawUrl: string) => {
+      const target = parseDabbobaDeepLink(
+        rawUrl,
+        shellConfiguration.baseOrigin,
+        SHELL_PLATFORM,
+      );
+      if (target) deliverDeepLink(target);
+    };
+
+    void Linking.getInitialURL()
+      .then((initialUrl) => {
+        if (active && initialUrl) handleDeepLink(initialUrl);
+      })
+      .catch(() => undefined);
+
+    const subscription = Linking.addEventListener("url", ({ url }) => handleDeepLink(url));
+    return () => {
+      active = false;
+      subscription.remove();
+    };
+  }, [deliverDeepLink, shellConfiguration]);
+
   const handleNavigation = (navigation: WebViewNavigation) => {
+    if (
+      !shellConfiguration ||
+      !isAllowedWebUrl(navigation.url, shellConfiguration.allowedOrigins)
+    ) {
+      return;
+    }
     setCanGoBack(navigation.canGoBack);
     setLoadError("");
   };
@@ -59,21 +190,36 @@ export default function App() {
     <SafeAreaProvider>
       <StatusBar style="dark" backgroundColor="#F5F5F1" />
       <SafeAreaView style={styles.safeArea} edges={["top", "right", "bottom", "left"]}>
-        <WebView
-          ref={webViewRef}
-          source={{ uri: webUrl }}
-          style={styles.webView}
-          originWhitelist={["http://*", "https://*"]}
-          javaScriptEnabled
-          domStorageEnabled
-          sharedCookiesEnabled
-          allowsBackForwardNavigationGestures
-          setSupportMultipleWindows={false}
-          onNavigationStateChange={handleNavigation}
-          onError={(event) => setLoadError(event.nativeEvent.description || "웹앱을 불러오지 못했습니다.")}
-          renderLoading={() => <LoadingView label="DABBOBA를 불러오는 중" />}
-          startInLoadingState
-        />
+        {shellConfiguration ? (
+          <WebView
+            ref={webViewRef}
+            source={{ uri: webUrl }}
+            style={styles.webView}
+            // The library auto-opens URLs rejected by originWhitelist. Route every scheme
+            // through the callback so unknown schemes can be blocked instead.
+            originWhitelist={["*"]}
+            onShouldStartLoadWithRequest={(request) => handleRequestedNavigation(request.url)}
+            onMessage={handleBridgeMessage}
+            onLoadStart={(event) => {
+              if (isAllowedWebUrl(event.nativeEvent.url, shellConfiguration.allowedOrigins)) {
+                webViewReadyRef.current = false;
+              }
+            }}
+            injectedJavaScript={APP_READY_INJECTION_SCRIPT}
+            javaScriptEnabled
+            domStorageEnabled
+            sharedCookiesEnabled
+            javaScriptCanOpenWindowsAutomatically={false}
+            allowsBackForwardNavigationGestures
+            setSupportMultipleWindows={false}
+            onNavigationStateChange={handleNavigation}
+            onError={(event) =>
+              setLoadError(event.nativeEvent.description || "웹앱을 불러오지 못했습니다.")
+            }
+            renderLoading={() => <LoadingView label="DABBOBA를 불러오는 중" />}
+            startInLoadingState
+          />
+        ) : null}
         {loadError ? (
           <View style={styles.errorLayer}>
             <Image
@@ -85,17 +231,21 @@ export default function App() {
             />
             <Text style={styles.errorTitle}>웹앱에 연결할 수 없어요.</Text>
             <Text style={styles.errorBody}>{loadError}</Text>
-            <Text style={styles.errorUrl}>{webUrl}</Text>
-            <Pressable
-              accessibilityRole="button"
-              style={({ pressed }) => [styles.retryButton, pressed && styles.retryButtonPressed]}
-              onPress={() => {
-                setLoadError("");
-                webViewRef.current?.reload();
-              }}
-            >
-              <Text style={styles.retryLabel}>다시 연결</Text>
-            </Pressable>
+            <Text style={styles.errorUrl}>
+              {webUrl || "EXPO_PUBLIC_DABBOBA_WEB_URL"}
+            </Text>
+            {shellConfiguration ? (
+              <Pressable
+                accessibilityRole="button"
+                style={({ pressed }) => [styles.retryButton, pressed && styles.retryButtonPressed]}
+                onPress={() => {
+                  setLoadError("");
+                  webViewRef.current?.reload();
+                }}
+              >
+                <Text style={styles.retryLabel}>다시 연결</Text>
+              </Pressable>
+            ) : null}
           </View>
         ) : null}
       </SafeAreaView>

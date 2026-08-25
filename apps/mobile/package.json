@@ -7,6 +7,7 @@
     "start": "expo start --go",
     "android": "expo start --android --go",
     "ios": "expo start --ios --go",
+    "test": "node --test ../../tests/expo-shell-structure.test.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -21,5 +22,9 @@
   "devDependencies": {
     "@types/react": "~19.1.0",
     "typescript": "~5.9.2"
+  },
+  "overrides": {
+    "metro": "0.83.8",
+    "postcss": "8.5.26"
   }
 }

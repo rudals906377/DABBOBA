@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
+  <title id="title">DABBOBA overlapping double D pixel monogram</title>
+  <desc id="desc">Two identical uppercase pixel D outlines aligned to the same cap height and baseline, overlapped horizontally.</desc>
+  <rect width="1024" height="1024" fill="#080A08"/>
+  <defs>
+    <path id="pixel-d" d="M0 0H256L288 32L320 64L352 96L384 128L416 160V384L384 416L352 448L320 480L288 512L256 544H0Z"/>
+  </defs>
+  <g fill="none" stroke-width="48" stroke-linecap="square" stroke-linejoin="miter" shape-rendering="crispEdges">
+    <use href="#pixel-d" x="224" y="240" stroke="#C8CBC5"/>
+    <use href="#pixel-d" x="384" y="240" stroke="#F6F3EA"/>
+  </g>
+</svg>

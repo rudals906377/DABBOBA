@@ -70,6 +70,10 @@ test("bottom navigation keeps the requested order and accessible current-page co
   );
   assert.match(bottomNavigationSource, /<span>\{tab\.label\}<\/span>/);
   assert.match(bottomNavigationSource, /"aria-hidden":\s*true/);
+  assert.doesNotMatch(bottomNavigationSource, /Icon\w+Fill/);
+  assert.doesNotMatch(bottomNavigationSource, /function CapsuleMachineIcon|<svg/);
+  assert.match(bottomNavigationSource, /className="app-bottom-navigation-machine-icon"/);
+  assert.match(bottomNavigationSource, /<NavigationIcon\s+id=\{tab\.id\}\s*\/>/);
 });
 
 test("뽀바 combines category filters with normalized product and IP search", () => {
@@ -137,6 +141,9 @@ test("root navigation collapses with scroll hysteresis while preserving access a
   assert.doesNotMatch(footerBlock, /"hidden"/);
 
   assert.match(prototypeStyles, /\.app-bottom-navigation > button \{[\s\S]*?min-height: 44px/);
+  assert.match(prototypeStyles, /\.app-bottom-navigation \{[\s\S]*?background:\s*rgba\(252, 252, 248, 0\.7\)[\s\S]*?backdrop-filter:\s*blur\(12px\)/);
+  assert.match(prototypeStyles, /\.app-bottom-navigation > button\[data-selected="true"\] > svg,[\s\S]*?\.app-bottom-navigation > button\[data-selected="true"\] > \.app-bottom-navigation-machine-icon \{[\s\S]*?background:\s*transparent;[\s\S]*?color:\s*var\(--db-green-ink\)/);
+  assert.match(prototypeStyles, /mask:\s*url\("\/assets\/dabboba\/ui\/capsule-machine-nav\.png"\)/);
   assert.match(
     prototypeStyles,
     /\.root-tab-footer\[data-navigation-state="compact"\] \.app-bottom-navigation \{[\s\S]*?max\(220px,[\s\S]*?height: 52px/,

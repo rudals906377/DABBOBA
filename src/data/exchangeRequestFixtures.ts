@@ -5,71 +5,103 @@ export type ExchangeFilter = (typeof EXCHANGE_FILTERS)[number];
 
 export type ExchangePost = {
   id: string;
+  authorId: string;
   author: string;
   categoryId: ProductCategoryId;
   ipId: string;
   title: string;
+  offeredInventoryUnitId: string;
+  offeredCatalogItemId: string;
   offeredItem: string;
-  wantedItem: string;
+  offeredItemImage: string;
+  appReferenceValue: number;
   body: string;
   time: string;
   applications: number;
+  lifecycleStatus?: "OPEN" | "MATCHED" | "COMPLETED" | "CANCELLED" | "HIDDEN";
+  acceptedOfferId?: string | null;
+  authorConfirmedAt?: string | null;
+  proposerConfirmedAt?: string | null;
 };
 
 export type ExchangeApplication = {
   id: string;
+  authorId: string;
   author: string;
+  offeredInventoryUnitId: string;
+  offeredCatalogItemId: string;
+  ipId: string;
+  categoryId: ProductCategoryId;
   offeredItem: string;
+  offeredItemImage: string;
+  appReferenceValue: number;
   message: string;
   time: string;
+  status?: "PENDING" | "ACCEPTED" | "REJECTED" | "WITHDRAWN";
 };
 
 export const DEFAULT_EXCHANGE_POSTS: ExchangePost[] = [
   {
     id: "exchange-one-piece-card",
+    authorId: "user-card-organizer",
     author: "카드정리중",
     categoryId: "tcg",
     ipId: "one-piece",
-    title: "원피스 루피 리더 카드 교환해요",
+    title: "루피 리더 카드, 교환 제안 받아요",
+    offeredInventoryUnitId: "inventory-card-organizer-luffy-leader",
+    offeredCatalogItemId: "one-piece-luffy-leader",
     offeredItem: "OP-13 몽키 D. 루피 리더 카드",
-    wantedItem: "포켓몬 피카츄 또는 리자몽 카드",
-    body: "슬리브와 탑로더에 보관했습니다. 상태가 비슷한 카드끼리 교환하고 싶어요.",
+    offeredItemImage: "/assets/dabboba/products/ip/one-piece.jpg",
+    appReferenceValue: 12_000,
+    body: "슬리브와 탑로더에 보관했습니다. 상품 상태와 함께 편하게 교환을 제안해 주세요.",
     time: "12분 전",
     applications: 3,
   },
   {
     id: "exchange-jjk-capsule",
+    authorId: "user-capsule-round",
     author: "캡슐한바퀴",
     categoryId: "gacha",
     ipId: "jujutsu-kaisen",
-    title: "고죠 캡슐 중복 교환 구해요",
+    title: "고죠 캡슐 중복, 교환 제안 받아요",
+    offeredInventoryUnitId: "inventory-capsule-round-gojo",
+    offeredCatalogItemId: "jjk-gojo-capsule",
     offeredItem: "주술회전 캡슐 DX 고죠 사토루",
-    wantedItem: "같은 시리즈 게토 스구루",
-    body: "개봉 후 구성만 확인했고 바로 보관했습니다. 직거래 또는 택배 모두 괜찮아요.",
+    offeredItemImage: "/assets/dabboba/products/ip/jujutsu-kaisen.jpg",
+    appReferenceValue: 9_000,
+    body: "개봉 후 구성만 확인했고 바로 보관했습니다. 원하는 상품으로 자유롭게 제안해 주세요.",
     time: "34분 전",
     applications: 2,
   },
   {
     id: "exchange-frieren-figure",
+    authorId: "user-dawn-mage",
     author: "새벽의마법사",
     categoryId: "figure",
     ipId: "frieren",
-    title: "프리렌 피규어를 페른으로 교환 원해요",
+    title: "프리렌 미니 피규어 교환 열어둘게요",
+    offeredInventoryUnitId: "inventory-dawn-mage-frieren",
+    offeredCatalogItemId: "frieren-mini-figure",
     offeredItem: "프리렌 미니 피규어 미개봉",
-    wantedItem: "동일 라인 페른 미니 피규어",
-    body: "박스 눌림 없는 미개봉 제품입니다. 사진 확인 후 천천히 교환해요.",
+    offeredItemImage: "/assets/dabboba/products/ip/frieren.jpg",
+    appReferenceValue: 54_900,
+    body: "박스 눌림 없는 미개봉 제품입니다. 사진 확인 후 천천히 제안을 살펴볼게요.",
     time: "1시간 전",
     applications: 1,
   },
   {
     id: "exchange-gundam-kuji",
+    authorId: "user-universal-century",
     author: "우주세기보관소",
     categoryId: "kuji",
     ipId: "mobile-suit-gundam",
-    title: "건담 쿠지 B상과 라스트원 교환 문의",
+    title: "건담 쿠지 B상 교환 제안 받습니다",
+    offeredInventoryUnitId: "inventory-universal-century-gundam-b",
+    offeredCatalogItemId: "gundam-kuji-b",
     offeredItem: "기동전사 건담 쿠지 B상",
-    wantedItem: "같은 쿠지 라스트원상 또는 A상",
-    body: "차액 협의 가능합니다. 상품 상태와 구성품을 서로 확인하고 진행하고 싶습니다.",
+    offeredItemImage: "/assets/dabboba/products/ip/mobile-suit-gundam.jpg",
+    appReferenceValue: 24_000,
+    body: "상품 상태와 구성품을 서로 확인하고 진행하고 싶습니다. 여러 제안을 편하게 남겨주세요.",
     time: "2시간 전",
     applications: 2,
   },
@@ -79,15 +111,29 @@ export const DEFAULT_EXCHANGE_APPLICATIONS: Record<string, ExchangeApplication[]
   "exchange-one-piece-card": [
     {
       id: "exchange-one-piece-card-1",
+      authorId: "user-green-binder",
       author: "초록바인더",
-      offeredItem: "포켓몬 카드 피카츄 AR",
+      offeredInventoryUnitId: "inventory-green-binder-pikachu",
+      offeredCatalogItemId: "pokemon-pikachu-card",
+      ipId: "pokemon",
+      categoryId: "tcg",
+      offeredItem: "포켓몬스터 피카츄 카드",
+      offeredItemImage: "/assets/dabboba/products/ip/pokemon.jpg",
+      appReferenceValue: 8_000,
       message: "상태 사진을 확인한 뒤 택배 교환하고 싶어요.",
       time: "7분 전",
     },
     {
       id: "exchange-one-piece-card-2",
+      authorId: "user-charizard-collector",
       author: "리자몽수집가",
-      offeredItem: "리자몽 ex 더블레어",
+      offeredInventoryUnitId: "inventory-charizard-collector-charizard",
+      offeredCatalogItemId: "pokemon-charizard-card",
+      ipId: "pokemon",
+      categoryId: "tcg",
+      offeredItem: "포켓몬스터 리자몽 카드",
+      offeredItemImage: "/assets/dabboba/products/ip/pokemon.jpg",
+      appReferenceValue: 18_000,
       message: "추가 카드까지 포함해서 서로 맞춰볼 수 있어요.",
       time: "4분 전",
     },
@@ -95,8 +141,15 @@ export const DEFAULT_EXCHANGE_APPLICATIONS: Record<string, ExchangeApplication[]
   "exchange-jjk-capsule": [
     {
       id: "exchange-jjk-capsule-1",
+      authorId: "user-goods-walk",
       author: "굿즈산책",
-      offeredItem: "같은 시리즈 게토 스구루",
+      offeredInventoryUnitId: "inventory-goods-walk-geto",
+      offeredCatalogItemId: "jjk-geto-capsule",
+      ipId: "jujutsu-kaisen",
+      categoryId: "gacha",
+      offeredItem: "주술회전 캡슐 DX 게토 스구루",
+      offeredItemImage: "/assets/dabboba/products/ip/jujutsu-kaisen.jpg",
+      appReferenceValue: 9_000,
       message: "저도 중복이라 1:1 교환 가능합니다.",
       time: "18분 전",
     },
@@ -105,8 +158,15 @@ export const DEFAULT_EXCHANGE_APPLICATIONS: Record<string, ExchangeApplication[]
   "exchange-gundam-kuji": [
     {
       id: "exchange-gundam-kuji-1",
+      authorId: "user-last-ticket",
       author: "마지막한장",
-      offeredItem: "건담 쿠지 A상",
+      offeredInventoryUnitId: "inventory-last-ticket-gundam-a",
+      offeredCatalogItemId: "gundam-kuji-a",
+      ipId: "mobile-suit-gundam",
+      categoryId: "kuji",
+      offeredItem: "기동전사 건담 쿠지 A상",
+      offeredItemImage: "/assets/dabboba/products/ip/mobile-suit-gundam.jpg",
+      appReferenceValue: 42_000,
       message: "구성품과 박스 상태 확인 후 차액 없이 교환을 제안드려요.",
       time: "53분 전",
     },
@@ -115,6 +175,7 @@ export const DEFAULT_EXCHANGE_APPLICATIONS: Record<string, ExchangeApplication[]
 
 export type ProductRequest = {
   id: string;
+  authorId: string;
   author: string;
   categoryId: ProductCategoryId;
   ipId: string;
@@ -122,6 +183,7 @@ export type ProductRequest = {
   details: string;
   time: string;
   likes: number;
+  version?: number;
 };
 
 export const REQUEST_CATEGORY_IDS: readonly ProductCategoryId[] = ["gacha", "tcg", "figure", "kuji"];
@@ -129,6 +191,7 @@ export const REQUEST_CATEGORY_IDS: readonly ProductCategoryId[] = ["gacha", "tcg
 export const DEFAULT_PRODUCT_REQUESTS: ProductRequest[] = [
   {
     id: "request-dandadan-gacha",
+    authorId: "user-occult-collector",
     author: "오컬트수집가",
     categoryId: "gacha",
     ipId: "dandadan",
@@ -139,6 +202,7 @@ export const DEFAULT_PRODUCT_REQUESTS: ProductRequest[] = [
   },
   {
     id: "request-pokemon-card",
+    authorId: "user-green-binder",
     author: "초록바인더",
     categoryId: "tcg",
     ipId: "pokemon",
@@ -149,6 +213,7 @@ export const DEFAULT_PRODUCT_REQUESTS: ProductRequest[] = [
   },
   {
     id: "request-evangelion-figure",
+    authorId: "user-unit-one-hangar",
     author: "초호기격납고",
     categoryId: "figure",
     ipId: "evangelion",
@@ -159,6 +224,7 @@ export const DEFAULT_PRODUCT_REQUESTS: ProductRequest[] = [
   },
   {
     id: "request-hunter-kuji",
+    authorId: "user-hunter-examinee",
     author: "헌터시험응시자",
     categoryId: "kuji",
     ipId: "hunter-x-hunter",

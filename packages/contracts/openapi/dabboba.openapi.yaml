@@ -1,0 +1,4425 @@
+openapi: 3.1.0
+info:
+  title: DABBOBA API
+  version: 0.1.0
+  description: Shared user, commerce, and privileged operations contract. Fixture-only prototype behavior is not represented as production persistence.
+servers:
+  - url: http://127.0.0.1:8788
+    description: Isolated local API
+tags:
+  - name: Auth
+  - name: Media
+  - name: Catalog
+  - name: Exchange
+  - name: Community
+  - name: Commerce
+  - name: Account
+  - name: Admin
+paths:
+  /healthz:
+    get:
+      operationId: getHealth
+      responses:
+        "200":
+          description: Process and dependencies are healthy.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+  /readyz:
+    get:
+      operationId: getReadiness
+      responses:
+        "200":
+          description: Process dependencies are ready to serve traffic.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Health" }
+        "503":
+          description: A required dependency is unavailable.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Health" }
+  /v1/auth/dev-session:
+    post:
+      tags: [Auth]
+      operationId: createDevelopmentSession
+      description: Development-only user session. The API refuses this route outside development and test.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [email]
+              properties:
+                email: { type: string, format: email, maxLength: 254 }
+      responses:
+        "201":
+          description: Session created.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SessionCreated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/auth/me:
+    get:
+      tags: [Auth]
+      operationId: getCurrentUserSession
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Current user actor and active session metadata.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UserSessionState" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /v1/auth/refresh:
+    post:
+      tags: [Auth]
+      operationId: refreshUserSession
+      security: [{ bearerAuth: [] }]
+      responses:
+        "201":
+          description: Current session revoked and replaced with a newly issued user session.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UserSessionIssued" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /v1/auth/logout:
+    post:
+      tags: [Auth]
+      operationId: logoutUser
+      security: [{ bearerAuth: [] }]
+      responses:
+        "204": { description: Current user session revoked. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /v1/admin/auth/login:
+    post:
+      tags: [Admin, Auth]
+      operationId: loginAdmin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [email, password]
+              properties:
+                email: { type: string, format: email, maxLength: 254 }
+                password: { type: string, minLength: 12, maxLength: 256 }
+      responses:
+        "201":
+          description: Privileged session created.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SessionCreated" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /v1/admin/auth/logout:
+    post:
+      tags: [Admin, Auth]
+      operationId: logoutAdmin
+      security: [{ bearerAuth: [] }]
+      responses:
+        "204": { description: Session revoked. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /v1/admin/me:
+    get:
+      tags: [Admin]
+      operationId: getAdminActor
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Current privileged actor.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Actor" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /v1/notices:
+    get:
+      tags: [Community]
+      operationId: listPublishedNotices
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: Published notices ordered by pinned state and recency.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/NoticePage" }
+  /v1/media/uploads:
+    post:
+      tags: [Media]
+      operationId: createMediaUploadIntent
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateMediaUploadInput" }
+      responses:
+        "201":
+          description: Short-lived multipart POST policy bound to the staging object, declared media metadata, and exact byte size.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MediaUploadIntent" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "429": { description: Per-user active, daily, or retained media count/byte quota exceeded. }
+        "503": { description: Media storage is not configured. }
+  /v1/media/{mediaId}/complete:
+    post:
+      tags: [Media]
+      operationId: completeMediaUpload
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/MediaId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: Bytes, checksum, MIME, decode limits, and dimensions verified; orientation normalized and metadata stripped through WebP re-encoding into an immutable object generation.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MediaReady" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "429": { description: Per-user image processing concurrency exceeded. }
+        "503": { description: API instance image processing capacity is busy. }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "410":
+          description: The durable upload intent expired and the client must create a new upload intent.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MediaUploadIntentExpiredErrorEnvelope" }
+  /v1/media/{mediaId}:
+    delete:
+      tags: [Media]
+      operationId: deleteOwnUnattachedMedia
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/MediaId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "204":
+          description: Owned, unattached media was marked deleted; repeating the same idempotency key is safe.
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403":
+          description: The authenticated account is not allowed to mutate data, including after account-deletion approval.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+        "404":
+          description: Media does not exist or is not owned by the authenticated user; ownership is not disclosed.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+        "409":
+          description: Media is attached to durable content and cannot be deleted directly.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+  /v1/media/{mediaId}/url:
+    get:
+      tags: [Media]
+      operationId: getOwnMediaUrl
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/MediaId"
+      responses:
+        "200":
+          description: Short-lived URL for media owned by the current actor.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MediaReadUrl" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/media/{mediaId}/public-url:
+    get:
+      tags: [Media]
+      operationId: getPublicPostMediaUrl
+      parameters:
+        - $ref: "#/components/parameters/MediaId"
+      responses:
+        "200":
+          description: Short-lived URL only when the media belongs to a visible community post.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MediaReadUrl" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/admin/media/{mediaId}/url:
+    get:
+      tags: [Admin, Media]
+      operationId: getAdminMediaUrl
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/MediaId"
+      responses:
+        "200":
+          description: Short-lived URL for privileged review of an attachment.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MediaReadUrl" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /v1/inquiries:
+    get:
+      tags: [Community]
+      operationId: listOwnInquiries
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: Authenticated user's inquiries.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/InquiryPage" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      tags: [Community]
+      operationId: createInquiry
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateInquiryInput" }
+      responses:
+        "201":
+          description: Inquiry created.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Inquiry" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /v1/inquiries/{inquiryId}:
+    get:
+      tags: [Community]
+      operationId: getOwnInquiry
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/InquiryId"
+      responses:
+        "200":
+          description: Inquiry with its conversation.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/InquiryDetail" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/inquiries/{inquiryId}/messages:
+    post:
+      tags: [Community]
+      operationId: addInquiryMessage
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/InquiryId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateInquiryMessageInput" }
+      responses:
+        "201":
+          description: User follow-up added.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/InquiryMessage" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /v1/community/posts:
+    get:
+      tags: [Community]
+      operationId: listCommunityPosts
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Search"
+        - name: ipId
+          in: query
+          schema: { type: string, maxLength: 120 }
+      responses:
+        "200":
+          description: Visible community posts.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CommunityPostPage" }
+    post:
+      tags: [Community]
+      operationId: createCommunityPost
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateCommunityPostInput" }
+      responses:
+        "201":
+          description: Post created.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CommunityPost" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /v1/community/posts/{postId}:
+    get:
+      tags: [Community]
+      operationId: getCommunityPost
+      parameters:
+        - $ref: "#/components/parameters/PostId"
+      responses:
+        "200":
+          description: Visible post detail.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CommunityPost" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      tags: [Community]
+      operationId: updateCommunityPost
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PostId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateCommunityPostInput" }
+      responses:
+        "200":
+          description: Author-owned active post updated after a version check.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CommunityPost" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+    delete:
+      tags: [Community]
+      operationId: deleteCommunityPost
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PostId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ExpectedVersionInput" }
+      responses:
+        "200":
+          description: Author-owned post soft-deleted after a version check.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CommunityPostDeletionResult" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /v1/community/posts/{postId}/like:
+    post:
+      tags: [Community]
+      operationId: setCommunityPostLike
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PostId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SetCommunityPostLikeInput" }
+      responses:
+        "200":
+          description: Explicit viewer like state and committed aggregate count.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CommunityPostLikeResult" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /v1/community/posts/{postId}/comments:
+    get:
+      tags: [Community]
+      operationId: listCommunityComments
+      parameters:
+        - $ref: "#/components/parameters/PostId"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: Visible comments ordered as a conversation.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CommentPage" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      tags: [Community]
+      operationId: createComment
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PostId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [content]
+              properties:
+                content: { type: string, minLength: 1, maxLength: 2000 }
+      responses:
+        "201":
+          description: Comment created.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Comment" }
+  /v1/community/comments/{commentId}:
+    delete:
+      tags: [Community]
+      operationId: deleteCommunityComment
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/CommentId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: Author-owned comment soft-deleted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CommunityCommentDeletionResult" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /v1/community/blocks:
+    get:
+      tags: [Community]
+      operationId: listCommunityBlocks
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: Users blocked by the current user.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BlockedUserPage" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /v1/community/blocks/{userId}:
+    post:
+      tags: [Community]
+      operationId: blockCommunityUser
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UserId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: Target user is blocked by the current user.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UserBlockResult" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+    delete:
+      tags: [Community]
+      operationId: unblockCommunityUser
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UserId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: Target user is no longer blocked by the current user.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UserBlockResult" }
+  /v1/reports:
+    post:
+      tags: [Community]
+      operationId: createReport
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateReportInput" }
+      responses:
+        "201":
+          description: Report accepted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Report" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /v1/catalog/ips:
+    get:
+      tags: [Catalog]
+      operationId: listCatalogIps
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Search"
+      responses:
+        "200":
+          description: Active IP catalog.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CatalogIpPage" }
+  /v1/catalog/characters:
+    get:
+      tags: [Catalog]
+      operationId: listCatalogCharacters
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Search"
+        - name: ipId
+          in: query
+          schema:
+            type: string
+            maxLength: 120
+            pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+      responses:
+        "200":
+          description: Active character catalog.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CharacterPage" }
+  /v1/catalog/products:
+    get:
+      tags: [Catalog]
+      operationId: listCatalogProducts
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Search"
+        - name: category
+          in: query
+          schema: { $ref: "#/components/schemas/ProductCategory" }
+        - name: ipId
+          in: query
+          schema: { type: string, maxLength: 120 }
+        - name: characterId
+          in: query
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Active products with server-owned price and availability.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CatalogProductPage" }
+  /v1/catalog/requests:
+    post:
+      tags: [Catalog]
+      operationId: createCatalogRequest
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateCatalogRequestInput" }
+      responses:
+        "201":
+          description: Product or IP request created.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CatalogRequest" }
+  /v1/wanted-requests:
+    get:
+      tags: [Community, Catalog]
+      operationId: listWantedRequests
+      description: Public active wanted-request room. Supplying a valid user session adds the viewer's like state.
+      security:
+        - bearerAuth: []
+        - {}
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Search"
+        - name: category
+          in: query
+          schema: { $ref: "#/components/schemas/ProductCategory" }
+        - name: ipId
+          in: query
+          schema:
+            type: string
+            maxLength: 120
+            pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+      responses:
+        "200":
+          description: Active wanted requests ordered newest first.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WantedRequestPage" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    post:
+      tags: [Community, Catalog]
+      operationId: createWantedRequest
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateWantedRequestInput" }
+      responses:
+        "201":
+          description: Wanted request created for an active catalog IP.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WantedRequest" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /v1/wanted-requests/{requestId}:
+    patch:
+      tags: [Community, Catalog]
+      operationId: updateWantedRequest
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/WantedRequestId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateWantedRequestInput" }
+      responses:
+        "200":
+          description: Author-owned active wanted request updated after a version check.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WantedRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+    delete:
+      tags: [Community, Catalog]
+      operationId: deleteWantedRequest
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/WantedRequestId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ExpectedVersionInput" }
+      responses:
+        "200":
+          description: Author-owned wanted request soft-deleted after a version check.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WantedRequestDeletionResult" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /v1/wanted-requests/{requestId}/like:
+    post:
+      tags: [Community]
+      operationId: setWantedRequestLike
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/WantedRequestId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SetWantedRequestLikeInput" }
+      responses:
+        "200":
+          description: Explicit viewer like state and committed aggregate count.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WantedRequestLikeResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /v1/exchange/inventory:
+    get:
+      tags: [Exchange]
+      operationId: listExchangeEligibleInventory
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Search"
+      responses:
+        "200":
+          description: Authenticated user's exchange-eligible registered inventory.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/InventoryUnitPage" }
+  /v1/exchange/listings:
+    get:
+      tags: [Exchange]
+      operationId: listExchangeListings
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Search"
+        - name: category
+          in: query
+          schema: { $ref: "#/components/schemas/ProductCategory" }
+      responses:
+        "200":
+          description: Open visible exchange listings.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ExchangeListingPage" }
+    post:
+      tags: [Exchange]
+      operationId: createExchangeListing
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateExchangeListingInput" }
+      responses:
+        "201":
+          description: Listing created from one owned inventory unit.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ExchangeListing" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /v1/exchange/listings/{listingId}:
+    get:
+      tags: [Exchange]
+      operationId: getExchangeListing
+      parameters:
+        - $ref: "#/components/parameters/ListingId"
+      responses:
+        "200":
+          description: Listing and visible offer summary.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ExchangeListing" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/exchange/listings/{listingId}/offers:
+    post:
+      tags: [Exchange]
+      operationId: createExchangeOffer
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/ListingId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateExchangeOfferInput" }
+      responses:
+        "201":
+          description: Product-backed exchange proposal created.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ExchangeOffer" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /v1/exchange/listings/{listingId}/offers/{offerId}/decision:
+    post:
+      tags: [Exchange]
+      operationId: decideExchangeOffer
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/ListingId"
+        - name: offerId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [decision]
+              properties:
+                decision: { type: string, enum: [ACCEPTED, REJECTED] }
+      responses:
+        "200":
+          description: Author decision committed atomically.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ExchangeOffer" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /v1/exchange/listings/{listingId}/cancel:
+    post:
+      tags: [Exchange]
+      operationId: cancelOwnExchangeListing
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/ListingId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: Open listing cancelled and all reserved inventory released atomically.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ExchangeListing" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /v1/exchange/listings/{listingId}/offers/{offerId}/withdraw:
+    post:
+      tags: [Exchange]
+      operationId: withdrawOwnExchangeOffer
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/ListingId"
+        - name: offerId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: Pending offer withdrawn and its inventory released.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ExchangeOffer" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /v1/exchange/listings/{listingId}/completion-confirmation:
+    post:
+      tags: [Exchange]
+      operationId: confirmExchangeCompletion
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/ListingId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: Party confirmation recorded; the second confirmation transfers both owned units atomically.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ExchangeListing" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /v1/admin/exchange/listings:
+    get:
+      tags: [Admin, Exchange]
+      operationId: listAdminExchangeListings
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Search"
+        - name: status
+          in: query
+          schema: { type: string, enum: [OPEN, MATCHED, COMPLETED, CANCELLED, HIDDEN] }
+      responses:
+        "200":
+          description: Exchange operations queue including matched, completed, cancelled, and hidden listings.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ExchangeListingPage" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /v1/admin/exchange/listings/{listingId}/resolution:
+    post:
+      tags: [Admin, Exchange]
+      operationId: resolveAdminExchange
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/ListingId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/AdminReason"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [action, reason]
+              properties:
+                action: { type: string, enum: [COMPLETE, CANCEL] }
+                reason: { type: string, minLength: 2, maxLength: 1000 }
+      responses:
+        "200":
+          description: Matched exchange completed or cancelled by an authorized operator and audited.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ExchangeListing" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /v1/catalog/products/{productId}/draw-odds:
+    get:
+      tags: [Catalog, Commerce]
+      operationId: getProductDrawOdds
+      parameters:
+        - $ref: "#/components/parameters/ProductId"
+      responses:
+        "200":
+          description: Current public, server-calculated odds for an active gacha or kuji product.
+          headers:
+            Cache-Control:
+              description: Odds are never served from a client or intermediary cache.
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PublicDrawOdds" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /v1/orders:
+    post:
+      tags: [Commerce]
+      operationId: createOrder
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateOrderInput" }
+      responses:
+        "201":
+          description: Server-priced order and stock reservation created.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Order" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "503": { description: Payment provider is not configured; no order or reservation is created. }
+  /v1/orders/{orderId}:
+    get:
+      tags: [Commerce]
+      operationId: getOrder
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Authenticated owner's order.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Order" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/payments/webhooks/{provider}:
+    post:
+      tags: [Commerce]
+      operationId: receivePaymentWebhook
+      parameters:
+        - name: provider
+          in: path
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 40 }
+        - name: x-dabboba-signature
+          in: header
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PaymentWebhookInput" }
+      responses:
+        "202": { description: Verified event accepted or previously processed. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /v1/draws/{entitlementId}/consume:
+    post:
+      tags: [Commerce]
+      operationId: consumeDrawEntitlement
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: entitlementId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: Server-committed immutable draw result for client reveal.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DrawResult" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /v1/account/profile:
+    get:
+      tags: [Account]
+      operationId: getAccountProfile
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Current user's minimized public profile preferences.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccountProfile" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    patch:
+      tags: [Account]
+      operationId: updateAccountProfile
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateAccountProfileInput" }
+      responses:
+        "200":
+          description: Profile updated with optimistic concurrency control.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccountProfile" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /v1/account/default-address:
+    get:
+      tags: [Account]
+      operationId: getDefaultShippingAddress
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Current user's default shipping address.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DefaultShippingAddress" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      tags: [Account]
+      operationId: upsertDefaultShippingAddress
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpsertDefaultShippingAddressInput" }
+      responses:
+        "200":
+          description: Existing address replaced after a version check.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DefaultShippingAddress" }
+        "201":
+          description: First default address created.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DefaultShippingAddress" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /v1/account/wishlist:
+    get:
+      tags: [Account]
+      operationId: listWishlist
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: Current user's wishlist, newest first.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WishlistPage" }
+  /v1/account/wishlist/{productId}:
+    post:
+      tags: [Account]
+      operationId: addWishlistItem
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: productId
+          in: path
+          required: true
+          schema: { type: string, maxLength: 120 }
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: Product is present in the current user's wishlist.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WishlistItem" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [Account]
+      operationId: removeWishlistItem
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: productId
+          in: path
+          required: true
+          schema: { type: string, maxLength: 120 }
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: Removal result without exposing another user's wishlist.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WishlistMutationResult" }
+  /v1/account/orders:
+    get:
+      tags: [Account]
+      operationId: listAccountOrders
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: Current user's minimized order history.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccountOrderPage" }
+  /v1/account/draw-entitlements:
+    get:
+      tags: [Account]
+      operationId: listAccountDrawEntitlements
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+        - name: status
+          in: query
+          description: Defaults to AVAILABLE when omitted.
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/AccountDrawEntitlementStatus"
+            default: AVAILABLE
+      responses:
+        "200":
+          description: Current user's durable paid draw entitlements, newest first.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccountDrawEntitlementPage" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /v1/account/points:
+    get:
+      tags: [Account]
+      operationId: listAccountPointLedger
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: Authoritative balance and current user's point ledger page.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccountPointPage" }
+  /v1/account/notification-preferences:
+    get:
+      tags: [Account]
+      operationId: getAccountNotificationPreferences
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Current user's durable notification and optional-consent preferences.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/NotificationPreferences" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    put:
+      tags: [Account]
+      operationId: updateAccountNotificationPreferences
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateNotificationPreferencesInput" }
+      responses:
+        "200":
+          description: Preferences updated with optimistic concurrency and immutable consent evidence.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/NotificationPreferences" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /v1/account/notifications:
+    get:
+      tags: [Account]
+      operationId: listAccountNotifications
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: Current user's notifications.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/NotificationPage" }
+  /v1/account/notifications/{notificationId}/read:
+    post:
+      tags: [Account]
+      operationId: markAccountNotificationRead
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: notificationId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: Notification is marked read exactly once for its owner.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccountNotification" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/account/shipping-requests:
+    get:
+      tags: [Account]
+      operationId: listAccountShippingRequests
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+        - name: status
+          in: query
+          schema: { $ref: "#/components/schemas/AccountShippingRequestStatus" }
+      responses:
+        "200":
+          description: Current user's shipping requests, newest first.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccountShippingRequestPage" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      tags: [Account]
+      operationId: createAccountShippingRequest
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateShippingRequestInput" }
+      responses:
+        "201":
+          description: Owned inventory is atomically moved to shipping with an immutable address snapshot.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ShippingRequest" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /v1/account/shipping-requests/{shippingRequestId}:
+    get:
+      tags: [Account]
+      operationId: getAccountShippingRequest
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/ShippingRequestId"
+      responses:
+        "200":
+          description: One shipping request owned by the current user.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccountShippingRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/account/deletion-request:
+    get:
+      tags: [Account]
+      operationId: getAccountDeletionRequest
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Most recent account deletion request owned by the current user.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccountDeletionRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      tags: [Account]
+      operationId: requestAccountDeletion
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/EmptyObject" }
+      responses:
+        "202":
+          description: Manual-review deletion request recorded or reassessed and all user sessions revoked.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccountDeletionRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /v1/admin/products/{productId}/draw-versions:
+    get:
+      tags: [Admin, Commerce]
+      operationId: listAdminDrawVersions
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: productId
+          in: path
+          required: true
+          schema: { type: string, maxLength: 120 }
+      responses:
+        "200":
+          description: Immutable probability versions and current finite pool quantities.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DrawProbabilityVersionList" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      tags: [Admin, Commerce]
+      operationId: createAdminDrawVersion
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: productId
+          in: path
+          required: true
+          schema: { type: string, maxLength: 120 }
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/AdminReason"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateDrawVersionInput" }
+      responses:
+        "201":
+          description: Draft probability version created and audited.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DrawProbabilityVersion" }
+  /v1/admin/products/{productId}/draw-versions/{versionId}/publish:
+    post:
+      tags: [Admin, Commerce]
+      operationId: publishAdminDrawVersion
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: productId
+          in: path
+          required: true
+          schema: { type: string, maxLength: 120 }
+        - name: versionId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/AdminReason"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 2, maxLength: 1000 }
+      responses:
+        "200":
+          description: Draft published, previous active version retired, and action audited.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [id, productId, version, status]
+                properties:
+                  id: { type: string, format: uuid }
+                  productId: { type: string, maxLength: 120 }
+                  version: { type: integer, minimum: 1 }
+                  status: { type: string, const: ACTIVE }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /v1/admin/dashboard:
+    get:
+      tags: [Admin]
+      operationId: getAdminDashboard
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Operational counts.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminDashboard" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /v1/admin/users:
+    get:
+      tags: [Admin]
+      operationId: listAdminUsers
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Search"
+        - name: status
+          in: query
+          schema: { $ref: "#/components/schemas/UserStatus" }
+      responses:
+        "200":
+          description: Privacy-minimized user list.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UserSummaryPage" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /v1/admin/users/{userId}:
+    get:
+      tags: [Admin]
+      operationId: getAdminUser
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UserId"
+      responses:
+        "200":
+          description: Privacy-minimized user detail and aggregate activity.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UserDetail" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/admin/users/{userId}/status:
+    post:
+      tags: [Admin]
+      operationId: changeUserStatus
+      description: Changes suspension or ban state. Account deletion must use the dedicated account-deletion review flow.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UserId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/AdminReason"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ChangeUserStatusInput" }
+      responses:
+        "200":
+          description: User status changed and audited.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UserSummary" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /v1/admin/administrators:
+    get:
+      tags: [Admin]
+      operationId: listAdministrators
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Administrator accounts; SUPER_ADMIN only.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UserSummaryPage" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    post:
+      tags: [Admin]
+      operationId: createAdministrator
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/AdminReason"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateAdministratorInput" }
+      responses:
+        "201":
+          description: Administrator created by SUPER_ADMIN and audited.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UserSummary" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /v1/admin/administrators/{userId}:
+    patch:
+      tags: [Admin]
+      operationId: changeAdministrator
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UserId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/AdminReason"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ChangeAdministratorInput" }
+      responses:
+        "200":
+          description: Administrator role or status changed by SUPER_ADMIN and audited.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UserSummary" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /v1/admin/notices:
+    get:
+      tags: [Admin]
+      operationId: listAdminNotices
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Search"
+      responses:
+        "200":
+          description: All notices including drafts and hidden records.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/NoticePage" }
+    post:
+      tags: [Admin]
+      operationId: createAdminNotice
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/AdminReason"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpsertNoticeInput" }
+      responses:
+        "201":
+          description: Notice created and audited.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Notice" }
+  /v1/admin/notices/{noticeId}:
+    patch:
+      tags: [Admin]
+      operationId: updateAdminNotice
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: noticeId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/AdminReason"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpsertNoticeInput" }
+      responses:
+        "200":
+          description: Notice updated and audited.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Notice" }
+    delete:
+      tags: [Admin]
+      operationId: softDeleteAdminNotice
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: noticeId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/AdminReason"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ExpectedVersionInput" }
+      responses:
+        "204": { description: Notice soft-deleted and audited. }
+  /v1/admin/notices/{noticeId}/restore:
+    post:
+      tags: [Admin]
+      operationId: restoreAdminNotice
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: noticeId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/AdminReason"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ExpectedVersionInput" }
+      responses:
+        "200":
+          description: Notice restored as an unpublished active draft and audited.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Notice" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /v1/admin/notices/{noticeId}/visibility:
+    post:
+      tags: [Admin]
+      operationId: changeAdminNoticeVisibility
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: noticeId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/AdminReason"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [status, expectedVersion]
+              properties:
+                status: { type: string, enum: [ACTIVE, HIDDEN] }
+                expectedVersion: { type: integer, minimum: 1 }
+      responses:
+        "200":
+          description: Notice hidden or unhidden without physical deletion and action audited.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Notice" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /v1/admin/inquiries:
+    get:
+      tags: [Admin]
+      operationId: listAdminInquiries
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Search"
+        - name: status
+          in: query
+          schema: { $ref: "#/components/schemas/InquiryStatus" }
+        - name: userId
+          in: query
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Filtered inquiry queue.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/InquiryPage" }
+  /v1/admin/inquiries/{inquiryId}:
+    get:
+      tags: [Admin]
+      operationId: getAdminInquiry
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/InquiryId"
+      responses:
+        "200":
+          description: Inquiry conversation with minimized user data.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/InquiryDetail" }
+  /v1/admin/inquiries/{inquiryId}/messages:
+    post:
+      tags: [Admin]
+      operationId: answerInquiry
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/InquiryId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/AdminReason"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateInquiryMessageInput" }
+      responses:
+        "201":
+          description: Admin answer stored, inquiry updated, and action audited.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/InquiryMessage" }
+  /v1/admin/posts:
+    get:
+      tags: [Admin]
+      operationId: listAdminPosts
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Search"
+        - name: status
+          in: query
+          schema: { $ref: "#/components/schemas/ContentStatus" }
+        - name: kind
+          in: query
+          schema: { type: string, enum: [DUKROOM, SNAP, GENERAL] }
+        - name: authorId
+          in: query
+          schema: { type: string, format: uuid }
+        - name: ipId
+          in: query
+          schema: { type: string, maxLength: 120 }
+      responses:
+        "200":
+          description: Moderation post list.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CommunityPostPage" }
+  /v1/admin/posts/{postId}/status:
+    post:
+      tags: [Admin]
+      operationId: moderatePost
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PostId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/AdminReason"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ModerateContentInput" }
+      responses:
+        "200":
+          description: Post status changed without physical deletion and audited.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CommunityPost" }
+  /v1/admin/comments:
+    get:
+      tags: [Admin]
+      operationId: listAdminComments
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Search"
+        - name: status
+          in: query
+          schema: { $ref: "#/components/schemas/ContentStatus" }
+      responses:
+        "200":
+          description: Moderation comment list.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CommentPage" }
+  /v1/admin/comments/{commentId}/status:
+    post:
+      tags: [Admin]
+      operationId: moderateComment
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: commentId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/AdminReason"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ModerateContentInput" }
+      responses:
+        "200":
+          description: Comment status changed without physical deletion and audited.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Comment" }
+  /v1/admin/reports:
+    get:
+      tags: [Admin]
+      operationId: listAdminReports
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+        - name: status
+          in: query
+          schema: { $ref: "#/components/schemas/ReportStatus" }
+        - name: targetType
+          in: query
+          schema: { type: string, enum: [POST, COMMENT, SNAP, USER, EXCHANGE_LISTING] }
+        - name: targetId
+          in: query
+          schema: { type: string, format: uuid }
+        - name: reporterId
+          in: query
+          schema: { type: string, format: uuid }
+        - name: subjectUserId
+          in: query
+          description: 회원 본인과 그 회원이 작성한 게시글, Snap, 댓글, 교환 글을 대상으로 한 신고만 조회합니다.
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Report queue.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReportPage" }
+  /v1/admin/reports/{reportId}/review:
+    post:
+      tags: [Admin]
+      operationId: startAdminReportReview
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: reportId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/AdminReason"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/StartReportReviewInput" }
+      responses:
+        "200":
+          description: Pending report claimed for review and audited.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Report" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /v1/admin/reports/{reportId}/resolution:
+    post:
+      tags: [Admin]
+      operationId: resolveAdminReport
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: reportId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/AdminReason"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ResolveReportInput" }
+      responses:
+        "200":
+          description: Report and selected moderation action committed and audited together.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Report" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /v1/admin/ips:
+    get:
+      tags: [Admin]
+      operationId: listAdminIps
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Search"
+      responses:
+        "200":
+          description: Full IP catalog including inactive rows.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CatalogIpPage" }
+    post:
+      tags: [Admin]
+      operationId: createAdminIp
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/AdminReason"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpsertIpInput" }
+      responses:
+        "201":
+          description: IP created and audited.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CatalogIp" }
+  /v1/admin/ips/{ipId}:
+    patch:
+      tags: [Admin]
+      operationId: updateAdminIp
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: ipId
+          in: path
+          required: true
+          schema: { type: string, maxLength: 120 }
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/AdminReason"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpsertIpInput" }
+      responses:
+        "200":
+          description: IP updated and audited.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CatalogIp" }
+  /v1/admin/characters:
+    get:
+      tags: [Admin]
+      operationId: listAdminCharacters
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Search"
+        - name: ipId
+          in: query
+          schema: { type: string, maxLength: 120 }
+      responses:
+        "200":
+          description: Character catalog.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CharacterPage" }
+    post:
+      tags: [Admin]
+      operationId: createAdminCharacter
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/AdminReason"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpsertCharacterInput" }
+      responses:
+        "201":
+          description: Character created and audited.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Character" }
+  /v1/admin/characters/{characterId}:
+    patch:
+      tags: [Admin]
+      operationId: updateAdminCharacter
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: characterId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/AdminReason"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpsertCharacterInput" }
+      responses:
+        "200":
+          description: Character updated and audited.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Character" }
+  /v1/admin/products:
+    get:
+      tags: [Admin]
+      operationId: listAdminProducts
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Search"
+        - name: category
+          in: query
+          schema: { $ref: "#/components/schemas/ProductCategory" }
+        - name: ipId
+          in: query
+          schema: { type: string, maxLength: 120 }
+        - name: characterId
+          in: query
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Full product catalog including inactive rows.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CatalogProductPage" }
+    post:
+      tags: [Admin]
+      operationId: createAdminProduct
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/AdminReason"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpsertProductInput" }
+      responses:
+        "201":
+          description: Product created and audited.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CatalogProduct" }
+  /v1/admin/products/{productId}:
+    patch:
+      tags: [Admin]
+      operationId: updateAdminProduct
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: productId
+          in: path
+          required: true
+          schema: { type: string, maxLength: 120 }
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/AdminReason"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpsertProductInput" }
+      responses:
+        "200":
+          description: Product updated and audited.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CatalogProduct" }
+  /v1/admin/catalog-requests:
+    get:
+      tags: [Admin]
+      operationId: listAdminCatalogRequests
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Search"
+        - name: kind
+          in: query
+          schema: { type: string, enum: [PRODUCT, IP] }
+        - name: status
+          in: query
+          schema: { $ref: "#/components/schemas/RequestStatus" }
+      responses:
+        "200":
+          description: Product and IP request queue.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CatalogRequestPage" }
+  /v1/admin/catalog-requests/{requestId}/decision:
+    post:
+      tags: [Admin]
+      operationId: decideCatalogRequest
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: requestId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/AdminReason"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DecideCatalogRequestInput" }
+      responses:
+        "200":
+          description: Request decided and audited. APPROVED and MERGED require an active canonical record that is visible in public catalog search.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CatalogRequest" }
+  /v1/admin/account-deletions:
+    get:
+      tags: [Admin, Account]
+      operationId: listAdminAccountDeletions
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+        - name: q
+          in: query
+          schema: { type: string, maxLength: 200 }
+        - name: status
+          in: query
+          schema:
+            type: string
+            default: OPEN
+            enum: [OPEN, PENDING_REVIEW, BLOCKED, APPROVED, COMPLETED, REJECTED, CANCELLED]
+      responses:
+        "200":
+          description: Account deletion review queue.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminAccountDeletionPage" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /v1/admin/account-deletions/{requestId}:
+    get:
+      tags: [Admin, Account]
+      operationId: getAdminAccountDeletion
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/AccountDeletionRequestId"
+      responses:
+        "200":
+          description: Account deletion request, current blockers, and immutable review events.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminAccountDeletionDetail" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/admin/account-deletions/{requestId}/decision:
+    post:
+      tags: [Admin, Account]
+      operationId: decideAdminAccountDeletion
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/AccountDeletionRequestId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/AdminReason"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DecideAccountDeletionInput" }
+      responses:
+        "200":
+          description: Account deletion review decision committed and audited without performing a hard delete.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminAccountDeletionDecisionResult" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /v1/admin/commerce/orders:
+    get:
+      tags: [Admin, Commerce]
+      operationId: listAdminCommerceOrders
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+        - name: status
+          in: query
+          schema: { $ref: "#/components/schemas/OrderStatus" }
+        - name: userId
+          in: query
+          schema: { type: string, format: uuid }
+        - name: q
+          in: query
+          schema: { type: string, maxLength: 120 }
+      responses:
+        "200":
+          description: Operational order queue with minimized customer identity.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminOrderPage" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /v1/admin/commerce/orders/{orderId}:
+    get:
+      tags: [Admin, Commerce]
+      operationId: getAdminCommerceOrder
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/OrderId"
+      responses:
+        "200":
+          description: Order lines and stock reservations for operational review.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminOrderDetail" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/admin/commerce/payments:
+    get:
+      tags: [Admin, Commerce]
+      operationId: listAdminCommercePayments
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+        - name: status
+          in: query
+          schema: { $ref: "#/components/schemas/PaymentStatus" }
+        - name: provider
+          in: query
+          schema: { type: string, maxLength: 40 }
+        - name: q
+          in: query
+          schema: { type: string, maxLength: 200 }
+      responses:
+        "200":
+          description: Payment ledger queue with provider status.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminPaymentPage" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /v1/admin/commerce/payments/{paymentId}:
+    get:
+      tags: [Admin, Commerce]
+      operationId: getAdminCommercePayment
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PaymentId"
+      responses:
+        "200":
+          description: Payment ledger entries and received provider events.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminPaymentDetail" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/admin/commerce/refund-reviews:
+    get:
+      tags: [Admin, Commerce]
+      operationId: listAdminRefundReviews
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+        - name: operationStatus
+          in: query
+          schema: { type: string, enum: [UNTRACKED, PENDING, IN_REVIEW, WAITING_PROVIDER, ESCALATED, CLOSED] }
+        - name: q
+          in: query
+          schema: { type: string, maxLength: 200 }
+      responses:
+        "200":
+          description: Refund-review operational queue.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminRefundReviewPage" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /v1/admin/commerce/refund-reviews/{paymentId}:
+    get:
+      tags: [Admin, Commerce]
+      operationId: getAdminRefundReview
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PaymentId"
+      responses:
+        "200":
+          description: Refund review with asset-safety reconciliation and operator notes.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminRefundReviewDetail" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      tags: [Admin, Commerce]
+      operationId: updateAdminRefundReview
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PaymentId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/AdminReason"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateAdminRefundReviewInput" }
+      responses:
+        "200":
+          description: Refund review status and note committed; no provider refund action is executed.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminRefundReviewMutationResult" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /v1/admin/commerce/inventory:
+    get:
+      tags: [Admin, Commerce]
+      operationId: listAdminInventory
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Search"
+        - name: category
+          in: query
+          schema: { $ref: "#/components/schemas/ProductCategory" }
+      responses:
+        "200":
+          description: Product stock and active draw-capacity summary.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminInventoryPage" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /v1/admin/commerce/inventory/{productId}:
+    get:
+      tags: [Admin, Commerce]
+      operationId: getAdminInventory
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/ProductId"
+      responses:
+        "200":
+          description: Stock adjustment ledger and reservations for one product.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminInventoryDetail" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/admin/commerce/inventory/{productId}/adjustments:
+    post:
+      tags: [Admin, Commerce]
+      operationId: adjustAdminInventory
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/ProductId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/AdminReason"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AdjustAdminInventoryInput" }
+      responses:
+        "200":
+          description: Stock adjustment committed to the append-only ledger after version and draw-capacity checks.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminInventoryAdjustmentResult" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /v1/admin/commerce/shipping:
+    get:
+      tags: [Admin, Commerce]
+      operationId: listAdminShippingRequests
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+        - name: status
+          in: query
+          schema: { $ref: "#/components/schemas/AdminShippingStatus" }
+        - name: q
+          in: query
+          schema: { type: string, maxLength: 200 }
+      responses:
+        "200":
+          description: Shipping operations queue without destination details.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminShippingRequestPage" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /v1/admin/commerce/shipping/{shippingRequestId}:
+    get:
+      tags: [Admin, Commerce]
+      operationId: getAdminShippingRequest
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/ShippingRequestId"
+      responses:
+        "200":
+          description: Shipping request destination, items, and status event ledger.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminShippingRequestDetail" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/admin/commerce/shipping/{shippingRequestId}/status:
+    post:
+      tags: [Admin, Commerce]
+      operationId: updateAdminShippingStatus
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/ShippingRequestId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/AdminReason"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateAdminShippingStatusInput" }
+      responses:
+        "200":
+          description: Allowed shipping state transition committed and audited.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminShippingStatusResult" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /v1/admin/audit-logs:
+    get:
+      tags: [Admin]
+      operationId: listAdminAuditLogs
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Search"
+        - name: action
+          in: query
+          schema: { type: string, maxLength: 100 }
+      responses:
+        "200":
+          description: Append-only privileged operation history.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminAuditLogPage" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque-session-token
+  parameters:
+    Cursor:
+      name: cursor
+      in: query
+      schema: { type: string, maxLength: 500 }
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 100, default: 30 }
+    Search:
+      name: q
+      in: query
+      schema: { type: string, maxLength: 120 }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema: { type: string, minLength: 16, maxLength: 200 }
+    AdminReason:
+      name: X-Admin-Reason
+      in: header
+      required: true
+      schema: { type: string, minLength: 2, maxLength: 1000 }
+    UserId:
+      name: userId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    InquiryId:
+      name: inquiryId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    PostId:
+      name: postId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    CommentId:
+      name: commentId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    MediaId:
+      name: mediaId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    ListingId:
+      name: listingId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    WantedRequestId:
+      name: requestId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    AccountDeletionRequestId:
+      name: requestId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    ProductId:
+      name: productId
+      in: path
+      required: true
+      schema:
+        type: string
+        maxLength: 120
+        pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+    OrderId:
+      name: orderId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    PaymentId:
+      name: paymentId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    ShippingRequestId:
+      name: shippingRequestId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+  responses:
+    BadRequest:
+      description: Request input is malformed or references an inactive catalog item.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+    Unauthorized:
+      description: Authentication is required or the session is invalid.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+    Forbidden:
+      description: The authenticated actor lacks the required role or ownership.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+    NotFound:
+      description: The visible resource does not exist.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+    Conflict:
+      description: The requested state transition conflicts with committed state.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+    RateLimited:
+      description: Too many attempts.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+  schemas:
+    Health:
+      type: object
+      additionalProperties: false
+      required: [status, database, redis, timestamp]
+      properties:
+        status: { type: string, enum: [ok, degraded] }
+        database: { type: string, enum: [ok, unavailable] }
+        redis: { type: string, enum: [ok, unavailable] }
+        timestamp: { type: string, format: date-time }
+    ErrorEnvelope:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          type: object
+          additionalProperties: false
+          required: [code, message, requestId]
+          properties:
+            code: { type: string }
+            message: { type: string }
+            requestId: { type: string }
+            details: { type: object, additionalProperties: true }
+    MediaUploadIntentExpiredErrorEnvelope:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          type: object
+          additionalProperties: false
+          required: [code, message, requestId]
+          properties:
+            code: { type: string, const: MEDIA_UPLOAD_INTENT_EXPIRED }
+            message: { type: string }
+            requestId: { type: string }
+    UserRole: { type: string, enum: [USER, ADMIN, SUPER_ADMIN] }
+    UserStatus: { type: string, enum: [ACTIVE, SUSPENDED, BANNED, DELETED] }
+    ContentStatus: { type: string, enum: [ACTIVE, HIDDEN, DELETED] }
+    InquiryStatus: { type: string, enum: [PENDING, IN_PROGRESS, ANSWERED, CLOSED] }
+    ReportStatus: { type: string, enum: [PENDING, REVIEWING, RESOLVED, REJECTED] }
+    RequestStatus: { type: string, enum: [PENDING, APPROVED, REJECTED, ON_HOLD, MERGED] }
+    ProductCategory: { type: string, enum: [gacha, figure, kuji, tcg] }
+    MediaPurpose: { type: string, enum: [PROFILE, POST, COMMENT, INQUIRY, EXCHANGE, CATALOG_REQUEST] }
+    MediaMimeType: { type: string, enum: [image/jpeg, image/png, image/webp, image/gif] }
+    CreateMediaUploadInput:
+      type: object
+      additionalProperties: false
+      required: [purpose, filename, mimeType, byteSize, checksumSha256]
+      properties:
+        purpose: { $ref: "#/components/schemas/MediaPurpose" }
+        filename: { type: string, minLength: 1, maxLength: 255 }
+        mimeType: { $ref: "#/components/schemas/MediaMimeType" }
+        byteSize: { type: integer, minimum: 1, maximum: 10485760 }
+        checksumSha256: { type: string, pattern: "^[0-9A-Fa-f]{64}$" }
+    MediaUploadIntent:
+      type: object
+      additionalProperties: false
+      required: [mediaId, uploadUrl, method, fields, fileFieldName, expiresAt, maxBytes]
+      properties:
+        mediaId: { type: string, format: uuid }
+        uploadUrl: { type: string, format: uri }
+        method: { type: string, const: POST }
+        fields:
+          type: object
+          minProperties: 1
+          additionalProperties: { type: string }
+          description: Append every field to multipart FormData before appending the file.
+        fileFieldName: { type: string, const: file }
+        expiresAt: { type: string, format: date-time }
+        maxBytes: { type: integer, minimum: 1, maximum: 10485760, description: Exact declared byte size enforced by the signed policy. }
+    MediaReady:
+      type: object
+      additionalProperties: false
+      required: [mediaId, status, mimeType]
+      properties:
+        mediaId: { type: string, format: uuid }
+        status: { type: string, const: READY }
+        mimeType: { type: string, const: image/webp }
+    MediaReadUrl:
+      type: object
+      additionalProperties: false
+      required: [mediaId, url, expiresAt, mimeType]
+      properties:
+        mediaId: { type: string, format: uuid }
+        url: { type: string, format: uri }
+        expiresAt: { type: string, format: date-time }
+        mimeType: { $ref: "#/components/schemas/MediaMimeType" }
+    Actor:
+      type: object
+      additionalProperties: false
+      required: [userId, email, nickname, role, status, sessionId, permissions]
+      properties:
+        userId: { type: string, format: uuid }
+        email: { type: string, format: email }
+        nickname: { type: string }
+        role: { $ref: "#/components/schemas/UserRole" }
+        status: { $ref: "#/components/schemas/UserStatus" }
+        sessionId: { type: string, format: uuid }
+        permissions: { type: array, items: { type: string } }
+    FavoriteIpSummary:
+      type: object
+      additionalProperties: false
+      required: [id, nameKo, imageUrl]
+      properties:
+        id: { type: string, maxLength: 120 }
+        nameKo: { type: string }
+        imageUrl: { type: [string, "null"], format: uri }
+    AccountProfile:
+      type: object
+      additionalProperties: false
+      required: [id, nickname, bio, favoriteIp, version, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        nickname: { type: string, minLength: 1, maxLength: 40 }
+        bio: { type: [string, "null"], maxLength: 500 }
+        favoriteIp:
+          oneOf:
+            - $ref: "#/components/schemas/FavoriteIpSummary"
+            - type: "null"
+        version: { type: integer, minimum: 1 }
+        updatedAt: { type: string, format: date-time }
+    UpdateAccountProfileInput:
+      type: object
+      additionalProperties: false
+      required: [expectedVersion]
+      properties:
+        nickname: { type: string, minLength: 1, maxLength: 40 }
+        bio: { type: [string, "null"], maxLength: 500 }
+        favoriteIpId: { type: [string, "null"], maxLength: 120, pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$" }
+        expectedVersion: { type: integer, minimum: 1 }
+    DefaultShippingAddress:
+      type: object
+      additionalProperties: false
+      required: [id, recipient, phone, postalCode, addressLine1, addressLine2, deliveryNote, version, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        recipient: { type: string, minLength: 1, maxLength: 80 }
+        phone: { type: string, pattern: "^\\+?[0-9]{8,15}$" }
+        postalCode: { type: string, minLength: 3, maxLength: 12 }
+        addressLine1: { type: string, minLength: 1, maxLength: 200 }
+        addressLine2: { type: [string, "null"], maxLength: 200 }
+        deliveryNote: { type: [string, "null"], maxLength: 200 }
+        version: { type: integer, minimum: 1 }
+        updatedAt: { type: string, format: date-time }
+    UpsertDefaultShippingAddressInput:
+      type: object
+      additionalProperties: false
+      required: [recipient, phone, postalCode, addressLine1]
+      properties:
+        recipient: { type: string, minLength: 1, maxLength: 80 }
+        phone: { type: string, minLength: 8, maxLength: 32 }
+        postalCode: { type: string, minLength: 3, maxLength: 12 }
+        addressLine1: { type: string, minLength: 1, maxLength: 200 }
+        addressLine2: { type: [string, "null"], maxLength: 200 }
+        deliveryNote: { type: [string, "null"], maxLength: 200 }
+        expectedVersion: { type: integer, minimum: 1 }
+    WishlistProduct:
+      type: object
+      additionalProperties: false
+      required: [id, name, ipId, ipNameKo, category, price, imageUrl, isActive]
+      properties:
+        id: { type: string, maxLength: 120 }
+        name: { type: string }
+        ipId: { type: string, maxLength: 120 }
+        ipNameKo: { type: string }
+        category: { $ref: "#/components/schemas/ProductCategory" }
+        price: { type: integer, minimum: 0 }
+        imageUrl: { type: [string, "null"], format: uri }
+        isActive: { type: boolean }
+    WishlistItem:
+      type: object
+      additionalProperties: false
+      required: [id, product, wishedAt]
+      properties:
+        id: { type: string, format: uuid }
+        product: { $ref: "#/components/schemas/WishlistProduct" }
+        wishedAt: { type: string, format: date-time }
+    WishlistPage:
+      allOf:
+        - $ref: "#/components/schemas/PageMeta"
+        - type: object
+          required: [items]
+          properties:
+            items: { type: array, items: { $ref: "#/components/schemas/WishlistItem" } }
+    WishlistMutationResult:
+      type: object
+      additionalProperties: false
+      required: [productId, removed]
+      properties:
+        productId: { type: string, maxLength: 120 }
+        removed: { type: boolean }
+    AccountOrderLine:
+      type: object
+      additionalProperties: false
+      required: [productId, productName, category, unitPrice, quantity, lineTotal]
+      properties:
+        productId: { type: string, maxLength: 120 }
+        productName: { type: string }
+        category: { $ref: "#/components/schemas/ProductCategory" }
+        unitPrice: { type: integer, minimum: 0 }
+        quantity: { type: integer, minimum: 1 }
+        lineTotal: { type: integer, minimum: 0 }
+    AccountOrder:
+      type: object
+      additionalProperties: false
+      required: [id, status, currency, subtotal, discountTotal, pointTotal, total, lines, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        status: { type: string, enum: [PENDING_PAYMENT, PAID, FULFILLED, CANCELLED, REFUND_REVIEW, REFUNDED] }
+        currency: { type: string, const: KRW }
+        subtotal: { type: integer, minimum: 0 }
+        discountTotal: { type: integer, minimum: 0 }
+        pointTotal: { type: integer, minimum: 0 }
+        total: { type: integer, minimum: 0 }
+        lines: { type: array, items: { $ref: "#/components/schemas/AccountOrderLine" } }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    AccountOrderPage:
+      allOf:
+        - $ref: "#/components/schemas/PageMeta"
+        - type: object
+          required: [items]
+          properties:
+            items: { type: array, items: { $ref: "#/components/schemas/AccountOrder" } }
+    AccountDrawEntitlementStatus:
+      type: string
+      enum: [AVAILABLE, CONSUMED, CANCELLED]
+    AccountDrawEntitlementProduct:
+      type: object
+      additionalProperties: false
+      required: [id, name, category, imageUrl]
+      properties:
+        id: { type: string, maxLength: 120 }
+        name: { type: string, maxLength: 240 }
+        category: { $ref: "#/components/schemas/ProductCategory" }
+        imageUrl: { type: [string, "null"], format: uri }
+    AccountDrawEntitlement:
+      type: object
+      additionalProperties: false
+      required: [id, orderId, orderLineId, product, probabilityVersion, status, createdAt, consumedAt]
+      properties:
+        id: { type: string, format: uuid }
+        orderId: { type: string, format: uuid }
+        orderLineId: { type: string, format: uuid }
+        product: { $ref: "#/components/schemas/AccountDrawEntitlementProduct" }
+        probabilityVersion: { type: integer, minimum: 1 }
+        status: { $ref: "#/components/schemas/AccountDrawEntitlementStatus" }
+        createdAt: { type: string, format: date-time }
+        consumedAt: { type: [string, "null"], format: date-time }
+    AccountDrawEntitlementPage:
+      allOf:
+        - $ref: "#/components/schemas/PageMeta"
+        - type: object
+          required: [items]
+          properties:
+            items: { type: array, items: { $ref: "#/components/schemas/AccountDrawEntitlement" } }
+    PointLedgerEntry:
+      type: object
+      additionalProperties: false
+      required: [id, entryType, amount, referenceType, referenceId, reason, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        entryType: { type: string, enum: [EARN, SPEND, REFUND, EXPIRE, ADJUSTMENT] }
+        amount: { type: integer }
+        referenceType: { type: string, maxLength: 100 }
+        referenceId: { type: string }
+        reason: { type: string }
+        createdAt: { type: string, format: date-time }
+    AccountPointPage:
+      allOf:
+        - $ref: "#/components/schemas/PageMeta"
+        - type: object
+          required: [balance, version, items]
+          properties:
+            balance: { type: integer, minimum: 0 }
+            version: { type: integer, minimum: 0 }
+            items: { type: array, items: { $ref: "#/components/schemas/PointLedgerEntry" } }
+    NotificationPreferences:
+      type: object
+      additionalProperties: false
+      required: [orderUpdates, exchangeUpdates, requestUpdates, restockUpdates, marketingSms, marketingEmail, marketingPush, personalizedRecommendations, version, updatedAt]
+      properties:
+        orderUpdates: { type: boolean, const: true }
+        exchangeUpdates: { type: boolean }
+        requestUpdates: { type: boolean }
+        restockUpdates: { type: boolean }
+        marketingSms: { type: boolean }
+        marketingEmail: { type: boolean }
+        marketingPush: { type: boolean }
+        personalizedRecommendations: { type: boolean }
+        version: { type: integer, minimum: 1 }
+        updatedAt: { type: string, format: date-time }
+    UpdateNotificationPreferencesInput:
+      type: object
+      additionalProperties: false
+      required: [exchangeUpdates, requestUpdates, restockUpdates, marketingSms, marketingEmail, marketingPush, personalizedRecommendations, expectedVersion]
+      properties:
+        exchangeUpdates: { type: boolean }
+        requestUpdates: { type: boolean }
+        restockUpdates: { type: boolean }
+        marketingSms: { type: boolean }
+        marketingEmail: { type: boolean }
+        marketingPush: { type: boolean }
+        personalizedRecommendations: { type: boolean }
+        expectedVersion: { type: integer, minimum: 1 }
+    AccountNotification:
+      type: object
+      additionalProperties: false
+      required: [id, kind, title, body, data, readAt, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        kind: { type: string, maxLength: 100 }
+        title: { type: string, maxLength: 160 }
+        body: { type: string }
+        data: { type: object, additionalProperties: true }
+        readAt: { type: [string, "null"], format: date-time }
+        createdAt: { type: string, format: date-time }
+    NotificationPage:
+      allOf:
+        - $ref: "#/components/schemas/PageMeta"
+        - type: object
+          required: [items]
+          properties:
+            items: { type: array, items: { $ref: "#/components/schemas/AccountNotification" } }
+    CreateShippingRequestInput:
+      type: object
+      additionalProperties: false
+      required: [inventoryUnitIds]
+      properties:
+        inventoryUnitIds:
+          type: array
+          minItems: 1
+          maxItems: 20
+          uniqueItems: true
+          items: { type: string, format: uuid }
+    ShippingDestination:
+      type: object
+      additionalProperties: false
+      required: [recipientMasked, phoneMasked, postalCode, addressLine1, addressLine2]
+      properties:
+        recipientMasked: { type: string }
+        phoneMasked: { type: string }
+        postalCode: { type: string }
+        addressLine1: { type: string }
+        addressLine2: { type: [string, "null"] }
+    ShippingRequest:
+      type: object
+      additionalProperties: false
+      required: [id, status, inventoryUnitIds, destination, requestedAt]
+      properties:
+        id: { type: string, format: uuid }
+        status: { type: string, const: REQUESTED }
+        inventoryUnitIds: { type: array, items: { type: string, format: uuid } }
+        destination: { $ref: "#/components/schemas/ShippingDestination" }
+        requestedAt: { type: string, format: date-time }
+    AccountShippingRequestStatus:
+      type: string
+      enum: [REQUESTED, PROCESSING, SHIPPED, DELIVERED, CANCELLED]
+    AccountShippingRequest:
+      type: object
+      additionalProperties: false
+      required: [id, status, version, inventoryUnitIds, destination, requestedAt, updatedAt, shippedAt, trackingCarrier, trackingNumber]
+      properties:
+        id: { type: string, format: uuid }
+        status: { $ref: "#/components/schemas/AccountShippingRequestStatus" }
+        version: { type: integer, minimum: 1 }
+        inventoryUnitIds:
+          type: array
+          minItems: 1
+          items: { type: string, format: uuid }
+        destination: { $ref: "#/components/schemas/ShippingDestination" }
+        requestedAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        shippedAt: { type: [string, "null"], format: date-time }
+        trackingCarrier: { type: [string, "null"] }
+        trackingNumber: { type: [string, "null"] }
+    AccountShippingRequestPage:
+      allOf:
+        - $ref: "#/components/schemas/PageMeta"
+        - type: object
+          required: [items]
+          properties:
+            items: { type: array, items: { $ref: "#/components/schemas/AccountShippingRequest" } }
+    SessionCreated:
+      type: object
+      additionalProperties: false
+      required: [token, expiresAt, actor]
+      properties:
+        token: { type: string }
+        expiresAt: { type: string, format: date-time }
+        actor: { $ref: "#/components/schemas/Actor" }
+    PageMeta:
+      type: object
+      additionalProperties: false
+      required: [nextCursor]
+      properties:
+        nextCursor: { type: [string, "null"] }
+    Notice:
+      type: object
+      additionalProperties: false
+      required: [id, title, content, isPinned, isPublished, status, createdBy, version, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        title: { type: string }
+        content: { type: string }
+        isPinned: { type: boolean }
+        isPublished: { type: boolean }
+        status: { $ref: "#/components/schemas/ContentStatus" }
+        createdBy: { type: string, format: uuid }
+        publishedAt: { type: [string, "null"], format: date-time }
+        version: { type: integer, minimum: 1 }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    UpsertNoticeInput:
+      type: object
+      additionalProperties: false
+      required: [title, content, isPinned, isPublished]
+      properties:
+        title: { type: string, minLength: 1, maxLength: 160 }
+        content: { type: string, minLength: 1, maxLength: 30000 }
+        isPinned: { type: boolean }
+        isPublished: { type: boolean }
+        expectedVersion: { type: integer, minimum: 1 }
+    ExpectedVersionInput:
+      type: object
+      additionalProperties: false
+      required: [expectedVersion]
+      properties:
+        expectedVersion: { type: integer, minimum: 1 }
+    NoticePage:
+      allOf:
+        - $ref: "#/components/schemas/PageMeta"
+        - type: object
+          required: [items]
+          properties:
+            items: { type: array, items: { $ref: "#/components/schemas/Notice" } }
+    Inquiry:
+      type: object
+      additionalProperties: false
+      required: [id, userId, category, title, status, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        userId: { type: string, format: uuid }
+        category: { type: string }
+        title: { type: string }
+        status: { $ref: "#/components/schemas/InquiryStatus" }
+        assignedAdminId: { type: [string, "null"], format: uuid }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    InquiryMessage:
+      type: object
+      additionalProperties: false
+      required: [id, inquiryId, authorId, authorRole, content, isInternal, mediaIds, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        inquiryId: { type: string, format: uuid }
+        authorId: { type: string, format: uuid }
+        authorRole: { $ref: "#/components/schemas/UserRole" }
+        content: { type: string }
+        isInternal: { type: boolean }
+        mediaIds: { type: array, items: { type: string, format: uuid } }
+        createdAt: { type: string, format: date-time }
+    InquiryDetail:
+      allOf:
+        - $ref: "#/components/schemas/Inquiry"
+        - type: object
+          required: [messages]
+          properties:
+            messages: { type: array, items: { $ref: "#/components/schemas/InquiryMessage" } }
+    CreateInquiryInput:
+      type: object
+      additionalProperties: false
+      required: [category, title, content]
+      properties:
+        category: { type: string, enum: [ACCOUNT, ERROR, PRODUCT, COMMUNITY, ORDER, OTHER] }
+        title: { type: string, minLength: 1, maxLength: 160 }
+        content: { type: string, minLength: 1, maxLength: 10000 }
+        mediaIds: { type: array, maxItems: 5, items: { type: string, format: uuid } }
+    CreateInquiryMessageInput:
+      type: object
+      additionalProperties: false
+      required: [content]
+      properties:
+        content: { type: string, minLength: 1, maxLength: 10000 }
+        status: { $ref: "#/components/schemas/InquiryStatus" }
+        isInternal: { type: boolean }
+        mediaIds: { type: array, maxItems: 5, items: { type: string, format: uuid } }
+    InquiryPage:
+      allOf:
+        - $ref: "#/components/schemas/PageMeta"
+        - type: object
+          required: [items]
+          properties:
+            items: { type: array, items: { $ref: "#/components/schemas/Inquiry" } }
+    CommunityPost:
+      type: object
+      additionalProperties: false
+      required: [id, authorId, authorNickname, kind, title, content, status, reportCount, commentCount, likeCount, likedByViewer, mediaIds, version, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        authorId: { type: string, format: uuid }
+        authorNickname: { type: string }
+        ipId: { type: [string, "null"], maxLength: 120 }
+        kind: { type: string, enum: [DUKROOM, SNAP, GENERAL] }
+        title: { type: string }
+        content: { type: string }
+        status: { $ref: "#/components/schemas/ContentStatus" }
+        reportCount: { type: integer, minimum: 0 }
+        commentCount: { type: integer, minimum: 0 }
+        likeCount: { type: integer, minimum: 0 }
+        likedByViewer: { type: boolean }
+        mediaIds: { type: array, items: { type: string, format: uuid } }
+        version: { type: integer, minimum: 1 }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    CreateCommunityPostInput:
+      type: object
+      additionalProperties: false
+      required: [kind, title, content]
+      properties:
+        ipId: { type: [string, "null"], maxLength: 120 }
+        kind: { type: string, enum: [DUKROOM, SNAP, GENERAL] }
+        title: { type: string, minLength: 1, maxLength: 160 }
+        content: { type: string, minLength: 1, maxLength: 20000 }
+        mediaIds: { type: array, maxItems: 10, items: { type: string, format: uuid } }
+    CommunityPostPage:
+      allOf:
+        - $ref: "#/components/schemas/PageMeta"
+        - type: object
+          required: [items]
+          properties:
+            items: { type: array, items: { $ref: "#/components/schemas/CommunityPost" } }
+    Comment:
+      type: object
+      additionalProperties: false
+      required: [id, postId, authorId, authorNickname, content, status, reportCount, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        postId: { type: string, format: uuid }
+        authorId: { type: string, format: uuid }
+        authorNickname: { type: string }
+        content: { type: string }
+        status: { $ref: "#/components/schemas/ContentStatus" }
+        reportCount: { type: integer, minimum: 0 }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    CommentPage:
+      allOf:
+        - $ref: "#/components/schemas/PageMeta"
+        - type: object
+          required: [items]
+          properties:
+            items: { type: array, items: { $ref: "#/components/schemas/Comment" } }
+    Report:
+      type: object
+      additionalProperties: false
+      required: [id, reporterId, targetType, targetId, reason, status, targetPreview, targetStatus, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        reporterId: { type: string, format: uuid }
+        targetType: { type: string, enum: [POST, COMMENT, SNAP, USER, EXCHANGE_LISTING] }
+        targetId: { type: string, format: uuid }
+        reason: { type: string, enum: [ABUSE, ADVERTISING, SPAM, INAPPROPRIATE, SUSPECTED_FRAUD, COPYRIGHT, OTHER] }
+        details: { type: [string, "null"] }
+        status: { $ref: "#/components/schemas/ReportStatus" }
+        targetPreview: { type: [string, "null"] }
+        targetStatus: { type: [string, "null"] }
+        resolution: { type: [string, "null"] }
+        resolvedBy: { type: [string, "null"], format: uuid }
+        resolvedAt: { type: [string, "null"], format: date-time }
+        createdAt: { type: string, format: date-time }
+    CreateReportInput:
+      type: object
+      additionalProperties: false
+      required: [targetType, targetId, reason]
+      properties:
+        targetType: { type: string, enum: [POST, COMMENT, SNAP, USER, EXCHANGE_LISTING] }
+        targetId: { type: string, format: uuid }
+        reason: { type: string, enum: [ABUSE, ADVERTISING, SPAM, INAPPROPRIATE, SUSPECTED_FRAUD, COPYRIGHT, OTHER] }
+        details: { type: string, maxLength: 2000 }
+    ResolveReportInput:
+      type: object
+      additionalProperties: false
+      description: WARN_USER와 SUSPEND_USER는 사용자 신고뿐 아니라 신고된 게시글, Snap, 댓글, 교환 글의 작성자에게 적용됩니다.
+      required: [status, action, reason]
+      properties:
+        status: { type: string, enum: [RESOLVED, REJECTED] }
+        action: { type: string, enum: [NO_ACTION, HIDE_POST, HIDE_COMMENT, WARN_USER, SUSPEND_USER] }
+        reason: { type: string, minLength: 1, maxLength: 1000 }
+        suspendUntil: { type: [string, "null"], format: date-time }
+    StartReportReviewInput:
+      type: object
+      additionalProperties: false
+      required: [reason]
+      properties:
+        reason: { type: string, minLength: 1, maxLength: 1000 }
+    ReportPage:
+      allOf:
+        - $ref: "#/components/schemas/PageMeta"
+        - type: object
+          required: [items]
+          properties:
+            items: { type: array, items: { $ref: "#/components/schemas/Report" } }
+    CatalogIp:
+      type: object
+      additionalProperties: false
+      required: [id, slug, nameKo, nameEn, aliases, description, imageUrl, isActive, version, createdAt, updatedAt]
+      properties:
+        id: { type: string, pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$", maxLength: 120 }
+        slug: { type: string }
+        nameKo: { type: string }
+        nameEn: { type: string }
+        nameJa: { type: [string, "null"] }
+        aliases: { type: array, items: { type: string } }
+        description: { type: string }
+        imageUrl: { type: [string, "null"], format: uri }
+        isActive: { type: boolean }
+        version: { type: integer, minimum: 1 }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    UpsertIpInput:
+      type: object
+      additionalProperties: false
+      required: [slug, nameKo, nameEn, aliases, description, isActive]
+      properties:
+        slug: { type: string, pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$", maxLength: 100 }
+        nameKo: { type: string, minLength: 1, maxLength: 160 }
+        nameEn: { type: string, minLength: 1, maxLength: 160 }
+        nameJa: { type: [string, "null"], maxLength: 160 }
+        aliases: { type: array, maxItems: 30, items: { type: string, maxLength: 160 } }
+        description: { type: string, maxLength: 5000 }
+        imageUrl: { type: [string, "null"], format: uri }
+        isActive: { type: boolean }
+        expectedVersion: { type: integer, minimum: 1 }
+    CatalogIpPage:
+      allOf:
+        - $ref: "#/components/schemas/PageMeta"
+        - type: object
+          required: [items]
+          properties:
+            items: { type: array, items: { $ref: "#/components/schemas/CatalogIp" } }
+    Character:
+      type: object
+      additionalProperties: false
+      required: [id, ipId, name, aliases, imageUrl, isActive, version, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        ipId: { type: string, maxLength: 120 }
+        name: { type: string }
+        aliases: { type: array, items: { type: string } }
+        imageUrl: { type: [string, "null"], format: uri }
+        isActive: { type: boolean }
+        version: { type: integer, minimum: 1 }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    UpsertCharacterInput:
+      type: object
+      additionalProperties: false
+      required: [ipId, name, aliases, isActive]
+      properties:
+        ipId: { type: string, maxLength: 120 }
+        name: { type: string, minLength: 1, maxLength: 160 }
+        aliases: { type: array, maxItems: 20, items: { type: string, maxLength: 160 } }
+        imageUrl: { type: [string, "null"], format: uri }
+        isActive: { type: boolean }
+        expectedVersion: { type: integer, minimum: 1 }
+    CharacterPage:
+      allOf:
+        - $ref: "#/components/schemas/PageMeta"
+        - type: object
+          required: [items]
+          properties:
+            items: { type: array, items: { $ref: "#/components/schemas/Character" } }
+    CatalogProduct:
+      type: object
+      additionalProperties: false
+      required: [id, sku, ipId, characterIds, category, name, manufacturer, price, availableQuantity, metadata, imageUrl, isActive, version, createdAt, updatedAt]
+      properties:
+        id: { type: string, pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$" }
+        sku: { type: string }
+        ipId: { type: string, maxLength: 120 }
+        characterIds: { type: array, items: { type: string, format: uuid } }
+        category: { $ref: "#/components/schemas/ProductCategory" }
+        name: { type: string }
+        manufacturer: { type: [string, "null"] }
+        releaseDate: { type: [string, "null"], format: date }
+        price: { type: integer, minimum: 0 }
+        availableQuantity: { type: integer, minimum: 0 }
+        metadata: { type: object, additionalProperties: true }
+        imageUrl: { type: [string, "null"], format: uri }
+        isActive: { type: boolean }
+        version: { type: integer, minimum: 1 }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    UpsertProductInput:
+      type: object
+      additionalProperties: false
+      required: [sku, ipId, category, name, price, availableQuantity, metadata, isActive]
+      properties:
+        sku: { type: string, minLength: 1, maxLength: 80 }
+        ipId: { type: string, maxLength: 120 }
+        characterIds: { type: array, maxItems: 30, items: { type: string, format: uuid } }
+        category:
+          allOf: [{ $ref: "#/components/schemas/ProductCategory" }]
+          description: 생성 후 변경할 수 없습니다. 카테고리 변경은 새 상품/SKU 등록으로 처리합니다.
+        name: { type: string, minLength: 1, maxLength: 240 }
+        manufacturer: { type: [string, "null"], maxLength: 160 }
+        releaseDate: { type: [string, "null"], format: date }
+        price: { type: integer, minimum: 0, maximum: 2147483647 }
+        availableQuantity: { type: integer, minimum: 0, maximum: 2147483647 }
+        metadata: { type: object, additionalProperties: true }
+        imageUrl: { type: [string, "null"], format: uri }
+        isActive: { type: boolean }
+        expectedVersion: { type: integer, minimum: 1 }
+    CatalogProductPage:
+      allOf:
+        - $ref: "#/components/schemas/PageMeta"
+        - type: object
+          required: [items]
+          properties:
+            items: { type: array, items: { $ref: "#/components/schemas/CatalogProduct" } }
+    CatalogRequest:
+      type: object
+      additionalProperties: false
+      required: [id, userId, kind, name, status, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        userId: { type: string, format: uuid }
+        kind: { type: string, enum: [PRODUCT, IP] }
+        name: { type: string }
+        referenceUrl: { type: [string, "null"], format: uri }
+        description: { type: [string, "null"] }
+        mediaId: { type: [string, "null"], format: uuid }
+        status: { $ref: "#/components/schemas/RequestStatus" }
+        canonicalTargetId: { type: [string, "null"], maxLength: 120 }
+        decisionReason: { type: [string, "null"] }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    CreateCatalogRequestInput:
+      type: object
+      additionalProperties: false
+      required: [kind, name]
+      properties:
+        kind: { type: string, enum: [PRODUCT, IP] }
+        name: { type: string, minLength: 1, maxLength: 240 }
+        referenceUrl: { type: [string, "null"], format: uri }
+        description: { type: [string, "null"], maxLength: 5000 }
+        mediaId: { type: [string, "null"], format: uuid }
+    DecideCatalogRequestInput:
+      oneOf:
+        - type: object
+          additionalProperties: false
+          required: [decision, reason, canonicalTargetId]
+          properties:
+            decision: { type: string, enum: [APPROVED, MERGED] }
+            reason: { type: string, minLength: 1, maxLength: 1000 }
+            canonicalTargetId: { type: string, minLength: 1, maxLength: 120, pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$" }
+        - type: object
+          additionalProperties: false
+          required: [decision, reason]
+          properties:
+            decision: { type: string, enum: [REJECTED, ON_HOLD] }
+            reason: { type: string, minLength: 1, maxLength: 1000 }
+    CatalogRequestPage:
+      allOf:
+        - $ref: "#/components/schemas/PageMeta"
+        - type: object
+          required: [items]
+          properties:
+            items: { type: array, items: { $ref: "#/components/schemas/CatalogRequest" } }
+    WantedRequest:
+      type: object
+      additionalProperties: false
+      required: [id, userId, authorNickname, category, ipId, ipNameKo, desiredItem, details, status, likeCount, likedByViewer, version, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        userId: { type: string, format: uuid }
+        authorNickname: { type: string }
+        category: { $ref: "#/components/schemas/ProductCategory" }
+        ipId:
+          type: string
+          maxLength: 120
+          pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+        ipNameKo: { type: string }
+        desiredItem: { type: string, minLength: 1, maxLength: 240 }
+        details: { type: string, minLength: 1, maxLength: 5000 }
+        status: { $ref: "#/components/schemas/ContentStatus" }
+        likeCount: { type: integer, minimum: 0 }
+        likedByViewer: { type: boolean }
+        version: { type: integer, minimum: 1 }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    CreateWantedRequestInput:
+      type: object
+      additionalProperties: false
+      required: [category, ipId, desiredItem, details]
+      properties:
+        category: { $ref: "#/components/schemas/ProductCategory" }
+        ipId:
+          type: string
+          maxLength: 120
+          pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+        desiredItem: { type: string, minLength: 1, maxLength: 240 }
+        details: { type: string, minLength: 1, maxLength: 5000 }
+    SetWantedRequestLikeInput:
+      type: object
+      additionalProperties: false
+      required: [liked]
+      properties:
+        liked: { type: boolean }
+    WantedRequestLikeResult:
+      type: object
+      additionalProperties: false
+      required: [requestId, liked, likeCount]
+      properties:
+        requestId: { type: string, format: uuid }
+        liked: { type: boolean }
+        likeCount: { type: integer, minimum: 0 }
+    WantedRequestPage:
+      allOf:
+        - $ref: "#/components/schemas/PageMeta"
+        - type: object
+          required: [items]
+          properties:
+            items: { type: array, items: { $ref: "#/components/schemas/WantedRequest" } }
+    InventoryUnit:
+      type: object
+      additionalProperties: false
+      required: [id, ownerId, productId, product, sourceType, status, acquiredAt]
+      properties:
+        id: { type: string, format: uuid }
+        ownerId: { type: string, format: uuid }
+        productId: { type: string, maxLength: 120 }
+        product: { $ref: "#/components/schemas/CatalogProduct" }
+        sourceType: { type: string, enum: [PURCHASE, GACHA, KUJI, ADMIN_ADJUSTMENT] }
+        status: { type: string, enum: [OWNED, EXCHANGE_LISTED, EXCHANGE_OFFERED, SHIPPING, DELIVERED, TRANSFERRED, REFUNDED] }
+        acquiredAt: { type: string, format: date-time }
+    InventoryUnitPage:
+      allOf:
+        - $ref: "#/components/schemas/PageMeta"
+        - type: object
+          required: [items]
+          properties:
+            items: { type: array, items: { $ref: "#/components/schemas/InventoryUnit" } }
+    ExchangeListing:
+      type: object
+      additionalProperties: false
+      required: [id, authorId, authorNickname, title, details, status, offeredInventory, offerCount, acceptedOfferId, matchedAt, authorConfirmedAt, proposerConfirmedAt, completedAt, completionMode, cancelledAt, cancelledBy, cancelReason, resolvedByAdminId, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        authorId: { type: string, format: uuid }
+        authorNickname: { type: string }
+        title: { type: string }
+        details: { type: string }
+        status: { type: string, enum: [OPEN, MATCHED, COMPLETED, CANCELLED, HIDDEN] }
+        offeredInventory: { $ref: "#/components/schemas/InventoryUnit" }
+        offerCount: { type: integer, minimum: 0 }
+        acceptedOfferId: { type: [string, "null"], format: uuid }
+        matchedAt: { type: [string, "null"], format: date-time }
+        authorConfirmedAt: { type: [string, "null"], format: date-time }
+        proposerConfirmedAt: { type: [string, "null"], format: date-time }
+        completedAt: { type: [string, "null"], format: date-time }
+        completionMode: { type: [string, "null"], enum: [MUTUAL_CONFIRMATION, ADMIN_OVERRIDE, null] }
+        cancelledAt: { type: [string, "null"], format: date-time }
+        cancelledBy: { type: [string, "null"], format: uuid }
+        cancelReason: { type: [string, "null"] }
+        resolvedByAdminId: { type: [string, "null"], format: uuid }
+        offers: { type: array, items: { $ref: "#/components/schemas/ExchangeOffer" } }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    CreateExchangeListingInput:
+      type: object
+      additionalProperties: false
+      required: [title, details, offeredInventoryUnitId]
+      properties:
+        title: { type: string, minLength: 1, maxLength: 160 }
+        details: { type: string, minLength: 1, maxLength: 5000 }
+        offeredInventoryUnitId: { type: string, format: uuid }
+    ExchangeListingPage:
+      allOf:
+        - $ref: "#/components/schemas/PageMeta"
+        - type: object
+          required: [items]
+          properties:
+            items: { type: array, items: { $ref: "#/components/schemas/ExchangeListing" } }
+    ExchangeOffer:
+      type: object
+      additionalProperties: false
+      required: [id, listingId, proposerId, offeredInventory, message, status, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        listingId: { type: string, format: uuid }
+        proposerId: { type: string, format: uuid }
+        offeredInventory: { $ref: "#/components/schemas/InventoryUnit" }
+        message: { type: string }
+        status: { type: string, enum: [PENDING, ACCEPTED, REJECTED, WITHDRAWN] }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    CreateExchangeOfferInput:
+      type: object
+      additionalProperties: false
+      required: [offeredInventoryUnitId, message]
+      properties:
+        offeredInventoryUnitId: { type: string, format: uuid }
+        message: { type: string, minLength: 1, maxLength: 2000 }
+    Order:
+      type: object
+      additionalProperties: false
+      required: [id, userId, paymentId, status, currency, subtotal, discountTotal, pointTotal, total, lines, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        userId: { type: string, format: uuid }
+        status: { type: string, enum: [PENDING_PAYMENT, PAID, FULFILLED, CANCELLED, REFUND_REVIEW, REFUNDED] }
+        paymentId: { type: string, format: uuid }
+        currency: { type: string, enum: [KRW] }
+        subtotal: { type: integer, minimum: 0 }
+        discountTotal: { type: integer, minimum: 0 }
+        pointTotal: { type: integer, minimum: 0 }
+        total: { type: integer, minimum: 0 }
+        lines:
+          type: array
+          items:
+            type: object
+            required: [productId, productName, category, unitPrice, quantity, lineTotal]
+            properties:
+              productId: { type: string, maxLength: 120 }
+              productName: { type: string }
+              category: { $ref: "#/components/schemas/ProductCategory" }
+              unitPrice: { type: integer, minimum: 0 }
+              quantity: { type: integer, minimum: 1 }
+              lineTotal: { type: integer, minimum: 0 }
+        drawEntitlementIds: { type: array, items: { type: string, format: uuid } }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    CreateOrderInput:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          minItems: 1
+          maxItems: 20
+          items:
+            type: object
+            additionalProperties: false
+            required: [productId, quantity]
+            properties:
+              productId: { type: string, maxLength: 120 }
+              quantity: { type: integer, minimum: 1, maximum: 20 }
+              expectedDrawVersion:
+                type: integer
+                minimum: 1
+                maximum: 2147483647
+                description: Required for gacha and kuji products; rejected for direct-purchase products.
+        couponCode: { type: [string, "null"], maxLength: 60 }
+        pointAmount: { type: integer, minimum: 0, maximum: 2147483647, default: 0 }
+    PaymentWebhookInput:
+      type: object
+      additionalProperties: false
+      required: [eventId, eventType, paymentId, occurredAt, amount]
+      properties:
+        eventId: { type: string, minLength: 1, maxLength: 200 }
+        eventType: { type: string, enum: [PAYMENT_SUCCEEDED, PAYMENT_FAILED, PAYMENT_CANCELLED, REFUND_SUCCEEDED] }
+        paymentId: { type: string, format: uuid }
+        providerPaymentId: { type: [string, "null"], maxLength: 200 }
+        occurredAt: { type: string, format: date-time }
+        amount: { type: integer, minimum: 0 }
+    DrawResult:
+      type: object
+      additionalProperties: false
+      required: [id, entitlementId, productId, prizeProductId, prizeInventoryUnitId, probabilityVersion, rarity, committedAt]
+      properties:
+        id: { type: string, format: uuid }
+        entitlementId: { type: string, format: uuid }
+        productId: { type: string, maxLength: 120 }
+        prizeProductId: { type: string, maxLength: 120 }
+        prizeInventoryUnitId: { type: string, format: uuid }
+        probabilityVersion: { type: integer, minimum: 1 }
+        rarity: { type: string }
+        committedAt: { type: string, format: date-time }
+    DrawPoolEntry:
+      type: object
+      additionalProperties: false
+      required: [id, prizeProductId, rarity, weight, initialQuantity, remainingQuantity]
+      properties:
+        id: { type: string, format: uuid }
+        prizeProductId: { type: string, maxLength: 120 }
+        rarity: { type: string, minLength: 1, maxLength: 40 }
+        weight: { type: integer, minimum: 1, maximum: 1000000 }
+        initialQuantity: { type: [integer, "null"], minimum: 1, maximum: 10000 }
+        remainingQuantity: { type: [integer, "null"], minimum: 0, maximum: 10000 }
+    DrawProbabilityVersion:
+      type: object
+      additionalProperties: false
+      required: [id, productId, version, status, publishedBy, publishedAt, createdAt, totalEffectiveWeight, entries]
+      properties:
+        id: { type: string, format: uuid }
+        productId: { type: string, maxLength: 120 }
+        version: { type: integer, minimum: 1 }
+        status: { type: string, enum: [DRAFT, ACTIVE, RETIRED] }
+        publishedBy: { type: [string, "null"], format: uuid }
+        publishedAt: { type: [string, "null"], format: date-time }
+        createdAt: { type: string, format: date-time }
+        totalEffectiveWeight: { type: integer, minimum: 0, maximum: 9007199254740991 }
+        entries: { type: array, minItems: 1, maxItems: 200, items: { $ref: "#/components/schemas/DrawPoolEntry" } }
+    DrawProbabilityVersionList:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/DrawProbabilityVersion" } }
+    CreateDrawVersionInput:
+      type: object
+      additionalProperties: false
+      required: [entries]
+      properties:
+        entries:
+          type: array
+          minItems: 1
+          maxItems: 200
+          items:
+            type: object
+            additionalProperties: false
+            required: [prizeProductId, rarity, weight, quantity]
+            properties:
+              prizeProductId: { type: string, maxLength: 120 }
+              rarity: { type: string, minLength: 1, maxLength: 40 }
+              weight: { type: integer, minimum: 1, maximum: 1000000 }
+              quantity: { type: [integer, "null"], minimum: 1, maximum: 10000 }
+    UserSummary:
+      type: object
+      additionalProperties: false
+      required: [id, emailMasked, nickname, role, status, postCount, reportCount, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        emailMasked: { type: string }
+        nickname: { type: string }
+        role: { $ref: "#/components/schemas/UserRole" }
+        status: { $ref: "#/components/schemas/UserStatus" }
+        postCount: { type: integer, minimum: 0 }
+        reportCount: { type: integer, minimum: 0 }
+        suspendedUntil: { type: [string, "null"], format: date-time }
+        createdAt: { type: string, format: date-time }
+    UserDetail:
+      allOf:
+        - $ref: "#/components/schemas/UserSummary"
+        - type: object
+          required: [inquiryCount, snapCount]
+          properties:
+            inquiryCount: { type: integer, minimum: 0 }
+            snapCount: { type: integer, minimum: 0 }
+            suspensionReason: { type: [string, "null"] }
+    UserSummaryPage:
+      allOf:
+        - $ref: "#/components/schemas/PageMeta"
+        - type: object
+          required: [items]
+          properties:
+            items: { type: array, items: { $ref: "#/components/schemas/UserSummary" } }
+    ChangeUserStatusInput:
+      type: object
+      additionalProperties: false
+      required: [status, reason]
+      properties:
+        status: { type: string, enum: [ACTIVE, SUSPENDED, BANNED] }
+        reason: { type: string, minLength: 1, maxLength: 1000 }
+        suspendedUntil: { type: [string, "null"], format: date-time }
+    CreateAdministratorInput:
+      type: object
+      additionalProperties: false
+      required: [email, nickname, password, role]
+      properties:
+        email: { type: string, format: email, maxLength: 254 }
+        nickname: { type: string, minLength: 2, maxLength: 40 }
+        password: { type: string, minLength: 12, maxLength: 256 }
+        role: { type: string, enum: [ADMIN, SUPER_ADMIN] }
+    ChangeAdministratorInput:
+      type: object
+      additionalProperties: false
+      required: [role, status, reason]
+      properties:
+        role: { type: string, enum: [ADMIN, SUPER_ADMIN] }
+        status: { type: string, enum: [ACTIVE, SUSPENDED, BANNED] }
+        reason: { type: string, minLength: 2, maxLength: 1000 }
+    ModerateContentInput:
+      type: object
+      additionalProperties: false
+      required: [status, reason]
+      properties:
+        status: { $ref: "#/components/schemas/ContentStatus" }
+        reason: { type: string, minLength: 1, maxLength: 1000 }
+    EmptyObject:
+      type: object
+      additionalProperties: false
+      maxProperties: 0
+    UserActor:
+      type: object
+      additionalProperties: false
+      required: [userId, email, nickname, role, status]
+      properties:
+        userId: { type: string, format: uuid }
+        email: { type: string, format: email }
+        nickname: { type: string }
+        role: { $ref: "#/components/schemas/UserRole" }
+        status: { $ref: "#/components/schemas/UserStatus" }
+    UserSession:
+      type: object
+      additionalProperties: false
+      required: [id, kind, createdAt, lastSeenAt, expiresAt]
+      properties:
+        id: { type: string, format: uuid }
+        kind: { type: string, const: USER }
+        createdAt: { type: string, format: date-time }
+        lastSeenAt: { type: string, format: date-time }
+        expiresAt: { type: string, format: date-time }
+    UserSessionState:
+      type: object
+      additionalProperties: false
+      required: [actor, session]
+      properties:
+        actor: { $ref: "#/components/schemas/UserActor" }
+        session: { $ref: "#/components/schemas/UserSession" }
+    UserSessionIssued:
+      type: object
+      additionalProperties: false
+      required: [token, expiresAt, rotatedFromSessionId, actor, session]
+      properties:
+        token: { type: string }
+        expiresAt: { type: string, format: date-time }
+        rotatedFromSessionId: { type: string, format: uuid }
+        actor: { $ref: "#/components/schemas/UserActor" }
+        session: { $ref: "#/components/schemas/UserSession" }
+    UpdateCommunityPostInput:
+      type: object
+      additionalProperties: false
+      required: [expectedVersion]
+      properties:
+        expectedVersion: { type: integer, minimum: 1 }
+        title: { type: string, minLength: 1, maxLength: 160 }
+        content: { type: string, minLength: 1, maxLength: 20000 }
+        ipId: { type: [string, "null"], maxLength: 120 }
+        mediaIds:
+          type: array
+          maxItems: 10
+          items: { type: string, format: uuid }
+      description: At least one mutable property in addition to expectedVersion is required.
+    CommunityPostDeletionResult:
+      type: object
+      additionalProperties: false
+      required: [postId, status, version]
+      properties:
+        postId: { type: string, format: uuid }
+        status: { type: string, const: DELETED }
+        version: { type: integer, minimum: 1 }
+    SetCommunityPostLikeInput:
+      type: object
+      additionalProperties: false
+      required: [liked]
+      properties:
+        liked: { type: boolean }
+    CommunityPostLikeResult:
+      type: object
+      additionalProperties: false
+      required: [postId, liked, likeCount]
+      properties:
+        postId: { type: string, format: uuid }
+        liked: { type: boolean }
+        likeCount: { type: integer, minimum: 0 }
+    CommunityCommentDeletionResult:
+      type: object
+      additionalProperties: false
+      required: [commentId, status]
+      properties:
+        commentId: { type: string, format: uuid }
+        status: { type: string, const: DELETED }
+    BlockedUser:
+      type: object
+      additionalProperties: false
+      required: [userId, nickname, blockedAt]
+      properties:
+        userId: { type: string, format: uuid }
+        nickname: { type: string }
+        blockedAt: { type: string, format: date-time }
+    BlockedUserPage:
+      allOf:
+        - $ref: "#/components/schemas/PageMeta"
+        - type: object
+          required: [items]
+          properties:
+            items: { type: array, items: { $ref: "#/components/schemas/BlockedUser" } }
+    UserBlockResult:
+      type: object
+      additionalProperties: false
+      required: [userId, blocked]
+      properties:
+        userId: { type: string, format: uuid }
+        blocked: { type: boolean }
+    UpdateWantedRequestInput:
+      type: object
+      additionalProperties: false
+      required: [expectedVersion]
+      properties:
+        expectedVersion: { type: integer, minimum: 1 }
+        category: { $ref: "#/components/schemas/ProductCategory" }
+        ipId:
+          type: string
+          maxLength: 120
+          pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+        desiredItem: { type: string, minLength: 1, maxLength: 240 }
+        details: { type: string, minLength: 1, maxLength: 5000 }
+      description: At least one mutable property in addition to expectedVersion is required.
+    WantedRequestDeletionResult:
+      type: object
+      additionalProperties: false
+      required: [requestId, status, version]
+      properties:
+        requestId: { type: string, format: uuid }
+        status: { type: string, const: DELETED }
+        version: { type: integer, minimum: 1 }
+    PublicDrawOddsEntry:
+      type: object
+      additionalProperties: false
+      required: [id, prizeProductId, prizeName, prizeImageUrl, rarity, weight, initialQuantity, remainingQuantity, effectiveWeight, probabilityNumerator, probabilityDenominator, probabilityPercent]
+      properties:
+        id: { type: string, format: uuid }
+        prizeProductId: { type: string, maxLength: 120 }
+        prizeName: { type: string }
+        prizeImageUrl: { type: [string, "null"], format: uri }
+        rarity: { type: string }
+        weight: { type: integer, minimum: 1 }
+        initialQuantity: { type: [integer, "null"], minimum: 1 }
+        remainingQuantity: { type: [integer, "null"], minimum: 0 }
+        effectiveWeight: { type: integer, minimum: 0 }
+        probabilityNumerator: { type: integer, minimum: 0 }
+        probabilityDenominator: { type: integer, minimum: 1 }
+        probabilityPercent: { type: number, minimum: 0, maximum: 100 }
+    PublicDrawOdds:
+      type: object
+      additionalProperties: false
+      required: [id, productId, version, publishedAt, calculatedAt, calculation, totalEffectiveWeight, entries]
+      properties:
+        id: { type: string, format: uuid }
+        productId: { type: string, maxLength: 120 }
+        version: { type: integer, minimum: 1 }
+        publishedAt: { type: string, format: date-time }
+        calculatedAt: { type: string, format: date-time }
+        calculation: { type: string, const: WEIGHT_X_REMAINING_QUANTITY }
+        totalEffectiveWeight: { type: integer, minimum: 1 }
+        entries: { type: array, items: { $ref: "#/components/schemas/PublicDrawOddsEntry" } }
+    AccountDeletionStatus:
+      type: string
+      enum: [PENDING_REVIEW, BLOCKED, APPROVED, COMPLETED, REJECTED, CANCELLED]
+    AccountDeletionBlockers:
+      type: object
+      additionalProperties: false
+      required: [pointBalance, activeOrderCount, activePaymentCount, availableDrawEntitlementCount, activeInventoryCount, activeShippingRequestCount, activeExchangeListingCount, activeExchangeOfferCount]
+      properties:
+        pointBalance: { type: integer, minimum: 0 }
+        activeOrderCount: { type: integer, minimum: 0 }
+        activePaymentCount: { type: integer, minimum: 0 }
+        availableDrawEntitlementCount: { type: integer, minimum: 0 }
+        activeInventoryCount: { type: integer, minimum: 0 }
+        activeShippingRequestCount: { type: integer, minimum: 0 }
+        activeExchangeListingCount: { type: integer, minimum: 0 }
+        activeExchangeOfferCount: { type: integer, minimum: 0 }
+    AccountDeletionRequest:
+      type: object
+      additionalProperties: false
+      required: [id, status, blockers, requestCount, hardDeletePerformed, policy, requestedAt, lastRequestedAt]
+      properties:
+        id: { type: string, format: uuid }
+        status: { $ref: "#/components/schemas/AccountDeletionStatus" }
+        blockers: { $ref: "#/components/schemas/AccountDeletionBlockers" }
+        requestCount: { type: integer, minimum: 1 }
+        hardDeletePerformed: { type: boolean, const: false }
+        policy: { type: string, const: MANUAL_REVIEW_REQUIRED }
+        requestedAt: { type: string, format: date-time }
+        lastRequestedAt: { type: string, format: date-time }
+    CommerceUser:
+      type: object
+      additionalProperties: false
+      required: [id, emailMasked, nickname]
+      properties:
+        id: { type: string, format: uuid }
+        emailMasked: { type: string }
+        nickname: { type: string }
+    AdminActorSummary:
+      type: object
+      additionalProperties: false
+      required: [id, nickname]
+      properties:
+        id: { type: string, format: uuid }
+        nickname: { type: string }
+    AdminAccountDeletionSummary:
+      type: object
+      additionalProperties: false
+      required: [id, user, status, blockers, requestCount, version, requestedAt, lastRequestedAt, decidedAt, decisionReason, decidedBy, createdAt, updatedAt, hardDeletePerformed, completionAvailable, completionPolicy]
+      properties:
+        id: { type: string, format: uuid }
+        user: { $ref: "#/components/schemas/CommerceUser" }
+        status: { $ref: "#/components/schemas/AccountDeletionStatus" }
+        blockers: { $ref: "#/components/schemas/AccountDeletionBlockers" }
+        requestCount: { type: integer, minimum: 1 }
+        version: { type: integer, minimum: 1 }
+        requestedAt: { type: string, format: date-time }
+        lastRequestedAt: { type: string, format: date-time }
+        decidedAt: { type: [string, "null"], format: date-time }
+        decisionReason: { type: [string, "null"] }
+        decidedBy:
+          oneOf:
+            - $ref: "#/components/schemas/AdminActorSummary"
+            - type: "null"
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        hardDeletePerformed: { type: boolean, const: false }
+        completionAvailable: { type: boolean, const: false }
+        completionPolicy: { type: string, const: EXTERNAL_RETENTION_POLICY_REQUIRED }
+    AdminAccountDeletionPage:
+      allOf:
+        - $ref: "#/components/schemas/PageMeta"
+        - type: object
+          required: [items]
+          properties:
+            items: { type: array, items: { $ref: "#/components/schemas/AdminAccountDeletionSummary" } }
+    AdminAccountDeletionEvent:
+      type: object
+      additionalProperties: false
+      required: [id, eventType, status, blockers, revokedSessionCount, correlationId, metadata, admin, reason, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        eventType: { type: string, enum: [CREATED, REASSESSED, STATUS_CHANGED] }
+        status: { $ref: "#/components/schemas/AccountDeletionStatus" }
+        blockers: { $ref: "#/components/schemas/AccountDeletionBlockers" }
+        revokedSessionCount: { type: integer, minimum: 0 }
+        correlationId: { type: string }
+        metadata: { type: object, additionalProperties: true }
+        admin:
+          oneOf:
+            - $ref: "#/components/schemas/AdminActorSummary"
+            - type: "null"
+        reason: { type: [string, "null"] }
+        createdAt: { type: string, format: date-time }
+    AdminAccountDeletionDetail:
+      allOf:
+        - $ref: "#/components/schemas/AdminAccountDeletionSummary"
+        - type: object
+          required: [currentBlockers, approvalEligible, rejectionAvailable, events]
+          properties:
+            currentBlockers: { $ref: "#/components/schemas/AccountDeletionBlockers" }
+            approvalEligible: { type: boolean }
+            rejectionAvailable: { type: boolean }
+            events: { type: array, items: { $ref: "#/components/schemas/AdminAccountDeletionEvent" } }
+    DecideAccountDeletionInput:
+      type: object
+      additionalProperties: false
+      required: [decision, reason]
+      properties:
+        decision: { type: string, enum: [APPROVED, REJECTED] }
+        reason: { type: string, minLength: 2, maxLength: 1000 }
+    AdminAccountDeletionDecisionResult:
+      allOf:
+        - $ref: "#/components/schemas/AdminAccountDeletionSummary"
+        - type: object
+          required: [currentBlockers, approvalEligible, rejectionAvailable]
+          properties:
+            currentBlockers: { $ref: "#/components/schemas/AccountDeletionBlockers" }
+            approvalEligible: { type: boolean, const: false }
+            rejectionAvailable: { type: boolean, const: false }
+    OrderStatus:
+      type: string
+      enum: [PENDING_PAYMENT, PAID, FULFILLED, CANCELLED, REFUND_REVIEW, REFUNDED]
+    PaymentStatus:
+      type: string
+      enum: [PENDING, AUTHORIZED, PAID, FAILED, CANCELLED, REFUND_REVIEW, REFUNDED]
+    RefundReviewStatus:
+      type: string
+      enum: [PENDING, IN_REVIEW, WAITING_PROVIDER, ESCALATED, CLOSED]
+    AdminOrderPayment:
+      type: object
+      additionalProperties: false
+      required: [id, status, provider]
+      properties:
+        id: { type: string, format: uuid }
+        status: { $ref: "#/components/schemas/PaymentStatus" }
+        provider: { type: string }
+    AdminOrder:
+      type: object
+      additionalProperties: false
+      required: [id, user, status, currency, subtotal, discountTotal, pointTotal, total, version, payment, lineCount, unitCount, paidAt, cancelledAt, refundedAt, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        user: { $ref: "#/components/schemas/CommerceUser" }
+        status: { $ref: "#/components/schemas/OrderStatus" }
+        currency: { type: string, const: KRW }
+        subtotal: { type: integer, minimum: 0 }
+        discountTotal: { type: integer, minimum: 0 }
+        pointTotal: { type: integer, minimum: 0 }
+        total: { type: integer, minimum: 0 }
+        version: { type: integer, minimum: 1 }
+        payment: { $ref: "#/components/schemas/AdminOrderPayment" }
+        lineCount: { type: integer, minimum: 0 }
+        unitCount: { type: integer, minimum: 0 }
+        paidAt: { type: [string, "null"], format: date-time }
+        cancelledAt: { type: [string, "null"], format: date-time }
+        refundedAt: { type: [string, "null"], format: date-time }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    AdminOrderLine:
+      type: object
+      additionalProperties: false
+      required: [id, productId, productName, category, unitPrice, quantity, lineTotal, probabilityVersionId, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        productId: { type: string, maxLength: 120 }
+        productName: { type: string }
+        category: { $ref: "#/components/schemas/ProductCategory" }
+        unitPrice: { type: integer, minimum: 0 }
+        quantity: { type: integer, minimum: 1 }
+        lineTotal: { type: integer, minimum: 0 }
+        probabilityVersionId: { type: [string, "null"], format: uuid }
+        createdAt: { type: string, format: date-time }
+    AdminStockReservation:
+      type: object
+      additionalProperties: false
+      required: [id, orderLineId, productId, quantity, status, expiresAt, resolvedAt, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        orderLineId: { type: string, format: uuid }
+        productId: { type: string, maxLength: 120 }
+        quantity: { type: integer, minimum: 1 }
+        status: { type: string }
+        expiresAt: { type: string, format: date-time }
+        resolvedAt: { type: [string, "null"], format: date-time }
+        createdAt: { type: string, format: date-time }
+    AdminOrderDetail:
+      allOf:
+        - $ref: "#/components/schemas/AdminOrder"
+        - type: object
+          required: [lines, reservations]
+          properties:
+            lines: { type: array, items: { $ref: "#/components/schemas/AdminOrderLine" } }
+            reservations: { type: array, items: { $ref: "#/components/schemas/AdminStockReservation" } }
+    AdminOrderPage:
+      allOf:
+        - $ref: "#/components/schemas/PageMeta"
+        - type: object
+          required: [items]
+          properties:
+            items: { type: array, items: { $ref: "#/components/schemas/AdminOrder" } }
+    AdminPayment:
+      type: object
+      additionalProperties: false
+      required: [id, orderId, orderStatus, user, provider, providerPaymentId, status, amount, currency, failureCode, version, paidAt, refundedAt, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        orderId: { type: string, format: uuid }
+        orderStatus: { $ref: "#/components/schemas/OrderStatus" }
+        user: { $ref: "#/components/schemas/CommerceUser" }
+        provider: { type: string }
+        providerPaymentId: { type: [string, "null"] }
+        status: { $ref: "#/components/schemas/PaymentStatus" }
+        amount: { type: integer, minimum: 0 }
+        currency: { type: string, const: KRW }
+        failureCode: { type: [string, "null"] }
+        version: { type: integer, minimum: 1 }
+        paidAt: { type: [string, "null"], format: date-time }
+        refundedAt: { type: [string, "null"], format: date-time }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    AdminPaymentLedgerEntry:
+      type: object
+      additionalProperties: false
+      required: [id, entryType, amount, currency, referenceId, reason, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        entryType: { type: string }
+        amount: { type: integer }
+        currency: { type: string }
+        referenceId: { type: string }
+        reason: { type: [string, "null"] }
+        createdAt: { type: string, format: date-time }
+    AdminPaymentProviderEvent:
+      type: object
+      additionalProperties: false
+      required: [id, providerEventId, eventType, occurredAt, processedAt, processingError, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        providerEventId: { type: string }
+        eventType: { type: string }
+        occurredAt: { type: string, format: date-time }
+        processedAt: { type: [string, "null"], format: date-time }
+        processingError: { type: [string, "null"], maxLength: 500 }
+        createdAt: { type: string, format: date-time }
+    AdminPaymentDetail:
+      allOf:
+        - $ref: "#/components/schemas/AdminPayment"
+        - type: object
+          required: [ledger, providerEvents]
+          properties:
+            ledger: { type: array, items: { $ref: "#/components/schemas/AdminPaymentLedgerEntry" } }
+            providerEvents: { type: array, items: { $ref: "#/components/schemas/AdminPaymentProviderEvent" } }
+    AdminPaymentPage:
+      allOf:
+        - $ref: "#/components/schemas/PageMeta"
+        - type: object
+          required: [items]
+          properties:
+            items: { type: array, items: { $ref: "#/components/schemas/AdminPayment" } }
+    AdminRefundReviewState:
+      type: object
+      additionalProperties: false
+      required: [id, status, assignedAdminId, version, updatedAt, closedAt]
+      properties:
+        id: { type: string, format: uuid }
+        status: { $ref: "#/components/schemas/RefundReviewStatus" }
+        assignedAdminId: { type: [string, "null"], format: uuid }
+        version: { type: integer, minimum: 1 }
+        updatedAt: { type: [string, "null"], format: date-time }
+        closedAt: { type: [string, "null"], format: date-time }
+    AdminRefundReview:
+      allOf:
+        - $ref: "#/components/schemas/AdminPayment"
+        - type: object
+          required: [review]
+          properties:
+            review:
+              oneOf:
+                - $ref: "#/components/schemas/AdminRefundReviewState"
+                - type: "null"
+    AdminRefundReviewPage:
+      allOf:
+        - $ref: "#/components/schemas/PageMeta"
+        - type: object
+          required: [items]
+          properties:
+            items: { type: array, items: { $ref: "#/components/schemas/AdminRefundReview" } }
+    AdminRefundAssetSafety:
+      type: object
+      additionalProperties: false
+      required: [expectedPurchaseUnits, actualPurchaseUnits, unsafePurchaseUnits, expectedDrawUnits, actualDrawEntitlements, consumedDrawEntitlements]
+      properties:
+        expectedPurchaseUnits: { type: integer, minimum: 0 }
+        actualPurchaseUnits: { type: integer, minimum: 0 }
+        unsafePurchaseUnits: { type: integer, minimum: 0 }
+        expectedDrawUnits: { type: integer, minimum: 0 }
+        actualDrawEntitlements: { type: integer, minimum: 0 }
+        consumedDrawEntitlements: { type: integer, minimum: 0 }
+    AdminRefundReviewNote:
+      type: object
+      additionalProperties: false
+      required: [id, adminId, adminNickname, status, note, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        adminId: { type: string, format: uuid }
+        adminNickname: { type: string }
+        status: { $ref: "#/components/schemas/RefundReviewStatus" }
+        note: { type: string }
+        createdAt: { type: string, format: date-time }
+    AdminRefundReviewDetail:
+      allOf:
+        - $ref: "#/components/schemas/AdminRefundReview"
+        - type: object
+          required: [assetSafety, notes, providerActionAvailable]
+          properties:
+            assetSafety: { $ref: "#/components/schemas/AdminRefundAssetSafety" }
+            notes: { type: array, items: { $ref: "#/components/schemas/AdminRefundReviewNote" } }
+            providerActionAvailable: { type: boolean, const: false }
+    UpdateAdminRefundReviewInput:
+      type: object
+      additionalProperties: false
+      required: [status, note, expectedVersion, reason]
+      properties:
+        status: { $ref: "#/components/schemas/RefundReviewStatus" }
+        note: { type: string, minLength: 2, maxLength: 5000 }
+        expectedVersion: { type: integer, minimum: 0, maximum: 2147483647 }
+        reason: { type: string, minLength: 2, maxLength: 1000 }
+    AdminRefundReviewMutationResult:
+      type: object
+      additionalProperties: false
+      required: [id, paymentId, status, assignedAdminId, version, updatedAt, closedAt, providerActionExecuted]
+      properties:
+        id: { type: string, format: uuid }
+        paymentId: { type: string, format: uuid }
+        status: { $ref: "#/components/schemas/RefundReviewStatus" }
+        assignedAdminId: { type: string, format: uuid }
+        version: { type: integer, minimum: 1 }
+        updatedAt: { type: string, format: date-time }
+        closedAt: { type: [string, "null"], format: date-time }
+        providerActionExecuted: { type: boolean, const: false }
+    AdminDrawCapacity:
+      type: object
+      additionalProperties: false
+      required: [probabilityVersionId, unlimited, remainingPrizeUnits, outstandingEntitlements, sellableUnits]
+      properties:
+        probabilityVersionId: { type: string, format: uuid }
+        unlimited: { type: boolean }
+        remainingPrizeUnits: { type: [integer, "null"], minimum: 0 }
+        outstandingEntitlements: { type: integer, minimum: 0 }
+        sellableUnits: { type: [integer, "null"], minimum: 0 }
+    AdminInventory:
+      type: object
+      additionalProperties: false
+      required: [productId, sku, name, category, ipId, isActive, onHand, reserved, available, version, drawCapacity, createdAt, updatedAt]
+      properties:
+        productId: { type: string, maxLength: 120 }
+        sku: { type: string }
+        name: { type: string }
+        category: { $ref: "#/components/schemas/ProductCategory" }
+        ipId: { type: string, maxLength: 120 }
+        isActive: { type: boolean }
+        onHand: { type: integer, minimum: 0 }
+        reserved: { type: integer, minimum: 0 }
+        available: { type: integer, minimum: 0 }
+        version: { type: integer, minimum: 1 }
+        drawCapacity:
+          oneOf:
+            - $ref: "#/components/schemas/AdminDrawCapacity"
+            - type: "null"
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    AdminInventoryAdjustment:
+      type: object
+      additionalProperties: false
+      required: [id, adminId, adminNickname, deltaOnHand, beforeOnHand, afterOnHand, beforeReserved, afterReserved, reason, requestId, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        adminId: { type: string, format: uuid }
+        adminNickname: { type: string }
+        deltaOnHand: { type: integer }
+        beforeOnHand: { type: integer, minimum: 0 }
+        afterOnHand: { type: integer, minimum: 0 }
+        beforeReserved: { type: integer, minimum: 0 }
+        afterReserved: { type: integer, minimum: 0 }
+        reason: { type: string }
+        requestId: { type: string }
+        createdAt: { type: string, format: date-time }
+    AdminInventoryReservation:
+      type: object
+      additionalProperties: false
+      required: [id, orderId, quantity, status, expiresAt, resolvedAt, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        orderId: { type: string, format: uuid }
+        quantity: { type: integer, minimum: 1 }
+        status: { type: string }
+        expiresAt: { type: string, format: date-time }
+        resolvedAt: { type: [string, "null"], format: date-time }
+        createdAt: { type: string, format: date-time }
+    AdminInventoryDetail:
+      allOf:
+        - $ref: "#/components/schemas/AdminInventory"
+        - type: object
+          required: [adjustments, reservations]
+          properties:
+            adjustments: { type: array, items: { $ref: "#/components/schemas/AdminInventoryAdjustment" } }
+            reservations: { type: array, items: { $ref: "#/components/schemas/AdminInventoryReservation" } }
+    AdminInventoryPage:
+      allOf:
+        - $ref: "#/components/schemas/PageMeta"
+        - type: object
+          required: [items]
+          properties:
+            items: { type: array, items: { $ref: "#/components/schemas/AdminInventory" } }
+    AdjustAdminInventoryInput:
+      type: object
+      additionalProperties: false
+      required: [deltaOnHand, expectedVersion, reason]
+      properties:
+        deltaOnHand:
+          type: integer
+          minimum: -2147483647
+          maximum: 2147483647
+          not: { const: 0 }
+        expectedVersion: { type: integer, minimum: 1, maximum: 2147483647 }
+        reason: { type: string, minLength: 2, maxLength: 1000 }
+    AdminInventoryAdjustmentResult:
+      type: object
+      additionalProperties: false
+      required: [adjustmentId, productId, deltaOnHand, onHand, reserved, available, version, createdAt]
+      properties:
+        adjustmentId: { type: string, format: uuid }
+        productId: { type: string, maxLength: 120 }
+        deltaOnHand: { type: integer }
+        onHand: { type: integer, minimum: 0 }
+        reserved: { type: integer, minimum: 0 }
+        available: { type: integer, minimum: 0 }
+        version: { type: integer, minimum: 1 }
+        createdAt: { type: string, format: date-time }
+    AdminShippingStatus:
+      type: string
+      enum: [REQUESTED, PROCESSING, SHIPPED, DELIVERED, CANCELLED]
+    AdminShippingRequest:
+      type: object
+      additionalProperties: false
+      required: [id, user, status, itemCount, trackingCarrier, trackingNumber, version, requestedAt, shippedAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        user: { $ref: "#/components/schemas/CommerceUser" }
+        status: { $ref: "#/components/schemas/AdminShippingStatus" }
+        itemCount: { type: integer, minimum: 0 }
+        trackingCarrier: { type: [string, "null"] }
+        trackingNumber: { type: [string, "null"] }
+        version: { type: integer, minimum: 1 }
+        requestedAt: { type: string, format: date-time }
+        shippedAt: { type: [string, "null"], format: date-time }
+        updatedAt: { type: string, format: date-time }
+    AdminShippingRequestPage:
+      allOf:
+        - $ref: "#/components/schemas/PageMeta"
+        - type: object
+          required: [items]
+          properties:
+            items: { type: array, items: { $ref: "#/components/schemas/AdminShippingRequest" } }
+    AdminShippingDestination:
+      type: object
+      additionalProperties: false
+      required: [recipient, phone, postalCode, addressLine1, addressLine2, deliveryNote]
+      properties:
+        recipient: { type: string }
+        phone: { type: string }
+        postalCode: { type: string }
+        addressLine1: { type: string }
+        addressLine2: { type: string }
+        deliveryNote: { type: string }
+    AdminShippingItem:
+      type: object
+      additionalProperties: false
+      required: [inventoryUnitId, productId, productName, sku, inventoryStatus]
+      properties:
+        inventoryUnitId: { type: string, format: uuid }
+        productId: { type: string, maxLength: 120 }
+        productName: { type: string }
+        sku: { type: string }
+        inventoryStatus: { type: string }
+    AdminShippingStatusEvent:
+      type: object
+      additionalProperties: false
+      required: [id, adminId, adminNickname, fromStatus, toStatus, trackingCarrier, trackingNumber, reason, requestId, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        adminId: { type: string, format: uuid }
+        adminNickname: { type: string }
+        fromStatus: { $ref: "#/components/schemas/AdminShippingStatus" }
+        toStatus: { $ref: "#/components/schemas/AdminShippingStatus" }
+        trackingCarrier: { type: [string, "null"] }
+        trackingNumber: { type: [string, "null"] }
+        reason: { type: string }
+        requestId: { type: string }
+        createdAt: { type: string, format: date-time }
+    AdminShippingRequestDetail:
+      allOf:
+        - $ref: "#/components/schemas/AdminShippingRequest"
+        - type: object
+          required: [destination, items, events]
+          properties:
+            destination: { $ref: "#/components/schemas/AdminShippingDestination" }
+            items: { type: array, items: { $ref: "#/components/schemas/AdminShippingItem" } }
+            events: { type: array, items: { $ref: "#/components/schemas/AdminShippingStatusEvent" } }
+    UpdateAdminShippingStatusInput:
+      type: object
+      additionalProperties: false
+      required: [status, expectedVersion, reason]
+      properties:
+        status: { type: string, enum: [PROCESSING, SHIPPED, DELIVERED, CANCELLED] }
+        expectedVersion: { type: integer, minimum: 1, maximum: 2147483647 }
+        reason: { type: string, minLength: 2, maxLength: 1000 }
+        trackingCarrier: { type: [string, "null"], maxLength: 100 }
+        trackingNumber: { type: [string, "null"], maxLength: 200 }
+    AdminShippingStatusResult:
+      type: object
+      additionalProperties: false
+      required: [id, status, trackingCarrier, trackingNumber, shippedAt, version, updatedAt, eventId]
+      properties:
+        id: { type: string, format: uuid }
+        status: { $ref: "#/components/schemas/AdminShippingStatus" }
+        trackingCarrier: { type: [string, "null"] }
+        trackingNumber: { type: [string, "null"] }
+        shippedAt: { type: [string, "null"], format: date-time }
+        version: { type: integer, minimum: 1 }
+        updatedAt: { type: string, format: date-time }
+        eventId: { type: string, format: uuid }
+    AdminAuditLog:
+      type: object
+      additionalProperties: false
+      required: [id, adminId, adminEmailMasked, action, targetType, targetId, reason, requestId, metadata, ipAddressMasked, clientLabel, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        adminId: { type: string, format: uuid }
+        adminEmailMasked: { type: string }
+        action: { type: string }
+        targetType: { type: string }
+        targetId: { type: string }
+        reason: { type: string }
+        requestId: { type: string }
+        metadata: { type: object, additionalProperties: true }
+        ipAddressMasked: { type: [string, "null"] }
+        clientLabel: { type: [string, "null"] }
+        createdAt: { type: string, format: date-time }
+    AdminAuditLogPage:
+      allOf:
+        - $ref: "#/components/schemas/PageMeta"
+        - type: object
+          required: [items]
+          properties:
+            items: { type: array, items: { $ref: "#/components/schemas/AdminAuditLog" } }
+    AdminDashboard:
+      type: object
+      additionalProperties: false
+      required: [totalUsers, usersJoinedToday, postsToday, snapsToday, unansweredInquiries, pendingReports, pendingProductRequests, pendingIpRequests, generatedAt]
+      properties:
+        totalUsers: { type: integer, minimum: 0 }
+        usersJoinedToday: { type: integer, minimum: 0 }
+        postsToday: { type: integer, minimum: 0 }
+        snapsToday: { type: integer, minimum: 0 }
+        unansweredInquiries: { type: integer, minimum: 0 }
+        pendingReports: { type: integer, minimum: 0 }
+        pendingProductRequests: { type: integer, minimum: 0 }
+        pendingIpRequests: { type: integer, minimum: 0 }
+        generatedAt: { type: string, format: date-time }
