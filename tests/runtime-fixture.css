@@ -44,10 +44,20 @@
 }
 
 .keyboard-footer {
+  position: relative;
   height: 84px;
   padding: 14px 20px;
   background: white;
   border-top: 1px solid #ddd;
+}
+
+.keyboard-dismiss-handle {
+  position: absolute;
+  z-index: 1;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: 12px;
 }
 
 .keyboard-footer input {

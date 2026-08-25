@@ -1,17 +1,10 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 
-async function drag(
-  page: Page,
-  locator: Locator,
-  deltaX: number,
-  deltaY: number,
-  steps = 8,
-  startOffset?: { x: number; y: number },
-) {
+async function drag(page: Page, locator: Locator, deltaX: number, deltaY: number, steps = 8) {
   const box = await locator.boundingBox();
   if (!box) throw new Error("Drag target has no bounding box");
-  const startX = box.x + (startOffset?.x ?? box.width / 2);
-  const startY = box.y + (startOffset?.y ?? box.height / 2);
+  const startX = box.x + box.width / 2;
+  const startY = box.y + box.height / 2;
 
   await page.mouse.move(startX, startY);
   await page.mouse.down();
@@ -108,13 +101,22 @@ test("keyboard and its attached footer dismiss on the same transition", async ({
   await page.goto("/tests/runtime-fixture.html?fixture=keyboard");
   const input = page.getByLabel("Message");
   const footer = page.getByTestId("flow-fixed-footer");
+  const dismissHandle = page.getByTestId("keyboard-dismiss-handle");
   const keyboard = page.getByTestId("keyboard-dock");
 
   await input.click();
   await expect(keyboard).toHaveAttribute("data-visible", "true");
-  // Start in the footer padding instead of over its input. Font/layout timing
-  // can otherwise make the interactive child consume the pointer sequence.
-  await drag(page, footer, 0, 120, 8, { x: 8, y: 6 });
+  await expect.poll(async () => page.evaluate(() => {
+    const footerElement = document.querySelector<HTMLElement>('[data-testid="flow-fixed-footer"]')!;
+    const keyboardElement = document.querySelector<HTMLElement>('[data-testid="keyboard-dock"]')!;
+    const fullHeight = Number.parseFloat(keyboardElement.style.height);
+    const transform = getComputedStyle(keyboardElement).transform;
+    const keyboardY = transform === "none" ? 0 : new DOMMatrixReadOnly(transform).m42;
+    const footerBottom = Number.parseFloat(getComputedStyle(footerElement).bottom);
+    return Math.max(Math.abs(keyboardY), Math.abs(footerBottom - fullHeight));
+  })).toBeLessThan(1);
+  await expect(dismissHandle).toBeVisible();
+  await drag(page, dismissHandle, 0, 120, 8);
   await expect(keyboard).toHaveAttribute("data-visible", "false");
 
   await page.waitForTimeout(100);
