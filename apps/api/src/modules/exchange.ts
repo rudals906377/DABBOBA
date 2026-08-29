@@ -23,7 +23,9 @@ type InventoryStatus =
   | "SHIPPING"
   | "DELIVERED"
   | "TRANSFERRED"
-  | "REFUNDED";
+  | "REFUNDED"
+  | "POINT_RETURNED";
+type InventorySourceType = "PURCHASE" | "GACHA" | "KUJI" | "ADMIN_ADJUSTMENT";
 type ListingStatus = "OPEN" | "MATCHED" | "COMPLETED" | "CANCELLED" | "HIDDEN";
 type OfferStatus = "PENDING" | "ACCEPTED" | "REJECTED" | "WITHDRAWN";
 type CompletionMode = "MUTUAL_CONFIRMATION" | "ADMIN_OVERRIDE";
@@ -32,7 +34,7 @@ type InventoryRow = {
   id: string;
   owner_id: string;
   product_id: string;
-  source_type: "PURCHASE" | "GACHA" | "KUJI" | "ADMIN_ADJUSTMENT";
+  source_type: InventorySourceType;
   inventory_status: InventoryStatus;
   acquired_at: Date;
   sku: string;
@@ -105,7 +107,7 @@ type OfferRow = InventoryRow & {
   offer_id: string;
   listing_id: string;
   proposer_id: string;
-  message: string;
+  proposer_nickname: string;
   offer_status: OfferStatus;
   offer_created_at: Date;
   offer_updated_at: Date;
@@ -115,6 +117,8 @@ type InventoryLockRow = {
   id: string;
   owner_id: string;
   status: InventoryStatus;
+  source_type: InventorySourceType;
+  draw_owner_id: string | null;
 };
 
 type Queryable = Pick<DatabaseClient, "query">;
@@ -142,6 +146,18 @@ export function isExchangeOfferTransitionAllowed(from: OfferStatus, to: OfferSta
   return from === to || OFFER_TRANSITIONS[from].includes(to);
 }
 
+export function isDrawExchangeSource(sourceType: InventorySourceType): boolean {
+  return sourceType === "GACHA" || sourceType === "KUJI";
+}
+
+export function isExchangeEligibleInventory(
+  status: InventoryStatus,
+  sourceType: InventorySourceType,
+  isOriginalDrawOwner: boolean,
+): boolean {
+  return status === "OWNED" && isDrawExchangeSource(sourceType) && isOriginalDrawOwner;
+}
+
 export function orderedInventoryIds(ids: readonly string[]): string[] {
   return [...new Set(ids)].sort((left, right) => left.localeCompare(right, "en-US"));
 }
@@ -163,12 +179,15 @@ const listingSelect = `SELECT
   ${inventorySelect}
   FROM exchange_listings l JOIN users u ON u.id=l.author_id
   JOIN inventory_units iu ON iu.id=l.offered_inventory_unit_id
-  JOIN catalog_products p ON p.id=iu.product_id LEFT JOIN product_stock s ON s.product_id=p.id`;
+  JOIN catalog_products p ON p.id=iu.product_id
+  JOIN catalog_ips i ON i.id=p.ip_id
+  LEFT JOIN product_stock s ON s.product_id=p.id`;
 
 const offerSelect = `SELECT
-  o.id AS offer_id,o.listing_id,o.proposer_id,o.message,o.status AS offer_status,
+  o.id AS offer_id,o.listing_id,o.proposer_id,proposer.nickname AS proposer_nickname,o.status AS offer_status,
   o.created_at AS offer_created_at,o.updated_at AS offer_updated_at,${inventorySelect}
-  FROM exchange_offers o JOIN inventory_units iu ON iu.id=o.offered_inventory_unit_id
+  FROM exchange_offers o JOIN users proposer ON proposer.id=o.proposer_id
+  JOIN inventory_units iu ON iu.id=o.offered_inventory_unit_id
   JOIN catalog_products p ON p.id=iu.product_id LEFT JOIN product_stock s ON s.product_id=p.id`;
 
 const mapProduct = (row: InventoryRow) => ({
@@ -228,8 +247,8 @@ const mapOffer = (row: OfferRow) => ({
   id: row.offer_id,
   listingId: row.listing_id,
   proposerId: row.proposer_id,
+  proposerNickname: row.proposer_nickname,
   offeredInventory: mapInventory(row),
-  message: row.message,
   status: row.offer_status,
   createdAt: iso(row.offer_created_at),
   updatedAt: iso(row.offer_updated_at),
@@ -282,8 +301,10 @@ async function lockInventoryUnits(client: DatabaseClient, inventoryIds: readonly
   const ids = orderedInventoryIds(inventoryIds);
   if (!ids.length) return new Map<string, InventoryLockRow>();
   const result = await client.query<InventoryLockRow>(
-    `SELECT id,owner_id,status FROM inventory_units
-     WHERE id=ANY($1::uuid[]) ORDER BY id FOR UPDATE`,
+    `SELECT iu.id,iu.owner_id,iu.status,iu.source_type,draw_result.user_id AS draw_owner_id
+     FROM inventory_units iu
+     LEFT JOIN draw_results draw_result ON draw_result.prize_inventory_unit_id=iu.id
+     WHERE iu.id=ANY($1::uuid[]) ORDER BY iu.id FOR UPDATE OF iu`,
     [ids],
   );
   if (result.rows.length !== ids.length) throw notFound("교환 상품을 찾을 수 없습니다.");
@@ -300,6 +321,25 @@ function requireInventoryState(
   if (!inventory) throw notFound("교환 상품을 찾을 수 없습니다.");
   if (inventory.owner_id !== ownerId || inventory.status !== status) {
     throw conflict("교환 상품의 소유권 또는 예약 상태가 변경되었습니다.");
+  }
+}
+
+function requireExchangeEligibleInventory(
+  locked: Map<string, InventoryLockRow>,
+  inventoryId: string,
+  ownerId: string,
+) {
+  const inventory = locked.get(inventoryId);
+  if (!inventory) throw notFound("교환 상품을 찾을 수 없습니다.");
+  if (inventory.owner_id !== ownerId) {
+    throw conflict("교환 상품의 소유권 또는 예약 상태가 변경되었습니다.");
+  }
+  if (!isExchangeEligibleInventory(
+    inventory.status,
+    inventory.source_type,
+    inventory.draw_owner_id === ownerId,
+  )) {
+    throw conflict("직접 뽑아 보관함에 보관 중인 가챠·쿠지 상품만 교환에 사용할 수 있습니다.");
   }
 }
 
@@ -442,7 +482,17 @@ export async function registerExchangeRoutes(app: FastifyInstance, context: ApiC
       const { limit, cursor } = pagination(query);
       const search = queryString(query.q);
       const values: unknown[] = [request.actor!.userId, limit + 1];
-      const filters = ["iu.owner_id=$1", "iu.status='OWNED'", "p.is_active=true"];
+      const filters = [
+        "iu.owner_id=$1",
+        "iu.status='OWNED'",
+        "iu.source_type IN ('GACHA','KUJI')",
+        `EXISTS (
+          SELECT 1 FROM draw_results draw_result
+          WHERE draw_result.prize_inventory_unit_id=iu.id
+            AND draw_result.user_id=iu.owner_id
+        )`,
+        "p.is_active=true",
+      ];
       if (search) {
         values.push(`%${search}%`);
         filters.push(`(p.name ILIKE $${values.length} OR p.sku ILIKE $${values.length})`);
@@ -475,7 +525,10 @@ export async function registerExchangeRoutes(app: FastifyInstance, context: ApiC
     if (search) {
       values.push(`%${search}%`);
       filters.push(
-        `(l.title ILIKE $${values.length} OR l.details ILIKE $${values.length} OR p.name ILIKE $${values.length})`,
+        `(l.title ILIKE $${values.length} OR l.details ILIKE $${values.length}
+          OR p.name ILIKE $${values.length} OR i.name_ko ILIKE $${values.length}
+          OR i.name_en ILIKE $${values.length} OR i.name_ja ILIKE $${values.length}
+          OR array_to_string(i.aliases, ' ') ILIKE $${values.length})`,
       );
     }
     if (category) {
@@ -535,7 +588,7 @@ export async function registerExchangeRoutes(app: FastifyInstance, context: ApiC
         },
         async (client) => {
           const locked = await lockInventoryUnits(client, [inventoryId]);
-          requireInventoryState(locked, inventoryId, request.actor!.userId, "OWNED");
+          requireExchangeEligibleInventory(locked, inventoryId, request.actor!.userId);
           const created = await client.query<{ id: string }>(
             `INSERT INTO exchange_listings(author_id,offered_inventory_unit_id,title,details)
              VALUES($1,$2,$3,$4) RETURNING id`,
@@ -567,13 +620,12 @@ export async function registerExchangeRoutes(app: FastifyInstance, context: ApiC
       const listingId = uuidInput((request.params as Record<string, unknown>).listingId, "listingId");
       const body = objectInput(request.body);
       const inventoryId = uuidInput(body.offeredInventoryUnitId, "offeredInventoryUnitId");
-      const message = stringInput(body, "message", { max: 2000 })!;
       const result = await runIdempotentMutation(
         context,
         request,
         {
           scope: "exchange.offer.create",
-          hashInput: { listingId, inventoryId, message },
+          hashInput: { listingId, inventoryId },
           resourceType: "EXCHANGE_OFFER",
         },
         async (client) => {
@@ -589,14 +641,14 @@ export async function registerExchangeRoutes(app: FastifyInstance, context: ApiC
           );
           if (blocked.rowCount) throw forbidden();
           const locked = await lockInventoryUnits(client, [inventoryId]);
-          requireInventoryState(locked, inventoryId, request.actor!.userId, "OWNED");
+          requireExchangeEligibleInventory(locked, inventoryId, request.actor!.userId);
           if (inventoryId === listing.offered_inventory_unit_id) {
             throw conflict("등록 상품과 동일한 상품은 제안할 수 없습니다.");
           }
           const created = await client.query<{ id: string }>(
             `INSERT INTO exchange_offers(listing_id,proposer_id,offered_inventory_unit_id,message)
-             VALUES($1,$2,$3,$4) RETURNING id`,
-            [listingId, request.actor!.userId, inventoryId, message],
+             VALUES($1,$2,$3,'이 상품과 교환하실래요?') RETURNING id`,
+            [listingId, request.actor!.userId, inventoryId],
           );
           const reserved = await client.query(
             "UPDATE inventory_units SET status='EXCHANGE_OFFERED' WHERE id=$1 AND status='OWNED' RETURNING id",

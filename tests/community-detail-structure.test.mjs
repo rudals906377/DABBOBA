@@ -98,11 +98,11 @@ test("seeded exchange listings, applications, and product requests keep complete
         application.offeredCatalogItemId,
         application.offeredItem,
         application.offeredItemImage,
-        application.message,
         application.time,
       ]) {
         assert.ok(value.trim(), `${application.id} has an empty required field`);
       }
+      assert.equal("message" in application, false, `${application.id} must stay product-only`);
       assert.ok(application.appReferenceValue > 0);
     }
   }
@@ -172,7 +172,8 @@ test("exchange detail shows one posted item and product-backed proposals with ow
   assert.match(detailPage, /post\.offeredItem/);
   assert.doesNotMatch(detailPage, /post\.wantedItems|원하는 교환품/);
   assert.match(detailPage, /application\.offeredItemImage/);
-  assert.match(detailPage, /addExchangeApplication\(post\.id, \{[\s\S]*?offeredInventoryUnitId:[\s\S]*?offeredCatalogItemId:[\s\S]*?ipId:[\s\S]*?categoryId:[\s\S]*?offeredItemImage:[\s\S]*?appReferenceValue:[\s\S]*?message,/);
+  assert.match(detailPage, /addExchangeApplication\(post\.id, \{[\s\S]*?offeredInventoryUnitId:[\s\S]*?offeredCatalogItemId:[\s\S]*?ipId:[\s\S]*?categoryId:[\s\S]*?offeredItemImage:[\s\S]*?appReferenceValue:/);
+  assert.doesNotMatch(detailPage, /application\.message|draftMessage|message:\s*draft/);
   assert.match(detailPage, /sessionCommerce\.exchangeApplicationDecisions/);
   assert.match(detailPage, /exchangeDecisionKey\(post\.id, application\.id\)/);
   assert.match(detailPage, /post\.authorId === currentUserId/);
@@ -180,7 +181,7 @@ test("exchange detail shows one posted item and product-backed proposals with ow
   assert.match(detailPage, /handleDecision\(application\.id, "accepted"\)/);
   assert.match(detailPage, /decideExchangeApplication\(post\.id, applicationId, decision, key\)/);
   assert.match(detailPage, /<KeyboardInput\b/);
-  assert.match(detailPage, /<KeyboardTextarea\b/);
+  assert.doesNotMatch(detailPage, /<KeyboardTextarea\b/);
   assert.match(detailPage, /이 상품으로 교환 제안하기/);
   assert.match(detailPage, /role="status">\{submitMessage\}/);
   assert.match(detailPage, /새로고침하면 작성 내용이 초기화됩니다/);

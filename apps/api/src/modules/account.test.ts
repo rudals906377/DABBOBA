@@ -6,10 +6,15 @@ import type { ApiContext } from "../types.js";
 import { AppError } from "../lib/errors.js";
 import {
   accountDeletionStatus,
+  canonicalPointReturnInventoryIds,
   canonicalShippingInventoryIds,
+  isPointReturnEligibleInventory,
+  MAX_POINT_BALANCE,
   maskShippingPhone,
   maskShippingRecipient,
   normalizeShippingPhone,
+  pointReturnAmount,
+  pointReturnTotalAmount,
   registerAccountRoutes,
 } from "./account.js";
 
@@ -75,6 +80,41 @@ test("shipping inventory ids are UUID-validated, unique, and deterministically o
     () => canonicalShippingInventoryIds([]),
     (error: unknown) => error instanceof AppError && error.statusCode === 400,
   );
+});
+
+test("point return ids and amounts are deterministic and use integer floor at 50 percent", () => {
+  const high = "ffffffff-ffff-4fff-8fff-ffffffffffff";
+  const low = "11111111-1111-4111-8111-111111111111";
+  assert.deepEqual(canonicalPointReturnInventoryIds([high, low]), [low, high]);
+  assert.equal(pointReturnAmount(9_999), 4_999);
+  assert.equal(pointReturnAmount(2), 1);
+  assert.equal(pointReturnAmount(1), 0);
+  assert.equal(pointReturnAmount(MAX_POINT_BALANCE), 1_073_741_823);
+  assert.equal(pointReturnTotalAmount([1_073_741_823, 1_073_741_823]), 2_147_483_646);
+  assert.throws(
+    () => pointReturnTotalAmount([1_073_741_823, 1_073_741_823, 2]),
+    (error: unknown) => error instanceof AppError && error.statusCode === 409,
+  );
+  assert.throws(() => canonicalPointReturnInventoryIds([low, low]), AppError);
+});
+
+test("point return eligibility requires original drawn inventory in the owned state", () => {
+  assert.equal(isPointReturnEligibleInventory("OWNED", "GACHA", true), true);
+  assert.equal(isPointReturnEligibleInventory("OWNED", "KUJI", true), true);
+  assert.equal(isPointReturnEligibleInventory("OWNED", "PURCHASE", true), false);
+  assert.equal(isPointReturnEligibleInventory("OWNED", "ADMIN_ADJUSTMENT", true), false);
+  assert.equal(isPointReturnEligibleInventory("OWNED", "GACHA", false), false);
+  for (const status of [
+    "EXCHANGE_LISTED",
+    "EXCHANGE_OFFERED",
+    "SHIPPING",
+    "DELIVERED",
+    "TRANSFERRED",
+    "REFUNDED",
+    "POINT_RETURNED",
+  ] as const) {
+    assert.equal(isPointReturnEligibleInventory(status, "GACHA", true), false);
+  }
 });
 
 test("shipping contact data is normalized for storage and masked for response", () => {
@@ -305,6 +345,105 @@ test("shipping request locks owned inventory in canonical order and commits one 
   assert.equal(queries.includes("COMMIT"), true);
 });
 
+test("point return atomically locks original draw inventory, records immutable audit, and credits one ledger entry", async () => {
+  const actorId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  const highId = "ffffffff-ffff-4fff-8fff-ffffffffffff";
+  const lowId = "11111111-1111-4111-8111-111111111111";
+  const pointReturnId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+  const idempotencyId = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+  const returnedAt = new Date("2026-08-30T01:00:00.000Z");
+  const queries: Array<{ sql: string; params: unknown[] }> = [];
+  const client = {
+    async query(sql: string, params: unknown[] = []) {
+      queries.push({ sql, params });
+      if (sql === "BEGIN" || sql === "COMMIT") return { rowCount: null, rows: [] };
+      if (sql.startsWith("DELETE FROM idempotency_keys")) return { rowCount: 0, rows: [] };
+      if (sql.includes("INSERT INTO idempotency_keys")) return { rowCount: 1, rows: [{ id: idempotencyId }] };
+      if (sql.includes("FROM inventory_units iu") && sql.includes("draw_results")) {
+        return {
+          rowCount: 2,
+          rows: [
+            {
+              id: lowId,
+              owner_id: actorId,
+              product_id: "prize-low",
+              source_type: "GACHA",
+              source_id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+              status: "OWNED",
+              price: 9_999,
+              draw_user_id: actorId,
+              draw_entitlement_id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+              draw_prize_product_id: "prize-low",
+            },
+            {
+              id: highId,
+              owner_id: actorId,
+              product_id: "prize-high",
+              source_type: "KUJI",
+              source_id: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+              status: "OWNED",
+              price: 2_000,
+              draw_user_id: actorId,
+              draw_entitlement_id: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+              draw_prize_product_id: "prize-high",
+            },
+          ],
+        };
+      }
+      if (sql.includes("INSERT INTO inventory_point_returns")) {
+        return { rowCount: 1, rows: [{ id: pointReturnId, returned_at: returnedAt }] };
+      }
+      if (sql.includes("INSERT INTO inventory_point_return_items")) return { rowCount: 2, rows: [] };
+      if (sql.includes("UPDATE inventory_units SET status='POINT_RETURNED'")) {
+        return { rowCount: 2, rows: [{ id: lowId }, { id: highId }] };
+      }
+      if (sql.includes("INSERT INTO point_accounts")) return { rowCount: 1, rows: [] };
+      if (sql.includes("INSERT INTO point_ledger_entries")) return { rowCount: 1, rows: [{ id: "ledger-1" }] };
+      if (sql.includes("UPDATE point_accounts SET balance=balance+")) {
+        return { rowCount: 1, rows: [{ balance: 7_599, version: 2 }] };
+      }
+      if (sql.includes("INSERT INTO outbox_events")) return { rowCount: 1, rows: [] };
+      if (sql.includes("UPDATE idempotency_keys SET state='COMPLETED'")) return { rowCount: 1, rows: [] };
+      throw new Error(`Unexpected query: ${sql}`);
+    },
+    release() { /* no-op */ },
+  };
+  const { app, routes } = routeCapture();
+  await registerAccountRoutes(app, testContext({ async connect() { return client; } }));
+  const handler = routes.get("/v1/account/point-returns");
+  assert.ok(handler);
+  let responseStatus = 0;
+  let responseBody: unknown;
+  const reply = {
+    code(status: number) { responseStatus = status; return this; },
+    header() { return this; },
+    send(body: unknown) { responseBody = body; return body; },
+  };
+  await handler({
+    actor: { userId: actorId },
+    headers: { "idempotency-key": "point-return-request-0001" },
+    body: { inventoryUnitIds: [highId, lowId] },
+    id: "request-point-return-0001",
+  }, reply);
+
+  assert.equal(responseStatus, 201);
+  assert.deepEqual(responseBody, {
+    id: pointReturnId,
+    inventoryUnitIds: [lowId, highId],
+    totalPointAmount: 5_999,
+    balance: 7_599,
+    returnedAt: returnedAt.toISOString(),
+  });
+  const inventoryLock = queries.find(({ sql }) => sql.includes("FROM inventory_units iu") && sql.includes("draw_results"));
+  assert.deepEqual(inventoryLock?.params, [[lowId, highId]]);
+  assert.match(inventoryLock?.sql || "", /ORDER BY iu\.id FOR UPDATE OF iu,p/);
+  assert.equal(queries.filter(({ sql }) => sql.includes("INSERT INTO point_ledger_entries")).length, 1);
+  const pointBalanceUpdate = queries.find(({ sql }) => sql.includes("UPDATE point_accounts SET balance=balance+"));
+  assert.match(pointBalanceUpdate?.sql || "", /balance<=\$3::integer-\$2::integer/);
+  assert.deepEqual(pointBalanceUpdate?.params, [actorId, 5_999, MAX_POINT_BALANCE]);
+  assert.equal(queries.some(({ sql }) => sql === "COMMIT"), true);
+});
+
 test("account migration adds only profile, default-address, and wishlist persistence without raw card fields", async () => {
   const sql = await readFile(new URL("../../../../packages/db/migrations/0004_user_account.sql", import.meta.url), "utf8");
   assert.match(sql, /CREATE TABLE user_profiles/);
@@ -326,4 +465,21 @@ test("account lifecycle migration keeps deletion reviewable, idempotent, and app
   assert.match(sql, /account_deletion_request_events_immutable/);
   assert.match(sql, /CHECK \(\(status = 'COMPLETED'\) = \(completed_at IS NOT NULL\)\)/);
   assert.doesNotMatch(sql, /DELETE\s+FROM\s+users/i);
+});
+
+test("point return migration separates the terminal status and keeps return evidence immutable", async () => {
+  const sql = await readFile(
+    new URL("../../../../packages/db/migrations/0019_inventory_point_returns.sql", import.meta.url),
+    "utf8",
+  );
+  assert.match(sql, /'POINT_RETURNED'/);
+  assert.match(sql, /CREATE TABLE inventory_point_returns/);
+  assert.match(sql, /CREATE TABLE inventory_point_return_items/);
+  assert.match(sql, /inventory_unit_id uuid NOT NULL UNIQUE/);
+  assert.match(sql, /point_amount = reference_amount \/ 2/);
+  assert.match(sql, /inventory_point_returns_immutable/);
+  assert.match(sql, /inventory_point_return_items_immutable/);
+  assert.match(sql, /CREATE CONSTRAINT TRIGGER inventory_point_returns_total_guard/);
+  assert.match(sql, /CREATE CONSTRAINT TRIGGER inventory_point_return_items_total_guard/);
+  assert.match(sql, /DEFERRABLE INITIALLY DEFERRED/g);
 });

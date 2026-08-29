@@ -902,6 +902,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/account/point-returns": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["createAccountPointReturn"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/account/notification-preferences": {
         parameters: {
             query?: never;
@@ -1980,6 +1996,18 @@ export interface components {
             version: number;
             items: components["schemas"]["PointLedgerEntry"][];
         };
+        CreatePointReturnInput: {
+            inventoryUnitIds: string[];
+        };
+        PointReturnResult: {
+            /** Format: uuid */
+            id: string;
+            inventoryUnitIds: string[];
+            totalPointAmount: number;
+            balance: number;
+            /** Format: date-time */
+            returnedAt: string;
+        };
         NotificationPreferences: {
             /** @constant */
             orderUpdates: true;
@@ -2452,7 +2480,7 @@ export interface components {
             /** @enum {string} */
             sourceType: "PURCHASE" | "GACHA" | "KUJI" | "ADMIN_ADJUSTMENT";
             /** @enum {string} */
-            status: "OWNED" | "EXCHANGE_LISTED" | "EXCHANGE_OFFERED" | "SHIPPING" | "DELIVERED" | "TRANSFERRED" | "REFUNDED";
+            status: "OWNED" | "EXCHANGE_LISTED" | "EXCHANGE_OFFERED" | "SHIPPING" | "DELIVERED" | "TRANSFERRED" | "REFUNDED" | "POINT_RETURNED";
             /** Format: date-time */
             acquiredAt: string;
         };
@@ -2512,8 +2540,8 @@ export interface components {
             listingId: string;
             /** Format: uuid */
             proposerId: string;
+            proposerNickname: string;
             offeredInventory: components["schemas"]["InventoryUnit"];
-            message: string;
             /** @enum {string} */
             status: "PENDING" | "ACCEPTED" | "REJECTED" | "WITHDRAWN";
             /** Format: date-time */
@@ -2524,7 +2552,6 @@ export interface components {
         CreateExchangeOfferInput: {
             /** Format: uuid */
             offeredInventoryUnitId: string;
-            message: string;
         };
         Order: {
             /** Format: uuid */
@@ -4550,7 +4577,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Authenticated user's exchange-eligible registered inventory. */
+            /** @description Authenticated user's GACHA or KUJI inventory whose immutable draw result belongs to the current owner and whose current status is OWNED, excluding active shipping, delivered, synthetic source-tagged, and transferred inventory. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -4575,7 +4602,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Open visible exchange listings. */
+            /** @description Open visible exchange listings, searchable by listing copy, product name, IP title, or IP alias. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -4653,7 +4680,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Product-backed exchange proposal created. */
+            /** @description Product-only exchange proposal created from eligible owned draw inventory. */
             201: {
                 headers: {
                     [name: string]: unknown;
@@ -5222,6 +5249,35 @@ export interface operations {
                     "application/json": components["schemas"]["AccountPointPage"];
                 };
             };
+        };
+    };
+    createAccountPointReturn: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreatePointReturnInput"];
+            };
+        };
+        responses: {
+            /** @description Directly drawn, currently stored inventory atomically returned for 50 percent of its server reference amount in points. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PointReturnResult"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            409: components["responses"]["Conflict"];
         };
     };
     getAccountNotificationPreferences: {

@@ -43,37 +43,133 @@ test(
         payload: { email },
       });
       assert.equal(response.statusCode, 201, response.body);
-      return response.json() as { token: string; actor: { userId: string } };
+      return response.json() as { token: string; actor: { userId: string; nickname: string } };
     };
     const suffix = randomUUID().replaceAll("-", "").slice(0, 12);
     const ipId = `exchange-test-ip-${suffix}`;
     const productId = `exchange-test-product-${suffix}`;
+    const gachaDrawProductId = `exchange-test-gacha-${suffix}`;
+    const kujiDrawProductId = `exchange-test-kuji-${suffix}`;
     const author = await session(`exchange-author-${suffix}@example.test`);
     const proposerOne = await session(`exchange-one-${suffix}@example.test`);
     const proposerTwo = await session(`exchange-two-${suffix}@example.test`);
 
     await pool.query(
-      `INSERT INTO catalog_ips(id,slug,name_ko,name_en)
-       VALUES($1,$2,'교환 테스트','Exchange Test')`,
+      `INSERT INTO catalog_ips(id,slug,name_ko,name_en,aliases)
+       VALUES($1,$2,'교환 테스트','Exchange Test',ARRAY['교환별칭'])`,
       [ipId, ipId],
     );
     await pool.query(
-      `INSERT INTO catalog_products(id,sku,ip_id,category,name,price)
-       VALUES($1,$2,$3,'figure','교환 테스트 상품',10000)`,
-      [productId, `EXCHANGE-${suffix.toUpperCase()}`, ipId],
+      `INSERT INTO catalog_products(id,sku,ip_id,category,name,price,is_prize_only)
+       VALUES
+         ($1,$2,$3,'figure','교환 테스트 상품',0,true),
+         ($4,$5,$3,'gacha','교환 테스트 가챠',1000,false),
+         ($6,$7,$3,'kuji','교환 테스트 쿠지',1000,false)`,
+      [
+        productId,
+        `EXCHANGE-${suffix.toUpperCase()}`,
+        ipId,
+        gachaDrawProductId,
+        `EXCHANGE-GACHA-${suffix.toUpperCase()}`,
+        kujiDrawProductId,
+        `EXCHANGE-KUJI-${suffix.toUpperCase()}`,
+      ],
     );
     await pool.query(
       "INSERT INTO product_stock(product_id,on_hand,reserved) VALUES($1,20,0)",
       [productId],
     );
 
-    const addInventory = async (ownerId: string) => {
+    const createDrawDefinition = async (
+      drawProductId: string,
+      category: "gacha" | "kuji",
+    ) => {
+      const version = await pool.query<{ id: string }>(
+        "INSERT INTO draw_probability_versions(product_id,version) VALUES($1,1) RETURNING id",
+        [drawProductId],
+      );
+      const poolEntry = await pool.query<{ id: string }>(
+        `INSERT INTO draw_pool_entries(
+          probability_version_id,prize_product_id,prize_name_snapshot,prize_image_url_snapshot,
+          prize_sku_snapshot,prize_ip_id_snapshot,prize_category_snapshot,rarity,weight
+        ) VALUES($1,$2,'교환 테스트 상품',NULL,$3,$4,'figure','A',1) RETURNING id`,
+        [version.rows[0]!.id, productId, `EXCHANGE-${suffix.toUpperCase()}`, ipId],
+      );
+      return {
+        category,
+        drawProductId,
+        poolEntryId: poolEntry.rows[0]!.id,
+        versionId: version.rows[0]!.id,
+      };
+    };
+    const drawDefinitions = {
+      GACHA: await createDrawDefinition(gachaDrawProductId, "gacha"),
+      KUJI: await createDrawDefinition(kujiDrawProductId, "kuji"),
+    };
+
+    const addInventory = async (
+      ownerId: string,
+      sourceType: "ADMIN_ADJUSTMENT" | "GACHA" | "KUJI" | "PURCHASE",
+      status: "OWNED" | "SHIPPING" | "DELIVERED" = "OWNED",
+    ) => {
       const result = await pool.query<{ id: string }>(
-        `INSERT INTO inventory_units(owner_id,product_id,source_type)
-         VALUES($1,$2,'ADMIN_ADJUSTMENT') RETURNING id`,
-        [ownerId, productId],
+        `INSERT INTO inventory_units(owner_id,product_id,source_type,status)
+         VALUES($1,$2,$3,$4) RETURNING id`,
+        [ownerId, productId, sourceType, status],
       );
       return result.rows[0]!.id;
+    };
+    const addDrawInventory = async (
+      ownerId: string,
+      sourceType: "GACHA" | "KUJI",
+      status: "OWNED" | "SHIPPING" | "DELIVERED" = "OWNED",
+    ) => {
+      const definition = drawDefinitions[sourceType];
+      const order = await pool.query<{ id: string }>(
+        `INSERT INTO orders(user_id,status,subtotal,total,paid_at)
+         VALUES($1,'PAID',1000,1000,now()) RETURNING id`,
+        [ownerId],
+      );
+      const line = await pool.query<{ id: string }>(
+        `INSERT INTO order_lines(
+          order_id,product_id,product_name_snapshot,category_snapshot,probability_version_id,
+          unit_price,quantity,line_total
+        ) VALUES($1,$2,$3,$4,$5,1000,1,1000) RETURNING id`,
+        [
+          order.rows[0]!.id,
+          definition.drawProductId,
+          `교환 테스트 ${sourceType === "GACHA" ? "가챠" : "쿠지"}`,
+          definition.category,
+          definition.versionId,
+        ],
+      );
+      const entitlement = await pool.query<{ id: string }>(
+        `INSERT INTO draw_entitlements(
+          order_line_id,user_id,product_id,probability_version_id,status,consumed_at
+        ) VALUES($1,$2,$3,$4,'CONSUMED',now()) RETURNING id`,
+        [line.rows[0]!.id, ownerId, definition.drawProductId, definition.versionId],
+      );
+      const inventoryId = await addInventory(ownerId, sourceType, status);
+      await pool.query(
+        `INSERT INTO draw_results(
+          entitlement_id,user_id,product_id,pool_entry_id,prize_product_id,prize_inventory_unit_id,
+          probability_version,selection_algorithm,entropy_hex,entropy_digest,roll_value,total_weight,
+          selection_snapshot
+        ) VALUES(
+          $1,$2,$3,$4,$5,$6,1,'SHA256_REJECTION_V1',$7,$8,0,1,'[]'::jsonb
+        )`,
+        [
+          entitlement.rows[0]!.id,
+          ownerId,
+          definition.drawProductId,
+          definition.poolEntryId,
+          productId,
+          inventoryId,
+          "0".repeat(64),
+          "1".repeat(64),
+        ],
+      );
+      return inventoryId;
     };
     const mutate = (
       token: string,
@@ -89,9 +185,38 @@ test(
       ...(payload ? { payload } : {}),
     });
 
-    const listingInventory = await addInventory(author.actor.userId);
-    const offerOneInventory = await addInventory(proposerOne.actor.userId);
-    const offerTwoInventory = await addInventory(proposerTwo.actor.userId);
+    const listingInventory = await addDrawInventory(author.actor.userId, "GACHA");
+    const offerOneInventory = await addDrawInventory(proposerOne.actor.userId, "GACHA");
+    const offerTwoInventory = await addDrawInventory(proposerTwo.actor.userId, "KUJI");
+
+    for (const inventoryId of [
+      await addInventory(author.actor.userId, "GACHA"),
+      await addInventory(author.actor.userId, "KUJI"),
+      await addInventory(author.actor.userId, "PURCHASE"),
+      await addInventory(author.actor.userId, "ADMIN_ADJUSTMENT"),
+      await addDrawInventory(author.actor.userId, "GACHA", "SHIPPING"),
+      await addDrawInventory(author.actor.userId, "KUJI", "DELIVERED"),
+    ]) {
+      const ineligibleListing = await mutate(author.token, "POST", "/v1/exchange/listings", {
+        title: "교환 불가 상품 테스트",
+        details: "직접 뽑아 현재 보관 중인 상품만 등록할 수 있어야 합니다.",
+        offeredInventoryUnitId: inventoryId,
+      });
+      assert.equal(ineligibleListing.statusCode, 409, ineligibleListing.body);
+      assert.match(ineligibleListing.body, /직접 뽑아 보관함에 보관 중인/);
+    }
+
+    const eligibleInventory = await app.inject({
+      method: "GET",
+      url: "/v1/exchange/inventory?limit=100",
+      headers: { authorization: `Bearer ${author.token}` },
+    });
+    assert.equal(eligibleInventory.statusCode, 200, eligibleInventory.body);
+    assert.deepEqual(
+      (eligibleInventory.json() as { items: Array<{ id: string }> }).items.map((item) => item.id),
+      [listingInventory],
+    );
+
     const listingResponse = await mutate(author.token, "POST", "/v1/exchange/listings", {
       title: "동시 수락 테스트",
       details: "한 제안만 수락되어야 합니다.",
@@ -100,22 +225,76 @@ test(
     assert.equal(listingResponse.statusCode, 201, listingResponse.body);
     const listingId = (listingResponse.json() as { id: string }).id;
 
+    for (const query of ["Exchange Test", "교환별칭"]) {
+      const searchResponse = await app.inject({
+        method: "GET",
+        url: `/v1/exchange/listings?q=${encodeURIComponent(query)}`,
+      });
+      assert.equal(searchResponse.statusCode, 200, searchResponse.body);
+      assert.equal(
+        (searchResponse.json() as { items: Array<{ id: string }> }).items.some((item) => item.id === listingId),
+        true,
+        `${query} should find the listing by IP metadata`,
+      );
+    }
+
+    const purchasedInventory = await addInventory(proposerOne.actor.userId, "PURCHASE");
+    const purchasedOffer = await mutate(
+      proposerOne.token,
+      "POST",
+      `/v1/exchange/listings/${listingId}/offers`,
+      { offeredInventoryUnitId: purchasedInventory },
+    );
+    assert.equal(purchasedOffer.statusCode, 409, purchasedOffer.body);
+    assert.match(purchasedOffer.body, /직접 뽑아 보관함에 보관 중인/);
+
+    for (const inventoryId of [
+      await addInventory(proposerOne.actor.userId, "GACHA"),
+      await addInventory(proposerOne.actor.userId, "KUJI"),
+      await addInventory(proposerOne.actor.userId, "ADMIN_ADJUSTMENT"),
+      await addDrawInventory(proposerOne.actor.userId, "GACHA", "SHIPPING"),
+      await addDrawInventory(proposerOne.actor.userId, "KUJI", "DELIVERED"),
+    ]) {
+      const ineligibleOffer = await mutate(
+        proposerOne.token,
+        "POST",
+        `/v1/exchange/listings/${listingId}/offers`,
+        { offeredInventoryUnitId: inventoryId },
+      );
+      assert.equal(ineligibleOffer.statusCode, 409, ineligibleOffer.body);
+      assert.match(ineligibleOffer.body, /직접 뽑아 보관함에 보관 중인/);
+    }
+
     const offerOneResponse = await mutate(
       proposerOne.token,
       "POST",
       `/v1/exchange/listings/${listingId}/offers`,
-      { offeredInventoryUnitId: offerOneInventory, message: "첫 번째 제안" },
+      { offeredInventoryUnitId: offerOneInventory },
     );
     const offerTwoResponse = await mutate(
       proposerTwo.token,
       "POST",
       `/v1/exchange/listings/${listingId}/offers`,
-      { offeredInventoryUnitId: offerTwoInventory, message: "두 번째 제안" },
+      { offeredInventoryUnitId: offerTwoInventory },
     );
     assert.equal(offerOneResponse.statusCode, 201, offerOneResponse.body);
     assert.equal(offerTwoResponse.statusCode, 201, offerTwoResponse.body);
     const offerOneId = (offerOneResponse.json() as { id: string }).id;
     const offerTwoId = (offerTwoResponse.json() as { id: string }).id;
+
+    const authorView = await app.inject({
+      method: "GET",
+      url: `/v1/exchange/listings/${listingId}`,
+      headers: { authorization: `Bearer ${author.token}` },
+    });
+    assert.equal(authorView.statusCode, 200, authorView.body);
+    const visibleOffers = (authorView.json() as {
+      offers: Array<{ proposerNickname: string }>;
+    }).offers;
+    assert.deepEqual(
+      visibleOffers.map((offer) => offer.proposerNickname).sort(),
+      [proposerOne.actor.nickname, proposerTwo.actor.nickname].sort(),
+    );
 
     const decisions = await Promise.all([
       mutate(
@@ -135,6 +314,7 @@ test(
     const acceptedIndex = decisions.findIndex((response) => response.statusCode === 200);
     const acceptedOfferId = acceptedIndex === 0 ? offerOneId : offerTwoId;
     const acceptedProposer = acceptedIndex === 0 ? proposerOne : proposerTwo;
+    const rejectedProposer = acceptedIndex === 0 ? proposerTwo : proposerOne;
     const acceptedInventory = acceptedIndex === 0 ? offerOneInventory : offerTwoInventory;
     const rejectedInventory = acceptedIndex === 0 ? offerTwoInventory : offerOneInventory;
 
@@ -193,9 +373,59 @@ test(
     );
     assert.equal(acceptedOffer.rows[0]!.status, "ACCEPTED");
 
-    const cancelListingInventory = await addInventory(author.actor.userId);
-    const withdrawInventory = await addInventory(proposerOne.actor.userId);
-    const cancelOfferInventory = await addInventory(proposerTwo.actor.userId);
+    for (const transferred of [
+      { inventoryId: listingInventory, owner: acceptedProposer },
+      { inventoryId: acceptedInventory, owner: author },
+    ]) {
+      const transferredInventory = await app.inject({
+        method: "GET",
+        url: "/v1/exchange/inventory?limit=100",
+        headers: { authorization: `Bearer ${transferred.owner.token}` },
+      });
+      assert.equal(transferredInventory.statusCode, 200, transferredInventory.body);
+      assert.equal(
+        (transferredInventory.json() as { items: Array<{ id: string }> }).items
+          .some((item) => item.id === transferred.inventoryId),
+        false,
+      );
+
+      const transferredListing = await mutate(
+        transferred.owner.token,
+        "POST",
+        "/v1/exchange/listings",
+        {
+          title: "양도 상품 재교환 차단 테스트",
+          details: "현재 소유자 본인이 직접 뽑은 상품이 아니면 등록할 수 없어야 합니다.",
+          offeredInventoryUnitId: transferred.inventoryId,
+        },
+      );
+      assert.equal(transferredListing.statusCode, 409, transferredListing.body);
+      assert.match(transferredListing.body, /직접 뽑아 보관함에 보관 중인/);
+    }
+
+    const transferGuardHost = await mutate(
+      rejectedProposer.token,
+      "POST",
+      "/v1/exchange/listings",
+      {
+        title: "양도 상품 제안 차단 테스트",
+        details: "양도받은 상품으로 제안할 수 없어야 합니다.",
+        offeredInventoryUnitId: rejectedInventory,
+      },
+    );
+    assert.equal(transferGuardHost.statusCode, 201, transferGuardHost.body);
+    const transferredOffer = await mutate(
+      acceptedProposer.token,
+      "POST",
+      `/v1/exchange/listings/${(transferGuardHost.json() as { id: string }).id}/offers`,
+      { offeredInventoryUnitId: listingInventory },
+    );
+    assert.equal(transferredOffer.statusCode, 409, transferredOffer.body);
+    assert.match(transferredOffer.body, /직접 뽑아 보관함에 보관 중인/);
+
+    const cancelListingInventory = await addDrawInventory(author.actor.userId, "GACHA");
+    const withdrawInventory = await addDrawInventory(proposerOne.actor.userId, "GACHA");
+    const cancelOfferInventory = await addDrawInventory(proposerTwo.actor.userId, "KUJI");
     const cancelListingResponse = await mutate(author.token, "POST", "/v1/exchange/listings", {
       title: "취소와 철회 테스트",
       details: "예약 상품이 다시 소유 상태가 되어야 합니다.",
@@ -206,7 +436,7 @@ test(
       proposerOne.token,
       "POST",
       `/v1/exchange/listings/${cancelListingId}/offers`,
-      { offeredInventoryUnitId: withdrawInventory, message: "철회할 제안" },
+      { offeredInventoryUnitId: withdrawInventory },
     );
     const withdrawOfferId = (withdrawOfferResponse.json() as { id: string }).id;
     const withdrawn = await mutate(
@@ -221,7 +451,7 @@ test(
       proposerTwo.token,
       "POST",
       `/v1/exchange/listings/${cancelListingId}/offers`,
-      { offeredInventoryUnitId: cancelOfferInventory, message: "글 취소로 반려될 제안" },
+      { offeredInventoryUnitId: cancelOfferInventory },
     );
     assert.equal(cancelOfferResponse.statusCode, 201, cancelOfferResponse.body);
     const cancelled = await mutate(
@@ -249,8 +479,8 @@ test(
        VALUES($1,'ADMIN',$2,now()+interval '1 day')`,
       [admin.rows[0]!.id, tokenDigest(adminToken, config.sessionTokenPepper)],
     );
-    const adminListingInventory = await addInventory(author.actor.userId);
-    const adminOfferInventory = await addInventory(proposerOne.actor.userId);
+    const adminListingInventory = await addDrawInventory(author.actor.userId, "GACHA");
+    const adminOfferInventory = await addDrawInventory(proposerOne.actor.userId, "GACHA");
     const adminListingResponse = await mutate(author.token, "POST", "/v1/exchange/listings", {
       title: "운영 취소 테스트",
       details: "매칭 후 운영 취소가 예약만 해제해야 합니다.",
@@ -261,7 +491,7 @@ test(
       proposerOne.token,
       "POST",
       `/v1/exchange/listings/${adminListingId}/offers`,
-      { offeredInventoryUnitId: adminOfferInventory, message: "운영 취소 대상" },
+      { offeredInventoryUnitId: adminOfferInventory },
     );
     const adminOfferId = (adminOfferResponse.json() as { id: string }).id;
     const accepted = await mutate(
@@ -304,8 +534,8 @@ test(
       ]),
     );
 
-    const overrideListingInventory = await addInventory(author.actor.userId);
-    const overrideOfferInventory = await addInventory(proposerTwo.actor.userId);
+    const overrideListingInventory = await addDrawInventory(author.actor.userId, "GACHA");
+    const overrideOfferInventory = await addDrawInventory(proposerTwo.actor.userId, "KUJI");
     const overrideListingResponse = await mutate(author.token, "POST", "/v1/exchange/listings", {
       title: "운영 완료 테스트",
       details: "운영 완료도 동일한 소유권 원장을 남겨야 합니다.",
@@ -316,7 +546,7 @@ test(
       proposerTwo.token,
       "POST",
       `/v1/exchange/listings/${overrideListingId}/offers`,
-      { offeredInventoryUnitId: overrideOfferInventory, message: "운영 완료 대상" },
+      { offeredInventoryUnitId: overrideOfferInventory },
     );
     const overrideOfferId = (overrideOfferResponse.json() as { id: string }).id;
     const overrideAccepted = await mutate(

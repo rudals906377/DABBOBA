@@ -28,7 +28,8 @@ type InventoryUnitStatus =
   | "SHIPPING"
   | "DELIVERED"
   | "TRANSFERRED"
-  | "REFUNDED";
+  | "REFUNDED"
+  | "POINT_RETURNED";
 
 type OrderSummaryRow = {
   id: string; user_id: string; user_email: string; nickname: string; status: OrderStatus; currency: "KRW";

@@ -110,6 +110,31 @@ type PointLedgerRow = {
   created_at: Date;
 };
 
+type PointReturnInventoryStatus =
+  | "OWNED"
+  | "EXCHANGE_LISTED"
+  | "EXCHANGE_OFFERED"
+  | "SHIPPING"
+  | "DELIVERED"
+  | "TRANSFERRED"
+  | "REFUNDED"
+  | "POINT_RETURNED";
+
+type PointReturnInventorySourceType = "PURCHASE" | "GACHA" | "KUJI" | "ADMIN_ADJUSTMENT";
+
+type PointReturnInventoryRow = {
+  id: string;
+  owner_id: string;
+  product_id: string;
+  source_type: PointReturnInventorySourceType;
+  source_id: string | null;
+  status: PointReturnInventoryStatus;
+  price: number | string;
+  draw_user_id: string | null;
+  draw_entitlement_id: string | null;
+  draw_prize_product_id: string | null;
+};
+
 type NotificationRow = {
   id: string;
   kind: string;
@@ -435,13 +460,48 @@ function addressInput(body: unknown) {
   };
 }
 
-export function canonicalShippingInventoryIds(value: unknown): string[] {
+function canonicalInventoryUnitIds(value: unknown): string[] {
   if (!Array.isArray(value) || value.length < 1 || value.length > 20) {
     throw badRequest("inventoryUnitIds는 1~20개여야 합니다.");
   }
   const ids = value.map((item) => uuidInput(item, "inventoryUnitId").toLowerCase());
   if (new Set(ids).size !== ids.length) throw badRequest("같은 보관 상품을 중복 선택할 수 없습니다.");
   return ids.sort((left, right) => left.localeCompare(right, "en-US"));
+}
+
+export function canonicalShippingInventoryIds(value: unknown): string[] {
+  return canonicalInventoryUnitIds(value);
+}
+
+export function canonicalPointReturnInventoryIds(value: unknown): string[] {
+  return canonicalInventoryUnitIds(value);
+}
+
+export function pointReturnAmount(referenceAmount: number): number {
+  if (!Number.isSafeInteger(referenceAmount) || referenceAmount < 0) {
+    throw new Error("Point return reference amount must be a non-negative safe integer.");
+  }
+  return Math.floor(referenceAmount / 2);
+}
+
+export const MAX_POINT_BALANCE = 2_147_483_647;
+
+export function pointReturnTotalAmount(pointAmounts: number[]): number {
+  const total = pointAmounts.reduce((sum, pointAmount) => sum + pointAmount, 0);
+  if (!Number.isSafeInteger(total) || total > MAX_POINT_BALANCE) {
+    throw conflict("한 번에 환급할 수 있는 포인트 한도를 초과했습니다.");
+  }
+  return total;
+}
+
+export function isPointReturnEligibleInventory(
+  status: PointReturnInventoryStatus,
+  sourceType: PointReturnInventorySourceType,
+  isOriginalDrawOwner: boolean,
+): boolean {
+  return status === "OWNED"
+    && (sourceType === "GACHA" || sourceType === "KUJI")
+    && isOriginalDrawOwner;
 }
 
 export function maskShippingRecipient(value: string): string {
@@ -737,6 +797,135 @@ export async function registerAccountRoutes(app: FastifyInstance, context: ApiCo
         ...page,
       };
     });
+  });
+
+  app.post("/v1/account/point-returns", { preHandler: context.auth.requireUser }, async (request, reply) => {
+    const body = objectInput(request.body);
+    assertOnlyKeys(body, ["inventoryUnitIds"]);
+    const inventoryUnitIds = canonicalPointReturnInventoryIds(body.inventoryUnitIds);
+    const actorId = request.actor!.userId;
+    const result = await idempotentMutation(context, {
+      actorId,
+      scope: "ACCOUNT_POINT_RETURN_CREATE",
+      key: idempotencyKey(request.headers),
+      payload: { inventoryUnitIds },
+      work: async (client) => {
+        const lockedInventory = await client.query<PointReturnInventoryRow>(
+          `SELECT iu.id,iu.owner_id,iu.product_id,iu.source_type,iu.source_id,iu.status,p.price,
+             draw_result.user_id AS draw_user_id,
+             draw_result.entitlement_id AS draw_entitlement_id,
+             draw_result.prize_product_id AS draw_prize_product_id
+           FROM inventory_units iu
+           JOIN catalog_products p ON p.id=iu.product_id
+           LEFT JOIN draw_results draw_result ON draw_result.prize_inventory_unit_id=iu.id
+           WHERE iu.id=ANY($1::uuid[])
+           ORDER BY iu.id FOR UPDATE OF iu,p`,
+          [inventoryUnitIds],
+        );
+        if (lockedInventory.rowCount !== inventoryUnitIds.length) {
+          throw conflict("선택한 상품 중 포인트 환급을 신청할 수 없는 항목이 있습니다.");
+        }
+
+        const items = lockedInventory.rows.map((inventory) => {
+          const originalDrawLinkMatches = inventory.draw_user_id === actorId
+            && inventory.source_id === inventory.draw_entitlement_id
+            && inventory.product_id === inventory.draw_prize_product_id;
+          if (
+            inventory.owner_id !== actorId
+            || !isPointReturnEligibleInventory(
+              inventory.status,
+              inventory.source_type,
+              originalDrawLinkMatches,
+            )
+          ) {
+            throw conflict("직접 뽑아 현재 보관함에 보관 중인 가챠·쿠지 상품만 포인트 환급을 신청할 수 있습니다.");
+          }
+          const referenceAmount = numberValue(inventory.price);
+          const pointAmount = pointReturnAmount(referenceAmount);
+          if (pointAmount <= 0) {
+            throw conflict("환급 포인트가 0P인 상품은 포인트 환급을 신청할 수 없습니다.");
+          }
+          return {
+            inventoryUnitId: inventory.id,
+            productId: inventory.product_id,
+            referenceAmount,
+            pointAmount,
+          };
+        });
+        const totalPointAmount = pointReturnTotalAmount(items.map((item) => item.pointAmount));
+
+        const created = await client.query<{ id: string; returned_at: Date }>(
+          `INSERT INTO inventory_point_returns(user_id,total_point_amount)
+           VALUES($1,$2) RETURNING id,returned_at`,
+          [actorId, totalPointAmount],
+        );
+        const pointReturnId = created.rows[0]!.id;
+        const insertedItems = await client.query(
+          `INSERT INTO inventory_point_return_items(
+             point_return_id,inventory_unit_id,product_id,reference_amount,point_amount
+           )
+           SELECT $1,item.inventory_unit_id,item.product_id,item.reference_amount,item.point_amount
+           FROM unnest($2::uuid[],$3::text[],$4::integer[],$5::integer[])
+             AS item(inventory_unit_id,product_id,reference_amount,point_amount)`,
+          [
+            pointReturnId,
+            items.map((item) => item.inventoryUnitId),
+            items.map((item) => item.productId),
+            items.map((item) => item.referenceAmount),
+            items.map((item) => item.pointAmount),
+          ],
+        );
+        if (insertedItems.rowCount !== items.length) {
+          throw conflict("포인트 환급 상품 기록을 저장하지 못했습니다.");
+        }
+        const transitioned = await client.query<{ id: string }>(
+          `UPDATE inventory_units SET status='POINT_RETURNED'
+           WHERE id=ANY($1::uuid[]) AND owner_id=$2 AND status='OWNED' RETURNING id`,
+          [inventoryUnitIds, actorId],
+        );
+        if (transitioned.rowCount !== inventoryUnitIds.length) {
+          throw conflict("선택한 상품의 보관 상태가 변경되었습니다.");
+        }
+
+        await client.query(
+          "INSERT INTO point_accounts(user_id,balance) VALUES($1,0) ON CONFLICT DO NOTHING",
+          [actorId],
+        );
+        await client.query(
+          `INSERT INTO point_ledger_entries(
+             user_id,entry_type,amount,reference_type,reference_id,reason
+           ) VALUES($1,'EARN',$2,'INVENTORY_POINT_RETURN',$3,'보관 상품 포인트 환급')`,
+          [actorId, totalPointAmount, pointReturnId],
+        );
+        const pointAccount = await client.query<{ balance: number | string; version: number }>(
+          `UPDATE point_accounts SET balance=balance+$2::integer,version=version+1
+           WHERE user_id=$1 AND balance<=$3::integer-$2::integer RETURNING balance,version`,
+          [actorId, totalPointAmount, MAX_POINT_BALANCE],
+        );
+        if (!pointAccount.rowCount) throw conflict("포인트 보유 한도를 초과했습니다.");
+
+        await writeOutbox(client, request.id, {
+          aggregateType: "INVENTORY_POINT_RETURN",
+          aggregateId: pointReturnId,
+          eventType: "inventory.point_returned",
+          payload: { pointReturnId, userId: actorId, inventoryUnitIds, totalPointAmount },
+        });
+        const responseBody = {
+          id: pointReturnId,
+          inventoryUnitIds,
+          totalPointAmount,
+          balance: numberValue(pointAccount.rows[0]!.balance),
+          returnedAt: iso(created.rows[0]!.returned_at),
+        };
+        return {
+          statusCode: 201,
+          body: responseBody,
+          resourceType: "INVENTORY_POINT_RETURN",
+          resourceId: pointReturnId,
+        };
+      },
+    });
+    return sendMutation(reply, result);
   });
 
   app.get("/v1/account/notifications", { preHandler: context.auth.requireUser }, async (request) => {

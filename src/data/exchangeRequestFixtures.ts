@@ -35,7 +35,6 @@ export type ExchangeApplication = {
   offeredItem: string;
   offeredItemImage: string;
   appReferenceValue: number;
-  message: string;
   time: string;
   status?: "PENDING" | "ACCEPTED" | "REJECTED" | "WITHDRAWN";
 };
@@ -120,7 +119,6 @@ export const DEFAULT_EXCHANGE_APPLICATIONS: Record<string, ExchangeApplication[]
       offeredItem: "포켓몬스터 피카츄 카드",
       offeredItemImage: "/assets/dabboba/products/ip/pokemon.jpg",
       appReferenceValue: 8_000,
-      message: "상태 사진을 확인한 뒤 택배 교환하고 싶어요.",
       time: "7분 전",
     },
     {
@@ -134,7 +132,6 @@ export const DEFAULT_EXCHANGE_APPLICATIONS: Record<string, ExchangeApplication[]
       offeredItem: "포켓몬스터 리자몽 카드",
       offeredItemImage: "/assets/dabboba/products/ip/pokemon.jpg",
       appReferenceValue: 18_000,
-      message: "추가 카드까지 포함해서 서로 맞춰볼 수 있어요.",
       time: "4분 전",
     },
   ],
@@ -150,7 +147,6 @@ export const DEFAULT_EXCHANGE_APPLICATIONS: Record<string, ExchangeApplication[]
       offeredItem: "주술회전 캡슐 DX 게토 스구루",
       offeredItemImage: "/assets/dabboba/products/ip/jujutsu-kaisen.jpg",
       appReferenceValue: 9_000,
-      message: "저도 중복이라 1:1 교환 가능합니다.",
       time: "18분 전",
     },
   ],
@@ -167,7 +163,6 @@ export const DEFAULT_EXCHANGE_APPLICATIONS: Record<string, ExchangeApplication[]
       offeredItem: "기동전사 건담 쿠지 A상",
       offeredItemImage: "/assets/dabboba/products/ip/mobile-suit-gundam.jpg",
       appReferenceValue: 42_000,
-      message: "구성품과 박스 상태 확인 후 차액 없이 교환을 제안드려요.",
       time: "53분 전",
     },
   ],

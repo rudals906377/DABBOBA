@@ -37,7 +37,6 @@ test("exchange detail and every customer lifecycle write use the contracted rout
     listingId,
     proposerId: "44444444-4444-4444-8444-444444444444",
     offeredInventory: { id: "inventory-two" },
-    message: "교환을 제안합니다.",
     status: "PENDING",
     createdAt: "2026-08-24T00:00:00Z",
     updatedAt: "2026-08-24T00:00:00Z",
@@ -66,7 +65,6 @@ test("exchange detail and every customer lifecycle write use the contracted rout
   const detail = await client.getExchangeListingDetail(listingId);
   await client.createExchangeOffer(listingId, {
     offeredInventoryUnitId: "inventory-two",
-    message: "교환을 제안합니다.",
   }, "offer-create-retry-key");
   await client.decideExchangeOffer(listingId, offerId, "ACCEPTED", "offer-decision-retry-key");
   await client.withdrawExchangeOffer(listingId, offerId, "offer-withdraw-retry-key");
@@ -94,7 +92,6 @@ test("exchange detail and every customer lifecycle write use the contracted rout
   ]);
   assert.deepEqual(JSON.parse(calls[1].init.body), {
     offeredInventoryUnitId: "inventory-two",
-    message: "교환을 제안합니다.",
   });
   assert.deepEqual(JSON.parse(calls[2].init.body), { decision: "ACCEPTED" });
   assert.equal(calls[3].init.body, undefined);
@@ -112,6 +109,8 @@ test("exchange detail UI loads authorized offers and exposes only server-backed 
   assert.match(detailPage, /loadExchangeListingDetail\(postId, signal\)/);
   assert.match(detailPage, /pendingOfferKeyRef\.current\?\.fingerprint === fingerprint/);
   assert.match(detailPage, /addExchangeApplication\(post\.id,[\s\S]*?pending\.key\)/);
+  assert.match(detailPage, /eligibleDrawExchangeProposalUnits\(sessionCommerce, currentUserId\)/);
+  assert.doesNotMatch(detailPage, /draftMessage|exchange-application-message|application\.message/);
   assert.match(detailPage, /pendingLifecycleKeysRef\.current\[action\]/);
   assert.match(detailPage, /decideExchangeApplication\(post\.id, applicationId, decision, key\)/);
   assert.match(detailPage, /withdrawExchangeApplication\(post\.id, applicationId, key\)/);

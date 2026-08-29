@@ -16,6 +16,7 @@ test("generated contract includes public and privileged seams", () => {
     "/v1/account/deletion-request",
     "/v1/account/draw-entitlements",
     "/v1/account/notification-preferences",
+    "/v1/account/point-returns",
     "/v1/account/shipping-requests",
     "/v1/account/shipping-requests/{shippingRequestId}",
     "/v1/catalog/characters",
@@ -37,7 +38,7 @@ test("generated contract includes public and privileged seams", () => {
     "/v1/admin/reports/{reportId}/resolution",
     "/v1/admin/audit-logs",
   ];
-  assert.equal(requiredPaths.length, 30);
+  assert.equal(requiredPaths.length, 31);
 });
 
 test("generic admin user status contract excludes account deletion", () => {
@@ -195,6 +196,52 @@ test("generated account shipping contract includes terminal delivery state and e
     "updatedAt",
     "version",
   ]);
+});
+
+test("generated point return contract is batch-idempotent and exposes the committed balance", () => {
+  const inventoryUnitIds = [
+    "11111111-1111-4111-8111-111111111111",
+    "22222222-2222-4222-8222-222222222222",
+  ];
+  const input = { inventoryUnitIds } satisfies components["schemas"]["CreatePointReturnInput"];
+  const result = {
+    id: "33333333-3333-4333-8333-333333333333",
+    inventoryUnitIds,
+    totalPointAmount: 5_999,
+    balance: 7_599,
+    returnedAt: "2026-08-30T01:00:00.000Z",
+  } satisfies components["schemas"]["PointReturnResult"];
+  const headers = {
+    "Idempotency-Key": "point-return-request-0001",
+  } satisfies paths["/v1/account/point-returns"]["post"]["parameters"]["header"];
+  const returnedInventoryStatus: components["schemas"]["InventoryUnit"]["status"] = "POINT_RETURNED";
+  const repositoryRoot = fileURLToPath(new URL("../../../", import.meta.url));
+  const contractDocument = readFileSync(
+    `${repositoryRoot}packages/contracts/openapi/dabboba.openapi.yaml`,
+    "utf8",
+  );
+  const schemaStart = contractDocument.indexOf("    CreatePointReturnInput:\n");
+  const schemaEnd = contractDocument.indexOf("    NotificationPreferences:\n", schemaStart);
+  const pointReturnSchemas = contractDocument.slice(schemaStart, schemaEnd);
+
+  assert.deepEqual(input.inventoryUnitIds, inventoryUnitIds);
+  assert.equal(result.totalPointAmount, 5_999);
+  assert.equal(headers["Idempotency-Key"], "point-return-request-0001");
+  assert.equal(returnedInventoryStatus, "POINT_RETURNED");
+  assert.match(pointReturnSchemas, /totalPointAmount: \{ type: integer, minimum: 1, maximum: 2147483647 \}/);
+  assert.match(pointReturnSchemas, /balance: \{ type: integer, minimum: 0, maximum: 2147483647 \}/);
+});
+
+test("exchange proposal contract accepts only one owned inventory selection and no free text", () => {
+  type OfferInput = components["schemas"]["CreateExchangeOfferInput"];
+  type HasNoMessage = "message" extends keyof OfferInput ? false : true;
+  const input = {
+    offeredInventoryUnitId: "11111111-1111-4111-8111-111111111111",
+  } satisfies OfferInput;
+  const hasNoMessage: HasNoMessage = true;
+
+  assert.equal(input.offeredInventoryUnitId, "11111111-1111-4111-8111-111111111111");
+  assert.equal(hasNoMessage, true);
 });
 
 const routeMethods = ["get", "post", "put", "patch", "delete"] as const;

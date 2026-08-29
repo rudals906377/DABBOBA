@@ -1,10 +1,13 @@
 import { randomUUID } from "expo-crypto";
 import { createDabbobaClient, errorMessage } from "@dabboba/api-client";
-import type { CatalogIp, CatalogProduct } from "@dabboba/contracts";
+import type { CatalogIp, CatalogProduct, components } from "@dabboba/contracts";
+
+type Notice = components["schemas"]["Notice"];
 
 export type HomeCatalogSnapshot = {
   ips: CatalogIp[];
   products: CatalogProduct[];
+  notices: Notice[];
   fetchedAt: string;
 };
 
@@ -13,9 +16,10 @@ export async function fetchHomeCatalog(apiBaseUrl: string): Promise<HomeCatalogS
     baseUrl: apiBaseUrl,
     requestId: randomUUID,
   });
-  const [ipResult, productResult] = await Promise.all([
-    client.GET("/v1/catalog/ips", { params: { query: { limit: 8 } } }),
-    client.GET("/v1/catalog/products", { params: { query: { limit: 12 } } }),
+  const [ipResult, productResult, noticeResult] = await Promise.all([
+    client.GET("/v1/catalog/ips", { params: { query: { limit: 30 } } }),
+    client.GET("/v1/catalog/products", { params: { query: { limit: 50 } } }),
+    client.GET("/v1/notices", { params: { query: { limit: 12 } } }),
   ]);
 
   if (!ipResult.data) {
@@ -28,6 +32,7 @@ export async function fetchHomeCatalog(apiBaseUrl: string): Promise<HomeCatalogS
   return {
     ips: ipResult.data.items,
     products: productResult.data.items,
+    notices: noticeResult.data?.items ?? [],
     fetchedAt: new Date().toISOString(),
   };
 }

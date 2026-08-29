@@ -23,7 +23,9 @@ export function resolveMobileRuntimeConfig(input: RuntimeConfigInput): MobileRun
         input.development,
         "EXPO_PUBLIC_DABBOBA_ASSET_BASE_URL",
       )
-    : null;
+    : input.development
+      ? developmentAssetUrl(input)
+      : null;
 
   return {
     apiBaseUrl: stripTrailingSlash(apiUrl.toString()),
@@ -34,17 +36,23 @@ export function resolveMobileRuntimeConfig(input: RuntimeConfigInput): MobileRun
 export function resolveCatalogImageUrl(
   imageUrl: string | null,
   assetBaseUrl: string | null,
+  version?: string | number,
 ): string | null {
   if (!imageUrl) return null;
+  let resolved: string | null;
   try {
     const absolute = new URL(imageUrl);
-    return absolute.protocol === "https:" || absolute.protocol === "http:"
+    resolved = absolute.protocol === "https:" || absolute.protocol === "http:"
       ? absolute.toString()
       : null;
   } catch {
     if (!assetBaseUrl || !imageUrl.startsWith("/")) return null;
-    return new URL(imageUrl, `${assetBaseUrl}/`).toString();
+    resolved = new URL(imageUrl, `${assetBaseUrl}/`).toString();
   }
+  if (!resolved || version === undefined) return resolved;
+  const versioned = new URL(resolved);
+  versioned.searchParams.set("v", String(version));
+  return versioned.toString();
 }
 
 function developmentApiUrl(input: RuntimeConfigInput): URL {
@@ -53,6 +61,11 @@ function developmentApiUrl(input: RuntimeConfigInput): URL {
   }
   const host = metroHost(input.metroHostUri) || (input.platform === "android" ? "10.0.2.2" : "127.0.0.1");
   return new URL(`http://${formatHost(host)}:8788`);
+}
+
+function developmentAssetUrl(input: RuntimeConfigInput): URL {
+  const host = metroHost(input.metroHostUri) || (input.platform === "android" ? "10.0.2.2" : "127.0.0.1");
+  return new URL(`http://${formatHost(host)}:4174`);
 }
 
 function metroHost(hostUri: string | undefined): string | null {

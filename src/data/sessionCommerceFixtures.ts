@@ -129,7 +129,7 @@ const INITIAL_INVENTORY_UNITS: SessionInventoryUnit[] = [
     itemName: "귀멸의 칼날 탄지로 미니 피규어",
     itemImage: "/assets/dabboba/products/ip/demon-slayer.jpg",
     appReferenceValue: 6_000,
-    source: "seed",
+    source: "gacha",
     acquiredAt: "2026.08.23",
     shippingDeadline: "2026.09.22",
     shippingStatus: "stored",
@@ -145,7 +145,7 @@ const INITIAL_INVENTORY_UNITS: SessionInventoryUnit[] = [
     itemName: "주술회전 캡슐 DX 고죠 사토루",
     itemImage: "/assets/dabboba/products/ip/jujutsu-kaisen.jpg",
     appReferenceValue: 9_000,
-    source: "seed",
+    source: "gacha",
     acquiredAt: "2026.08.21",
     shippingDeadline: "2026.09.20",
     shippingStatus: "stored",
@@ -161,7 +161,7 @@ const INITIAL_INVENTORY_UNITS: SessionInventoryUnit[] = [
     itemName: "HUNTER×HUNTER 키메라 앤트 C상",
     itemImage: "/assets/dabboba/products/ip/hunter-x-hunter.jpg",
     appReferenceValue: 13_000,
-    source: "seed",
+    source: "kuji",
     acquiredAt: "2026.08.19",
     shippingDeadline: "2026.09.18",
     shippingStatus: "stored",
@@ -177,7 +177,7 @@ const INITIAL_INVENTORY_UNITS: SessionInventoryUnit[] = [
     itemName: "OP-13 몽키 D. 루피 리더 카드",
     itemImage: "/assets/dabboba/products/ip/one-piece.jpg",
     appReferenceValue: 12_000,
-    source: "seed",
+    source: "direct-purchase",
     acquiredAt: "2026.08.24",
     shippingDeadline: "2026.09.23",
     shippingStatus: "stored",
@@ -295,6 +295,15 @@ export function eligibleSessionInventoryUnits(
     unit.ownerId === ownerId
     && unit.shippingStatus === "stored"
     && unit.exchangeStatus === "available"
+  ));
+}
+
+export function eligibleDrawExchangeProposalUnits(
+  state: SessionCommerceState,
+  ownerId = CURRENT_USER_ID,
+): SessionInventoryUnit[] {
+  return eligibleSessionInventoryUnits(state, ownerId).filter((unit) => (
+    unit.source === "gacha" || unit.source === "kuji"
   ));
 }
 

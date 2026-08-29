@@ -86,6 +86,7 @@ import {
   CURRENT_USER_ID,
   createInitialSessionCommerceState,
   decideSessionExchangeApplication,
+  eligibleDrawExchangeProposalUnits,
   eligibleSessionInventoryUnits,
   exchangeDecisionKey,
   recordSessionInventoryUnitOnce,
@@ -772,7 +773,6 @@ function mapApiExchangeOffer(item: ApiExchangeOffer, author: string): ExchangeAp
     offeredItem: inventory.itemName,
     offeredItemImage: inventory.itemImage,
     appReferenceValue: inventory.appReferenceValue,
-    message: item.message,
     time: serverDateLabel(item.createdAt),
     status: item.status,
   };
@@ -1007,7 +1007,7 @@ type DabbobaContextValue = {
     postId: string,
     application: Pick<
       ExchangeApplication,
-      "offeredInventoryUnitId" | "offeredCatalogItemId" | "ipId" | "categoryId" | "offeredItem" | "offeredItemImage" | "appReferenceValue" | "message"
+      "offeredInventoryUnitId" | "offeredCatalogItemId" | "ipId" | "categoryId" | "offeredItem" | "offeredItemImage" | "appReferenceValue"
     >,
     idempotencyKey?: string,
   ) => Promise<UserMutationResult<ApiExchangeOffer>>;
@@ -1896,7 +1896,7 @@ export default function Prototype() {
     postId: string,
     application: Pick<
       ExchangeApplication,
-      "offeredInventoryUnitId" | "offeredCatalogItemId" | "ipId" | "categoryId" | "offeredItem" | "offeredItemImage" | "appReferenceValue" | "message"
+      "offeredInventoryUnitId" | "offeredCatalogItemId" | "ipId" | "categoryId" | "offeredItem" | "offeredItemImage" | "appReferenceValue"
     >,
     idempotencyKey?: string,
   ): Promise<UserMutationResult<ApiExchangeOffer>> => {
@@ -1904,7 +1904,6 @@ export default function Prototype() {
       try {
         const created = await apiRuntime.client.createExchangeOffer(postId, {
           offeredInventoryUnitId: application.offeredInventoryUnitId,
-          message: application.message,
         }, idempotencyKey);
         const nextApplication = mapApiExchangeOffer(created, profile.nickname);
         setExchangeApplications((current) => ({
@@ -4459,7 +4458,6 @@ function ExchangeDetailPage({ postId }: { postId: string }) {
   const [draftOfferedQuery, setDraftOfferedQuery] = useState("");
   const [draftOfferedInventoryUnitId, setDraftOfferedInventoryUnitId] = useState("");
   const [applicationSuggestionsOpen, setApplicationSuggestionsOpen] = useState(false);
-  const [draftMessage, setDraftMessage] = useState("");
   const [submitMessage, setSubmitMessage] = useState("");
   const [remoteDetail, setRemoteDetail] = useState<ApiExchangeListingDetail | null>(null);
   const [detailLoadMessage, setDetailLoadMessage] = useState("");
@@ -4467,7 +4465,7 @@ function ExchangeDetailPage({ postId }: { postId: string }) {
   const [submittingOffer, setSubmittingOffer] = useState(false);
   const [busyLifecycleAction, setBusyLifecycleAction] = useState("");
   const ownedExchangeItems = useMemo(() => inventoryExchangeItems(
-    eligibleSessionInventoryUnits(sessionCommerce, currentUserId),
+    eligibleDrawExchangeProposalUnits(sessionCommerce, currentUserId),
   ), [currentUserId, sessionCommerce]);
 
   const refreshRemoteDetail = useCallback(async (signal?: AbortSignal) => {
@@ -4528,12 +4526,10 @@ function ExchangeDetailPage({ postId }: { postId: string }) {
     : eligibleApplicationItems;
 
   const submitApplication = async () => {
-    const message = draftMessage.trim();
-    if (!selectedApplicationItem || !message || isOwnPost || submittingOffer || offerRequestInFlightRef.current || listingStatus !== "OPEN") return;
+    if (!selectedApplicationItem || isOwnPost || submittingOffer || offerRequestInFlightRef.current || listingStatus !== "OPEN") return;
     const fingerprint = JSON.stringify([
       post.id,
       selectedApplicationItem.inventoryUnitId ?? selectedApplicationItem.id,
-      message,
     ]);
     const pending = pendingOfferKeyRef.current?.fingerprint === fingerprint
       ? pendingOfferKeyRef.current
@@ -4549,7 +4545,6 @@ function ExchangeDetailPage({ postId }: { postId: string }) {
       offeredItem: selectedApplicationItem.name,
       offeredItemImage: selectedApplicationItem.image,
       appReferenceValue: selectedApplicationItem.estimatedPrice,
-      message,
     }, pending.key);
     offerRequestInFlightRef.current = false;
     setSubmittingOffer(false);
@@ -4562,7 +4557,6 @@ function ExchangeDetailPage({ postId }: { postId: string }) {
     setDraftOfferedQuery("");
     setDraftOfferedInventoryUnitId("");
     setApplicationSuggestionsOpen(false);
-    setDraftMessage("");
     setSubmitMessage(result.message);
     if (apiMode === "remote") void refreshRemoteDetail();
   };
@@ -4737,7 +4731,6 @@ function ExchangeDetailPage({ postId }: { postId: string }) {
                     </span>
                     <b>{exchangePriceLabel(application.appReferenceValue)}<small>{APP_REFERENCE_VALUE_NOTICE}</small></b>
                   </div>
-                  <p>{application.message}</p>
                   {isOwnPost && listingStatus === "OPEN" ? (
                     <div className="exchange-application-controls" aria-label={`${application.author}의 교환 제안 처리`}>
                       <button
@@ -4816,7 +4809,7 @@ function ExchangeDetailPage({ postId }: { postId: string }) {
             <form className="exchange-application-form" onSubmit={(event) => { event.preventDefault(); submitApplication(); }}>
               <div className="exchange-application-product-picker">
                 <label htmlFor="exchange-offered-item">내가 제안할 상품</label>
-                <small>내 보관함·구매 내역에 있는 상품만 선택할 수 있어요.</small>
+                <small>내가 가챠·쿠지에서 직접 뽑아 보관 중인 상품만 선택할 수 있어요.</small>
                 <KeyboardInput
                   id="exchange-offered-item"
                   value={draftOfferedQuery}
@@ -4848,25 +4841,13 @@ function ExchangeDetailPage({ postId }: { postId: string }) {
                   />
                 ) : null}
               </div>
-              <label htmlFor="exchange-application-message">제안 메시지</label>
-              <KeyboardTextarea
-                id="exchange-application-message"
-                value={draftMessage}
-                maxLength={300}
-                placeholder="상품 상태와 교환 방법을 간단히 알려주세요."
-                onChange={(event) => {
-                  setDraftMessage(event.currentTarget.value);
-                  setSubmitMessage("");
-                }}
-                onBlur={() => keyboard.hide()}
-              />
               <div>
-                <small>{draftMessage.length}/300</small>
+                <small>별도 글 없이 선택한 상품 정보만 전달됩니다.</small>
                 <ActionButton
                   type="submit"
                   variant="brandSolid"
                   size="medium"
-                  disabled={submittingOffer || !selectedApplicationItem || !draftMessage.trim()}
+                  disabled={submittingOffer || !selectedApplicationItem}
                   aria-busy={submittingOffer}
                   onPointerDown={(event) => event.preventDefault()}
                 >

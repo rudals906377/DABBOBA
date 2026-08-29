@@ -212,7 +212,7 @@ test("community, wanted-room, exchange, inquiry, and order writes all carry idem
   await client.createWantedRequest({ category: "figure", ipId: "one-piece", desiredItem: "루피 피규어", details: "재입고를 기다려요." });
   await client.setWantedRequestLike("11111111-1111-4111-8111-111111111111", true);
   await client.createExchangeListing({ title: "교환", details: "상세", offeredInventoryUnitId: "unit-1" });
-  await client.createExchangeOffer("listing-1", { offeredInventoryUnitId: "unit-2", message: "제안" });
+  await client.createExchangeOffer("listing-1", { offeredInventoryUnitId: "unit-2" });
   await client.decideExchangeOffer("listing-1", "offer-1", "ACCEPTED");
   await client.createOrder({ items: [{ productId: "product-1", quantity: 1 }] });
 

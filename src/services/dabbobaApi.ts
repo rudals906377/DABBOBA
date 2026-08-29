@@ -345,7 +345,6 @@ export type ApiExchangeOffer = {
   listingId: string;
   proposerId: string;
   offeredInventory: ApiInventoryUnit;
-  message: string;
   status: "PENDING" | "ACCEPTED" | "REJECTED" | "WITHDRAWN";
   createdAt: string;
   updatedAt: string;
@@ -1341,7 +1340,7 @@ export class DabbobaApiClient {
 
   createExchangeOffer(
     listingId: string,
-    input: { offeredInventoryUnitId: string; message: string },
+    input: { offeredInventoryUnitId: string },
     idempotencyKey?: string,
   ) {
     return this.request<ApiExchangeOffer>(`/v1/exchange/listings/${encodeURIComponent(listingId)}/offers`, {

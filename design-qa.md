@@ -160,6 +160,377 @@
 
 final result: passed
 
+## 2026-08-30 — Ppoba catalog media follows each source aspect ratio
+
+This section supersedes only the Ppoba-list portion of the older “Edge-to-edge catalog product photography” decision. Home, Exchange, Product History, account, and other compact fixed thumbnail slots continue to use `cover`; Ppoba product cards now follow the latest explicit request to show the complete registered photograph.
+
+**Source and rendered evidence**
+
+- Source visual truth: `/var/folders/ym/kg6qcm917wv2wdk0qby6y6tw0000gn/T/TemporaryItems/NSIRD_screencaptureui_5VDbEh/스크린샷 2026-08-30 오전 4.53.49.png` (`972 × 1798` px), showing a landscape Tokyo Revengers asset cropped into a square Ppoba card.
+- Rendered implementation: `work/qa/ppoba-kuji-adaptive-after-default.png` (`409 × 848` px), captured from the open `localhost:3200` DABBOBA SDK54 Simulator stream with Ppoba → Kuji selected.
+- Full-view combined comparison: `work/qa/ppoba-kuji-adaptive-full-comparison.png` (`1944 × 1798` px). The implementation capture was scaled proportionally from `409 × 848` to `868 × 1798` and centered in a `972 × 1798` black comparison column; the source column remained at native pixels. This normalizes the browser canvas height without interpreting either stream capture as physical-device density proof.
+- Focused media comparison: `work/qa/ppoba-kuji-adaptive-media-comparison.png` (`1376 × 688` px). The source square media region remained `688 × 688`; the rendered `292 × 164` landscape media region was scaled proportionally to `688 × 386` and centered without cropping.
+- Viewport and state: source `972 × 1798` browser capture; implementation default in-app-browser viewport/capture `409 × 848`; signed-in native Ppoba Kuji catalog with one full-width card per row. The live API fixture changed from Tokyo Revengers to Evangelion, so the comparison evaluates the same catalog surface and landscape-media rule, not product identity.
+
+**Findings and iteration history**
+
+- Initial P1: a fixed `1:1` frame plus `cover` materially removed both side edges of every landscape Kuji asset, hiding subjects and artwork text.
+- Fix: Ppoba cards now reset the measured ratio when the URI changes, read the source dimensions with `Image.getSize`, confirm dimensions again on load, bind `width / height` to the frame, and render the registered asset with `contain`. The existing Gacha two-column and Kuji one-column widths remain unchanged.
+- Post-fix evidence: both visible Kuji cards render as landscape frames. The Evangelion card keeps the far-left artwork, central title art, and far-right characters visible simultaneously; no stretching, crop, letterbox band inside the media frame, or synthetic replacement asset is present.
+- Revised result: no actionable P0, P1, or P2 finding remains. If image dimensions are temporarily unavailable, the card safely starts at `1:1`; after load it adopts the source ratio, and `contain` prevents image-edge loss during that fallback.
+
+**Required fidelity surfaces**
+
+- Fonts and typography: the pixel Ppoba heading and Noto Sans KR product metadata, weights, line heights, wrapping, and truncation remain unchanged.
+- Spacing and layout rhythm: only media height now follows its source. Card gutter, full-width Kuji column, two-column Gacha grid, category badge, radii, metadata spacing, and floating navigation remain unchanged.
+- Colors and visual tokens: the warm page canvas, neutral stroke, green category badge, and navigation tokens are unchanged.
+- Image quality and asset fidelity: original catalog assets render directly at their intrinsic landscape, portrait, or square ratio with all edges visible and no distortion. No generated, approximated, or duplicated background asset was introduced.
+- Copy and content: IP, subject title, price, stock, category labels, description, and search/filter wording are unchanged.
+
+**Interaction and technical evidence**
+
+- Ppoba navigation and the Kuji category control were exercised in the live Simulator stream; both remained responsive after the image-frame change.
+- Browser console error check returned no errors in the verified state.
+- Structural coverage protects URI reset, valid-dimension guards, race cleanup, dynamic aspect-ratio binding, `contain`, and removal of the fixed-square Ppoba frame while preserving `cover` on compact non-Ppoba thumbnails.
+- Consolidated verification passed: Expo mobile TypeScript, all 138 unit tests, protected-runtime integrity, production web build, and `git diff --check`. The existing Vite chunk-size advisory remains non-blocking and is unrelated to this media change.
+- Evidence is local in-app-browser and iOS Simulator-stream proof only; physical-device, signed-native, and store-build behavior is not claimed.
+- A separate focused region was necessary because full-view scaling makes the complete image edges and aspect-ratio change harder to judge.
+
+final result: passed
+
+## 2026-08-29 — Checkout payment-connection guide
+
+**Source and rendered evidence**
+
+- Source visual truth: `/var/folders/ym/kg6qcm917wv2wdk0qby6y6tw0000gn/T/TemporaryItems/NSIRD_screencaptureui_ftoErK/스크린샷 2026-08-29 오후 9.06.40.png` (`694 × 1518` px), showing the approved local checkout-preparation confirmation and its explicit no-PG/no-order boundary.
+- Alert interaction proof: `/tmp/dabboba-checkout-alert-flow-proof.png` (`1206 × 2622` px), captured after pressing `결제 준비 완료` in the running native app.
+- Next-screen implementation proof: `/tmp/dabboba-checkout-confirm-to-connection-proof.png` (`1206 × 2622` px), captured after pressing the alert's `확인` action rather than opening the destination by deep link.
+- Exit interaction proof: `/tmp/dabboba-checkout-connection-return-proof.png` (`1206 × 2622` px), showing that `뽀바로 돌아가기` returns to the native shop root.
+- Full normalized comparison: `work/qa/native-checkout-connection-guide-comparison.png` (`742 × 3168` px). The implementation capture was normalized from `1206 × 2622` to the source's `694 × 1518` dimensions before stacking.
+- Viewport and density: DABBOBA SDK54 iOS Simulator at `402 × 874` logical points and `3×` native screenshot density.
+
+**Findings and comparison history**
+
+- The source is the preceding alert state, not a mock of the new destination, so this pass evaluates flow continuity, visual-system fidelity, and truthful state communication rather than pretending the two screens should be pixel-identical.
+- No actionable P0, P1, or P2 issue remains. The new screen inherits the same safe-area header, pixel-title hierarchy, warm canvas, card geometry, green selection language, product data, and fixed amount footer.
+- The first rendered implementation already preserved the required commerce boundary, kept all status labels at `결제 전` or `대기`, and avoided presenting a payment, order number, or draw entitlement. No visual correction loop was required.
+- A separate focused crop was unnecessary because the full normalized board keeps the header, status hero, product card, selected-payment summary, amount footer, typography, and imagery readable at the same source width.
+
+**Required fidelity surfaces**
+
+- Fonts and typography: the single `결제 연결 안내` interface title and section headings use the shared Galmuri pixel system; product names, amounts, instructions, and button labels remain in Noto Sans KR with readable weight and wrapping.
+- Spacing and layout rhythm: the destination keeps the existing 14–16 px native gutter, compact 12 px section rhythm, rounded SEED card geometry, 44 px header target, and footer separated from the scroll region.
+- Colors and tokens: the established warm basement/default surfaces, near-black safety hero, canonical `#91E98E` brand accent, neutral strokes, and muted supporting copy all map to existing SEED tokens.
+- Image quality and asset fidelity: the server product image is reloaded and rendered through the existing catalog URL resolver with the approved edge-to-edge `cover` thumbnail treatment; no placeholder or generated substitute appears in the verified state.
+- Copy and content: the page explicitly says the current state is `결제 전`, explains `가격·재고 재확인 → PG 결제 승인 → 서버 주문 확정 → 추첨권 발급`, and states that the local app sends no PG request and creates no payment, order number, or entitlement.
+
+**Interaction and technical evidence**
+
+- Pressing `결제 준비 완료` opened the approved native alert. Pressing its `확인` action opened the new footer-free route with the selected product, quantity, payment method, and point intent.
+- The destination reloaded live product data, recomputed the displayed total from the server product price, and clamped query-supplied quantity and point values before display.
+- Pressing `뽀바로 돌아가기` replaced the route with the native shop root; the app was then reopened on the new guide for handoff.
+- No payment, order, inventory, or draw mutation endpoint is called from the new screen.
+- Physical-device, real PG-provider, signed-webhook, production-order, and signed-store-build verification remain outside this local Simulator pass.
+
+final result: passed
+
+## 2026-08-29 — Root-header capsule stroke alignment
+
+**Source and rendered evidence**
+
+- Source visual truth: `/var/folders/ym/kg6qcm917wv2wdk0qby6y6tw0000gn/T/TemporaryItems/NSIRD_screencaptureui_dGcVCq/스크린샷 2026-08-29 오후 8.56.13.png` (`270 × 68` px), where the capsule contour and seams read materially thinner than search and notifications.
+- Revised iOS Simulator evidence: `/tmp/dabboba-header-capsule-stroke-after.png` (`1206 × 2622` px), captured on the 교환방 root screen.
+- Focused comparison: `work/qa/root-header-capsule-stroke-comparison.png` (`318 × 230` px), normalizing the before and after action rows for direct optical review.
+- State and density: DABBOBA SDK54 iOS Simulator at native `1206 × 2622` screenshot density. The header keeps the existing 23 px Ionicons and 25 px capsule slot.
+
+**Findings and implementation**
+
+- Initial P2: the raster capsule asset used hairline source strokes, so downsampling it to 25 px made the outline and both shell seams visually lighter than the adjacent search and bell icons.
+- Fix: the approved transparent capsule asset remains the visual source, with eight subpixel neutral-tinted outline passes behind it to reinforce only the downsampled outer contour. The established 25 px slot, two curved parallel source seams, 15-degree clockwise tilt, green upper shell, white lower shell, and restrained highlight remain intact.
+- Revised result: the three actions now share one optical line-weight family at normal header viewing size. The capsule remains distinct without text, center latch, or monster-ball construction.
+
+**Required fidelity surfaces**
+
+- Fonts and typography: unchanged; the header title keeps its pixel treatment and this icon contains no text.
+- Spacing and layout rhythm: unchanged; all three actions retain their shared 44 px targets and fixed search → notifications → product-history order.
+- Colors and tokens: the shell uses the canonical brand token `#91E98E`; contour and seams use the shared neutral foreground token; the lower shell and highlight use the elevated white layer token.
+- Image quality and asset fidelity: the original transparent capsule asset remains the foreground source; the outline reinforcement prevents its silhouette from disappearing during 25 px downsampling without replacing the approved artwork.
+- Copy and content: unchanged.
+
+**Interaction and technical evidence**
+
+- Search, notifications, and product-history routes remain unchanged; this is a visual-only icon implementation change.
+- Structural coverage fixes the 25 px asset and frame, neutral outline reinforcement, and 15-degree tilt while preserving the approved source artwork.
+- Consolidated verification passed: native TypeScript, all 119 unit tests, protected-runtime integrity, production web build, Expo iOS export, `git diff --check`, Metro health, and the `localhost:3201` preview.
+- Simulator evidence confirms the revised line weight; physical-device and signed-store-build verification remain outside this pass.
+
+final result: passed
+
+## 2026-08-29 — Intrinsic-ratio Product Detail photography
+
+**Source and rendered evidence**
+
+- Source visual truth: `/var/folders/ym/kg6qcm917wv2wdk0qby6y6tw0000gn/T/TemporaryItems/NSIRD_screencaptureui_6nm1Fp/스크린샷 2026-08-29 오후 8.33.38.png` (`696 × 646` px), showing the supplied landscape Tokyo Revengers artwork forced into a square crop.
+- Intermediate spacing reference: `/var/folders/ym/kg6qcm917wv2wdk0qby6y6tw0000gn/T/TemporaryItems/NSIRD_screencaptureui_EEra9m/스크린샷 2026-08-29 오후 8.39.10.png` (`706 × 376` px), where the complete landscape artwork was visible but the side gutters still felt too large.
+- Final iOS Simulator evidence: `/tmp/dabboba-landscape-product-detail-centered-after-v2.png` (`1206 × 2622` px).
+- Same-product focused comparison: `work/qa/product-detail-intrinsic-landscape-comparison.png` (`1200 × 1596` px), with the supplied square crop above and the final original-ratio hero below.
+- State and density: Tokyo Revengers Product Detail on the DABBOBA SDK54 iOS Simulator at native `1206 × 2622` screenshot density. The 8 px logical app gutter renders as 24 native pixels at this density.
+
+**Findings and iteration history**
+
+- Initial P2: the fixed square hero combined with `cover` cropped both sides of the registered `1280 × 720` landscape asset, removing one subject and cutting visual text.
+- First fix: the hero began measuring the source with `Image.getSize` and rendered with `contain`, which restored the whole photo and removed the fixed square frame, border, and synthetic background.
+- Intermediate P2: the ratio-driven view resolved its width from the previous layout and left an oversized right gutter despite symmetric margin intent.
+- Final fix: a dedicated full-width outer container now owns the symmetric 8 px page gutter, while the inner hero explicitly fills 100% of that container and derives only its height from the source aspect ratio.
+- Revised result: no actionable P0, P1, or P2 issue remains. All four characters, the title art, and the copyright line remain visible without crop, stretch, or letterbox space; the photograph is centered and uses nearly the full screen width.
+
+**Required fidelity surfaces**
+
+- Fonts and typography: Product Detail typography and the pixel header remain unchanged.
+- Spacing and layout rhythm: the hero keeps 8 px horizontal gutters and the existing 16 px vertical rhythm. The detail copy naturally moves upward for landscape media.
+- Colors and tokens: the warm page canvas and existing product colors remain unchanged; no new frame, border, or background has been added around the image.
+- Image quality and asset fidelity: the original `1280 × 720` asset renders at its intrinsic `16:9` ratio with no blur, crop, distortion, or replacement asset.
+- Copy and content: product IP, subject title, price, stock, and metadata remain unchanged.
+
+**Interaction and technical evidence**
+
+- Back, wishlist, quantity, commerce, and cross-link behavior remain unchanged.
+- Compact catalog, exchange, and account thumbnails intentionally retain edge-to-edge `cover` behavior because those surfaces remain fixed thumbnail slots; this intrinsic-ratio rule applies to Product Detail media.
+- Consolidated verification passed: Expo native TypeScript, all 118 unit tests, protected-runtime integrity, production web build, Expo iOS export, `git diff --check`, Metro health, and the `localhost:3201` preview. The existing Node module-type and Vite chunk-size advisories remain non-blocking and are unrelated to this change.
+- Physical-device and signed-store-build verification remain outside this Simulator QA.
+
+final result: passed
+
+## 2026-08-29 — Product-row title hierarchy
+
+**Source and rendered evidence**
+
+- Source visual truth: `/var/folders/ym/kg6qcm917wv2wdk0qby6y6tw0000gn/T/TemporaryItems/NSIRD_screencaptureui_QTPDfh/스크린샷 2026-08-29 오후 8.29.59.png` (`676 × 968` px), showing Product History rows where the small IP title was repeated again inside the large product title.
+- Revised iOS Simulator evidence: `/tmp/dabboba-product-row-title-hierarchy-after.png` (`1206 × 2622` px), showing the same Product History list after the shared subject-title rule was applied.
+- Focused normalized comparison: `work/qa/product-row-title-hierarchy-comparison.png` (`676 × 1705` px), with the supplied list above and revised list below.
+- State and density: `내가 본 상품` on the DABBOBA SDK54 iOS Simulator. The live recently viewed order changed after opening products during verification; the comparison evaluates the same registered rows and hierarchy, not their history order.
+
+**Findings and iteration history**
+
+- Initial P2: the small muted line already established the IP, but large row titles repeated `원피스`, `도쿄 리벤저스`, and the full Slime IP. This weakened the intended `작품명 → 상품 내용` hierarchy and spent horizontal space on duplicate words.
+- Fix: the reusable catalog row now uses the same exact-match subject-title formatter as Product Detail. It removes one canonical IP occurrence from the large product title, preserves qualifiers such as `극장판`, and falls back to the registered title when the IP is not an exact match or removal would leave no subject.
+- Revised result: no actionable P0, P1, or P2 mismatch remains. Visible examples now read `원피스 / 카드게임 OP-13 계승되는 의지`, `도쿄 리벤저스 / 천축편 이치방쿠지`, and `전생했더니 슬라임이었던 건에 대하여 / 극장판 창해의 눈물편 이치방쿠지`.
+
+**Required fidelity surfaces**
+
+- Fonts and typography: the small Noto Sans KR IP line remains muted and regular; the large subject remains the existing strong row title. Size, weight, line height, and two-line limit are unchanged.
+- Spacing and layout rhythm: thumbnail, copy column, category badge, price, card padding, radius, and row gaps are unchanged. Removing duplicate text only improves available line space.
+- Colors and tokens: unchanged; the warm card surface, neutral metadata, near-black subject, and green category badge retain their existing tokens.
+- Image quality: unchanged; product images remain full-bleed `cover` crops in the existing rounded thumbnail frame.
+- Copy and content: no registered product data was altered. The formatter changes presentation only and preserves the full original title as its fallback.
+
+**Interaction and technical evidence**
+
+- The row accessibility label still uses the complete registered product name, and every row still opens the shared Product Detail route.
+- Unit coverage verifies subject extraction and fallback behavior; structural coverage fixes the shared row to the formatter so history, draw, and wishlist modes keep the same hierarchy.
+- Consolidated verification passed: native TypeScript checking, 118 unit tests, protected-runtime integrity, production web build, Expo iOS export, `git diff --check`, Metro health, and the `localhost:3201` Simulator preview.
+- The production web build retains its existing non-blocking chunk-size advisory, and the unit run retains its existing non-blocking Node module-type warning for `product-title.ts`; neither warning comes from this hierarchy change.
+- Physical-device and signed-store-build verification remain outside this Simulator QA.
+
+final result: passed
+
+## 2026-08-29 — Wishlist in Product History
+
+**Source and rendered evidence**
+
+- Source visual truth: `/Users/kyoungmin/Desktop/스크린샷 2026-08-29 오후 8.22.00.png` (`690 × 242` px), showing the existing two-segment Product History header.
+- Revised iOS Simulator evidence: `/tmp/dabboba-product-history-wishlist-after.png` (`1206 × 2622` px), showing the same header with the added `찜한 상품` segment and the existing recently viewed list.
+- Focused normalized comparison: `work/qa/product-history-wishlist-tab-comparison.png` (`690 × 517` px), with the supplied reference above and revised implementation below.
+- State and density: Product History with `내가 본 상품` selected on the DABBOBA SDK54 iOS Simulator. The implementation crop was normalized from native screenshot density to the supplied 690 px width before comparison.
+
+**Findings and iteration history**
+
+- Initial gap: Product History exposed only viewed and drawn products even though the authenticated wishlist already existed elsewhere in the account experience.
+- Fix: the segment row now contains `내가 본 상품`, `내가 뽑은 상품`, and `찜한 상품` at equal flexible widths. Wishlist mode reads the existing profile snapshot, renders the real account wishlist with the shared catalog row, records the wished date, and opens the shared Product Detail route.
+- Revised result: no actionable P0, P1, or P2 mismatch remains. All three Korean labels fit on one line at the target width, share the same 36 px minimum height and 8 px radius, and retain the existing green selected state without increasing the header height.
+
+**Required fidelity surfaces**
+
+- Fonts and typography: the pixel `상품 기록` title and Noto Sans KR segment/body copy are unchanged; the new label uses the same weight and line treatment as its siblings.
+- Spacing and layout rhythm: header, content gutter, segment gap, description offset, and list geometry remain unchanged. Only the segment widths redistribute evenly from two to three columns.
+- Colors and tokens: the canonical green selected fill, warm surface, neutral border, and muted inactive text remain unchanged.
+- Image quality: the shared product row continues to use full-bleed `cover` product imagery; no new or replacement asset was needed.
+- Copy and content: the new mode uses concise wishlist-specific guidance and a dedicated empty state. Existing viewed/drawn wording is preserved.
+
+**Interaction and technical evidence**
+
+- The new mode is backed by `/v1/account/wishlist` through the existing authenticated profile snapshot rather than a duplicated local-only fixture.
+- Each wishlist row routes to `/product/{productId}`. The visible segment control and its selected-state behavior were inspected in the running Simulator, while structural coverage protects the wishlist branch, server snapshot binding, empty copy, and product-detail connection.
+- Consolidated verification passed: native TypeScript checking, 118 unit tests, protected-runtime integrity, production web build, Expo iOS export, `git diff --check`, Metro health, and the `localhost:3201` Simulator preview.
+- The production web build retains its existing non-blocking chunk-size advisory, and the unit run retains its existing non-blocking Node module-type warning for `product-title.ts`; neither warning comes from this Product History change.
+- Physical-device and signed-store-build verification remain outside this Simulator QA.
+
+final result: passed
+
+## 2026-08-29 — Edge-to-edge catalog product photography
+
+**Source and rendered evidence**
+
+- Supplied catalog-grid reference: `/var/folders/ym/kg6qcm917wv2wdk0qby6y6tw0000gn/T/TemporaryItems/NSIRD_screencaptureui_Cd702l/스크린샷 2026-08-29 오후 8.19.33.png` (`694 × 500` px), where wide product art was letterboxed inside square cards.
+- Supplied product-detail reference: `/var/folders/ym/kg6qcm917wv2wdk0qby6y6tw0000gn/T/TemporaryItems/NSIRD_screencaptureui_PFfXF7/스크린샷 2026-08-29 오후 8.19.43.png` (`704 × 664` px), where the same image treatment left large blank bands above and below the artwork.
+- Revised iOS Simulator grid evidence: `/tmp/dabboba-product-cover-grid-after.png` (`1206 × 2622` px).
+- Revised iOS Simulator detail evidence: `/tmp/dabboba-product-cover-detail-after.png` (`1206 × 2622` px).
+- Focused comparisons: `work/qa/catalog-product-cover-grid-comparison.png` (`696 × 901` px) and `work/qa/catalog-product-cover-detail-comparison.png` (`696 × 1200` px).
+- State and density: Home catalog and Product Detail on the DABBOBA SDK54 iOS Simulator at native screenshot density. The supplied and revised detail captures contain different fixture products, so the comparison evaluates the shared image-frame behavior rather than content identity.
+
+**Findings and iteration history**
+
+- Initial P2: native `contain` sizing preserved the full wide image but exposed large neutral bands inside the fixed product frame, making the catalog look unfinished and reducing the visual weight of the merchandise.
+- Historical fix at the time of this pass: customer-facing product photography used centered native `cover` sizing across the listed surfaces. The later Product Detail intrinsic-ratio pass and the 2026-08-30 Ppoba intrinsic-ratio pass supersede that choice on those two surfaces only.
+- Current result: Home, Exchange, reusable catalog/history rows, and profile account thumbnails still fill their fixed rounded slots with `cover`. Product Detail and Ppoba catalog cards instead preserve every source edge at the original ratio, as recorded in their newer QA sections.
+
+**Required fidelity surfaces**
+
+- Fonts and typography: unchanged; Noto Sans content text and isolated pixel-display titles retain their existing roles.
+- Spacing and layout rhythm: the historical fixed-thumbnail geometry remains applicable only to the compact surfaces named above; newer Product Detail and Ppoba sections document their adaptive media geometry.
+- Colors and tokens: unchanged; no synthetic backdrop, blur fill, or new color layer was introduced.
+- Image quality: compact fixed thumbnails still render the original asset directly with native `cover`; Product Detail and Ppoba use their newer intrinsic-ratio rules. No surface uses an enlarged duplicate background, placeholder, or generated replacement.
+- Copy and content: unchanged.
+
+**Interaction and technical evidence**
+
+- Home product cards still open Product Detail, and the revised full-bleed hero was inspected in the running Simulator stream.
+- Structural coverage now protects the per-surface rule: compact thumbnails retain `cover`, while Product Detail and Ppoba retain intrinsic-ratio `contain` behavior.
+- Consolidated verification passed: native TypeScript checking, 118 unit tests, protected-runtime integrity, production web build, Expo iOS export, `git diff --check`, Metro health, and the `localhost:3201` Simulator preview.
+- The production web build retains its existing non-blocking chunk-size advisory, and the unit run retains its existing non-blocking Node module-type warning for `product-title.ts`; neither warning comes from this image-fit change.
+- Physical-device and signed-store-build verification remain outside this Simulator QA.
+
+final result: passed
+
+## 2026-08-29 — Smoother root-navigation expansion and collapse
+
+**Source and rendered evidence**
+
+- Source motion reference: `/Users/kyoungmin/Desktop/KakaoTalk_Video_2026-08-29-18-48-16.mp4`, sampled in `/tmp/dabboba-nav-reference-every-second.png` (`2012 × 1457` px).
+- Revised motion capture: `/tmp/dabboba-nav-smooth-after.mp4` (`1206 × 2622` px, 5.78 seconds) recorded from the running iOS Simulator while collapsing and re-expanding the Home navigation through scroll gestures.
+- Detailed implementation contact sheet: `/tmp/dabboba-nav-smooth-after-detail.png` (`2468 × 1456` px), sampled at 8 fps and cropped to the navigation region.
+- Side-by-side motion board: `work/qa/root-navigation-smoother-motion-comparison.png` (`4480 × 1456` px), with the reference sequence on the left and the DABBOBA implementation sequence on the right.
+- State and density: Home root catalog on the SDK54 iOS Simulator at native `1206 × 2622` screenshot density. No browser frame was used as native motion proof.
+
+**Findings and iteration history**
+
+- Initial P2: the bar used a fixed 220 ms timing curve while the active selection-track width and position were recalculated from `onLayout`. Bar size, label visibility, and selection geometry could therefore update on different frames and make quick direction changes feel abrupt.
+- Fix: expansion and collapse now share one interruptible, overshoot-clamped spring. Width, height, radius, vertical offset, label reveal, tab width, and selection-track geometry all derive continuously from the same animated value.
+- Revised result: the sampled frames show intermediate sizes in both directions without a skipped endpoint, stacked animation, or rebound. The active Home track remains centered while the capsule width changes.
+
+**Required fidelity surfaces**
+
+- Typography: Noto Sans KR labels are unchanged; their reveal now fades and clips gradually instead of dropping out at the end of an unrelated layout pass.
+- Spacing and geometry: the expanded and compact resting sizes are unchanged. Only interpolation and damping changed, so safe-area position and 44 px touch targets remain intact.
+- Colors and surfaces: the translucent warm capsule, neutral active track, and canonical green selection indicator are unchanged.
+- Motion accessibility: reduced-motion continues to set the requested resting state immediately, bypassing the spring.
+
+**Interaction and technical evidence**
+
+- Verified collapse while scrolling down and re-expansion while scrolling up in the running iOS Simulator.
+- Native TypeScript checking and the root-navigation structural regression test passed after the motion change.
+- Consolidated verification passed: 118 unit tests, protected-runtime integrity, production web build, Expo iOS export, `git diff --check`, Metro health, and the `localhost:3201` Simulator preview.
+- The production web build still emits its existing non-blocking chunk-size advisory; the unit run still emits its existing non-blocking Node module-type warning for `product-title.ts`. Neither warning originates from this navigation motion change.
+- Physical-device and signed-store-build verification remain outside this Simulator QA.
+
+final result: passed
+
+## 2026-08-29 — Home discovery order and Dukroom preview
+
+**Source and rendered evidence**
+
+- Removal reference: `/var/folders/ym/kg6qcm917wv2wdk0qby6y6tw0000gn/T/TemporaryItems/NSIRD_screencaptureui_0IyFbP/스크린샷 2026-08-29 오후 7.40.25.png` (`1017 × 234` px), showing the black API-status introduction card that must no longer appear.
+- Final home-top iOS Simulator capture: `/tmp/dabboba-home-top-final.png` (`1206 × 2622` px).
+- Final lower-home iOS Simulator capture: `/tmp/dabboba-home-dukroom-final.png` (`1206 × 2622` px).
+- Dukroom navigation proof: `/tmp/dabboba-home-dukroom-detail-proof.png` (`1206 × 2622` px).
+- Same-input comparison board: `work/qa/home-section-order-comparison.png` (`2400 × 1400` px).
+- State: native Expo Home feed on the DABBOBA SDK54 iOS Simulator, with the local catalog API available.
+
+**Findings**
+
+- No actionable P0, P1, or P2 issue remains.
+- The former black `원하는 거 다 뽑아` API-status introduction card is absent.
+- The native Home feed now follows the requested order exactly: `다뽀바 인기 작품`, `오늘의 뽀바`, then `다뽀바 덕룸`.
+- `오늘의 뽀바` deliberately presents a compact four-product set so the community preview is reachable without turning Home into the full shop catalog. Category chips continue to filter this compact set.
+- The Home Dukroom rail combines available community posts with the existing registered-product example content and preserves the established image, author, IP, title, like, and comment presentation.
+
+**Required fidelity surfaces**
+
+- Fonts and typography: the DABBOBA wordmark and Korean pixel section-title system remain unchanged; product, author, price, and community metadata continue to use the shared Noto text system.
+- Spacing and layout rhythm: removing the hero closes the dead area above discovery while retaining the existing Home gutter, section spacing, horizontal rails, and transparent floating-navigation inset.
+- Colors and tokens: the warm page surface, near-black text, canonical green rank/category accents, and quiet card borders remain unchanged.
+- Image quality: the existing catalog and Dukroom assets render at native Simulator density without a replacement placeholder in the inspected states.
+- Copy and content: the three requested Korean section titles are the only Home discovery headings in this flow; the technical API/cache source note was removed from customer-facing UI.
+
+**Interaction and technical evidence**
+
+- Tapping the first Home Dukroom card opened the existing native `덕룸 상세` route and displayed the matching post content.
+- The structural regression test fixes the hero removal, exact three-section order, four-product Home limit, Dukroom preview fetch, and detail-route connection.
+- Physical-device and signed-store-build verification remain outside this Simulator QA.
+
+final result: passed
+
+## 2026-08-29 — Product-detail IP and subject hierarchy
+
+**Source and rendered evidence**
+
+- Source title crop: `/var/folders/ym/kg6qcm917wv2wdk0qby6y6tw0000gn/T/TemporaryItems/NSIRD_screencaptureui_iLmdwm/스크린샷 2026-08-29 오후 7.46.05.png` (`1017 × 234` px).
+- Final iOS Simulator capture: `/tmp/dabboba-product-title-after-2.png` (`1206 × 2622` px).
+- Focused implementation crop: `/tmp/dabboba-product-title-after-focus.png` (`1140 × 360` px).
+- Same-input focused comparison: `work/qa/product-title-hierarchy-comparison.png` (`2200 × 520` px).
+- State: `전생했더니 슬라임이었던 건에 대하여` 쿠지 상품 상세, native Expo app on the DABBOBA SDK54 iOS Simulator.
+
+**Findings and iteration history**
+
+- Initial P2: the canonical IP name appeared both in the small metadata line and again inside the large product heading, weakening hierarchy and forcing an avoidable extra line.
+- Fix: the detail screen now removes one exact occurrence of the loaded IP name from the registered product title and uses the remaining subject as the large heading. Qualifiers before the IP name are preserved.
+- Revised result: no actionable P0, P1, or P2 mismatch remains. The small line contains `전생했더니 슬라임이었던 건에 대하여`; the large line contains only `극장판 창해의 눈물편 이치방쿠지`.
+
+**Required fidelity surfaces**
+
+- Fonts and typography: the small line retains the shared muted Noto Sans KR metadata treatment, while the subject retains the existing large, heavy Noto Sans KR product-title treatment.
+- Spacing and layout rhythm: the existing 4 px title gap, product-detail gutter, badge row, price rhythm, and footer placement are unchanged; removing repeated copy reduces the heading from three lines to one in the inspected state.
+- Colors and tokens: the warm surface, muted IP color, near-black subject color, and green category badge are unchanged.
+- Image quality: the existing licensed/prototype product asset remains untouched and renders with the same contain treatment.
+- Copy and content: only duplicated IP text is removed from the large heading. Registered product data, descriptions, price, stock, and commerce copy remain unchanged.
+
+**Interaction and technical evidence**
+
+- Exact-prefix, in-title, separator, no-match, and whole-title fallbacks are covered by the product-title unit tests.
+- The title is derived at render time; catalog source data and API contracts are not rewritten.
+- Physical-device and signed-store-build verification remain outside this Simulator QA.
+
+final result: passed
+
+## 2026-08-29 — Scroll-responsive floating root navigation
+
+**Source and rendered evidence**
+
+- Motion reference: `/Users/kyoungmin/Desktop/KakaoTalk_Video_2026-08-29-18-48-16.mp4` (`1320 × 306`, 24 fps, 27 seconds).
+- Reference contact sheet: `/tmp/dabboba-nav-reference-every-second.png`.
+- Expanded iOS Simulator state: `/tmp/dabboba-nav-expanded-final.png` (`1206 × 2622` px).
+- Compact iOS Simulator state: `/tmp/dabboba-nav-compact-v1.png` (`1206 × 2622` px).
+- Same-input comparison: `work/qa/root-navigation-motion-comparison.png` (`1600 × 1620` px), with the video states above and DABBOBA expanded/compact states below.
+- Viewport and state: DABBOBA SDK54 iOS Simulator, top/root expanded state and the compact visual state used after downward scrolling.
+
+**Findings**
+
+- No actionable P0, P1, or P2 visual mismatch remains. The implementation preserves the reference's floating translucent surface, stable five-item layout, neutral moving selection track, and compact icon-only state without copying the reference brand.
+- Typography: the expanded labels remain Noto Sans KR; compact mode removes the labels instead of scaling them into illegibility.
+- Spacing and layout: the expanded bar is 66 px high and uses the available mobile width; the compact bar reduces to 54 px high and at most 304 px wide. Both remain centered above the bottom safe area.
+- Colors and tokens: selection uses the existing DABBOBA green only for the icon and thin two-pixel indicator. The larger moving track stays neutral, keeping the adult, restrained SEED-derived direction.
+- Accessibility: every tab keeps a minimum 44 × 44 px target in both states, and reduced-motion preference collapses transition duration while preserving state changes.
+- Image quality: no new raster or placeholder asset was introduced; existing line icons and the shared Ppoba icon remain sharp and optically balanced.
+
+**Interaction and technical evidence**
+
+- All five root scroll screens share the same direction-aware handler. Downward movement accumulates 18 px before compacting; upward movement accumulates 10 px before expanding; returning within 12 px of the top expands immediately.
+- A tab change expands the bar and moves the neutral selection track with a damped spring (`damping: 23`, `stiffness: 230`). The bar itself uses a 220 ms cubic-bezier transition and never fully hides.
+- The compact screenshot was produced as a deterministic visual-state capture; transition behavior is covered by the shared implementation and structural regression assertions rather than claimed as physical-device gesture proof.
+- Physical-device and signed-store-build validation remain outside this local iOS Simulator QA.
+
+final result: passed
+
 ## 2026-08-24 — Home settings entry and settings detail flows
 
 **Source visual truth**
@@ -428,5 +799,140 @@ final result: passed
 **Follow-up Polish**
 
 - None required for this rollout.
+
+final result: passed
+
+## 2026-08-29 — Root header action order and capsule balance
+
+**Source and rendered evidence**
+
+- User-selected order: `검색 → 알림 → 캡슐`, with the capsule fixed at the far right.
+- Before capture: `/tmp/dabboba-title-capsule-live-2.png` (`1206 × 2622` px).
+- Final iOS Simulator capture: `/tmp/dabboba-header-order-final.png` (`1206 × 2622` px).
+- Same-input focused comparison: `work/qa/root-header-actions-order-comparison.png` (`1206 × 210` px), with before on the left and final on the right.
+- State: Home root screen, iPhone simulator, development catalog loaded.
+
+**Findings**
+
+- No actionable P0, P1, or P2 issue remains.
+- The final header visibly follows `검색 → 알림 → 캡슐`; all five root screens consume the same shared action component, so the order stays consistent across categories.
+- Search and notification remain 23 px line icons. The 25 px capsule has a darker outline with comparable optical weight, a canonical green upper shell, exactly two curved seams, no wordmark or center latch, and a restrained 15-degree clockwise tilt.
+- The three controls keep their existing 44 px touch targets and vertical alignment. Moving the capsule to the far right does not shift the Home wordmark or reduce header breathing room.
+
+**Interaction and technical evidence**
+
+- The updated order was bundled by Expo and inspected in the running iOS Simulator.
+- Expo iOS export, native TypeScript checking, protected-runtime checking, and the production web build passed.
+- The structural test now fixes the requested action order to prevent regression.
+
+final result: passed
+
+## 2026-08-29 — Transparent root-navigation overlay
+
+**Source and rendered evidence**
+
+- Source motion reference: `/Users/kyoungmin/Desktop/KakaoTalk_Video_2026-08-29-18-48-16.mp4`, represented by `/tmp/dabboba-nav-reference-every-second.png` (`2012 × 1457` px).
+- Initial implementation evidence: `/tmp/dabboba-nav-expanded-final-live.png` (`1206 × 2622` px), where the tab bar still occupied a separate footer region.
+- Revised iOS Simulator evidence: `/tmp/dabboba-nav-transparent-footer-v1.png` (`1206 × 2622` px).
+- Same-input focused comparison: `work/qa/root-navigation-transparent-overlay-comparison.png` (`1600 × 1840` px), with the source states above and the revised DABBOBA navigation overlay below.
+- State and density: scrolled root catalog on the DABBOBA SDK54 iOS Simulator at native screenshot density; no cross-density measurement was used for spacing judgments.
+
+**Findings and iteration history**
+
+- Initial P2: the custom tab bar participated in the bottom-tab flex layout, leaving an opaque page-colored footer around the floating capsule. This visually stopped the feed before the navigation and weakened the requested floating-over-content effect.
+- Fix: the outer footer is now absolutely positioned on all four bottom edges, fully transparent, and layered above the root scene. Every root feed receives a shared 124 px content inset so its final item can still scroll clear of the control.
+- Revised result: no actionable P0, P1, or P2 mismatch remains. Product cards, images, and text visibly continue beneath and around the navigation capsule while the capsule surface remains readable.
+
+**Required fidelity surfaces**
+
+- Fonts and typography: Noto Sans KR tab labels and the isolated pixel-title system are unchanged.
+- Spacing and layout rhythm: the previous rectangular footer reservation is gone; the floating capsule remains centered and safe-area aligned without changing its expanded or compact dimensions.
+- Colors and tokens: the outer overlay is fully transparent, while the navigation capsule retains its restrained translucent warm surface and canonical green selection indicator.
+- Image quality: existing product images remain visible behind the overlay without a new mask, placeholder, or raster asset.
+- Copy and content: no labels or app copy changed.
+
+**Interaction and technical evidence**
+
+- Pointer handling remains `box-none` outside the capsule, so uncovered page content stays scrollable and tappable.
+- All five root screens use the same bottom content inset and shared floating-navigation component.
+- Physical-device and signed-store-build verification remain outside this Simulator QA.
+
+final result: passed
+
+## 2026-08-29 — Balanced Korean explanatory copy
+
+**Source and rendered evidence**
+
+- Source visual truth: `/var/folders/ym/kg6qcm917wv2wdk0qby6y6tw0000gn/T/TemporaryItems/NSIRD_screencaptureui_xSFfgK/스크린샷 2026-08-29 오후 8.12.55.png` (`650 × 244` px), showing the Exchange Room introduction with `여러` split across lines as `여` / `러`.
+- Initial native evidence: `/tmp/dabboba-exchange-copy-before.png` (`1206 × 2622` px).
+- Revised native evidence: `/tmp/dabboba-exchange-copy-after.png` (`1206 × 2622` px).
+- Focused same-width comparison: `work/qa/exchange-intro-copy-wrap-comparison.png` (`650 × 478` px), with the supplied state above and the corrected state below.
+- State and density: Exchange Room root screen on the SDK54 iOS Simulator at native `1206 × 2622` screenshot density. The focused implementation crop was normalized to the supplied image width; judgments are limited to the app-owned card content.
+
+**Findings and iteration history**
+
+- Initial P2: iOS character-based Hangul wrapping left the first syllable of `여러` on the first line and the second syllable on the next line. The split interrupted reading rhythm in a short, fixed callout.
+- Fix: the shared text layer now offers balanced explanatory wrapping (`hangul-word` on iOS and `balanced` on Android). This fixed callout also receives one semantic break after the complete first clause, keeping `여러` intact.
+- Revised result: the first line ends at the comma and the second line begins with the complete word `여러`; line height and slight tracking adjustment keep the two-line block optically even without changing the card or action geometry.
+
+**Required fidelity surfaces**
+
+- Fonts and typography: Noto Sans KR remains the content face. The description stays at 14 px with a relaxed 22 px line height and `-0.15` tracking; no pixel-display font enters body copy.
+- Spacing and layout rhythm: the black card, 16 px internal gutter, callout-to-button gap, button height, and corner radii are unchanged.
+- Colors and tokens: the muted description, inverted card surface, and canonical green action remain unchanged.
+- Image quality: this callout contains no image asset; surrounding product imagery is unaffected.
+- Copy and content: wording is unchanged. Only a semantic line break was added after `올리고,`.
+
+**Interaction and technical evidence**
+
+- The `교환 상품 올리기` action remains in its original location and retains its existing behavior.
+- Native TypeScript checking passed after the shared text primitive was added; the structural test fixes the platform wrapping strategy and semantic break to prevent regression.
+- Consolidated verification passed: 118 unit tests, protected-runtime integrity, production web build, Expo iOS export, `git diff --check`, Metro health, and the `localhost:3201` Simulator preview.
+- The production web build retains its existing non-blocking chunk-size advisory, and the unit run retains its existing non-blocking Node module-type warning for `product-title.ts`; neither warning comes from this copy-layout change.
+- Physical-device and signed-store-build verification remain outside this Simulator QA.
+
+final result: passed
+## 2026-08-29 — Native checkout preparation flow
+
+- Request: preserve the approved Product Detail confirmation wording and build the screen shown after `OK`.
+- Visual sources:
+  - approved alert: `/var/folders/ym/kg6qcm917wv2wdk0qby6y6tw0000gn/T/TemporaryItems/NSIRD_screencaptureui_M8sZDZ/스크린샷 2026-08-29 오후 8.42.31.png` (`656×452`)
+  - existing web checkout structure: `/tmp/dabboba-legacy-checkout-reference.png` (`1280×720`)
+- Native implementation evidence: `/tmp/dabboba-native-checkout-preparation.png` (`1206×2622`)
+- Comparison board: `work/qa/native-checkout-preparation-comparison.png` (`2000×1500`)
+- Verified state: 도쿄 리벤저스 쿠지, 수량 3개, 결제 예정 금액 29,700원.
+- Handoff: the Product Detail alert keeps the approved `뽑기 주문 준비 완료` copy and the single `OK` action opens `/checkout/[productId]` with product ID and quantity.
+- Fidelity: the native screen retains the established checkout information order—product, coupon/points, payment method, total—and applies the current Expo SEED-compatible spacing, Noto body copy, pixel titles, off-white background, and DABBOBA green.
+- Interaction: payment method and all-points controls are selectable locally; the product and point balance are refreshed from the API on entry.
+- Commerce boundary: the screen explicitly states that local PG payment and order creation do not occur. No payment success, order, or draw entitlement is fabricated.
+- Automated verification: focused structure test and Expo mobile TypeScript check passed before the full workspace verification.
+- Evidence scope: verified in the iOS simulator and local preview only; no physical-device, signed-native, payment-provider, or store-build proof is claimed.
+- Final result: passed.
+
+## 2026-08-29 — Exchange Room main rule card
+
+**Evidence**
+
+- Source visual truth: `/var/folders/ym/kg6qcm917wv2wdk0qby6y6tw0000gn/T/TemporaryItems/NSIRD_screencaptureui_yRR1Q2/스크린샷 2026-08-29 오후 8.54.33.png` (`660×202`).
+- Rendered implementation: `/tmp/dabboba-exchange-rule-main.png` (`1206×2622`, iOS Simulator screenshot; approximately `402×874` logical points at `3×`).
+- Focus crop: implementation pixels `(35,385)–(1171,905)`, resulting in `1136×520`.
+- Combined comparison input: `work/qa/exchange-main-rule-card-comparison.png` (`1200×1000`). Both rule-card regions were normalized to the same `1040 px` comparison width; the main-screen action below the copy is an intentional extension of the source card.
+- State: Exchange Room root, all categories selected, eight API-backed example listings, signed-in local development session.
+
+**Findings**
+
+- No actionable P0/P1/P2 differences remain. The source card's near-black surface, rounded corners, green `교환 규칙` label, muted readable copy, and exact rule wording are preserved on the Exchange Room main screen.
+- Fonts and typography: Noto Sans KR remains the readable face for the rule label and body. The hierarchy is restrained and the two-clause rule remains legible without using the pixel display font for instructional copy.
+- Spacing and layout rhythm: the card uses the existing 16 px screen gutter, 16 px internal padding, 16 px radius, and established spacing tokens. The retained 44 px `교환 상품 올리기` action fits inside the card without crowding the rule copy.
+- Colors and tokens: the card uses the existing inverted SEED layer, canonical `#91E98E` title/action accent, and muted light body copy.
+- Image quality: the rule card contains no image asset or substitute artwork; surrounding product images remain unchanged.
+- Copy and content: the main screen now states that only app-purchased products registered in storage can be listed and that displayed amounts are gacha-shop reference prices, not seller-defined prices.
+
+**Interaction and verification**
+
+- The existing `교환 상품 올리기` action remains connected to its original authentication-aware handler.
+- The category filters and listing routes remain below the rule card and unchanged.
+- Focused structural regression test and Expo mobile TypeScript check passed before consolidated verification.
+- Evidence is iOS Simulator/local-preview proof only; physical-device and signed-store-build behavior is not claimed.
 
 final result: passed

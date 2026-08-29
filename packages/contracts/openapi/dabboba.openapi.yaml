@@ -765,7 +765,7 @@ paths:
         - $ref: "#/components/parameters/Search"
       responses:
         "200":
-          description: Authenticated user's exchange-eligible registered inventory.
+          description: Authenticated user's GACHA or KUJI inventory whose immutable draw result belongs to the current owner and whose current status is OWNED, excluding active shipping, delivered, synthetic source-tagged, and transferred inventory.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/InventoryUnitPage" }
@@ -782,7 +782,7 @@ paths:
           schema: { $ref: "#/components/schemas/ProductCategory" }
       responses:
         "200":
-          description: Open visible exchange listings.
+          description: Open visible exchange listings, searchable by listing copy, product name, IP title, or IP alias.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ExchangeListingPage" }
@@ -832,7 +832,7 @@ paths:
             schema: { $ref: "#/components/schemas/CreateExchangeOfferInput" }
       responses:
         "201":
-          description: Product-backed exchange proposal created.
+          description: Product-only exchange proposal created from eligible owned draw inventory.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ExchangeOffer" }
@@ -1224,6 +1224,27 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/AccountPointPage" }
+  /v1/account/point-returns:
+    post:
+      tags: [Account]
+      operationId: createAccountPointReturn
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreatePointReturnInput" }
+      responses:
+        "201":
+          description: Directly drawn, currently stored inventory atomically returned for 50 percent of its server reference amount in points.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PointReturnResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "409": { $ref: "#/components/responses/Conflict" }
   /v1/account/notification-preferences:
     get:
       tags: [Account]
@@ -2900,6 +2921,32 @@ components:
             balance: { type: integer, minimum: 0 }
             version: { type: integer, minimum: 0 }
             items: { type: array, items: { $ref: "#/components/schemas/PointLedgerEntry" } }
+    CreatePointReturnInput:
+      type: object
+      additionalProperties: false
+      required: [inventoryUnitIds]
+      properties:
+        inventoryUnitIds:
+          type: array
+          minItems: 1
+          maxItems: 20
+          uniqueItems: true
+          items: { type: string, format: uuid }
+    PointReturnResult:
+      type: object
+      additionalProperties: false
+      required: [id, inventoryUnitIds, totalPointAmount, balance, returnedAt]
+      properties:
+        id: { type: string, format: uuid }
+        inventoryUnitIds:
+          type: array
+          minItems: 1
+          maxItems: 20
+          uniqueItems: true
+          items: { type: string, format: uuid }
+        totalPointAmount: { type: integer, minimum: 1, maximum: 2147483647 }
+        balance: { type: integer, minimum: 0, maximum: 2147483647 }
+        returnedAt: { type: string, format: date-time }
     NotificationPreferences:
       type: object
       additionalProperties: false
@@ -3462,7 +3509,7 @@ components:
         productId: { type: string, maxLength: 120 }
         product: { $ref: "#/components/schemas/CatalogProduct" }
         sourceType: { type: string, enum: [PURCHASE, GACHA, KUJI, ADMIN_ADJUSTMENT] }
-        status: { type: string, enum: [OWNED, EXCHANGE_LISTED, EXCHANGE_OFFERED, SHIPPING, DELIVERED, TRANSFERRED, REFUNDED] }
+        status: { type: string, enum: [OWNED, EXCHANGE_LISTED, EXCHANGE_OFFERED, SHIPPING, DELIVERED, TRANSFERRED, REFUNDED, POINT_RETURNED] }
         acquiredAt: { type: string, format: date-time }
     InventoryUnitPage:
       allOf:
@@ -3515,23 +3562,22 @@ components:
     ExchangeOffer:
       type: object
       additionalProperties: false
-      required: [id, listingId, proposerId, offeredInventory, message, status, createdAt, updatedAt]
+      required: [id, listingId, proposerId, proposerNickname, offeredInventory, status, createdAt, updatedAt]
       properties:
         id: { type: string, format: uuid }
         listingId: { type: string, format: uuid }
         proposerId: { type: string, format: uuid }
+        proposerNickname: { type: string }
         offeredInventory: { $ref: "#/components/schemas/InventoryUnit" }
-        message: { type: string }
         status: { type: string, enum: [PENDING, ACCEPTED, REJECTED, WITHDRAWN] }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
     CreateExchangeOfferInput:
       type: object
       additionalProperties: false
-      required: [offeredInventoryUnitId, message]
+      required: [offeredInventoryUnitId]
       properties:
         offeredInventoryUnitId: { type: string, format: uuid }
-        message: { type: string, minLength: 1, maxLength: 2000 }
     Order:
       type: object
       additionalProperties: false
