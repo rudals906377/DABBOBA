@@ -1,5 +1,23 @@
 import pg from "pg";
 
+export {
+  KUJI_CHECKOUT_LEASE_SECONDS,
+  KUJI_DRAW_LEASE_SECONDS,
+  bumpKujiRoomVersion,
+  completeLockedKujiOrderRoomIfDrawn,
+  expireLockedKujiOrderDrawing,
+  kujiCheckoutExpiry,
+  kujiDrawingExpiry,
+  lockExistingKujiRoom,
+  lockKujiRoomAdvisories,
+  lockLinkedKujiRoomForOrder,
+  promoteNextKujiRoomEntryLocked,
+  releaseLockedKujiOrderRoom,
+  startLockedKujiOrderDrawing,
+  type KujiRoomEntryState,
+  type LockedKujiOrderRoom,
+} from "./kuji-room.js";
+
 const { Pool } = pg;
 
 export type DatabasePool = pg.Pool;
@@ -7,6 +25,11 @@ export type DatabaseClient = pg.PoolClient;
 export type Queryable = Pick<pg.Pool, "query"> | Pick<pg.PoolClient, "query">;
 
 export function createDatabasePool(databaseUrl: string, applicationName = "dabboba") {
+  assertDisposableIntegrationDatabaseTarget(
+    databaseUrl,
+    process.env.DATABASE_URL,
+    applicationName,
+  );
   return new Pool({
     connectionString: databaseUrl,
     application_name: applicationName,
@@ -15,6 +38,28 @@ export function createDatabasePool(databaseUrl: string, applicationName = "dabbo
     connectionTimeoutMillis: 5_000,
     allowExitOnIdle: false,
   });
+}
+
+export function assertDisposableIntegrationDatabaseTarget(
+  databaseUrl: string,
+  applicationDatabaseUrl: string | undefined,
+  applicationName: string,
+): void {
+  if (!applicationName.endsWith("-integration") || !applicationDatabaseUrl) return;
+  if (databaseTarget(databaseUrl) !== databaseTarget(applicationDatabaseUrl)) return;
+  throw new Error(
+    "통합 테스트 데이터베이스가 앱 데이터베이스와 같습니다. 별도의 DABBOBA_DISPOSABLE_TEST_DATABASE_URL을 사용해 주세요.",
+  );
+}
+
+function databaseTarget(value: string): string {
+  try {
+    const parsed = new URL(value);
+    const port = parsed.port || "5432";
+    return `${parsed.hostname.toLocaleLowerCase("en-US")}:${port}${parsed.pathname}`;
+  } catch {
+    return value.trim();
+  }
 }
 
 export async function withTransaction<T>(pool: DatabasePool, work: (client: DatabaseClient) => Promise<T>): Promise<T> {

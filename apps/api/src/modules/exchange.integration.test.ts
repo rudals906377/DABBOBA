@@ -187,11 +187,12 @@ test(
 
     const listingInventory = await addDrawInventory(author.actor.userId, "GACHA");
     const offerOneInventory = await addDrawInventory(proposerOne.actor.userId, "GACHA");
-    const offerTwoInventory = await addDrawInventory(proposerTwo.actor.userId, "KUJI");
+    const offerTwoInventory = await addDrawInventory(proposerTwo.actor.userId, "GACHA");
 
     for (const inventoryId of [
       await addInventory(author.actor.userId, "GACHA"),
       await addInventory(author.actor.userId, "KUJI"),
+      await addDrawInventory(author.actor.userId, "KUJI"),
       await addInventory(author.actor.userId, "PURCHASE"),
       await addInventory(author.actor.userId, "ADMIN_ADJUSTMENT"),
       await addDrawInventory(author.actor.userId, "GACHA", "SHIPPING"),
@@ -217,6 +218,55 @@ test(
       [listingInventory],
     );
 
+    const legacyKujiListingInventory = await addDrawInventory(author.actor.userId, "KUJI");
+    const legacyKujiListing = await pool.query<{ id: string }>(
+      `INSERT INTO exchange_listings(author_id,offered_inventory_unit_id,title,details)
+       VALUES($1,$2,'기존 쿠지 교환글','규칙 변경 전 데이터') RETURNING id`,
+      [author.actor.userId, legacyKujiListingInventory],
+    );
+    const legacyKujiListingId = legacyKujiListing.rows[0]!.id;
+    await pool.query(
+      "UPDATE inventory_units SET status='EXCHANGE_LISTED' WHERE id=$1",
+      [legacyKujiListingInventory],
+    );
+    const publicListingsAfterLegacyInsert = await app.inject({
+      method: "GET",
+      url: "/v1/exchange/listings?limit=100",
+    });
+    assert.equal(publicListingsAfterLegacyInsert.statusCode, 200, publicListingsAfterLegacyInsert.body);
+    assert.equal(
+      (publicListingsAfterLegacyInsert.json() as { items: Array<{ id: string }> }).items
+        .some((item) => item.id === legacyKujiListingId),
+      false,
+    );
+    const legacyDetail = await app.inject({
+      method: "GET",
+      url: `/v1/exchange/listings/${legacyKujiListingId}`,
+      headers: { authorization: `Bearer ${author.token}` },
+    });
+    assert.equal(legacyDetail.statusCode, 404, legacyDetail.body);
+    const legacyOfferAttempt = await mutate(
+      proposerOne.token,
+      "POST",
+      `/v1/exchange/listings/${legacyKujiListingId}/offers`,
+      { offeredInventoryUnitId: await addDrawInventory(proposerOne.actor.userId, "GACHA") },
+    );
+    assert.equal(legacyOfferAttempt.statusCode, 409, legacyOfferAttempt.body);
+    assert.match(legacyOfferAttempt.body, /가챠로 직접 뽑아/);
+    const legacyCancellation = await mutate(
+      author.token,
+      "POST",
+      `/v1/exchange/listings/${legacyKujiListingId}/cancel`,
+      undefined,
+    );
+    assert.equal(legacyCancellation.statusCode, 200, legacyCancellation.body);
+    assert.equal((legacyCancellation.json() as { status: string }).status, "CANCELLED");
+    const legacyInventoryAfterCancellation = await pool.query<{ status: string }>(
+      "SELECT status FROM inventory_units WHERE id=$1",
+      [legacyKujiListingInventory],
+    );
+    assert.equal(legacyInventoryAfterCancellation.rows[0]!.status, "OWNED");
+
     const listingResponse = await mutate(author.token, "POST", "/v1/exchange/listings", {
       title: "동시 수락 테스트",
       details: "한 제안만 수락되어야 합니다.",
@@ -238,6 +288,38 @@ test(
       );
     }
 
+    const legacyKujiOfferInventory = await addDrawInventory(proposerTwo.actor.userId, "KUJI");
+    const legacyKujiOffer = await pool.query<{ id: string }>(
+      `INSERT INTO exchange_offers(listing_id,proposer_id,offered_inventory_unit_id,message)
+       VALUES($1,$2,$3,'기존 쿠지 제안') RETURNING id`,
+      [listingId, proposerTwo.actor.userId, legacyKujiOfferInventory],
+    );
+    const legacyKujiOfferId = legacyKujiOffer.rows[0]!.id;
+    await pool.query(
+      "UPDATE inventory_units SET status='EXCHANGE_OFFERED' WHERE id=$1",
+      [legacyKujiOfferInventory],
+    );
+    const legacyKujiAcceptance = await mutate(
+      author.token,
+      "POST",
+      `/v1/exchange/listings/${listingId}/offers/${legacyKujiOfferId}/decision`,
+      { decision: "ACCEPTED" },
+    );
+    assert.equal(legacyKujiAcceptance.statusCode, 409, legacyKujiAcceptance.body);
+    assert.match(legacyKujiAcceptance.body, /가챠로 직접 뽑아/);
+    const legacyKujiRejection = await mutate(
+      author.token,
+      "POST",
+      `/v1/exchange/listings/${listingId}/offers/${legacyKujiOfferId}/decision`,
+      { decision: "REJECTED" },
+    );
+    assert.equal(legacyKujiRejection.statusCode, 200, legacyKujiRejection.body);
+    const legacyKujiOfferInventoryAfterRejection = await pool.query<{ status: string }>(
+      "SELECT status FROM inventory_units WHERE id=$1",
+      [legacyKujiOfferInventory],
+    );
+    assert.equal(legacyKujiOfferInventoryAfterRejection.rows[0]!.status, "OWNED");
+
     const purchasedInventory = await addInventory(proposerOne.actor.userId, "PURCHASE");
     const purchasedOffer = await mutate(
       proposerOne.token,
@@ -251,6 +333,7 @@ test(
     for (const inventoryId of [
       await addInventory(proposerOne.actor.userId, "GACHA"),
       await addInventory(proposerOne.actor.userId, "KUJI"),
+      await addDrawInventory(proposerOne.actor.userId, "KUJI"),
       await addInventory(proposerOne.actor.userId, "ADMIN_ADJUSTMENT"),
       await addDrawInventory(proposerOne.actor.userId, "GACHA", "SHIPPING"),
       await addDrawInventory(proposerOne.actor.userId, "KUJI", "DELIVERED"),
@@ -289,8 +372,9 @@ test(
     });
     assert.equal(authorView.statusCode, 200, authorView.body);
     const visibleOffers = (authorView.json() as {
-      offers: Array<{ proposerNickname: string }>;
+      offers: Array<{ id: string; proposerNickname: string }>;
     }).offers;
+    assert.equal(visibleOffers.some((offer) => offer.id === legacyKujiOfferId), false);
     assert.deepEqual(
       visibleOffers.map((offer) => offer.proposerNickname).sort(),
       [proposerOne.actor.nickname, proposerTwo.actor.nickname].sort(),
@@ -425,7 +509,7 @@ test(
 
     const cancelListingInventory = await addDrawInventory(author.actor.userId, "GACHA");
     const withdrawInventory = await addDrawInventory(proposerOne.actor.userId, "GACHA");
-    const cancelOfferInventory = await addDrawInventory(proposerTwo.actor.userId, "KUJI");
+    const cancelOfferInventory = await addDrawInventory(proposerTwo.actor.userId, "GACHA");
     const cancelListingResponse = await mutate(author.token, "POST", "/v1/exchange/listings", {
       title: "취소와 철회 테스트",
       details: "예약 상품이 다시 소유 상태가 되어야 합니다.",
@@ -535,7 +619,7 @@ test(
     );
 
     const overrideListingInventory = await addDrawInventory(author.actor.userId, "GACHA");
-    const overrideOfferInventory = await addDrawInventory(proposerTwo.actor.userId, "KUJI");
+    const overrideOfferInventory = await addDrawInventory(proposerTwo.actor.userId, "GACHA");
     const overrideListingResponse = await mutate(author.token, "POST", "/v1/exchange/listings", {
       title: "운영 완료 테스트",
       details: "운영 완료도 동일한 소유권 원장을 남겨야 합니다.",

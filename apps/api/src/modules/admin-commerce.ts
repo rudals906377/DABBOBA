@@ -32,7 +32,7 @@ type InventoryUnitStatus =
   | "POINT_RETURNED";
 
 type OrderSummaryRow = {
-  id: string; user_id: string; user_email: string; nickname: string; status: OrderStatus; currency: "KRW";
+  id: string; user_id: string; user_email: string | null; nickname: string; status: OrderStatus; currency: "KRW";
   subtotal: number | string; discount_total: number | string; point_total: number | string; total: number | string;
   paid_at: Date | null; cancelled_at: Date | null; refunded_at: Date | null; version: number;
   payment_id: string; payment_status: PaymentStatus; payment_provider: string;
@@ -40,7 +40,7 @@ type OrderSummaryRow = {
 };
 
 type PaymentSummaryRow = {
-  id: string; order_id: string; order_status: OrderStatus; user_id: string; user_email: string; nickname: string;
+  id: string; order_id: string; order_status: OrderStatus; user_id: string; user_email: string | null; nickname: string;
   provider: string; provider_payment_id: string | null; status: PaymentStatus; amount: number | string; currency: "KRW";
   failure_code: string | null; paid_at: Date | null; refunded_at: Date | null; version: number; created_at: Date; updated_at: Date;
 };
@@ -58,7 +58,7 @@ type InventoryRow = {
 };
 
 type ShippingRow = {
-  id: string; user_id: string; user_email: string; nickname: string; status: ShippingStatus; address_snapshot: unknown;
+  id: string; user_id: string; user_email: string | null; nickname: string; status: ShippingStatus; address_snapshot: unknown;
   requested_at: Date; shipped_at: Date | null; tracking_carrier: string | null; tracking_number: string | null;
   version: number; updated_at: Date; item_count: number | string; created_at: Date;
 };

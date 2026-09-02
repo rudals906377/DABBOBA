@@ -17,7 +17,8 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { KoreanPixelTitle, RootCategoryTitle } from "@/components/RootCategoryTitle";
+import { ProductInfoDivider } from "@/components/ProductInfoDivider";
+import { KoreanPixelTitle, KoreanPixelTitleAccessory, RootCategoryTitle } from "@/components/RootCategoryTitle";
 import { RootHeaderActions } from "@/components/RootHeaderActions";
 import {
   ROOT_NAVIGATION_CONTENT_INSET,
@@ -26,6 +27,8 @@ import {
 import { AppText as Text, AppTextInput as TextInput, BalancedAppText } from "@/components/Typography";
 import { SeedActionButton, SeedChip, SeedIconButton, SeedInputShell } from "@/design-system/components";
 import { seed } from "@/design-system/seed";
+import { openCustomerLogin } from "@/features/auth/login-navigation";
+import { PRODUCT_CATEGORY_OPTIONS } from "@/features/catalog/product-categories";
 import {
   categoryLabel,
   fetchExchangeRoom,
@@ -52,10 +55,7 @@ import { colors } from "@/theme";
 
 const CATEGORIES: ReadonlyArray<{ label: string; value?: ExchangeCategory }> = [
   { label: "전체" },
-  { label: "가챠", value: "gacha" },
-  { label: "피규어", value: "figure" },
-  { label: "쿠지", value: "kuji" },
-  { label: "카드", value: "tcg" },
+  ...PRODUCT_CATEGORY_OPTIONS,
 ];
 
 type LoadSource = "live" | "cache" | "empty";
@@ -99,7 +99,7 @@ export function ExchangeRoomScreen() {
       if (manual) setRefreshing(true);
       if (debouncedQuery) setSearching(true);
       try {
-        const fresh = await fetchExchangeRoom(runtime.apiBaseUrl, selectedCategory, debouncedQuery);
+        const fresh = await fetchExchangeRoom(runtime.apiBaseUrl, selectedCategory, debouncedQuery, __DEV__);
         if (sequence !== loadSequence.current) return;
         setSnapshot(fresh);
         setSource("live");
@@ -110,16 +110,17 @@ export function ExchangeRoomScreen() {
         const cached = await readExchangeListingCache(db, selectedCategory);
         if (sequence !== loadSequence.current) return;
         if (cached) {
+          const cachedItems = __DEV__ ? cached.items : cached.items.filter((item) => !item.isExample);
           setSnapshot(debouncedQuery
             ? {
                 ...cached,
                 items: filterExchangeItems(
-                  cached.items,
+                  cachedItems,
                   cached.ipSearchTerms ?? cached.ipNames,
                   debouncedQuery,
                 ),
               }
-            : cached);
+            : { ...cached, items: cachedItems });
           setSource("cache");
           setMessage(debouncedQuery
             ? "연결이 불안정해 저장된 교환 글 안에서 검색했어요."
@@ -177,9 +178,9 @@ export function ExchangeRoomScreen() {
   const openComposer = useCallback(async () => {
     const tokens = await readAuthTokens();
     if (!tokens) {
-      Alert.alert(
-        "로그인이 필요해요",
-        "로그인 후 직접 뽑아 현재 보관 중인 가챠·쿠지 상품을 교환방에 올릴 수 있어요.",
+      openCustomerLogin(
+        "로그인 후 가챠로 직접 뽑아 현재 보관 중인 상품을 교환방에 올릴 수 있어요.",
+        "/exchange/new",
       );
       return;
     }
@@ -196,7 +197,6 @@ export function ExchangeRoomScreen() {
     [normalizedQuery, snapshot?.ipNames, snapshot?.ipSearchTerms, snapshot?.items],
   );
   const searchPending = Boolean(normalizedQuery && (normalizedQuery !== debouncedQuery || searching));
-  const examplesVisible = items.length > 0 && items.every((item) => item.isExample);
   const assetBaseUrl = runtime.assetBaseUrl
     ?? (__DEV__ ? runtime.apiBaseUrl.replace(/:8788$/, ":4174") : null);
 
@@ -212,7 +212,7 @@ export function ExchangeRoomScreen() {
       >
         <Header />
 
-        <SeedInputShell focused={searchFocused} style={styles.searchBox}>
+        <SeedInputShell focused={searchFocused} variant="search" style={styles.searchBox}>
           <Ionicons name="search-outline" size={20} color={colors.muted} />
           <TextInput
             value={query}
@@ -272,15 +272,8 @@ export function ExchangeRoomScreen() {
           <KoreanPixelTitle variant="section" numberOfLines={2} style={styles.sectionTitle}>
             {normalizedQuery ? "검색 결과" : "교환을 기다리고 있어요"}
           </KoreanPixelTitle>
-          <Text style={styles.sectionCount}>{items.length}개</Text>
+          <KoreanPixelTitleAccessory style={styles.sectionCount}>{items.length}개</KoreanPixelTitleAccessory>
         </View>
-
-        {examplesVisible ? (
-          <View style={styles.exampleNotice}>
-            <View style={styles.exampleDot} />
-            <Text style={styles.exampleNoticeText}>화면 구성을 확인할 수 있는 예시 글이에요.</Text>
-          </View>
-        ) : null}
 
         {message ? (
           <View style={[styles.notice, source === "empty" && styles.noticeError]}>
@@ -323,14 +316,14 @@ export function ExchangeRoomScreen() {
           </View>
         ) : null}
 
-        {snapshot ? (
-          <Text style={styles.sourceNote}>
-            {source === "live"
-              ? examplesVisible
-                ? "Fastify API 카탈로그 기반 예시"
-                : "Fastify API에서 방금 불러온 실제 교환 글"
-              : "기기에 저장된 삭제 가능한 캐시"}
-          </Text>
+        {snapshot && !normalizedQuery && items.length === 0 && source !== "empty" ? (
+          <View style={styles.searchEmpty}>
+            <Ionicons name="swap-horizontal-outline" size={32} color={colors.muted} />
+            <KoreanPixelTitle variant="section" style={styles.searchEmptyTitle}>아직 등록된 교환 상품이 없어요</KoreanPixelTitle>
+            <BalancedAppText style={styles.searchEmptyBody}>
+              보관함에 있는 상품으로 첫 교환을 시작해 보세요.
+            </BalancedAppText>
+          </View>
         ) : null}
       </ScrollView>
 
@@ -384,9 +377,8 @@ function ExchangeRulesModal({
             <Text style={styles.modalBadge}>입장 안내</Text>
           </View>
           <View style={styles.modalRuleList}>
-            <RuleLine>직접 뽑은 가챠·쿠지 상품 중 현재 보관함에 보관 중인 상품만 교환 등록·제안과 포인트 환급을 신청할 수 있어요.</RuleLine>
+            <RuleLine>가챠로 직접 뽑아 현재 보관함에 보관 중인 상품만 교환 등록·제안을 신청할 수 있어요.</RuleLine>
             <RuleLine>배송 신청이 접수되었거나 배송이 완료된 상품은 환불·교환·포인트 환급을 신청할 수 없어요.</RuleLine>
-            <RuleLine>표시 금액은 판매가가 아닌 앱 기준가예요.</RuleLine>
           </View>
           <Pressable
             accessibilityRole="checkbox"
@@ -437,19 +429,16 @@ function ListingCard({
         <View style={styles.cardCategoryBadge}>
           <Text style={styles.cardCategoryLabel}>{categoryLabel(item.product.category)}</Text>
         </View>
-        {item.isExample ? (
-          <View style={styles.exampleBadge}>
-            <Text style={styles.exampleBadgeLabel}>예시</Text>
-          </View>
-        ) : null}
       </View>
       <View style={styles.cardBody}>
         <Text numberOfLines={2} style={styles.listingTitle}>{item.title}</Text>
         <Text style={styles.productMeta}>{ipName ?? "작품 정보 확인 중"} · {categoryLabel(item.product.category)}</Text>
         <Text numberOfLines={2} style={styles.productName}>{productSubjectTitle(item.product.name, ipName)}</Text>
-        <Text numberOfLines={2} style={styles.listingDetails}>{item.details}</Text>
+        {item.details.trim() ? (
+          <Text numberOfLines={2} style={styles.listingDetails}>{item.details}</Text>
+        ) : null}
+        <ProductInfoDivider style={styles.priceDivider} />
         <View style={styles.priceBox}>
-          <Text style={styles.priceCaption}>가챠샵 기준가 · 판매가 아님</Text>
           <Text style={styles.price}>{item.product.price.toLocaleString("ko-KR")}원</Text>
         </View>
         <View style={styles.cardFooter}>
@@ -464,7 +453,7 @@ function ListingCard({
 function MediaPlaceholder() {
   return (
     <View style={styles.mediaPlaceholder}>
-      <Text style={styles.mediaPlaceholderLabel}>ITEM IMAGE</Text>
+      <Text style={styles.mediaPlaceholderLabel}>이미지 준비 중</Text>
     </View>
   );
 }
@@ -495,16 +484,13 @@ const styles = StyleSheet.create({
   categoryRail: { paddingHorizontal: seed.spacing.globalGutter, paddingTop: seed.spacing.x3_5, gap: seed.spacing.betweenChips },
   sectionHeader: { marginTop: seed.spacing.x7, marginBottom: seed.spacing.x3_5, paddingHorizontal: seed.spacing.globalGutter, flexDirection: "row", alignItems: "flex-end", justifyContent: "space-between", gap: seed.spacing.componentDefault },
   sectionTitle: { flex: 1 },
-  sectionCount: { color: colors.muted, fontSize: 14, fontWeight: "800", paddingBottom: 3 },
-  exampleNotice: { marginHorizontal: seed.spacing.globalGutter, marginBottom: seed.spacing.x3_5, minHeight: seed.size.touchTarget, paddingHorizontal: seed.spacing.componentDefault, borderRadius: seed.radius.r3, backgroundColor: seed.color.background.brandWeak, flexDirection: "row", alignItems: "center", gap: seed.spacing.x2 },
-  exampleDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.greenInk },
-  exampleNoticeText: { flex: 1, color: colors.greenInk, fontSize: 12, lineHeight: 18, fontWeight: "700" },
+  sectionCount: { paddingBottom: 3 },
   notice: { marginHorizontal: seed.spacing.globalGutter, marginBottom: seed.spacing.componentDefault, borderRadius: seed.radius.r3, backgroundColor: seed.color.background.brandWeak, padding: seed.spacing.x3_5, flexDirection: "row", alignItems: "center", gap: seed.spacing.componentDefault },
   noticeError: { backgroundColor: seed.color.background.criticalWeak },
   noticeText: { flex: 1, color: colors.ink, fontSize: 13, lineHeight: 19 },
   retry: { minHeight: 40, justifyContent: "center", paddingHorizontal: 12, borderRadius: 10, backgroundColor: colors.ink },
   retryLabel: { color: colors.white, fontSize: 12, fontWeight: "800" },
-  loading: { paddingVertical: 58, alignItems: "center", gap: 12 },
+  loading: { paddingHorizontal: seed.spacing.globalGutter, paddingVertical: 58, alignItems: "center", gap: 12 },
   loadingText: { color: colors.muted, fontSize: 14 },
   list: { paddingHorizontal: seed.spacing.globalGutter, gap: seed.spacing.x3_5 },
   searchEmpty: { minHeight: 230, marginHorizontal: seed.spacing.globalGutter, paddingHorizontal: seed.spacing.x5, alignItems: "center", justifyContent: "center", borderRadius: seed.radius.r4, borderWidth: 1, borderColor: seed.color.stroke.neutral, backgroundColor: seed.color.layer.default },
@@ -515,20 +501,17 @@ const styles = StyleSheet.create({
   productImage: { width: "100%", height: "100%" },
   cardCategoryBadge: { position: "absolute", top: 8, left: 8, borderRadius: 7, paddingHorizontal: 8, paddingVertical: 6, backgroundColor: colors.brand },
   cardCategoryLabel: { color: colors.ink, fontSize: 10, fontWeight: "900" },
-  exampleBadge: { position: "absolute", right: 8, top: 8, borderRadius: 7, paddingHorizontal: 7, paddingVertical: 5, backgroundColor: colors.black },
-  exampleBadgeLabel: { color: colors.white, fontSize: 9, fontWeight: "900" },
   cardBody: { flex: 1, minWidth: 0 },
   listingTitle: { color: colors.ink, fontSize: 16, lineHeight: 22, fontWeight: "900" },
   productName: { color: colors.ink, fontSize: 14, lineHeight: 20, fontWeight: "800", marginTop: 3 },
   productMeta: { color: colors.muted, fontSize: 12, lineHeight: 17, marginTop: 5 },
   listingDetails: { color: colors.muted, fontSize: 12, lineHeight: 18, marginTop: 8 },
-  priceBox: { marginTop: 10, paddingTop: 9, borderTopWidth: 1, borderTopColor: colors.line },
-  priceCaption: { color: colors.muted, fontSize: 9, lineHeight: 13, fontWeight: "700" },
+  priceDivider: { marginTop: 10 },
+  priceBox: { marginTop: 9 },
   price: { color: colors.ink, fontSize: 15, lineHeight: 20, fontWeight: "900", marginTop: 2 },
   cardFooter: { marginTop: 10, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 },
   author: { flex: 1, color: colors.muted, fontSize: 11, fontWeight: "700" },
   offerCount: { color: colors.greenInk, fontSize: 11, fontWeight: "900" },
   mediaPlaceholder: { flex: 1, alignItems: "center", justifyContent: "center", padding: 12 },
   mediaPlaceholderLabel: { color: colors.muted, fontFamily: "monospace", fontSize: 9, fontWeight: "800", textAlign: "center" },
-  sourceNote: { color: seed.color.foreground.muted, ...seed.typography.caption, textAlign: "center", marginTop: seed.spacing.x6, paddingHorizontal: seed.spacing.globalGutter },
 });

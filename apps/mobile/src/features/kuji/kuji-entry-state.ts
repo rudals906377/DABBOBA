@@ -1,34 +1,51 @@
-export type KujiRoomAvailability = "AVAILABLE" | "OCCUPIED";
-
 export type KujiTurnCall = {
   productId: string;
+  entryId: string;
   title: "차례가 되었습니다";
-  body: "뽑으러 가시겠어요? 10초 안에 입장해 주세요.";
-  claimExpiresAt: string;
+  body: "결제 대기 시간이 시작되었어요.";
+  checkoutExpiresAt: string;
+  serverNow: string;
+  developmentFixture?: boolean;
 };
 
-export const LOCAL_KUJI_ROOM_AVAILABILITY: KujiRoomAvailability = "AVAILABLE";
-export const KUJI_ENTRY_CLAIM_SECONDS = 10;
-
-export function resolveKujiEntryPath(productId: string, availability: KujiRoomAvailability): string {
-  const encodedProductId = encodeURIComponent(productId);
-  return availability === "AVAILABLE"
-    ? `/kuji/draw/${encodedProductId}`
-    : `/kuji/queue/${encodedProductId}`;
+export function buildKujiRoomGatePath(productId: string): string {
+  return `/kuji/queue/${encodeURIComponent(productId)}`;
 }
 
-export function buildKujiTurnCall(productId: string, notifiedAtMs: number): KujiTurnCall {
+export function buildKujiCheckoutPath(
+  productId: string,
+  entryId: string,
+  checkoutExpiresAt: string,
+  serverNow?: string,
+  developmentFixture = false,
+): string {
+  const query = [
+    `kujiEntryId=${encodeURIComponent(entryId)}`,
+    `kujiCheckoutExpiresAt=${encodeURIComponent(checkoutExpiresAt)}`,
+    ...(serverNow ? [`serverNow=${encodeURIComponent(serverNow)}`] : []),
+    ...(developmentFixture ? ["kujiRoomFixture=development"] : []),
+  ].join("&");
+  return `/checkout/${encodeURIComponent(productId)}?${query}`;
+}
+
+export function buildKujiTurnCall(
+  productId: string,
+  entryId: string,
+  checkoutExpiresAt: string,
+  serverNow: string,
+  developmentFixture = false,
+): KujiTurnCall {
   return {
     productId,
+    entryId,
     title: "차례가 되었습니다",
-    body: "뽑으러 가시겠어요? 10초 안에 입장해 주세요.",
-    claimExpiresAt: new Date(notifiedAtMs + KUJI_ENTRY_CLAIM_SECONDS * 1_000).toISOString(),
+    body: "결제 대기 시간이 시작되었어요.",
+    checkoutExpiresAt,
+    serverNow,
+    ...(developmentFixture ? { developmentFixture: true } : {}),
   };
 }
 
-export function resolveKujiTurnNotificationPath(call: KujiTurnCall, openedAtMs: number): string {
-  if (openedAtMs >= Date.parse(call.claimExpiresAt)) {
-    return resolveKujiEntryPath(call.productId, "OCCUPIED");
-  }
-  return `${resolveKujiEntryPath(call.productId, "AVAILABLE")}?claimExpiresAt=${encodeURIComponent(call.claimExpiresAt)}`;
+export function resolveKujiTurnNotificationPath(call: KujiTurnCall, _openedAtMs: number): string {
+  return buildKujiRoomGatePath(call.productId);
 }

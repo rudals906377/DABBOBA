@@ -1,5 +1,9 @@
 import type { DatabaseClient, DatabasePool } from "@dabboba/db";
-import { withTransaction } from "@dabboba/db";
+import {
+  lockLinkedKujiRoomForOrder,
+  releaseLockedKujiOrderRoom,
+  withTransaction,
+} from "@dabboba/db";
 import type { Logger } from "./logger.js";
 
 type OrderPaymentRow = {
@@ -135,8 +139,9 @@ async function expireLockedOrder(
 
 export async function expireOrderReservations(pool: DatabasePool, orderId: string, now = new Date()): Promise<ExpiryOutcome> {
   return withTransaction(pool, async (client) => {
-    // Match the webhook lock order (payment, then order) so concurrent expiry and
-    // provider callbacks resolve predictably instead of forming a lock cycle.
+    // Match the API lock order: linked kuji room, payment, order, then stock.
+    // The initial linkage lookup is non-locking; order_id becomes immutable once set.
+    const linkedKujiRoom = await lockLinkedKujiRoomForOrder(client, orderId);
     const payment = await client.query<{ id: string; status: string }>(
       "SELECT id,status FROM payments WHERE order_id=$1 FOR UPDATE",
       [orderId],
@@ -147,11 +152,19 @@ export async function expireOrderReservations(pool: DatabasePool, orderId: strin
       [orderId],
     );
     if (!order.rowCount) return { status: "missing", released: 0 };
-    return expireLockedOrder(client, {
+    const outcome = await expireLockedOrder(client, {
       ...order.rows[0]!,
       payment_id: payment.rows[0]!.id,
       payment_status: payment.rows[0]!.status,
     }, now);
+    if (outcome.status === "expired" && linkedKujiRoom) {
+      await releaseLockedKujiOrderRoom(client, {
+        orderId,
+        serverNow: now,
+        terminalState: "EXPIRED",
+      });
+    }
+    return outcome;
   });
 }
 

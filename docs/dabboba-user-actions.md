@@ -33,15 +33,18 @@
 
 ## 2. 사용자 로그인과 계정
 
-- [ ] `계정 필요` Supabase Auth project 설정과 publishable key 준비. secret/service-role key는 앱에 입력하지 않음
-- [ ] `계정 필요` 본인 확인에 사용할 휴대폰/SMS 공급자 계약과 Supabase Auth 발신 정보 준비
-- [ ] `계정 필요` Google OAuth client와 Supabase callback/production redirect URI 등록
-- [ ] `계정 필요` Kakao Developers 앱, 동의항목, Supabase callback/production redirect URI 등록
-- [ ] `미결정` 하나의 검증된 휴대폰 번호를 Google/Kakao/휴대폰 로그인에 어떻게 연결하고 중복 계정을 병합할지 운영 정책 승인
+- [ ] `계정 필요` 서울 또는 확정 region에 Supabase project를 만들고 project URL과 publishable key를 준비. secret/service-role key는 앱·채팅·저장소에 입력하지 않음
+- [ ] `검증 필요` Supabase Auth JWT signing key가 JWKS로 검증 가능한 비대칭 키(ES256/RS256)인지 확인
+- [ ] `계정 필요` Kakao Developers 앱과 Naver Developers 앱을 만들고 각 client ID/secret을 Supabase Auth에만 등록
+- [ ] `검증 필요` Kakao·Naver 모두 이메일 권한 없이 사용할 수 있게 구성하고, Supabase의 이메일 없는 사용자 허용 설정을 확인
+- [ ] `계정 필요` 한국 휴대폰 문자 발송에 사용할 SMS 공급자 계약·결제수단·발신번호 등록과 Supabase Auth 발신 연동 준비
+- [ ] `검증 필요` Supabase redirect allow list에 `dabboba://auth/callback`, 각 소셜 공급자에 `https://<project-ref>.supabase.co/auth/v1/callback` 등록
+- [ ] `승인 필요` 카카오·네이버·휴대폰 계정은 같은 이메일/번호가 보여도 자동 병합하지 않는 정책과, 향후 본인 재인증 기반 계정 연결 절차 승인
 - [ ] `미결정` 연령 제한, 보호자 동의, 계정 복구, 휴대폰 번호 변경, 탈퇴/보존 정책 승인
-- [ ] `검증 필요` 신규 가입, 기존 계정 연결, 재인증, 정지, 탈퇴, 계정 복구를 실제 provider sandbox에서 확인
+- [ ] `검증 필요` development build와 실제 provider sandbox에서 신규 가입, 재로그인, 취소, cold/warm callback, 정지, 탈퇴, 번호 변경을 확인
+- [ ] `승인 필요` iOS 출시 전에 Kakao·Naver 로그인 구성이 App Review Guideline 4.8의 동등한 로그인 수단 요건을 충족하는지 검토하고, 필요하면 Sign in with Apple 추가
 
-현재 저장소의 customer `dev-session`은 개발용 legacy 경계다. Supabase credential만 입력한다고 production 로그인이 완성되는 것은 아니며, JWT 검증, canonical user 연결, 정지·탈퇴 session 폐기와 실제 provider callback 통합 테스트가 추가로 필요하다.
+앱과 API에는 카카오·네이버·한국 휴대폰 OTP 화면, Supabase PKCE/OTP, 비대칭 JWT 검증, canonical user 연결, DABBOBA session 교환까지 구현돼 있다. 실제 계정·redirect·SMS 설정과 development build 통합 검증은 외부 콘솔 없이는 완료할 수 없다. 상세 순서와 값의 보관 위치는 `docs/customer-auth-setup.md`를 따른다. SMS OTP는 휴대폰 번호를 현재 소유했다는 확인일 뿐 PASS/CI/DI 법정 본인확인이 아니다.
 
 ## 3. 관리자 계정과 운영 조직
 

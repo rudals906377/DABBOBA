@@ -17,6 +17,7 @@ import { SQLiteProvider } from "expo-sqlite";
 import { StatusBar } from "expo-status-bar";
 import { Suspense, useEffect, useState, type ReactNode } from "react";
 import { ActivityIndicator, Platform, StyleSheet, View } from "react-native";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { KujiNotificationObserver } from "@/features/kuji/KujiNotificationObserver";
 import { ensureDevelopmentAuthSession } from "@/lib/development-session";
 import { initializeLocalDatabase } from "@/lib/local-database";
@@ -27,8 +28,14 @@ import {
 import { colors } from "@/theme";
 
 export default function RootLayout() {
+  const customerAuthSetupAttempted = Boolean(
+    process.env.EXPO_PUBLIC_SUPABASE_URL?.trim()
+    || process.env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY?.trim(),
+  );
   const [fontsLoaded, fontError] = useFonts({
     Galmuri11: require("galmuri/dist/Galmuri11-Bold.ttf"),
+    Galmuri11Readable: require("galmuri/dist/Galmuri11.ttf"),
+    DabbobaKoreanPixelBold: require("galmuri/dist/Galmuri11-Bold.ttf"),
     NotoSans_400Regular,
     NotoSans_500Medium,
     NotoSans_700Bold,
@@ -43,10 +50,10 @@ export default function RootLayout() {
   if (!fontsLoaded) return <AppBootFallback />;
 
   return (
-    <>
+    <GestureHandlerRootView style={styles.gestureRoot}>
       <StatusBar style="dark" backgroundColor={colors.canvas} />
       <Suspense fallback={<AppBootFallback />}>
-        <DevelopmentSessionBootstrap enabled={__DEV__}>
+        <DevelopmentSessionBootstrap enabled={__DEV__ && !customerAuthSetupAttempted}>
           <>
             <KujiNotificationObserver />
             <SQLiteProvider
@@ -59,7 +66,7 @@ export default function RootLayout() {
           </>
         </DevelopmentSessionBootstrap>
       </Suspense>
-    </>
+    </GestureHandlerRootView>
   );
 }
 
@@ -116,6 +123,7 @@ function AppBootFallback() {
 }
 
 const styles = StyleSheet.create({
+  gestureRoot: { flex: 1 },
   stack: { backgroundColor: colors.canvas },
   loading: {
     flex: 1,

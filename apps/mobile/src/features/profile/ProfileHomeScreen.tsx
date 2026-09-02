@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
-import { router, type Href } from "expo-router";
-import type { ComponentProps } from "react";
+import { router, useFocusEffect, type Href } from "expo-router";
+import { useCallback, useRef, type ComponentProps } from "react";
 import {
   ActivityIndicator,
   Pressable,
@@ -17,7 +17,7 @@ import {
   useRootNavigationScroll,
 } from "@/components/RootFloatingTabBar";
 import { AppText as Text } from "@/components/Typography";
-import { SeedCard } from "@/design-system/components";
+import { SeedActionButton, SeedCard, SeedInlineGuidance } from "@/design-system/components";
 import { seed } from "@/design-system/seed";
 import { useProfileSnapshot } from "@/features/profile/use-profile-snapshot";
 import { colors } from "@/theme";
@@ -51,7 +51,15 @@ const ACCOUNT_MENU: ReadonlyArray<{ section: ProfileSection; label: string; capt
 export function ProfileHomeScreen() {
   const rootNavigationScroll = useRootNavigationScroll();
   const { snapshot, message, refreshing, reload } = useProfileSnapshot();
+  const hasFocusedOnce = useRef(false);
   const push = (section: ProfileSection) => router.push(`/profile/${section}` as Href);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (hasFocusedOnce.current) void reload();
+      else hasFocusedOnce.current = true;
+    }, [reload]),
+  );
 
   return (
     <SafeAreaView style={styles.safeArea} edges={["top", "left", "right"]}>
@@ -85,15 +93,21 @@ export function ProfileHomeScreen() {
         {snapshot ? (
           <>
             {snapshot.isExample ? (
-              <View style={styles.exampleBanner}>
-                <View style={styles.exampleDot} />
-                <Text style={styles.exampleText}>프로필·주문·포인트·배송은 로그인 전 화면 예시예요. 공개 신청방·공지는 서버 목록을 사용할 수 있습니다.</Text>
+              <View style={styles.guestLogin}>
+                <SeedInlineGuidance>
+                  로그인하면 주문·포인트·배송 내역과 나의 수집 기록을 확인할 수 있어요.
+                </SeedInlineGuidance>
+                <SeedActionButton
+                  label="로그인"
+                  onPress={() => router.push("/auth/login" as Href)}
+                  style={styles.guestLoginButton}
+                />
               </View>
             ) : null}
 
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel="프로필 관리 열기"
+              accessibilityLabel="프로필 수정 열기"
               onPress={() => push("edit")}
               style={({ pressed }) => [styles.profileCard, pressed && styles.pressed]}
             >
@@ -103,7 +117,7 @@ export function ProfileHomeScreen() {
               <View style={styles.profileText}>
                 <View style={styles.nameRow}>
                   <Text style={styles.nickname}>{snapshot.profile.nickname}</Text>
-                  <Text style={styles.levelBadge}>{snapshot.isExample ? "PREVIEW" : "MEMBER"}</Text>
+                  <Text style={styles.levelBadge}>{snapshot.isExample ? "로그인 전" : "회원"}</Text>
                 </View>
                 <Text numberOfLines={2} style={styles.bio}>{snapshot.profile.bio ?? "나만의 수집 프로필을 완성해 보세요."}</Text>
               </View>
@@ -139,8 +153,8 @@ export function ProfileHomeScreen() {
 
             <Text style={styles.disclosure}>
               {snapshot.isExample
-                ? "프로필·등급·주문·포인트·배송 내용은 로그인 전 예시이며 실제 계정 데이터가 아닙니다."
-                : "주문·포인트·배송 상태는 서버에 저장된 계정 내역을 기준으로 표시합니다."}
+                ? "로그인하면 내 계정에 저장된 프로필·등급·주문·포인트·배송 내역을 확인할 수 있어요."
+                : "주문·포인트·배송 상태는 내 계정의 최신 내역을 기준으로 표시해요."}
             </Text>
           </>
         ) : null}
@@ -207,11 +221,10 @@ const styles = StyleSheet.create({
   loadingText: { color: colors.muted, fontSize: 14 },
   errorBox: { marginTop: seed.spacing.x5, borderRadius: seed.radius.r4, padding: seed.spacing.x5, backgroundColor: seed.color.background.criticalWeak, alignItems: "center" },
   errorText: { color: colors.ink, fontSize: 14, lineHeight: 21, textAlign: "center" },
+  guestLogin: { marginTop: seed.spacing.x3_5, gap: seed.spacing.x3 },
+  guestLoginButton: { alignSelf: "stretch" },
   retryButton: { minHeight: 42, justifyContent: "center", marginTop: 14, paddingHorizontal: 18, borderRadius: 10, backgroundColor: colors.ink },
   retryLabel: { color: colors.white, fontWeight: "900" },
-  exampleBanner: { minHeight: seed.size.touchTarget, flexDirection: "row", alignItems: "center", gap: seed.spacing.x2, borderRadius: seed.radius.r3, paddingHorizontal: seed.spacing.x3_5, backgroundColor: seed.color.background.brandWeak },
-  exampleDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.greenInk },
-  exampleText: { flex: 1, color: colors.greenInk, fontSize: 11, lineHeight: 17, fontWeight: "700" },
   profileCard: { marginTop: seed.spacing.x3_5, minHeight: 110, flexDirection: "row", alignItems: "center", gap: seed.spacing.x3_5, borderRadius: seed.radius.r5, borderWidth: 1, borderColor: seed.color.stroke.neutral, padding: seed.spacing.x4_5, backgroundColor: seed.color.layer.default },
   avatar: { width: 60, height: 60, borderRadius: 30, alignItems: "center", justifyContent: "center", backgroundColor: colors.brand },
   avatarText: { color: colors.ink, fontSize: 22, fontWeight: "900" },

@@ -14,7 +14,12 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { KoreanPixelTitle } from "@/components/RootCategoryTitle";
+import {
+  FloatingBottomActionPanel,
+  useFloatingBottomActionContentInset,
+} from "@/components/FloatingBottomActionPanel";
+import { ProductInfoDivider } from "@/components/ProductInfoDivider";
+import { KoreanPixelTitle, KoreanPixelTitleAccessory } from "@/components/RootCategoryTitle";
 import { AppText as Text } from "@/components/Typography";
 import { seed } from "@/design-system/seed";
 import {
@@ -35,6 +40,7 @@ import { colors } from "@/theme";
 
 export function ExchangeListingDetailScreen() {
   const { listingId } = useLocalSearchParams<{ listingId?: string }>();
+  const floatingBottomInset = useFloatingBottomActionContentInset();
   const runtime = useMemo(
     () =>
       resolveMobileRuntimeConfig({
@@ -84,7 +90,7 @@ export function ExchangeListingDetailScreen() {
     if (!tokens) {
       Alert.alert(
         "로그인이 필요해요",
-        "교환 신청은 로그인 후 내가 직접 뽑아 보관 중인 상품으로만 할 수 있어요.",
+        "교환 신청은 로그인 후 내가 가챠로 직접 뽑아 보관 중인 상품으로만 할 수 있어요.",
       );
       return;
     }
@@ -160,11 +166,12 @@ export function ExchangeListingDetailScreen() {
   );
 
   const item = detail?.item ?? null;
+  const showOfferAction = detail?.viewerRole === "VISITOR" && detail.listingStatus === "OPEN";
   const assetBaseUrl = runtime.assetBaseUrl
     ?? (__DEV__ ? runtime.apiBaseUrl.replace(/:8788$/, ":4174") : null);
 
   return (
-    <SafeAreaView style={styles.safeArea} edges={["top", "bottom", "left", "right"]}>
+    <SafeAreaView style={styles.safeArea} edges={["top", "left", "right"]}>
       <View style={styles.header}>
         <Pressable
           accessibilityRole="button"
@@ -180,7 +187,10 @@ export function ExchangeListingDetailScreen() {
       </View>
 
       <ScrollView
-        contentContainerStyle={styles.content}
+        contentContainerStyle={[
+          styles.content,
+          { paddingBottom: showOfferAction ? floatingBottomInset : seed.spacing.screenBottom },
+        ]}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={() => void load(true)} tintColor={colors.ink} />
         }
@@ -211,7 +221,7 @@ export function ExchangeListingDetailScreen() {
             </View>
 
             <Text style={styles.title}>{item.title}</Text>
-            <Text style={styles.details}>{item.details}</Text>
+            {item.details.trim() ? <Text style={styles.details}>{item.details}</Text> : null}
 
             <ProductSummary
               product={item.product}
@@ -224,11 +234,8 @@ export function ExchangeListingDetailScreen() {
               <View style={styles.proposalSection}>
                 <View style={styles.sectionHeader}>
                   <KoreanPixelTitle variant="section" numberOfLines={2} style={styles.sectionTitle}>들어온 제안 {detail.proposals.length}개</KoreanPixelTitle>
-                  <Text style={styles.oneChoiceBadge}>1개 선택</Text>
+                  <KoreanPixelTitleAccessory style={styles.oneChoiceBadge}>1개 선택</KoreanPixelTitleAccessory>
                 </View>
-                <Text style={styles.sectionDescription}>
-                  B·C·D·E가 각자 직접 뽑은 상품 하나만 골라 제안했어요. 제안자는 별도 글을 작성하지 않아요.
-                </Text>
                 {detail.proposals.length ? detail.proposals.map((proposal) => (
                   <ProposalCard
                     key={proposal.id}
@@ -266,8 +273,8 @@ export function ExchangeListingDetailScreen() {
         ) : null}
       </ScrollView>
 
-      {detail && detail.viewerRole === "VISITOR" && detail.listingStatus === "OPEN" ? (
-        <View style={styles.bottomBar}>
+      {showOfferAction ? (
+        <FloatingBottomActionPanel>
           <Pressable
             accessibilityRole="button"
             onPress={() => void offer()}
@@ -275,7 +282,7 @@ export function ExchangeListingDetailScreen() {
           >
             <Text style={styles.offerButtonLabel}>교환 신청하기</Text>
           </Pressable>
-        </View>
+        </FloatingBottomActionPanel>
       ) : null}
     </SafeAreaView>
   );
@@ -293,11 +300,41 @@ function ProductSummary({
   label: string;
 }) {
   const imageUri = resolveCatalogImageUrl(product.imageUrl, assetBaseUrl, product.version);
+  const [imageAspectRatio, setImageAspectRatio] = useState(1);
+
+  useEffect(() => {
+    let active = true;
+    setImageAspectRatio(1);
+    if (!imageUri) return () => { active = false; };
+
+    Image.getSize(
+      imageUri,
+      (width, height) => {
+        if (active && width > 0 && height > 0) setImageAspectRatio(width / height);
+      },
+      () => undefined,
+    );
+    return () => { active = false; };
+  }, [imageUri]);
+
+  const landscape = imageAspectRatio > 1.2;
   return (
-    <View style={styles.productCard}>
-      <View style={styles.productImageFrame}>
+    <View style={[styles.productCard, landscape && styles.productCardLandscape]}>
+      <View style={[
+        styles.productImageFrame,
+        landscape && styles.productImageFrameLandscape,
+        { aspectRatio: imageAspectRatio },
+      ]}>
         {imageUri ? (
-          <Image source={{ uri: imageUri }} style={styles.productImage} resizeMode="cover" />
+          <Image
+            source={{ uri: imageUri }}
+            style={styles.productImage}
+            resizeMode="contain"
+            onLoad={({ nativeEvent }) => {
+              const { width, height } = nativeEvent.source;
+              if (width > 0 && height > 0) setImageAspectRatio(width / height);
+            }}
+          />
         ) : (
           <View style={styles.mediaPlaceholder}><Text style={styles.mediaPlaceholderLabel}>ITEM</Text></View>
         )}
@@ -308,7 +345,7 @@ function ProductSummary({
           {ipName ?? "작품 정보 확인 중"} · {categoryLabel(product.category)}
         </Text>
         <Text numberOfLines={2} style={styles.productName}>{productSubjectTitle(product.name, ipName)}</Text>
-        <Text style={styles.priceCaption}>가챠샵 기준가 · 판매가 아님</Text>
+        <ProductInfoDivider style={styles.productFieldDivider} />
         <Text style={styles.price}>{product.price.toLocaleString("ko-KR")}원</Text>
       </View>
     </View>
@@ -399,22 +436,23 @@ const styles = StyleSheet.create({
   listingStatus: { marginLeft: "auto", overflow: "hidden", borderRadius: 12, paddingHorizontal: 10, paddingVertical: 6, backgroundColor: "#EDF0ED", color: colors.muted, fontSize: 11, fontWeight: "800" },
   title: { color: seed.color.foreground.neutral, ...seed.typography.screenTitle, marginTop: seed.spacing.x4_5 },
   details: { color: colors.muted, fontSize: 14, lineHeight: 22, marginTop: 7 },
-  productCard: { marginTop: seed.spacing.x4, flexDirection: "row", gap: seed.spacing.x3_5, borderRadius: seed.radius.r4, borderWidth: 1, borderColor: seed.color.stroke.neutral, backgroundColor: seed.color.layer.default, padding: seed.spacing.x3_5 },
-  productImageFrame: { width: 104, aspectRatio: 1, overflow: "hidden", borderRadius: seed.radius.r3, backgroundColor: seed.color.layer.basement },
+  productCard: { marginTop: seed.spacing.x4, flexDirection: "row", alignItems: "center", gap: seed.spacing.x3_5, borderRadius: seed.radius.r4, borderWidth: 1, borderColor: seed.color.stroke.neutral, backgroundColor: seed.color.layer.default, padding: seed.spacing.x3_5 },
+  productCardLandscape: { flexDirection: "column", alignItems: "stretch" },
+  productImageFrame: { width: 104, overflow: "hidden", borderRadius: seed.radius.r3, backgroundColor: seed.color.layer.basement },
+  productImageFrameLandscape: { width: "100%" },
   productImage: { width: "100%", height: "100%" },
   mediaPlaceholder: { flex: 1, alignItems: "center", justifyContent: "center" },
   mediaPlaceholderLabel: { color: colors.muted, fontFamily: "monospace", fontSize: 10, fontWeight: "800" },
-  productInfo: { flex: 1, minWidth: 0, justifyContent: "center" },
+  productInfo: { flex: 1, minWidth: 0, alignSelf: "stretch", justifyContent: "center" },
   productLabel: { color: colors.greenInk, fontSize: 10, lineHeight: 15, fontWeight: "900" },
   productName: { color: colors.ink, fontSize: 15, lineHeight: 21, fontWeight: "900", marginTop: 3 },
   productMeta: { color: colors.muted, fontSize: 11, lineHeight: 16, marginTop: 4 },
-  priceCaption: { color: colors.greenInk, fontSize: 10, lineHeight: 15, fontWeight: "800", marginTop: 8 },
-  price: { color: colors.ink, fontSize: 17, lineHeight: 23, fontWeight: "900", marginTop: 1 },
+  productFieldDivider: { marginTop: 7 },
+  price: { color: colors.ink, fontSize: 17, lineHeight: 23, fontWeight: "900", marginTop: 6 },
   proposalSection: { marginTop: seed.spacing.x7 },
   sectionHeader: { flexDirection: "row", alignItems: "flex-end", justifyContent: "space-between", gap: 12 },
   sectionTitle: { flex: 1 },
-  oneChoiceBadge: { overflow: "hidden", borderRadius: seed.radius.r2, paddingHorizontal: seed.spacing.x2_5, paddingVertical: seed.spacing.x1_5, backgroundColor: seed.color.background.brandWeak, color: seed.color.foreground.brand, fontSize: 11, fontWeight: "700" },
-  sectionDescription: { color: colors.muted, fontSize: 13, lineHeight: 20, marginTop: 9, marginBottom: 4 },
+  oneChoiceBadge: { overflow: "hidden", borderRadius: seed.radius.r2, paddingHorizontal: seed.spacing.x2_5, paddingVertical: seed.spacing.x1_5, backgroundColor: seed.color.background.brandWeak, color: seed.color.foreground.brand, fontSize: 11 },
   proposalCard: { marginTop: seed.spacing.x3_5, borderRadius: seed.radius.r5, borderWidth: 1, borderColor: seed.color.stroke.neutral, backgroundColor: seed.color.layer.default, padding: seed.spacing.x3_5 },
   proposalCardAccepted: { borderWidth: 2, borderColor: colors.greenInk },
   proposerRow: { flexDirection: "row", alignItems: "center", gap: 8 },
@@ -431,7 +469,6 @@ const styles = StyleSheet.create({
   emptyProposals: { marginTop: 14, borderRadius: 18, padding: 24, alignItems: "center", backgroundColor: colors.surface },
   emptyProposalsTitle: { color: colors.ink, fontSize: 15, fontWeight: "900" },
   emptyProposalsBody: { color: colors.muted, fontSize: 12, lineHeight: 18, textAlign: "center", marginTop: 6 },
-  bottomBar: { paddingHorizontal: seed.spacing.globalGutter, paddingTop: seed.spacing.componentDefault, paddingBottom: seed.spacing.x2, borderTopWidth: 1, borderTopColor: seed.color.stroke.neutral, backgroundColor: seed.color.layer.default },
   offerButton: { minHeight: seed.size.actionButton.large, borderRadius: seed.radius.r3, alignItems: "center", justifyContent: "center", backgroundColor: seed.color.background.brandSolid },
   offerButtonLabel: { color: colors.ink, fontSize: 15, fontWeight: "900" },
 });

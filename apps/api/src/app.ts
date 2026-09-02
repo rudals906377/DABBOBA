@@ -15,8 +15,10 @@ import { registerAccountRoutes } from "./modules/account.js";
 import { registerCatalogRoutes } from "./modules/catalog.js";
 import { registerCommerceRoutes } from "./modules/commerce.js";
 import { registerCommunityRoutes } from "./modules/community.js";
+import { registerCustomerAuthRoutes } from "./modules/customer-auth.js";
 import { registerExchangeRoutes } from "./modules/exchange.js";
 import { registerHealthRoutes } from "./modules/health.js";
+import { registerKujiRoomRoutes } from "./modules/kuji-rooms.js";
 import { registerMediaRoutes } from "./modules/media.js";
 import { registerNotificationPreferenceRoutes } from "./modules/notification-preferences.js";
 import { registerWantedRoutes } from "./modules/wanted.js";
@@ -51,6 +53,7 @@ export async function buildApp(options: BuildAppOptions) {
         "req.headers['x-dabboba-admin-client-signature']",
         "body.password",
         "body.token",
+        "body.accessToken",
       ],
     },
     genReqId: requestId,
@@ -110,6 +113,7 @@ export async function buildApp(options: BuildAppOptions) {
   registerErrorHandler(app);
   await registerHealthRoutes(app, context);
   await registerAuthRoutes(app, context);
+  await registerCustomerAuthRoutes(app, context);
   await registerMediaRoutes(app, context);
   await registerAccountRoutes(app, context);
   await registerNotificationPreferenceRoutes(app, context);
@@ -118,6 +122,7 @@ export async function buildApp(options: BuildAppOptions) {
   await registerWantedRoutes(app, context);
   await registerExchangeRoutes(app, context);
   await registerCommerceRoutes(app, context);
+  await registerKujiRoomRoutes(app, context);
   await registerAdminCommerceRoutes(app, context);
   await registerAdminAccountDeletionRoutes(app, context);
   await registerAdminRoutes(app, context);

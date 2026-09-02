@@ -1,13 +1,13 @@
 import { createHmac, randomBytes } from "node:crypto";
 import type { ApiConfig } from "@dabboba/config";
-import type { DatabasePool } from "@dabboba/db";
+import type { DatabasePool, Queryable } from "@dabboba/db";
 import { isAdminRole, type UserRole, type UserStatus } from "@dabboba/domain";
 import type { FastifyReply, FastifyRequest, preHandlerHookHandler } from "fastify";
 import { forbidden, unauthorized } from "../lib/errors.js";
 
 export type Actor = {
   userId: string;
-  email: string;
+  email: string | null;
   nickname: string;
   role: UserRole;
   status: UserStatus;
@@ -26,7 +26,7 @@ export function tokenDigest(token: string, pepper: string): string {
 }
 
 export async function issueSession(
-  pool: DatabasePool,
+  pool: Queryable,
   config: ApiConfig,
   input: { userId: string; kind: "USER" | "ADMIN"; ip?: string; userAgent?: string },
 ) {
@@ -56,7 +56,7 @@ export function createAuthHooks(pool: DatabasePool, config: ApiConfig) {
       session_id: string;
       session_kind: "USER" | "ADMIN";
       user_id: string;
-      email: string;
+      email: string | null;
       nickname: string;
       role: UserRole;
       status: UserStatus;

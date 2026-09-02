@@ -14,13 +14,16 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import {
+  FloatingBottomActionPanel,
+  useFloatingBottomActionContentInset,
+} from "@/components/FloatingBottomActionPanel";
+import { ProductInfoDivider } from "@/components/ProductInfoDivider";
 import { KoreanPixelTitle } from "@/components/RootCategoryTitle";
 import { AppText as Text } from "@/components/Typography";
 import { seed } from "@/design-system/seed";
-import {
-  LOCAL_KUJI_ROOM_AVAILABILITY,
-  resolveKujiEntryPath,
-} from "@/features/kuji/kuji-entry-state";
+import { openCustomerLogin } from "@/features/auth/login-navigation";
+import { buildKujiRoomGatePath } from "@/features/kuji/kuji-entry-state";
 import {
   categoryLabel,
   fetchProductDetail,
@@ -42,6 +45,7 @@ import { colors } from "@/theme";
 export function ProductDetailScreen() {
   const db = useSQLiteContext();
   const router = useRouter();
+  const floatingBottomInset = useFloatingBottomActionContentInset();
   const params = useLocalSearchParams<{ productId?: string | string[] }>();
   const productId = firstParam(params.productId) ?? "";
   const runtime = useMemo(
@@ -65,8 +69,9 @@ export function ProductDetailScreen() {
     setLoading(true);
     try {
       const tokens = await readAuthTokens();
-      setAccessToken(tokens?.accessToken ?? null);
       const next = await fetchProductDetail(runtime.apiBaseUrl, productId, tokens?.accessToken);
+      const currentTokens = await readAuthTokens();
+      setAccessToken(currentTokens?.accessToken ?? null);
       setSnapshot(next);
       void recordRecentlyViewedProduct(db, next.product.id).catch(() => undefined);
       setMessage("");
@@ -84,6 +89,14 @@ export function ProductDetailScreen() {
   const product = snapshot?.product ?? null;
   const maxQuantity = Math.max(1, Math.min(product?.availableQuantity ?? 1, 10));
   const total = (product?.price ?? 0) * quantity;
+  const drawUnavailable = Boolean(
+    product
+      && isDrawCategory(product.category)
+      && (
+        product.availableQuantity <= 0
+        || (!__DEV__ && (snapshot?.drawOdds?.entries.length ?? 0) === 0)
+      ),
+  );
 
   const goBack = () => {
     if (router.canGoBack()) router.back();
@@ -93,7 +106,10 @@ export function ProductDetailScreen() {
   const toggleWishlist = async () => {
     if (!snapshot || wishlistPending) return;
     if (!accessToken) {
-      Alert.alert("로그인이 필요합니다", "찜 목록은 로그인한 계정에 저장됩니다.");
+      openCustomerLogin(
+        "찜 목록은 로그인한 계정에 저장됩니다.",
+        `/product/${encodeURIComponent(productId)}`,
+      );
       return;
     }
     const next = !snapshot.wishedByViewer;
@@ -111,16 +127,34 @@ export function ProductDetailScreen() {
   const continueCommerce = () => {
     if (!product) return;
     if (!accessToken) {
-      Alert.alert("로그인이 필요합니다", "주문과 추첨 결과는 로그인한 계정에 저장됩니다.");
+      openCustomerLogin(
+        "주문과 추첨 결과는 로그인한 계정에 저장됩니다.",
+        isDrawCategory(product.category) && product.category === "kuji"
+          ? buildKujiRoomGatePath(product.id)
+          : `/checkout/${encodeURIComponent(product.id)}`,
+      );
       return;
     }
-    if (product.category === "kuji") {
-      router.push(resolveKujiEntryPath(product.id, LOCAL_KUJI_ROOM_AVAILABILITY) as Href);
+    if (isDrawCategory(product.category)) {
+      if (drawUnavailable) {
+        Alert.alert(
+          "지금은 뽑을 수 없어요",
+          product.availableQuantity <= 0
+            ? "남은 수량이 없어 구매할 수 없어요."
+            : "확률표가 공개된 뒤 구매할 수 있어요.",
+        );
+        return;
+      }
+      router.push(
+        product.category === "kuji"
+          ? buildKujiRoomGatePath(product.id) as Href
+          : `/checkout/${encodeURIComponent(product.id)}` as Href,
+      );
       return;
     }
     Alert.alert(
-      isDrawCategory(product.category) ? "뽑기 주문 준비 완료" : "구매 주문 준비 완료",
-      `${quantity}개 · ${total.toLocaleString("ko-KR")}원으로 결제 화면에 이어질 예정입니다. 현재 로컬 앱에서는 실제 결제를 진행하지 않습니다.`,
+      "구매 주문 준비 완료",
+      `${quantity}개 · ${total.toLocaleString("ko-KR")}원으로 결제 화면에 이어질 예정입니다. 현재는 결제 서비스 연결 전이라 주문이 접수되지 않아요.`,
       [
         {
           text: "OK",
@@ -133,7 +167,7 @@ export function ProductDetailScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.safeArea} edges={["top", "bottom", "left", "right"]}>
+    <SafeAreaView style={styles.safeArea} edges={["top", "left", "right"]}>
       <View style={styles.header}>
         <Pressable accessibilityRole="button" accessibilityLabel="뒤로 가기" onPress={goBack} hitSlop={10} style={styles.headerAction}>
           <Ionicons name="chevron-back" size={28} color={colors.ink} />
@@ -161,7 +195,10 @@ export function ProductDetailScreen() {
         </View>
       ) : (
         <>
-          <ScrollView contentContainerStyle={styles.content}>
+          <ScrollView
+            style={styles.scrollView}
+            contentContainerStyle={[styles.content, { paddingBottom: floatingBottomInset }]}
+          >
             <ProductHero snapshot={snapshot} assetBaseUrl={runtime.assetBaseUrl} />
 
             <View style={styles.detailCopy}>
@@ -169,10 +206,11 @@ export function ProductDetailScreen() {
                 <View style={styles.categoryBadge}><Text style={styles.categoryBadgeLabel}>{categoryLabel(product.category)}</Text></View>
                 <Text style={styles.stock}>{product.availableQuantity}개 남음</Text>
               </View>
+              <ProductInfoDivider style={styles.detailFieldDivider} />
               <Text style={styles.ipName}>{snapshot.ip?.nameKo ?? "등록 작품"}</Text>
               <Text style={styles.productName}>{productSubjectTitle(product.name, snapshot.ip?.nameKo)}</Text>
+              <ProductInfoDivider style={styles.detailFieldDivider} />
               <Text style={styles.price}>{product.price.toLocaleString("ko-KR")}원</Text>
-              <Text style={styles.description}>{productMetadataText(product, "description") ?? `${snapshot.ip?.nameKo ?? "등록 작품"}의 정식 등록 상품입니다. 상품 구성과 판매 방식은 아래 안내를 확인해 주세요.`}</Text>
             </View>
 
             <View style={styles.factList}>
@@ -193,21 +231,34 @@ export function ProductDetailScreen() {
             )}
           </ScrollView>
 
-          <View style={styles.footer}>
-            <View style={styles.quantityBox}>
-              <Pressable accessibilityRole="button" accessibilityLabel="수량 줄이기" disabled={quantity <= 1} onPress={() => setQuantity((current) => Math.max(1, current - 1))} style={styles.quantityButton}>
-                <Ionicons name="remove" size={20} color={quantity <= 1 ? colors.line : colors.ink} />
-              </Pressable>
-              <Text style={styles.quantityLabel}>{quantity}</Text>
-              <Pressable accessibilityRole="button" accessibilityLabel="수량 늘리기" disabled={quantity >= maxQuantity} onPress={() => setQuantity((current) => Math.min(maxQuantity, current + 1))} style={styles.quantityButton}>
-                <Ionicons name="add" size={20} color={quantity >= maxQuantity ? colors.line : colors.ink} />
-              </Pressable>
-            </View>
-            <Pressable accessibilityRole="button" onPress={continueCommerce} style={({ pressed }) => [styles.primaryButton, pressed && styles.pressed]}>
-              <Text style={styles.primaryButtonMeta}>{total.toLocaleString("ko-KR")}원</Text>
-              <Text style={styles.primaryButtonLabel}>{product.category === "kuji" ? "뽑으러 가기" : isDrawCategory(product.category) ? "뽑기 준비" : "구매 준비"}</Text>
+          <FloatingBottomActionPanel panelStyle={styles.footer}>
+            {!isDrawCategory(product.category) ? (
+              <View style={styles.quantityBox}>
+                <Pressable accessibilityRole="button" accessibilityLabel="수량 줄이기" disabled={quantity <= 1} onPress={() => setQuantity((current) => Math.max(1, current - 1))} style={styles.quantityButton}>
+                  <Ionicons name="remove" size={20} color={quantity <= 1 ? colors.line : colors.ink} />
+                </Pressable>
+                <Text style={styles.quantityLabel}>{quantity}</Text>
+                <Pressable accessibilityRole="button" accessibilityLabel="수량 늘리기" disabled={quantity >= maxQuantity} onPress={() => setQuantity((current) => Math.min(maxQuantity, current + 1))} style={styles.quantityButton}>
+                  <Ionicons name="add" size={20} color={quantity >= maxQuantity ? colors.line : colors.ink} />
+                </Pressable>
+              </View>
+            ) : null}
+            <Pressable
+              accessibilityRole="button"
+              accessibilityState={{ disabled: drawUnavailable }}
+              disabled={drawUnavailable}
+              onPress={continueCommerce}
+              style={({ pressed }) => [
+                styles.primaryButton,
+                isDrawCategory(product.category) && styles.primaryButtonCentered,
+                pressed && styles.pressed,
+                drawUnavailable && styles.disabled,
+              ]}
+            >
+              {isDrawCategory(product.category) ? null : <Text style={styles.primaryButtonMeta}>{total.toLocaleString("ko-KR")}원</Text>}
+              <Text style={styles.primaryButtonLabel}>{isDrawCategory(product.category) ? "뽑으러 가기" : "구매 준비"}</Text>
             </Pressable>
-          </View>
+          </FloatingBottomActionPanel>
         </>
       )}
     </SafeAreaView>
@@ -246,7 +297,7 @@ function ProductHero({ snapshot, assetBaseUrl }: { snapshot: ProductDetailSnapsh
               if (width > 0 && height > 0) setImageAspectRatio(width / height);
             }}
           />
-        ) : <View style={styles.placeholder}><Text style={styles.placeholderLabel}>IMAGE READY</Text></View>}
+        ) : <View style={styles.placeholder}><Text style={styles.placeholderLabel}>이미지 준비 중</Text></View>}
         <View style={styles.editionBadge}><Text style={styles.editionLabel}>{productMetadataText(snapshot.product, "edition") ?? snapshot.product.sku}</Text></View>
       </View>
     </View>
@@ -262,7 +313,7 @@ function OddsSection({ snapshot }: { snapshot: ProductDetailSnapshot }) {
   return (
     <View style={styles.section}>
       <KoreanPixelTitle variant="section" style={styles.sectionTitle}>현재 경품·확률</KoreanPixelTitle>
-      {odds ? (
+      {odds?.entries.length ? (
         <>
           {odds.entries.slice(0, 10).map((entry) => (
             <View key={entry.id} style={styles.oddsRow}>
@@ -276,7 +327,7 @@ function OddsSection({ snapshot }: { snapshot: ProductDetailSnapshot }) {
       ) : (
         <View style={styles.oddsEmpty}>
           <Ionicons name="lock-closed-outline" size={22} color={colors.muted} />
-          <View style={styles.oddsEmptyCopy}><Text style={styles.oddsEmptyTitle}>공개된 확률표를 확인 중이에요</Text><Text style={styles.oddsEmptyBody}>확률표가 공개되기 전에는 실제 주문·추첨을 진행하지 않습니다.</Text></View>
+          <View style={styles.oddsEmptyCopy}><Text style={styles.oddsEmptyTitle}>공개된 확률표를 확인 중이에요</Text><Text style={styles.oddsEmptyBody}>확률표 공개 전에는 실제 구매를 진행할 수 없으며 개발용 체험만 제공돼요.</Text></View>
         </View>
       )}
     </View>
@@ -292,17 +343,18 @@ function firstParam(value: string | string[] | undefined): string | undefined {
 }
 
 const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: seed.color.layer.basement },
+  safeArea: { flex: 1, position: "relative", backgroundColor: seed.color.layer.basement },
   header: { minHeight: seed.size.topNavigation, paddingHorizontal: seed.spacing.x3_5, flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: seed.color.stroke.neutral, backgroundColor: seed.color.layer.default },
   headerAction: { width: seed.size.touchTarget, height: seed.size.touchTarget, alignItems: "center", justifyContent: "center" },
   headerTitle: { alignItems: "center" },
-  center: { flex: 1, alignItems: "center", justifyContent: "center", padding: 28, gap: 12 },
+  center: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: seed.spacing.globalGutter, paddingVertical: 28, gap: 12 },
   centerText: { color: colors.muted, fontSize: 14 },
   errorTitle: { color: colors.ink, fontSize: 16, lineHeight: 23, fontWeight: "800", textAlign: "center" },
   retryButton: { minHeight: 44, justifyContent: "center", paddingHorizontal: 18, borderRadius: 10, backgroundColor: colors.ink },
   retryLabel: { color: colors.white, fontSize: 13, fontWeight: "800" },
+  scrollView: { flex: 1 },
   content: { paddingBottom: seed.spacing.screenBottom },
-  heroContainer: { marginHorizontal: seed.spacing.x2, marginVertical: seed.spacing.globalGutter },
+  heroContainer: { marginHorizontal: seed.spacing.x2, marginVertical: seed.spacing.x4 },
   hero: { width: "100%", overflow: "hidden", borderRadius: seed.radius.r6 },
   heroImage: { width: "100%", height: "100%" },
   placeholder: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: seed.color.background.neutralWeak },
@@ -314,10 +366,10 @@ const styles = StyleSheet.create({
   categoryBadge: { paddingHorizontal: 9, paddingVertical: 6, borderRadius: 7, backgroundColor: colors.brand },
   categoryBadgeLabel: { color: colors.ink, fontSize: 11, fontWeight: "900" },
   stock: { color: colors.muted, fontSize: 12, fontWeight: "800" },
-  ipName: { color: colors.muted, fontSize: 13, marginTop: 16 },
+  detailFieldDivider: { marginTop: seed.spacing.x3_5 },
+  ipName: { color: colors.muted, fontSize: 13, marginTop: seed.spacing.x3 },
   productName: { color: seed.color.foreground.neutral, ...seed.typography.screenTitle, marginTop: seed.spacing.x1 },
-  price: { color: colors.ink, fontSize: 22, fontWeight: "900", marginTop: 12 },
-  description: { color: colors.muted, fontSize: 14, lineHeight: 22, marginTop: 14 },
+  price: { color: colors.ink, fontSize: 22, fontWeight: "900", marginTop: seed.spacing.x3 },
   factList: { marginHorizontal: seed.spacing.globalGutter, marginTop: seed.spacing.x6, borderRadius: seed.radius.r4, borderWidth: 1, borderColor: seed.color.stroke.neutral, backgroundColor: seed.color.layer.default, overflow: "hidden" },
   fact: { minHeight: 58, paddingHorizontal: 16, flexDirection: "row", alignItems: "center", gap: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.line },
   factText: { flex: 1, color: colors.ink, fontSize: 13, lineHeight: 19, fontWeight: "700" },
@@ -336,12 +388,14 @@ const styles = StyleSheet.create({
   infoRow: { minHeight: 52, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 14, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.line },
   infoLabel: { color: colors.muted, fontSize: 13 },
   infoValue: { flex: 1, color: colors.ink, fontSize: 13, fontWeight: "800", textAlign: "right" },
-  footer: { paddingHorizontal: seed.spacing.globalGutter, paddingTop: seed.spacing.componentDefault, paddingBottom: seed.spacing.x1, borderTopWidth: 1, borderTopColor: seed.color.stroke.neutral, backgroundColor: seed.color.layer.default, flexDirection: "row", alignItems: "center", gap: seed.spacing.x2_5 },
+  footer: { flexDirection: "row", alignItems: "center", gap: seed.spacing.x2_5 },
   quantityBox: { height: 54, borderRadius: seed.radius.r3_5, borderWidth: 1, borderColor: seed.color.stroke.neutral, flexDirection: "row", alignItems: "center", backgroundColor: seed.color.layer.basement },
-  quantityButton: { width: 42, height: 52, alignItems: "center", justifyContent: "center" },
+  quantityButton: { width: seed.size.touchTarget, height: 52, alignItems: "center", justifyContent: "center" },
   quantityLabel: { minWidth: 24, color: colors.ink, fontSize: 16, fontWeight: "900", textAlign: "center" },
   primaryButton: { flex: 1, minHeight: seed.size.actionButton.large, paddingHorizontal: seed.spacing.x4, borderRadius: seed.radius.r3, backgroundColor: seed.color.background.brandSolid, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: seed.spacing.x2_5 },
+  primaryButtonCentered: { justifyContent: "center" },
   primaryButtonMeta: { color: colors.ink, fontSize: 12, fontWeight: "800" },
   primaryButtonLabel: { color: colors.ink, fontSize: 16, fontWeight: "900" },
   pressed: { opacity: seed.state.pressedOpacity },
+  disabled: { opacity: seed.state.disabledOpacity },
 });

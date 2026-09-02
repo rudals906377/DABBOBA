@@ -156,7 +156,7 @@ API는 업무 상태와 outbox event를 같은 PostgreSQL 트랜잭션에 기록
 | 관리자·교환 PostgreSQL 통합 테스트 | 구현됨 | CI 또는 로컬 disposable DB 실행 증거 필요 |
 | 계정 탈퇴 검토 | 차단 항목 재계산·사용자 변경 직렬화·승인 후 세션/재로그인 차단·감사/outbox 구현 | 보존 기간·익명화 범위·재가입 정책 승인과 실제 완료 배치 전 자동 삭제 불가 |
 | 주문·재고·포인트·추첨 원장 | 구현됨 | 실제 PG sandbox와 장애·환불 통합 테스트 필요 |
-| 고객 production 로그인 | dev session 경계만 존재 | 전화/Google/Kakao 계정·검증 연동 전 출시 불가 |
+| 고객 production 로그인 | 카카오·네이버·한국 휴대폰 OTP → Supabase Auth → Fastify 검증 → DABBOBA session 교환 구현 | 실제 provider 계정·redirect·SMS 연동, development build와 실기기 통합 검증 전 출시 불가 |
 | 결제 공급자 | generic webhook 경계만 존재 | PG 선정·승인 API·서명 규격·조정 adapter 전 실결제 불가 |
 | 일반 API 실제 IP rate-limit | `trustProxy: false` fail-closed, ingress 전략 미확정 | 신뢰 proxy 또는 edge/WAF 설정과 spoofing·IP 분리 통합 증거 전 출시 불가 |
 | 미디어 | durable intent/complete idempotency·만료 410·미연결 소유 미디어 삭제·exact-size V4 POST policy·사용자 쿼터·generation/checksum/MIME 검증·decode 제한·orientation/EXIF 제거·WebP 재인코딩·worker 정리 경계 구현 | 실제 GCS CORS/IAM/삭제, 유해 콘텐츠 검사·CDN과 권리 자산 검증 필요 |

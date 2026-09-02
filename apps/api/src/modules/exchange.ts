@@ -147,7 +147,7 @@ export function isExchangeOfferTransitionAllowed(from: OfferStatus, to: OfferSta
 }
 
 export function isDrawExchangeSource(sourceType: InventorySourceType): boolean {
-  return sourceType === "GACHA" || sourceType === "KUJI";
+  return sourceType === "GACHA";
 }
 
 export function isExchangeEligibleInventory(
@@ -175,7 +175,16 @@ const listingSelect = `SELECT
   l.status AS listing_status,l.accepted_offer_id,l.matched_at,l.author_confirmed_at,l.proposer_confirmed_at,
   l.completed_at,l.completion_mode,l.cancelled_at,l.cancelled_by,l.cancel_reason,l.resolved_by_admin_id,
   l.created_at AS listing_created_at,l.updated_at AS listing_updated_at,
-  (SELECT count(*) FROM exchange_offers o WHERE o.listing_id=l.id AND o.status<>'WITHDRAWN') AS offer_count,
+  (SELECT count(*)
+   FROM exchange_offers o
+   JOIN inventory_units offer_inventory ON offer_inventory.id=o.offered_inventory_unit_id
+   WHERE o.listing_id=l.id AND o.status<>'WITHDRAWN'
+     AND offer_inventory.source_type='GACHA'
+     AND EXISTS (
+       SELECT 1 FROM draw_results offer_draw_result
+       WHERE offer_draw_result.prize_inventory_unit_id=offer_inventory.id
+         AND offer_draw_result.user_id=o.proposer_id
+     )) AS offer_count,
   ${inventorySelect}
   FROM exchange_listings l JOIN users u ON u.id=l.author_id
   JOIN inventory_units iu ON iu.id=l.offered_inventory_unit_id
@@ -339,7 +348,19 @@ function requireExchangeEligibleInventory(
     inventory.source_type,
     inventory.draw_owner_id === ownerId,
   )) {
-    throw conflict("직접 뽑아 보관함에 보관 중인 가챠·쿠지 상품만 교환에 사용할 수 있습니다.");
+    throw conflict("가챠로 직접 뽑아 보관함에 보관 중인 상품만 교환에 사용할 수 있습니다.");
+  }
+}
+
+function requireOriginalGachaDrawInventory(
+  locked: Map<string, InventoryLockRow>,
+  inventoryId: string,
+  ownerId: string,
+) {
+  const inventory = locked.get(inventoryId);
+  if (!inventory) throw notFound("교환 상품을 찾을 수 없습니다.");
+  if (!isDrawExchangeSource(inventory.source_type) || inventory.draw_owner_id !== ownerId) {
+    throw conflict("가챠로 직접 뽑아 보관함에 보관 중인 상품만 교환에 사용할 수 있습니다.");
   }
 }
 
@@ -403,6 +424,8 @@ async function finalizeOwnershipExchange(
   ]);
   requireInventoryState(locked, listing.offered_inventory_unit_id, listing.author_id, "EXCHANGE_LISTED");
   requireInventoryState(locked, offer.offered_inventory_unit_id, offer.proposer_id, "EXCHANGE_OFFERED");
+  requireOriginalGachaDrawInventory(locked, listing.offered_inventory_unit_id, listing.author_id);
+  requireOriginalGachaDrawInventory(locked, offer.offered_inventory_unit_id, offer.proposer_id);
   if (listing.offered_inventory_unit_id === offer.offered_inventory_unit_id) {
     throw conflict("동일한 상품끼리는 교환을 완료할 수 없습니다.");
   }
@@ -485,7 +508,7 @@ export async function registerExchangeRoutes(app: FastifyInstance, context: ApiC
       const filters = [
         "iu.owner_id=$1",
         "iu.status='OWNED'",
-        "iu.source_type IN ('GACHA','KUJI')",
+        "iu.source_type='GACHA'",
         `EXISTS (
           SELECT 1 FROM draw_results draw_result
           WHERE draw_result.prize_inventory_unit_id=iu.id
@@ -521,7 +544,17 @@ export async function registerExchangeRoutes(app: FastifyInstance, context: ApiC
       ? undefined
       : enumInput(query, "category", PRODUCT_CATEGORIES);
     const values: unknown[] = [limit + 1];
-    const filters = ["l.status='OPEN'"];
+    const filters = [
+      "l.status='OPEN'",
+      "iu.source_type='GACHA'",
+      `EXISTS (
+        SELECT 1 FROM draw_results draw_result
+        WHERE draw_result.prize_inventory_unit_id=iu.id
+          AND draw_result.user_id=l.author_id
+      )`,
+      "p.is_active=true",
+      "i.is_active=true",
+    ];
     if (search) {
       values.push(`%${search}%`);
       filters.push(
@@ -549,7 +582,13 @@ export async function registerExchangeRoutes(app: FastifyInstance, context: ApiC
   app.get("/v1/exchange/listings/:listingId", async (request) => {
     const listingId = uuidInput((request.params as Record<string, unknown>).listingId, "listingId");
     const result = await context.pool.query<ListingRow>(
-      `${listingSelect} WHERE l.id=$1 AND l.status<>'HIDDEN'`,
+      `${listingSelect} WHERE l.id=$1 AND l.status<>'HIDDEN' AND iu.source_type='GACHA'
+       AND EXISTS (
+         SELECT 1 FROM draw_results draw_result
+         WHERE draw_result.prize_inventory_unit_id=iu.id
+           AND draw_result.user_id=l.author_id
+       )
+       AND p.is_active=true AND i.is_active=true`,
       [listingId],
     );
     if (!result.rowCount) throw notFound();
@@ -564,6 +603,12 @@ export async function registerExchangeRoutes(app: FastifyInstance, context: ApiC
     const authorOwnsListing = actor.userId === result.rows[0]!.author_id;
     const offerRows = await context.pool.query<OfferRow>(
       `${offerSelect} WHERE o.listing_id=$1 ${authorOwnsListing ? "" : "AND o.proposer_id=$2"}
+       AND iu.source_type='GACHA'
+       AND EXISTS (
+         SELECT 1 FROM draw_results draw_result
+         WHERE draw_result.prize_inventory_unit_id=iu.id
+           AND draw_result.user_id=o.proposer_id
+       )
        ORDER BY o.created_at DESC,o.id DESC`,
       authorOwnsListing ? [listingId] : [listingId, actor.userId],
     );
@@ -640,11 +685,25 @@ export async function registerExchangeRoutes(app: FastifyInstance, context: ApiC
             [listing.author_id, request.actor!.userId],
           );
           if (blocked.rowCount) throw forbidden();
-          const locked = await lockInventoryUnits(client, [inventoryId]);
-          requireExchangeEligibleInventory(locked, inventoryId, request.actor!.userId);
           if (inventoryId === listing.offered_inventory_unit_id) {
             throw conflict("등록 상품과 동일한 상품은 제안할 수 없습니다.");
           }
+          const locked = await lockInventoryUnits(client, [
+            listing.offered_inventory_unit_id,
+            inventoryId,
+          ]);
+          requireInventoryState(
+            locked,
+            listing.offered_inventory_unit_id,
+            listing.author_id,
+            "EXCHANGE_LISTED",
+          );
+          requireOriginalGachaDrawInventory(
+            locked,
+            listing.offered_inventory_unit_id,
+            listing.author_id,
+          );
+          requireExchangeEligibleInventory(locked, inventoryId, request.actor!.userId);
           const created = await client.query<{ id: string }>(
             `INSERT INTO exchange_offers(listing_id,proposer_id,offered_inventory_unit_id,message)
              VALUES($1,$2,$3,'이 상품과 교환하실래요?') RETURNING id`,
@@ -722,6 +781,16 @@ export async function registerExchangeRoutes(app: FastifyInstance, context: ApiC
                 "EXCHANGE_OFFERED",
               );
             }
+            requireOriginalGachaDrawInventory(
+              locked,
+              listing.offered_inventory_unit_id,
+              listing.author_id,
+            );
+            requireOriginalGachaDrawInventory(
+              locked,
+              offer.offered_inventory_unit_id,
+              offer.proposer_id,
+            );
             const accepted = await client.query(
               "UPDATE exchange_offers SET status='ACCEPTED',decided_at=now() WHERE id=$1 AND status='PENDING' RETURNING id",
               [offerId],

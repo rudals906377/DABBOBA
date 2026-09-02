@@ -42,7 +42,7 @@ export function nextAdminLoginFailureState(input: {
 
 function actorResponse(input: {
   userId: string;
-  email: string;
+  email: string | null;
   nickname: string;
   role: UserRole;
   status: UserStatus;
@@ -67,7 +67,7 @@ type CurrentSessionRow = {
 function currentUserResponse(
   actor: {
     userId: string;
-    email: string;
+    email: string | null;
     nickname: string;
     role: UserRole;
     status: UserStatus;
@@ -94,7 +94,9 @@ export async function registerAuthRoutes(app: FastifyInstance, context: ApiConte
     const input = objectInput(request.body);
     const email = stringInput(input, "email", { max: 254 })!.toLocaleLowerCase("en-US");
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw badRequest("이메일 형식을 확인해 주세요.");
-    const nickname = email.split("@")[0]!.slice(0, 20) || "테스트 사용자";
+    const nickname = email.endsWith("@dabboba.local")
+      ? "모찌수집가"
+      : email.split("@")[0]!.slice(0, 20) || "다뽀바 회원";
     const result = await withTransaction(context.pool, async (client) => {
       const user = await client.query<{ id: string; email: string; nickname: string; role: UserRole; status: UserStatus }>(
         `INSERT INTO users (email, nickname)

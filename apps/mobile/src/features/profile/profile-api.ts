@@ -1,9 +1,11 @@
 import { randomUUID } from "expo-crypto";
-import { createDabbobaClient, errorMessage } from "@dabboba/api-client";
+import { errorMessage } from "@dabboba/api-client";
 import type { CatalogProduct, components } from "@dabboba/contracts";
+import { createMobileDabbobaClient as createDabbobaClient } from "@/lib/mobile-api-client";
 
 type Actor = components["schemas"]["UserActor"];
 type AccountProfile = components["schemas"]["AccountProfile"];
+type AccountBasicInfo = components["schemas"]["AccountBasicInfo"];
 type DefaultAddress = components["schemas"]["DefaultShippingAddress"];
 type WishlistItem = components["schemas"]["WishlistItem"];
 type InventoryUnit = components["schemas"]["InventoryUnit"];
@@ -15,12 +17,15 @@ type Notice = components["schemas"]["Notice"];
 type Inquiry = components["schemas"]["Inquiry"];
 type NotificationPreferences = components["schemas"]["NotificationPreferences"];
 
+export type ProfileWantedRequest = WantedRequest & { mediaUrl: string | null };
+
 export type ProfileSnapshot = {
   isExample: boolean;
   catalogProducts: CatalogProduct[];
   ipNames: Record<string, string>;
   actor: Actor | null;
   profile: AccountProfile;
+  basicInfo: AccountBasicInfo;
   defaultAddress: DefaultAddress | null;
   wishlist: WishlistItem[];
   inventory: InventoryUnit[];
@@ -28,7 +33,7 @@ export type ProfileSnapshot = {
   pointBalance: number;
   pointHistory: PointLedgerEntry[];
   shippingRequests: ShippingRequest[];
-  wantedRequests: WantedRequest[];
+  wantedRequests: ProfileWantedRequest[];
   notices: Notice[];
   inquiries: Inquiry[];
   notificationPreferences: NotificationPreferences;
@@ -42,6 +47,16 @@ export type PointReturnResult = {
   balance: number;
   returnedAt: string;
 };
+
+export class ProfileApiError extends Error {
+  readonly status: number;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = "ProfileApiError";
+    this.status = status;
+  }
+}
 
 const IDS = {
   user: "10000000-0000-4000-8000-000000000001",
@@ -80,15 +95,16 @@ export async function fetchProfileSnapshot(
   const ipNames = Object.fromEntries(
     (ipsResult.data?.items ?? []).map((ip) => [ip.id, ip.nameKo]),
   );
+  const wantedRequests = await attachWantedMediaUrls(client, wantedResult.data?.items ?? []);
 
   if (!accessToken) {
     if (!products.length) {
-      throw new Error(errorMessage(productsResult.error, "내정보 예시 상품을 불러오지 못했습니다."));
+      throw new Error(errorMessage(productsResult.error, "상품 정보를 불러오지 못했습니다."));
     }
     return createExampleSnapshot(
       products,
       ipNames,
-      wantedResult.data?.items ?? [],
+      wantedRequests,
       noticesResult.data?.items ?? [],
     );
   }
@@ -96,6 +112,7 @@ export async function fetchProfileSnapshot(
   const [
     meResult,
     profileResult,
+    basicInfoResult,
     addressResult,
     wishlistResult,
     inventoryResult,
@@ -107,6 +124,7 @@ export async function fetchProfileSnapshot(
   ] = await Promise.all([
     client.GET("/v1/auth/me"),
     client.GET("/v1/account/profile"),
+    client.GET("/v1/account/basic-info"),
     client.GET("/v1/account/default-address"),
     client.GET("/v1/account/wishlist", { params: { query: { limit: 50 } } }),
     client.GET("/v1/exchange/inventory", { params: { query: { limit: 50 } } }),
@@ -117,11 +135,19 @@ export async function fetchProfileSnapshot(
     client.GET("/v1/account/notification-preferences"),
   ]);
 
-  if (!meResult.data || !profileResult.data) {
-    throw new Error(errorMessage(meResult.error ?? profileResult.error, "로그인 정보를 확인하지 못했습니다."));
+  if (!meResult.data || !profileResult.data || !basicInfoResult.data) {
+    const failed = !meResult.data ? meResult : !profileResult.data ? profileResult : basicInfoResult;
+    throw new ProfileApiError(
+      failed.response.status,
+      errorMessage(failed.error, "로그인 정보를 확인하지 못했습니다."),
+    );
   }
   if (!pointsResult.data || !preferencesResult.data) {
-    throw new Error(errorMessage(pointsResult.error ?? preferencesResult.error, "내정보를 모두 불러오지 못했습니다."));
+    const failed = !pointsResult.data ? pointsResult : preferencesResult;
+    throw new ProfileApiError(
+      failed.response.status,
+      errorMessage(failed.error, "내정보를 모두 불러오지 못했습니다."),
+    );
   }
 
   return {
@@ -130,6 +156,7 @@ export async function fetchProfileSnapshot(
     ipNames,
     actor: meResult.data.actor,
     profile: profileResult.data,
+    basicInfo: basicInfoResult.data,
     defaultAddress: addressResult.data ?? null,
     wishlist: wishlistResult.data?.items ?? [],
     inventory: inventoryResult.data?.items ?? [],
@@ -137,7 +164,7 @@ export async function fetchProfileSnapshot(
     pointBalance: pointsResult.data.balance,
     pointHistory: pointsResult.data.items,
     shippingRequests: shippingResult.data?.items ?? [],
-    wantedRequests: wantedResult.data?.items ?? [],
+    wantedRequests,
     notices: noticesResult.data?.items ?? [],
     inquiries: inquiriesResult.data?.items ?? [],
     notificationPreferences: preferencesResult.data,
@@ -156,6 +183,20 @@ export async function updateAccountProfile(
     body: input,
   });
   if (!result.data) throw new Error(errorMessage(result.error, "프로필을 저장하지 못했습니다."));
+  return result.data;
+}
+
+export async function updateAccountBasicInfo(
+  apiBaseUrl: string,
+  accessToken: string,
+  input: components["schemas"]["UpdateAccountBasicInfoInput"],
+): Promise<AccountBasicInfo> {
+  const client = authorizedClient(apiBaseUrl, accessToken);
+  const result = await client.PATCH("/v1/account/basic-info", {
+    params: { header: { "Idempotency-Key": randomUUID() } },
+    body: input,
+  });
+  if (!result.data) throw new Error(errorMessage(result.error, "계정 기본정보를 저장하지 못했습니다."));
   return result.data;
 }
 
@@ -250,7 +291,7 @@ function authorizedClient(apiBaseUrl: string, accessToken: string) {
 function createExampleSnapshot(
   products: CatalogProduct[],
   ipNames: Record<string, string>,
-  publicWanted: WantedRequest[],
+  publicWanted: ProfileWantedRequest[],
   publicNotices: Notice[],
 ): ProfileSnapshot {
   const now = new Date();
@@ -282,7 +323,7 @@ function createExampleSnapshot(
     status: "OWNED",
     acquiredAt: daysAgo(index + 3),
   }));
-  const wantedFallback: WantedRequest = {
+  const wantedFallback: ProfileWantedRequest = {
     id: IDS.wanted,
     userId: IDS.user,
     authorNickname: "모찌수집가",
@@ -291,6 +332,8 @@ function createExampleSnapshot(
     ipNameKo: ipNames[second.ipId] ?? "등록 작품",
     desiredItem: `${second.name} 재입고를 기다려요`,
     details: "같이 기다리는 수집가가 얼마나 있는지 알려주세요.",
+    mediaId: null,
+    mediaUrl: null,
     status: "ACTIVE",
     likeCount: 18,
     likedByViewer: false,
@@ -325,12 +368,21 @@ function createExampleSnapshot(
       version: 1,
       updatedAt: daysAgo(1),
     },
+    basicInfo: {
+      id: IDS.user,
+      nickname: "모찌수집가",
+      email: "mobile-test@dabboba.local",
+      phoneMasked: null,
+      birthDate: null,
+      version: 1,
+      updatedAt: daysAgo(1),
+    },
     defaultAddress: {
       id: IDS.address,
       recipient: "홍*동",
       phone: "010****1234",
-      postalCode: "00000",
-      addressLine1: "서울시 예시구 DABBOBA로",
+      postalCode: "*****",
+      addressLine1: "서울특별시 성동구 ****로",
       addressLine2: "상세주소는 로그인 후 표시",
       deliveryNote: "문 앞에 놓아주세요",
       version: 1,
@@ -370,8 +422,8 @@ function createExampleSnapshot(
       destination: {
         recipientMasked: "홍*동",
         phoneMasked: "010****1234",
-        postalCode: "00000",
-        addressLine1: "서울시 예시구 DABBOBA로",
+        postalCode: "*****",
+        addressLine1: "서울특별시 성동구 ****로",
         addressLine2: null,
       },
       requestedAt: daysAgo(2),
@@ -406,6 +458,19 @@ function createExampleSnapshot(
     },
     fetchedAt: now.toISOString(),
   };
+}
+
+async function attachWantedMediaUrls(
+  client: ReturnType<typeof createDabbobaClient>,
+  requests: WantedRequest[],
+): Promise<ProfileWantedRequest[]> {
+  return Promise.all(requests.map(async (request) => {
+    if (!request.mediaId) return { ...request, mediaUrl: null };
+    const result = await client.GET("/v1/media/{mediaId}/public-url", {
+      params: { path: { mediaId: request.mediaId } },
+    });
+    return { ...request, mediaUrl: result.data?.url ?? null };
+  }));
 }
 
 export function formatDate(value: string): string {

@@ -41,6 +41,9 @@ const shopApiSource = readFileSync(path.join(root, "apps/mobile/src/features/sho
 const checkoutScreenSource = readOptionalSource("apps/mobile/src/features/checkout/CheckoutScreen.tsx");
 const checkoutConnectionScreenSource = readOptionalSource("apps/mobile/src/features/checkout/CheckoutConnectionScreen.tsx");
 const checkoutApiSource = readOptionalSource("apps/mobile/src/features/checkout/checkout-api.ts");
+const drawRevealSource = readOptionalSource("apps/mobile/src/features/draw/DrawRevealScreen.tsx");
+const kujiDrawSource = readOptionalSource("apps/mobile/src/features/kuji/KujiDrawScreen.tsx");
+const kujiQueueSource = readOptionalSource("apps/mobile/src/features/kuji/KujiQueueScreen.tsx");
 const dukroomRouteSource = readFileSync(path.join(root, "apps/mobile/app/(tabs)/dukroom.tsx"), "utf8");
 const storageRootSource = readOptionalSource("apps/mobile/src/features/profile/StorageRootScreen.tsx");
 const dukroomDetailRouteSource = readFileSync(path.join(root, "apps/mobile/app/dukroom/[postId].tsx"), "utf8");
@@ -53,6 +56,7 @@ const profileMemberRouteSource = readFileSync(path.join(root, "apps/mobile/app/p
 const profileHomeSource = readFileSync(path.join(root, "apps/mobile/src/features/profile/ProfileHomeScreen.tsx"), "utf8");
 const profileSectionSource = readFileSync(path.join(root, "apps/mobile/src/features/profile/ProfileSectionScreen.tsx"), "utf8");
 const profileMemberSource = readFileSync(path.join(root, "apps/mobile/src/features/profile/ProfileMemberDetailScreen.tsx"), "utf8");
+const profileRecordDetailSource = readOptionalSource("apps/mobile/src/features/profile/ProfileRecordDetailScreen.tsx");
 const profileApiSource = readFileSync(path.join(root, "apps/mobile/src/features/profile/profile-api.ts"), "utf8");
 const shippingPolicySource = readFileSync(path.join(root, "apps/mobile/src/features/profile/shipping-policy.ts"), "utf8");
 const rootHeaderActionsSource = readOptionalSource("apps/mobile/src/components/RootHeaderActions.tsx");
@@ -66,6 +70,7 @@ const notificationsScreenSource = readOptionalSource("apps/mobile/src/features/n
 const notificationsApiSource = readOptionalSource("apps/mobile/src/features/notifications/notifications-api.ts");
 const prototypeCss = readFileSync(path.join(root, "src/prototype.css"), "utf8");
 const catalogApiSource = readFileSync(path.join(root, "apps/mobile/src/features/catalog/catalog-api.ts"), "utf8");
+const productCategoriesSource = readFileSync(path.join(root, "apps/mobile/src/features/catalog/product-categories.ts"), "utf8");
 const localDatabaseSource = readFileSync(path.join(root, "apps/mobile/src/lib/local-database.ts"), "utf8");
 const sessionStoreSource = readFileSync(path.join(root, "apps/mobile/src/lib/session-store.ts"), "utf8");
 const developmentSessionSource = readOptionalSource("apps/mobile/src/lib/development-session.ts");
@@ -124,7 +129,12 @@ test("Expo entry is native-first with typed routes, API contracts, secure tokens
   assert.equal(mobilePackage.dependencies["@dabboba/api-client"], "workspace:*");
   assert.equal(mobilePackage.dependencies["expo-secure-store"], "~15.0.8");
   assert.equal(mobilePackage.dependencies["expo-sqlite"], "~16.0.10");
+  assert.equal(mobilePackage.dependencies["expo-image-picker"], "~17.0.11");
+  assert.equal(mobilePackage.dependencies["expo-image-manipulator"], "~14.0.8");
   assert.equal(mobilePackage.dependencies["expo-notifications"], "~0.32.17");
+  assert.equal(mobilePackage.dependencies["expo-auth-session"], "~7.0.11");
+  assert.equal(mobilePackage.dependencies["expo-web-browser"], "~15.0.11");
+  assert.ok(mobilePackage.dependencies["@supabase/supabase-js"]);
   assert.equal(mobilePackage.scripts.start, "expo start --go");
   assert.equal(mobilePackage.scripts.test, "node --test ../../tests/expo-shell-structure.test.mjs");
   assert.equal(mobileAppConfig.expo.scheme, "dabboba");
@@ -134,7 +144,16 @@ test("Expo entry is native-first with typed routes, API contracts, secure tokens
     "expo-secure-store",
     "expo-sqlite",
     "expo-font",
+    [
+      "expo-image-picker",
+      {
+        photosPermission: "신청 상품 사진을 첨부하기 위해 사진 보관함 접근이 필요합니다.",
+        cameraPermission: false,
+        microphonePermission: false,
+      },
+    ],
     "expo-notifications",
+    "expo-web-browser",
   ]);
   assert.match(rootLayoutSource, /SQLiteProvider/);
   assert.match(tabsLayoutSource, /name="exchange"/);
@@ -169,10 +188,11 @@ test("Expo entry is native-first with typed routes, API contracts, secure tokens
   assert.match(sessionStoreSource, /SecureStore\.setItemAsync/);
   assert.match(sessionStoreSource, /access-token/);
   assert.match(sessionStoreSource, /refresh-token/);
-  assert.match(rootLayoutSource, /DevelopmentSessionBootstrap enabled=\{__DEV__\}/);
+  assert.match(rootLayoutSource, /customerAuthSetupAttempted/);
+  assert.match(rootLayoutSource, /DevelopmentSessionBootstrap enabled=\{__DEV__ && !customerAuthSetupAttempted\}/);
   assert.match(developmentSessionSource, /\/v1\/auth\/me/);
   assert.match(developmentSessionSource, /\/v1\/auth\/dev-session/);
-  assert.match(developmentSessionSource, /mobile-test@dabboba\.local/);
+  assert.match(developmentSessionSource, /app@dabboba\.local/);
   assert.match(developmentSessionSource, /writeAuthTokens/);
   assert.doesNotMatch(`${rootLayoutSource}\n${tabsLayoutSource}\n${homeSource}`, /WebView/);
 });
@@ -186,6 +206,16 @@ test("native home follows the compact announcement, draw activity, today, collec
   const eventIndex = homeSource.indexOf("<EventNoticeCard");
   assert.ok(tickerIndex > -1 && drawActivityIndex > tickerIndex && todayIndex > drawActivityIndex && collectionsIndex > todayIndex && eventIndex > collectionsIndex);
   assert.match(homeSource, /const todayProducts = visibleProducts\.slice\(0, 4\)/);
+  assert.match(homeSource, /<ScrollView[\s\S]*?horizontal[\s\S]*?contentContainerStyle=\{styles\.productRail\}[\s\S]*?\{todayProducts\.map/);
+  assert.match(homeSource, /homeCollections\.map[\s\S]*?<ScrollView[\s\S]*?horizontal[\s\S]*?contentContainerStyle=\{styles\.productRail\}/);
+  assert.match(homeSource, /productCard:\s*\{\s*width:\s*HOME_PRODUCT_CARD_WIDTH/);
+  assert.match(homeSource, /collectionCard:\s*\{\s*width:\s*HOME_PRODUCT_CARD_WIDTH/);
+  assert.equal((homeSource.match(/getHomeProductCardWidth\(product\.category, viewportWidth, seed\.spacing\.globalGutter\)/g) ?? []).length, 2);
+  assert.match(homeSource, /fallbackAspectRatio = isKuji \? 16 \/ 9/);
+  assert.match(homeSource, /Image\.getSize\(/);
+  assert.match(homeSource, /resizeMode=\{isKuji \? "contain" : "cover"\}/);
+  assert.match(homeSource, /collectionImageFrame:\s*\{\s*width:\s*"100%"/);
+  assert.doesNotMatch(homeSource, /productGrid|flexWrap:\s*"wrap"/);
   assert.doesNotMatch(homeSource, /다뽀바 인기 작품|다뽀바 덕룸|fetchDukroomHomePreview/);
   assert.match(homeSource, /buildHomeCollections/);
   assert.match(homeFeedSource, /orderedIpIds\.flatMap/);
@@ -193,12 +223,12 @@ test("native home follows the compact announcement, draw activity, today, collec
   assert.match(announcementTickerSource, /Animated\.timing\(translateX/);
   assert.match(announcementTickerSource, /Animated\.timing\(translateY/);
   assert.match(announcementTickerSource, /AccessibilityInfo\.isReduceMotionEnabled/);
-  assert.match(homeSource, /화면 예시/);
+  assert.doesNotMatch(homeSource, /화면 예시|IMAGE READY/);
   assert.match(homeSource, /styles\.activityPerson[\s\S]*?item\.personName/);
   assert.match(homeSource, /styles\.activityProduct[\s\S]*?item\.productName/);
   assert.match(homeSource, /activityPerson:\s*\{[^}]*fontWeight:\s*"900"/);
   assert.match(homeSource, /activityProduct:\s*\{[^}]*color:\s*seed\.color\.foreground\.brand/);
-  assert.match(homeSource, /buildDrawActivityExamples\(snapshot\?\.products \?\? \[\], snapshot\?\.ips \?\? \[\], productSubjectTitle\)/);
+  assert.match(homeSource, /__DEV__[\s\S]*?buildDrawActivityExamples\(snapshot\?\.products \?\? \[\], snapshot\?\.ips \?\? \[\], productSubjectTitle\)/);
   assert.match(homeFeedSource, /productNameForActivity\(product\.name, ipNameById\.get\(product\.ipId\)\)/);
   assert.match(homeSource, /getTickerOverflowDistance/);
   assert.match(homeSource, /Animated\.loop/);
@@ -223,7 +253,7 @@ test("only Home keeps the DABBOBA wordmark while category roots use compact Kore
   assert.equal(mobilePackage.dependencies.galmuri, "2.40.3");
   assert.match(rootLayoutSource, /useFonts\(\{\s*Galmuri11:\s*require\("galmuri\/dist\/Galmuri11-Bold\.ttf"\)/);
   assert.match(rootCategoryTitleSource, /accessibilityRole="header"/);
-  assert.match(rootCategoryTitleSource, /fontFamily:\s*"Galmuri11"/);
+  assert.match(rootCategoryTitleSource, /fontFamily:\s*"DabbobaKoreanPixelBold"/);
   assert.match(rootCategoryTitleSource, /fontWeight:\s*"400"/);
   assert.match(rootCategoryTitleSource, /fontSize:\s*22/);
 });
@@ -264,13 +294,15 @@ test("readable app copy uses Noto Sans while fixed pixel brand surfaces stay iso
     assert.match(source, /import \{[^}]*AppText as Text[^}]*\} from "@\/components\/Typography";/, `${relativePath} must use the shared readable text component`);
   }
 
-  assert.match(rootCategoryTitleSource, /fontFamily:\s*"Galmuri11"/);
+  assert.match(rootCategoryTitleSource, /fontFamily:\s*"DabbobaKoreanPixelBold"/);
+  assert.match(rootLayoutSource, /Galmuri11Readable:\s*require\("galmuri\/dist\/Galmuri11\.ttf"\)/);
+  assert.match(rootCategoryTitleSource, /section:\s*\{[\s\S]*?fontSize:\s*20/);
   assert.doesNotMatch(rootHeaderActionsSource, /<Text\b|fontFamily:/);
 });
 
 test("app-authored title blocks use one Korean pixel title instead of stacked English eyebrows", () => {
   assert.match(rootCategoryTitleSource, /export function KoreanPixelTitle/);
-  assert.match(rootCategoryTitleSource, /fontFamily:\s*"Galmuri11"/);
+  assert.match(rootCategoryTitleSource, /fontFamily:\s*"DabbobaKoreanPixelBold"/);
 
   for (const source of [
     homeSource,
@@ -296,11 +328,43 @@ test("app-authored title blocks use one Korean pixel title instead of stacked En
   assert.doesNotMatch(profileMemberSource, /eyebrow:/);
 });
 
+test("section titles and their compact accessories share one locked bold Korean pixel face", () => {
+  assert.match(rootLayoutSource, /DabbobaKoreanPixelBold:\s*require\("galmuri\/dist\/Galmuri11-Bold\.ttf"\)/);
+  assert.match(rootCategoryTitleSource, /export function KoreanPixelTitleAccessory/);
+  assert.match(rootCategoryTitleSource, /fixedPixelFace:\s*\{[\s\S]*?fontFamily:\s*"DabbobaKoreanPixelBold"[\s\S]*?fontWeight:\s*"400"/);
+  assert.match(rootCategoryTitleSource, /style=\{\[styles\.base, styles\[variant\], style, styles\.fixedPixelFace\]\}/);
+  assert.match(rootCategoryTitleSource, /style=\{\[styles\.accessory, style, styles\.fixedPixelFace\]\}/);
+  assert.match(rootCategoryTitleSource, /accessory:\s*\{[\s\S]*?fontSize:\s*12/);
+
+  for (const source of [
+    homeSource,
+    exchangeRoomSource,
+    exchangeDetailSource,
+    searchScreenSource,
+    notificationsScreenSource,
+    dukroomSource,
+    dukroomDetailSource,
+    kujiDrawSource,
+    kujiQueueSource,
+    drawRevealSource,
+  ]) {
+    assert.match(source, /KoreanPixelTitleAccessory/);
+  }
+
+  assert.match(homeSource, /<KoreanPixelTitleAccessory>\{trailing\}<\/KoreanPixelTitleAccessory>/);
+  assert.doesNotMatch(homeSource, /<Text style=\{styles\.sectionTrailing\}>/);
+  assert.doesNotMatch(searchScreenSource, /<Text style=\{styles\.result(?:Title|Count)\}>/);
+  assert.doesNotMatch(kujiDrawSource, /<Text style=\{styles\.boardCount\}>/);
+  assert.doesNotMatch(exchangeDetailSource, /<Text style=\{styles\.oneChoiceBadge\}>/);
+  assert.doesNotMatch(notificationsScreenSource, /<Text style=\{styles\.unreadCount\}>/);
+  assert.doesNotMatch(drawRevealSource, /<Text style=\{styles\.summaryRail(?:Title|Count)\}>/);
+});
+
 test("Expo app applies a native SEED-compatible design layer without web-only packages", () => {
   assert.equal(mobilePackage.dependencies["@seed-design/react"], undefined);
   assert.equal(mobilePackage.dependencies["@seed-design/css"], undefined);
   assert.match(seedTokensSource, /export const seed/);
-  assert.match(seedTokensSource, /globalGutter:\s*16/);
+  assert.match(seedTokensSource, /globalGutter:\s*12/);
   assert.match(seedTokensSource, /componentDefault:\s*12/);
   assert.match(seedTokensSource, /betweenChips:\s*8/);
   assert.match(seedTokensSource, /screenTitle:\s*\{\s*fontSize:\s*26,\s*lineHeight:\s*35,\s*fontWeight:\s*"700"/);
@@ -331,6 +395,70 @@ test("Expo app applies a native SEED-compatible design layer without web-only pa
   for (const [relativePath, source] of styledAppSurfaces) {
     if (!/StyleSheet\.create/.test(source)) continue;
     assert.match(source, /@\/design-system\/seed/, `${relativePath} must use the shared native SEED tokens`);
+  }
+});
+
+test("native advisory guidance uses one text-only caption treatment across customer screens", () => {
+  assert.match(seedComponentsSource, /export function SeedInlineGuidance/);
+  assert.match(seedComponentsSource, /inlineGuidance:\s*\{[^}]*seed\.typography\.caption/);
+  assert.doesNotMatch(
+    seedComponentsSource,
+    /inlineGuidance:\s*\{[^}]*(?:backgroundColor|borderColor|borderRadius|borderWidth|padding)/,
+  );
+
+  for (const source of [
+    checkoutScreenSource,
+    checkoutConnectionScreenSource,
+    drawRevealSource,
+    kujiQueueSource,
+    storageRootSource,
+    profileHomeSource,
+    profileSectionSource,
+    profileMemberSource,
+    profileRecordDetailSource,
+    productHistoryScreenSource,
+    dukroomSource,
+    dukroomDetailSource,
+  ]) {
+    assert.match(source, /SeedInlineGuidance/);
+  }
+
+  const guidanceSources = [
+    checkoutScreenSource,
+    checkoutConnectionScreenSource,
+    drawRevealSource,
+    exchangeCreateSource,
+    kujiQueueSource,
+    storageRootSource,
+    profileHomeSource,
+    profileSectionSource,
+    profileMemberSource,
+    profileRecordDetailSource,
+    productHistoryScreenSource,
+    dukroomSource,
+    dukroomDetailSource,
+  ].join("\n");
+  assert.doesNotMatch(
+    guidanceSources,
+    /(?:drawNote|boundaryNote|storageNote|referenceNotice|guideCard|exampleNotice|exampleBanner|guestBanner|infoBox):\s*\{[^}]*(?:backgroundColor|borderColor|borderRadius|borderWidth|padding)/,
+  );
+  assert.doesNotMatch(checkoutScreenSource, /주문 내용을 확인해 주세요|styles\.lead|leadIcon/);
+  assert.doesNotMatch(checkoutConnectionScreenSource, /실제 결제가 연결되면 이렇게 진행돼요|styles\.hero|heroIcon|statusPill/);
+});
+
+test("fixed Korean guidance separates semantic paragraphs without forcing breaks into dynamic copy", () => {
+  assert.match(typographySource, /export function BalancedParagraphText/);
+  assert.match(typographySource, /paragraphs\.map\(\(paragraph\) => paragraph\.trim\(\)\)\.filter\(Boolean\)/);
+  assert.match(typographySource, /normalizedParagraphs\.join\("\\n"\)/);
+  assert.match(seedComponentsSource, /paragraphs\?: readonly string\[\]/);
+  assert.match(seedComponentsSource, /<BalancedParagraphText[\s\S]*?paragraphs=\{paragraphs\}/);
+
+  assert.match(profileSectionSource, /paragraphs=\{\[\s*"직접 뽑아 보관 중인 가챠·쿠지만 신청할 수 있어요\.",\s*"배송·교환·환급 중이거나 배송 완료된 상품은 제외돼요\."/);
+  assert.match(profileSectionSource, /paragraphs=\{\[\s*"예상 환급 포인트는 상품 기준가의 50%예요\.",\s*"확인 후 신청하면 서버가 최종 포인트를 다시 계산해요\."/);
+  assert.doesNotMatch(profileSectionSource, /<Text style=\{styles\.modeDescription\}>상품 기준가의 50%/);
+
+  for (const source of [checkoutScreenSource, kujiQueueSource, dukroomDetailSource]) {
+    assert.match(source, /<SeedInlineGuidance[\s\S]*?paragraphs=\{\[/);
   }
 });
 
@@ -407,6 +535,7 @@ test("native root navigation floats, compacts on downward scroll, and glides sel
   assert.match(rootFloatingTabBarSource, /Animated\.spring\(selection/);
   assert.match(rootFloatingTabBarSource, /damping: 23/);
   assert.match(rootFloatingTabBarSource, /selectionTrack/);
+  assert.doesNotMatch(rootFloatingTabBarSource, /selectionIndicator/);
   assert.match(rootFloatingTabBarSource, /const animatedTabWidth = motion\.progress\.interpolate/);
   assert.match(rootFloatingTabBarSource, /const animatedTrackWidth = motion\.progress\.interpolate/);
   assert.match(rootFloatingTabBarSource, /Animated\.multiply\(selection, animatedTabWidth\)/);
@@ -426,13 +555,16 @@ test("native exchange room shows API-backed examples for every category and open
   assert.match(exchangeApiSource, /createDabbobaClient/);
   assert.match(exchangeApiSource, /\/v1\/exchange\/listings/);
   assert.match(exchangeApiSource, /\/v1\/catalog\/products/);
-  assert.match(exchangeApiSource, /\["gacha", "figure", "kuji", "tcg"\]/);
+  assert.match(exchangeApiSource, /PRODUCT_CATEGORY_VALUES/);
+  assert.match(exchangeRoomSource, /\.\.\.PRODUCT_CATEGORY_OPTIONS/);
   assert.match(exchangeApiSource, /EXAMPLE_PREFIX/);
   assert.match(exchangeRoomSource, /fetchExchangeRoom/);
   assert.match(exchangeRoomSource, /readExchangeListingCache/);
   assert.match(exchangeRoomSource, /writeExchangeListingCache/);
-  assert.match(exchangeRoomSource, /화면 구성을 확인할 수 있는 예시 글이에요/);
-  assert.match(exchangeRoomSource, /가챠샵 기준가 · 판매가 아님/);
+  assert.doesNotMatch(exchangeRoomSource, /화면 구성을 확인할 수 있는 예시 글이에요|Fastify API|ITEM IMAGE/);
+  assert.match(exchangeRoomSource, /아직 등록된 교환 상품이 없어요/);
+  assert.doesNotMatch(exchangeRoomSource, /가챠샵 기준가 · 판매가 아님/);
+  assert.doesNotMatch(exchangeDetailSource, /가챠샵 기준가 · 판매가 아님/);
   assert.match(exchangeRoomSource, /BalancedAppText/);
   assert.match(exchangeRoomSource, /useFocusEffect/);
   assert.match(exchangeRoomSource, /<Modal/);
@@ -444,10 +576,11 @@ test("native exchange room shows API-backed examples for every category and open
   assert.match(exchangeRoomSource, /writeExchangeRulesDismissed/);
   assert.match(localDatabaseSource, /DATABASE_VERSION = 4/);
   assert.match(localDatabaseSource, /CREATE TABLE IF NOT EXISTS app_preferences/);
-  assert.match(localDatabaseSource, /exchange\.rules\.dismissed\.v1/);
-  assert.match(exchangeRoomSource, /직접 뽑은 가챠·쿠지 상품 중 현재 보관함에 보관 중인 상품만/);
+  assert.match(localDatabaseSource, /exchange\.rules\.dismissed\.v2/);
+  assert.match(localDatabaseSource, /exchange\.listings\.v2/);
+  assert.match(exchangeRoomSource, /가챠로 직접 뽑아 현재 보관함에 보관 중인 상품만 교환 등록·제안을 신청/);
   assert.match(exchangeRoomSource, /배송 신청이 접수되었거나 배송이 완료된 상품은 환불·교환·포인트 환급을 신청할 수 없어요/);
-  assert.match(exchangeRoomSource, /표시 금액은 판매가가 아닌 앱 기준가예요/);
+  assert.doesNotMatch(exchangeRoomSource, /표시 금액은 판매가가 아닌 앱 기준가예요/);
   assert.doesNotMatch(exchangeRoomSource, /<ExchangeRuleCard/);
   assert.doesNotMatch(exchangeRoomSource, /가챠샵에서 구매해 보관함에 등록된 상품만 올릴 수 있어요/);
   assert.match(exchangeRoomSource, /<SeedChip/);
@@ -457,7 +590,9 @@ test("native exchange room shows API-backed examples for every category and open
   assert.match(exchangeRoomSource, /keyboardShouldPersistTaps="handled"/);
   assert.match(exchangeRoomSource, /검색 결과가 없어요/);
   assert.match(exchangeRoomSource, /검색어 지우기/);
-  assert.match(exchangeRoomSource, /fetchExchangeRoom\(runtime\.apiBaseUrl, selectedCategory, debouncedQuery\)/);
+  assert.match(exchangeRoomSource, /fetchExchangeRoom\(runtime\.apiBaseUrl, selectedCategory, debouncedQuery, __DEV__\)/);
+  assert.match(exchangeApiSource, /includePreview = false/);
+  assert.match(exchangeApiSource, /items\.length === 0 && includePreview/);
   assert.match(exchangeApiSource, /query:\s*\{\s*limit:\s*30,\s*category,\s*q:\s*search\s*\}/);
   assert.match(exchangeRoomSource, /router\.push\("\/exchange\/new"\)/);
   assert.match(exchangeRoomSource, /label="교환 상품 올리기"/);
@@ -470,13 +605,18 @@ test("native exchange room shows API-backed examples for every category and open
   assert.match(exchangeCreateSource, /교환글 제목/);
   assert.match(exchangeCreateSource, /상품 설명/);
   assert.match(exchangeCreateSource, /교환 상품 올리기/);
-  assert.match(exchangeCreateSource, /가챠·쿠지에서 직접 뽑아 현재 보관 중인 상품 1개/);
-  assert.match(exchangeCreateSource, /배송을 신청했거나 이미 받은 상품은 표시되지 않아요/);
+  assert.doesNotMatch(exchangeCreateSource, /올릴 상품 선택/);
+  assert.doesNotMatch(exchangeCreateSource, /등록하는 동안 이 상품은 교환용으로 안전하게 보관돼요/);
+  assert.match(exchangeCreateSource, /등록 가능한 상품이 없어요/);
+  assert.match(exchangeCreateSource, /<BalancedParagraphText[\s\S]*?paragraphs=\{\[\s*"가챠로 뽑은 상품만 가능해요\.",\s*"배송을 신청했거나 이미 받은 상품, 포인트 환급·다른 교환에 사용 중인 상품은 표시되지 않아요\.",?\s*\]\}/);
   assert.match(exchangeCreateSource, /accessibilityRole="radio"/);
   assert.match(exchangeCreateSource, /title\.trim\(\)/);
   assert.match(exchangeCreateSource, /details\.trim\(\)/);
   assert.match(exchangeApiSource, /export async function fetchExchangeListingInventory[\s\S]*?snapshot\.items\.filter\(isDrawnExchangeInventory\)/);
-  assert.match(exchangeApiSource, /직접 뽑은 뒤 배송을 신청하지 않고 보관함에 보관 중/);
+  assert.doesNotMatch(exchangeApiSource, /직접 뽑은 뒤 배송을 신청하지 않고 보관함에 보관 중/);
+  assert.match(exchangeApiSource, /details:\s*""/);
+  assert.match(exchangeRoomSource, /item\.details\.trim\(\)[\s\S]*?styles\.listingDetails/);
+  assert.match(exchangeDetailSource, /item\.details\.trim\(\)[\s\S]*?styles\.details/);
   assert.match(exchangeApiSource, /export async function createExchangeListing[\s\S]*?client\.POST\("\/v1\/exchange\/listings"[\s\S]*?"Idempotency-Key": randomUUID\(\)[\s\S]*?body: input/);
   assert.match(exchangeDetailRouteSource, /ExchangeListingDetailScreen/);
   assert.match(exchangeApiSource, /proposerNickname/);
@@ -484,25 +624,46 @@ test("native exchange room shows API-backed examples for every category and open
   assert.match(exchangeApiSource, /offers\/\{offerId\}\/decision/);
   assert.match(exchangeApiSource, /"Idempotency-Key": randomUUID\(\)/);
   assert.match(exchangeDetailSource, /들어온 제안/);
-  assert.match(exchangeDetailSource, /B·C·D·E가 각자 직접 뽑은 상품 하나만 골라 제안했어요/);
+  assert.doesNotMatch(exchangeDetailSource, /B·C·D·E가 각자 직접 뽑은 상품 하나만 골라 제안했어요|제안자는 별도 글을 작성하지 않아요|sectionDescription/);
   assert.match(exchangeDetailSource, /교환하기/);
   assert.doesNotMatch(exchangeDetailSource, /이 제안 선택하기/);
   assert.match(exchangeDetailSource, /거절하기/);
   assert.match(exchangeDetailSource, /교환 신청하기/);
   assert.match(exchangeDetailSource, /\/exchange\/\$\{listingId\}\/offer/);
   assert.doesNotMatch(exchangeDetailSource, /proposal\.message|proposalMessage/);
+  assert.match(exchangeDetailSource, /Image\.getSize/);
+  assert.match(exchangeDetailSource, /resizeMode="contain"/);
+  assert.match(exchangeDetailSource, /\{ aspectRatio: imageAspectRatio \}/);
+  assert.match(exchangeDetailSource, /productCardLandscape/);
+  assert.doesNotMatch(exchangeDetailSource, /productImageFrame:\s*\{[^}]*aspectRatio:\s*1/);
   assert.match(exchangeOfferRouteSource, /ExchangeOfferScreen/);
   assert.match(exchangeOfferSource, /fetchExchangeOfferInventory/);
   assert.match(exchangeOfferSource, /createExchangeOffer/);
-  assert.match(exchangeApiSource, /sourceType === "GACHA" \|\| item\.sourceType === "KUJI"/);
-  assert.match(exchangeOfferSource, /가챠·쿠지에서 직접 뽑아 현재 보관 중인 상품 1개만 선택/);
-  assert.match(exchangeOfferSource, /포인트 환급·다른 교환에 사용하지 않은 직접 뽑은 상품만 신청/);
+  assert.match(exchangeApiSource, /item\.status === "OWNED" && item\.sourceType === "GACHA"/);
+  assert.doesNotMatch(exchangeApiSource, /item\.sourceType === "KUJI"/);
+  assert.match(exchangeApiSource, /listing\.offeredInventory\.sourceType === "GACHA"/);
+  assert.match(exchangeApiSource, /offer\.offeredInventory\.sourceType === "GACHA"/);
+  assert.match(exchangeOfferSource, /가챠로 직접 뽑아 현재 보관 중인 상품 1개만 선택/);
+  assert.match(exchangeOfferSource, /가챠로 뽑은 상품만 가능해요/);
   assert.match(exchangeOfferSource, /교환 신청 완료/);
   assert.doesNotMatch(exchangeOfferSource, /AppTextInput|TextInput|Keyboard/);
   assert.doesNotMatch(exchangeDetailSource, /교환 규칙|ruleBox/);
   assert.match(exchangeDetailSource, /productSubjectTitle\(product\.name, ipName\)/);
   assert.doesNotMatch(tabsLayoutSource, /name="exchange\/\[listingId\]"/);
   assert.doesNotMatch(tabsLayoutSource, /name="exchange\/new"/);
+});
+
+test("native customer screens omit repeated reference-price disclaimers", () => {
+  const customerSource = ["apps/mobile/src", "apps/mobile/app"]
+    .flatMap((relativePath) => collectTsxSources(path.join(root, relativePath)))
+    .map(([relativePath, source]) => `${relativePath}\n${source}`)
+    .join("\n");
+
+  assert.doesNotMatch(customerSource, /(?:가챠샵|앱) 기준가 · 판매가 아님/);
+  assert.doesNotMatch(customerSource, /표시 금액은 판매가가 아닌 앱 기준가예요/);
+  assert.doesNotMatch(customerSource, /사용자가 정한 판매가가 아니라 앱에 등록된 상품 기준가예요/);
+  assert.doesNotMatch(customerSource, /판매 상태와 가챠샵 기준가를 확인/);
+  assert.match(profileSectionSource, /예상 환급 포인트는 상품 기준가의 50%예요/);
 });
 
 test("native ppoba catalog and product detail coexist with the shared drawn-product storage root", () => {
@@ -512,31 +673,43 @@ test("native ppoba catalog and product detail coexist with the shared drawn-prod
   assert.match(shopSource, /상품명·작품 검색/);
   assert.match(shopSource, /\/product\//);
   assert.match(shopSource, /<SeedChip/);
+  assert.doesNotMatch(
+    shopSource,
+    /가챠와 쿠지를 먼저 만나보세요|피규어와 카드는 차례로 준비하고 있어요|categoryDescription/,
+  );
   for (const endpoint of ["/v1/catalog/products", "/v1/catalog/ips", "/draw-odds", "/v1/account/wishlist/"]) {
     assert.match(shopApiSource, new RegExp(endpoint.replaceAll("/", "\\/")));
   }
   assert.doesNotMatch(productDetailSource, /같은 작품 덕룸 보기|수집가들의 진열과 사진/);
-  assert.match(productDetailSource, /현재 로컬 앱에서는 실제 결제를 진행하지 않습니다/);
+  assert.doesNotMatch(
+    productDetailSource,
+    /productMetadataText\(product, "description"\)|정식 등록 상품입니다|상품 구성과 판매 방식은 아래 안내를 확인해 주세요|styles\.description/,
+  );
+  assert.match(productDetailSource, /현재는 결제 서비스 연결 전이라 주문이 접수되지 않아요/);
   assert.match(catalogProductRowSource, /productSubjectTitle\(product\.name, ipName\)/);
   assert.match(shopSource, /productSubjectTitle\(product\.name, ipName\)/);
   assert.match(homeSource, /productSubjectTitle\(product\.name, ipName\)/);
   assert.match(profileSectionSource, /productSubjectTitle\(product\.name, ipName\)/);
   assert.doesNotMatch(catalogProductRowSource, /style=\{styles\.name\}>\{product\.name\}/);
-  for (const source of [homeSource, exchangeRoomSource, exchangeDetailSource, profileSectionSource, catalogProductRowSource]) {
+  for (const source of [exchangeRoomSource, profileSectionSource, catalogProductRowSource]) {
     assert.match(source, /resizeMode="cover"/);
   }
-  assert.doesNotMatch(`${homeSource}\n${exchangeRoomSource}\n${exchangeDetailSource}\n${profileSectionSource}\n${catalogProductRowSource}`, /productImage[^\n]*resizeMode="contain"|resizeMode="contain"[^\n]*(?:productImage|thumbImage|styles\.image)/);
+  assert.doesNotMatch(`${exchangeRoomSource}\n${profileSectionSource}\n${catalogProductRowSource}`, /productImage[^\n]*resizeMode="contain"|resizeMode="contain"[^\n]*(?:productImage|thumbImage|styles\.image)/);
+  assert.match(homeSource, /resizeMode=\{isKuji \? "contain" : "cover"\}/);
   assert.match(shopSource, /Image\.getSize\(/);
   assert.match(shopSource, /setImageAspectRatio\(1\)/);
   assert.match(shopSource, /let active = true/);
   assert.match(shopSource, /width > 0 && height > 0/);
-  assert.match(shopSource, /setImageAspectRatio\(width \/ height\)/);
+  assert.match(shopSource, /setImageAspectRatio\(displayProductAspectRatio\(uri, width, height\)\)/);
   assert.match(shopSource, /return \(\) => \{ active = false; \}/);
   assert.match(shopSource, /\}, \[uri\]\);/);
   assert.match(shopSource, /aspectRatio:\s*imageAspectRatio/);
-  assert.match(shopSource, /resizeMode="contain"/);
+  assert.match(shopSource, /FIXTURE_CONTENT_ASPECT_RATIOS/);
+  assert.match(shopSource, /displayProductAspectRatio\(uri, width, height\)/);
+  assert.match(shopSource, /resizeMode="cover"/);
   assert.match(shopSource, /onLoad=\{\(\{ nativeEvent \}\) =>/);
   assert.doesNotMatch(shopSource, /productImageFrame:\s*\{[^}]*aspectRatio:\s*1/);
+  assert.doesNotMatch(shopSource, /productImageFrame:\s*\{[^}]*(?:borderWidth|borderColor|backgroundColor)/);
   assert.match(productDetailSource, /Image\.getSize\(/);
   assert.match(productDetailSource, /aspectRatio:\s*imageAspectRatio/);
   assert.match(productDetailSource, /resizeMode="contain"/);
@@ -567,10 +740,9 @@ test("native ppoba catalog and product detail coexist with the shared drawn-prod
 });
 
 test("native ppoba opens gacha and kuji while figure and card stay in a pixel coming-soon state", () => {
-  assert.match(
-    shopSource,
-    /const CATEGORIES:[\s\S]*?\{ label: "가챠", value: "gacha" \}[\s\S]*?\{ label: "쿠지", value: "kuji" \}[\s\S]*?\{ label: "피규어", value: "figure" \}[\s\S]*?\{ label: "카드", value: "tcg" \}/,
-  );
+  assert.match(productCategoriesSource, /\{ value: "gacha", label: "가챠" \}[\s\S]*?\{ value: "kuji", label: "쿠지" \}[\s\S]*?\{ value: "figure", label: "피규어" \}[\s\S]*?\{ value: "tcg", label: "카드" \}/);
+  assert.match(shopSource, /PRODUCT_CATEGORY_OPTIONS\.map/);
+  assert.match(homeSource, /\.\.\.PRODUCT_CATEGORY_OPTIONS\.map/);
   assert.doesNotMatch(shopSource, /\{ label: "전체" \}/);
   assert.match(shopSource, /useState<ProductCategory>\("gacha"\)/);
   assert.match(shopSource, /const isComingSoon = selectedCategory === "figure" \|\| selectedCategory === "tcg"/);
@@ -590,9 +762,34 @@ test("native ppoba opens gacha and kuji while figure and card stay in a pixel co
   assert.match(shopSource, /accessibilityRole="radio"/);
 });
 
-test("native Product Detail continues through the approved copy into a footer-free checkout preparation screen", () => {
-  assert.match(productDetailSource, /뽑기 주문 준비 완료/);
-  assert.match(productDetailSource, /현재 로컬 앱에서는 실제 결제를 진행하지 않습니다/);
+test("native kuji claims its room before the shared quantity and purchase checkout", () => {
+  assert.match(productDetailSource, /product\.category === "kuji"[\s\S]*?buildKujiRoomGatePath\(product\.id\)[\s\S]*?`\/checkout\/\$\{encodeURIComponent\(product\.id\)\}`/);
+  assert.match(productDetailSource, /isDrawCategory\(product\.category\) \? "뽑으러 가기" : "구매 준비"/);
+  assert.match(productDetailSource, /buildKujiRoomGatePath/);
+  assert.doesNotMatch(productDetailSource, /buildGachaPreviewParams|resolveKujiEntryPath|결제 금액 확인/);
+
+  assert.match(checkoutScreenSource, /수량 선택/);
+  assert.match(checkoutScreenSource, /구매 수량/);
+  assert.match(checkoutScreenSource, /drawMode \? "구매하기" : "결제 준비 완료"/);
+  assert.match(checkoutScreenSource, /params: buildGachaPreviewParams\(quantity\)/);
+  assert.match(checkoutScreenSource, /kujiCheckoutExpiresAt/);
+  assert.match(checkoutScreenSource, /결제 남은 시간/);
+  assert.match(checkoutScreenSource, /createKujiCheckoutOrder/);
+  assert.match(checkoutScreenSource, /kujiRoomEntryId:\s*kujiEntryId/);
+  assert.match(checkoutScreenSource, /paidKujiOrderEntitlementIds\(order, quantity\)/);
+  assert.match(checkoutScreenSource, /entitlementIds:\s*entitlementIds\.join\(","\)/);
+  assert.match(checkoutScreenSource, /`\/kuji\/draw\/\$\{encodeURIComponent\(product\.id\)\}\?\$\{query\.toString\(\)\}`/);
+  assert.doesNotMatch(checkoutScreenSource, /resolveKujiEntryPath|LOCAL_KUJI_ROOM_AVAILABILITY/);
+  assert.match(checkoutScreenSource, /"구매 금액 확인"/);
+  assert.match(checkoutScreenSource, /text: "취소", style: "cancel"/);
+  assert.match(checkoutScreenSource, /text: "구매하기", onPress: \(\) => void submitKujiOrder\(\)/);
+  assert.match(checkoutScreenSource, /order\.status === "PENDING_PAYMENT"/);
+  assert.doesNotMatch(checkoutScreenSource, /openPurchasedDraw|쿠지[^\n]*체험용 뽑기/);
+});
+
+test("native purchase Product Detail continues into a footer-free checkout preparation screen", () => {
+  assert.match(productDetailSource, /구매 주문 준비 완료/);
+  assert.match(productDetailSource, /현재는 결제 서비스 연결 전이라 주문이 접수되지 않아요/);
   assert.match(productDetailSource, /`\/checkout\/\$\{encodeURIComponent\(product\.id\)\}\?quantity=\$\{quantity\}`/);
 
   assert.match(checkoutRouteSource, /CheckoutScreen/);
@@ -608,26 +805,30 @@ test("native Product Detail continues through the approved copy into a footer-fr
   assert.match(checkoutScreenSource, /카카오페이/);
   assert.match(checkoutScreenSource, /네이버페이/);
   assert.match(checkoutScreenSource, /결제 준비 완료/);
-  assert.match(checkoutScreenSource, /PG 결제와 주문 생성은 진행되지 않습니다/);
+  assert.match(checkoutScreenSource, /현재는 결제 서비스 연결 전이라 결제와 주문이 접수되지 않아요/);
   assert.match(checkoutScreenSource, /결제 준비가 끝났어요/);
   assert.match(checkoutScreenSource, /onPress:\s*openConnectionGuide/);
   assert.match(checkoutScreenSource, /`\/checkout\/connect\/\$\{encodeURIComponent\(product\.id\)\}\?\$\{query\.toString\(\)\}`/);
   assert.match(checkoutScreenSource, /resizeMode="cover"/);
-  assert.doesNotMatch(checkoutScreenSource, /submitOrder|createOrder|drawEntitlement|결제 완료/);
+  assert.match(checkoutScreenSource, /createKujiCheckoutOrder/);
+  assert.match(checkoutScreenSource, /결제가 완료된 뒤에만 추첨권/);
   assert.doesNotMatch(tabsLayoutSource, /name="checkout/);
 
   assert.match(checkoutConnectionRouteSource, /CheckoutConnectionScreen/);
   assert.match(checkoutConnectionScreenSource, /useLocalSearchParams/);
   assert.match(checkoutConnectionScreenSource, /fetchProductDetail/);
   assert.match(checkoutConnectionScreenSource, /결제 연결 안내/);
-  assert.match(checkoutConnectionScreenSource, /현재 상태/);
-  assert.match(checkoutConnectionScreenSource, /결제 전/);
-  for (const step of ["가격·재고 재확인", "PG 결제 승인", "서버 주문 확정", "추첨권 발급"]) {
-    assert.match(checkoutConnectionScreenSource, new RegExp(step));
+  assert.match(checkoutConnectionScreenSource, /SeedInlineGuidance/);
+  assert.match(checkoutConnectionScreenSource, /결제가 완료되면 바로 상품 뽑기 화면으로 이동해요/);
+  assert.doesNotMatch(checkoutConnectionScreenSource, /결제 진행 순서|CheckoutStep/);
+  for (const removedStep of ["가격·재고 재확인", "결제 승인", "서버 주문 확정", "추첨권 발급"]) {
+    assert.doesNotMatch(checkoutConnectionScreenSource, new RegExp(removedStep));
   }
-  assert.match(checkoutConnectionScreenSource, /현재 로컬 앱에서는 PG 결제 요청을 보내지 않습니다/);
-  assert.match(checkoutConnectionScreenSource, /따라서 결제 완료, 주문 번호, 추첨권도 생성되지 않아요/);
-  assert.match(checkoutConnectionScreenSource, /router\.replace\("\/\(tabs\)\/ppoba"\)/);
+  assert.match(checkoutConnectionScreenSource, /`\/draw\/preview\/\$\{encodeURIComponent\(product\.id\)\}\?\$\{query\.toString\(\)\}`/);
+  assert.match(checkoutConnectionScreenSource, /category:\s*product\.category/);
+  assert.match(checkoutConnectionScreenSource, /count:\s*String\(quantity\)/);
+  assert.match(checkoutConnectionScreenSource, /mode:\s*quantity > 1 \? "all" : "single"/);
+  assert.match(checkoutConnectionScreenSource, /label=\{isDrawCategory\(product\.category\) \? "상품 뽑기" : "뽀바로 돌아가기"\}/);
   assert.doesNotMatch(checkoutConnectionScreenSource, /submitOrder|createOrder|issueDraw|drawEntitlement/);
 });
 
@@ -643,6 +844,7 @@ test("native my-info hub opens every account utility and nested member detail ou
   assert.doesNotMatch(profileHomeSource, /section: "shipping", label: "배송 신청"/);
   for (const endpoint of [
     "/v1/account/profile",
+    "/v1/account/basic-info",
     "/v1/account/default-address",
     "/v1/account/wishlist",
     "/v1/exchange/inventory",
@@ -658,25 +860,74 @@ test("native my-info hub opens every account utility and nested member detail ou
   ]) {
     assert.match(profileApiSource, new RegExp(endpoint.replaceAll("/", "\\/")));
   }
-  assert.match(profileSectionSource, /로그인 전 화면 예시/);
+  assert.match(profileSectionSource, /로그인하면 주문·포인트·배송 내역과 나의 수집 기록을 확인할 수 있어요/);
+  assert.doesNotMatch(profileSectionSource, /로그인 전 화면 예시/);
   assert.match(profileSectionSource, /배송 신청/);
   assert.match(profileSectionSource, /포인트 환급/);
   assert.match(profileSectionSource, /createPointReturn/);
   assert.match(profileSectionSource, /Math\.floor\(item\.product\.price \/ 2\)/);
   assert.match(profileSectionSource, /section === "storage" \|\| section === "shipping"/);
-  assert.match(profileSectionSource, /배송·교환·환급이 진행 중이거나 이미 배송받은 상품은 표시되지 않아요/);
-  assert.match(profileHomeSource, /주문·포인트·배송 상태는 서버/);
+  assert.match(profileSectionSource, /배송·교환·환급 중이거나 배송 완료된 상품은 제외돼요/);
+  assert.match(profileHomeSource, /주문·포인트·배송 상태는 내 계정의 최신 내역/);
   for (const detail of ["개인정보", "기본 배송지", "결제 카드", "결제 설정", "로그인 및 보안", "알림 수신설정", "개인정보·수신 동의", "약관·운영정책", "로그아웃·회원탈퇴"]) {
     assert.match(profileMemberSource, new RegExp(detail));
   }
-  assert.match(profileMemberSource, /SecureStore/);
-  assert.match(profileMemberSource, /전체 카드번호, CVC, 비밀번호/);
+  assert.match(profileMemberSource, /로그인 정보는 기기에 안전하게 보관/);
+  assert.match(profileMemberSource, /전체 카드번호, 보안번호, 비밀번호/);
   assert.doesNotMatch(tabsLayoutSource, /name="profile\/\[section\]"/);
+});
+
+test("native profile edit stays focused on nickname and introduction", () => {
+  const editStart = profileSectionSource.indexOf("function ProfileEdit(");
+  const editEnd = profileSectionSource.indexOf("\nfunction Wishlist(", editStart);
+  assert.notEqual(editStart, -1);
+  assert.notEqual(editEnd, -1);
+
+  const profileEditSource = profileSectionSource.slice(editStart, editEnd);
+  assert.match(profileMemberSource, /label="계정 기본정보 수정"[\s\S]*?router\.push\("\/profile\/member\/personal\/edit"/);
+  assert.doesNotMatch(profileMemberSource, /label="프로필 닉네임·소개 수정"[\s\S]*?router\.push\("\/profile\/edit"/);
+  assert.match(profileSectionSource, /edit:\s*\{ title: "프로필 수정" \}/);
+  assert.match(profileEditSource, /<FieldLabel label="닉네임"/);
+  assert.match(profileEditSource, /<FieldLabel label="한 줄 소개"/);
+  assert.match(profileEditSource, /<PrimaryButton label=\{saving \? "저장 중" : "프로필 저장"\}/);
+  assert.match(profileEditSource, /router\.back\(\)/);
+  assert.doesNotMatch(profileEditSource, /SectionLead|profilePreview|largeAvatar|previewName|previewBio|MenuLink/);
+  for (const source of [profileHomeSource, profileMemberSource]) {
+    assert.match(source, /useFocusEffect/);
+    assert.match(source, /hasFocusedOnce/);
+    assert.match(source, /if \(hasFocusedOnce\.current\) void [\w.]*reload\(\)/);
+  }
+});
+
+test("short fixed profile guidance avoids an orphan tail without forced text scaling", () => {
+  const sectionLeadStart = profileSectionSource.indexOf("function SectionLead(");
+  const sectionLeadEnd = profileSectionSource.indexOf("\nfunction FieldLabel(", sectionLeadStart);
+  assert.notEqual(sectionLeadStart, -1);
+  assert.notEqual(sectionLeadEnd, -1);
+
+  const sectionLeadSource = profileSectionSource.slice(sectionLeadStart, sectionLeadEnd);
+  assert.match(profileSectionSource, /description="묶음 배송하거나 포인트로 환급할 수 있어요\."/);
+  assert.doesNotMatch(profileSectionSource, /직접 뽑아 보관 중인 상품을 묶어 배송받거나 포인트로 환급할 수 있어요/);
+  assert.match(sectionLeadSource, /BalancedAppText/);
+  assert.doesNotMatch(sectionLeadSource, /numberOfLines|adjustsFontSizeToFit|allowFontScaling|minimumFontScale/);
 });
 
 test("native shipping request shows the category-sensitive free-shipping policy", () => {
   assert.match(profileSectionSource, /가챠 상품만 주문하면 30,000원 이상/);
   assert.match(profileSectionSource, /쿠지·피규어·카드가 하나라도 포함되면 50,000원 이상 무료배송/);
+  for (const styleName of [
+    "sectionLeadBody",
+    "modeDescription",
+    "shippingPolicyDescription",
+    "shippingPolicyEmpty",
+  ]) {
+    assert.match(
+      profileSectionSource,
+      new RegExp(`<BalancedAppText style=\\{styles\\.${styleName}\\}>`),
+      `${styleName} must preserve Korean word-boundary wrapping`,
+    );
+  }
+  assert.match(profileSectionSource, /<SeedInlineGuidance[\s\S]*?style=\{styles\.storageGuidance\}[\s\S]*?paragraphs=\{\[/);
   assert.match(profileSectionSource, /calculateShippingPolicy/);
   assert.match(shippingPolicySource, /GACHA_ONLY_FREE_SHIPPING_THRESHOLD = 30_000/);
   assert.match(shippingPolicySource, /MIXED_CATEGORY_FREE_SHIPPING_THRESHOLD = 50_000/);

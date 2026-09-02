@@ -10,7 +10,7 @@ import { beginIdempotency, completeIdempotency, idempotencyKey, requestHash } fr
 import { enumInput, integerInput, objectInput, stringInput, uuidInput } from "../lib/input.js";
 import type { ApiContext } from "../types.js";
 
-const MEDIA_PURPOSES = ["PROFILE", "POST", "COMMENT", "INQUIRY", "EXCHANGE", "CATALOG_REQUEST"] as const;
+const MEDIA_PURPOSES = ["PROFILE", "POST", "COMMENT", "INQUIRY", "EXCHANGE", "CATALOG_REQUEST", "WANTED_REQUEST"] as const;
 const SUPPORTED_MIME_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"] as const;
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 const MAX_ACTIVE_UPLOAD_COUNT = 10;
@@ -738,15 +738,20 @@ async function mediaHasReferences(queryable: Queryable, id: string): Promise<boo
     inquiry_message: boolean;
     community_post: boolean;
     catalog_request: boolean;
+    wanted_request: boolean;
   }>(
     `SELECT
        EXISTS(SELECT 1 FROM inquiry_message_media WHERE media_id=$1) AS inquiry_message,
        EXISTS(SELECT 1 FROM community_post_media WHERE media_id=$1) AS community_post,
-       EXISTS(SELECT 1 FROM catalog_requests WHERE media_id=$1) AS catalog_request`,
+       EXISTS(SELECT 1 FROM catalog_requests WHERE media_id=$1) AS catalog_request,
+       EXISTS(SELECT 1 FROM wanted_requests WHERE media_id=$1) AS wanted_request`,
     [id],
   );
   const row = references.rows[0];
-  return row?.inquiry_message === true || row?.community_post === true || row?.catalog_request === true;
+  return row?.inquiry_message === true
+    || row?.community_post === true
+    || row?.catalog_request === true
+    || row?.wanted_request === true;
 }
 
 export async function assertReadyOwnedMedia(
@@ -1283,7 +1288,7 @@ export async function registerMediaRoutes(app: FastifyInstance, context: ApiCont
         return { replay: false, statusCode: 204, body: responseBody, objectKeys: [] as string[] };
       }
       if (await mediaHasReferences(client, id)) {
-        throw conflict("게시물, 문의 또는 카탈로그 요청에 사용 중인 첨부 파일은 삭제할 수 없습니다.");
+        throw conflict("게시물, 문의, 신청 또는 카탈로그 요청에 사용 중인 첨부 파일은 삭제할 수 없습니다.");
       }
       const previousStatus = asset.status;
       const processingIdempotencyId = mediaProcessingIdempotencyId(asset);
@@ -1336,11 +1341,18 @@ export async function registerMediaRoutes(app: FastifyInstance, context: ApiCont
     const id = mediaId(request);
     const row = await context.pool.query<MediaRow>(
       `SELECT m.* FROM media_assets m
-       WHERE m.id=$1 AND m.status='READY' AND m.purpose='POST'
-         AND EXISTS (
-           SELECT 1 FROM community_post_media pm
-           JOIN community_posts p ON p.id=pm.post_id
-           WHERE pm.media_id=m.id AND p.status='ACTIVE'
+       WHERE m.id=$1 AND m.status='READY'
+         AND (
+           (m.purpose='POST' AND EXISTS (
+             SELECT 1 FROM community_post_media pm
+             JOIN community_posts p ON p.id=pm.post_id
+             WHERE pm.media_id=m.id AND p.status='ACTIVE'
+           ))
+           OR
+           (m.purpose='WANTED_REQUEST' AND EXISTS (
+             SELECT 1 FROM wanted_requests
+             WHERE media_id=$1 AND status='ACTIVE'
+           ))
          )`,
       [id],
     );

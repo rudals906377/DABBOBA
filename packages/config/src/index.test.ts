@@ -20,6 +20,73 @@ test("API config accepts the isolated local DABBOBA services", () => {
   assert.deepEqual(config.webOrigins, ["http://127.0.0.1:4174"]);
   assert.deepEqual(config.adminOrigins, ["http://127.0.0.1:4180"]);
   assert.equal(config.adminProxyIdentitySecret, null);
+  assert.equal(config.supabaseUrl, null);
+  assert.equal(config.supabaseJwtAudience, null);
+});
+
+test("Supabase customer auth is optional and defaults to the authenticated audience", () => {
+  const config = loadApiConfig({
+    NODE_ENV: "test",
+    DATABASE_URL: "postgresql://test/db",
+    REDIS_URL: "redis://test",
+    SESSION_TOKEN_PEPPER: "test-pepper",
+    SUPABASE_URL: "http://127.0.0.1:54321/",
+  });
+  assert.equal(config.supabaseUrl, "http://127.0.0.1:54321");
+  assert.equal(config.supabaseJwtAudience, "authenticated");
+});
+
+test("Supabase customer auth validates its URL and audience without requiring a service secret", () => {
+  const base = {
+    NODE_ENV: "test",
+    DATABASE_URL: "postgresql://test/db",
+    REDIS_URL: "redis://test",
+    SESSION_TOKEN_PEPPER: "test-pepper",
+  };
+  assert.throws(() => loadApiConfig({
+    ...base,
+    SUPABASE_JWT_AUDIENCE: "authenticated",
+  }), /requires SUPABASE_URL/);
+  assert.throws(() => loadApiConfig({
+    ...base,
+    SUPABASE_URL: "https://project.supabase.co/auth/v1",
+  }), /without credentials, path, query, or fragment/);
+  assert.throws(() => loadApiConfig({
+    ...base,
+    SUPABASE_URL: "https://project.supabase.co",
+    SUPABASE_JWT_AUDIENCE: "not valid with spaces",
+  }), /1-128 character token/);
+
+  const config = loadApiConfig({
+    ...base,
+    SUPABASE_URL: "https://project.supabase.co",
+    SUPABASE_JWT_AUDIENCE: "dabboba-authenticated",
+  });
+  assert.equal(config.supabaseUrl, "https://project.supabase.co");
+  assert.equal(config.supabaseJwtAudience, "dabboba-authenticated");
+  assert.equal("SUPABASE_SERVICE_ROLE_KEY" in config, false);
+});
+
+test("production Supabase customer auth requires HTTPS", () => {
+  const production = {
+    NODE_ENV: "production",
+    DATABASE_URL: "postgresql://test/db",
+    REDIS_URL: "redis://test",
+    SESSION_TOKEN_PEPPER: "session-pepper-that-is-long-and-production-only",
+    ADMIN_PROXY_IDENTITY_SECRET: "admin-proxy-secret-that-is-long-and-production-only",
+    WEB_ORIGINS: "https://www.example.test",
+    ADMIN_ORIGINS: "https://admin.example.test",
+  };
+  assert.throws(() => loadApiConfig(production), /SUPABASE_URL is required/);
+  assert.throws(() => loadApiConfig({
+    ...production,
+    SUPABASE_URL: "http://project.supabase.co",
+  }), /HTTPS/);
+  const config = loadApiConfig({
+    ...production,
+    SUPABASE_URL: "https://project.supabase.co",
+  });
+  assert.equal(config.supabaseUrl, "https://project.supabase.co");
 });
 
 test("production refuses insecure origins and development secrets", () => {
@@ -29,6 +96,7 @@ test("production refuses insecure origins and development secrets", () => {
     REDIS_URL: "redis://test",
     SESSION_TOKEN_PEPPER: "local-development-only-change-me",
     ADMIN_PROXY_IDENTITY_SECRET: "production-admin-proxy-secret-value",
+    SUPABASE_URL: "https://project.supabase.co",
     WEB_ORIGINS: "http://example.test",
   }));
 });
@@ -50,6 +118,7 @@ test("production requires a distinct admin proxy secret and explicit edge-overwr
     DATABASE_URL: "postgresql://test/db",
     REDIS_URL: "redis://test",
     SESSION_TOKEN_PEPPER: "session-pepper-that-is-long-and-production-only",
+    SUPABASE_URL: "https://project.supabase.co",
     WEB_ORIGINS: "https://www.example.test",
     ADMIN_ORIGINS: "https://admin.example.test",
   };
@@ -92,6 +161,7 @@ test("production requires a strong dedicated payment webhook secret when a provi
     REDIS_URL: "redis://test",
     SESSION_TOKEN_PEPPER: "session-pepper-that-is-long-and-production-only",
     ADMIN_PROXY_IDENTITY_SECRET: "admin-proxy-secret-that-is-long-and-production-only",
+    SUPABASE_URL: "https://project.supabase.co",
     WEB_ORIGINS: "https://www.example.test",
     ADMIN_ORIGINS: "https://admin.example.test",
   };

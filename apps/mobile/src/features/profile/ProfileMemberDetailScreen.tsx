@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
-import { router, useLocalSearchParams, type Href } from "expo-router";
-import { useEffect, useState } from "react";
+import { router, useFocusEffect, useLocalSearchParams, type Href } from "expo-router";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -15,7 +15,13 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import type { components } from "@dabboba/contracts";
 import { KoreanPixelTitle } from "@/components/RootCategoryTitle";
 import { AppText as Text } from "@/components/Typography";
+import { SeedInlineGuidance } from "@/design-system/components";
 import { seed } from "@/design-system/seed";
+import {
+  fetchAccountDeletionRequest,
+  requestAccountDeletion,
+  type AccountDeletionRequest,
+} from "@/features/profile/account-detail-api";
 import {
   formatDate,
   logoutAccount,
@@ -47,6 +53,14 @@ export function ProfileMemberDetailScreen() {
   const section: MemberSection = rawSection && rawSection in DETAIL_META ? rawSection as MemberSection : "personal";
   const meta = DETAIL_META[section];
   const profileState = useProfileSnapshot();
+  const hasFocusedOnce = useRef(false);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (hasFocusedOnce.current) void profileState.reload();
+      else hasFocusedOnce.current = true;
+    }, [profileState.reload]),
+  );
 
   return (
     <SafeAreaView style={styles.safeArea} edges={["top", "bottom", "left", "right"]}>
@@ -78,17 +92,18 @@ function MemberContent({ section, profileState }: { section: MemberSection; prof
 
 function Personal({ profileState }: { profileState: ReturnType<typeof useProfileSnapshot> }) {
   const snapshot = profileState.snapshot!;
+  const basicInfo = snapshot.basicInfo;
   return (
     <>
       <Lead title="계정 기본정보" body="이메일과 휴대폰 변경은 본인확인을 다시 거쳐야 합니다." />
       <InfoCard>
-        <InfoRow label="닉네임" value={snapshot.profile.nickname} />
-        <InfoRow label="이메일" value={snapshot.actor?.email ?? "m***@example.com"} />
-        <InfoRow label="휴대폰" value="010-****-1234" />
-        <InfoRow label="생년월일" value="미등록" last />
+        <InfoRow label="닉네임" value={basicInfo.nickname} />
+        <InfoRow label="이메일" value={basicInfo.email ?? "등록된 이메일 없음"} />
+        <InfoRow label="휴대폰" value={basicInfo.phoneMasked ?? "등록된 번호 없음"} />
+        <InfoRow label="생년월일" value={basicInfo.birthDate ? basicInfo.birthDate.replaceAll("-", ".") : "미등록"} last />
       </InfoCard>
-      <ActionButton label="프로필 닉네임·소개 수정" onPress={() => router.push("/profile/edit" as Href)} />
-      <Text style={styles.disclosure}>정식 서비스의 이메일·휴대폰 변경은 인증번호 확인과 활성 세션 재검증을 거칩니다.</Text>
+      <ActionButton label="계정 기본정보 수정" onPress={() => router.push("/profile/member/personal/edit" as Href)} />
+      <Text style={styles.disclosure}>이메일·휴대폰을 변경할 때는 인증번호 확인과 다시 로그인이 필요할 수 있어요.</Text>
     </>
   );
 }
@@ -107,8 +122,8 @@ function Address({ profileState }: { profileState: ReturnType<typeof useProfileS
           {address.deliveryNote ? <Text style={styles.deliveryNote}>배송 메모 · {address.deliveryNote}</Text> : null}
           <Text style={styles.updatedAt}>{formatDate(address.updatedAt)} 확인</Text>
         </View>
-      ) : <EmptyState icon="location-outline" title="기본 배송지가 없어요" body="주소 등록 폼은 인증 계정 연결 후 활성화됩니다." />}
-      <ActionButton label={address ? "기본 배송지 수정" : "기본 배송지 등록"} onPress={() => Alert.alert("주소 편집 화면 준비 중", "우편번호 검색과 본인확인을 포함해 다음 단계에서 연결합니다.")} />
+      ) : <EmptyState icon="location-outline" title="기본 배송지가 없어요" body="로그인하면 배송지를 등록할 수 있어요." />}
+      <ActionButton label={address ? "기본 배송지 수정" : "기본 배송지 등록"} onPress={() => router.push("/profile/member/address/edit" as Href)} />
     </>
   );
 }
@@ -116,29 +131,27 @@ function Address({ profileState }: { profileState: ReturnType<typeof useProfileS
 function Payments() {
   return (
     <>
-      <Lead title="안전하게 저장된 결제수단" body="앱에는 카드번호나 CVC를 저장하지 않고 PG사가 발급한 결제 토큰만 사용합니다." />
+      <Lead title="안전하게 저장된 결제수단" body="카드번호와 보안번호는 앱에 저장하지 않고 결제사가 안전하게 관리해요." />
       <View style={styles.paymentCard}>
         <KoreanPixelTitle variant="compact" style={styles.paymentBrand}>결제 카드</KoreanPixelTitle>
-        <Text style={styles.paymentNumber}>••••  ••••  ••••  1234</Text>
-        <View style={styles.paymentFooter}><Text style={styles.paymentMeta}>테스트 카드 예시</Text><Text style={styles.paymentBadge}>미연결</Text></View>
+        <Text style={styles.paymentNumber}>••••  ••••  ••••  ••••</Text>
+        <View style={styles.paymentFooter}><Text style={styles.paymentMeta}>카드 등록 전</Text><Text style={styles.paymentBadge}>미등록</Text></View>
       </View>
-      <ActionButton label="결제 카드 추가" onPress={() => Alert.alert("PG 연결이 필요해요", "정식 PG 계약과 네이티브 결제 SDK 연결 후 사용할 수 있습니다.")} />
-      <Text style={styles.disclosure}>전체 카드번호, CVC, 비밀번호는 클라이언트·DB·로그 어디에도 저장하지 않습니다.</Text>
+      <ActionButton label="결제 카드 등록 준비 중" disabled onPress={() => undefined} />
+      <Text style={styles.disclosure}>전체 카드번호, 보안번호, 비밀번호는 앱이나 서비스 기록에 저장하지 않아요.</Text>
     </>
   );
 }
 
 function PaymentSettings() {
-  const [quickPayment, setQuickPayment] = useState(false);
-  const [receipt, setReceipt] = useState(true);
   return (
     <>
-      <Lead title="결제 기본 동작" body="실제 결제수단이 연결되기 전에는 이 설정이 결제를 실행하지 않습니다." />
+      <Lead title="결제 기본 동작" body="결제수단을 등록하기 전에는 이 설정으로 결제가 진행되지 않아요." />
       <InfoCard>
-        <ToggleRow label="간편결제 우선 표시" body="연결된 결제수단을 결제창 위에 표시" value={quickPayment} onChange={setQuickPayment} />
-        <ToggleRow label="결제 영수증 알림" body="결제·취소·환불 결과를 필수로 안내" value={receipt} onChange={setReceipt} last />
+        <ToggleRow label="간편결제 우선 표시" body="결제수단 연동 후 설정 가능" value={false} disabled onChange={() => undefined} />
+        <ToggleRow label="결제 영수증 알림" body="결제수단 연동 후 설정 가능" value disabled onChange={() => undefined} last />
       </InfoCard>
-      <Text style={styles.disclosure}>결제 완료 여부는 앱 화면이 아니라 PG 서명 Webhook과 서버 재검증으로 확정합니다.</Text>
+      <Text style={styles.disclosure}>결제 완료 여부는 결제사의 승인 내역을 안전하게 확인한 뒤 확정해요.</Text>
     </>
   );
 }
@@ -147,14 +160,14 @@ function Security({ profileState }: { profileState: ReturnType<typeof useProfile
   const snapshot = profileState.snapshot!;
   return (
     <>
-      <Lead title="계정과 세션 보호" body="로그인 토큰은 기기의 SecureStore에만 저장하고 DB 비밀키는 앱에 넣지 않습니다." />
+      <Lead title="계정과 세션 보호" body="로그인 정보는 기기에 안전하게 보관하고 민감한 서비스 정보는 앱에 저장하지 않아요." />
       <InfoCard>
-        <InfoRow label="로그인 상태" value={snapshot.isExample ? "미로그인 · 화면 예시" : "로그인됨"} />
+        <InfoRow label="로그인 상태" value={snapshot.isExample ? "로그인이 필요해요" : "로그인됨"} />
         <InfoRow label="계정 상태" value={snapshot.actor?.status ?? "ACTIVE"} />
         <InfoRow label="권한" value={snapshot.actor?.role ?? "USER"} />
         <InfoRow label="최근 프로필 변경" value={formatDate(snapshot.profile.updatedAt)} last />
       </InfoCard>
-      <ActionButton label="모든 기기에서 로그아웃" onPress={() => Alert.alert("보안 기능 안내", "다중 기기 세션 목록과 전체 폐기는 인증 제공자 연결 후 활성화합니다.")} />
+      <ActionButton label="다른 기기 로그아웃 준비 중" disabled onPress={() => undefined} />
     </>
   );
 }
@@ -168,7 +181,7 @@ function Notifications({ profileState }: { profileState: ReturnType<typeof usePr
   const save = async () => {
     if (snapshot.isExample || !profileState.accessToken) {
       profileState.setSnapshot((current) => current ? { ...current, notificationPreferences: preferences } : current);
-      Alert.alert("화면 예시에 저장했어요");
+      Alert.alert("로그인 후 저장할 수 있어요", "현재 변경은 앱을 다시 열면 초기화될 수 있어요.");
       return;
     }
     try {
@@ -227,7 +240,7 @@ function Consents({ profileState }: { profileState: ReturnType<typeof useProfile
         <ConsentRow title="맞춤 추천" status={preferences.personalizedRecommendations ? "동의" : "미동의"} last />
       </InfoCard>
       <ActionButton label="선택 동의 변경" onPress={() => router.push("/profile/member/notifications" as Href)} />
-      <Text style={styles.disclosure}>실제 수집 항목·처리 목적·보관 기간·처리 위탁사는 출시 전 개인정보처리방침에서 확정해야 합니다.</Text>
+      <Text style={styles.disclosure}>수집 항목·이용 목적·보관 기간·처리 위탁은 개인정보처리방침에서 확인할 수 있어요.</Text>
     </>
   );
 }
@@ -235,31 +248,75 @@ function Consents({ profileState }: { profileState: ReturnType<typeof useProfile
 function Legal() {
   return (
     <>
-      <Lead title="약관과 운영정책" body="아래 문서는 화면 구조를 위한 초안이며 공개 전 사업자 정보와 전문 검토가 필요합니다." />
-      <Policy title="서비스 이용약관" body="회원, 상품 구매, 가챠·쿠지, 포인트, 보관함, 배송과 커뮤니티 이용 조건을 다룹니다." />
-      <Policy title="개인정보처리방침" body="수집 항목, 처리 목적, 보관 기간, 제3자 제공과 처리 위탁, 권리 행사 절차를 안내합니다." />
-      <Policy title="배송·보관함 정책" body="무료 보관기간, 배송비, 합배송, 출고, 장기 미신청 상품 처리 기준을 안내합니다." />
-      <Policy title="교환방·신청방 운영정책" body="금지 행위, 신고, 제재, 이의제기와 콘텐츠 처리 기준을 안내합니다." />
-      <View style={styles.warningBox}><Text style={styles.warningTitle}>출시 전 필수</Text><Text style={styles.warningBody}>상호·대표자·사업자등록번호·통신판매업 신고번호·주소·연락처·시행일을 실제 정보로 교체해야 합니다.</Text></View>
+      <Lead title="약관과 운영정책" body="이용 중 적용되는 기준을 문서별로 확인할 수 있어요." />
+      <Policy policyId="terms" title="서비스 이용약관" body="회원, 상품 구매, 가챠·쿠지, 포인트, 보관함, 배송과 커뮤니티 이용 조건" />
+      <Policy policyId="privacy" title="개인정보처리방침" body="수집 항목, 처리 목적, 보관 기간과 회원의 권리" />
+      <Policy policyId="shipping-storage" title="배송·보관함 정책" body="신청 가능한 상품, 무료배송, 출고와 수령 기준" />
+      <Policy policyId="exchange-request" title="교환방·신청방 운영정책" body="교환 제안, 상품 신청, 금지 행위와 이용 제한" />
     </>
   );
 }
 
 function AccountActions({ profileState }: { profileState: ReturnType<typeof useProfileSnapshot> }) {
   const snapshot = profileState.snapshot!;
+  const [deletionRequest, setDeletionRequest] = useState<AccountDeletionRequest | null>(null);
+  const [deletionPending, setDeletionPending] = useState(false);
+  useEffect(() => {
+    if (snapshot.isExample || !profileState.accessToken) return;
+    let active = true;
+    void fetchAccountDeletionRequest(profileState.runtime.apiBaseUrl, profileState.accessToken)
+      .then((result) => { if (active) setDeletionRequest(result); })
+      .catch(() => undefined);
+    return () => { active = false; };
+  }, [profileState.accessToken, profileState.runtime.apiBaseUrl, snapshot.isExample]);
+
   const logout = () => Alert.alert("로그아웃할까요?", "이 기기의 로그인 세션을 종료합니다.", [
     { text: "취소", style: "cancel" },
     { text: "로그아웃", style: "destructive", onPress: () => { void (async () => {
       try {
         if (profileState.accessToken && !snapshot.isExample) await logoutAccount(profileState.runtime.apiBaseUrl, profileState.accessToken);
       } catch (error) {
-        Alert.alert("서버 로그아웃을 확인하지 못했어요", error instanceof Error ? error.message : "기기 토큰은 정리합니다.");
+        Alert.alert("로그아웃 상태를 확인하지 못했어요", error instanceof Error ? error.message : "이 기기의 로그인 정보는 정리할게요.");
       } finally {
         await clearAuthTokens();
         router.replace("/(tabs)/profile");
       }
     })(); } },
   ]);
+
+  const requestDeletion = () => {
+    if (snapshot.isExample || !profileState.accessToken) {
+      Alert.alert("로그인이 필요해요", "로그인하면 회원탈퇴를 요청할 수 있어요.");
+      return;
+    }
+    Alert.alert(
+      "회원탈퇴를 요청할까요?",
+      "진행 중인 주문·배송·교환과 보관 상품을 확인한 뒤 처리되며, 요청이 접수되면 모든 기기에서 로그아웃됩니다.",
+      [
+        { text: "취소", style: "cancel" },
+        {
+          text: "탈퇴 요청",
+          style: "destructive",
+          onPress: () => { void (async () => {
+            try {
+              setDeletionPending(true);
+              const result = await requestAccountDeletion(profileState.runtime.apiBaseUrl, profileState.accessToken!);
+              setDeletionRequest(result);
+              await clearAuthTokens();
+              Alert.alert("탈퇴 요청을 접수했어요", "진행 상태를 검토한 뒤 등록된 연락처로 안내해 드려요.", [
+                { text: "확인", onPress: () => router.replace("/(tabs)/profile") },
+              ]);
+            } catch (error) {
+              Alert.alert("탈퇴를 요청하지 못했어요", error instanceof Error ? error.message : "잠시 후 다시 시도해 주세요.");
+            } finally {
+              setDeletionPending(false);
+            }
+          })(); },
+        },
+      ],
+    );
+  };
+
   return (
     <>
       <Lead title="계정 세션과 탈퇴" body="로그아웃은 계정을 삭제하지 않으며, 회원탈퇴는 진행 중인 거래와 법정 보관 기록을 확인한 뒤 처리됩니다." />
@@ -272,10 +329,20 @@ function AccountActions({ profileState }: { profileState: ReturnType<typeof useP
         <Ionicons name="warning-outline" size={25} color={colors.danger} />
         <Text style={styles.dangerTitle}>탈퇴 후 되돌릴 수 없어요</Text>
         <Text style={styles.dangerBody}>보관 상품, 진행 중인 주문·배송·교환, 남은 포인트가 있으면 탈퇴 요청이 보류될 수 있어요. 법령상 보관이 필요한 거래 기록은 계정과 분리해 정해진 기간 동안 보관될 수 있습니다.</Text>
-        <Pressable accessibilityRole="button" onPress={() => Alert.alert("회원탈퇴 요청", snapshot.isExample ? "로그인 후 실제 계정에서 요청할 수 있어요." : "실수 방지를 위한 재인증 화면과 차단 항목 확인을 다음 단계에서 연결합니다.")} style={styles.dangerButton}><Text style={styles.dangerButtonLabel}>회원탈퇴 요청</Text></Pressable>
+        {deletionRequest ? <View style={styles.deletionStatus}><Text style={styles.deletionStatusLabel}>현재 상태</Text><Text style={styles.deletionStatusValue}>{deletionStatusLabel(deletionRequest.status)}</Text></View> : null}
+        <Pressable accessibilityRole="button" accessibilityState={{ busy: deletionPending }} disabled={deletionPending} onPress={requestDeletion} style={[styles.dangerButton, deletionPending && styles.disabled]}><Text style={styles.dangerButtonLabel}>{deletionPending ? "요청 중" : "회원탈퇴 요청"}</Text></Pressable>
       </View>
     </>
   );
+}
+
+function deletionStatusLabel(status: AccountDeletionRequest["status"]): string {
+  if (status === "PENDING_REVIEW") return "검토 중";
+  if (status === "BLOCKED") return "처리 대기";
+  if (status === "APPROVED") return "승인됨";
+  if (status === "COMPLETED") return "처리 완료";
+  if (status === "REJECTED") return "처리 불가";
+  return "요청 취소";
 }
 
 function Header({ title }: { title: string }) {
@@ -302,8 +369,8 @@ function ConsentRow({ title, status, last = false }: { title: string; status: st
   return <View style={[styles.infoRow, !last && styles.infoRowBorder]}><Text style={styles.infoLabel}>{title}</Text><Text style={styles.consentStatus}>{status}</Text></View>;
 }
 
-function Policy({ title, body }: { title: string; body: string }) {
-  return <View style={styles.policyCard}><Text style={styles.policyTitle}>{title}</Text><Text style={styles.policyBody}>{body}</Text><Ionicons name="chevron-forward" size={18} color={colors.muted} style={styles.policyArrow} /></View>;
+function Policy({ policyId, title, body }: { policyId: string; title: string; body: string }) {
+  return <Pressable accessibilityRole="button" onPress={() => router.push(`/profile/member/legal/${policyId}` as Href)} style={({ pressed }) => [styles.policyCard, pressed && styles.pressed]}><Text style={styles.policyTitle}>{title}</Text><Text style={styles.policyBody}>{body}</Text><Ionicons name="chevron-forward" size={18} color={colors.muted} style={styles.policyArrow} /></Pressable>;
 }
 
 function ActionButton({ label, onPress, disabled = false }: { label: string; onPress: () => void; disabled?: boolean }) {
@@ -311,7 +378,7 @@ function ActionButton({ label, onPress, disabled = false }: { label: string; onP
 }
 
 function ExampleNotice() {
-  return <View style={styles.exampleBanner}><View style={styles.exampleDot} /><Text style={styles.exampleText}>로그인 전 화면 예시입니다. 민감정보는 실제 값이 아니라 마스킹된 테스트 정보예요.</Text></View>;
+  return <SeedInlineGuidance style={styles.exampleGuidance}>로그인하면 내 계정 정보와 보안 설정을 확인할 수 있어요.</SeedInlineGuidance>;
 }
 
 function Loading() {
@@ -339,9 +406,7 @@ const styles = StyleSheet.create({
   loadingText: { color: colors.muted, fontSize: 13 },
   errorBox: { borderRadius: seed.radius.r4, padding: seed.spacing.x5, backgroundColor: seed.color.background.criticalWeak },
   errorText: { color: colors.ink, fontSize: 13, lineHeight: 20, textAlign: "center" },
-  exampleBanner: { minHeight: seed.size.actionButton.medium, flexDirection: "row", alignItems: "center", gap: seed.spacing.x2, borderRadius: seed.radius.r3, paddingHorizontal: seed.spacing.x3_5, marginBottom: seed.spacing.x4, backgroundColor: seed.color.background.brandWeak },
-  exampleDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.greenInk },
-  exampleText: { flex: 1, color: colors.greenInk, fontSize: 10, lineHeight: 16, fontWeight: "700" },
+  exampleGuidance: { marginBottom: seed.spacing.x4 },
   lead: { marginBottom: 18 },
   leadTitle: { color: seed.color.foreground.neutral, ...seed.typography.screenTitle },
   leadBody: { color: colors.muted, fontSize: 13, lineHeight: 20, marginTop: 7 },
@@ -387,6 +452,9 @@ const styles = StyleSheet.create({
   dangerCard: { borderRadius: seed.radius.r5, borderWidth: 1, borderColor: seed.color.stroke.critical, padding: seed.spacing.x4_5, marginTop: seed.spacing.x3_5, backgroundColor: seed.color.background.criticalWeak },
   dangerTitle: { color: colors.danger, fontSize: 16, fontWeight: "900", marginTop: 12 },
   dangerBody: { color: colors.ink, fontSize: 11, lineHeight: 18, marginTop: 8 },
+  deletionStatus: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: seed.color.stroke.critical, marginTop: seed.spacing.x3, paddingTop: seed.spacing.x3 },
+  deletionStatusLabel: { color: colors.muted, fontSize: 11 },
+  deletionStatusValue: { color: colors.danger, fontSize: 12, fontWeight: "900" },
   dangerButton: { minHeight: 48, alignItems: "center", justifyContent: "center", borderRadius: 12, borderWidth: 1, borderColor: colors.danger, marginTop: 16 },
   dangerButtonLabel: { color: colors.danger, fontSize: 13, fontWeight: "900" },
   emptyState: { minHeight: 220, alignItems: "center", justifyContent: "center", borderRadius: 18, padding: 24, backgroundColor: colors.surface },

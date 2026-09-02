@@ -6,7 +6,8 @@ export function nullableIso(value: Date | string | null): string | null {
   return value ? iso(value) : null;
 }
 
-export function maskEmail(email: string): string {
+export function maskEmail(email: string | null): string {
+  if (!email) return "미등록";
   const [local = "", domain = ""] = email.split("@");
   const visible = local.slice(0, Math.min(2, local.length));
   return `${visible}${"*".repeat(Math.max(2, local.length - visible.length))}@${domain}`;

@@ -1,6 +1,7 @@
 import { randomUUID } from "expo-crypto";
-import { createDabbobaClient, errorMessage } from "@dabboba/api-client";
+import { errorMessage } from "@dabboba/api-client";
 import type { components } from "@dabboba/contracts";
+import { createMobileDabbobaClient as createDabbobaClient } from "@/lib/mobile-api-client";
 
 export type AccountNotification = components["schemas"]["AccountNotification"];
 

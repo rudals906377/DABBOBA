@@ -10,8 +10,10 @@ import {
   canonicalShippingInventoryIds,
   isPointReturnEligibleInventory,
   MAX_POINT_BALANCE,
+  maskAccountPhone,
   maskShippingPhone,
   maskShippingRecipient,
+  normalizeBirthDate,
   normalizeShippingPhone,
   pointReturnAmount,
   pointReturnTotalAmount,
@@ -123,6 +125,89 @@ test("shipping contact data is normalized for storage and masked for response", 
   assert.equal(maskShippingRecipient("김영민"), "김*민");
   assert.equal(maskShippingPhone("01012345678"), "*******5678");
   assert.throws(() => normalizeShippingPhone("010-ABCD-5678"), AppError);
+});
+
+test("account basics validate real, plausible birth dates and mask verified phone identities", () => {
+  const today = new Date("2026-08-31T12:00:00.000Z");
+  assert.equal(normalizeBirthDate("2000-02-29", today), "2000-02-29");
+  assert.equal(normalizeBirthDate("2026-08-31", today), "2026-08-31");
+  assert.throws(() => normalizeBirthDate("2025-02-29", today), AppError);
+  assert.throws(() => normalizeBirthDate("1899-12-31", today), AppError);
+  assert.throws(() => normalizeBirthDate("2026-09-01", today), AppError);
+  assert.throws(() => normalizeBirthDate("2000/02/29", today), AppError);
+  assert.equal(maskAccountPhone("01012345678"), "010-****-5678");
+  assert.equal(maskAccountPhone("+82 (10) 1234-5678"), "+82-10-****-5678");
+  assert.equal(maskAccountPhone("123"), "****");
+});
+
+test("account basic info update rejects direct email and phone mutations", async () => {
+  const { app, routes } = routeCapture();
+  await registerAccountRoutes(app, testContext({ async connect() { throw new Error("must not connect"); } }));
+  const handler = routes.get("/v1/account/basic-info");
+  assert.ok(handler);
+
+  for (const body of [
+    { email: "changed@example.test", expectedVersion: 1 },
+    { phone: "01012345678", expectedVersion: 1 },
+  ]) {
+    await assert.rejects(
+      handler({
+        actor: { userId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" },
+        headers: { "idempotency-key": "basic-info-update-0001" },
+        body,
+      }, {}),
+      (error: unknown) => error instanceof AppError && error.statusCode === 400,
+    );
+  }
+});
+
+test("account basic info reads the verified phone column and returns only a masked value", async () => {
+  const actorId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  let basicInfoHandler: RouteHandler | undefined;
+  let capturedSql = "";
+  const register = (...args: unknown[]) => {
+    if (args[0] === "/v1/account/basic-info" && typeof args.at(-1) === "function") {
+      basicInfoHandler = args.at(-1) as RouteHandler;
+    }
+  };
+  const app = {
+    get: register,
+    post() { /* no-op */ },
+    put() { /* no-op */ },
+    patch() { /* preserve the captured GET */ },
+    delete() { /* no-op */ },
+  } as unknown as FastifyInstance;
+  const pool = {
+    async query(sql: string, params: unknown[]) {
+      capturedSql = sql;
+      assert.deepEqual(params, [actorId]);
+      return { rowCount: 1, rows: [{
+        id: actorId,
+        nickname: "모찌수집가",
+        email: "owner@example.test",
+        phone_e164: "+821012345678",
+        birth_date: "2000-02-29",
+        version: 2,
+        updated_at: new Date("2026-08-31T03:00:00.000Z"),
+      }] };
+    },
+  };
+  await registerAccountRoutes(app, testContext(pool));
+  assert.ok(basicInfoHandler);
+
+  const body = await basicInfoHandler({ actor: { userId: actorId } }, {});
+  assert.deepEqual(body, {
+    id: actorId,
+    nickname: "모찌수집가",
+    email: "owner@example.test",
+    phoneMasked: "+82-10-****-5678",
+    birthDate: "2000-02-29",
+    version: 2,
+    updatedAt: "2026-08-31T03:00:00.000Z",
+  });
+  assert.equal(Object.hasOwn(body as object, "phone"), false);
+  assert.match(capturedSql, /u\.phone_e164/);
+  assert.doesNotMatch(capturedSql, /auth_identities|provider_subject/);
 });
 
 test("account deletion remains review-only and reports any authoritative blocker", () => {
@@ -266,6 +351,51 @@ test("profile updates reject a stale owner version before changing the user row"
   const lock = queries.find(({ sql }) => sql.includes("FOR UPDATE OF u,p"));
   assert.deepEqual(lock?.params, [actorId]);
   assert.equal(queries.some(({ sql }) => sql.startsWith("UPDATE users")), false);
+  assert.equal(queries.some(({ sql }) => sql === "ROLLBACK"), true);
+});
+
+test("account basic info updates reject a stale version before changing private data", async () => {
+  const actorId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  const queries: Array<{ sql: string; params: unknown[] }> = [];
+  const client = {
+    async query(sql: string, params: unknown[] = []) {
+      queries.push({ sql, params });
+      if (sql === "BEGIN" || sql === "ROLLBACK") return { rowCount: null, rows: [] };
+      if (sql.startsWith("DELETE FROM idempotency_keys")) return { rowCount: 0, rows: [] };
+      if (sql.includes("INSERT INTO idempotency_keys")) {
+        return { rowCount: 1, rows: [{ id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc" }] };
+      }
+      if (sql.includes("p.birth_date") && sql.includes("FOR UPDATE OF u,p")) {
+        return { rowCount: 1, rows: [{
+          id: actorId,
+          nickname: "현재 닉네임",
+          email: "owner@example.test",
+          phone_e164: "+821012345678",
+          birth_date: "2000-01-01",
+          version: 3,
+          updated_at: new Date("2026-08-31T03:00:00.000Z"),
+        }] };
+      }
+      throw new Error(`Unexpected query: ${sql}`);
+    },
+    release() { /* no-op */ },
+  };
+  const { app, routes } = routeCapture();
+  await registerAccountRoutes(app, testContext({ async connect() { return client; } }));
+  const handler = routes.get("/v1/account/basic-info");
+  assert.ok(handler);
+  await assert.rejects(
+    handler({
+      actor: { userId: actorId },
+      headers: { "idempotency-key": "basic-info-update-0002" },
+      body: { nickname: "새 닉네임", birthDate: null, expectedVersion: 2 },
+    }, {}),
+    (error: unknown) => error instanceof AppError && error.statusCode === 409,
+  );
+  const lock = queries.find(({ sql }) => sql.includes("p.birth_date") && sql.includes("FOR UPDATE OF u,p"));
+  assert.deepEqual(lock?.params, [actorId]);
+  assert.equal(queries.some(({ sql }) => sql.startsWith("UPDATE users")), false);
+  assert.equal(queries.some(({ sql }) => sql.includes("UPDATE user_profiles SET birth_date")), false);
   assert.equal(queries.some(({ sql }) => sql === "ROLLBACK"), true);
 });
 
@@ -482,4 +612,14 @@ test("point return migration separates the terminal status and keeps return evid
   assert.match(sql, /CREATE CONSTRAINT TRIGGER inventory_point_returns_total_guard/);
   assert.match(sql, /CREATE CONSTRAINT TRIGGER inventory_point_return_items_total_guard/);
   assert.match(sql, /DEFERRABLE INITIALLY DEFERRED/g);
+});
+
+test("account basic info migration stores only bounded birth dates", async () => {
+  const sql = await readFile(
+    new URL("../../../../packages/db/migrations/0021_user_profile_birth_date.sql", import.meta.url),
+    "utf8",
+  );
+  assert.match(sql, /ADD COLUMN birth_date date/);
+  assert.match(sql, /birth_date BETWEEN DATE '1900-01-01' AND CURRENT_DATE/);
+  assert.doesNotMatch(sql, /phone|email/i);
 });

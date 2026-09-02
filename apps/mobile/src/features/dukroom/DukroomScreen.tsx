@@ -14,14 +14,14 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { KoreanPixelTitle, RootCategoryTitle } from "@/components/RootCategoryTitle";
+import { KoreanPixelTitle, KoreanPixelTitleAccessory, RootCategoryTitle } from "@/components/RootCategoryTitle";
 import { RootHeaderActions } from "@/components/RootHeaderActions";
 import {
   ROOT_NAVIGATION_CONTENT_INSET,
   useRootNavigationScroll,
 } from "@/components/RootFloatingTabBar";
 import { AppText as Text } from "@/components/Typography";
-import { SeedActionButton } from "@/design-system/components";
+import { SeedActionButton, SeedInlineGuidance } from "@/design-system/components";
 import { seed } from "@/design-system/seed";
 import {
   fetchDukroomSnapshot,
@@ -115,7 +115,7 @@ export function DukroomScreen() {
         <View style={styles.sectionHeader}>
           <KoreanPixelTitle variant="section">수집가의 방</KoreanPixelTitle>
           <View style={styles.sectionActions}>
-            <Text style={styles.sectionCount}>{visibleItems.length}개</Text>
+            <KoreanPixelTitleAccessory style={styles.sectionCount}>{visibleItems.length}개</KoreanPixelTitleAccessory>
             <SeedActionButton
               label="글쓰기"
               size="small"
@@ -127,7 +127,7 @@ export function DukroomScreen() {
         </View>
 
         {hasExamples ? (
-          <View style={styles.exampleBanner}><View style={styles.exampleDot} /><Text style={styles.exampleText}>서버에 공개된 일반 덕룸 글이 부족해 등록 상품으로 만든 화면 예시를 함께 보여드려요.</Text></View>
+          <SeedInlineGuidance style={styles.exampleGuidance}>서버에 공개된 일반 덕룸 글이 부족해 등록 상품으로 만든 화면 예시를 함께 보여드려요.</SeedInlineGuidance>
         ) : null}
 
         {loading ? (
@@ -203,13 +203,11 @@ const styles = StyleSheet.create({
   clearFilter: { minHeight: seed.size.touchTarget, paddingHorizontal: seed.spacing.x2_5, flexDirection: "row", alignItems: "center", gap: seed.spacing.x0_5, borderRadius: seed.radius.r2, backgroundColor: seed.color.layer.default },
   clearFilterLabel: { color: colors.ink, fontSize: 12, fontWeight: "800" },
   sectionHeader: { marginTop: seed.spacing.x7, marginBottom: seed.spacing.x3_5, paddingHorizontal: seed.spacing.globalGutter, flexDirection: "row", alignItems: "flex-end", justifyContent: "space-between" },
-  sectionCount: { color: colors.muted, fontSize: 14, fontWeight: "800", paddingBottom: 3 },
+  sectionCount: { paddingBottom: 3 },
   sectionActions: { flexDirection: "row", alignItems: "center", gap: seed.spacing.x2_5 },
   composeButton: { paddingHorizontal: seed.spacing.x3 },
-  exampleBanner: { marginHorizontal: seed.spacing.globalGutter, marginBottom: seed.spacing.x3_5, padding: seed.spacing.componentDefault, borderRadius: seed.radius.r3, backgroundColor: seed.color.background.brandWeak, flexDirection: "row", alignItems: "center", gap: seed.spacing.x2_5 },
-  exampleDot: { width: 9, height: 9, borderRadius: 5, backgroundColor: colors.greenInk },
-  exampleText: { flex: 1, color: colors.greenInk, fontSize: 12, lineHeight: 18, fontWeight: "700" },
-  loading: { paddingVertical: 70, alignItems: "center", gap: 12 },
+  exampleGuidance: { marginHorizontal: seed.spacing.globalGutter, marginBottom: seed.spacing.x3_5 },
+  loading: { paddingHorizontal: seed.spacing.globalGutter, paddingVertical: 70, alignItems: "center", gap: 12 },
   loadingText: { color: colors.muted, fontSize: 14 },
   feed: { paddingHorizontal: seed.spacing.globalGutter, gap: seed.spacing.x4 },
   card: { overflow: "hidden", borderRadius: seed.radius.r5, borderWidth: 1, borderColor: seed.color.stroke.neutral, backgroundColor: seed.color.layer.default },

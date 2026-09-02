@@ -12,6 +12,7 @@ test("generated contract includes public and privileged seams", () => {
     "/v1/inquiries",
     "/v1/media/uploads",
     "/v1/media/{mediaId}",
+    "/v1/account/basic-info",
     "/v1/account/profile",
     "/v1/account/deletion-request",
     "/v1/account/draw-entitlements",
@@ -26,6 +27,8 @@ test("generated contract includes public and privileged seams", () => {
     "/v1/wanted-requests",
     "/v1/wanted-requests/{requestId}/like",
     "/v1/exchange/listings",
+    "/v1/kuji/rooms/{productId}/entries",
+    "/v1/kuji/rooms/{productId}/entries/{entryId}",
     "/v1/orders",
     "/v1/admin/dashboard",
     "/v1/admin/account-deletions",
@@ -38,7 +41,83 @@ test("generated contract includes public and privileged seams", () => {
     "/v1/admin/reports/{reportId}/resolution",
     "/v1/admin/audit-logs",
   ];
-  assert.equal(requiredPaths.length, 31);
+  assert.equal(requiredPaths.length, 34);
+});
+
+test("generated kuji room contract carries server time, one checkout lease, FIFO, and committed activity", () => {
+  const snapshot = {
+    serverNow: "2026-09-01T03:00:00.000Z",
+    version: 3,
+    productId: "evangelion-kuji",
+    viewer: {
+      entryId: "11111111-1111-4111-8111-111111111111",
+      state: "WAITING",
+      position: 2,
+      peopleAhead: 1,
+      checkoutExpiresAt: null,
+    },
+    active: {
+      displayName: "럭**후",
+      phase: "CHECKOUT_PENDING",
+      checkoutExpiresAt: "2026-09-01T03:03:00.000Z",
+    },
+    waitingCount: 2,
+    waitingPeople: [{
+      entryId: "11111111-1111-4111-8111-111111111111",
+      displayName: "나*",
+      position: 2,
+      isViewer: true,
+    }],
+    recentActivity: [{
+      id: "22222222-2222-4222-8222-222222222222",
+      displayName: "쿠**터",
+      prizeName: "A상 피규어",
+      prizeImageUrl: null,
+      rarity: "A",
+      committedAt: "2026-09-01T02:59:30.000Z",
+    }],
+  } satisfies components["schemas"]["KujiRoomSnapshot"];
+  const joinPath: keyof paths["/v1/kuji/rooms/{productId}/entries"] = "post";
+  const roomPath: keyof paths["/v1/kuji/rooms/{productId}/entries/{entryId}"] = "get";
+
+  assert.equal(joinPath, "post");
+  assert.equal(roomPath, "get");
+  assert.equal(snapshot.viewer.peopleAhead, 1);
+  assert.equal(snapshot.active.checkoutExpiresAt, "2026-09-01T03:03:00.000Z");
+});
+
+test("generated order input links kuji checkout to one room entry", () => {
+  const input = {
+    items: [{ productId: "evangelion-kuji", quantity: 2, expectedDrawVersion: 1 }],
+    pointAmount: 0,
+    kujiRoomEntryId: "11111111-1111-4111-8111-111111111111",
+  } satisfies components["schemas"]["CreateOrderInput"];
+  assert.equal(input.kujiRoomEntryId, "11111111-1111-4111-8111-111111111111");
+});
+
+test("generated account basic info contract keeps verified contacts read-only", () => {
+  const basicInfo = {
+    id: "11111111-1111-4111-8111-111111111111",
+    nickname: "모찌수집가",
+    email: "owner@example.test",
+    phoneMasked: "010-****-5678",
+    birthDate: "2000-02-29",
+    version: 2,
+    updatedAt: "2026-08-31T03:00:00.000Z",
+  } satisfies components["schemas"]["AccountBasicInfo"];
+  const update = {
+    nickname: "새 닉네임",
+    birthDate: null,
+    expectedVersion: 2,
+  } satisfies components["schemas"]["UpdateAccountBasicInfoInput"];
+  const headers = {
+    "Idempotency-Key": "account-basic-update-0001",
+  } satisfies paths["/v1/account/basic-info"]["patch"]["parameters"]["header"];
+
+  assert.equal(basicInfo.phoneMasked, "010-****-5678");
+  assert.equal(Object.hasOwn(update, "email"), false);
+  assert.equal(Object.hasOwn(update, "phone"), false);
+  assert.equal(headers["Idempotency-Key"], "account-basic-update-0001");
 });
 
 test("generic admin user status contract excludes account deletion", () => {

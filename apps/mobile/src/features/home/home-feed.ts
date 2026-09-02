@@ -6,6 +6,8 @@ type HomeProduct = Pick<CatalogProduct, "id" | "ipId" | "category" | "name" | "i
 type HomeNotice = Pick<Notice, "title" | "isPinned" | "isPublished" | "status">;
 
 export const DEFAULT_HOME_COLLECTION_IP_IDS = ["demon-slayer", "pokemon"] as const;
+export const HOME_PRODUCT_CARD_WIDTH = 164;
+export const HOME_KUJI_CARD_MAX_WIDTH = 520;
 export const HOME_ANNOUNCEMENT_FALLBACKS = [
   "가챠 상품만 배송하면 30,000원 이상 무료배송이에요.",
   "쿠지·피규어·카드가 포함되면 50,000원 이상 무료배송이에요.",
@@ -59,6 +61,31 @@ export function homeAnnouncementMessages(notices: readonly HomeNotice[]): string
 export function getTickerOverflowDistance(viewportWidth: number, textWidth: number): number {
   if (viewportWidth <= 0 || textWidth <= viewportWidth) return 0;
   return textWidth - viewportWidth;
+}
+
+export function getHomeProductCardWidth(
+  category: CatalogProduct["category"],
+  viewportWidth: number,
+  horizontalGutter: number,
+): number {
+  if (category !== "kuji") return HOME_PRODUCT_CARD_WIDTH;
+  const availableWidth = Math.max(HOME_PRODUCT_CARD_WIDTH, viewportWidth - horizontalGutter * 2);
+  return Math.min(HOME_KUJI_CARD_MAX_WIDTH, availableWidth);
+}
+
+export function buildDrawActivityTickerWindow<Item extends { id: string }>(
+  items: readonly Item[],
+  startIndex: number,
+  visibleRows: number,
+): Item[] {
+  if (!items.length || visibleRows <= 0) return [];
+  const visibleCount = Math.min(items.length, Math.max(1, Math.floor(visibleRows)));
+  const windowLength = items.length > 1 ? visibleCount + 1 : visibleCount;
+  const normalizedStart = ((startIndex % items.length) + items.length) % items.length;
+  return Array.from(
+    { length: windowLength },
+    (_, offset) => items[(normalizedStart + offset) % items.length]!,
+  );
 }
 
 export function buildDrawActivityExamples(

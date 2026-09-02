@@ -1,10 +1,12 @@
 import { Ionicons } from "@expo/vector-icons";
 import Constants from "expo-constants";
-import { type Href, useLocalSearchParams, useRouter } from "expo-router";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { type Href, useLocalSearchParams, useNavigation, useRouter } from "expo-router";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  AccessibilityInfo,
   ActivityIndicator,
   Alert,
+  AppState,
   Image,
   Platform,
   Pressable,
@@ -13,11 +15,36 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import {
+  FloatingBottomActionPanel,
+  useFloatingBottomActionContentInset,
+} from "@/components/FloatingBottomActionPanel";
+import { ProductInfoDivider } from "@/components/ProductInfoDivider";
 import { KoreanPixelTitle } from "@/components/RootCategoryTitle";
-import { AppText as Text, BalancedAppText } from "@/components/Typography";
-import { SeedActionButton } from "@/design-system/components";
+import { AppText as Text } from "@/components/Typography";
+import { SeedActionButton, SeedInlineGuidance } from "@/design-system/components";
 import { seed } from "@/design-system/seed";
-import { fetchCheckoutPointBalance } from "@/features/checkout/checkout-api";
+import {
+  CheckoutOrderApiError,
+  createKujiCheckoutOrder,
+  fetchCheckoutPointBalance,
+  paidKujiOrderEntitlementIds,
+} from "@/features/checkout/checkout-api";
+import {
+  DRAW_PURCHASE_MAX_QUANTITY,
+  normalizeDrawPurchaseCount,
+} from "@/features/draw/draw-purchase-state";
+import {
+  createKujiCheckoutClock,
+  formatKujiCheckoutRemainingTime,
+  kujiCheckoutRemainingSeconds,
+  resolveKujiCheckoutPhase,
+} from "@/features/kuji/kuji-checkout-state";
+import { fetchKujiRoom, leaveKujiRoom } from "@/features/kuji/kuji-room-api";
+import {
+  buildDrawPaymentConfirmation,
+  buildGachaPreviewParams,
+} from "@/features/kuji/kuji-selection-state";
 import {
   categoryLabel,
   fetchProductDetail,
@@ -41,19 +68,46 @@ const PAYMENT_METHODS: Array<{
   caption: string;
   icon: keyof typeof Ionicons.glyphMap;
 }> = [
-  { id: "card", label: "간편카드", caption: "PG 연동 준비 중", icon: "card-outline" },
-  { id: "kakao", label: "카카오페이", caption: "PG 연동 준비 중", icon: "chatbubble-ellipses-outline" },
-  { id: "naver", label: "네이버페이", caption: "PG 연동 준비 중", icon: "wallet-outline" },
+  { id: "card", label: "간편카드", caption: "결제 서비스 준비 중", icon: "card-outline" },
+  { id: "kakao", label: "카카오페이", caption: "결제 서비스 준비 중", icon: "chatbubble-ellipses-outline" },
+  { id: "naver", label: "네이버페이", caption: "결제 서비스 준비 중", icon: "wallet-outline" },
 ];
 
 export function CheckoutScreen() {
   const router = useRouter();
+  const navigation = useNavigation();
+  const floatingBottomInset = useFloatingBottomActionContentInset();
   const params = useLocalSearchParams<{
     productId?: string | string[];
     quantity?: string | string[];
+    kujiEntryId?: string | string[];
+    kujiCheckoutExpiresAt?: string | string[];
+    checkoutExpiresAt?: string | string[];
+    serverNow?: string | string[];
+    kujiRoomFixture?: string | string[];
   }>();
   const productId = firstParam(params.productId) ?? "";
-  const requestedQuantity = quantityFromParam(firstParam(params.quantity));
+  const requestedQuantity = normalizeDrawPurchaseCount(firstParam(params.quantity));
+  const kujiEntryId = firstParam(params.kujiEntryId);
+  const kujiCheckoutExpiresAt = firstParam(params.kujiCheckoutExpiresAt)
+    ?? firstParam(params.checkoutExpiresAt);
+  const kujiServerNow = firstParam(params.serverNow);
+  const kujiRoomFixture = firstParam(params.kujiRoomFixture);
+  const [verifiedKujiLease, setVerifiedKujiLease] = useState<{
+    checkoutExpiresAt: string;
+    serverNow: string;
+  } | null>(null);
+  const effectiveKujiCheckoutExpiresAt = verifiedKujiLease?.checkoutExpiresAt
+    ?? kujiCheckoutExpiresAt;
+  const effectiveKujiServerNow = verifiedKujiLease?.serverNow ?? kujiServerNow;
+  const kujiCheckoutClock = useMemo(
+    () => createKujiCheckoutClock(
+      effectiveKujiCheckoutExpiresAt,
+      effectiveKujiServerNow,
+      Date.now(),
+    ),
+    [effectiveKujiCheckoutExpiresAt, effectiveKujiServerNow, kujiEntryId, productId],
+  );
   const runtime = useMemo(
     () => resolveMobileRuntimeConfig({
       configuredApiUrl: process.env.EXPO_PUBLIC_DABBOBA_API_URL,
@@ -68,8 +122,14 @@ export function CheckoutScreen() {
   const [pointBalance, setPointBalance] = useState(0);
   const [usePoints, setUsePoints] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethodId>("card");
+  const [quantity, setQuantity] = useState(requestedQuantity);
   const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState("");
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  const checkoutCompletedRef = useRef(false);
+  const checkoutExpiredHandledRef = useRef(false);
+  const orderSubmittingRef = useRef(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -80,25 +140,115 @@ export function CheckoutScreen() {
         fetchProductDetail(runtime.apiBaseUrl, productId, tokens.accessToken),
         fetchCheckoutPointBalance(runtime.apiBaseUrl, tokens.accessToken),
       ]);
+      if (nextSnapshot.product.category === "kuji") {
+        if (!kujiEntryId || !kujiCheckoutExpiresAt) {
+          throw new Error("쿠지 대기실에서 순서를 확인한 뒤 결제를 시작해 주세요.");
+        }
+        if (__DEV__ && kujiRoomFixture === "development") {
+          setVerifiedKujiLease({
+            checkoutExpiresAt: kujiCheckoutExpiresAt,
+            serverNow: kujiServerNow ?? new Date().toISOString(),
+          });
+        } else {
+          const room = await fetchKujiRoom(
+            runtime.apiBaseUrl,
+            tokens.accessToken,
+            productId,
+            kujiEntryId,
+          );
+          const checkoutOwnsDrawingTransition = room.viewer.state === "DRAWING"
+            && (orderSubmittingRef.current || checkoutCompletedRef.current);
+          if (
+            room.viewer.entryId !== kujiEntryId
+            || (
+              room.viewer.state !== "CHECKOUT_PENDING"
+              && !checkoutOwnsDrawingTransition
+            )
+            || (
+              room.viewer.state === "CHECKOUT_PENDING"
+              && !room.viewer.checkoutExpiresAt
+            )
+          ) {
+            throw new Error("현재 결제 가능한 쿠지 순서가 아닙니다. 대기실에서 다시 확인해 주세요.");
+          }
+          if (room.viewer.state === "CHECKOUT_PENDING" && room.viewer.checkoutExpiresAt) {
+            setVerifiedKujiLease({
+              checkoutExpiresAt: room.viewer.checkoutExpiresAt,
+              serverNow: room.serverNow,
+            });
+          }
+        }
+      } else {
+        setVerifiedKujiLease(null);
+      }
       setSnapshot(nextSnapshot);
       setPointBalance(nextPointBalance);
       setMessage("");
     } catch (error) {
+      setSnapshot(null);
+      setVerifiedKujiLease(null);
       setMessage(error instanceof Error ? error.message : "결제 정보를 불러오지 못했습니다.");
     } finally {
       setLoading(false);
     }
-  }, [productId, runtime.apiBaseUrl]);
+  }, [
+    kujiCheckoutExpiresAt,
+    kujiEntryId,
+    kujiRoomFixture,
+    kujiServerNow,
+    productId,
+    runtime.apiBaseUrl,
+  ]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
   const product = snapshot?.product ?? null;
-  const quantity = Math.max(
-    1,
-    Math.min(requestedQuantity, product?.availableQuantity ?? requestedQuantity, 10),
+  const drawMode = product ? isDrawCategory(product.category) : false;
+  const hasKujiCheckoutRouteLease = Boolean(kujiEntryId && kujiCheckoutExpiresAt);
+  const isKujiCheckout = product?.category === "kuji" || hasKujiCheckoutRouteLease;
+  const kujiCheckoutRemaining = isKujiCheckout
+    ? kujiCheckoutRemainingSeconds(kujiCheckoutClock, nowMs)
+    : 0;
+  const kujiCheckoutExpired = isKujiCheckout && kujiCheckoutRemaining <= 0;
+  const kujiCheckoutRemainingTime = formatKujiCheckoutRemainingTime(kujiCheckoutRemaining);
+  const drawAvailable = product
+    ? !drawMode || (
+      product.availableQuantity > 0
+      && (__DEV__ || (snapshot?.drawOdds?.entries.length ?? 0) > 0)
+    )
+    : false;
+  const maxQuantity = normalizeDrawPurchaseCount(
+    DRAW_PURCHASE_MAX_QUANTITY,
+    product?.availableQuantity,
   );
+
+  useEffect(() => {
+    setQuantity(requestedQuantity);
+  }, [productId, requestedQuantity]);
+
+  useEffect(() => {
+    if (!product) return;
+    setQuantity((current) => normalizeDrawPurchaseCount(current, product.availableQuantity));
+  }, [productId, product?.availableQuantity]);
+
+  useEffect(() => {
+    if (!isKujiCheckout) return undefined;
+
+    const syncNow = () => setNowMs(Date.now());
+    syncNow();
+    const timer = setInterval(syncNow, 1_000);
+    const appStateSubscription = AppState.addEventListener("change", (state) => {
+      if (state === "active") syncNow();
+    });
+
+    return () => {
+      clearInterval(timer);
+      appStateSubscription.remove();
+    };
+  }, [isKujiCheckout, kujiCheckoutClock]);
+
   const subtotal = (product?.price ?? 0) * quantity;
   const pointUsed = usePoints ? Math.min(pointBalance, subtotal) : 0;
   const paymentTotal = Math.max(0, subtotal - pointUsed);
@@ -110,7 +260,110 @@ export function CheckoutScreen() {
     ? resolveCatalogImageUrl(product.imageUrl, assetBaseUrl, product.version)
     : null;
 
+  const replaceWithProduct = useCallback(() => {
+    router.replace(`/product/${encodeURIComponent(productId)}` as Href);
+  }, [productId, router]);
+
+  const releaseKujiEntryBestEffort = useCallback(async () => {
+    if (!kujiEntryId) return;
+    try {
+      const tokens = await readAuthTokens();
+      if (!tokens?.accessToken) return;
+      await leaveKujiRoom(runtime.apiBaseUrl, tokens.accessToken, productId, kujiEntryId);
+    } catch {
+      // Returning to the product must not be blocked by a temporary release failure.
+    }
+  }, [kujiEntryId, productId, runtime.apiBaseUrl]);
+
+  const expireKujiCheckout = useCallback(() => {
+    const phase = resolveKujiCheckoutPhase(
+      kujiCheckoutClock,
+      Date.now(),
+      checkoutCompletedRef.current,
+      orderSubmittingRef.current,
+    );
+    if (checkoutExpiredHandledRef.current || phase !== "EXPIRED") return;
+    checkoutExpiredHandledRef.current = true;
+    void releaseKujiEntryBestEffort();
+    AccessibilityInfo.announceForAccessibility(
+      "결제 대기 시간이 끝나 자동으로 취소됐어요. 상품 페이지로 이동합니다.",
+    );
+    replaceWithProduct();
+    Alert.alert(
+      "결제 시간이 끝났어요",
+      "3분이 지나 결제가 자동으로 취소됐어요.",
+    );
+  }, [kujiCheckoutClock, releaseKujiEntryBestEffort, replaceWithProduct]);
+
+  const cancelKujiCheckout = useCallback(() => {
+    checkoutExpiredHandledRef.current = true;
+    void releaseKujiEntryBestEffort();
+    AccessibilityInfo.announceForAccessibility("결제를 취소하고 상품 페이지로 이동합니다.");
+    replaceWithProduct();
+  }, [releaseKujiEntryBestEffort, replaceWithProduct]);
+
+  const confirmKujiCheckoutCancellation = useCallback(() => {
+    if (orderSubmittingRef.current) return;
+    const remaining = kujiCheckoutRemainingSeconds(kujiCheckoutClock, Date.now());
+    if (remaining <= 0) {
+      expireKujiCheckout();
+      return;
+    }
+    Alert.alert(
+      "결제를 취소할까요?",
+      "결제를 취소하면 상품 페이지로 돌아가요.",
+      [
+        { text: "계속 결제", style: "cancel" },
+        { text: "결제 취소", style: "destructive", onPress: cancelKujiCheckout },
+      ],
+    );
+  }, [cancelKujiCheckout, expireKujiCheckout, kujiCheckoutClock]);
+
+  useEffect(() => {
+    checkoutCompletedRef.current = false;
+    checkoutExpiredHandledRef.current = false;
+    setNowMs(Date.now());
+  }, [kujiEntryId, productId]);
+
+  useEffect(() => {
+    if (!isKujiCheckout || !kujiCheckoutExpired) return;
+    if (!hasKujiCheckoutRouteLease && loading) return;
+    if (submitting) return;
+    expireKujiCheckout();
+  }, [
+    expireKujiCheckout,
+    hasKujiCheckoutRouteLease,
+    isKujiCheckout,
+    kujiCheckoutExpired,
+    loading,
+    submitting,
+  ]);
+
+  useEffect(() => navigation.addListener("beforeRemove", (event) => {
+    if (
+      !isKujiCheckout
+      || checkoutCompletedRef.current
+      || checkoutExpiredHandledRef.current
+    ) return;
+
+    event.preventDefault();
+    confirmKujiCheckoutCancellation();
+  }), [
+    confirmKujiCheckoutCancellation,
+    kujiCheckoutExpiresAt,
+    kujiEntryId,
+    isKujiCheckout,
+    navigation,
+  ]);
+
   const goBack = () => {
+    if (
+      isKujiCheckout
+      && !checkoutCompletedRef.current
+    ) {
+      confirmKujiCheckoutCancellation();
+      return;
+    }
     if (router.canGoBack()) router.back();
     else router.replace("/(tabs)/ppoba");
   };
@@ -127,17 +380,167 @@ export function CheckoutScreen() {
     );
   };
 
+  const openGachaPreview = () => {
+    if (
+      !__DEV__
+      || !product
+      || product.category !== "gacha"
+      || !drawAvailable
+      || quantity <= 0
+    ) return;
+    router.push({
+      pathname: `/draw/preview/${encodeURIComponent(product.id)}`,
+      params: buildGachaPreviewParams(quantity),
+    } as Href);
+  };
+
+  const submitKujiOrder = async () => {
+    if (
+      orderSubmittingRef.current
+      || !product
+      || product.category !== "kuji"
+      || !kujiEntryId
+    ) return;
+    const currentNowMs = Date.now();
+    if (kujiCheckoutRemainingSeconds(kujiCheckoutClock, currentNowMs) <= 0) {
+      setNowMs(currentNowMs);
+      expireKujiCheckout();
+      return;
+    }
+    if (kujiRoomFixture === "development") {
+      Alert.alert(
+        "실제 대기실 연결이 필요해요",
+        "개발용 대기 정보로는 주문이나 추첨권을 만들지 않아요. 서버가 연결된 뒤 대기실에서 다시 시작해 주세요.",
+      );
+      return;
+    }
+    const expectedDrawVersion = snapshot?.drawOdds?.version;
+    if (!expectedDrawVersion) {
+      Alert.alert(
+        "확률표를 다시 확인해 주세요",
+        "결제 전 확인한 최신 확률표가 없어 주문을 접수하지 않았어요.",
+      );
+      return;
+    }
+
+    orderSubmittingRef.current = true;
+    setSubmitting(true);
+    try {
+      const tokens = await readAuthTokens();
+      if (!tokens?.accessToken) throw new Error("로그인 후 쿠지 주문을 진행해 주세요.");
+      const order = await createKujiCheckoutOrder(
+        runtime.apiBaseUrl,
+        tokens.accessToken,
+        {
+          productId: product.id,
+          quantity,
+          expectedDrawVersion,
+          pointAmount: pointUsed,
+          kujiRoomEntryId: kujiEntryId,
+        },
+      );
+      const entitlementIds = paidKujiOrderEntitlementIds(order, quantity);
+      if (!entitlementIds) {
+        if (order.status === "PENDING_PAYMENT") {
+          Alert.alert(
+            "외부 결제 연결 준비 중",
+            "주문은 서버에 접수됐지만 결제 제공 화면이 아직 앱에 연결되지 않아 뽑기로 이동하지 않았어요. 남은 결제 시간이 끝나면 주문과 대기 순서가 자동으로 취소돼요.",
+          );
+          return;
+        }
+        Alert.alert(
+          "추첨권을 확인하고 있어요",
+          "서버에서 결제 완료와 추첨권 발급이 모두 확인되지 않아 뽑기로 이동하지 않았어요.",
+        );
+        return;
+      }
+
+      checkoutCompletedRef.current = true;
+      const query = new URLSearchParams({
+        count: String(entitlementIds.length),
+        orderId: order.id,
+        entitlementIds: entitlementIds.join(","),
+      });
+      router.replace(
+        `/kuji/draw/${encodeURIComponent(product.id)}?${query.toString()}` as Href,
+      );
+    } catch (error) {
+      const providerUnavailable = error instanceof CheckoutOrderApiError && error.status === 503;
+      Alert.alert(
+        providerUnavailable ? "외부 결제 연결 준비 중" : "주문을 접수하지 못했어요",
+        providerUnavailable
+          ? "카드·간편결제 제공 서비스가 아직 연결되지 않아 주문과 결제를 접수하지 않았어요. 포인트로 전액 결제할 수 있는 경우에는 서버에서 바로 완료돼요."
+          : error instanceof Error
+            ? error.message
+            : "쿠지 주문을 다시 확인해 주세요.",
+      );
+    } finally {
+      orderSubmittingRef.current = false;
+      setSubmitting(false);
+    }
+  };
+
   const finishPreparation = () => {
     if (!product) return;
+    if (isDrawCategory(product.category)) {
+      if (
+        product.category === "kuji"
+        && kujiCheckoutRemainingSeconds(kujiCheckoutClock, Date.now()) <= 0
+      ) {
+        expireKujiCheckout();
+        return;
+      }
+      if (!drawAvailable || quantity <= 0) {
+        Alert.alert(
+          "지금은 구매할 수 없어요",
+          product.availableQuantity <= 0
+            ? "남은 수량이 없어 구매할 수 없어요."
+            : "확률표가 공개된 뒤 구매할 수 있어요.",
+        );
+        return;
+      }
+      const unit = product.category === "kuji" ? "장" : "개";
+      const paymentConfirmation = buildDrawPaymentConfirmation(product.price, quantity, unit);
+      const pointLine = pointUsed > 0
+        ? `\n포인트 사용 -${pointUsed.toLocaleString("ko-KR")}원`
+        : "";
+      if (product.category === "kuji") {
+        Alert.alert(
+          "구매 금액 확인",
+          `${paymentConfirmation.message}${pointLine}\n최종 결제 예정 ${paymentTotal.toLocaleString("ko-KR")}원 · ${selectedPayment.label}`,
+          [
+            { text: "취소", style: "cancel" },
+            { text: "구매하기", onPress: () => void submitKujiOrder() },
+          ],
+        );
+        return;
+      }
+      if (!__DEV__) {
+        Alert.alert(
+          "구매 연결 준비 중",
+          "실제 결제와 추첨권 발급이 연결된 뒤 이용할 수 있어요.",
+        );
+        return;
+      }
+      Alert.alert(
+        "구매 금액 확인",
+        `${paymentConfirmation.message}${pointLine}\n최종 결제 예정 ${paymentTotal.toLocaleString("ko-KR")}원 · ${selectedPayment.label}\n현재 개발 화면에서는 결제와 주문이 접수되지 않으며 체험용 뽑기 화면으로 이동해요.`,
+        [
+          { text: "취소", style: "cancel" },
+          { text: "뽑기 시작", onPress: openGachaPreview },
+        ],
+      );
+      return;
+    }
     Alert.alert(
       "결제 준비가 끝났어요",
-      `${quantity}개 · ${paymentTotal.toLocaleString("ko-KR")}원 · ${selectedPayment.label}을 선택했어요. 현재 로컬 앱에서는 PG 결제와 주문 생성은 진행되지 않습니다.`,
+      `${quantity}개 · ${paymentTotal.toLocaleString("ko-KR")}원 · ${selectedPayment.label}을 선택했어요. 현재는 결제 서비스 연결 전이라 결제와 주문이 접수되지 않아요.`,
       [{ text: "확인", onPress: openConnectionGuide }],
     );
   };
 
   return (
-    <SafeAreaView style={styles.safeArea} edges={["top", "bottom", "left", "right"]}>
+    <SafeAreaView style={styles.safeArea} edges={["top", "left", "right"]}>
       <View style={styles.header}>
         <Pressable
           accessibilityRole="button"
@@ -165,18 +568,38 @@ export function CheckoutScreen() {
         </View>
       ) : (
         <>
-          <ScrollView contentContainerStyle={styles.content}>
-            <View style={styles.lead}>
-              <View style={styles.leadIcon}>
-                <Ionicons name="shield-checkmark-outline" size={22} color={colors.greenInk} />
+          <ScrollView contentContainerStyle={[styles.content, { paddingBottom: floatingBottomInset }]}>
+            <SeedInlineGuidance
+              paragraphs={["상품과 금액을 다시 확인한 뒤 결제 수단을 선택해 주세요."]}
+            />
+
+            {product.category === "kuji" && kujiRoomFixture === "development" ? (
+              <SeedInlineGuidance
+                paragraphs={["서버가 연결되지 않아 개발용 결제 화면을 보여드리고 있어요."]}
+              />
+            ) : null}
+
+            {product.category === "kuji" ? (
+              <View
+                accessible
+                accessibilityLabel={`결제 남은 시간 ${kujiCheckoutRemainingTime}`}
+                accessibilityHint="시간이 끝나면 결제가 자동으로 취소되고 상품 페이지로 이동합니다."
+                style={[
+                  styles.checkoutTimer,
+                  kujiCheckoutExpired && styles.checkoutTimerExpired,
+                ]}
+              >
+                <View style={styles.checkoutTimerCopy}>
+                  <KoreanPixelTitle variant="compact" style={styles.checkoutTimerTitle}>
+                    결제 남은 시간
+                  </KoreanPixelTitle>
+                  <Text style={styles.checkoutTimerCaption}>
+                    3분 안에 결제를 완료해 주세요.
+                  </Text>
+                </View>
+                <Text style={styles.checkoutTimerValue}>{kujiCheckoutRemainingTime}</Text>
               </View>
-              <View style={styles.leadCopy}>
-                <KoreanPixelTitle variant="compact">주문 내용을 확인해 주세요</KoreanPixelTitle>
-                <BalancedAppText style={styles.leadBody}>
-                  상품과 금액을 다시 확인한 뒤 테스트 결제 수단을 선택해요.
-                </BalancedAppText>
-              </View>
-            </View>
+            ) : null}
 
             <View style={styles.section}>
               <KoreanPixelTitle variant="section" style={styles.sectionTitle}>주문 상품</KoreanPixelTitle>
@@ -193,13 +616,60 @@ export function CheckoutScreen() {
                   <Text numberOfLines={2} style={styles.productName}>
                     {productSubjectTitle(product.name, snapshot.ip?.nameKo)}
                   </Text>
+                  <ProductInfoDivider style={styles.productFieldDivider} />
                   <View style={styles.productMeta}>
                     <Text style={styles.category}>{categoryLabel(product.category)}</Text>
-                    <Text style={styles.productPrice}>{product.price.toLocaleString("ko-KR")}원 · {quantity}개</Text>
+                    <Text style={styles.productPrice}>{product.price.toLocaleString("ko-KR")}원 · {quantity}{product.category === "kuji" ? "장" : "개"}</Text>
                   </View>
                 </View>
               </View>
             </View>
+
+            {drawMode ? (
+              <View style={styles.section}>
+                <KoreanPixelTitle variant="section" style={styles.sectionTitle}>수량 선택</KoreanPixelTitle>
+                <View style={styles.quantityRow}>
+                  <View style={styles.quantityCopy}>
+                    <Text style={styles.quantityTitle}>구매 수량</Text>
+                    <Text style={styles.quantityCaption}>
+                      {drawAvailable
+                        ? `최대 ${maxQuantity}${product.category === "kuji" ? "장" : "개"}까지 선택할 수 있어요.`
+                        : "현재 구매할 수 있는 수량이 없어요."}
+                    </Text>
+                  </View>
+                  <View style={styles.quantityBox}>
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel="수량 줄이기"
+                      disabled={submitting || kujiCheckoutExpired || quantity <= 1}
+                      onPress={() => setQuantity((current) => (
+                        normalizeDrawPurchaseCount(current - 1, product.availableQuantity)
+                      ))}
+                      style={styles.quantityButton}
+                    >
+                      <Ionicons name="remove" size={20} color={submitting || kujiCheckoutExpired || quantity <= 1 ? colors.line : colors.ink} />
+                    </Pressable>
+                    <Text style={styles.quantityValue}>{quantity}</Text>
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel="수량 늘리기"
+                      disabled={submitting || kujiCheckoutExpired || quantity >= maxQuantity}
+                      onPress={() => setQuantity((current) => (
+                        normalizeDrawPurchaseCount(current + 1, product.availableQuantity)
+                      ))}
+                      style={styles.quantityButton}
+                    >
+                      <Ionicons name="add" size={20} color={submitting || kujiCheckoutExpired || quantity >= maxQuantity ? colors.line : colors.ink} />
+                    </Pressable>
+                  </View>
+                </View>
+                <ProductInfoDivider style={styles.quantityDivider} />
+                <View style={styles.quantityTotalRow}>
+                  <Text style={styles.quantityTotalLabel}>{quantity}{product.category === "kuji" ? "장" : "개"} 구매 금액</Text>
+                  <Text style={styles.quantityTotalValue}>{subtotal.toLocaleString("ko-KR")}원</Text>
+                </View>
+              </View>
+            ) : null}
 
             <View style={styles.section}>
               <KoreanPixelTitle variant="section" style={styles.sectionTitle}>할인·포인트</KoreanPixelTitle>
@@ -209,15 +679,15 @@ export function CheckoutScreen() {
                 </View>
                 <View style={styles.rowCopy}>
                   <Text style={styles.rowTitle}>쿠폰</Text>
-                  <Text style={styles.rowCaption}>쿠폰 기능 연결 준비 중</Text>
+                  <Text style={styles.rowCaption}>쿠폰 기능 준비 중</Text>
                 </View>
                 <Text style={styles.rowValue}>사용 안 함</Text>
               </View>
               <Pressable
                 accessibilityRole="switch"
                 accessibilityLabel="보유 포인트 모두 사용"
-                accessibilityState={{ checked: usePoints, disabled: pointBalance <= 0 }}
-                disabled={pointBalance <= 0}
+                accessibilityState={{ checked: usePoints, disabled: submitting || pointBalance <= 0 }}
+                disabled={submitting || pointBalance <= 0}
                 onPress={() => setUsePoints((current) => !current)}
                 style={({ pressed }) => [styles.discountRow, pressed && styles.pressed, pointBalance <= 0 && styles.disabled]}
               >
@@ -236,7 +706,13 @@ export function CheckoutScreen() {
 
             <View style={styles.section}>
               <KoreanPixelTitle variant="section" style={styles.sectionTitle}>결제 수단</KoreanPixelTitle>
-              <Text style={styles.sectionCaption}>화면 확인용 선택이며 아직 PG와 연결되지 않았어요.</Text>
+              <Text style={styles.sectionCaption}>
+                {product.category === "kuji"
+                  ? paymentTotal === 0
+                    ? "포인트 전액 결제는 서버 확인 후 바로 추첨권이 발급돼요."
+                    : "카드·간편결제 제공 화면은 연결 준비 중이며, 완료 전에는 추첨권이 발급되지 않아요."
+                  : "결제 수단을 선택해 주세요. 현재는 결제 서비스 연결 전이라 주문이 접수되지 않아요."}
+              </Text>
               <View style={styles.paymentList} accessibilityRole="radiogroup">
                 {PAYMENT_METHODS.map((method, index) => {
                   const selected = paymentMethod === method.id;
@@ -244,7 +720,8 @@ export function CheckoutScreen() {
                     <Pressable
                       key={method.id}
                       accessibilityRole="radio"
-                      accessibilityState={{ selected }}
+                      accessibilityState={{ selected, disabled: submitting }}
+                      disabled={submitting}
                       onPress={() => setPaymentMethod(method.id)}
                       style={({ pressed }) => [
                         styles.paymentMethod,
@@ -280,33 +757,36 @@ export function CheckoutScreen() {
             </View>
 
             {isDrawCategory(product.category) ? (
-              <View style={styles.drawNote}>
-                <Ionicons name="dice-outline" size={21} color={colors.greenInk} />
-                <BalancedAppText style={styles.drawNoteText}>
-                  실제 결제가 확인된 뒤에만 서버가 추첨권 {quantity}장을 발급하고 결과를 확정해요.
-                </BalancedAppText>
-              </View>
+              <SeedInlineGuidance>
+                결제가 완료된 뒤에만 추첨권 {quantity}장이 발급되고 결과가 확정돼요.
+              </SeedInlineGuidance>
             ) : null}
 
-            <View style={styles.secureNote}>
-              <Ionicons name="lock-closed-outline" size={18} color={colors.muted} />
-              <BalancedAppText style={styles.secureNoteText}>
-                현재 로컬 화면에서는 PG 결제와 주문 생성은 진행되지 않습니다. 실제 서비스에서는 서버가 가격·재고·포인트를 다시 확인한 뒤 PG 승인 결과로 주문을 확정합니다.
-              </BalancedAppText>
-            </View>
+            <SeedInlineGuidance
+              paragraphs={product.category === "kuji"
+                ? [
+                  "서버가 최신 가격·재고·확률표, 대기 순서와 포인트를 다시 확인한 뒤 주문을 접수해요.",
+                  "결제 완료와 추첨권 발급이 모두 확인된 경우에만 쿠지 뽑기 화면으로 이동해요.",
+                ]
+                : [
+                  "현재는 결제 서비스 연결 전이라 결제와 주문이 접수되지 않아요.",
+                  "서비스 연결 후에는 최신 가격·재고·포인트와 결제 승인 내역을 확인한 뒤 주문이 확정돼요.",
+                ]}
+            />
           </ScrollView>
 
-          <View style={styles.footer}>
+          <FloatingBottomActionPanel panelStyle={styles.footer}>
             <View style={styles.footerTotal}>
               <Text style={styles.footerCaption}>결제 예정 금액</Text>
               <Text style={styles.footerValue}>{paymentTotal.toLocaleString("ko-KR")}원</Text>
             </View>
             <SeedActionButton
-              label="결제 준비 완료"
+              label={submitting ? "주문 확인 중" : drawMode ? "구매하기" : "결제 준비 완료"}
+              disabled={submitting || (drawMode && (kujiCheckoutExpired || !drawAvailable || quantity <= 0))}
               onPress={finishPreparation}
               style={styles.footerAction}
             />
-          </View>
+          </FloatingBottomActionPanel>
         </>
       )}
     </SafeAreaView>
@@ -326,23 +806,20 @@ function firstParam(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
 }
 
-function quantityFromParam(value: string | undefined): number {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? Math.max(1, Math.min(Math.trunc(parsed), 10)) : 1;
-}
-
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: seed.color.layer.basement },
   header: { minHeight: seed.size.topNavigation, paddingHorizontal: seed.spacing.x3_5, flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: seed.color.stroke.neutral, backgroundColor: seed.color.layer.default },
   headerAction: { width: seed.size.touchTarget, height: seed.size.touchTarget, alignItems: "center", justifyContent: "center" },
-  state: { flex: 1, minHeight: 420, paddingHorizontal: seed.spacing.x7, alignItems: "center", justifyContent: "center", gap: seed.spacing.componentDefault },
+  state: { flex: 1, minHeight: 420, paddingHorizontal: seed.spacing.globalGutter, alignItems: "center", justifyContent: "center", gap: seed.spacing.componentDefault },
   stateTitle: { color: colors.ink, ...seed.typography.subtitle, textAlign: "center" },
   stateBody: { color: colors.muted, ...seed.typography.body },
-  content: { paddingHorizontal: seed.spacing.x3_5, paddingTop: seed.spacing.x3_5, paddingBottom: seed.spacing.x7, gap: seed.spacing.componentDefault },
-  lead: { minHeight: 88, padding: seed.spacing.x3_5, borderRadius: seed.radius.r4, backgroundColor: seed.color.background.brandWeak, flexDirection: "row", alignItems: "flex-start", gap: seed.spacing.x3 },
-  leadIcon: { width: seed.size.touchTarget, height: seed.size.touchTarget, borderRadius: seed.radius.r3, backgroundColor: seed.color.layer.default, alignItems: "center", justifyContent: "center" },
-  leadCopy: { flex: 1, paddingTop: seed.spacing.x0_5 },
-  leadBody: { marginTop: seed.spacing.x1_5, color: colors.muted, ...seed.typography.body },
+  content: { paddingHorizontal: seed.spacing.globalGutter, paddingTop: seed.spacing.x3_5, paddingBottom: seed.spacing.x7, gap: seed.spacing.componentDefault },
+  checkoutTimer: { minHeight: 88, paddingHorizontal: seed.spacing.x3_5, paddingVertical: seed.spacing.x3, borderRadius: seed.radius.r4, borderWidth: 1, borderColor: colors.brand, backgroundColor: seed.color.background.brandWeak, flexDirection: "row", alignItems: "center", gap: seed.spacing.x3 },
+  checkoutTimerExpired: { borderColor: seed.color.stroke.critical, backgroundColor: seed.color.background.criticalWeak },
+  checkoutTimerCopy: { flex: 1, minWidth: 0 },
+  checkoutTimerTitle: { marginBottom: seed.spacing.x1 },
+  checkoutTimerCaption: { color: colors.muted, ...seed.typography.caption },
+  checkoutTimerValue: { minWidth: 84, color: colors.greenInk, fontFamily: "Galmuri11", fontSize: 24, lineHeight: 31, fontWeight: "400", fontVariant: ["tabular-nums"], textAlign: "right" },
   section: { padding: seed.spacing.x3_5, borderRadius: seed.radius.r4, borderWidth: 1, borderColor: seed.color.stroke.neutral, backgroundColor: seed.color.layer.default },
   sectionTitle: { marginBottom: seed.spacing.x3 },
   sectionCaption: { marginTop: -seed.spacing.x1_5, marginBottom: seed.spacing.x3, color: colors.muted, ...seed.typography.caption },
@@ -352,9 +829,21 @@ const styles = StyleSheet.create({
   productCopy: { flex: 1, minWidth: 0 },
   ipName: { color: colors.muted, ...seed.typography.caption },
   productName: { marginTop: seed.spacing.x1, color: colors.ink, ...seed.typography.bodyStrong },
+  productFieldDivider: { marginTop: seed.spacing.x2 },
   productMeta: { marginTop: seed.spacing.x2, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: seed.spacing.x2 },
   category: { paddingHorizontal: seed.spacing.x2, paddingVertical: seed.spacing.x1, borderRadius: seed.radius.r1_5, overflow: "hidden", color: colors.ink, backgroundColor: colors.brand, fontSize: 11, lineHeight: 15, fontWeight: "700" },
   productPrice: { flex: 1, color: colors.ink, ...seed.typography.label, fontWeight: "700", textAlign: "right" },
+  quantityRow: { minHeight: 58, flexDirection: "row", alignItems: "center", gap: seed.spacing.x3 },
+  quantityCopy: { flex: 1 },
+  quantityTitle: { color: colors.ink, ...seed.typography.bodyStrong },
+  quantityCaption: { marginTop: seed.spacing.x0_5, color: colors.muted, ...seed.typography.caption },
+  quantityBox: { height: 48, borderRadius: seed.radius.r3, borderWidth: 1, borderColor: seed.color.stroke.neutral, backgroundColor: seed.color.layer.basement, flexDirection: "row", alignItems: "center" },
+  quantityButton: { width: seed.size.touchTarget, height: seed.size.touchTarget, alignItems: "center", justifyContent: "center" },
+  quantityValue: { minWidth: 28, color: colors.ink, fontSize: 16, lineHeight: 22, fontWeight: "900", textAlign: "center", fontVariant: ["tabular-nums"] },
+  quantityDivider: { marginTop: seed.spacing.x2 },
+  quantityTotalRow: { minHeight: 50, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: seed.spacing.x3 },
+  quantityTotalLabel: { color: colors.muted, ...seed.typography.label },
+  quantityTotalValue: { color: colors.ink, ...seed.typography.subtitle, fontVariant: ["tabular-nums"] },
   discountRow: { minHeight: 62, flexDirection: "row", alignItems: "center", gap: seed.spacing.x2_5, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: seed.color.stroke.muted },
   rowIcon: { width: 36, height: 36, borderRadius: seed.radius.r2_5, backgroundColor: seed.color.background.neutralWeak, alignItems: "center", justifyContent: "center" },
   rowCopy: { flex: 1 },
@@ -378,11 +867,7 @@ const styles = StyleSheet.create({
   totalRow: { marginTop: seed.spacing.x2, paddingTop: seed.spacing.x3, borderTopWidth: 1, borderTopColor: seed.color.stroke.neutral, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: seed.spacing.x3 },
   totalLabel: { color: colors.ink, ...seed.typography.bodyStrong },
   totalValue: { color: colors.ink, fontSize: 20, lineHeight: 27, fontWeight: "900" },
-  drawNote: { minHeight: 64, padding: seed.spacing.x3_5, borderRadius: seed.radius.r3, backgroundColor: seed.color.background.brandWeak, flexDirection: "row", alignItems: "flex-start", gap: seed.spacing.x2_5 },
-  drawNoteText: { flex: 1, color: colors.greenInk, ...seed.typography.bodyStrong },
-  secureNote: { paddingHorizontal: seed.spacing.x1, paddingTop: seed.spacing.x1, flexDirection: "row", alignItems: "flex-start", gap: seed.spacing.x2 },
-  secureNoteText: { flex: 1, color: colors.muted, ...seed.typography.caption },
-  footer: { paddingHorizontal: seed.spacing.globalGutter, paddingTop: seed.spacing.componentDefault, paddingBottom: seed.spacing.x1, borderTopWidth: 1, borderTopColor: seed.color.stroke.neutral, backgroundColor: seed.color.layer.default, flexDirection: "row", alignItems: "center", gap: seed.spacing.componentDefault },
+  footer: { flexDirection: "row", alignItems: "center", gap: seed.spacing.componentDefault },
   footerTotal: { width: 116 },
   footerCaption: { color: colors.muted, ...seed.typography.caption },
   footerValue: { marginTop: seed.spacing.x0_5, color: colors.ink, fontSize: 18, lineHeight: 24, fontWeight: "900" },

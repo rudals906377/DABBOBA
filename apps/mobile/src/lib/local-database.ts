@@ -4,7 +4,7 @@ import type { ExchangeCategory, ExchangeRoomSnapshot } from "@/features/exchange
 
 const DATABASE_VERSION = 4;
 const HOME_CATALOG_KEY = "home.catalog.v1";
-const EXCHANGE_RULES_DISMISSED_KEY = "exchange.rules.dismissed.v1";
+const EXCHANGE_RULES_DISMISSED_KEY = "exchange.rules.dismissed.v2";
 
 export async function initializeLocalDatabase(db: SQLiteDatabase): Promise<void> {
   await db.execAsync("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;");
@@ -82,7 +82,7 @@ export async function writeExchangeRulesDismissed(
 }
 
 function exchangeListingCacheKey(category?: ExchangeCategory): string {
-  return `exchange.listings.v1.${category ?? "all"}`;
+  return `exchange.listings.v2.${category ?? "all"}`;
 }
 
 export async function readExchangeListingCache(

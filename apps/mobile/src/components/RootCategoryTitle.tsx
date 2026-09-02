@@ -21,7 +21,7 @@ export function KoreanPixelTitle({
       accessibilityRole="header"
       maxFontSizeMultiplier={1.2}
       numberOfLines={numberOfLines}
-      style={[styles.base, styles[variant], style]}
+      style={[styles.base, styles[variant], style, styles.fixedPixelFace]}
     >
       {children}
     </Text>
@@ -32,10 +32,30 @@ export function RootCategoryTitle({ children }: { children: string }) {
   return <KoreanPixelTitle variant="root">{children}</KoreanPixelTitle>;
 }
 
+export function KoreanPixelTitleAccessory({
+  children,
+  style,
+}: {
+  children: ReactNode;
+  style?: StyleProp<TextStyle>;
+}) {
+  return (
+    <Text
+      maxFontSizeMultiplier={1.2}
+      numberOfLines={1}
+      style={[styles.accessory, style, styles.fixedPixelFace]}
+    >
+      {children}
+    </Text>
+  );
+}
+
 const styles = StyleSheet.create({
   base: {
     color: colors.ink,
-    fontFamily: "Galmuri11",
+  },
+  fixedPixelFace: {
+    fontFamily: "DabbobaKoreanPixelBold",
     fontWeight: "400",
   },
   root: {
@@ -49,9 +69,9 @@ const styles = StyleSheet.create({
     lineHeight: 33,
   },
   section: {
-    fontSize: 22,
-    letterSpacing: -0.8,
-    lineHeight: 30,
+    fontSize: 20,
+    letterSpacing: -0.45,
+    lineHeight: 28,
   },
   header: {
     fontSize: 16,
@@ -62,5 +82,11 @@ const styles = StyleSheet.create({
     fontSize: 15,
     letterSpacing: -0.5,
     lineHeight: 22,
+  },
+  accessory: {
+    color: colors.muted,
+    fontSize: 12,
+    letterSpacing: -0.35,
+    lineHeight: 18,
   },
 });

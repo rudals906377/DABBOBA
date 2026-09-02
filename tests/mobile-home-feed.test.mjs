@@ -4,7 +4,9 @@ import { test } from "node:test";
 import {
   HOME_ANNOUNCEMENT_FALLBACKS,
   buildDrawActivityExamples,
+  buildDrawActivityTickerWindow,
   buildHomeCollections,
+  getHomeProductCardWidth,
   getTickerOverflowDistance,
   homeAnnouncementMessages,
 } from "../apps/mobile/src/features/home/home-feed.ts";
@@ -31,6 +33,14 @@ test("home collections follow an externally supplied IP order without hardcoded 
   assert.deepEqual(collections.map((collection) => collection.title), ["귀멸의 칼날 컬렉션", "포켓몬스터 컬렉션"]);
   assert.deepEqual(collections[0].products.map((product) => product.id), ["demon-gacha"]);
   assert.deepEqual(collections[1].products.map((product) => product.id), ["pokemon-card"]);
+});
+
+test("home kuji cards use the available phone width while other categories stay compact", () => {
+  assert.equal(getHomeProductCardWidth("kuji", 368, 16), 336);
+  assert.equal(getHomeProductCardWidth("gacha", 368, 16), 164);
+  assert.equal(getHomeProductCardWidth("figure", 368, 16), 164);
+  assert.equal(getHomeProductCardWidth("tcg", 368, 16), 164);
+  assert.equal(getHomeProductCardWidth("kuji", 834, 24), 520);
 });
 
 test("home announcements prefer published pinned notices and otherwise use safe service guidance", () => {
@@ -65,4 +75,27 @@ test("draw activity examples use only draw categories and stay explicitly non-li
   assert.ok(activity.every((item) => item.message.endsWith("뽑았어요")));
   assert.match(activity[0].message, /귀멸 캡슐을 뽑았어요$/);
   assert.match(activity[1].message, /쿠지를 뽑았어요$/);
+});
+
+test("draw activity ticker keeps three visible rows and stages the next item below them", () => {
+  const items = [
+    { id: "draw-a" },
+    { id: "draw-b" },
+    { id: "draw-c" },
+    { id: "draw-d" },
+  ];
+
+  assert.deepEqual(
+    buildDrawActivityTickerWindow(items, 0, 3).map((item) => item.id),
+    ["draw-a", "draw-b", "draw-c", "draw-d"],
+  );
+  assert.deepEqual(
+    buildDrawActivityTickerWindow(items, 2, 3).map((item) => item.id),
+    ["draw-c", "draw-d", "draw-a", "draw-b"],
+  );
+  assert.deepEqual(
+    buildDrawActivityTickerWindow(items.slice(0, 3), 0, 3).map((item) => item.id),
+    ["draw-a", "draw-b", "draw-c", "draw-a"],
+  );
+  assert.deepEqual(buildDrawActivityTickerWindow([], 0, 3), []);
 });

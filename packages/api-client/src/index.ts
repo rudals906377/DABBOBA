@@ -3,12 +3,31 @@ import type { paths } from "@dabboba/contracts";
 
 export type TokenProvider = () => string | null | Promise<string | null>;
 
+export type UnauthorizedResponse = {
+  request: Request;
+  response: Response;
+};
+
+export type UnauthorizedHandler = (
+  context: UnauthorizedResponse,
+) => void | Promise<void>;
+
 export type DabbobaClientOptions = {
   baseUrl: string;
   token?: TokenProvider;
   fetch?: typeof globalThis.fetch;
   requestId?: () => string;
+  onUnauthorized?: UnauthorizedHandler;
 };
+
+let fallbackRequestSequence = 0;
+
+function createRequestId(): string {
+  const runtimeCrypto = globalThis.crypto;
+  if (typeof runtimeCrypto?.randomUUID === "function") return runtimeCrypto.randomUUID();
+  fallbackRequestSequence = (fallbackRequestSequence + 1) % Number.MAX_SAFE_INTEGER;
+  return `client-${Date.now().toString(36)}-${fallbackRequestSequence.toString(36)}`;
+}
 
 export function createDabbobaClient(options: DabbobaClientOptions) {
   const client = createClient<paths>({
@@ -20,8 +39,13 @@ export function createDabbobaClient(options: DabbobaClientOptions) {
     async onRequest({ request }) {
       const token = await options.token?.();
       if (token) request.headers.set("authorization", `Bearer ${token}`);
-      request.headers.set("x-request-id", options.requestId?.() || crypto.randomUUID());
+      request.headers.set("x-request-id", options.requestId?.() || createRequestId());
       return request;
+    },
+    async onResponse({ request, response }) {
+      if (response.status === 401) {
+        await options.onUnauthorized?.({ request, response });
+      }
     },
   };
 

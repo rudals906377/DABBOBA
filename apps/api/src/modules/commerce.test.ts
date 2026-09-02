@@ -10,6 +10,7 @@ import {
   assertDirectPurchaseAllowed,
   assertDrawPrizeSnapshotsCurrent,
   assertLatestDrawDraft,
+  assertKujiRoomOrderBinding,
   assertUniqueDrawPrizeProductIds,
   createDrawSelectionEvidence,
   checkoutReservationViolation,
@@ -132,6 +133,59 @@ test("paid orders fail closed without a provider while zero-external-payment ord
     (error: unknown) => error instanceof AppError && error.code === "PAYMENT_NOT_CONFIGURED",
   );
   assert.equal(paymentProviderForOrder("TEST_PG", 1000), "TEST_PG");
+});
+
+test("kuji orders require one kuji-only product and a room entry", () => {
+  const roomEntryId = "11111111-1111-4111-8111-111111111111";
+  assert.doesNotThrow(() => assertKujiRoomOrderBinding([{ category: "kuji" }], roomEntryId));
+  assert.throws(
+    () => assertKujiRoomOrderBinding([{ category: "kuji" }], null),
+    (error: unknown) => error instanceof AppError && error.statusCode === 400,
+  );
+  assert.throws(
+    () => assertKujiRoomOrderBinding([{ category: "kuji" }, { category: "figure" }], roomEntryId),
+    (error: unknown) => error instanceof AppError && error.statusCode === 400,
+  );
+  assert.throws(
+    () => assertKujiRoomOrderBinding([{ category: "figure" }], roomEntryId),
+    (error: unknown) => error instanceof AppError && error.statusCode === 400,
+  );
+  assert.doesNotThrow(() => assertKujiRoomOrderBinding([{ category: "gacha" }], null));
+});
+
+test("kuji payment, draw, and worker paths lock the room before payment or stock", async () => {
+  const commerceSource = await readFile(new URL("../../src/modules/commerce.ts", import.meta.url), "utf8");
+  const webhookStart = commerceSource.indexOf("const paymentLookup=");
+  const webhookRoomLock = commerceSource.indexOf("lockLinkedKujiRoomForOrder", webhookStart);
+  const webhookPaymentLock = commerceSource.indexOf("FROM payments WHERE id=$1 FOR UPDATE", webhookRoomLock);
+  assert.ok(webhookStart >= 0 && webhookStart < webhookRoomLock && webhookRoomLock < webhookPaymentLock);
+
+  const drawStart = commerceSource.indexOf('app.post("/v1/draws/:entitlementId/consume"');
+  const drawRoomLock = commerceSource.indexOf("lockLinkedKujiRoomForOrder", drawStart);
+  const drawOrderLock = commerceSource.indexOf("SELECT status FROM orders WHERE id=$1 FOR UPDATE", drawRoomLock);
+  const drawStockLock = commerceSource.indexOf("FOR UPDATE OF p,s", drawRoomLock);
+  assert.ok(
+    drawStart >= 0
+      && drawStart < drawRoomLock
+      && drawRoomLock < drawOrderLock
+      && drawOrderLock < drawStockLock,
+  );
+
+  const workerSource = await readFile(new URL("../../../worker/src/reservations.ts", import.meta.url), "utf8");
+  const workerRoomLock = workerSource.indexOf("lockLinkedKujiRoomForOrder(client, orderId)");
+  const workerPaymentLock = workerSource.indexOf("FROM payments WHERE order_id=$1 FOR UPDATE", workerRoomLock);
+  assert.ok(workerRoomLock >= 0 && workerRoomLock < workerPaymentLock);
+});
+
+test("late kuji payment success releases local assets and drawing expiry keeps paid tickets consumable", async () => {
+  const source = await readFile(new URL("../../src/modules/commerce.ts", import.meta.url), "utf8");
+  const lateSuccess = source.indexOf("KUJI_PAYMENT_SUCCEEDED_OUTSIDE_LEASE");
+  const releasedRoom = source.indexOf("terminalState:\"EXPIRED\"", lateSuccess);
+  const cancelledAt = source.indexOf("cancelled_at=COALESCE(cancelled_at,$3)", lateSuccess);
+  assert.ok(lateSuccess >= 0 && releasedRoom > lateSuccess && cancelledAt > lateSuccess);
+  assert.match(source, /expireLockedKujiOrderDrawing/);
+  assert.match(source, /\["EXPIRED","COMPLETED"\]\.includes\(linkedKujiRoom\.state\)/);
+  assert.match(source, /entitlementsRemainConsumable:true/);
 });
 
 test("prize-only catalog products cannot be purchased directly", () => {
@@ -579,7 +633,8 @@ test("an already consumed draw returns immutable prize snapshot fields", async (
       if (sql === "BEGIN" || sql === "COMMIT") return { rowCount: null, rows: [] };
       if (sql.startsWith("DELETE FROM idempotency_keys")) return { rowCount: 0, rows: [] };
       if (sql.includes("INSERT INTO idempotency_keys")) return { rowCount: 1, rows: [{ id: "idem-1" }] };
-      if (sql === "SELECT product_id,probability_version_id FROM draw_entitlements WHERE id=$1") return { rowCount: 1, rows: [{ product_id: "draw-product", probability_version_id: "version-id" }] };
+      if (sql.includes("SELECT e.product_id,e.probability_version_id,l.order_id FROM draw_entitlements")) return { rowCount: 1, rows: [{ product_id: "draw-product", probability_version_id: "version-id", order_id: "order-id" }] };
+      if (sql.includes("FROM kuji_room_entries WHERE order_id=$1")) return { rowCount: 0, rows: [] };
       if (sql.startsWith("SELECT p.id FROM catalog_products")) return { rowCount: 1, rows: [{ id: "draw-product" }] };
       if (sql === "SELECT id FROM draw_probability_versions WHERE id=$1 FOR UPDATE") return { rowCount: 1, rows: [{ id: "version-id" }] };
       if (sql.startsWith("SELECT pg_advisory_xact_lock")) return { rowCount: 1, rows: [{}] };
@@ -649,7 +704,8 @@ test("a newly consumed draw returns the selected pool entry snapshot", async () 
       if (sql === "BEGIN" || sql === "COMMIT") return { rowCount: null, rows: [] };
       if (sql.startsWith("DELETE FROM idempotency_keys")) return { rowCount: 0, rows: [] };
       if (sql.includes("INSERT INTO idempotency_keys")) return { rowCount: 1, rows: [{ id: "idem-2" }] };
-      if (sql === "SELECT product_id,probability_version_id FROM draw_entitlements WHERE id=$1") return { rowCount: 1, rows: [{ product_id: "draw-product", probability_version_id: "version-id" }] };
+      if (sql.includes("SELECT e.product_id,e.probability_version_id,l.order_id FROM draw_entitlements")) return { rowCount: 1, rows: [{ product_id: "draw-product", probability_version_id: "version-id", order_id: "order-id" }] };
+      if (sql.includes("FROM kuji_room_entries WHERE order_id=$1")) return { rowCount: 0, rows: [] };
       if (sql.startsWith("SELECT p.id FROM catalog_products")) return { rowCount: 1, rows: [{ id: "draw-product" }] };
       if (sql === "SELECT id FROM draw_probability_versions WHERE id=$1 FOR UPDATE") return { rowCount: 1, rows: [{ id: "version-id" }] };
       if (sql.startsWith("SELECT pg_advisory_xact_lock")) return { rowCount: 1, rows: [{}] };
@@ -744,7 +800,7 @@ test("an authenticated webhook for an unknown payment returns 404 before event p
     async query(sql: string) {
       queries.push(sql);
       if (sql === "BEGIN" || sql === "ROLLBACK") return { rowCount: null, rows: [] };
-      if (sql.includes("FROM payments WHERE id=$1 FOR UPDATE")) return { rowCount: 0, rows: [] };
+      if (sql === "SELECT order_id FROM payments WHERE id=$1") return { rowCount: 0, rows: [] };
       throw new Error(`Unexpected query: ${sql}`);
     },
     release() { /* no-op test connection */ },
@@ -809,6 +865,10 @@ test("a reused provider event id with different content is rejected instead of s
   const client = {
     async query(sql: string) {
       if (sql === "BEGIN" || sql === "ROLLBACK") return { rowCount: null, rows: [] };
+      if (sql === "SELECT order_id FROM payments WHERE id=$1") {
+        return { rowCount: 1, rows: [{ order_id: "22222222-2222-4222-8222-222222222222" }] };
+      }
+      if (sql.includes("FROM kuji_room_entries WHERE order_id=$1")) return { rowCount: 0, rows: [] };
       if (sql.includes("FROM payments WHERE id=$1 FOR UPDATE")) {
         return { rowCount: 1, rows: [{
           id: "11111111-1111-4111-8111-111111111111",
@@ -864,6 +924,8 @@ test("late provider success is persisted for reconciliation without fulfilling r
       queries.push(sql);
       queryParams.push(params);
       if (sql === "BEGIN" || sql === "COMMIT") return { rowCount: null, rows: [] };
+      if (sql === "SELECT order_id FROM payments WHERE id=$1") return { rowCount: 1, rows: [{ order_id: "22222222-2222-4222-8222-222222222222" }] };
+      if (sql.includes("FROM kuji_room_entries WHERE order_id=$1")) return { rowCount: 0, rows: [] };
       if (sql.includes("FROM payments WHERE id=$1 FOR UPDATE")) return { rowCount: 1, rows: [{
         id: "11111111-1111-4111-8111-111111111111",
         order_id: "22222222-2222-4222-8222-222222222222",

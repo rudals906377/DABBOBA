@@ -15,8 +15,13 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import type { InventoryUnit } from "@dabboba/contracts";
+import {
+  FloatingBottomActionPanel,
+  useFloatingBottomActionContentInset,
+} from "@/components/FloatingBottomActionPanel";
+import { ProductInfoDivider } from "@/components/ProductInfoDivider";
 import { KoreanPixelTitle } from "@/components/RootCategoryTitle";
-import { AppText as Text } from "@/components/Typography";
+import { AppText as Text, BalancedParagraphText } from "@/components/Typography";
 import { seed } from "@/design-system/seed";
 import {
   categoryLabel,
@@ -35,6 +40,7 @@ import { colors } from "@/theme";
 
 export function ExchangeOfferScreen() {
   const { listingId } = useLocalSearchParams<{ listingId?: string }>();
+  const floatingBottomInset = useFloatingBottomActionContentInset();
   const runtime = useMemo(
     () => resolveMobileRuntimeConfig({
       configuredApiUrl: process.env.EXPO_PUBLIC_DABBOBA_API_URL,
@@ -59,7 +65,7 @@ export function ExchangeOfferScreen() {
       if (!tokens) {
         setAccessToken(null);
         setSnapshot(null);
-        setError("로그인 후 직접 뽑아 현재 보관 중인 가챠·쿠지 상품을 선택할 수 있어요.");
+        setError("로그인 후 가챠로 직접 뽑아 현재 보관 중인 상품을 선택할 수 있어요.");
         return;
       }
       const next = await fetchExchangeOfferInventory(runtime.apiBaseUrl, tokens.accessToken);
@@ -118,7 +124,7 @@ export function ExchangeOfferScreen() {
   }, [accessToken, listingId, runtime.apiBaseUrl, selected, submitting]);
 
   return (
-    <SafeAreaView style={styles.safeArea} edges={["top", "bottom", "left", "right"]}>
+    <SafeAreaView style={styles.safeArea} edges={["top", "left", "right"]}>
       <View style={styles.header}>
         <Pressable
           accessibilityRole="button"
@@ -134,14 +140,14 @@ export function ExchangeOfferScreen() {
       </View>
 
       <ScrollView
-        contentContainerStyle={styles.content}
+        contentContainerStyle={[styles.content, { paddingBottom: floatingBottomInset }]}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={() => void load(true)} tintColor={colors.ink} />
         }
       >
         <KoreanPixelTitle variant="section">내가 뽑은 상품</KoreanPixelTitle>
         <Text style={styles.description}>
-          가챠·쿠지에서 직접 뽑아 현재 보관 중인 상품 1개만 선택할 수 있어요. 글이나 설명은 작성하지 않아요.
+          가챠로 직접 뽑아 현재 보관 중인 상품 1개만 선택할 수 있어요. 글이나 설명은 작성하지 않아요.
         </Text>
 
         {!snapshot && !error ? (
@@ -164,9 +170,13 @@ export function ExchangeOfferScreen() {
         {snapshot && snapshot.items.length === 0 ? (
           <View style={styles.stateBox}>
             <KoreanPixelTitle variant="section">신청할 상품이 없어요</KoreanPixelTitle>
-            <Text style={styles.stateText}>
-              배송을 신청했거나 이미 받은 상품은 표시되지 않아요. 포인트 환급·다른 교환에 사용하지 않은 직접 뽑은 상품만 신청할 수 있어요.
-            </Text>
+            <BalancedParagraphText
+              paragraphs={[
+                "가챠로 뽑은 상품만 가능해요.",
+                "배송을 신청했거나 이미 받은 상품, 포인트 환급·다른 교환에 사용 중인 상품은 표시되지 않아요.",
+              ]}
+              style={styles.stateText}
+            />
           </View>
         ) : null}
 
@@ -182,7 +192,7 @@ export function ExchangeOfferScreen() {
         ))}
       </ScrollView>
 
-      <View style={styles.bottomBar}>
+      <FloatingBottomActionPanel>
         <Pressable
           accessibilityRole="button"
           disabled={!selected || submitting}
@@ -199,7 +209,7 @@ export function ExchangeOfferScreen() {
             <Text style={styles.submitLabel}>{selected ? "이 상품으로 교환 신청하기" : "상품을 선택해 주세요"}</Text>
           )}
         </Pressable>
-      </View>
+      </FloatingBottomActionPanel>
     </SafeAreaView>
   );
 }
@@ -237,7 +247,7 @@ function InventoryChoice({
         <Text numberOfLines={1} style={styles.ipName}>{ipName ?? "작품 정보 확인 중"}</Text>
         <Text numberOfLines={2} style={styles.productName}>{productSubjectTitle(item.product.name, ipName)}</Text>
         <Text style={styles.meta}>{categoryLabel(item.product.category)} · {item.sourceType === "GACHA" ? "가챠에서 뽑음" : "쿠지에서 뽑음"}</Text>
-        <Text style={styles.priceCaption}>앱 기준가 · 판매가 아님</Text>
+        <ProductInfoDivider style={styles.productFieldDivider} />
         <Text style={styles.price}>{item.product.price.toLocaleString("ko-KR")}원</Text>
       </View>
       <View style={[styles.radio, selected && styles.radioSelected]}>
@@ -268,11 +278,10 @@ const styles = StyleSheet.create({
   ipName: { color: colors.muted, fontSize: 11, lineHeight: 16 },
   productName: { color: colors.ink, fontSize: 15, lineHeight: 21, fontWeight: "900", marginTop: 3 },
   meta: { color: colors.muted, fontSize: 11, lineHeight: 16, marginTop: 5 },
-  priceCaption: { color: colors.greenInk, fontSize: 10, lineHeight: 15, fontWeight: "800", marginTop: 7 },
-  price: { color: colors.ink, fontSize: 16, lineHeight: 22, fontWeight: "900" },
+  productFieldDivider: { marginTop: 7 },
+  price: { color: colors.ink, fontSize: 16, lineHeight: 22, fontWeight: "900", marginTop: 5 },
   radio: { width: 24, height: 24, borderRadius: 12, borderWidth: 1.5, borderColor: seed.color.stroke.contrast, alignItems: "center", justifyContent: "center" },
   radioSelected: { borderColor: colors.greenInk, backgroundColor: colors.brand },
-  bottomBar: { paddingHorizontal: seed.spacing.globalGutter, paddingTop: seed.spacing.componentDefault, paddingBottom: seed.spacing.x2, borderTopWidth: 1, borderTopColor: seed.color.stroke.neutral, backgroundColor: seed.color.layer.default },
   submitButton: { minHeight: seed.size.actionButton.large, borderRadius: seed.radius.r3, alignItems: "center", justifyContent: "center", backgroundColor: seed.color.background.brandSolid },
   submitLabel: { color: colors.ink, fontSize: 15, fontWeight: "900" },
   pressed: { opacity: seed.state.pressedOpacity },

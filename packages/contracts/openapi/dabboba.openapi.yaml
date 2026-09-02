@@ -13,6 +13,7 @@ tags:
   - name: Exchange
   - name: Community
   - name: Commerce
+  - name: Kuji
   - name: Account
   - name: Admin
 paths:
@@ -40,6 +41,49 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Health" }
+  /v1/auth/providers:
+    get:
+      tags: [Auth]
+      operationId: getCustomerLoginProviders
+      description: Returns the supported customer login methods and whether server-side Supabase token exchange is configured.
+      responses:
+        "200":
+          description: Customer login provider discovery.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CustomerLoginProviders" }
+  /v1/auth/exchange:
+    post:
+      tags: [Auth]
+      operationId: exchangeCustomerAccessToken
+      description: Verifies an asymmetric Supabase access token for exactly one Kakao, Naver, or phone identity and returns an opaque DABBOBA session. Accounts are keyed only by the broker issuer and subject, never email or phone; multi-provider broker identities require a separate explicit linking flow and are rejected here.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CustomerAccessTokenExchangeInput" }
+      responses:
+        "201":
+          description: DABBOBA customer session created.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SessionCreated" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "503":
+          description: Supabase customer token exchange is not configured.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
   /v1/auth/dev-session:
     post:
       tags: [Auth]
@@ -680,7 +724,7 @@ paths:
             schema: { $ref: "#/components/schemas/CreateWantedRequestInput" }
       responses:
         "201":
-          description: Wanted request created for an active catalog IP.
+          description: Wanted request created with a typed work name, an optional catalog IP match, and an optional photo.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/WantedRequest" }
@@ -765,7 +809,7 @@ paths:
         - $ref: "#/components/parameters/Search"
       responses:
         "200":
-          description: Authenticated user's GACHA or KUJI inventory whose immutable draw result belongs to the current owner and whose current status is OWNED, excluding active shipping, delivered, synthetic source-tagged, and transferred inventory.
+          description: Authenticated user's GACHA inventory whose immutable draw result belongs to the current owner and whose current status is OWNED, excluding KUJI, active shipping, delivered, synthetic source-tagged, and transferred inventory.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/InventoryUnitPage" }
@@ -782,7 +826,7 @@ paths:
           schema: { $ref: "#/components/schemas/ProductCategory" }
       responses:
         "200":
-          description: Open visible exchange listings, searchable by listing copy, product name, IP title, or IP alias.
+          description: Open visible GACHA-origin exchange listings, searchable by listing copy, product name, IP title, or IP alias.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ExchangeListingPage" }
@@ -799,7 +843,7 @@ paths:
             schema: { $ref: "#/components/schemas/CreateExchangeListingInput" }
       responses:
         "201":
-          description: Listing created from one owned inventory unit.
+          description: Listing created from one eligible directly drawn GACHA inventory unit.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ExchangeListing" }
@@ -832,7 +876,7 @@ paths:
             schema: { $ref: "#/components/schemas/CreateExchangeOfferInput" }
       responses:
         "201":
-          description: Product-only exchange proposal created from eligible owned draw inventory.
+          description: Product-only exchange proposal created from eligible directly drawn GACHA inventory.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ExchangeOffer" }
@@ -984,6 +1028,82 @@ paths:
               schema: { $ref: "#/components/schemas/PublicDrawOdds" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
+  /v1/kuji/rooms/{productId}/entries:
+    post:
+      tags: [Kuji, Commerce]
+      operationId: joinKujiRoom
+      description: Atomically reuses the viewer's active entry or joins the product FIFO. An empty room grants one non-renewing 180-second checkout lease.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/ProductId"
+      responses:
+        "200":
+          description: Existing active entry returned without creating a duplicate.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+            X-Idempotent-Replay:
+              schema: { type: string, const: "true" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/KujiRoomSnapshot" }
+        "201":
+          description: Entry created as CHECKOUT_PENDING when free or WAITING when occupied.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/KujiRoomSnapshot" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /v1/kuji/rooms/{productId}/entries/{entryId}:
+    get:
+      tags: [Kuji, Commerce]
+      operationId: getOwnKujiRoomEntry
+      description: Returns an uncached authoritative snapshot and atomically expires stale occupancy before promoting the next FIFO entry.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/ProductId"
+        - name: entryId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Current room snapshot for the entry owner.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/KujiRoomSnapshot" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [Kuji, Commerce]
+      operationId: leaveOwnKujiRoomEntry
+      description: Idempotently cancels an owned WAITING or CHECKOUT_PENDING entry, atomically cancels any linked unpaid order and releases its stock, points, and coupon, then promotes the next FIFO entry. DRAWING or payment-authorized/paid entries return conflict.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/ProductId"
+        - name: entryId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Updated room snapshot with the viewer's terminal state.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/KujiRoomSnapshot" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
   /v1/orders:
     post:
       tags: [Commerce]
@@ -1089,6 +1209,38 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/AccountProfile" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /v1/account/basic-info:
+    get:
+      tags: [Account]
+      operationId: getAccountBasicInfo
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Current user's private account basics. Verified phone identity is masked.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccountBasicInfo" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    patch:
+      tags: [Account]
+      operationId: updateAccountBasicInfo
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateAccountBasicInfoInput" }
+      responses:
+        "200":
+          description: Mutable account basics updated with optimistic concurrency control.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccountBasicInfo" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "409": { $ref: "#/components/responses/Conflict" }
   /v1/account/default-address:
     get:
@@ -2652,6 +2804,27 @@ components:
         database: { type: string, enum: [ok, unavailable] }
         redis: { type: string, enum: [ok, unavailable] }
         timestamp: { type: string, format: date-time }
+    CustomerAuthProvider:
+      type: string
+      enum: [KAKAO, NAVER, PHONE]
+    CustomerLoginProviders:
+      type: object
+      additionalProperties: false
+      required: [methods, brokerExchangeConfigured]
+      properties:
+        methods:
+          type: array
+          minItems: 3
+          maxItems: 3
+          uniqueItems: true
+          items: { $ref: "#/components/schemas/CustomerAuthProvider" }
+        brokerExchangeConfigured: { type: boolean }
+    CustomerAccessTokenExchangeInput:
+      type: object
+      additionalProperties: false
+      required: [accessToken]
+      properties:
+        accessToken: { type: string, minLength: 64, maxLength: 16384, writeOnly: true }
     ErrorEnvelope:
       type: object
       additionalProperties: false
@@ -2686,7 +2859,7 @@ components:
     ReportStatus: { type: string, enum: [PENDING, REVIEWING, RESOLVED, REJECTED] }
     RequestStatus: { type: string, enum: [PENDING, APPROVED, REJECTED, ON_HOLD, MERGED] }
     ProductCategory: { type: string, enum: [gacha, figure, kuji, tcg] }
-    MediaPurpose: { type: string, enum: [PROFILE, POST, COMMENT, INQUIRY, EXCHANGE, CATALOG_REQUEST] }
+    MediaPurpose: { type: string, enum: [PROFILE, POST, COMMENT, INQUIRY, EXCHANGE, CATALOG_REQUEST, WANTED_REQUEST] }
     MediaMimeType: { type: string, enum: [image/jpeg, image/png, image/webp, image/gif] }
     CreateMediaUploadInput:
       type: object
@@ -2737,7 +2910,7 @@ components:
       required: [userId, email, nickname, role, status, sessionId, permissions]
       properties:
         userId: { type: string, format: uuid }
-        email: { type: string, format: email }
+        email: { type: [string, "null"], format: email }
         nickname: { type: string }
         role: { $ref: "#/components/schemas/UserRole" }
         status: { $ref: "#/components/schemas/UserStatus" }
@@ -2773,6 +2946,26 @@ components:
         nickname: { type: string, minLength: 1, maxLength: 40 }
         bio: { type: [string, "null"], maxLength: 500 }
         favoriteIpId: { type: [string, "null"], maxLength: 120, pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$" }
+        expectedVersion: { type: integer, minimum: 1 }
+    AccountBasicInfo:
+      type: object
+      additionalProperties: false
+      required: [id, nickname, email, phoneMasked, birthDate, version, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        nickname: { type: string, minLength: 1, maxLength: 40 }
+        email: { type: [string, "null"], format: email }
+        phoneMasked: { type: [string, "null"], maxLength: 32 }
+        birthDate: { type: [string, "null"], format: date }
+        version: { type: integer, minimum: 1 }
+        updatedAt: { type: string, format: date-time }
+    UpdateAccountBasicInfoInput:
+      type: object
+      additionalProperties: false
+      required: [expectedVersion]
+      properties:
+        nickname: { type: string, minLength: 1, maxLength: 40 }
+        birthDate: { type: [string, "null"], format: date }
         expectedVersion: { type: integer, minimum: 1 }
     DefaultShippingAddress:
       type: object
@@ -3447,19 +3640,20 @@ components:
     WantedRequest:
       type: object
       additionalProperties: false
-      required: [id, userId, authorNickname, category, ipId, ipNameKo, desiredItem, details, status, likeCount, likedByViewer, version, createdAt, updatedAt]
+      required: [id, userId, authorNickname, category, ipId, ipNameKo, desiredItem, details, mediaId, status, likeCount, likedByViewer, version, createdAt, updatedAt]
       properties:
         id: { type: string, format: uuid }
         userId: { type: string, format: uuid }
         authorNickname: { type: string }
         category: { $ref: "#/components/schemas/ProductCategory" }
         ipId:
-          type: string
+          type: [string, "null"]
           maxLength: 120
           pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$"
-        ipNameKo: { type: string }
+        ipNameKo: { type: string, minLength: 1, maxLength: 160 }
         desiredItem: { type: string, minLength: 1, maxLength: 240 }
         details: { type: string, minLength: 1, maxLength: 5000 }
+        mediaId: { type: [string, "null"], format: uuid }
         status: { $ref: "#/components/schemas/ContentStatus" }
         likeCount: { type: integer, minimum: 0 }
         likedByViewer: { type: boolean }
@@ -3469,15 +3663,17 @@ components:
     CreateWantedRequestInput:
       type: object
       additionalProperties: false
-      required: [category, ipId, desiredItem, details]
+      required: [category, ipNameKo, desiredItem, details]
       properties:
         category: { $ref: "#/components/schemas/ProductCategory" }
         ipId:
-          type: string
+          type: [string, "null"]
           maxLength: 120
           pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+        ipNameKo: { type: string, minLength: 1, maxLength: 160 }
         desiredItem: { type: string, minLength: 1, maxLength: 240 }
         details: { type: string, minLength: 1, maxLength: 5000 }
+        mediaId: { type: [string, "null"], format: uuid }
     SetWantedRequestLikeInput:
       type: object
       additionalProperties: false
@@ -3630,6 +3826,10 @@ components:
                 description: Required for gacha and kuji products; rejected for direct-purchase products.
         couponCode: { type: [string, "null"], maxLength: 60 }
         pointAmount: { type: integer, minimum: 0, maximum: 2147483647, default: 0 }
+        kujiRoomEntryId:
+          type: string
+          format: uuid
+          description: Required for a kuji-only order and rejected for non-kuji orders.
     PaymentWebhookInput:
       type: object
       additionalProperties: false
@@ -3785,7 +3985,7 @@ components:
       required: [userId, email, nickname, role, status]
       properties:
         userId: { type: string, format: uuid }
-        email: { type: string, format: email }
+        email: { type: [string, "null"], format: email }
         nickname: { type: string }
         role: { $ref: "#/components/schemas/UserRole" }
         status: { $ref: "#/components/schemas/UserStatus" }
@@ -3889,11 +4089,13 @@ components:
         expectedVersion: { type: integer, minimum: 1 }
         category: { $ref: "#/components/schemas/ProductCategory" }
         ipId:
-          type: string
+          type: [string, "null"]
           maxLength: 120
           pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+        ipNameKo: { type: string, minLength: 1, maxLength: 160 }
         desiredItem: { type: string, minLength: 1, maxLength: 240 }
         details: { type: string, minLength: 1, maxLength: 5000 }
+        mediaId: { type: [string, "null"], format: uuid }
       description: At least one mutable property in addition to expectedVersion is required.
     WantedRequestDeletionResult:
       type: object
@@ -3903,6 +4105,68 @@ components:
         requestId: { type: string, format: uuid }
         status: { type: string, const: DELETED }
         version: { type: integer, minimum: 1 }
+    KujiRoomEntryState:
+      type: string
+      enum: [WAITING, CHECKOUT_PENDING, DRAWING, COMPLETED, CANCELLED, EXPIRED]
+    KujiRoomViewer:
+      type: object
+      additionalProperties: false
+      required: [entryId, state, position, peopleAhead, checkoutExpiresAt]
+      properties:
+        entryId: { type: string, format: uuid }
+        state: { $ref: "#/components/schemas/KujiRoomEntryState" }
+        position: { type: [integer, "null"], minimum: 1 }
+        peopleAhead: { type: integer, minimum: 0 }
+        checkoutExpiresAt: { type: [string, "null"], format: date-time }
+    KujiRoomActiveEntry:
+      type: object
+      additionalProperties: false
+      required: [displayName, phase, checkoutExpiresAt]
+      properties:
+        displayName: { type: string, minLength: 2, maxLength: 40 }
+        phase: { type: string, enum: [CHECKOUT_PENDING, DRAWING] }
+        checkoutExpiresAt: { type: [string, "null"], format: date-time }
+    KujiRoomWaitingPerson:
+      type: object
+      additionalProperties: false
+      required: [entryId, displayName, position, isViewer]
+      properties:
+        entryId: { type: string, format: uuid }
+        displayName: { type: string, minLength: 2, maxLength: 40 }
+        position: { type: integer, minimum: 1 }
+        isViewer: { type: boolean }
+    KujiRoomRecentActivity:
+      type: object
+      additionalProperties: false
+      required: [id, displayName, prizeName, prizeImageUrl, rarity, committedAt]
+      properties:
+        id: { type: string, format: uuid }
+        displayName: { type: string, minLength: 2, maxLength: 40 }
+        prizeName: { type: string, minLength: 1, maxLength: 240 }
+        prizeImageUrl: { type: [string, "null"], format: uri }
+        rarity: { type: string, minLength: 1, maxLength: 40 }
+        committedAt: { type: string, format: date-time }
+    KujiRoomSnapshot:
+      type: object
+      additionalProperties: false
+      required: [serverNow, version, productId, viewer, active, waitingCount, waitingPeople, recentActivity]
+      properties:
+        serverNow: { type: string, format: date-time }
+        version: { type: integer, minimum: 1 }
+        productId: { type: string, maxLength: 120 }
+        viewer: { $ref: "#/components/schemas/KujiRoomViewer" }
+        active:
+          oneOf:
+            - $ref: "#/components/schemas/KujiRoomActiveEntry"
+            - type: "null"
+        waitingCount: { type: integer, minimum: 0 }
+        waitingPeople:
+          type: array
+          items: { $ref: "#/components/schemas/KujiRoomWaitingPerson" }
+        recentActivity:
+          type: array
+          maxItems: 8
+          items: { $ref: "#/components/schemas/KujiRoomRecentActivity" }
     PublicDrawOddsEntry:
       type: object
       additionalProperties: false

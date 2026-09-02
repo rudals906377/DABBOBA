@@ -16,7 +16,7 @@ import { colors } from "@/theme";
 const TICKER_ROW_HEIGHT = 36;
 const SHORT_MESSAGE_HOLD_MS = 3_000;
 
-export function AnnouncementTicker({ messages, onPress }: { messages: readonly string[]; onPress: () => void }) {
+export function AnnouncementTicker({ messages, onPress }: { messages: readonly string[]; onPress: (message: string) => void }) {
   const safeMessages = useMemo(() => messages.map((message) => message.trim()).filter(Boolean), [messages]);
   const [index, setIndex] = useState(0);
   const [viewportWidth, setViewportWidth] = useState(0);
@@ -88,7 +88,7 @@ export function AnnouncementTicker({ messages, onPress }: { messages: readonly s
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={`공지사항: ${currentMessage}`}
-      onPress={onPress}
+      onPress={() => onPress(currentMessage)}
       style={({ pressed }) => [styles.container, pressed && styles.pressed]}
     >
       <View style={styles.label}><Text style={styles.labelText}>공지</Text></View>

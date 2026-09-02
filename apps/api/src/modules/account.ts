@@ -32,6 +32,16 @@ type ProfileRow = {
   updated_at: Date;
 };
 
+type AccountBasicInfoRow = {
+  id: string;
+  nickname: string;
+  email: string | null;
+  phone_e164: string | null;
+  birth_date: string | Date | null;
+  version: number;
+  updated_at: Date;
+};
+
 type AddressRow = {
   id: string;
   user_id: string;
@@ -315,6 +325,17 @@ async function loadProfile(queryable: Queryable, userId: string): Promise<Profil
   return result.rows[0]!;
 }
 
+async function loadAccountBasicInfo(queryable: Queryable, userId: string): Promise<AccountBasicInfoRow> {
+  const result = await queryable.query<AccountBasicInfoRow>(
+    `SELECT u.id,u.nickname,u.email::text,u.phone_e164,p.birth_date,p.version,p.updated_at
+     FROM users u JOIN user_profiles p ON p.user_id=u.id
+     WHERE u.id=$1`,
+    [userId],
+  );
+  if (!result.rowCount) throw notFound("계정 기본정보를 찾을 수 없습니다.");
+  return result.rows[0]!;
+}
+
 const mapProfile = (row: ProfileRow) => ({
   id: row.id,
   nickname: row.nickname,
@@ -326,6 +347,29 @@ const mapProfile = (row: ProfileRow) => ({
         imageUrl: row.favorite_ip_image_url,
       }
     : null,
+  version: row.version,
+  updatedAt: iso(row.updated_at),
+});
+
+export function maskAccountPhone(providerSubject: string): string {
+  const digits = providerSubject.replace(/\D/g, "");
+  if (/^010\d{8}$/.test(digits)) return `010-****-${digits.slice(-4)}`;
+  if (/^8210\d{8}$/.test(digits)) return `+82-10-****-${digits.slice(-4)}`;
+  if (digits.length < 4) return "****";
+  return `${"*".repeat(Math.max(4, digits.length - 4))}${digits.slice(-4)}`;
+}
+
+function dateOnly(value: string | Date | null): string | null {
+  if (value === null) return null;
+  return value instanceof Date ? value.toISOString().slice(0, 10) : value;
+}
+
+const mapAccountBasicInfo = (row: AccountBasicInfoRow) => ({
+  id: row.id,
+  nickname: row.nickname,
+  email: row.email,
+  phoneMasked: row.phone_e164 ? maskAccountPhone(row.phone_e164) : null,
+  birthDate: dateOnly(row.birth_date),
   version: row.version,
   updatedAt: iso(row.updated_at),
 });
@@ -436,6 +480,42 @@ function profilePatch(body: unknown) {
     throw badRequest("수정할 프로필 값을 입력해 주세요.");
   }
   return { nickname, bio, favoriteIpId, expectedVersion };
+}
+
+export function normalizeBirthDate(value: unknown, today = new Date()): string {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    throw badRequest("birthDate는 YYYY-MM-DD 형식이어야 합니다.");
+  }
+  const [year, month, day] = value.split("-").map(Number) as [number, number, number];
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+  if (
+    parsed.getUTCFullYear() !== year
+    || parsed.getUTCMonth() !== month - 1
+    || parsed.getUTCDate() !== day
+  ) {
+    throw badRequest("birthDate에 올바른 날짜를 입력해 주세요.");
+  }
+  const todayUtc = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));
+  const minimum = Date.UTC(1900, 0, 1);
+  if (parsed.getTime() < minimum || parsed.getTime() > todayUtc.getTime()) {
+    throw badRequest("birthDate 범위를 확인해 주세요.");
+  }
+  return value;
+}
+
+function accountBasicInfoPatch(body: unknown) {
+  const input = objectInput(body);
+  assertOnlyKeys(input, ["nickname", "birthDate", "expectedVersion"]);
+  const nickname = input.nickname === undefined ? undefined : stringInput(input, "nickname", { max: 40 });
+  let birthDate: string | null | undefined;
+  if (Object.hasOwn(input, "birthDate")) {
+    birthDate = input.birthDate === null ? null : normalizeBirthDate(input.birthDate);
+  }
+  const expectedVersion = integerInput(input, "expectedVersion", { min: 1 })!;
+  if (nickname === undefined && birthDate === undefined) {
+    throw badRequest("수정할 계정 기본정보를 입력해 주세요.");
+  }
+  return { nickname, birthDate, expectedVersion };
 }
 
 export function normalizeShippingPhone(value: string): string {
@@ -568,6 +648,50 @@ export async function registerAccountRoutes(app: FastifyInstance, context: ApiCo
         );
         if (!updated.rowCount) throw conflict("프로필이 다른 기기에서 먼저 수정되었습니다.");
         const body = mapProfile(await loadProfile(client, actorId));
+        return { statusCode: 200, body, resourceType: "USER_PROFILE", resourceId: actorId };
+      },
+    });
+    return sendMutation(reply, result);
+  });
+
+  app.get("/v1/account/basic-info", { preHandler: context.auth.requireUser }, async (request) => {
+    return mapAccountBasicInfo(await loadAccountBasicInfo(context.pool, request.actor!.userId));
+  });
+
+  app.patch("/v1/account/basic-info", { preHandler: context.auth.requireUser }, async (request, reply) => {
+    const input = accountBasicInfoPatch(request.body);
+    const actorId = request.actor!.userId;
+    const result = await idempotentMutation(context, {
+      actorId,
+      scope: "ACCOUNT_BASIC_INFO_UPDATE",
+      key: idempotencyKey(request.headers),
+      payload: input,
+      work: async (client) => {
+        const before = await client.query<AccountBasicInfoRow>(
+          `SELECT u.id,u.nickname,u.email::text,u.phone_e164,p.birth_date,p.version,p.updated_at
+           FROM users u JOIN user_profiles p ON p.user_id=u.id
+           WHERE u.id=$1 FOR UPDATE OF u,p`,
+          [actorId],
+        );
+        if (!before.rowCount) throw notFound("계정 기본정보를 찾을 수 없습니다.");
+        const current = before.rows[0]!;
+        if (current.version !== input.expectedVersion) {
+          throw conflict("계정 기본정보가 다른 기기에서 먼저 수정되었습니다.");
+        }
+        if (input.nickname !== undefined) {
+          await client.query("UPDATE users SET nickname=$2 WHERE id=$1", [actorId, input.nickname]);
+        }
+        const updated = await client.query(
+          `UPDATE user_profiles SET birth_date=$2,version=version+1
+           WHERE user_id=$1 AND version=$3 RETURNING user_id`,
+          [
+            actorId,
+            input.birthDate === undefined ? dateOnly(current.birth_date) : input.birthDate,
+            input.expectedVersion,
+          ],
+        );
+        if (!updated.rowCount) throw conflict("계정 기본정보가 다른 기기에서 먼저 수정되었습니다.");
+        const body = mapAccountBasicInfo(await loadAccountBasicInfo(client, actorId));
         return { statusCode: 200, body, resourceType: "USER_PROFILE", resourceId: actorId };
       },
     });

@@ -1,3 +1,8 @@
+import type {
+  KujiRecentDrawActivity,
+  KujiRoomSnapshot,
+} from "@/features/kuji/kuji-room-api";
+
 export type KujiQueueParticipantState = "ACTIVE" | "WAITING";
 
 export type KujiQueueParticipant = {
@@ -9,6 +14,14 @@ export type KujiQueueParticipant = {
 };
 
 export const KUJI_SESSION_LIMIT_SECONDS = 5 * 60;
+export const KUJI_LOCAL_CHECKOUT_SECONDS = 3 * 60;
+
+export function isKujiRoomEndpointUnavailable(status: number, message: string): boolean {
+  if ([405, 501, 502, 503, 504].includes(status)) return true;
+  if (status !== 404) return false;
+  return /route\b.*\bnot found/i.test(message)
+    || message === "쿠지 대기실 응답을 확인하지 못했습니다.";
+}
 
 export type KujiQueueSnapshot = {
   productId: string;
@@ -85,4 +98,114 @@ export function formatKujiRemainingTime(seconds: number): string {
   const minutes = Math.floor(safeSeconds / 60);
   const remainder = safeSeconds % 60;
   return `${String(minutes).padStart(2, "0")}:${String(remainder).padStart(2, "0")}`;
+}
+
+export function createKujiRoomFallback(
+  productId: string,
+  startedAtMs: number,
+): KujiRoomSnapshot {
+  const serverNow = new Date(startedAtMs).toISOString();
+  const entryId = `dev-kuji-${encodeURIComponent(productId)}`;
+  if (!usesOccupiedFallback(productId)) {
+    return {
+      serverNow,
+      version: 1,
+      productId,
+      viewer: {
+        entryId,
+        state: "CHECKOUT_PENDING",
+        position: null,
+        peopleAhead: 0,
+        checkoutExpiresAt: new Date(
+          startedAtMs + KUJI_LOCAL_CHECKOUT_SECONDS * 1_000,
+        ).toISOString(),
+      },
+      active: {
+        displayName: "나",
+        phase: "CHECKOUT_PENDING",
+        checkoutExpiresAt: new Date(
+          startedAtMs + KUJI_LOCAL_CHECKOUT_SECONDS * 1_000,
+        ).toISOString(),
+      },
+      waitingCount: 0,
+      waitingPeople: [],
+      recentActivity: buildFallbackRecentActivity(startedAtMs),
+    };
+  }
+
+  return {
+    serverNow,
+    version: 1,
+    productId,
+    viewer: {
+      entryId,
+      state: "WAITING",
+      position: 3,
+      peopleAhead: 2,
+      checkoutExpiresAt: null,
+    },
+    active: {
+      displayName: "럭키덕후",
+      phase: "DRAWING",
+      checkoutExpiresAt: null,
+    },
+    waitingCount: 3,
+    waitingPeople: [
+      { entryId: "dev-waiter-1", displayName: "쿠지마스터", position: 1, isViewer: false },
+      { entryId: "dev-waiter-2", displayName: "애니콜렉터", position: 2, isViewer: false },
+      { entryId, displayName: "나", position: 3, isViewer: true },
+    ],
+    recentActivity: buildFallbackRecentActivity(startedAtMs),
+  };
+}
+
+export function sortKujiRecentActivity(
+  activity: KujiRecentDrawActivity[],
+): KujiRecentDrawActivity[] {
+  return activity.slice().sort((left, right) => (
+    Date.parse(right.committedAt) - Date.parse(left.committedAt)
+  ));
+}
+
+export function formatKujiActivityAge(committedAt: string, serverNow: string): string {
+  const elapsedSeconds = Math.max(
+    0,
+    Math.floor((Date.parse(serverNow) - Date.parse(committedAt)) / 1_000),
+  );
+  if (!Number.isFinite(elapsedSeconds) || elapsedSeconds < 10) return "방금";
+  if (elapsedSeconds < 60) return `${elapsedSeconds}초 전`;
+  return `${Math.floor(elapsedSeconds / 60)}분 전`;
+}
+
+function usesOccupiedFallback(productId: string): boolean {
+  return productId.toLowerCase().includes("evangelion");
+}
+
+function buildFallbackRecentActivity(startedAtMs: number): KujiRecentDrawActivity[] {
+  return [
+    {
+      id: "dev-result-3",
+      displayName: "모찌캡슐",
+      prizeName: "A상 피규어",
+      prizeImageUrl: null,
+      rarity: "A",
+      committedAt: new Date(startedAtMs - 8_000).toISOString(),
+    },
+    {
+      id: "dev-result-2",
+      displayName: "럭키레버",
+      prizeName: "C상 아크릴 스탠드",
+      prizeImageUrl: null,
+      rarity: "C",
+      committedAt: new Date(startedAtMs - 27_000).toISOString(),
+    },
+    {
+      id: "dev-result-1",
+      displayName: "뽀바좋아",
+      prizeName: "D상 클리어 파일",
+      prizeImageUrl: null,
+      rarity: "D",
+      committedAt: new Date(startedAtMs - 63_000).toISOString(),
+    },
+  ];
 }

@@ -86,6 +86,23 @@ export function BalancedAppText({
   );
 }
 
+export function BalancedParagraphText({
+  paragraphs,
+  accessibilityLabel,
+  ...props
+}: Omit<TextProps, "children"> & { paragraphs: readonly string[] }) {
+  const normalizedParagraphs = paragraphs.map((paragraph) => paragraph.trim()).filter(Boolean);
+
+  return (
+    <BalancedAppText
+      {...props}
+      accessibilityLabel={accessibilityLabel ?? normalizedParagraphs.join(" ")}
+    >
+      {normalizedParagraphs.join("\n")}
+    </BalancedAppText>
+  );
+}
+
 export function AppTextInput({ style, ...props }: TextInputProps) {
   return <NativeTextInput {...props} style={[style, fontStyle(style, "korean")]} />;
 }

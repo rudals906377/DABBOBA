@@ -163,7 +163,7 @@ export function RootFloatingTabBar({ state, descriptors, navigation, insets }: B
   const { width: windowWidth } = useWindowDimensions();
   const selection = useRef(new Animated.Value(state.index)).current;
   const previousIndexRef = useRef(state.index);
-  const expandedWidth = Math.min(windowWidth - seed.spacing.x6, 520);
+  const expandedWidth = Math.min(windowWidth - seed.spacing.globalGutter * 2, 520);
   const compactWidth = Math.max(260, Math.min(windowWidth - seed.spacing.x14, 304));
   const routeCount = Math.max(1, state.routes.length);
   const expandedTabWidth = expandedWidth / routeCount;
@@ -243,9 +243,7 @@ export function RootFloatingTabBar({ state, descriptors, navigation, insets }: B
             { left: seed.spacing.x1 },
             trackAnimatedStyle,
           ]}
-        >
-          <View style={styles.selectionIndicator} />
-        </Animated.View>
+        />
 
         {state.routes.map((route, index) => {
           const options = descriptors[route.key]?.options ?? {};
@@ -324,14 +322,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     borderRadius: seed.radius.full,
     backgroundColor: "rgba(17, 20, 17, 0.07)",
-  },
-  selectionIndicator: {
-    position: "absolute",
-    top: 0,
-    width: 18,
-    height: 2,
-    borderRadius: seed.radius.full,
-    backgroundColor: seed.color.background.brandSolid,
   },
   tab: {
     zIndex: 1,

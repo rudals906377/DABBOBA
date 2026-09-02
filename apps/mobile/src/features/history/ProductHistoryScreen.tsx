@@ -8,7 +8,7 @@ import type { CatalogProduct } from "@dabboba/contracts";
 import { CatalogProductRow } from "@/components/CatalogProductRow";
 import { KoreanPixelTitle } from "@/components/RootCategoryTitle";
 import { AppText as Text } from "@/components/Typography";
-import { SeedChip } from "@/design-system/components";
+import { SeedChip, SeedInlineGuidance } from "@/design-system/components";
 import { seed } from "@/design-system/seed";
 import { useProfileSnapshot } from "@/features/profile/use-profile-snapshot";
 import { fetchShopSnapshot, type ShopSnapshot } from "@/features/shop/shop-api";
@@ -103,7 +103,7 @@ export function ProductHistoryScreen() {
         </Text>
 
         {needsProfile && profileState.snapshot?.isExample ? (
-          <View style={styles.exampleBanner}><View style={styles.exampleDot} /><Text style={styles.exampleText}>로그인 전에는 화면 구성을 위한 상품 예시가 표시돼요.</Text></View>
+          <SeedInlineGuidance style={styles.exampleGuidance}>로그인하면 내가 뽑은 상품과 찜한 상품을 확인할 수 있어요.</SeedInlineGuidance>
         ) : null}
 
         {loading || (needsProfile && !profileState.snapshot && !profileState.message) ? (
@@ -170,13 +170,11 @@ const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: seed.color.layer.basement },
   header: { minHeight: seed.size.topNavigation, paddingHorizontal: seed.spacing.x2_5, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: seed.color.stroke.neutral, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   headerAction: { width: seed.size.touchTarget, height: seed.size.touchTarget, alignItems: "center", justifyContent: "center" },
-  content: { padding: seed.spacing.globalGutter, paddingBottom: seed.spacing.screenBottom },
+  content: { paddingHorizontal: seed.spacing.globalGutter, paddingTop: seed.spacing.x4, paddingBottom: seed.spacing.screenBottom },
   segment: { flexDirection: "row", gap: seed.spacing.betweenChips },
   segmentButton: { flex: 1 },
   description: { color: colors.muted, fontSize: 12, lineHeight: 18, marginTop: 14 },
-  exampleBanner: { minHeight: seed.size.touchTarget, paddingHorizontal: seed.spacing.componentDefault, marginTop: seed.spacing.x3_5, borderRadius: seed.radius.r3, backgroundColor: seed.color.background.brandWeak, flexDirection: "row", alignItems: "center", gap: seed.spacing.x2 },
-  exampleDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.greenInk },
-  exampleText: { flex: 1, color: colors.greenInk, fontSize: 11, lineHeight: 17, fontWeight: "700" },
+  exampleGuidance: { marginTop: seed.spacing.x3_5 },
   list: { marginTop: 18, gap: 12 },
   state: { minHeight: 330, paddingHorizontal: 26, alignItems: "center", justifyContent: "center" },
   stateTitle: { color: colors.ink, fontSize: 16, lineHeight: 23, fontWeight: "900", textAlign: "center", marginTop: 12 },

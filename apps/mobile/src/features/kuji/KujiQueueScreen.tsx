@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import Constants from "expo-constants";
-import { type Href, useLocalSearchParams, useRouter } from "expo-router";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { type Href, useLocalSearchParams, useNavigation, useRouter } from "expo-router";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -13,30 +13,44 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { KoreanPixelTitle } from "@/components/RootCategoryTitle";
-import { AppText as Text, BalancedAppText } from "@/components/Typography";
-import { SeedActionButton } from "@/design-system/components";
+import { ProductInfoDivider } from "@/components/ProductInfoDivider";
+import { KoreanPixelTitle, KoreanPixelTitleAccessory } from "@/components/RootCategoryTitle";
+import { AppText as Text } from "@/components/Typography";
+import { SeedActionButton, SeedInlineGuidance } from "@/design-system/components";
 import { seed } from "@/design-system/seed";
 import {
-  buildKujiQueueView,
-  createKujiQueueExample,
-  formatKujiRemainingTime,
-  kujiRemainingSeconds,
-  type KujiQueuePersonView,
+  buildKujiCheckoutPath,
+} from "@/features/kuji/kuji-entry-state";
+import {
+  KUJI_LOCAL_CHECKOUT_SECONDS,
+  createKujiRoomFallback,
+  formatKujiActivityAge,
+  sortKujiRecentActivity,
 } from "@/features/kuji/kuji-queue-state";
+import {
+  fetchKujiRoom,
+  isKujiRoomApiUnavailable,
+  joinKujiRoom,
+  leaveKujiRoom,
+  type KujiRecentDrawActivity,
+  type KujiRoomSnapshot,
+  type KujiRoomWaitingPerson,
+} from "@/features/kuji/kuji-room-api";
 import { scheduleKujiTurnExampleNotification } from "@/features/kuji/kuji-notifications";
 import { fetchProductDetail, type ProductDetailSnapshot } from "@/features/shop/shop-api";
 import { productSubjectTitle } from "@/features/shop/product-title";
 import { readAuthTokens } from "@/lib/session-store";
 import {
-  resolveCatalogImageUrl,
   resolveMobileRuntimeConfig,
   type MobilePlatform,
 } from "@/lib/runtime-config";
 import { colors } from "@/theme";
 
+const KUJI_ROOM_POLL_INTERVAL_MS = 2_000;
+
 export function KujiQueueScreen() {
   const router = useRouter();
+  const navigation = useNavigation();
   const params = useLocalSearchParams<{ productId?: string | string[] }>();
   const productId = firstParam(params.productId) ?? "";
   const runtime = useMemo(
@@ -49,51 +63,169 @@ export function KujiQueueScreen() {
     }),
     [],
   );
-  const [snapshot, setSnapshot] = useState<ProductDetailSnapshot | null>(null);
+  const accessTokenRef = useRef<string | null>(null);
+  const loadPendingRef = useRef(false);
+  const redirectedRef = useRef(false);
+  const allowNavigationRef = useRef(false);
+  const fallbackStartedAtRef = useRef(Date.now());
+  const [productSnapshot, setProductSnapshot] = useState<ProductDetailSnapshot | null>(null);
+  const [room, setRoom] = useState<KujiRoomSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
+  const [syncMessage, setSyncMessage] = useState("");
+  const [usingFallback, setUsingFallback] = useState(false);
   const [notificationPending, setNotificationPending] = useState(false);
-  const [nowMs, setNowMs] = useState(() => Date.now());
-  const queueSnapshot = useMemo(() => createKujiQueueExample(productId), [productId]);
-  const queue = useMemo(() => buildKujiQueueView(queueSnapshot), [queueSnapshot]);
-  const activePerson = queue.orderedPeople.find((person) => person.state === "ACTIVE") ?? null;
-  const remainingTime = formatKujiRemainingTime(kujiRemainingSeconds(activePerson?.expiresAt, nowMs));
+  const [leavePending, setLeavePending] = useState(false);
+
+  const continueToCheckout = useCallback((
+    next: KujiRoomSnapshot,
+    developmentFixture = false,
+  ): boolean => {
+    const { viewer } = next;
+    if (
+      viewer.state !== "CHECKOUT_PENDING"
+      || !viewer.checkoutExpiresAt
+      || redirectedRef.current
+    ) return false;
+    redirectedRef.current = true;
+    router.replace(
+      buildKujiCheckoutPath(
+        productId,
+        viewer.entryId,
+        viewer.checkoutExpiresAt,
+        next.serverNow,
+        developmentFixture,
+      ) as Href,
+    );
+    return true;
+  }, [productId, router]);
 
   const load = useCallback(async () => {
+    if (loadPendingRef.current) return;
+    loadPendingRef.current = true;
+    redirectedRef.current = false;
     setLoading(true);
+    setMessage("");
+    setSyncMessage("");
     try {
       const tokens = await readAuthTokens();
-      const next = await fetchProductDetail(runtime.apiBaseUrl, productId, tokens?.accessToken);
-      if (next.product.category !== "kuji") throw new Error("쿠지 상품에서만 대기 현황을 확인할 수 있어요.");
-      setSnapshot(next);
-      setMessage("");
+      if (!tokens?.accessToken) throw new Error("로그인 정보를 확인한 뒤 다시 시도해 주세요.");
+      accessTokenRef.current = tokens.accessToken;
+
+      const productRequest = fetchProductDetail(
+        runtime.apiBaseUrl,
+        productId,
+        tokens.accessToken,
+      ).then((nextProduct) => (
+        nextProduct.product.category === "kuji" ? nextProduct : null
+      )).catch(() => null);
+
+      let nextRoom: KujiRoomSnapshot;
+      let usedFallback = false;
+      try {
+        nextRoom = await joinKujiRoom(runtime.apiBaseUrl, tokens.accessToken, productId);
+        setUsingFallback(false);
+      } catch (error) {
+        if (!__DEV__ || !isKujiRoomApiUnavailable(error)) throw error;
+        nextRoom = createKujiRoomFallback(productId, fallbackStartedAtRef.current);
+        usedFallback = true;
+        setUsingFallback(true);
+      }
+      void productRequest.then(setProductSnapshot);
+      if (!continueToCheckout(nextRoom, usedFallback)) setRoom(nextRoom);
     } catch (error) {
-      setSnapshot(null);
-      setMessage(error instanceof Error ? error.message : "쿠지 대기 현황을 불러오지 못했습니다.");
+      setRoom(null);
+      setMessage(error instanceof Error ? error.message : "쿠지 대기실을 불러오지 못했습니다.");
     } finally {
-      setLoading(false);
+      loadPendingRef.current = false;
+      if (!redirectedRef.current) setLoading(false);
     }
-  }, [productId, runtime.apiBaseUrl]);
+  }, [continueToCheckout, productId, runtime.apiBaseUrl]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
-  useEffect(() => {
-    const timer = setInterval(() => setNowMs(Date.now()), 1_000);
-    return () => clearInterval(timer);
-  }, []);
+  const entryId = room?.viewer.entryId ?? "";
+  const shouldPoll = Boolean(
+    room
+      && !usingFallback
+      && room.viewer.state === "WAITING"
+      && accessTokenRef.current,
+  );
 
-  const goBack = () => {
-    if (router.canGoBack()) router.back();
-    else router.replace("/(tabs)/ppoba");
-  };
+  useEffect(() => {
+    if (!shouldPoll || !entryId) return;
+    let mounted = true;
+    let requestPending = false;
+    const poll = async () => {
+      if (requestPending || !accessTokenRef.current) return;
+      requestPending = true;
+      try {
+        const next = await fetchKujiRoom(
+          runtime.apiBaseUrl,
+          accessTokenRef.current,
+          productId,
+          entryId,
+        );
+        if (!mounted) return;
+        setSyncMessage("");
+        if (continueToCheckout(next)) return;
+        setRoom((current) => (
+          !current || next.version >= current.version ? next : current
+        ));
+      } catch {
+        if (mounted) setSyncMessage("대기 순서를 다시 연결하는 중이에요.");
+      } finally {
+        requestPending = false;
+      }
+    };
+    const timer = setInterval(() => void poll(), KUJI_ROOM_POLL_INTERVAL_MS);
+    return () => {
+      mounted = false;
+      clearInterval(timer);
+    };
+  }, [continueToCheckout, entryId, productId, runtime.apiBaseUrl, shouldPoll]);
+
+  const confirmLeave = useCallback(async () => {
+    if (!room || leavePending) return;
+    setLeavePending(true);
+    try {
+      if (!usingFallback && accessTokenRef.current) {
+        await leaveKujiRoom(
+          runtime.apiBaseUrl,
+          accessTokenRef.current,
+          productId,
+          room.viewer.entryId,
+        );
+      }
+      allowNavigationRef.current = true;
+      router.replace(`/product/${encodeURIComponent(productId)}` as Href);
+    } catch (error) {
+      Alert.alert(
+        "대기를 취소하지 못했어요",
+        error instanceof Error ? error.message : "잠시 후 다시 시도해 주세요.",
+      );
+    } finally {
+      setLeavePending(false);
+    }
+  }, [leavePending, productId, room, router, runtime.apiBaseUrl, usingFallback]);
 
   const browseOtherPages = async () => {
-    if (notificationPending) return;
+    if (notificationPending || !room) return;
     setNotificationPending(true);
     try {
-      await scheduleKujiTurnExampleNotification(productId);
+      if (usingFallback) {
+        const checkoutExpiresAt = new Date(
+          Date.now() + (KUJI_LOCAL_CHECKOUT_SECONDS + 5) * 1_000,
+        ).toISOString();
+        await scheduleKujiTurnExampleNotification(
+          productId,
+          room.viewer.entryId,
+          checkoutExpiresAt,
+        );
+      }
+      allowNavigationRef.current = true;
       router.replace("/(tabs)" as Href);
     } catch (error) {
       Alert.alert(
@@ -105,129 +237,223 @@ export function KujiQueueScreen() {
     }
   };
 
+  const askToLeave = useCallback(() => {
+    Alert.alert("대기를 취소할까요?", "취소하면 현재 순서를 잃게 돼요.", [
+      { text: "계속 대기", style: "cancel" },
+      { text: "대기 취소", style: "destructive", onPress: () => void confirmLeave() },
+    ]);
+  }, [confirmLeave]);
+
+  const goBack = () => {
+    if (room?.viewer.state === "WAITING" || room?.viewer.state === "CHECKOUT_PENDING") {
+      askToLeave();
+      return;
+    }
+    if (router.canGoBack()) router.back();
+    else router.replace(`/product/${encodeURIComponent(productId)}` as Href);
+  };
+
+  useEffect(() => navigation.addListener("beforeRemove", (event) => {
+    if (
+      allowNavigationRef.current
+      || redirectedRef.current
+      || !room
+      || !["WAITING", "CHECKOUT_PENDING"].includes(room.viewer.state)
+    ) return;
+    event.preventDefault();
+    askToLeave();
+  }), [askToLeave, navigation, room]);
+
   return (
     <SafeAreaView style={styles.safeArea} edges={["top", "bottom", "left", "right"]}>
       <View style={styles.header}>
-        <Pressable accessibilityRole="button" accessibilityLabel="상품 상세로 돌아가기" onPress={goBack} hitSlop={10} style={styles.headerAction}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="상품 상세로 돌아가기"
+          onPress={goBack}
+          hitSlop={10}
+          style={styles.headerAction}
+        >
           <Ionicons name="chevron-back" size={28} color={colors.ink} />
         </Pressable>
-        <KoreanPixelTitle variant="header">쿠지 대기</KoreanPixelTitle>
+        <KoreanPixelTitle variant="header">쿠지 대기실</KoreanPixelTitle>
         <View style={styles.headerAction} />
       </View>
 
       {loading ? (
         <View style={styles.state}>
           <ActivityIndicator color={colors.ink} />
-          <Text style={styles.stateBody}>대기 현황을 불러오는 중</Text>
+          <Text style={styles.stateBody}>쿠지방을 확인하는 중</Text>
         </View>
-      ) : message || !snapshot ? (
+      ) : message || !room ? (
         <View style={styles.state}>
           <Ionicons name="alert-circle-outline" size={34} color={colors.muted} />
-          <Text style={styles.stateTitle}>{message || "대기 현황을 확인할 수 없습니다."}</Text>
+          <Text style={styles.stateTitle}>{message || "대기실을 확인할 수 없습니다."}</Text>
           <SeedActionButton label="다시 불러오기" variant="neutralSolid" onPress={() => void load()} />
         </View>
       ) : (
         <ScrollView contentContainerStyle={styles.content}>
-          <View style={styles.exampleNotice}>
-            <View style={styles.exampleBadge}><Text style={styles.exampleBadgeText}>화면 예시</Text></View>
-            <BalancedAppText style={styles.exampleText}>
-              아직 실제 대기열 API와 연결되지 않았어요. 운영에서는 서버가 결제된 추첨권을 확인한 뒤 순서를 확정해요.
-            </BalancedAppText>
-          </View>
+          {usingFallback ? (
+            <SeedInlineGuidance
+              paragraphs={["서버가 연결되지 않아 개발용 대기 현황을 보여드리고 있어요."]}
+            />
+          ) : null}
 
-          <ProductSummary snapshot={snapshot} assetBaseUrl={runtime.assetBaseUrl} />
+          <LiveDrawSection room={room} />
+          <WaitingSection room={room} />
 
-          <View style={styles.positionCard}>
-            <KoreanPixelTitle variant="compact">내 입장 순서</KoreanPixelTitle>
-            <View style={styles.positionValueRow}>
-              <Text style={styles.positionValue}>{queue.viewerPosition ?? "-"}</Text>
-              <Text style={styles.positionUnit}>번째</Text>
-            </View>
-            <Text style={styles.aheadText}>앞에 {queue.peopleAheadCount}명이 기다리고 있어요.</Text>
-            <View style={styles.progressTrack}>
-              <View style={[styles.progressFill, { width: `${Math.max(18, 100 / Math.max(queue.viewerPosition ?? 1, 1))}%` }]} />
-            </View>
-          </View>
-
-          <View style={styles.activeCard}>
-            <View style={styles.activeHeader}>
-              <View>
-                <KoreanPixelTitle variant="compact" style={styles.activeTitle}>현재 입장 중</KoreanPixelTitle>
-                <Text style={styles.activeName}>{queue.orderedPeople[0]?.displayName ?? "입장 준비 중"}</Text>
+          {productSnapshot ? (
+            <View style={styles.productLine} accessibilityRole="summary">
+              <View style={styles.productLineIcon}>
+                <Ionicons name="ticket-outline" size={20} color={colors.greenInk} />
               </View>
-              <View style={styles.timerBlock}>
-                <Text style={styles.timerLabel}>남은 시간</Text>
-                <Text style={styles.timerValue}>{remainingTime}</Text>
+              <ProductInfoDivider orientation="vertical" />
+              <View style={styles.productLineCopy}>
+                <Text style={styles.productIp}>{productSnapshot.ip?.nameKo ?? "등록 작품"}</Text>
+                <Text numberOfLines={2} style={styles.productName}>
+                  {productSubjectTitle(productSnapshot.product.name, productSnapshot.ip?.nameKo)}
+                </Text>
               </View>
             </View>
-            <BalancedAppText style={styles.activeBody}>
-              쿠지방에는 한 명만 입장할 수 있고 제한시간은 5분이에요. 시간이 끝나면 다음 순서가 자동으로 열려요.
-            </BalancedAppText>
-          </View>
+          ) : null}
 
-          <View style={styles.queueSection}>
-            <View style={styles.sectionHeader}>
-              <KoreanPixelTitle variant="section">대기 중</KoreanPixelTitle>
-              <Text style={styles.queueCount}>{queue.orderedPeople.filter((person) => person.state === "WAITING").length}명</Text>
-            </View>
-            <View style={styles.queueList}>
-              {queue.orderedPeople.filter((person) => person.state === "WAITING").map((person) => (
-                <QueueRow key={person.userId} person={person} />
-              ))}
-            </View>
-          </View>
-
-          <View style={styles.guideCard}>
-            <Ionicons name="information-circle-outline" size={21} color={colors.greenInk} />
-            <BalancedAppText style={styles.guideText}>
-              대기 중에는 다른 페이지를 둘러봐도 괜찮아요. 앞사람이 끝나면 휴대폰 상단 알림으로 차례를 알려드려요.
-            </BalancedAppText>
-          </View>
+          {syncMessage ? <Text style={styles.syncMessage}>{syncMessage}</Text> : null}
 
           <SeedActionButton
-            label={notificationPending ? "알림 준비 중" : "다른 페이지 둘러보기"}
+            label={notificationPending ? "이동 준비 중" : "다른 상품 둘러보기"}
             variant="neutralSolid"
             disabled={notificationPending}
             onPress={() => void browseOtherPages()}
           />
-
-          <BalancedAppText style={styles.restoreText}>
-            실제 서비스에서는 앱을 다시 열어도 서버가 같은 순서를 복원하고, 차례 알림 후 10초 동안만 입장을 선점할 수 있어요.
-          </BalancedAppText>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="쿠지 대기 취소"
+            accessibilityState={{ disabled: leavePending }}
+            disabled={leavePending}
+            onPress={askToLeave}
+            style={({ pressed }) => [styles.leaveButton, pressed && styles.pressed]}
+          >
+            <Text style={styles.leaveLabel}>{leavePending ? "취소 중" : "대기 취소"}</Text>
+          </Pressable>
         </ScrollView>
       )}
     </SafeAreaView>
   );
 }
 
-function ProductSummary({ snapshot, assetBaseUrl }: { snapshot: ProductDetailSnapshot; assetBaseUrl: string | null }) {
-  const imageUri = resolveCatalogImageUrl(snapshot.product.imageUrl, assetBaseUrl, snapshot.product.version);
+function LiveDrawSection({ room }: { room: KujiRoomSnapshot }) {
+  const activity = sortKujiRecentActivity(room.recentActivity);
   return (
-    <View style={styles.productCard}>
-      {imageUri ? (
-        <Image source={{ uri: imageUri }} resizeMode="cover" style={styles.productImage} />
-      ) : (
-        <View style={[styles.productImage, styles.productPlaceholder]}><Ionicons name="image-outline" size={24} color={colors.muted} /></View>
-      )}
-      <View style={styles.productCopy}>
-        <Text style={styles.ipName}>{snapshot.ip?.nameKo ?? "등록 작품"}</Text>
-        <Text numberOfLines={2} style={styles.productName}>{productSubjectTitle(snapshot.product.name, snapshot.ip?.nameKo)}</Text>
-        <Text style={styles.productMeta}>쿠지 · {snapshot.product.price.toLocaleString("ko-KR")}원</Text>
+    <View style={styles.liveCard}>
+      <View style={styles.liveHeader}>
+        <KoreanPixelTitle variant="section" style={styles.liveTitle}>실시간 뽑기 현황</KoreanPixelTitle>
+        <View style={styles.liveBadge}><Text style={styles.liveBadgeText}>LIVE</Text></View>
       </View>
+
+      <View style={styles.activeLine}>
+        <View style={styles.activeDot} />
+        <Text style={styles.activeText}>
+          {room.active
+            ? `${room.active.displayName}님이 ${room.active.phase === "DRAWING" ? "뽑는 중" : "결제 준비 중"}`
+            : "지금 이용 중인 사람이 없어요"}
+        </Text>
+      </View>
+
+      <View style={styles.recentHeader}>
+        <Text style={styles.recentLabel}>최근 결과</Text>
+        <Text style={styles.recentCount}>{activity.length}개</Text>
+      </View>
+
+      {activity.length ? (
+        <View style={styles.activityList}>
+          {activity.map((item) => (
+            <ActivityRow key={item.id} activity={item} serverNow={room.serverNow} />
+          ))}
+        </View>
+      ) : (
+        <View style={styles.activityEmpty}>
+          <Ionicons name="sparkles-outline" size={20} color="#929A91" />
+          <Text style={styles.activityEmptyText}>아직 공개된 결과가 없어요.</Text>
+        </View>
+      )}
     </View>
   );
 }
 
-function QueueRow({ person }: { person: KujiQueuePersonView }) {
+function ActivityRow({
+  activity,
+  serverNow,
+}: {
+  activity: KujiRecentDrawActivity;
+  serverNow: string;
+}) {
+  const age = formatKujiActivityAge(activity.committedAt, serverNow);
   return (
-    <View style={[styles.queueRow, person.isViewer && styles.viewerRow]}>
+    <View
+      style={styles.activityRow}
+      accessible
+      accessibilityLabel={`${activity.displayName}님이 ${activity.prizeName} 뽑음, ${activity.rarity}상, ${age}`}
+    >
+      {activity.prizeImageUrl ? (
+        <Image source={{ uri: activity.prizeImageUrl }} style={styles.activityImage} />
+      ) : (
+        <View style={styles.rarityTile}><Text style={styles.rarityText}>{activity.rarity}</Text></View>
+      )}
+      <View style={styles.activityCopy}>
+        <Text style={styles.activityName}>{activity.displayName}님</Text>
+        <Text numberOfLines={1} style={styles.activityPrize}>{activity.prizeName}</Text>
+      </View>
+      <Text style={styles.activityAge}>{age}</Text>
+    </View>
+  );
+}
+
+function WaitingSection({ room }: { room: KujiRoomSnapshot }) {
+  return (
+    <View style={styles.waitingCard}>
+      <View style={styles.sectionHeader}>
+        <KoreanPixelTitle variant="section">대기 중</KoreanPixelTitle>
+        <KoreanPixelTitleAccessory>{room.waitingCount}명</KoreanPixelTitleAccessory>
+      </View>
+
+      <View
+        style={styles.viewerSummary}
+        accessible
+        accessibilityLabel={room.viewer.position
+          ? `내 순서 ${room.viewer.position}번째, 앞에 ${room.viewer.peopleAhead}명`
+          : "입장 순서를 확인하는 중"}
+      >
+        <Text style={styles.viewerSummaryLabel}>내 순서</Text>
+        <Text style={styles.viewerSummaryValue}>
+          {room.viewer.position ? `${room.viewer.position}번째` : "확인 중"}
+        </Text>
+        <Text style={styles.viewerSummaryMeta}>앞에 {room.viewer.peopleAhead}명</Text>
+      </View>
+
+      {room.waitingPeople.length ? (
+        <View style={styles.queueList}>
+          {room.waitingPeople.map((person) => (
+            <QueueRow key={person.entryId} person={person} />
+          ))}
+        </View>
+      ) : (
+        <Text style={styles.waitingEmpty}>대기 중인 사람이 없어요.</Text>
+      )}
+    </View>
+  );
+}
+
+function QueueRow({ person }: { person: KujiRoomWaitingPerson }) {
+  return (
+    <View
+      style={[styles.queueRow, person.isViewer && styles.viewerRow]}
+      accessible
+      accessibilityLabel={`${person.position}번째, ${person.displayName}${person.isViewer ? ", 내 순서" : ""}`}
+    >
       <View style={[styles.positionBadge, person.isViewer && styles.viewerPositionBadge]}>
         <Text style={styles.positionBadgeText}>{person.position}</Text>
       </View>
-      <View style={styles.queuePersonCopy}>
-        <Text style={styles.queueName}>{person.displayName}</Text>
-        <Text style={styles.queueStatus}>{person.isViewer ? "내 순서" : "대기 중"}</Text>
-      </View>
+      <Text style={styles.queueName}>{person.displayName}</Text>
       {person.isViewer ? <View style={styles.meBadge}><Text style={styles.meBadgeText}>ME</Text></View> : null}
     </View>
   );
@@ -241,51 +467,55 @@ const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: seed.color.layer.basement },
   header: { minHeight: seed.size.topNavigation, paddingHorizontal: seed.spacing.x3_5, flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: seed.color.stroke.neutral, backgroundColor: seed.color.layer.default },
   headerAction: { width: seed.size.touchTarget, height: seed.size.touchTarget, alignItems: "center", justifyContent: "center" },
-  state: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: seed.spacing.x7, gap: seed.spacing.componentDefault },
+  state: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: seed.spacing.globalGutter, gap: seed.spacing.componentDefault },
   stateTitle: { color: colors.ink, ...seed.typography.subtitle, textAlign: "center" },
   stateBody: { color: colors.muted, ...seed.typography.body },
-  content: { padding: seed.spacing.globalGutter, paddingBottom: seed.spacing.x8, gap: seed.spacing.componentDefault },
-  exampleNotice: { minHeight: 60, padding: seed.spacing.x3, borderRadius: seed.radius.r3, backgroundColor: seed.color.background.brandWeak, flexDirection: "row", alignItems: "flex-start", gap: seed.spacing.x2_5 },
-  exampleBadge: { paddingHorizontal: seed.spacing.x2, paddingVertical: seed.spacing.x1, borderRadius: seed.radius.r1_5, backgroundColor: colors.ink },
-  exampleBadgeText: { color: colors.white, fontSize: 9, lineHeight: 13, fontWeight: "900" },
-  exampleText: { flex: 1, color: colors.greenInk, ...seed.typography.caption },
-  productCard: { padding: seed.spacing.x3, borderRadius: seed.radius.r4, borderWidth: 1, borderColor: seed.color.stroke.neutral, backgroundColor: seed.color.layer.default, flexDirection: "row", alignItems: "center", gap: seed.spacing.componentDefault },
-  productImage: { width: 76, height: 76, borderRadius: seed.radius.r3, backgroundColor: seed.color.background.neutralWeak },
-  productPlaceholder: { alignItems: "center", justifyContent: "center" },
-  productCopy: { flex: 1, minWidth: 0 },
-  ipName: { color: colors.muted, ...seed.typography.caption },
-  productName: { marginTop: seed.spacing.x1, color: colors.ink, ...seed.typography.bodyStrong },
-  productMeta: { marginTop: seed.spacing.x2, color: colors.greenInk, ...seed.typography.label, fontWeight: "700" },
-  positionCard: { minHeight: 188, padding: seed.spacing.x4_5, borderRadius: seed.radius.r5, borderWidth: 1, borderColor: seed.color.stroke.neutral, backgroundColor: seed.color.layer.default, alignItems: "center" },
-  positionValueRow: { marginTop: seed.spacing.x2, flexDirection: "row", alignItems: "flex-end" },
-  positionValue: { color: colors.ink, fontSize: 64, lineHeight: 72, fontWeight: "900" },
-  positionUnit: { marginBottom: seed.spacing.x2, marginLeft: seed.spacing.x1, color: colors.ink, ...seed.typography.subtitle },
-  aheadText: { marginTop: seed.spacing.x1, color: colors.muted, ...seed.typography.bodyStrong },
-  progressTrack: { width: "100%", height: 6, marginTop: seed.spacing.x4, overflow: "hidden", borderRadius: seed.radius.full, backgroundColor: seed.color.background.neutralWeak },
-  progressFill: { height: "100%", borderRadius: seed.radius.full, backgroundColor: seed.color.background.brandSolid },
-  activeCard: { minHeight: 136, padding: seed.spacing.x4_5, borderRadius: seed.radius.r5, backgroundColor: colors.ink },
-  activeHeader: { flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: seed.spacing.x3 },
-  activeTitle: { color: colors.brand },
-  activeName: { marginTop: seed.spacing.x2, color: colors.white, ...seed.typography.subtitle },
-  timerBlock: { minWidth: 82, paddingHorizontal: seed.spacing.x2_5, paddingVertical: seed.spacing.x2, borderRadius: seed.radius.r3, backgroundColor: "rgba(145, 233, 142, 0.13)", alignItems: "flex-end" },
-  timerLabel: { color: "#C7CDC5", fontSize: 10, lineHeight: 14 },
-  timerValue: { marginTop: seed.spacing.x0_5, color: colors.brand, fontFamily: "Galmuri11", fontSize: 18, lineHeight: 23, fontWeight: "400", fontVariant: ["tabular-nums"] },
-  activeBody: { marginTop: seed.spacing.x3, color: "#C7CDC5", ...seed.typography.caption },
-  queueSection: { marginTop: seed.spacing.x2 },
-  sectionHeader: { marginBottom: seed.spacing.x3, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  queueCount: { color: colors.muted, ...seed.typography.label, fontWeight: "700" },
-  queueList: { overflow: "hidden", borderRadius: seed.radius.r4, borderWidth: 1, borderColor: seed.color.stroke.neutral, backgroundColor: seed.color.layer.default },
-  queueRow: { minHeight: 64, paddingHorizontal: seed.spacing.x3_5, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: seed.color.stroke.neutral, flexDirection: "row", alignItems: "center", gap: seed.spacing.x3 },
+  content: { paddingHorizontal: seed.spacing.globalGutter, paddingTop: seed.spacing.x4, paddingBottom: seed.spacing.x8, gap: seed.spacing.componentDefault },
+  liveCard: { overflow: "hidden", borderRadius: seed.radius.r5, backgroundColor: colors.ink, padding: seed.spacing.x4 },
+  liveHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: seed.spacing.x3 },
+  liveTitle: { color: colors.white },
+  liveBadge: { paddingHorizontal: seed.spacing.x2, paddingVertical: seed.spacing.x1, borderRadius: seed.radius.r1_5, backgroundColor: colors.brand },
+  liveBadgeText: { color: colors.ink, fontSize: 9, lineHeight: 12, fontWeight: "900" },
+  activeLine: { minHeight: seed.size.touchTarget, marginTop: seed.spacing.x2, flexDirection: "row", alignItems: "center", gap: seed.spacing.x2 },
+  activeDot: { width: 7, height: 7, borderRadius: seed.radius.full, backgroundColor: colors.brand },
+  activeText: { flex: 1, color: "#D9DDD7", ...seed.typography.caption },
+  recentHeader: { minHeight: 30, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "#3A403A", flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  recentLabel: { color: "#AEB6AD", ...seed.typography.caption, fontWeight: "700" },
+  recentCount: { color: "#929A91", ...seed.typography.caption },
+  activityList: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "#313631" },
+  activityRow: { minHeight: 66, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "#313631", flexDirection: "row", alignItems: "center", gap: seed.spacing.x2_5 },
+  activityImage: { width: 42, height: 42, borderRadius: seed.radius.r2_5, backgroundColor: "#2D322D" },
+  rarityTile: { width: 42, height: 42, borderRadius: seed.radius.r2_5, borderWidth: 1, borderColor: "#586158", alignItems: "center", justifyContent: "center", backgroundColor: "#202520" },
+  rarityText: { color: colors.brand, fontFamily: "Galmuri11", fontSize: 17, lineHeight: 21, fontWeight: "400" },
+  activityCopy: { flex: 1, minWidth: 0 },
+  activityName: { color: "#AEB6AD", ...seed.typography.caption },
+  activityPrize: { marginTop: seed.spacing.x0_5, color: colors.white, ...seed.typography.bodyStrong },
+  activityAge: { color: "#929A91", ...seed.typography.caption },
+  activityEmpty: { minHeight: 78, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "#3A403A", flexDirection: "row", alignItems: "center", justifyContent: "center", gap: seed.spacing.x2 },
+  activityEmptyText: { color: "#AEB6AD", ...seed.typography.caption },
+  waitingCard: { borderRadius: seed.radius.r5, borderWidth: 1, borderColor: seed.color.stroke.neutral, backgroundColor: seed.color.layer.default, padding: seed.spacing.x4 },
+  sectionHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: seed.spacing.x3 },
+  viewerSummary: { minHeight: 64, marginTop: seed.spacing.x3, paddingHorizontal: seed.spacing.x3, borderRadius: seed.radius.r3, backgroundColor: seed.color.background.brandWeak, flexDirection: "row", alignItems: "center", gap: seed.spacing.x2 },
+  viewerSummaryLabel: { color: colors.greenInk, ...seed.typography.caption, fontWeight: "700" },
+  viewerSummaryValue: { flex: 1, color: colors.ink, ...seed.typography.subtitle },
+  viewerSummaryMeta: { color: colors.muted, ...seed.typography.caption },
+  queueList: { marginTop: seed.spacing.x3, overflow: "hidden", borderRadius: seed.radius.r3, borderWidth: 1, borderColor: seed.color.stroke.neutral },
+  queueRow: { minHeight: 58, paddingHorizontal: seed.spacing.x3, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: seed.color.stroke.neutral, flexDirection: "row", alignItems: "center", gap: seed.spacing.x3 },
   viewerRow: { backgroundColor: seed.color.background.brandWeak },
-  positionBadge: { width: 34, height: 34, borderRadius: seed.radius.full, backgroundColor: seed.color.background.neutralWeak, alignItems: "center", justifyContent: "center" },
+  positionBadge: { width: 32, height: 32, borderRadius: seed.radius.full, backgroundColor: seed.color.background.neutralWeak, alignItems: "center", justifyContent: "center" },
   viewerPositionBadge: { backgroundColor: seed.color.background.brandSolid },
   positionBadgeText: { color: colors.ink, ...seed.typography.label, fontWeight: "900" },
-  queuePersonCopy: { flex: 1 },
-  queueName: { color: colors.ink, ...seed.typography.bodyStrong },
-  queueStatus: { marginTop: seed.spacing.x0_5, color: colors.muted, ...seed.typography.caption },
+  queueName: { flex: 1, color: colors.ink, ...seed.typography.bodyStrong },
   meBadge: { paddingHorizontal: seed.spacing.x2, paddingVertical: seed.spacing.x1, borderRadius: seed.radius.r1_5, backgroundColor: colors.ink },
   meBadgeText: { color: colors.brand, fontSize: 9, lineHeight: 13, fontWeight: "900" },
-  guideCard: { minHeight: 76, padding: seed.spacing.x3_5, borderRadius: seed.radius.r3, backgroundColor: seed.color.background.brandWeak, flexDirection: "row", alignItems: "flex-start", gap: seed.spacing.x2_5 },
-  guideText: { flex: 1, color: colors.greenInk, ...seed.typography.caption },
-  restoreText: { color: colors.muted, ...seed.typography.caption, textAlign: "center" },
+  waitingEmpty: { marginTop: seed.spacing.x4, color: colors.muted, ...seed.typography.body, textAlign: "center" },
+  productLine: { minHeight: 70, paddingHorizontal: seed.spacing.x3, borderRadius: seed.radius.r4, borderWidth: 1, borderColor: seed.color.stroke.neutral, backgroundColor: seed.color.layer.default, flexDirection: "row", alignItems: "center", gap: seed.spacing.x3 },
+  productLineIcon: { width: 40, height: 40, borderRadius: seed.radius.r3, backgroundColor: seed.color.background.brandWeak, alignItems: "center", justifyContent: "center" },
+  productLineCopy: { flex: 1, minWidth: 0 },
+  productIp: { color: colors.muted, ...seed.typography.caption },
+  productName: { marginTop: seed.spacing.x0_5, color: colors.ink, ...seed.typography.bodyStrong },
+  syncMessage: { color: colors.muted, ...seed.typography.caption, textAlign: "center" },
+  leaveButton: { minHeight: seed.size.touchTarget, alignItems: "center", justifyContent: "center" },
+  leaveLabel: { color: seed.color.foreground.critical, ...seed.typography.label, fontWeight: "700" },
+  pressed: { opacity: seed.state.pressedOpacity },
 });

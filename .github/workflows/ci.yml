@@ -121,10 +121,19 @@ jobs:
       - name: Prove migration re-entry is a no-op
         run: pnpm run db:migrate
 
-      - name: Build API integration suite
-        run: pnpm --filter @dabboba/api build
+      - name: Build database integration suites
+        run: |
+          pnpm --filter @dabboba/api build
+          pnpm --filter @dabboba/worker build
 
       - name: Run PostgreSQL-backed API integration tests
         env:
+          DATABASE_URL: ""
           DABBOBA_TEST_DATABASE_URL: postgresql://dabboba:dabboba_ci_only@127.0.0.1:5432/dabboba_ci
         run: pnpm --filter @dabboba/api test
+
+      - name: Run PostgreSQL-backed worker integration tests
+        env:
+          DATABASE_URL: ""
+          DABBOBA_TEST_DATABASE_URL: postgresql://dabboba:dabboba_ci_only@127.0.0.1:5432/dabboba_ci
+        run: pnpm --filter @dabboba/worker test

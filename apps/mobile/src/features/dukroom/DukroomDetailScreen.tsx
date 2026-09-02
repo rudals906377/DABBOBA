@@ -14,8 +14,9 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { KoreanPixelTitle } from "@/components/RootCategoryTitle";
+import { KoreanPixelTitle, KoreanPixelTitleAccessory } from "@/components/RootCategoryTitle";
 import { AppText as Text, AppTextInput as TextInput } from "@/components/Typography";
+import { SeedInlineGuidance } from "@/design-system/components";
 import { seed } from "@/design-system/seed";
 import {
   createDukroomComment,
@@ -188,10 +189,13 @@ export function DukroomDetailScreen() {
         ) : (
           <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>
             {item.isExample ? (
-              <View style={styles.exampleBanner}>
-                <Ionicons name="eye-outline" size={19} color={colors.greenInk} />
-                <Text style={styles.exampleText}>등록 상품으로 구성한 화면 예시입니다. 좋아요와 댓글은 서버에 저장되지 않아요.</Text>
-              </View>
+              <SeedInlineGuidance
+                style={styles.exampleGuidance}
+                paragraphs={[
+                  "등록 상품으로 구성한 화면 예시입니다.",
+                  "좋아요와 댓글은 서버에 저장되지 않아요.",
+                ]}
+              />
             ) : null}
 
             <View style={styles.authorRow}>
@@ -243,7 +247,7 @@ export function DukroomDetailScreen() {
             </View>
 
             <View style={styles.commentSection}>
-              <View style={styles.sectionHeader}><KoreanPixelTitle variant="section">댓글</KoreanPixelTitle><Text style={styles.sectionCount}>{snapshot.comments.length}개</Text></View>
+              <View style={styles.sectionHeader}><KoreanPixelTitle variant="section">댓글</KoreanPixelTitle><KoreanPixelTitleAccessory>{snapshot.comments.length}개</KoreanPixelTitleAccessory></View>
               {snapshot.comments.length ? snapshot.comments.map((entry) => <CommentRow key={entry.id} comment={entry} />) : (
                 <View style={styles.commentEmpty}><Text style={styles.commentEmptyTitle}>아직 댓글이 없어요</Text><Text style={styles.commentEmptyBody}>첫 번째 수집 이야기를 남겨보세요.</Text></View>
               )}
@@ -320,14 +324,13 @@ const styles = StyleSheet.create({
   header: { minHeight: seed.size.topNavigation, paddingHorizontal: seed.spacing.x3_5, flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: seed.color.stroke.neutral, backgroundColor: seed.color.layer.default },
   headerAction: { width: seed.size.touchTarget, height: seed.size.touchTarget, alignItems: "center", justifyContent: "center" },
   headerTitle: { alignItems: "center" },
-  center: { flex: 1, alignItems: "center", justifyContent: "center", padding: 28, gap: 12 },
+  center: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: seed.spacing.globalGutter, paddingVertical: 28, gap: 12 },
   centerText: { color: colors.muted, fontSize: 14 },
   errorTitle: { color: colors.ink, fontSize: 16, lineHeight: 23, fontWeight: "800", textAlign: "center" },
   retryButton: { minHeight: 44, justifyContent: "center", paddingHorizontal: 18, borderRadius: 10, backgroundColor: colors.ink },
   retryLabel: { color: colors.white, fontSize: 13, fontWeight: "800" },
   content: { paddingBottom: seed.spacing.screenBottom },
-  exampleBanner: { marginHorizontal: seed.spacing.globalGutter, marginTop: seed.spacing.x4, padding: seed.spacing.componentDefault, borderRadius: seed.radius.r3, backgroundColor: seed.color.background.brandWeak, flexDirection: "row", alignItems: "center", gap: seed.spacing.x2_5 },
-  exampleText: { flex: 1, color: colors.greenInk, fontSize: 12, lineHeight: 18, fontWeight: "700" },
+  exampleGuidance: { marginHorizontal: seed.spacing.globalGutter, marginTop: seed.spacing.x4 },
   authorRow: { paddingHorizontal: seed.spacing.globalGutter, paddingTop: seed.spacing.x5, flexDirection: "row", alignItems: "center", gap: seed.spacing.x2_5 },
   avatar: { width: 42, height: 42, borderRadius: 21, alignItems: "center", justifyContent: "center", backgroundColor: colors.ink },
   avatarText: { color: colors.brand, fontSize: 16, fontWeight: "900" },
@@ -336,7 +339,7 @@ const styles = StyleSheet.create({
   postDate: { color: colors.muted, fontSize: 11, marginTop: 4 },
   ipBadge: { maxWidth: "42%", paddingHorizontal: seed.spacing.x2, paddingVertical: seed.spacing.x1_5, borderRadius: seed.radius.r2, backgroundColor: seed.color.background.brandWeak },
   ipBadgeLabel: { color: colors.greenInk, fontSize: 11, fontWeight: "800" },
-  hero: { margin: seed.spacing.globalGutter, aspectRatio: 1, overflow: "hidden", borderRadius: seed.radius.r5, borderWidth: 1, borderColor: seed.color.stroke.neutral, backgroundColor: seed.color.layer.default },
+  hero: { marginHorizontal: seed.spacing.globalGutter, marginVertical: seed.spacing.x4, aspectRatio: 1, overflow: "hidden", borderRadius: seed.radius.r5, borderWidth: 1, borderColor: seed.color.stroke.neutral, backgroundColor: seed.color.layer.default },
   heroImage: { width: "100%", height: "100%" },
   placeholder: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: seed.color.background.neutralWeak },
   postCopy: { paddingHorizontal: seed.spacing.globalGutter },
@@ -354,7 +357,6 @@ const styles = StyleSheet.create({
   crossLinkCaption: { color: colors.muted, fontSize: 12, marginTop: 4 },
   commentSection: { marginTop: seed.spacing.x8, paddingHorizontal: seed.spacing.globalGutter },
   sectionHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 12 },
-  sectionCount: { color: colors.muted, fontSize: 13, fontWeight: "800" },
   commentRow: { paddingVertical: 14, flexDirection: "row", alignItems: "flex-start", gap: 11, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.line },
   commentAvatar: { width: 34, height: 34, borderRadius: 17, alignItems: "center", justifyContent: "center", backgroundColor: "#E9F7E7" },
   commentAvatarText: { color: colors.greenInk, fontSize: 13, fontWeight: "900" },

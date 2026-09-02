@@ -14,6 +14,8 @@ export type ApiConfig = {
   adminOrigins: string[];
   sessionTokenPepper: string;
   adminProxyIdentitySecret: string | null;
+  supabaseUrl?: string | null;
+  supabaseJwtAudience?: string | null;
   sessionTtlDays: number;
   paymentProvider: string;
   paymentWebhookSecret: string | null;
@@ -58,6 +60,48 @@ function adminProxySecret(env: Environment, runtime: RuntimeEnvironment): string
     }
   }
   return value;
+}
+
+function supabaseAuthConfig(
+  env: Environment,
+  runtime: RuntimeEnvironment,
+): Pick<ApiConfig, "supabaseUrl" | "supabaseJwtAudience"> {
+  const rawUrl = optional(env, "SUPABASE_URL");
+  const rawAudience = optional(env, "SUPABASE_JWT_AUDIENCE");
+  if (!rawUrl) {
+    if (rawAudience) throw new Error("SUPABASE_JWT_AUDIENCE requires SUPABASE_URL");
+    if (runtime === "production") throw new Error("SUPABASE_URL is required in production");
+    return { supabaseUrl: null, supabaseJwtAudience: null };
+  }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(rawUrl);
+  } catch {
+    throw new Error("SUPABASE_URL must be a valid HTTP(S) origin");
+  }
+  if (
+    !/^https?:$/.test(parsed.protocol)
+    || parsed.username
+    || parsed.password
+    || parsed.pathname !== "/"
+    || parsed.search
+    || parsed.hash
+  ) {
+    throw new Error("SUPABASE_URL must be an HTTP(S) origin without credentials, path, query, or fragment");
+  }
+  if (runtime === "production" && parsed.protocol !== "https:") {
+    throw new Error("SUPABASE_URL must use HTTPS in production");
+  }
+
+  const audience = rawAudience || "authenticated";
+  if (!/^[A-Za-z0-9._:-]{1,128}$/.test(audience)) {
+    throw new Error("SUPABASE_JWT_AUDIENCE must be a 1-128 character token");
+  }
+  return {
+    supabaseUrl: parsed.origin,
+    supabaseJwtAudience: audience,
+  };
 }
 
 function paymentConfig(
@@ -142,6 +186,7 @@ export function loadApiConfig(env: Environment = process.env): ApiConfig {
   const proxyIdentitySecret = adminProxySecret(env, runtime);
   const webOrigins = originList(env, "WEB_ORIGINS", env.WEB_ORIGIN || "http://127.0.0.1:4174");
   const adminOrigins = originList(env, "ADMIN_ORIGINS", "http://127.0.0.1:4180");
+  const supabaseAuth = supabaseAuthConfig(env, runtime);
 
   if (runtime === "production") {
     if (pepper.length < 32 || pepper.includes("local-development")) {
@@ -166,6 +211,7 @@ export function loadApiConfig(env: Environment = process.env): ApiConfig {
     adminOrigins,
     sessionTokenPepper: pepper,
     adminProxyIdentitySecret: proxyIdentitySecret,
+    ...supabaseAuth,
     sessionTtlDays: integer(env, "SESSION_TTL_DAYS", 30, 1, 365),
     ...payment,
     gcsBucket: optional(env, "GCS_BUCKET"),

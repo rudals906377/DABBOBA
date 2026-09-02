@@ -36,6 +36,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/auth/providers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Returns the supported customer login methods and whether server-side Supabase token exchange is configured. */
+        get: operations["getCustomerLoginProviders"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/exchange": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description Verifies an asymmetric Supabase access token for exactly one Kakao, Naver, or phone identity and returns an opaque DABBOBA session. Accounts are keyed only by the broker issuer and subject, never email or phone; multi-provider broker identities require a separate explicit linking flow and are rejected here. */
+        post: operations["exchangeCustomerAccessToken"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/auth/dev-session": {
         parameters: {
             query?: never;
@@ -726,6 +760,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/kuji/rooms/{productId}/entries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description Atomically reuses the viewer's active entry or joins the product FIFO. An empty room grants one non-renewing 180-second checkout lease. */
+        post: operations["joinKujiRoom"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/kuji/rooms/{productId}/entries/{entryId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Returns an uncached authoritative snapshot and atomically expires stale occupancy before promoting the next FIFO entry. */
+        get: operations["getOwnKujiRoomEntry"];
+        put?: never;
+        post?: never;
+        /** @description Idempotently cancels an owned WAITING or CHECKOUT_PENDING entry, atomically cancels any linked unpaid order and releases its stock, points, and coupon, then promotes the next FIFO entry. DRAWING or payment-authorized/paid entries return conflict. */
+        delete: operations["leaveOwnKujiRoomEntry"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/orders": {
         parameters: {
             query?: never;
@@ -804,6 +873,22 @@ export interface paths {
         options?: never;
         head?: never;
         patch: operations["updateAccountProfile"];
+        trace?: never;
+    };
+    "/v1/account/basic-info": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getAccountBasicInfo"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch: operations["updateAccountBasicInfo"];
         trace?: never;
     };
     "/v1/account/default-address": {
@@ -1765,6 +1850,15 @@ export interface components {
             /** Format: date-time */
             timestamp: string;
         };
+        /** @enum {string} */
+        CustomerAuthProvider: "KAKAO" | "NAVER" | "PHONE";
+        CustomerLoginProviders: {
+            methods: components["schemas"]["CustomerAuthProvider"][];
+            brokerExchangeConfigured: boolean;
+        };
+        CustomerAccessTokenExchangeInput: {
+            accessToken: string;
+        };
         ErrorEnvelope: {
             error: {
                 code: string;
@@ -1798,7 +1892,7 @@ export interface components {
         /** @enum {string} */
         ProductCategory: "gacha" | "figure" | "kuji" | "tcg";
         /** @enum {string} */
-        MediaPurpose: "PROFILE" | "POST" | "COMMENT" | "INQUIRY" | "EXCHANGE" | "CATALOG_REQUEST";
+        MediaPurpose: "PROFILE" | "POST" | "COMMENT" | "INQUIRY" | "EXCHANGE" | "CATALOG_REQUEST" | "WANTED_REQUEST";
         /** @enum {string} */
         MediaMimeType: "image/jpeg" | "image/png" | "image/webp" | "image/gif";
         CreateMediaUploadInput: {
@@ -1847,7 +1941,7 @@ export interface components {
             /** Format: uuid */
             userId: string;
             /** Format: email */
-            email: string;
+            email: string | null;
             nickname: string;
             role: components["schemas"]["UserRole"];
             status: components["schemas"]["UserStatus"];
@@ -1875,6 +1969,25 @@ export interface components {
             nickname?: string;
             bio?: string | null;
             favoriteIpId?: string | null;
+            expectedVersion: number;
+        };
+        AccountBasicInfo: {
+            /** Format: uuid */
+            id: string;
+            nickname: string;
+            /** Format: email */
+            email: string | null;
+            phoneMasked: string | null;
+            /** Format: date */
+            birthDate: string | null;
+            version: number;
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        UpdateAccountBasicInfoInput: {
+            nickname?: string;
+            /** Format: date */
+            birthDate?: string | null;
             expectedVersion: number;
         };
         DefaultShippingAddress: {
@@ -2439,10 +2552,12 @@ export interface components {
             userId: string;
             authorNickname: string;
             category: components["schemas"]["ProductCategory"];
-            ipId: string;
+            ipId: string | null;
             ipNameKo: string;
             desiredItem: string;
             details: string;
+            /** Format: uuid */
+            mediaId: string | null;
             status: components["schemas"]["ContentStatus"];
             likeCount: number;
             likedByViewer: boolean;
@@ -2454,9 +2569,12 @@ export interface components {
         };
         CreateWantedRequestInput: {
             category: components["schemas"]["ProductCategory"];
-            ipId: string;
+            ipId?: string | null;
+            ipNameKo: string;
             desiredItem: string;
             details: string;
+            /** Format: uuid */
+            mediaId?: string | null;
         };
         SetWantedRequestLikeInput: {
             liked: boolean;
@@ -2592,6 +2710,11 @@ export interface components {
             couponCode?: string | null;
             /** @default 0 */
             pointAmount: number;
+            /**
+             * Format: uuid
+             * @description Required for a kuji-only order and rejected for non-kuji orders.
+             */
+            kujiRoomEntryId?: string;
         };
         PaymentWebhookInput: {
             eventId: string;
@@ -2719,7 +2842,7 @@ export interface components {
             /** Format: uuid */
             userId: string;
             /** Format: email */
-            email: string;
+            email: string | null;
             nickname: string;
             role: components["schemas"]["UserRole"];
             status: components["schemas"]["UserStatus"];
@@ -2798,9 +2921,12 @@ export interface components {
         UpdateWantedRequestInput: {
             expectedVersion: number;
             category?: components["schemas"]["ProductCategory"];
-            ipId?: string;
+            ipId?: string | null;
+            ipNameKo?: string;
             desiredItem?: string;
             details?: string;
+            /** Format: uuid */
+            mediaId?: string | null;
         };
         WantedRequestDeletionResult: {
             /** Format: uuid */
@@ -2808,6 +2934,53 @@ export interface components {
             /** @constant */
             status: "DELETED";
             version: number;
+        };
+        /** @enum {string} */
+        KujiRoomEntryState: "WAITING" | "CHECKOUT_PENDING" | "DRAWING" | "COMPLETED" | "CANCELLED" | "EXPIRED";
+        KujiRoomViewer: {
+            /** Format: uuid */
+            entryId: string;
+            state: components["schemas"]["KujiRoomEntryState"];
+            position: number | null;
+            peopleAhead: number;
+            /** Format: date-time */
+            checkoutExpiresAt: string | null;
+        };
+        KujiRoomActiveEntry: {
+            displayName: string;
+            /** @enum {string} */
+            phase: "CHECKOUT_PENDING" | "DRAWING";
+            /** Format: date-time */
+            checkoutExpiresAt: string | null;
+        };
+        KujiRoomWaitingPerson: {
+            /** Format: uuid */
+            entryId: string;
+            displayName: string;
+            position: number;
+            isViewer: boolean;
+        };
+        KujiRoomRecentActivity: {
+            /** Format: uuid */
+            id: string;
+            displayName: string;
+            prizeName: string;
+            /** Format: uri */
+            prizeImageUrl: string | null;
+            rarity: string;
+            /** Format: date-time */
+            committedAt: string;
+        };
+        KujiRoomSnapshot: {
+            /** Format: date-time */
+            serverNow: string;
+            version: number;
+            productId: string;
+            viewer: components["schemas"]["KujiRoomViewer"];
+            active: components["schemas"]["KujiRoomActiveEntry"] | null;
+            waitingCount: number;
+            waitingPeople: components["schemas"]["KujiRoomWaitingPerson"][];
+            recentActivity: components["schemas"]["KujiRoomRecentActivity"][];
         };
         PublicDrawOddsEntry: {
             /** Format: uuid */
@@ -3458,6 +3631,66 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Health"];
+                };
+            };
+        };
+    };
+    getCustomerLoginProviders: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Customer login provider discovery. */
+            200: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerLoginProviders"];
+                };
+            };
+        };
+    };
+    exchangeCustomerAccessToken: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CustomerAccessTokenExchangeInput"];
+            };
+        };
+        responses: {
+            /** @description DABBOBA customer session created. */
+            201: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionCreated"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimited"];
+            /** @description Supabase customer token exchange is not configured. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
         };
@@ -4455,7 +4688,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Wanted request created for an active catalog IP. */
+            /** @description Wanted request created with a typed work name, an optional catalog IP match, and an optional photo. */
             201: {
                 headers: {
                     [name: string]: unknown;
@@ -4577,7 +4810,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Authenticated user's GACHA or KUJI inventory whose immutable draw result belongs to the current owner and whose current status is OWNED, excluding active shipping, delivered, synthetic source-tagged, and transferred inventory. */
+            /** @description Authenticated user's GACHA inventory whose immutable draw result belongs to the current owner and whose current status is OWNED, excluding KUJI, active shipping, delivered, synthetic source-tagged, and transferred inventory. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -4602,7 +4835,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Open visible exchange listings, searchable by listing copy, product name, IP title, or IP alias. */
+            /** @description Open visible GACHA-origin exchange listings, searchable by listing copy, product name, IP title, or IP alias. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -4628,7 +4861,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Listing created from one owned inventory unit. */
+            /** @description Listing created from one eligible directly drawn GACHA inventory unit. */
             201: {
                 headers: {
                     [name: string]: unknown;
@@ -4680,7 +4913,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Product-only exchange proposal created from eligible owned draw inventory. */
+            /** @description Product-only exchange proposal created from eligible directly drawn GACHA inventory. */
             201: {
                 headers: {
                     [name: string]: unknown;
@@ -4892,6 +5125,96 @@ export interface operations {
             409: components["responses"]["Conflict"];
         };
     };
+    joinKujiRoom: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                productId: components["parameters"]["ProductId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Existing active entry returned without creating a duplicate. */
+            200: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    "X-Idempotent-Replay"?: "true";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KujiRoomSnapshot"];
+                };
+            };
+            /** @description Entry created as CHECKOUT_PENDING when free or WAITING when occupied. */
+            201: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KujiRoomSnapshot"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    getOwnKujiRoomEntry: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                productId: components["parameters"]["ProductId"];
+                entryId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current room snapshot for the entry owner. */
+            200: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KujiRoomSnapshot"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    leaveOwnKujiRoomEntry: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                productId: components["parameters"]["ProductId"];
+                entryId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Updated room snapshot with the viewer's terminal state. */
+            200: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KujiRoomSnapshot"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
     createOrder: {
         parameters: {
             query?: never;
@@ -5046,6 +5369,56 @@ export interface operations {
                     "application/json": components["schemas"]["AccountProfile"];
                 };
             };
+            409: components["responses"]["Conflict"];
+        };
+    };
+    getAccountBasicInfo: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current user's private account basics. Verified phone identity is masked. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountBasicInfo"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    updateAccountBasicInfo: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateAccountBasicInfoInput"];
+            };
+        };
+        responses: {
+            /** @description Mutable account basics updated with optimistic concurrency control. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountBasicInfo"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
             409: components["responses"]["Conflict"];
         };
     };

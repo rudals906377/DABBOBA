@@ -7,7 +7,7 @@ import {
   writeAuthTokens,
 } from "@/lib/session-store";
 
-const DEVELOPMENT_EMAIL = "mobile-test@dabboba.local";
+const DEVELOPMENT_EMAIL = "app@dabboba.local";
 
 export async function ensureDevelopmentAuthSession(
   apiBaseUrl: string,
@@ -27,7 +27,7 @@ export async function ensureDevelopmentAuthSession(
     body: { email: DEVELOPMENT_EMAIL },
   });
   if (!result.data) {
-    throw new Error(errorMessage(result.error, "테스트 계정에 로그인하지 못했습니다."));
+    throw new Error(errorMessage(result.error, "로그인 정보를 확인하지 못했습니다."));
   }
 
   // The local development endpoint issues one bearer token. Keep the second

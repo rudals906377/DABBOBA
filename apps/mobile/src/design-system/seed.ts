@@ -66,7 +66,7 @@ export const seed = {
     x13: 52,
     x14: 56,
     x16: 64,
-    globalGutter: 16,
+    globalGutter: 12,
     componentDefault: 12,
     navToTitle: 20,
     screenBottom: 56,

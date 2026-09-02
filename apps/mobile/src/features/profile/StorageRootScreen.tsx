@@ -17,6 +17,7 @@ import {
   useRootNavigationScroll,
 } from "@/components/RootFloatingTabBar";
 import { AppText as Text } from "@/components/Typography";
+import { SeedInlineGuidance } from "@/design-system/components";
 import { seed } from "@/design-system/seed";
 import { StorageHubContent } from "@/features/profile/ProfileSectionScreen";
 import { useProfileSnapshot } from "@/features/profile/use-profile-snapshot";
@@ -77,10 +78,9 @@ export function StorageRootScreen() {
           ) : null}
 
           {profileState.snapshot?.isExample ? (
-            <View style={styles.exampleBanner}>
-              <View style={styles.exampleDot} />
-              <Text style={styles.exampleText}>로그인 전에는 보관함과 신청 과정을 확인할 수 있는 화면 예시가 표시돼요.</Text>
-            </View>
+            <SeedInlineGuidance style={styles.exampleGuidance}>
+              로그인하면 보관 중인 상품과 신청 내역을 확인할 수 있어요.
+            </SeedInlineGuidance>
           ) : null}
 
           {profileState.snapshot ? (
@@ -119,7 +119,5 @@ const styles = StyleSheet.create({
   retryButton: { minHeight: seed.size.touchTarget, justifyContent: "center", marginTop: seed.spacing.x3, paddingHorizontal: seed.spacing.x4, borderRadius: seed.radius.r3, backgroundColor: colors.ink },
   retryLabel: { color: colors.white, fontSize: 13, fontWeight: "800" },
   pressed: { opacity: seed.state.pressedOpacity },
-  exampleBanner: { minHeight: seed.size.touchTarget, flexDirection: "row", alignItems: "center", gap: seed.spacing.x2, borderRadius: seed.radius.r3, paddingHorizontal: seed.spacing.x3_5, marginBottom: seed.spacing.x4, backgroundColor: seed.color.background.brandWeak },
-  exampleDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.greenInk },
-  exampleText: { flex: 1, color: colors.greenInk, fontSize: 10, lineHeight: 16, fontWeight: "700" },
+  exampleGuidance: { marginBottom: seed.spacing.x4 },
 });

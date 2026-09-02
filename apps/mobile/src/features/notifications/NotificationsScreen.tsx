@@ -1,10 +1,10 @@
 import { Ionicons } from "@expo/vector-icons";
 import Constants from "expo-constants";
-import { useRouter } from "expo-router";
+import { type Href, useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { KoreanPixelTitle } from "@/components/RootCategoryTitle";
+import { KoreanPixelTitle, KoreanPixelTitleAccessory } from "@/components/RootCategoryTitle";
 import { AppText as Text } from "@/components/Typography";
 import { seed } from "@/design-system/seed";
 import {
@@ -69,17 +69,22 @@ export function NotificationsScreen() {
     else router.replace("/(tabs)");
   };
 
-  const markRead = async (notification: AccountNotification) => {
-    if (!accessToken || notification.readAt || pendingId) return;
-    setPendingId(notification.id);
-    try {
-      const updated = await markAccountNotificationRead(runtime.apiBaseUrl, accessToken, notification.id);
-      setNotifications((current) => current.map((item) => item.id === updated.id ? updated : item));
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "알림을 읽음 처리하지 못했습니다.");
-    } finally {
-      setPendingId(null);
+  const openNotification = async (notification: AccountNotification) => {
+    if (!notification.readAt) {
+      if (!accessToken || pendingId) return;
+      setPendingId(notification.id);
+      try {
+        const updated = await markAccountNotificationRead(runtime.apiBaseUrl, accessToken, notification.id);
+        setNotifications((current) => current.map((item) => item.id === updated.id ? updated : item));
+      } catch (error) {
+        setMessage(error instanceof Error ? error.message : "알림을 읽음 처리하지 못했습니다.");
+        return;
+      } finally {
+        setPendingId(null);
+      }
     }
+
+    router.push(`/notifications/${encodeURIComponent(notification.id)}` as Href);
   };
 
   const unreadCount = notifications.filter((notification) => !notification.readAt).length;
@@ -91,7 +96,7 @@ export function NotificationsScreen() {
           <Ionicons name="chevron-back" size={27} color={colors.ink} />
         </Pressable>
         <KoreanPixelTitle variant="header">알림함</KoreanPixelTitle>
-        <View style={styles.headerAction}>{unreadCount ? <Text style={styles.unreadCount}>{unreadCount > 99 ? "99+" : unreadCount}</Text> : null}</View>
+        <View style={styles.headerAction}>{unreadCount ? <KoreanPixelTitleAccessory style={styles.unreadCount}>{unreadCount > 99 ? "99+" : unreadCount}</KoreanPixelTitleAccessory> : null}</View>
       </View>
 
       <ScrollView
@@ -120,7 +125,7 @@ export function NotificationsScreen() {
             {message ? <View style={styles.inlineError}><Text style={styles.inlineErrorText}>{message}</Text></View> : null}
             <View style={styles.list}>
               {notifications.map((notification) => (
-                <NotificationRow key={notification.id} notification={notification} pending={pendingId === notification.id} onPress={() => void markRead(notification)} />
+                <NotificationRow key={notification.id} notification={notification} pending={pendingId === notification.id} onPress={() => void openNotification(notification)} />
               ))}
             </View>
           </>
@@ -168,8 +173,8 @@ const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: seed.color.layer.basement },
   header: { minHeight: seed.size.topNavigation, paddingHorizontal: seed.spacing.x2_5, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: seed.color.stroke.neutral, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   headerAction: { width: seed.size.touchTarget, height: seed.size.touchTarget, alignItems: "center", justifyContent: "center" },
-  unreadCount: { minWidth: 24, height: 24, paddingHorizontal: 6, borderRadius: 12, overflow: "hidden", backgroundColor: colors.brand, color: colors.ink, fontSize: 11, lineHeight: 24, fontWeight: "900", textAlign: "center" },
-  content: { padding: seed.spacing.globalGutter, paddingBottom: seed.spacing.screenBottom },
+  unreadCount: { minWidth: 24, height: 24, paddingHorizontal: 6, borderRadius: 12, overflow: "hidden", backgroundColor: colors.brand, color: colors.ink, fontSize: 11, lineHeight: 24, textAlign: "center" },
+  content: { paddingHorizontal: seed.spacing.globalGutter, paddingTop: seed.spacing.x4, paddingBottom: seed.spacing.screenBottom },
   description: { color: colors.muted, fontSize: 12, lineHeight: 18, marginBottom: 18 },
   list: { gap: 10 },
   notification: { minHeight: 112, padding: seed.spacing.x3_5, borderRadius: seed.radius.r4, borderWidth: 1, borderColor: seed.color.stroke.neutral, backgroundColor: seed.color.layer.default, flexDirection: "row", alignItems: "flex-start", gap: seed.spacing.componentDefault },

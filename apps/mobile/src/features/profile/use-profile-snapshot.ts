@@ -1,12 +1,16 @@
 import Constants from "expo-constants";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Platform } from "react-native";
-import { fetchProfileSnapshot, type ProfileSnapshot } from "@/features/profile/profile-api";
+import {
+  fetchProfileSnapshot,
+  ProfileApiError,
+  type ProfileSnapshot,
+} from "@/features/profile/profile-api";
 import {
   resolveMobileRuntimeConfig,
   type MobilePlatform,
 } from "@/lib/runtime-config";
-import { readAuthTokens } from "@/lib/session-store";
+import { clearAuthTokens, readAuthTokens } from "@/lib/session-store";
 
 export function useProfileSnapshot() {
   const runtime = useMemo(
@@ -29,7 +33,15 @@ export function useProfileSnapshot() {
     try {
       const tokens = await readAuthTokens();
       setAccessToken(tokens?.accessToken ?? null);
-      const next = await fetchProfileSnapshot(runtime.apiBaseUrl, tokens?.accessToken);
+      let next: ProfileSnapshot;
+      try {
+        next = await fetchProfileSnapshot(runtime.apiBaseUrl, tokens?.accessToken);
+      } catch (error) {
+        if (!(error instanceof ProfileApiError) || error.status !== 401 || !tokens) throw error;
+        await clearAuthTokens();
+        setAccessToken(null);
+        next = await fetchProfileSnapshot(runtime.apiBaseUrl);
+      }
       setSnapshot(next);
       setMessage("");
     } catch (error) {

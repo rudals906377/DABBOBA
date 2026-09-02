@@ -16,15 +16,19 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import type { CatalogProduct } from "@dabboba/contracts";
+import { GachaMachineFrame } from "@/components/GachaMachineFrame";
+import { KujiProductFrame } from "@/components/KujiProductFrame";
+import { ProductInfoDivider } from "@/components/ProductInfoDivider";
 import { KoreanPixelTitle, RootCategoryTitle } from "@/components/RootCategoryTitle";
 import { RootHeaderActions } from "@/components/RootHeaderActions";
 import {
   ROOT_NAVIGATION_CONTENT_INSET,
   useRootNavigationScroll,
 } from "@/components/RootFloatingTabBar";
-import { AppText as Text, AppTextInput as TextInput, BalancedAppText } from "@/components/Typography";
+import { AppText as Text, AppTextInput as TextInput } from "@/components/Typography";
 import { SeedActionButton, SeedChip, SeedIconButton, SeedInputShell } from "@/design-system/components";
 import { seed } from "@/design-system/seed";
+import { PRODUCT_CATEGORY_OPTIONS } from "@/features/catalog/product-categories";
 import {
   categoryLabel,
   fetchShopSnapshot,
@@ -45,12 +49,16 @@ import {
 } from "@/lib/runtime-config";
 import { colors } from "@/theme";
 
-const CATEGORIES: ReadonlyArray<{ label: string; value: ProductCategory }> = [
-  { label: "가챠", value: "gacha" },
-  { label: "쿠지", value: "kuji" },
-  { label: "피규어", value: "figure" },
-  { label: "카드", value: "tcg" },
-];
+const FIXTURE_CONTENT_ASPECT_RATIOS: Readonly<Record<string, number>> = {
+  "/assets/dabboba/products/ip/blue-lock.jpg": 1032 / 1200,
+  "/assets/dabboba/products/ip/dandadan.jpg": 1035 / 1200,
+  "/assets/dabboba/products/ip/demon-slayer.jpg": 1034 / 1200,
+  "/assets/dabboba/products/ip/detective-conan.jpg": 1031 / 1200,
+  "/assets/dabboba/products/ip/haikyu.jpg": 1039 / 1200,
+  "/assets/dabboba/products/ip/jujutsu-kaisen.jpg": 489 / 560,
+  "/assets/dabboba/products/ip/oshi-no-ko.jpg": 1035 / 1200,
+  "/assets/dabboba/products/ip/pokemon.jpg": 328 / 658,
+};
 
 export function ShopScreen() {
   const rootNavigationScroll = useRootNavigationScroll();
@@ -135,11 +143,7 @@ export function ShopScreen() {
           <RootHeaderActions />
         </View>
 
-        <BalancedAppText style={styles.categoryDescription}>
-          {"가챠와 쿠지를 먼저 만나보세요.\n피규어와 카드는 차례로 준비하고 있어요."}
-        </BalancedAppText>
-
-        <SeedInputShell focused={searchFocused} style={styles.searchBox}>
+        <SeedInputShell focused={searchFocused} variant="search" style={styles.searchBox}>
           <Ionicons name="search-outline" size={20} color={colors.muted} />
           <TextInput
             value={query}
@@ -178,7 +182,7 @@ export function ShopScreen() {
 
         <View style={styles.categoryToolbar}>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.categoryScroll} contentContainerStyle={styles.categoryRail}>
-            {CATEGORIES.map((category) => {
+            {PRODUCT_CATEGORY_OPTIONS.map((category) => {
               const active = selectedCategory === category.value;
               return (
                 <SeedChip
@@ -227,13 +231,14 @@ export function ShopScreen() {
               </View>
             ) : visibleProducts.length ? (
               <View style={styles.productGrid}>
-                {visibleProducts.map((product) => (
+                {visibleProducts.map((product, index) => (
                   <ProductCard
                     key={product.id}
                     product={product}
                     ipName={ipNames.get(product.ipId) ?? "등록 작품"}
                     assetBaseUrl={runtime.assetBaseUrl}
                     wide={selectedCategory === "kuji"}
+                    divided={index < visibleProducts.length - 1}
                     onPress={() => openProduct(product)}
                   />
                 ))}
@@ -344,12 +349,14 @@ function ProductCard({
   ipName,
   assetBaseUrl,
   wide,
+  divided,
   onPress,
 }: {
   product: CatalogProduct;
   ipName: string;
   assetBaseUrl: string | null;
   wide: boolean;
+  divided: boolean;
   onPress: () => void;
 }) {
   const uri = resolveCatalogImageUrl(product.imageUrl, assetBaseUrl, product.version);
@@ -363,10 +370,12 @@ function ProductCard({
       <AdaptiveProductMedia uri={uri} category={product.category} />
       <Text numberOfLines={1} style={styles.productIp}>{ipName}</Text>
       <Text numberOfLines={2} style={styles.productName}>{productSubjectTitle(product.name, ipName)}</Text>
+      <ProductInfoDivider style={styles.productFieldDivider} />
       <View style={styles.productMeta}>
         <Text style={styles.productPrice}>{product.price.toLocaleString("ko-KR")}원</Text>
         <Text style={styles.productStock}>{product.availableQuantity}개</Text>
       </View>
+      {divided ? <ProductInfoDivider style={styles.productBoundaryDivider} /> : null}
     </Pressable>
   );
 }
@@ -388,7 +397,9 @@ function AdaptiveProductMedia({
     Image.getSize(
       uri,
       (width, height) => {
-        if (active && width > 0 && height > 0) setImageAspectRatio(width / height);
+        if (active && width > 0 && height > 0) {
+          setImageAspectRatio(displayProductAspectRatio(uri, width, height));
+        }
       },
       () => undefined,
     );
@@ -396,25 +407,31 @@ function AdaptiveProductMedia({
   }, [uri]);
 
   return (
-    <View style={[styles.productImageFrame, { aspectRatio: imageAspectRatio }]}>
-      {uri ? (
-        <Image
-          source={{ uri }}
-          resizeMode="contain"
-          style={styles.productImage}
-          onLoad={({ nativeEvent }) => {
-            const { width, height } = nativeEvent.source;
-            if (width > 0 && height > 0) setImageAspectRatio(width / height);
-          }}
-        />
-      ) : <MediaPlaceholder />}
-      <View style={styles.categoryBadge}><Text style={styles.categoryBadgeLabel}>{categoryLabel(category)}</Text></View>
-    </View>
+    <GachaMachineFrame category={category}>
+      <KujiProductFrame category={category}>
+        <View style={[styles.productImageFrame, category === "gacha" && styles.gachaMachineMediaWindow, { aspectRatio: imageAspectRatio }]}>
+          {uri ? (
+            <Image
+              source={{ uri }}
+              resizeMode="cover"
+              style={styles.productImage}
+              onLoad={({ nativeEvent }) => {
+                const { width, height } = nativeEvent.source;
+                if (width > 0 && height > 0) {
+                  setImageAspectRatio(displayProductAspectRatio(uri, width, height));
+                }
+              }}
+            />
+          ) : <MediaPlaceholder />}
+          {category !== "gacha" ? <View style={styles.categoryBadge}><Text style={styles.categoryBadgeLabel}>{categoryLabel(category)}</Text></View> : null}
+        </View>
+      </KujiProductFrame>
+    </GachaMachineFrame>
   );
 }
 
 function MediaPlaceholder() {
-  return <View style={styles.mediaPlaceholder}><Text style={styles.mediaPlaceholderLabel}>IMAGE READY</Text></View>;
+  return <View style={styles.mediaPlaceholder}><Text style={styles.mediaPlaceholderLabel}>이미지 준비 중</Text></View>;
 }
 
 function firstParam(value: string | string[] | undefined): string | undefined {
@@ -425,11 +442,17 @@ function normalizeSearch(value: string): string {
   return value.normalize("NFKC").trim().toLocaleLowerCase("ko-KR").replace(/\s+/g, " ");
 }
 
+function displayProductAspectRatio(uri: string, width: number, height: number): number {
+  const sourcePath = uri.split("?", 1)[0] ?? uri;
+  const fixtureRatio = Object.entries(FIXTURE_CONTENT_ASPECT_RATIOS)
+    .find(([path]) => sourcePath.endsWith(path))?.[1];
+  return fixtureRatio ?? width / height;
+}
+
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: seed.color.layer.basement },
   content: { paddingBottom: ROOT_NAVIGATION_CONTENT_INSET },
   header: { minHeight: seed.size.topNavigation, paddingHorizontal: seed.spacing.globalGutter, flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: seed.color.stroke.neutral },
-  categoryDescription: { marginHorizontal: seed.spacing.globalGutter, marginTop: seed.spacing.x3_5, color: seed.color.foreground.muted, ...seed.typography.label },
   searchBox: { marginHorizontal: seed.spacing.globalGutter, marginTop: seed.spacing.x3_5 },
   searchInput: { flex: 1, color: colors.ink, fontSize: 15, paddingVertical: 12 },
   clearSearch: { width: seed.size.touchTarget, height: seed.size.touchTarget, marginRight: -seed.spacing.x2 },
@@ -446,20 +469,23 @@ const styles = StyleSheet.create({
   filterActiveDot: { position: "absolute", top: 5, right: 5, width: 5, height: 5, borderRadius: 3, backgroundColor: colors.greenInk },
   comingSoon: { minHeight: 320, marginTop: seed.spacing.x7, paddingHorizontal: seed.spacing.globalGutter, alignItems: "center", justifyContent: "center" },
   comingSoonBody: { marginTop: seed.spacing.x3_5, color: colors.muted, fontSize: 14, lineHeight: 21, textAlign: "center" },
-  loading: { paddingVertical: 70, alignItems: "center", gap: 12 },
+  loading: { paddingHorizontal: seed.spacing.globalGutter, paddingVertical: 70, alignItems: "center", gap: 12 },
   loadingText: { color: colors.muted, fontSize: 14 },
   productGrid: { marginTop: seed.spacing.x7, paddingHorizontal: seed.spacing.globalGutter, flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between", rowGap: seed.spacing.x6 },
-  productCard: { width: "48%" },
+  productCard: { width: "48%", paddingBottom: seed.spacing.x3 },
   kujiProductCard: { width: "100%" },
-  productImageFrame: { width: "100%", borderRadius: seed.radius.r4, overflow: "hidden", borderWidth: 1, borderColor: seed.color.stroke.neutral, backgroundColor: seed.color.layer.default },
+  productImageFrame: { width: "100%", borderRadius: seed.radius.r4, overflow: "hidden" },
+  gachaMachineMediaWindow: { borderRadius: 0 },
   productImage: { width: "100%", height: "100%" },
   categoryBadge: { position: "absolute", top: 9, left: 9, paddingHorizontal: 8, paddingVertical: 6, borderRadius: 7, backgroundColor: colors.brand },
   categoryBadgeLabel: { color: colors.ink, fontSize: 11, fontWeight: "900" },
   productIp: { color: colors.muted, fontSize: 11, marginTop: 9 },
   productName: { minHeight: 40, color: colors.ink, fontSize: 14, lineHeight: 20, fontWeight: "800", marginTop: 3 },
+  productFieldDivider: { marginTop: seed.spacing.x2 },
   productMeta: { marginTop: 6, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 6 },
   productPrice: { flexShrink: 1, color: colors.ink, fontSize: 15, fontWeight: "900" },
   productStock: { color: colors.muted, fontSize: 11, fontWeight: "700" },
+  productBoundaryDivider: { position: "absolute", right: 0, bottom: 0, left: 0 },
   mediaPlaceholder: { flex: 1, alignItems: "center", justifyContent: "center", padding: 14, backgroundColor: "#EEF0EA" },
   mediaPlaceholderLabel: { color: colors.muted, fontFamily: "monospace", fontSize: 9, fontWeight: "700", textAlign: "center" },
   empty: { marginHorizontal: seed.spacing.globalGutter, paddingVertical: seed.spacing.x14, paddingHorizontal: seed.spacing.x5, alignItems: "center", borderRadius: seed.radius.r4, borderWidth: 1, borderColor: seed.color.stroke.neutral, backgroundColor: seed.color.layer.default },

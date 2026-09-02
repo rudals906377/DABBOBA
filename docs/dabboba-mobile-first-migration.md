@@ -54,7 +54,7 @@ DABBOBA의 제품 본체는 고객 웹이 아니라 `apps/mobile`의 Expo + Reac
 ## 사용자 또는 외부 승인이 필요한 항목
 
 - Supabase 조직/project, 서울 또는 확정 region, billing, production URL
-- Auth provider의 Google/Kakao/SMS 설정과 redirect URI, 계정 병합 정책
+- Auth provider의 Kakao/Naver/SMS 설정과 redirect URI, 자동 병합 금지 및 별도 계정 연결 정책
 - Storage bucket, publishable key와 서버 secret key의 secret manager 입력
 - Queues/`pgmq` 활성화와 운영 worker 배포 권한
 - 국내 PG 계약, webhook secret, 환불·정산 정책

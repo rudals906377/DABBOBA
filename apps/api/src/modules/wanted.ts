@@ -7,6 +7,7 @@ import { beginIdempotency, completeIdempotency, idempotencyKey, requestHash } fr
 import { booleanInput, enumInput, integerInput, objectInput, queryString, slugIdInput, stringInput, uuidInput } from "../lib/input.js";
 import { cursorPage, pagination } from "../lib/pagination.js";
 import { iso, numberValue } from "../lib/rows.js";
+import { assertReadyOwnedMedia } from "./media.js";
 import type { ApiContext } from "../types.js";
 
 type WantedRequestRow = {
@@ -14,10 +15,11 @@ type WantedRequestRow = {
   user_id: string;
   author_nickname: string;
   category: "gacha" | "figure" | "kuji" | "tcg";
-  ip_id: string;
+  ip_id: string | null;
   ip_name_ko: string;
   desired_item: string;
   details: string;
+  media_id: string | null;
   status: "ACTIVE" | "HIDDEN" | "DELETED";
   like_count: number | string;
   liked_by_viewer: boolean;
@@ -27,13 +29,13 @@ type WantedRequestRow = {
 };
 
 const wantedSelect = `SELECT w.id,w.user_id,u.nickname AS author_nickname,w.category,w.ip_id,
-  i.name_ko AS ip_name_ko,w.desired_item,w.details,w.status,w.version,w.created_at,w.updated_at,
+  w.ip_name_ko,w.desired_item,w.details,w.media_id,w.status,w.version,w.created_at,w.updated_at,
   (SELECT count(*) FROM wanted_request_likes l WHERE l.request_id=w.id) AS like_count,
   ($1::uuid IS NOT NULL AND EXISTS(
     SELECT 1 FROM wanted_request_likes viewer_like
     WHERE viewer_like.request_id=w.id AND viewer_like.user_id=$1
   )) AS liked_by_viewer
-  FROM wanted_requests w JOIN users u ON u.id=w.user_id JOIN catalog_ips i ON i.id=w.ip_id`;
+  FROM wanted_requests w JOIN users u ON u.id=w.user_id LEFT JOIN catalog_ips i ON i.id=w.ip_id`;
 
 const mapWanted = (row: WantedRequestRow) => ({
   id: row.id,
@@ -44,6 +46,7 @@ const mapWanted = (row: WantedRequestRow) => ({
   ipNameKo: row.ip_name_ko,
   desiredItem: row.desired_item,
   details: row.details,
+  mediaId: row.media_id,
   status: row.status,
   likeCount: numberValue(row.like_count),
   likedByViewer: row.liked_by_viewer,
@@ -113,13 +116,15 @@ function wantedPatch(body: unknown) {
   const category = input.category === undefined
     ? undefined
     : enumInput(input, "category", PRODUCT_CATEGORIES);
-  const ipId = input.ipId === undefined ? undefined : slugIdInput(input.ipId, "ipId");
+  const ipId = input.ipId === undefined ? undefined : input.ipId === null ? null : slugIdInput(input.ipId, "ipId");
+  const ipNameKo = stringInput(input, "ipNameKo", { max: 160, optional: true });
   const desiredItem = stringInput(input, "desiredItem", { max: 240, optional: true });
   const details = stringInput(input, "details", { max: 5000, optional: true });
-  if (category === undefined && ipId === undefined && desiredItem === undefined && details === undefined) {
+  const mediaId = input.mediaId === undefined ? undefined : input.mediaId === null ? null : uuidInput(input.mediaId, "mediaId");
+  if (category === undefined && ipId === undefined && ipNameKo === undefined && desiredItem === undefined && details === undefined && mediaId === undefined) {
     throw badRequest("수정할 신청 글 값을 보내 주세요.");
   }
-  return { expectedVersion, category, ipId, desiredItem, details };
+  return { expectedVersion, category, ipId, ipNameKo, desiredItem, details, mediaId };
 }
 
 export async function registerWantedRoutes(app: FastifyInstance, context: ApiContext) {
@@ -133,10 +138,10 @@ export async function registerWantedRoutes(app: FastifyInstance, context: ApiCon
       : enumInput(query, "category", PRODUCT_CATEGORIES);
     const ipId = query.ipId === undefined ? undefined : slugIdInput(query.ipId, "ipId");
     const values: unknown[] = [viewerId, limit + 1];
-    const filters = ["w.status='ACTIVE'", "i.is_active=true"];
+    const filters = ["w.status='ACTIVE'", "(w.ip_id IS NULL OR i.is_active=true)"];
     if (search) {
       values.push(`%${search}%`);
-      filters.push(`(w.desired_item ILIKE $${values.length} OR w.details ILIKE $${values.length} OR i.name_ko ILIKE $${values.length})`);
+      filters.push(`(w.desired_item ILIKE $${values.length} OR w.details ILIKE $${values.length} OR w.ip_name_ko ILIKE $${values.length})`);
     }
     if (category) {
       values.push(category);
@@ -162,30 +167,45 @@ export async function registerWantedRoutes(app: FastifyInstance, context: ApiCon
     config: { rateLimit: { max: 12, timeWindow: "1 minute" } },
   }, async (request, reply) => {
     const body = objectInput(request.body);
+    const ipId = body.ipId === undefined || body.ipId === null ? null : slugIdInput(body.ipId, "ipId");
+    const typedIpName = stringInput(body, "ipNameKo", { max: 160, optional: true });
+    if (!ipId && !typedIpName) throw badRequest("작품 이름을 입력해 주세요.");
     const input = {
       category: enumInput(body, "category", PRODUCT_CATEGORIES)!,
-      ipId: slugIdInput(body.ipId, "ipId"),
+      ipId,
+      ipNameKo: typedIpName ?? "",
       desiredItem: stringInput(body, "desiredItem", { max: 240 })!,
       details: stringInput(body, "details", { max: 5000 })!,
+      mediaId: body.mediaId === undefined || body.mediaId === null ? null : uuidInput(body.mediaId, "mediaId"),
     };
     const result = await idempotentMutation(context, request, {
       scope: "WANTED_REQUEST_CREATE",
       payload: input,
       resourceType: "WANTED_REQUEST",
       work: async (client) => {
-        const ip = await client.query("SELECT 1 FROM catalog_ips WHERE id=$1 AND is_active=true", [input.ipId]);
-        if (!ip.rowCount) throw badRequest("신청할 작품 IP를 찾을 수 없습니다.");
+        let ipNameKo = input.ipNameKo;
+        if (input.ipId) {
+          const ip = await client.query<{ name_ko: string }>(
+            "SELECT name_ko FROM catalog_ips WHERE id=$1 AND is_active=true",
+            [input.ipId],
+          );
+          if (!ip.rowCount) throw badRequest("신청할 작품 IP를 찾을 수 없습니다.");
+          ipNameKo = ip.rows[0]!.name_ko;
+        }
+        if (input.mediaId) {
+          await assertReadyOwnedMedia(client, request.actor!.userId, [input.mediaId], ["WANTED_REQUEST"]);
+        }
         const created = await client.query<{ id: string }>(
-          `INSERT INTO wanted_requests(user_id,category,ip_id,desired_item,details)
-           VALUES($1,$2,$3,$4,$5) RETURNING id`,
-          [request.actor!.userId, input.category, input.ipId, input.desiredItem, input.details],
+          `INSERT INTO wanted_requests(user_id,category,ip_id,ip_name_ko,desired_item,details,media_id)
+           VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
+          [request.actor!.userId, input.category, input.ipId, ipNameKo, input.desiredItem, input.details, input.mediaId],
         );
         const requestId = created.rows[0]!.id;
         await writeOutbox(client, request.id, {
           aggregateType: "WANTED_REQUEST",
           aggregateId: requestId,
           eventType: "wanted-request.created",
-          payload: { requestId, userId: request.actor!.userId, ipId: input.ipId, category: input.category },
+          payload: { requestId, userId: request.actor!.userId, ipId: input.ipId, ipNameKo, category: input.category, mediaId: input.mediaId },
         });
         return {
           statusCode: 201,
@@ -213,11 +233,13 @@ export async function registerWantedRoutes(app: FastifyInstance, context: ApiCon
           status: WantedRequestRow["status"];
           version: number;
           category: WantedRequestRow["category"];
-          ip_id: string;
+          ip_id: string | null;
+          ip_name_ko: string;
           desired_item: string;
           details: string;
+          media_id: string | null;
         }>(
-          "SELECT user_id,status,version,category,ip_id,desired_item,details FROM wanted_requests WHERE id=$1 FOR UPDATE",
+          "SELECT user_id,status,version,category,ip_id,ip_name_ko,desired_item,details,media_id FROM wanted_requests WHERE id=$1 FOR UPDATE",
           [requestId],
         );
         if (!before.rowCount) throw notFound("신청 글을 찾을 수 없습니다.");
@@ -225,20 +247,39 @@ export async function registerWantedRoutes(app: FastifyInstance, context: ApiCon
         if (current.user_id !== request.actor!.userId) throw forbidden();
         if (current.status !== "ACTIVE") throw conflict("공개 중인 신청 글만 수정할 수 있습니다.");
         if (current.version !== input.expectedVersion) throw conflict("신청 글이 다른 기기에서 먼저 수정되었습니다.");
+        let nextIpId = current.ip_id;
+        let nextIpNameKo = current.ip_name_ko;
         if (input.ipId !== undefined) {
-          const ip = await client.query("SELECT 1 FROM catalog_ips WHERE id=$1 AND is_active=true", [input.ipId]);
-          if (!ip.rowCount) throw badRequest("신청할 작품 IP를 찾을 수 없습니다.");
+          nextIpId = input.ipId;
+          if (input.ipId) {
+            const ip = await client.query<{ name_ko: string }>(
+              "SELECT name_ko FROM catalog_ips WHERE id=$1 AND is_active=true",
+              [input.ipId],
+            );
+            if (!ip.rowCount) throw badRequest("신청할 작품 IP를 찾을 수 없습니다.");
+            nextIpNameKo = ip.rows[0]!.name_ko;
+          } else if (input.ipNameKo !== undefined) {
+            nextIpNameKo = input.ipNameKo;
+          }
+        } else if (input.ipNameKo !== undefined) {
+          nextIpId = null;
+          nextIpNameKo = input.ipNameKo;
+        }
+        if (input.mediaId) {
+          await assertReadyOwnedMedia(client, request.actor!.userId, [input.mediaId], ["WANTED_REQUEST"]);
         }
         const updated = await client.query(
           `UPDATE wanted_requests
-           SET category=$2,ip_id=$3,desired_item=$4,details=$5,version=version+1
-           WHERE id=$1 AND version=$6 AND status='ACTIVE' RETURNING id`,
+           SET category=$2,ip_id=$3,ip_name_ko=$4,desired_item=$5,details=$6,media_id=$7,version=version+1
+           WHERE id=$1 AND version=$8 AND status='ACTIVE' RETURNING id`,
           [
             requestId,
             input.category ?? current.category,
-            input.ipId ?? current.ip_id,
+            nextIpId,
+            nextIpNameKo,
             input.desiredItem ?? current.desired_item,
             input.details ?? current.details,
+            input.mediaId === undefined ? current.media_id : input.mediaId,
             input.expectedVersion,
           ],
         );

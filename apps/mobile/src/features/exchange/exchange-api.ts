@@ -1,6 +1,8 @@
 import { randomUUID } from "expo-crypto";
-import { createDabbobaClient, errorMessage } from "@dabboba/api-client";
+import { errorMessage } from "@dabboba/api-client";
 import type { CatalogProduct, ExchangeListing, ExchangeOffer, InventoryUnit } from "@dabboba/contracts";
+import { PRODUCT_CATEGORY_VALUES } from "@/features/catalog/product-categories";
+import { createMobileDabbobaClient as createDabbobaClient } from "@/lib/mobile-api-client";
 
 export type ExchangeCategory = CatalogProduct["category"];
 
@@ -54,6 +56,7 @@ export async function fetchExchangeRoom(
   apiBaseUrl: string,
   category?: ExchangeCategory,
   query?: string,
+  includePreview = false,
 ): Promise<ExchangeRoomSnapshot> {
   const search = query?.trim() || undefined;
   const client = createDabbobaClient({ baseUrl: apiBaseUrl, requestId: randomUUID });
@@ -78,14 +81,16 @@ export async function fetchExchangeRoom(
     ip.id,
     [ip.nameKo, ip.nameEn, ip.nameJa ?? "", ...ip.aliases].join(" "),
   ]));
-  let items = listingResult.data.items.map(toCardItem);
+  let items = listingResult.data.items
+    .filter((listing) => listing.offeredInventory.sourceType === "GACHA")
+    .map(toCardItem);
 
-  if (items.length === 0) {
+  if (items.length === 0 && includePreview) {
     const productResult = await client.GET("/v1/catalog/products", {
       params: { query: { limit: 100, category } },
     });
     if (!productResult.data) {
-      throw new Error(errorMessage(productResult.error, "예시 상품을 불러오지 못했습니다."));
+      throw new Error(errorMessage(productResult.error, "상품 정보를 불러오지 못했습니다."));
     }
     items = createExampleItems(productResult.data.items, category, search, ipSearchTerms);
   }
@@ -117,7 +122,7 @@ export async function fetchExchangeDetail(
       params: { query: { limit: 100 } },
     });
     if (!productResult.data) {
-      throw new Error(errorMessage(productResult.error, "예시 상품을 불러오지 못했습니다."));
+      throw new Error(errorMessage(productResult.error, "상품 정보를 불러오지 못했습니다."));
     }
     const item = createExampleItems(productResult.data.items).find(
       (candidate) => candidate.product.id === productId,
@@ -146,12 +151,17 @@ export async function fetchExchangeDetail(
   }
 
   const listing = listingResult.data;
+  if (listing.offeredInventory.sourceType !== "GACHA") {
+    throw new Error("가챠로 뽑은 상품만 교환할 수 있어요.");
+  }
   const item = toCardItem(listing);
   return {
     item,
     ipName: ipNames[item.product.ipId] ?? null,
     ipNames,
-    proposals: (listing.offers ?? []).map(toProposalItem),
+    proposals: (listing.offers ?? [])
+      .filter((offer) => offer.offeredInventory.sourceType === "GACHA")
+      .map(toProposalItem),
     viewerRole: meResult.data?.actor.userId === listing.authorId ? "AUTHOR" : "VISITOR",
     listingStatus: listing.status,
   };
@@ -230,7 +240,7 @@ async function fetchExchangeInventory(
 }
 
 export function isDrawnExchangeInventory(item: InventoryUnit): boolean {
-  return item.status === "OWNED" && (item.sourceType === "GACHA" || item.sourceType === "KUJI");
+  return item.status === "OWNED" && item.sourceType === "GACHA";
 }
 
 export async function createExchangeListing(
@@ -312,7 +322,7 @@ function createExampleItems(
 ): ExchangeCardItem[] {
   const categories: ExchangeCategory[] = selectedCategory
     ? [selectedCategory]
-    : ["gacha", "figure", "kuji", "tcg"];
+    : [...PRODUCT_CATEGORY_VALUES];
 
   return categories.flatMap((category, categoryIndex) => {
     const categoryItems = products
@@ -321,7 +331,7 @@ function createExampleItems(
         id: `${EXAMPLE_PREFIX}${product.id}`,
         isExample: true,
         title: exampleTitle(category, index),
-        details: exampleDetails(category, product.name, index),
+        details: "",
         product,
         authorNickname: EXAMPLE_AUTHORS[(categoryIndex + index) % EXAMPLE_AUTHORS.length] ?? "다뽑아회원",
         offerCount: 4,
@@ -381,10 +391,6 @@ function exampleTitle(category: ExchangeCategory, index: number): string {
     tcg: ["카드 상품 서로 교환해요", "컬렉션 채우려고 카드 교환 구해요"],
   };
   return titles[category][index] ?? titles[category][0];
-}
-
-function exampleDetails(category: ExchangeCategory, productName: string, _index: number): string {
-  return `${productName}입니다. 직접 뽑은 뒤 배송을 신청하지 않고 보관함에 보관 중이며, 같은 ${categoryLabel(category)} 카테고리 상품 제안을 기다리고 있어요.`;
 }
 
 export function categoryLabel(category: ExchangeCategory): string {

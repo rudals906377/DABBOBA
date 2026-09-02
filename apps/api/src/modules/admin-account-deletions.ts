@@ -26,7 +26,7 @@ type AccountDeletionDecision = (typeof ACCOUNT_DELETION_DECISIONS)[number];
 type AccountDeletionRow = {
   id: string;
   user_id: string;
-  user_email: string;
+  user_email: string | null;
   nickname: string;
   status: AccountDeletionStatus;
   blocker_snapshot: unknown;

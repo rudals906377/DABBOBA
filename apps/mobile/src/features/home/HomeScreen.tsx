@@ -15,25 +15,37 @@ import {
   ScrollView,
   StyleSheet,
   View,
+  useWindowDimensions,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import type { CatalogProduct } from "@dabboba/contracts";
+import { GachaMachineFrame } from "@/components/GachaMachineFrame";
+import { KujiProductFrame } from "@/components/KujiProductFrame";
 import {
   ROOT_NAVIGATION_CONTENT_INSET,
   useRootNavigationScroll,
 } from "@/components/RootFloatingTabBar";
 import { RootHeaderActions } from "@/components/RootHeaderActions";
-import { KoreanPixelTitle } from "@/components/RootCategoryTitle";
+import { KoreanPixelTitle, KoreanPixelTitleAccessory } from "@/components/RootCategoryTitle";
+import { ProductInfoDivider } from "@/components/ProductInfoDivider";
 import { AppText as Text } from "@/components/Typography";
 import { SeedChip } from "@/design-system/components";
 import { seed } from "@/design-system/seed";
 import { fetchHomeCatalog, type HomeCatalogSnapshot } from "@/features/catalog/catalog-api";
+import {
+  PRODUCT_CATEGORY_OPTIONS,
+  productCategoryLabel,
+  type ProductCategoryLabel,
+} from "@/features/catalog/product-categories";
 import { AnnouncementTicker } from "@/features/home/AnnouncementTicker";
 import {
   DEFAULT_HOME_COLLECTION_IP_IDS,
+  HOME_PRODUCT_CARD_WIDTH,
   type DrawActivityItem,
   buildDrawActivityExamples,
+  buildDrawActivityTickerWindow,
   buildHomeCollections,
+  getHomeProductCardWidth,
   getTickerOverflowDistance,
   homeAnnouncementMessages,
 } from "@/features/home/home-feed";
@@ -47,7 +59,14 @@ import {
 import { colors } from "@/theme";
 
 const WORDMARK = require("../../../assets/dabboba-wordmark.png");
-const CATEGORIES = ["전체", "가챠", "쿠지", "피규어", "카드"] as const;
+const CATEGORIES: readonly ("전체" | ProductCategoryLabel)[] = [
+  "전체",
+  ...PRODUCT_CATEGORY_OPTIONS.map(({ label }) => label),
+];
+const DRAW_ACTIVITY_ROW_HEIGHT = 40;
+const DRAW_ACTIVITY_VISIBLE_ROWS = 3;
+const DRAW_ACTIVITY_HOLD_MS = 4_000;
+const DRAW_ACTIVITY_RISE_MS = 1_050;
 
 type LoadSource = "live" | "cache" | "empty";
 
@@ -79,7 +98,7 @@ export function HomeScreen() {
   const visibleProducts = useMemo(() => {
     const products = snapshot?.products.filter((product) => product.isActive && !product.isPrizeOnly) ?? [];
     if (selectedCategory === "전체") return products;
-    return products.filter((product) => categoryLabel(product.category) === selectedCategory);
+    return products.filter((product) => productCategoryLabel(product.category) === selectedCategory);
   }, [selectedCategory, snapshot]);
   const todayProducts = visibleProducts.slice(0, 4);
   const announcementMessages = useMemo(
@@ -87,7 +106,11 @@ export function HomeScreen() {
     [snapshot?.notices],
   );
   const drawActivityItems = useMemo(
-    () => buildDrawActivityExamples(snapshot?.products ?? [], snapshot?.ips ?? [], productSubjectTitle),
+    () => (
+      __DEV__
+        ? buildDrawActivityExamples(snapshot?.products ?? [], snapshot?.ips ?? [], productSubjectTitle)
+        : []
+    ),
     [snapshot?.ips, snapshot?.products],
   );
   const homeCollections = useMemo(() => {
@@ -139,7 +162,19 @@ export function HomeScreen() {
         <HomeHeader />
         <AnnouncementTicker
           messages={announcementMessages}
-          onPress={() => router.push("/profile/support" as Href)}
+          onPress={(announcement) => {
+            const notice = snapshot?.notices.find((item) => (
+              item.isPinned
+              && item.isPublished
+              && item.status === "ACTIVE"
+              && item.title.trim() === announcement
+            ));
+            if (notice) {
+              router.push(`/profile/notices/${encodeURIComponent(notice.id)}` as Href);
+              return;
+            }
+            router.push("/profile/support" as Href);
+          }}
         />
 
         {message ? (
@@ -183,17 +218,23 @@ export function HomeScreen() {
               ))}
             </ScrollView>
 
-            <View style={styles.productGrid}>
-              {todayProducts.map((product) => (
+            <ScrollView
+              horizontal
+              nestedScrollEnabled
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.productRail}
+            >
+              {todayProducts.map((product, index) => (
                 <ProductCard
                   key={product.id}
                   product={product}
                   ipName={ipNames.get(product.ipId) ?? "등록 작품"}
                   assetBaseUrl={runtime.assetBaseUrl}
+                  divided={index < todayProducts.length - 1}
                   onPress={() => router.push(`/product/${encodeURIComponent(product.id)}` as Href)}
                 />
               ))}
-            </View>
+            </ScrollView>
 
             {homeCollections.map((collection) => (
               <View key={collection.id}>
@@ -204,15 +245,17 @@ export function HomeScreen() {
                 />
                 <ScrollView
                   horizontal
+                  nestedScrollEnabled
                   showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={styles.collectionRail}
+                  contentContainerStyle={styles.productRail}
                 >
-                  {collection.products.map((product) => (
+                  {collection.products.map((product, index) => (
                     <CollectionProductCard
                       key={product.id}
                       product={product}
                       ipName={collection.ip.nameKo}
                       assetBaseUrl={runtime.assetBaseUrl}
+                      divided={index < collection.products.length - 1}
                       onPress={() => router.push(`/product/${encodeURIComponent(product.id)}` as Href)}
                     />
                   ))}
@@ -243,18 +286,18 @@ function SectionTitle({
   onTrailingPress,
 }: {
   title: string;
-  trailing: string;
+  trailing?: string;
   onTrailingPress?: () => void;
 }) {
   return (
     <View style={styles.sectionHeader}>
       <KoreanPixelTitle variant="section">{title}</KoreanPixelTitle>
       {onTrailingPress ? (
-        <Pressable accessibilityRole="button" accessibilityLabel={`${title} 전체보기`} onPress={onTrailingPress} style={styles.sectionTrailingButton}>
-          <Text style={styles.sectionTrailing}>전체보기</Text>
+        <Pressable accessibilityRole="button" accessibilityLabel={`${title} ${trailing}`} onPress={onTrailingPress} style={styles.sectionTrailingButton}>
+          <KoreanPixelTitleAccessory>{trailing}</KoreanPixelTitleAccessory>
           <Ionicons name="chevron-forward" size={14} color={colors.muted} />
         </Pressable>
-      ) : <Text style={styles.sectionTrailing}>{trailing}</Text>}
+      ) : trailing ? <KoreanPixelTitleAccessory>{trailing}</KoreanPixelTitleAccessory> : null}
     </View>
   );
 }
@@ -266,23 +309,87 @@ function DrawActivityPanel({
   items: ReturnType<typeof buildDrawActivityExamples>;
   onProductPress: (productId: string) => void;
 }) {
+  const [startIndex, setStartIndex] = useState(0);
+  const [reduceMotion, setReduceMotion] = useState(false);
+  const translateY = useRef(new Animated.Value(0)).current;
+  const itemSignature = useMemo(() => items.map((item) => item.id).join("|"), [items]);
+  const visibleRowCount = Math.min(DRAW_ACTIVITY_VISIBLE_ROWS, items.length);
+  const tickerItems = useMemo(
+    () => buildDrawActivityTickerWindow(items, startIndex, DRAW_ACTIVITY_VISIBLE_ROWS),
+    [items, startIndex],
+  );
+
+  useEffect(() => {
+    let active = true;
+    void AccessibilityInfo.isReduceMotionEnabled().then((enabled) => {
+      if (active) setReduceMotion(enabled);
+    });
+    const subscription = AccessibilityInfo.addEventListener("reduceMotionChanged", setReduceMotion);
+    return () => {
+      active = false;
+      subscription.remove();
+    };
+  }, []);
+
+  useEffect(() => {
+    translateY.stopAnimation();
+    translateY.setValue(0);
+    setStartIndex(0);
+  }, [itemSignature, translateY]);
+
+  useEffect(() => {
+    translateY.stopAnimation();
+    translateY.setValue(0);
+    if (reduceMotion || items.length <= 1) return undefined;
+
+    const animation = Animated.sequence([
+      Animated.delay(DRAW_ACTIVITY_HOLD_MS),
+      Animated.timing(translateY, {
+        toValue: -DRAW_ACTIVITY_ROW_HEIGHT,
+        duration: DRAW_ACTIVITY_RISE_MS,
+        easing: Easing.inOut(Easing.cubic),
+        useNativeDriver: true,
+      }),
+    ]);
+    animation.start(({ finished }) => {
+      if (finished) setStartIndex((current) => (current + 1) % items.length);
+    });
+    return () => animation.stop();
+  }, [itemSignature, items.length, reduceMotion, startIndex, translateY]);
+
   return (
     <>
-      <SectionTitle title="방금 뽑았어요" trailing="화면 예시" />
+      <SectionTitle title="방금 뽑았어요" />
       <View style={styles.activityCard}>
-        {items.length ? items.map((item, index) => (
-          <Pressable
-            key={item.id}
-            accessibilityRole="button"
-            accessibilityLabel={`${item.message} 상품 보기`}
-            onPress={() => onProductPress(item.productId)}
-            style={({ pressed }) => [styles.activityRow, index < items.length - 1 && styles.activityRowBorder, pressed && styles.pressed]}
-          >
-            <View style={styles.activityDot} />
-            <DrawActivityMarquee item={item} />
-            <Text style={styles.activityTime}>방금</Text>
-          </Pressable>
-        )) : <Text style={styles.activityEmpty}>새로운 뽑기 소식을 준비하고 있어요.</Text>}
+        {items.length ? (
+          <View style={[styles.activityViewport, { height: visibleRowCount * DRAW_ACTIVITY_ROW_HEIGHT }]}>
+            <Animated.View style={{ transform: [{ translateY }] }}>
+              {tickerItems.map((item, index) => (
+                <Pressable
+                  key={`${index}-${item.id}`}
+                  accessibilityRole="button"
+                  accessibilityLabel={`${item.message} 상품 보기`}
+                  accessibilityElementsHidden={index >= visibleRowCount}
+                  importantForAccessibility={index >= visibleRowCount ? "no-hide-descendants" : "auto"}
+                  pointerEvents={index >= visibleRowCount ? "none" : "auto"}
+                  onPress={() => onProductPress(item.productId)}
+                  style={({ pressed }) => [styles.activityRow, pressed && styles.pressed]}
+                >
+                  <View style={styles.activityDot} />
+                  <DrawActivityMarquee item={item} />
+                  <Text style={styles.activityTime}>방금</Text>
+                </Pressable>
+              ))}
+            </Animated.View>
+            {Array.from({ length: Math.max(visibleRowCount - 1, 0) }, (_, index) => (
+              <View
+                key={`divider-${index}`}
+                pointerEvents="none"
+                style={[styles.activityRowDivider, { top: (index + 1) * DRAW_ACTIVITY_ROW_HEIGHT }]}
+              />
+            ))}
+          </View>
+        ) : <Text style={styles.activityEmpty}>새로운 뽑기 소식을 준비하고 있어요.</Text>}
       </View>
     </>
   );
@@ -384,30 +491,31 @@ function ProductCard({
   product,
   ipName,
   assetBaseUrl,
+  divided,
   onPress,
 }: {
   product: CatalogProduct;
   ipName: string;
   assetBaseUrl: string | null;
+  divided: boolean;
   onPress: () => void;
 }) {
   const uri = resolveCatalogImageUrl(product.imageUrl, assetBaseUrl, product.version);
+  const { width: viewportWidth } = useWindowDimensions();
+  const cardWidth = getHomeProductCardWidth(product.category, viewportWidth, seed.spacing.globalGutter);
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={`${product.name} 상세 보기`}
       onPress={onPress}
-      style={({ pressed }) => [styles.productCard, pressed && styles.pressed]}
+      style={({ pressed }) => [styles.productCard, { width: cardWidth }, pressed && styles.pressed]}
     >
-      <View style={styles.productImageFrame}>
-        {uri ? <Image source={{ uri }} style={styles.productImage} resizeMode="cover" /> : <MediaPlaceholder />}
-        <View style={styles.categoryBadge}>
-          <Text style={styles.categoryBadgeLabel}>{categoryLabel(product.category)}</Text>
-        </View>
-      </View>
+      <HomeProductMedia uri={uri} category={product.category} variant="today" showBadge />
       <Text numberOfLines={1} style={styles.productIp}>{ipName}</Text>
       <Text numberOfLines={2} style={styles.productName}>{productSubjectTitle(product.name, ipName)}</Text>
+      <ProductInfoDivider style={styles.productFieldDivider} />
       <Text style={styles.productPrice}>{product.price.toLocaleString("ko-KR")}원</Text>
+      {divided ? <ProductInfoDivider orientation="vertical" style={styles.productCardDivider} /> : null}
     </Pressable>
   );
 }
@@ -416,28 +524,97 @@ function CollectionProductCard({
   product,
   ipName,
   assetBaseUrl,
+  divided,
   onPress,
 }: {
   product: CatalogProduct;
   ipName: string;
   assetBaseUrl: string | null;
+  divided: boolean;
   onPress: () => void;
 }) {
   const uri = resolveCatalogImageUrl(product.imageUrl, assetBaseUrl, product.version);
+  const { width: viewportWidth } = useWindowDimensions();
+  const cardWidth = getHomeProductCardWidth(product.category, viewportWidth, seed.spacing.globalGutter);
+  const isKuji = product.category === "kuji";
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={`${product.name} 상세 보기`}
       onPress={onPress}
-      style={({ pressed }) => [styles.collectionCard, pressed && styles.pressed]}
+      style={({ pressed }) => [styles.collectionCard, { width: cardWidth }, pressed && styles.pressed]}
     >
-      <View style={styles.collectionImageFrame}>
-        {uri ? <Image source={{ uri }} resizeMode="cover" style={styles.productImage} /> : <MediaPlaceholder />}
-      </View>
+      <HomeProductMedia uri={uri} category={product.category} variant="collection" showBadge={isKuji} />
       <Text numberOfLines={1} style={styles.collectionProductIp}>{ipName}</Text>
       <Text numberOfLines={2} style={styles.collectionProductName}>{productSubjectTitle(product.name, ipName)}</Text>
-      <Text style={styles.collectionProductMeta}>{categoryLabel(product.category)} · {product.price.toLocaleString("ko-KR")}원</Text>
+      <ProductInfoDivider style={styles.productFieldDivider} />
+      <Text style={styles.collectionProductMeta}>{productCategoryLabel(product.category)} · {product.price.toLocaleString("ko-KR")}원</Text>
+      {divided ? <ProductInfoDivider orientation="vertical" style={styles.productCardDivider} /> : null}
     </Pressable>
+  );
+}
+
+function HomeProductMedia({
+  uri,
+  category,
+  variant,
+  showBadge,
+}: {
+  uri: string | null;
+  category: CatalogProduct["category"];
+  variant: "today" | "collection";
+  showBadge: boolean;
+}) {
+  const isKuji = category === "kuji";
+  const fallbackAspectRatio = isKuji ? 16 / 9 : variant === "today" ? 1 : 1.24;
+  const [imageAspectRatio, setImageAspectRatio] = useState(fallbackAspectRatio);
+
+  useEffect(() => {
+    let active = true;
+    setImageAspectRatio(fallbackAspectRatio);
+    if (!isKuji || !uri) return () => { active = false; };
+
+    Image.getSize(
+      uri,
+      (width, height) => {
+        if (active && width > 0 && height > 0) setImageAspectRatio(width / height);
+      },
+      () => undefined,
+    );
+    return () => { active = false; };
+  }, [fallbackAspectRatio, isKuji, uri]);
+
+  return (
+    <GachaMachineFrame category={category}>
+      <KujiProductFrame category={category}>
+        <View
+          style={[
+            variant === "today" ? styles.productImageFrame : styles.collectionImageFrame,
+            category === "gacha" && styles.gachaMachineMediaWindow,
+            category === "kuji" && styles.kujiProductMediaWindow,
+            { aspectRatio: imageAspectRatio },
+          ]}
+        >
+          {uri ? (
+            <Image
+              source={{ uri }}
+              resizeMode={isKuji ? "contain" : "cover"}
+              style={styles.productImage}
+              onLoad={({ nativeEvent }) => {
+                if (!isKuji) return;
+                const { width, height } = nativeEvent.source;
+                if (width > 0 && height > 0) setImageAspectRatio(width / height);
+              }}
+            />
+          ) : <MediaPlaceholder />}
+          {showBadge && category !== "gacha" ? (
+            <View style={styles.categoryBadge}>
+              <Text style={styles.categoryBadgeLabel}>{productCategoryLabel(category)}</Text>
+            </View>
+          ) : null}
+        </View>
+      </KujiProductFrame>
+    </GachaMachineFrame>
   );
 }
 
@@ -465,16 +642,9 @@ function EventNoticeCard({ onPress }: { onPress: () => void }) {
 function MediaPlaceholder() {
   return (
     <View style={styles.mediaPlaceholder}>
-      <Text style={styles.mediaPlaceholderLabel}>IMAGE READY</Text>
+      <Text style={styles.mediaPlaceholderLabel}>이미지 준비 중</Text>
     </View>
   );
-}
-
-function categoryLabel(category: CatalogProduct["category"]): string {
-  if (category === "gacha") return "가챠";
-  if (category === "figure") return "피규어";
-  if (category === "kuji") return "쿠지";
-  return "카드";
 }
 
 const styles = StyleSheet.create({
@@ -504,7 +674,7 @@ const styles = StyleSheet.create({
   connectionNoticeText: { flex: 1, color: colors.ink, fontSize: 12, lineHeight: 18 },
   retry: { minHeight: 36, justifyContent: "center", paddingHorizontal: 10, borderRadius: 8, backgroundColor: colors.ink },
   retryLabel: { color: colors.white, fontSize: 11, fontWeight: "800" },
-  loading: { paddingVertical: 60, alignItems: "center", gap: seed.spacing.x3 },
+  loading: { paddingHorizontal: seed.spacing.globalGutter, paddingVertical: 60, alignItems: "center", gap: seed.spacing.x3 },
   loadingText: { color: colors.muted, fontSize: 13 },
   sectionHeader: {
     marginTop: seed.spacing.x7,
@@ -515,10 +685,10 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
   },
   sectionTrailingButton: { minHeight: 36, flexDirection: "row", alignItems: "center", gap: 2, paddingLeft: seed.spacing.x3 },
-  sectionTrailing: { color: colors.muted, fontSize: 12, fontWeight: "700" },
   activityCard: { marginHorizontal: seed.spacing.globalGutter, overflow: "hidden", borderRadius: seed.radius.r4, borderWidth: 1, borderColor: seed.color.stroke.neutral, backgroundColor: seed.color.layer.default },
-  activityRow: { minHeight: 40, flexDirection: "row", alignItems: "center", gap: seed.spacing.x2_5, paddingHorizontal: seed.spacing.x3_5 },
-  activityRowBorder: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: seed.color.stroke.neutral },
+  activityViewport: { overflow: "hidden" },
+  activityRow: { height: DRAW_ACTIVITY_ROW_HEIGHT, flexDirection: "row", alignItems: "center", gap: seed.spacing.x2_5, paddingHorizontal: seed.spacing.x3_5 },
+  activityRowDivider: { position: "absolute", left: 0, right: 0, height: StyleSheet.hairlineWidth, backgroundColor: seed.color.stroke.neutral },
   activityDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.brand },
   activityTextViewport: { flex: 1, height: 20, justifyContent: "center", overflow: "hidden" },
   activityTextTrack: { justifyContent: "center" },
@@ -530,21 +700,24 @@ const styles = StyleSheet.create({
   activityTime: { color: colors.muted, fontSize: 10 },
   activityEmpty: { color: colors.muted, fontSize: 12, padding: seed.spacing.x4 },
   categoryRail: { paddingHorizontal: seed.spacing.globalGutter, paddingBottom: seed.spacing.x4, gap: seed.spacing.betweenChips },
-  productGrid: { paddingHorizontal: seed.spacing.globalGutter, flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between", rowGap: seed.spacing.x6 },
-  productCard: { width: "48%" },
-  productImageFrame: { aspectRatio: 1, borderRadius: seed.radius.r4, overflow: "hidden", borderWidth: 1, borderColor: seed.color.stroke.neutral, backgroundColor: seed.color.layer.default },
+  productRail: { paddingHorizontal: seed.spacing.globalGutter, gap: seed.spacing.componentDefault },
+  productCard: { width: HOME_PRODUCT_CARD_WIDTH },
+  productImageFrame: { borderRadius: seed.radius.r4, overflow: "hidden", borderWidth: 1, borderColor: seed.color.stroke.neutral, backgroundColor: seed.color.layer.default },
   productImage: { width: "100%", height: "100%" },
   categoryBadge: { position: "absolute", top: 9, left: 9, borderRadius: seed.radius.r2, paddingHorizontal: 8, paddingVertical: 6, backgroundColor: colors.brand },
   categoryBadgeLabel: { color: colors.ink, fontSize: 11, fontWeight: "900" },
   productIp: { color: colors.muted, fontSize: 11, lineHeight: 16, marginTop: 9 },
   productName: { color: colors.ink, fontSize: 14, lineHeight: 20, fontWeight: "800", marginTop: 3 },
   productPrice: { color: colors.ink, fontSize: 15, fontWeight: "900", marginTop: 5 },
-  collectionRail: { paddingHorizontal: seed.spacing.globalGutter, gap: seed.spacing.componentDefault },
-  collectionCard: { width: 164 },
-  collectionImageFrame: { width: 164, aspectRatio: 1.24, overflow: "hidden", borderRadius: seed.radius.r4, backgroundColor: seed.color.background.neutralWeak },
+  collectionCard: { width: HOME_PRODUCT_CARD_WIDTH },
+  collectionImageFrame: { width: "100%", overflow: "hidden", borderRadius: seed.radius.r4, backgroundColor: seed.color.background.neutralWeak },
+  gachaMachineMediaWindow: { borderWidth: 0, borderRadius: 0 },
+  kujiProductMediaWindow: { borderWidth: 0, borderRadius: 0, backgroundColor: "transparent" },
   collectionProductIp: { color: colors.muted, fontSize: 10, lineHeight: 15, marginTop: seed.spacing.x2 },
   collectionProductName: { color: colors.ink, fontSize: 13, lineHeight: 19, fontWeight: "800", marginTop: seed.spacing.x1 },
   collectionProductMeta: { color: colors.muted, fontSize: 11, fontWeight: "700", marginTop: seed.spacing.x1 },
+  productFieldDivider: { marginTop: seed.spacing.x2 },
+  productCardDivider: { position: "absolute", top: 0, right: -7, bottom: 0 },
   eventSection: { marginBottom: seed.spacing.x4 },
   eventCard: { minHeight: 94, marginHorizontal: seed.spacing.globalGutter, paddingHorizontal: seed.spacing.x4, flexDirection: "row", alignItems: "center", gap: seed.spacing.x3, borderRadius: seed.radius.r4, backgroundColor: seed.color.background.brandSolid },
   eventIcon: { width: 42, height: 42, borderRadius: 21, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(252, 252, 248, 0.72)" },

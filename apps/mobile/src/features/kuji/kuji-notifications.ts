@@ -15,6 +15,8 @@ Notifications.setNotificationHandler({
 
 export async function scheduleKujiTurnExampleNotification(
   productId: string,
+  entryId: string,
+  checkoutExpiresAt: string,
   delaySeconds = 5,
 ): Promise<string> {
   const permission = await ensureNotificationPermission();
@@ -29,7 +31,13 @@ export async function scheduleKujiTurnExampleNotification(
     });
   }
 
-  const call = buildKujiTurnCall(productId, Date.now() + delaySeconds * 1_000);
+  const call = buildKujiTurnCall(
+    productId,
+    entryId,
+    checkoutExpiresAt,
+    new Date(Date.now() + delaySeconds * 1_000).toISOString(),
+    true,
+  );
   return Notifications.scheduleNotificationAsync({
     content: {
       title: call.title,
@@ -38,7 +46,10 @@ export async function scheduleKujiTurnExampleNotification(
       data: {
         kind: "KUJI_TURN",
         productId: call.productId,
-        claimExpiresAt: call.claimExpiresAt,
+        entryId: call.entryId,
+        checkoutExpiresAt: call.checkoutExpiresAt,
+        serverNow: call.serverNow,
+        ...(call.developmentFixture ? { kujiRoomFixture: "development" } : {}),
       },
     },
     trigger: {

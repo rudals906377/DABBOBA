@@ -6,7 +6,9 @@ import { ActivityIndicator, Keyboard, Platform, Pressable, ScrollView, StyleShee
 import { SafeAreaView } from "react-native-safe-area-context";
 import type { CatalogProduct } from "@dabboba/contracts";
 import { CatalogProductRow } from "@/components/CatalogProductRow";
+import { KoreanPixelTitle, KoreanPixelTitleAccessory } from "@/components/RootCategoryTitle";
 import { AppText as Text, AppTextInput as TextInput } from "@/components/Typography";
+import { SeedInputShell } from "@/design-system/components";
 import { seed } from "@/design-system/seed";
 import { fetchShopSnapshot, type ShopSnapshot } from "@/features/shop/shop-api";
 import { resolveMobileRuntimeConfig, type MobilePlatform } from "@/lib/runtime-config";
@@ -28,6 +30,7 @@ export function ProductSearchScreen() {
   const [snapshot, setSnapshot] = useState<ShopSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
+  const [searchFocused, setSearchFocused] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -76,13 +79,14 @@ export function ProductSearchScreen() {
         <Pressable accessibilityRole="button" accessibilityLabel="뒤로 가기" onPress={goBack} style={styles.headerAction}>
           <Ionicons name="chevron-back" size={27} color={colors.ink} />
         </Pressable>
-        <View style={styles.searchBox}>
+        <SeedInputShell focused={searchFocused} variant="search" style={styles.searchBox}>
           <Ionicons name="search-outline" size={20} color={colors.muted} />
           <TextInput
             autoFocus
             value={query}
             onChangeText={setQuery}
-            onBlur={Keyboard.dismiss}
+            onFocus={() => setSearchFocused(true)}
+            onBlur={() => { setSearchFocused(false); Keyboard.dismiss(); }}
             placeholder="상품명·작품 검색"
             placeholderTextColor="#8D948C"
             returnKeyType="search"
@@ -93,7 +97,7 @@ export function ProductSearchScreen() {
               <Ionicons name="close-circle" size={20} color={colors.muted} />
             </Pressable>
           ) : null}
-        </View>
+        </SeedInputShell>
       </View>
 
       <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>
@@ -109,7 +113,7 @@ export function ProductSearchScreen() {
           <State icon="search-outline" title="무엇을 찾고 있나요?" body="상품명이나 작품 이름을 입력하면 등록 상품을 바로 찾아드려요." />
         ) : results.length ? (
           <>
-            <View style={styles.resultHeader}><Text style={styles.resultTitle}>검색 결과</Text><Text style={styles.resultCount}>{results.length}개</Text></View>
+            <View style={styles.resultHeader}><KoreanPixelTitle variant="section">검색 결과</KoreanPixelTitle><KoreanPixelTitleAccessory>{results.length}개</KoreanPixelTitleAccessory></View>
             <View style={styles.list}>
               {results.map((product) => (
                 <CatalogProductRow key={product.id} product={product} ipName={ipNames.get(product.ipId) ?? "등록 작품"} assetBaseUrl={runtime.assetBaseUrl} onPress={() => openProduct(product)} />
@@ -142,12 +146,10 @@ const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: seed.color.layer.basement },
   header: { minHeight: seed.size.topNavigation, paddingHorizontal: seed.spacing.x2_5, gap: seed.spacing.x1, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: seed.color.stroke.neutral, flexDirection: "row", alignItems: "center" },
   headerAction: { width: seed.size.touchTarget, height: seed.size.touchTarget, alignItems: "center", justifyContent: "center" },
-  searchBox: { flex: 1, minHeight: seed.size.input, paddingHorizontal: seed.spacing.componentDefault, borderRadius: seed.radius.r3, borderWidth: 1, borderColor: seed.color.stroke.neutral, backgroundColor: seed.color.layer.default, flexDirection: "row", alignItems: "center", gap: seed.spacing.x2 },
+  searchBox: { flex: 1 },
   searchInput: { flex: 1, color: colors.ink, fontSize: 15, paddingVertical: 11 },
-  content: { padding: seed.spacing.globalGutter, paddingBottom: seed.spacing.screenBottom },
+  content: { paddingHorizontal: seed.spacing.globalGutter, paddingTop: seed.spacing.x4, paddingBottom: seed.spacing.screenBottom },
   resultHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 14 },
-  resultTitle: { color: seed.color.foreground.neutral, ...seed.typography.sectionTitle },
-  resultCount: { color: colors.muted, fontSize: 13, fontWeight: "800" },
   list: { gap: 12 },
   state: { minHeight: 430, paddingHorizontal: 28, alignItems: "center", justifyContent: "center" },
   stateTitle: { color: colors.ink, fontSize: 17, lineHeight: 24, fontWeight: "900", textAlign: "center", marginTop: 13 },

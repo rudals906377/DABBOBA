@@ -6,9 +6,10 @@ import {
   View,
   type PressableProps,
   type StyleProp,
+  type TextProps,
   type ViewStyle,
 } from "react-native";
-import { AppText as Text } from "@/components/Typography";
+import { AppText as Text, BalancedAppText, BalancedParagraphText } from "@/components/Typography";
 import { seed, type SeedActionVariant } from "@/design-system/seed";
 
 type SeedActionButtonProps = Omit<PressableProps, "children" | "style"> & {
@@ -111,14 +112,40 @@ export function SeedCard({ children, style }: { children: ReactNode; style?: Sty
   return <View style={[styles.card, style]}>{children}</View>;
 }
 
-export function SeedInputShell({ children, focused = false, error = false, style }: {
+export function SeedInlineGuidance({
+  style,
+  paragraphs,
+  children,
+  ...props
+}: TextProps & { paragraphs?: readonly string[] }) {
+  if (paragraphs) {
+    return (
+      <BalancedParagraphText
+        {...props}
+        paragraphs={paragraphs}
+        style={[styles.inlineGuidance, style]}
+      />
+    );
+  }
+
+  return <BalancedAppText {...props} style={[styles.inlineGuidance, style]}>{children}</BalancedAppText>;
+}
+
+export function SeedInputShell({ children, focused = false, error = false, variant = "default", style }: {
   children: ReactNode;
   focused?: boolean;
   error?: boolean;
+  variant?: "default" | "search";
   style?: StyleProp<ViewStyle>;
 }) {
   return (
-    <View style={[styles.inputShell, focused && styles.inputFocused, error && styles.inputError, style]}>
+    <View style={[
+      styles.inputShell,
+      style,
+      variant === "search" && styles.inputSearch,
+      focused && styles.inputFocused,
+      error && styles.inputError,
+    ]}>
       {children}
     </View>
   );
@@ -187,6 +214,7 @@ const styles = StyleSheet.create({
     borderColor: seed.color.stroke.neutral,
     backgroundColor: seed.color.layer.default,
   },
+  inlineGuidance: { color: seed.color.foreground.muted, ...seed.typography.caption },
   inputShell: {
     minHeight: seed.size.input,
     paddingHorizontal: seed.spacing.x3_5,
@@ -198,6 +226,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: seed.spacing.x2,
   },
+  inputSearch: { borderColor: seed.color.stroke.brand },
   inputFocused: { borderColor: seed.color.stroke.brand, borderWidth: 2 },
   inputError: { borderColor: seed.color.stroke.critical },
 });

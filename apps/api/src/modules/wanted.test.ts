@@ -72,6 +72,7 @@ function wantedRow(overrides: Record<string, unknown> = {}) {
     ip_name_ko: "스파이 패밀리",
     desired_item: "아냐 교복 피규어",
     details: "재입고되면 알려주세요.",
+    media_id: null,
     status: "ACTIVE",
     like_count: "2",
     liked_by_viewer: true,
@@ -130,6 +131,7 @@ test("wanted room applies public filters and exposes the authenticated viewer's 
       ipNameKo: "스파이 패밀리",
       desiredItem: "아냐 교복 피규어",
       details: "재입고되면 알려주세요.",
+      mediaId: null,
       status: "ACTIVE",
       likeCount: 2,
       likedByViewer: true,
@@ -154,7 +156,7 @@ test("wanted request creation is one authenticated idempotent transaction", asyn
       if (sql === "BEGIN" || sql === "COMMIT") return { rowCount: null, rows: [] };
       if (sql.startsWith("DELETE FROM idempotency_keys")) return { rowCount: 0, rows: [] };
       if (sql.includes("INSERT INTO idempotency_keys")) return { rowCount: 1, rows: [{ id: idempotencyId }] };
-      if (sql.includes("SELECT 1 FROM catalog_ips")) return { rowCount: 1, rows: [{}] };
+      if (sql.includes("SELECT name_ko FROM catalog_ips")) return { rowCount: 1, rows: [{ name_ko: "스파이 패밀리" }] };
       if (sql.includes("INSERT INTO wanted_requests")) return { rowCount: 1, rows: [{ id: requestId }] };
       if (sql.includes("INSERT INTO outbox_events")) return { rowCount: 1, rows: [] };
       if (sql.includes("FROM wanted_requests w") && sql.includes("WHERE w.id=$2")) {
@@ -186,15 +188,75 @@ test("wanted request creation is one authenticated idempotent transaction", asyn
   const result = capture.result();
   assert.equal(result.statusCode, 201);
   assert.equal((result.body as { id: string }).id, requestId);
-  assert.deepEqual(queries.find(({ sql }) => sql.includes("SELECT 1 FROM catalog_ips"))?.params, ["spy-family"]);
+  assert.deepEqual(queries.find(({ sql }) => sql.includes("SELECT name_ko FROM catalog_ips"))?.params, ["spy-family"]);
   assert.deepEqual(queries.find(({ sql }) => sql.includes("INSERT INTO wanted_requests"))?.params, [
     authorId,
     "figure",
     "spy-family",
+    "스파이 패밀리",
     "아냐 교복 피규어",
     "재입고되면 알려주세요.",
+    null,
   ]);
   assert.equal(queries.some(({ sql }) => sql === "COMMIT"), true);
+});
+
+test("wanted request creation stores a custom work name and one ready owned photo", async () => {
+  const mediaId = "ffffffff-ffff-4fff-8fff-ffffffffffff";
+  const queries: Array<{ sql: string; params: unknown[] }> = [];
+  const client = {
+    async query(sql: string, params: unknown[] = []) {
+      queries.push({ sql, params });
+      if (sql === "BEGIN" || sql === "COMMIT") return { rowCount: null, rows: [] };
+      if (sql.startsWith("DELETE FROM idempotency_keys")) return { rowCount: 0, rows: [] };
+      if (sql.includes("INSERT INTO idempotency_keys")) return { rowCount: 1, rows: [{ id: idempotencyId }] };
+      if (sql.includes("SELECT id FROM media_assets")) return { rowCount: 1, rows: [{ id: mediaId }] };
+      if (sql.includes("INSERT INTO wanted_requests")) return { rowCount: 1, rows: [{ id: requestId }] };
+      if (sql.includes("INSERT INTO outbox_events")) return { rowCount: 1, rows: [] };
+      if (sql.includes("FROM wanted_requests w") && sql.includes("WHERE w.id=$2")) {
+        return { rowCount: 1, rows: [wantedRow({ ip_id: null, ip_name_ko: "새로 나온 작품", media_id: mediaId, liked_by_viewer: false, like_count: "0" })] };
+      }
+      if (sql.includes("UPDATE idempotency_keys SET state='COMPLETED'")) return { rowCount: 1, rows: [] };
+      throw new Error(`Unexpected query: ${sql}`);
+    },
+    release() { /* no-op */ },
+  };
+  const { app, routes } = routeCapture();
+  await registerWantedRoutes(app, testContext({ async connect() { return client; } }, authorId));
+  const handler = routes.get("POST /v1/wanted-requests");
+  assert.ok(handler);
+  const capture = replyCapture();
+
+  await handler({
+    actor: { userId: authorId },
+    headers: { "idempotency-key": "wanted-create-custom-0001" },
+    body: {
+      category: "kuji",
+      ipId: null,
+      ipNameKo: "새로 나온 작품",
+      desiredItem: "한정판 쿠지",
+      details: "사진과 같은 상품을 찾고 있어요.",
+      mediaId,
+    },
+    id: "wanted-request-custom-create-test",
+  }, capture.reply);
+
+  assert.equal(capture.result().statusCode, 201);
+  assert.equal(queries.some(({ sql }) => sql.includes("SELECT name_ko FROM catalog_ips")), false);
+  assert.deepEqual(queries.find(({ sql }) => sql.includes("SELECT id FROM media_assets"))?.params, [
+    [mediaId],
+    authorId,
+    ["WANTED_REQUEST"],
+  ]);
+  assert.deepEqual(queries.find(({ sql }) => sql.includes("INSERT INTO wanted_requests"))?.params, [
+    authorId,
+    "kuji",
+    null,
+    "새로 나온 작품",
+    "한정판 쿠지",
+    "사진과 같은 상품을 찾고 있어요.",
+    mediaId,
+  ]);
 });
 
 test("wanted like commits the explicit state and rejects self-like attempts", async () => {

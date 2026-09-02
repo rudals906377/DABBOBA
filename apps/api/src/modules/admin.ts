@@ -10,7 +10,7 @@ import { browserLabel, iso, maskEmail, maskIp, nullableIso, numberValue } from "
 import type { ApiContext } from "../types.js";
 
 type UserRow = {
-  id: string; email: string; nickname: string; role: UserRole; status: UserStatus; suspended_until: Date | null;
+  id: string; email: string | null; nickname: string; role: UserRole; status: UserStatus; suspended_until: Date | null;
   suspension_reason: string | null; created_at: Date; post_count: number | string; report_count: number | string;
   inquiry_count?: number | string; snap_count?: number | string;
 };
