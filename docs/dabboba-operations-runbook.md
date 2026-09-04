@@ -25,7 +25,7 @@ corepack pnpm run workspace:assert
 
 API, DB CLI, worker는 `.env`를 자동으로 읽지 않는다. 로컬 셸에 값을 export하거나 승인된 환경 주입 도구를 사용한다. 관리자 Next 앱은 `apps/admin/.env.local`을 읽는다. 실서비스 비밀을 로컬 파일, Git, 이슈, 채팅에 복사하지 않는다.
 
-### PostgreSQL과 전환용 Redis
+### pgmq PostgreSQL과 선택적 로컬 Redis
 
 ```sh
 corepack pnpm run local:services
@@ -34,7 +34,9 @@ corepack pnpm run db:migrate
 
 `db:migrate`는 advisory lock, 파일 순서, 체크섬, `schema_migrations`를 사용한다. 이미 적용한 SQL 파일을 수정하면 체크섬 오류로 중단된다. 적용된 migration을 고치지 말고 새 번호의 forward migration을 추가한다.
 
-현재 로컬 worker와 outbox 전달기는 Redis/BullMQ를 사용하므로 기존 기능 검증을 위해 함께 기동한다. 신규 운영 목표는 Supabase PostgreSQL·Queues·Storage이며, 이 전환이 끝난 뒤에는 측정된 필요가 없는 Redis를 별도 운영 의존성으로 남기지 않는다. 현재 구현과 목표 구조를 혼동하지 말고 `docs/dabboba-production-architecture.md`와 `docs/dabboba-mobile-first-migration.md`를 함께 따른다.
+운영에서는 API `DATABASE_URL`에 `dabboba_runtime`, worker `WORKER_DATABASE_URL`에 `dabboba_worker`, 단일 migration job의 `DATABASE_MIGRATION_URL`에 schema owner를 사용한다. 세 credential은 서로 다른 secret이어야 한다. `0027`부터 `0031`까지의 원자적 queue 보안 migration 묶음, `0032` worker reconciliation migration, `0033` exchange bundle migration까지 적용한다. 새 DB를 만들거나 의도적으로 credential을 회전할 때만 각기 다른 새 비밀번호를 `provision:runtime-role -- --password-stdin`과 `provision:worker-role -- --password-stdin`에 표준입력으로 주입한다. 기존 credential을 release마다 불필요하게 회전하지 않는다. Supabase pooler에서 migration과 worker는 세션 advisory lock이 유지되는 Session mode(5432)만 허용하며 Transaction mode(6543)는 사용하지 않는다. 비밀번호는 migration SQL, 인자, Git에 넣지 말고 secret manager에서 별도로 회전한다. 이 migration 묶음은 `dabboba_runtime`의 pgmq/dead-letter 및 worker 전용 reconciliation 테이블 권한을 회수하므로 API는 해당 경로를 직접 다룰 수 없다.
+
+로컬 PostgreSQL 이미지는 pgmq를 포함하고 이전 PostgreSQL 16 volume과 다른 이름을 사용하므로 기존 로컬 데이터를 삭제하지 않는다. worker는 Redis/BullMQ 없이 한 batch를 처리하고 종료한다. Compose의 Redis는 `REDIS_URL`을 명시한 로컬 API의 선택적 공유 rate-limit 호환용일 뿐이며 Cloud Run API/worker에는 배포하지 않는다. `0027_supabase_worker_queue.sql`은 logged queue만 만들고 `pgmq_public`, `anon`, `authenticated`, `service_role`에 queue 접근을 주지 않는다.
 
 탈퇴 승인과 고객 변경 요청은 사용자별 advisory lock으로 직렬화된다. 운영자가 승인에 성공한 뒤에는 해당 사용자의 활성 세션이 폐기되고 새 idempotent 변경이 DB trigger에서 거부된다. 승인 계정을 다시 활성화하거나 DB에서 탈퇴 상태를 직접 되돌리지 말고, 보존·재가입 정책에 따른 별도 운영 절차를 사용한다.
 
@@ -115,7 +117,7 @@ corepack pnpm --filter @dabboba/mobile start
 - 이전 고객 웹: `http://127.0.0.1:4174` (`dev:lan` 기준). 마이그레이션 참고·웹 확장 채널이며 앱 완성 증거가 아님
 - API liveness/readiness: `http://127.0.0.1:8788/healthz`, `http://127.0.0.1:8788/readyz`
 - 관리자 웹: `http://localhost:4180`
-- worker liveness/readiness/metrics: `http://127.0.0.1:8791/live`, `/ready`, `/metrics`
+- worker: `dev:worker` 한 번의 종료 코드·구조화 로그와 DB의 outbox/queue/dead-letter 상태로 확인
 
 관리자 쿠키는 `Secure`로 설정된다. 로컬 관리자는 브라우저의 localhost secure-cookie 예외가 적용되는 `http://localhost:4180`을 우선하고, 쿠키가 저장되지 않으면 HTTPS local proxy로 확인한다.
 
@@ -130,35 +132,71 @@ corepack pnpm run workspace:assert
 corepack pnpm --filter @dabboba/contracts generate
 corepack pnpm run build:all
 corepack pnpm exec turbo run typecheck
-test -n "$DABBOBA_DISPOSABLE_TEST_DATABASE_URL"
-DABBOBA_TEST_DATABASE_URL="$DABBOBA_DISPOSABLE_TEST_DATABASE_URL" corepack pnpm exec turbo run test --force
+corepack pnpm exec turbo run test --force
 corepack pnpm run test:sites
 corepack pnpm run test:runtime
+bash ops/cloud-run/check-artifacts.sh --build
 git diff --check
 ```
 
-DB 변경은 disposable PostgreSQL에서 migration을 두 번 실행해 첫 실행은 적용되고 두 번째 실행은 no-op인지 확인한다. 마이그레이션이 적용된 전용 테스트 DB에서 다음처럼 PostgreSQL 통합 테스트를 별도로 실행한다. 이 URL은 운영이나 보존해야 할 로컬 DB가 아니라 해당 검증만을 위한 DB여야 한다.
+DB 변경은 disposable PostgreSQL에서 migration을 두 번 실행해 첫 실행은 적용되고 두 번째 실행은 no-op인지 확인한다. 다음 URL과 비밀번호는 운영이나 보존해야 할 로컬 DB가 아니라 해당 검증만을 위한 DB와 두 제한 역할을 가리켜야 한다. 모든 값이 준비되지 않으면 통합 테스트가 조용히 skip될 수 있으므로 먼저 각각을 검사한다.
 
 ```sh
 test -n "$DABBOBA_DISPOSABLE_TEST_DATABASE_URL"
+test -n "$DABBOBA_DISPOSABLE_RUNTIME_DATABASE_URL"
+test -n "$DABBOBA_DISPOSABLE_WORKER_DATABASE_URL"
+test -n "$DABBOBA_DISPOSABLE_RUNTIME_DATABASE_PASSWORD"
+test -n "$DABBOBA_DISPOSABLE_WORKER_DATABASE_PASSWORD"
+
+DATABASE_MIGRATION_URL="$DABBOBA_DISPOSABLE_TEST_DATABASE_URL" corepack pnpm run db:migrate
+DATABASE_MIGRATION_URL="$DABBOBA_DISPOSABLE_TEST_DATABASE_URL" corepack pnpm run db:migrate
+
+printf '%s\n' "$DABBOBA_DISPOSABLE_RUNTIME_DATABASE_PASSWORD" | \
+  DATABASE_MIGRATION_URL="$DABBOBA_DISPOSABLE_TEST_DATABASE_URL" \
+  corepack pnpm --filter @dabboba/db provision:runtime-role -- --password-stdin
+printf '%s\n' "$DABBOBA_DISPOSABLE_WORKER_DATABASE_PASSWORD" | \
+  DATABASE_MIGRATION_URL="$DABBOBA_DISPOSABLE_TEST_DATABASE_URL" \
+  corepack pnpm --filter @dabboba/db provision:worker-role -- --password-stdin
+
+DATABASE_URL='' \
+DATABASE_MIGRATION_URL="$DABBOBA_DISPOSABLE_TEST_DATABASE_URL" \
+DABBOBA_RUNTIME_TEST_DATABASE_URL="$DABBOBA_DISPOSABLE_RUNTIME_DATABASE_URL" \
+DABBOBA_WORKER_TEST_DATABASE_URL="$DABBOBA_DISPOSABLE_WORKER_DATABASE_URL" \
+  corepack pnpm --filter @dabboba/db test
+
+DATABASE_URL='' \
+DATABASE_MIGRATION_URL="$DABBOBA_DISPOSABLE_TEST_DATABASE_URL" \
 DABBOBA_TEST_DATABASE_URL="$DABBOBA_DISPOSABLE_TEST_DATABASE_URL" \
-  corepack pnpm exec turbo run test --force
+DABBOBA_RUNTIME_TEST_DATABASE_URL='' \
+  corepack pnpm --filter @dabboba/api test
+DATABASE_URL='' \
+DATABASE_MIGRATION_URL="$DABBOBA_DISPOSABLE_TEST_DATABASE_URL" \
+DABBOBA_RUNTIME_TEST_DATABASE_URL="$DABBOBA_DISPOSABLE_RUNTIME_DATABASE_URL" \
+  node --test apps/api/dist/runtime-role-routes.integration.test.js
+
+DATABASE_URL='' \
+DATABASE_MIGRATION_URL="$DABBOBA_DISPOSABLE_TEST_DATABASE_URL" \
+DABBOBA_WORKER_TEST_DATABASE_URL="$DABBOBA_DISPOSABLE_WORKER_DATABASE_URL" \
+WORKER_DATABASE_URL="$DABBOBA_DISPOSABLE_WORKER_DATABASE_URL" \
+  corepack pnpm --filter @dabboba/worker test
 ```
 
 이 통합 스위트는 일반 사용자/관리자 세션 분리, 관리자 RBAC, 공지 lifecycle, 문의 내부 메모 비노출, 신고 제재, 감사 로그 불변성, 교환 동시 수락·양측 완료·운영 해결과 소유권 이전을 실제 PostgreSQL에서 확인한다. 또한 배송 목록/상세의 사용자 소유권·송장 상태, `AVAILABLE` 추첨권 pagination, 알림 수신 설정의 기본값·낙관적 버전·same-key replay/다른 payload 충돌·append-only 동의 event/outbox, 미디어 intent/complete idempotency와 만료 410·미연결 삭제/연결 충돌을 확인한다. GCS, 실제 PG, APNs/FCM과 실기기는 별도 sandbox/기기 검증 대상이다.
 
+현재 전체 API 통합 suite는 fixture 준비를 위해 schema owner로 실행되고, 제한된 `dabboba_runtime` 경로는 카탈로그와 알림 설정 대표 route 통합 테스트로 검증한다. DB ACL suite와 대표 route 검증은 통과하지만, production release 전에는 제한 역할로 실행하는 route 범위를 더 넓혀 route와 테이블 권한의 회귀 증거를 보강한다.
+
 ## 3. 배포 순서
 
-현재 저장소에는 배포 IaC가 없다. 배포 플랫폼을 정한 뒤에도 다음 순서를 유지한다.
+저장소에는 Cloud Run용 컨테이너·사전점검·배포 스크립트가 있지만 실제 GCP 프로젝트에는 아직 적용하지 않았다. `docs/cloud-run-deployment.md`의 비용 승인 가드와 다음 순서를 함께 유지한다.
 
 1. CI의 workspace와 disposable DB migration job이 모두 통과했는지 확인한다. `corepack pnpm audit --prod --audit-level high`도 통과시키고, EAS가 루트 `pnpm-lock.yaml`을 사용하는지 확인한다.
 2. 운영 PostgreSQL의 자동 백업/PITR 상태와 최신 복원 훈련 결과를 확인한다.
 3. 운영 secret manager에 새 release가 필요로 하는 환경값이 있는지 확인한다.
    관리자 배포에서는 BFF/API의 `ADMIN_PROXY_IDENTITY_SECRET` 일치, edge의 `ADMIN_EDGE_CLIENT_IP_HEADER` overwrite, 서버 시계 동기화도 함께 확인한다.
    일반 API는 신뢰 proxy 범위/hop 또는 edge/WAF 실제 client IP별 rate-limit 구성을 확인하고, 애플리케이션에서 미검증 `trustProxy`를 켜지 않는다.
-4. 단일 migration job에서 `corepack pnpm run db:migrate`를 실행한다. API/worker replica 각각에서 migration을 자동 실행하지 않는다.
+4. schema owner의 `DATABASE_MIGRATION_URL`을 받은 단일 migration job에서 `corepack pnpm run db:migrate`를 실행한다. 새 DB/credential rotation이면 두 제한 login을 운영자 호스트에서 프로비저닝한다. API에는 `dabboba_runtime`의 `DATABASE_URL`, worker에는 `dabboba_worker`의 `WORKER_DATABASE_URL`만 주고, replica 각각에서 migration을 자동 실행하지 않는다. 대상 DB에서 0033 체크섬과 두 역할 suite를 검증한 뒤에만 문서의 정확한 `DABBOBA_DATABASE_RELEASE_ATTESTATION`을 설정한다. 이 값이 없으면 API/worker 배포 스크립트가 중단된다.
 5. 이전 앱 버전과 새 schema가 함께 동작하는 expand/contract 방식인지 확인한 뒤 API를 점진 배포한다.
-6. worker를 배포하고 `/ready`, unpublished outbox depth, failed job 수를 확인한다.
+6. 유한 worker Job을 한 번 수동 실행해 성공 종료, unpublished outbox depth, pgmq queue depth와 `worker_dead_letters`를 확인한다. 실행한 immutable image tag에 맞는 `DABBOBA_WORKER_EXECUTION_ATTESTATION`을 설정한 뒤에만 인증된 Scheduler 호출을 연결한다. 이 값이나 DB release attestation이 없으면 Scheduler 생성 스크립트가 중단된다.
 7. 관리자 웹을 배포하고 정확한 HTTPS origin/CORS를 확인한다. 고객 Expo 앱은 서명된 iOS·Android 후보 빌드로 만들고, 이전 고객 웹은 필요한 마이그레이션 참고·웹 확장 범위만 배포한다.
 8. 읽기 smoke test 후 공지 작성→공개 조회, 문의 작성→관리자 답변→사용자 조회, 신고→처리→감사 로그의 sandbox 흐름을 확인한다.
 9. PG sandbox에서 주문 idempotency, webhook 서명 거부, 중복 event, 재고 확정, 환불 검토, 추첨권 단일 소비를 확인한다.
@@ -181,7 +219,7 @@ DABBOBA_TEST_DATABASE_URL="$DABBOBA_DISPOSABLE_TEST_DATABASE_URL" \
 - PostgreSQL: 암호화 자동 백업, PITR, 별도 장애 도메인 복제, 삭제 보호
 - Supabase Storage: 비공개 bucket, 소유자·경로 제한 정책, staging의 짧은 lifecycle, 처리 완료 object 보존, 접근·요청 로그. 서명된 업로드 권한은 재전송될 수 있으므로 API의 업로드 intent와 완료 처리를 멱등하게 유지
 - 비용·abuse: Storage 요청·저장량 급증과 비정상 업로드를 관측하고, edge WAF/IP rate limit·계정 생성 속도 제한·비정상 계정 차단을 운영 정책으로 연결
-- 전환 중 GCS/Redis: 현재 구현 검증에만 해당하는 운영 요구를 유지한다. 전환 완료 뒤 원본 복구 수단이나 불필요한 신규 운영 의존성으로 남기지 않음
+- 전환 중 GCS: 현재 구현의 private signed direct-upload 보안·멱등성 기준을 유지한다. Supabase Storage adapter가 동등하게 검증되기 전까지 임의 교체하지 않음
 - secret: 버전 관리와 감사 가능한 secret manager; 코드/DB dump/log에 평문 포함 금지
 
 RPO, RTO, 보존 기간, 복구 승인자는 사용자가 정해야 한다. 설정 화면을 캡처한 것만으로 끝내지 말고 최소 분기마다 별도 복원 환경에서 훈련한다.
@@ -214,24 +252,24 @@ dump 파일에는 개인정보, 알림 동의 변경 evidence와 업무 원장�
 
 ### 현재 노출된 신호
 
-- API: 현재 `/healthz`는 PostgreSQL/전환용 Redis 상태를 반환하고 `/readyz`는 PostgreSQL 실패 시 503
-- worker: `/live`, `/ready`, `/health`, process-local JSON `/metrics`
+- API: `/healthz`는 외부 의존성을 조회하지 않는 process liveness, `/readyz`는 제한 시간 안의 PostgreSQL 준비 상태이며 실패 시 503
+- worker: Cloud Run Job 실행/종료 로그, pgmq `read_ct`/queue depth, immutable `worker_dead_letters`, unpublished outbox age
 - 구조화 로그: request/correlation, 작업 ID, aggregate ID; 인증 header/cookie/password/token redaction
 - PostgreSQL: unpublished/failed outbox, 오래된 예약, 결제 조정 대상, 감사 로그
-- 현재 BullMQ: waiting/active/delayed/failed 수와 반복 실패. Supabase Queues 전환 뒤에는 queue depth, visibility timeout, retry·dead-letter 지표로 교체
+- Supabase Queues: queue depth, visibility timeout 재노출, `read_ct` 재시도, dead-letter 증가
 
 ### 출시 전 반드시 연결할 알림
 
-- API/worker readiness 실패와 오류율 상승
+- API readiness 실패, worker Job 실패/실행 누락과 오류율 상승
 - DB 연결/저장 공간/replication lag/lock 대기/PITR 실패
-- unpublished outbox age와 depth, BullMQ failed/retry 폭증
+- unpublished outbox age/depth, pgmq retry/dead-letter 폭증
 - 만료되지 않은 오래된 재고 예약
 - `PENDING`, `AUTHORIZED`, `REFUND_REVIEW` 결제 backlog
 - 재고 음수 방지 위반, 추첨 pool 소진, draw entitlement/result 불일치
 - 관리자 로그인 실패 급증과 고위험 감사 이벤트
 - GCS 처리 실패·POST 요청/저장량 급증·staging/deleted cleanup backlog, CDN 오류, 알림 공급자 실패와 선택 해제된 외부 알림 전달 시도
 
-현재 `/metrics`는 process-local JSON이다. Prometheus exporter, 중앙 로그, 에러 추적, dashboard, paging destination은 배포 플랫폼에서 별도로 구성해야 한다.
+중앙 metric exporter, 오류 추적, dashboard, paging destination은 배포 플랫폼에서 별도로 구성해야 한다. Job은 상시 HTTP metric endpoint를 열지 않는다.
 
 ## 6. 장애 대응
 
@@ -245,15 +283,16 @@ dump 파일에는 개인정보, 알림 동의 변경 evidence와 업무 원장�
 
 ### PostgreSQL 장애
 
-- API `/readyz`와 worker `/ready`를 확인하고 쓰기 요청을 받지 않게 한다.
+- API `/readyz`와 최근 worker Job 실행 결과를 확인하고 쓰기 요청을 받지 않게 한다.
 - 관리형 DB failover/PITR 상태를 확인한다.
 - 복구 후 schema version과 최근 provider event/order ledger를 대조한다.
 - outbox publication을 재개하고 backlog가 0으로 수렴하는지 본다.
 
-### 전환용 Redis/BullMQ 장애
+### Supabase Queues/worker Job 장애
 
 - PostgreSQL 업무 트랜잭션은 계속 outbox를 남길 수 있지만 queue 의존 작업은 지연됨을 공지한다.
-- Redis 복구 후 worker를 재기동하고 동일한 stable job ID로 unpublished outbox를 재게시한다.
+- pgmq extension/ACL, Scheduler 인증, 최근 Job 종료 코드를 확인한 뒤 유한 worker Job을 한 번 수동 실행한다.
+- visibility timeout이 지난 메시지는 다시 읽히며 기존 handler가 멱등하게 처리한다. 시도 상한을 넘은 항목은 `worker_dead_letters`와 canonical outbox를 함께 조사한다.
 - `published_at`가 있지만 부수 효과가 불명확한 event는 notification/payment 상태를 기준으로 idempotent 재조정한다.
 
 ### 결제 불일치

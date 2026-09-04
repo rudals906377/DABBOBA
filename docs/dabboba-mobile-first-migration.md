@@ -15,7 +15,7 @@ DABBOBA의 제품 본체는 고객 웹이 아니라 `apps/mobile`의 Expo + Reac
 | 인증 | API의 권한·정지·탈퇴·감사 판정 | 고객 자체 session을 Supabase Auth JWT 기반 canonical identity로 단계 전환 | SecureStore token 보관, provider 연결·계정 병합 정책 |
 | 데이터 | PostgreSQL 원장, 기존 forward-only SQL migration, 결제·재고·추첨 트랜잭션 | production 연결을 Supabase PostgreSQL로 이동하고 모듈별로 Drizzle 도입 | 앱 SQLite의 삭제 가능한 cache/draft/upload queue schema |
 | 미디어 | 소유자·상태·checksum·크기·EXIF 제거·변형·삭제 정책 | GCS adapter를 Supabase Storage signed upload/worker adapter로 교체 | private bucket 정책, RLS, 유해물 검사, CDN/변형 운영 증거 |
-| 작업 처리 | transactional outbox와 idempotent worker handler | BullMQ publication을 Supabase Queues 소비로 교체 | queue visibility/retry/dead-letter 운영과 복구 테스트 |
+| 작업 처리 | transactional outbox와 idempotent worker handler | Supabase Queues 소비와 유한 worker 실행으로 전환 완료 | queue visibility/retry/dead-letter 운영과 복구 테스트 |
 | 관리자 | Next.js 운영 웹과 Fastify API 경계 | Supabase Auth/Storage 상태를 API를 통해 보게 조정 | 운영자 MFA·실제 계정·감사/복구 절차 |
 
 ## 변하지 않는 서버 책임

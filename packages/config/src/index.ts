@@ -3,13 +3,18 @@ type Environment = Record<string, string | undefined>;
 export * from "./admin-proxy-identity.js";
 
 export type RuntimeEnvironment = "development" | "test" | "production";
+export type ApiSurface = "customer" | "admin" | "all";
 
 export type ApiConfig = {
   environment: RuntimeEnvironment;
+  /** Optional only for backwards-compatible programmatic configs; loadApiConfig always sets it. */
+  surface?: ApiSurface;
   host: string;
   port: number;
   databaseUrl: string;
-  redisUrl: string;
+  /** Loaded configs set a bounded value; optional for older programmatic test fixtures. */
+  databasePoolMax?: number;
+  redisUrl: string | null;
   webOrigins: string[];
   adminOrigins: string[];
   sessionTokenPepper: string;
@@ -33,6 +38,11 @@ export type AdminConfig = {
   adminEdgeClientIpHeader: string | null;
 };
 
+export type MigrationConfig = {
+  environment: RuntimeEnvironment;
+  databaseUrl: string;
+};
+
 const INTERNAL_ADMIN_IDENTITY_HEADERS = new Set([
   "forwarded",
   "x-forwarded-for",
@@ -52,7 +62,12 @@ function optional(env: Environment, key: string): string | null {
   return env[key]?.trim() || null;
 }
 
-function adminProxySecret(env: Environment, runtime: RuntimeEnvironment): string | null {
+function adminProxySecret(
+  env: Environment,
+  runtime: RuntimeEnvironment,
+  enabled = true,
+): string | null {
+  if (!enabled) return null;
   const value = optional(env, "ADMIN_PROXY_IDENTITY_SECRET");
   if (runtime === "production") {
     if (!value || Buffer.byteLength(value, "utf8") < 32 || Buffer.byteLength(value, "utf8") > 512 || /(?:change-me|local-development)/i.test(value)) {
@@ -65,7 +80,9 @@ function adminProxySecret(env: Environment, runtime: RuntimeEnvironment): string
 function supabaseAuthConfig(
   env: Environment,
   runtime: RuntimeEnvironment,
+  enabled = true,
 ): Pick<ApiConfig, "supabaseUrl" | "supabaseJwtAudience"> {
+  if (!enabled) return { supabaseUrl: null, supabaseJwtAudience: null };
   const rawUrl = optional(env, "SUPABASE_URL");
   const rawAudience = optional(env, "SUPABASE_JWT_AUDIENCE");
   if (!rawUrl) {
@@ -164,6 +181,48 @@ function environment(env: Environment): RuntimeEnvironment {
   return value;
 }
 
+function apiSurface(env: Environment, runtime: RuntimeEnvironment): ApiSurface {
+  const value = env.API_SURFACE?.trim() || (runtime === "production" ? "customer" : "all");
+  if (value !== "customer" && value !== "admin" && value !== "all") {
+    throw new Error("API_SURFACE must be customer, admin, or all");
+  }
+  return value;
+}
+
+function migrationDatabaseUrl(env: Environment, runtime: RuntimeEnvironment): string {
+  const dedicatedUrl = optional(env, "DATABASE_MIGRATION_URL");
+  if (runtime === "production" && !dedicatedUrl) {
+    throw new Error("Missing required environment variable: DATABASE_MIGRATION_URL");
+  }
+
+  const value = dedicatedUrl || required(env, "DATABASE_URL");
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    throw new Error("DATABASE_MIGRATION_URL must be a valid PostgreSQL URL");
+  }
+  if (parsed.protocol !== "postgres:" && parsed.protocol !== "postgresql:") {
+    throw new Error("DATABASE_MIGRATION_URL must use postgres:// or postgresql://");
+  }
+
+  const hostname = parsed.hostname.toLowerCase().replace(/\.$/, "");
+  if (
+    runtime === "production"
+    && !hostname.endsWith(".supabase.com")
+    && !hostname.endsWith(".supabase.co")
+  ) {
+    throw new Error("DATABASE_MIGRATION_URL must use an approved Supabase hostname in production");
+  }
+  if (hostname.endsWith(".pooler.supabase.com") && parsed.port === "6543") {
+    throw new Error(
+      "DATABASE_MIGRATION_URL must use the Supabase Session pooler on port 5432, not Transaction mode on port 6543",
+    );
+  }
+
+  return value;
+}
+
 function originList(env: Environment, key: string, fallback: string): string[] {
   const values = (env[key] || fallback)
     .split(",")
@@ -182,11 +241,18 @@ function originList(env: Environment, key: string, fallback: string): string[] {
 
 export function loadApiConfig(env: Environment = process.env): ApiConfig {
   const runtime = environment(env);
+  const surface = apiSurface(env, runtime);
+  const includesCustomer = surface === "customer" || surface === "all";
+  const includesAdmin = surface === "admin" || surface === "all";
   const pepper = required(env, "SESSION_TOKEN_PEPPER");
-  const proxyIdentitySecret = adminProxySecret(env, runtime);
-  const webOrigins = originList(env, "WEB_ORIGINS", env.WEB_ORIGIN || "http://127.0.0.1:4174");
-  const adminOrigins = originList(env, "ADMIN_ORIGINS", "http://127.0.0.1:4180");
-  const supabaseAuth = supabaseAuthConfig(env, runtime);
+  const proxyIdentitySecret = adminProxySecret(env, runtime, includesAdmin);
+  const webOrigins = includesCustomer
+    ? originList(env, "WEB_ORIGINS", env.WEB_ORIGIN || "http://127.0.0.1:4174")
+    : [];
+  const adminOrigins = includesAdmin
+    ? originList(env, "ADMIN_ORIGINS", "http://127.0.0.1:4180")
+    : [];
+  const supabaseAuth = supabaseAuthConfig(env, runtime, includesCustomer);
 
   if (runtime === "production") {
     if (pepper.length < 32 || pepper.includes("local-development")) {
@@ -203,10 +269,14 @@ export function loadApiConfig(env: Environment = process.env): ApiConfig {
 
   return {
     environment: runtime,
-    host: env.API_HOST?.trim() || "127.0.0.1",
-    port: integer(env, "API_PORT", 8788, 1, 65_535),
+    surface,
+    host: env.API_HOST?.trim() || (runtime === "production" ? "0.0.0.0" : "127.0.0.1"),
+    port: env.PORT?.trim()
+      ? integer(env, "PORT", 8788, 1, 65_535)
+      : integer(env, "API_PORT", 8788, 1, 65_535),
     databaseUrl: required(env, "DATABASE_URL"),
-    redisUrl: required(env, "REDIS_URL"),
+    databasePoolMax: integer(env, "DATABASE_POOL_MAX", runtime === "production" ? 5 : 15, 1, 15),
+    redisUrl: optional(env, "REDIS_URL"),
     webOrigins,
     adminOrigins,
     sessionTokenPepper: pepper,
@@ -217,6 +287,14 @@ export function loadApiConfig(env: Environment = process.env): ApiConfig {
     gcsBucket: optional(env, "GCS_BUCKET"),
     gcsProjectId: optional(env, "GCS_PROJECT_ID"),
     logLevel: env.LOG_LEVEL?.trim() || (runtime === "production" ? "info" : "debug"),
+  };
+}
+
+export function loadMigrationConfig(env: Environment = process.env): MigrationConfig {
+  const runtime = environment(env);
+  return {
+    environment: runtime,
+    databaseUrl: migrationDatabaseUrl(env, runtime),
   };
 }
 

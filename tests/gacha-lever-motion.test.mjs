@@ -3,9 +3,11 @@ import test from "node:test";
 
 import {
   GACHA_LEVER_COMPLETION_RADIANS,
+  GACHA_LEVER_REQUIRED_TAPS,
   GACHA_LEVER_REQUIRED_TURNS,
   GACHA_LEVER_TARGET_RADIANS,
   advanceGachaLeverRadians,
+  advanceGachaLeverTapRadians,
   createGachaLeverMotionState,
   isGachaLeverComplete,
   normalizeGachaLeverDelta,
@@ -22,6 +24,24 @@ test("the gacha lever requires about two clockwise circles", () => {
   assert.equal(isGachaLeverComplete(GACHA_LEVER_COMPLETION_RADIANS), true);
   assert.equal(resolveGachaLeverProgress(0), 0);
   assert.equal(resolveGachaLeverProgress(GACHA_LEVER_TARGET_RADIANS), 1);
+});
+
+test("repeated lever taps reach the same two-turn target without skipping the result gate", () => {
+  assert.equal(GACHA_LEVER_REQUIRED_TAPS, 8);
+  let radians = 0;
+
+  for (let tap = 1; tap < GACHA_LEVER_REQUIRED_TAPS; tap += 1) {
+    radians = advanceGachaLeverTapRadians(radians);
+    assert.equal(isGachaLeverComplete(radians), false);
+  }
+
+  radians = advanceGachaLeverTapRadians(radians);
+  assert.equal(radians, GACHA_LEVER_TARGET_RADIANS);
+  assert.equal(isGachaLeverComplete(radians), true);
+  assert.equal(
+    advanceGachaLeverTapRadians(GACHA_LEVER_TARGET_RADIANS),
+    GACHA_LEVER_TARGET_RADIANS,
+  );
 });
 
 test("clockwise samples unwrap continuously across the angle boundary", () => {

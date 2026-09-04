@@ -123,6 +123,12 @@ test(
       ownerId: string,
       sourceType: "GACHA" | "KUJI",
       status: "OWNED" | "SHIPPING" | "DELIVERED" = "OWNED",
+      overrides: {
+        sourceId?: string | null;
+        inventoryProductId?: string;
+        drawOwnerId?: string;
+        drawPrizeProductId?: string;
+      } = {},
     ) => {
       const definition = drawDefinitions[sourceType];
       const order = await pool.query<{ id: string }>(
@@ -149,7 +155,18 @@ test(
         ) VALUES($1,$2,$3,$4,'CONSUMED',now()) RETURNING id`,
         [line.rows[0]!.id, ownerId, definition.drawProductId, definition.versionId],
       );
-      const inventoryId = await addInventory(ownerId, sourceType, status);
+      const inventory = await pool.query<{ id: string }>(
+        `INSERT INTO inventory_units(owner_id,product_id,source_type,source_id,status)
+         VALUES($1,$2,$3,$4,$5) RETURNING id`,
+        [
+          ownerId,
+          overrides.inventoryProductId ?? productId,
+          sourceType,
+          overrides.sourceId === undefined ? entitlement.rows[0]!.id : overrides.sourceId,
+          status,
+        ],
+      );
+      const inventoryId = inventory.rows[0]!.id;
       await pool.query(
         `INSERT INTO draw_results(
           entitlement_id,user_id,product_id,pool_entry_id,prize_product_id,prize_inventory_unit_id,
@@ -160,10 +177,10 @@ test(
         )`,
         [
           entitlement.rows[0]!.id,
-          ownerId,
+          overrides.drawOwnerId ?? ownerId,
           definition.drawProductId,
           definition.poolEntryId,
-          productId,
+          overrides.drawPrizeProductId ?? productId,
           inventoryId,
           "0".repeat(64),
           "1".repeat(64),
@@ -184,10 +201,97 @@ test(
       headers: { authorization: `Bearer ${token}`, "idempotency-key": key, ...extraHeaders },
       ...(payload ? { payload } : {}),
     });
+    const completeBundleExchange = async (input: {
+      label: string;
+      listingInventoryIds: string[];
+      proposer: { token: string; actor: { userId: string } };
+      offerInventoryIds: string[];
+    }) => {
+      const listingResponse = await mutate(author.token, "POST", "/v1/exchange/listings", {
+        title: `${input.label} 교환 테스트`,
+        details: `${input.label} 묶음 전체의 소유권이 원자적으로 이전되어야 합니다.`,
+        offeredInventoryUnitIds: input.listingInventoryIds,
+      });
+      assert.equal(listingResponse.statusCode, 201, listingResponse.body);
+      const listingId = (listingResponse.json() as { id: string }).id;
+      const offerResponse = await mutate(
+        input.proposer.token,
+        "POST",
+        `/v1/exchange/listings/${listingId}/offers`,
+        { offeredInventoryUnitIds: input.offerInventoryIds },
+      );
+      assert.equal(offerResponse.statusCode, 201, offerResponse.body);
+      const offerId = (offerResponse.json() as { id: string }).id;
+      const accepted = await mutate(
+        author.token,
+        "POST",
+        `/v1/exchange/listings/${listingId}/offers/${offerId}/decision`,
+        { decision: "ACCEPTED" },
+      );
+      assert.equal(accepted.statusCode, 200, accepted.body);
+      const authorConfirmed = await mutate(
+        author.token,
+        "POST",
+        `/v1/exchange/listings/${listingId}/completion-confirmation`,
+        undefined,
+      );
+      assert.equal(authorConfirmed.statusCode, 200, authorConfirmed.body);
+      const proposerConfirmed = await mutate(
+        input.proposer.token,
+        "POST",
+        `/v1/exchange/listings/${listingId}/completion-confirmation`,
+        undefined,
+      );
+      assert.equal(proposerConfirmed.statusCode, 200, proposerConfirmed.body);
+      assert.equal((proposerConfirmed.json() as { status: string }).status, "COMPLETED");
+
+      const inventory = await pool.query<{ id: string; owner_id: string; status: string }>(
+        "SELECT id,owner_id,status FROM inventory_units WHERE id=ANY($1::uuid[])",
+        [[...input.listingInventoryIds, ...input.offerInventoryIds]],
+      );
+      const inventoryById = new Map(inventory.rows.map((row) => [row.id, row]));
+      for (const inventoryId of input.listingInventoryIds) {
+        assert.equal(inventoryById.get(inventoryId)?.owner_id, input.proposer.actor.userId);
+        assert.equal(inventoryById.get(inventoryId)?.status, "OWNED");
+      }
+      for (const inventoryId of input.offerInventoryIds) {
+        assert.equal(inventoryById.get(inventoryId)?.owner_id, author.actor.userId);
+        assert.equal(inventoryById.get(inventoryId)?.status, "OWNED");
+      }
+      const ledger = await pool.query<{ count: string }>(
+        "SELECT count(*) FROM inventory_ownership_transfers WHERE exchange_listing_id=$1",
+        [listingId],
+      );
+      assert.equal(
+        Number(ledger.rows[0]!.count),
+        input.listingInventoryIds.length + input.offerInventoryIds.length,
+      );
+    };
 
     const listingInventory = await addDrawInventory(author.actor.userId, "GACHA");
+    const listingInventoryTwo = await addDrawInventory(author.actor.userId, "GACHA");
     const offerOneInventory = await addDrawInventory(proposerOne.actor.userId, "GACHA");
+    const offerOneInventoryTwo = await addDrawInventory(proposerOne.actor.userId, "GACHA");
     const offerTwoInventory = await addDrawInventory(proposerTwo.actor.userId, "GACHA");
+    const offerTwoInventoryTwo = await addDrawInventory(proposerTwo.actor.userId, "GACHA");
+    const mismatchedSourceInventory = await addDrawInventory(
+      author.actor.userId,
+      "GACHA",
+      "OWNED",
+      { sourceId: randomUUID() },
+    );
+    const mismatchedPrizeInventory = await addDrawInventory(
+      author.actor.userId,
+      "GACHA",
+      "OWNED",
+      { drawPrizeProductId: gachaDrawProductId },
+    );
+    const mismatchedDrawOwnerInventory = await addDrawInventory(
+      author.actor.userId,
+      "GACHA",
+      "OWNED",
+      { drawOwnerId: proposerOne.actor.userId },
+    );
 
     for (const inventoryId of [
       await addInventory(author.actor.userId, "GACHA"),
@@ -197,6 +301,9 @@ test(
       await addInventory(author.actor.userId, "ADMIN_ADJUSTMENT"),
       await addDrawInventory(author.actor.userId, "GACHA", "SHIPPING"),
       await addDrawInventory(author.actor.userId, "KUJI", "DELIVERED"),
+      mismatchedSourceInventory,
+      mismatchedPrizeInventory,
+      mismatchedDrawOwnerInventory,
     ]) {
       const ineligibleListing = await mutate(author.token, "POST", "/v1/exchange/listings", {
         title: "교환 불가 상품 테스트",
@@ -214,9 +321,45 @@ test(
     });
     assert.equal(eligibleInventory.statusCode, 200, eligibleInventory.body);
     assert.deepEqual(
-      (eligibleInventory.json() as { items: Array<{ id: string }> }).items.map((item) => item.id),
-      [listingInventory],
+      (eligibleInventory.json() as { items: Array<{ id: string }> }).items
+        .map((item) => item.id)
+        .sort(),
+      [listingInventory, listingInventoryTwo].sort(),
     );
+
+    const forgedListing = await pool.query<{ id: string }>(
+      `INSERT INTO exchange_listings(author_id,offered_inventory_unit_id,title,details)
+       VALUES($1,$2,'위조 연결 교환글','draw entitlement 연결이 다른 기존 데이터') RETURNING id`,
+      [author.actor.userId, mismatchedSourceInventory],
+    );
+    const forgedListingId = forgedListing.rows[0]!.id;
+    await pool.query(
+      "UPDATE inventory_units SET status='EXCHANGE_LISTED' WHERE id=$1",
+      [mismatchedSourceInventory],
+    );
+    const publicListingsAfterForgedInsert = await app.inject({
+      method: "GET",
+      url: "/v1/exchange/listings?limit=100",
+    });
+    assert.equal(publicListingsAfterForgedInsert.statusCode, 200, publicListingsAfterForgedInsert.body);
+    assert.equal(
+      (publicListingsAfterForgedInsert.json() as { items: Array<{ id: string }> }).items
+        .some((item) => item.id === forgedListingId),
+      false,
+    );
+    const forgedDetail = await app.inject({
+      method: "GET",
+      url: `/v1/exchange/listings/${forgedListingId}`,
+      headers: { authorization: `Bearer ${author.token}` },
+    });
+    assert.equal(forgedDetail.statusCode, 404, forgedDetail.body);
+    const forgedCancellation = await mutate(
+      author.token,
+      "POST",
+      `/v1/exchange/listings/${forgedListingId}/cancel`,
+      undefined,
+    );
+    assert.equal(forgedCancellation.statusCode, 200, forgedCancellation.body);
 
     const legacyKujiListingInventory = await addDrawInventory(author.actor.userId, "KUJI");
     const legacyKujiListing = await pool.query<{ id: string }>(
@@ -267,13 +410,37 @@ test(
     );
     assert.equal(legacyInventoryAfterCancellation.rows[0]!.status, "OWNED");
 
+    const rollbackListingInventory = await addDrawInventory(author.actor.userId, "GACHA");
+    const rollbackInvalidListingInventory = await addDrawInventory(author.actor.userId, "KUJI");
+    const rejectedListingBundle = await mutate(author.token, "POST", "/v1/exchange/listings", {
+      title: "묶음 전체 검증 테스트",
+      details: "한 상품이라도 부적격이면 아무 상품도 예약되지 않아야 합니다.",
+      offeredInventoryUnitIds: [rollbackListingInventory, rollbackInvalidListingInventory],
+    });
+    assert.equal(rejectedListingBundle.statusCode, 409, rejectedListingBundle.body);
+    const rollbackListingState = await pool.query<{ status: string }>(
+      "SELECT status FROM inventory_units WHERE id=ANY($1::uuid[]) ORDER BY id",
+      [[rollbackListingInventory, rollbackInvalidListingInventory]],
+    );
+    assert.ok(rollbackListingState.rows.every((row) => row.status === "OWNED"));
+
     const listingResponse = await mutate(author.token, "POST", "/v1/exchange/listings", {
       title: "동시 수락 테스트",
       details: "한 제안만 수락되어야 합니다.",
-      offeredInventoryUnitId: listingInventory,
+      offeredInventoryUnitIds: [listingInventory, listingInventoryTwo],
     });
     assert.equal(listingResponse.statusCode, 201, listingResponse.body);
-    const listingId = (listingResponse.json() as { id: string }).id;
+    const createdListing = listingResponse.json() as {
+      id: string;
+      offeredInventory: { id: string };
+      offeredInventories: Array<{ id: string }>;
+    };
+    const listingId = createdListing.id;
+    assert.equal(createdListing.offeredInventory.id, listingInventory);
+    assert.deepEqual(
+      createdListing.offeredInventories.map((inventory) => inventory.id),
+      [listingInventory, listingInventoryTwo],
+    );
 
     for (const query of ["Exchange Test", "교환별칭"]) {
       const searchResponse = await app.inject({
@@ -287,6 +454,50 @@ test(
         `${query} should find the listing by IP metadata`,
       );
     }
+
+    const forgedOfferInventory = await addDrawInventory(
+      proposerTwo.actor.userId,
+      "GACHA",
+      "OWNED",
+      { inventoryProductId: gachaDrawProductId },
+    );
+    const forgedOffer = await pool.query<{ id: string }>(
+      `INSERT INTO exchange_offers(listing_id,proposer_id,offered_inventory_unit_id,message)
+       VALUES($1,$2,$3,'위조 상품 연결 제안') RETURNING id`,
+      [listingId, proposerTwo.actor.userId, forgedOfferInventory],
+    );
+    const forgedOfferId = forgedOffer.rows[0]!.id;
+    await pool.query(
+      "UPDATE inventory_units SET status='EXCHANGE_OFFERED' WHERE id=$1",
+      [forgedOfferInventory],
+    );
+    const detailAfterForgedOffer = await app.inject({
+      method: "GET",
+      url: `/v1/exchange/listings/${listingId}`,
+      headers: { authorization: `Bearer ${author.token}` },
+    });
+    assert.equal(detailAfterForgedOffer.statusCode, 200, detailAfterForgedOffer.body);
+    const filteredDetail = detailAfterForgedOffer.json() as {
+      offerCount: number;
+      offers: Array<{ id: string }>;
+    };
+    assert.equal(filteredDetail.offerCount, 0);
+    assert.equal(filteredDetail.offers.some((offer) => offer.id === forgedOfferId), false);
+    const forgedAcceptance = await mutate(
+      author.token,
+      "POST",
+      `/v1/exchange/listings/${listingId}/offers/${forgedOfferId}/decision`,
+      { decision: "ACCEPTED" },
+    );
+    assert.equal(forgedAcceptance.statusCode, 409, forgedAcceptance.body);
+    assert.match(forgedAcceptance.body, /가챠로 직접 뽑아/);
+    const forgedRejection = await mutate(
+      author.token,
+      "POST",
+      `/v1/exchange/listings/${listingId}/offers/${forgedOfferId}/decision`,
+      { decision: "REJECTED" },
+    );
+    assert.equal(forgedRejection.statusCode, 200, forgedRejection.body);
 
     const legacyKujiOfferInventory = await addDrawInventory(proposerTwo.actor.userId, "KUJI");
     const legacyKujiOffer = await pool.query<{ id: string }>(
@@ -330,6 +541,20 @@ test(
     assert.equal(purchasedOffer.statusCode, 409, purchasedOffer.body);
     assert.match(purchasedOffer.body, /직접 뽑아 보관함에 보관 중인/);
 
+    const rollbackOfferInventory = await addDrawInventory(proposerOne.actor.userId, "GACHA");
+    const rejectedOfferBundle = await mutate(
+      proposerOne.token,
+      "POST",
+      `/v1/exchange/listings/${listingId}/offers`,
+      { offeredInventoryUnitIds: [rollbackOfferInventory, purchasedInventory] },
+    );
+    assert.equal(rejectedOfferBundle.statusCode, 409, rejectedOfferBundle.body);
+    const rollbackOfferState = await pool.query<{ status: string }>(
+      "SELECT status FROM inventory_units WHERE id=$1",
+      [rollbackOfferInventory],
+    );
+    assert.equal(rollbackOfferState.rows[0]!.status, "OWNED");
+
     for (const inventoryId of [
       await addInventory(proposerOne.actor.userId, "GACHA"),
       await addInventory(proposerOne.actor.userId, "KUJI"),
@@ -337,6 +562,24 @@ test(
       await addInventory(proposerOne.actor.userId, "ADMIN_ADJUSTMENT"),
       await addDrawInventory(proposerOne.actor.userId, "GACHA", "SHIPPING"),
       await addDrawInventory(proposerOne.actor.userId, "KUJI", "DELIVERED"),
+      await addDrawInventory(
+        proposerOne.actor.userId,
+        "GACHA",
+        "OWNED",
+        { sourceId: randomUUID() },
+      ),
+      await addDrawInventory(
+        proposerOne.actor.userId,
+        "GACHA",
+        "OWNED",
+        { drawPrizeProductId: gachaDrawProductId },
+      ),
+      await addDrawInventory(
+        proposerOne.actor.userId,
+        "GACHA",
+        "OWNED",
+        { drawOwnerId: author.actor.userId },
+      ),
     ]) {
       const ineligibleOffer = await mutate(
         proposerOne.token,
@@ -352,16 +595,34 @@ test(
       proposerOne.token,
       "POST",
       `/v1/exchange/listings/${listingId}/offers`,
-      { offeredInventoryUnitId: offerOneInventory },
+      { offeredInventoryUnitIds: [offerOneInventory, offerOneInventoryTwo] },
     );
     const offerTwoResponse = await mutate(
       proposerTwo.token,
       "POST",
       `/v1/exchange/listings/${listingId}/offers`,
-      { offeredInventoryUnitId: offerTwoInventory },
+      { offeredInventoryUnitIds: [offerTwoInventory, offerTwoInventoryTwo] },
     );
     assert.equal(offerOneResponse.statusCode, 201, offerOneResponse.body);
     assert.equal(offerTwoResponse.statusCode, 201, offerTwoResponse.body);
+    assert.deepEqual(
+      (offerOneResponse.json() as { offeredInventories: Array<{ id: string }> })
+        .offeredInventories.map((inventory) => inventory.id),
+      [offerOneInventory, offerOneInventoryTwo],
+    );
+    const duplicateActiveOfferInventory = await addDrawInventory(proposerOne.actor.userId, "GACHA");
+    const duplicateActiveOffer = await mutate(
+      proposerOne.token,
+      "POST",
+      `/v1/exchange/listings/${listingId}/offers`,
+      { offeredInventoryUnitIds: [duplicateActiveOfferInventory] },
+    );
+    assert.equal(duplicateActiveOffer.statusCode, 409, duplicateActiveOffer.body);
+    const duplicateActiveOfferState = await pool.query<{ status: string }>(
+      "SELECT status FROM inventory_units WHERE id=$1",
+      [duplicateActiveOfferInventory],
+    );
+    assert.equal(duplicateActiveOfferState.rows[0]!.status, "OWNED");
     const offerOneId = (offerOneResponse.json() as { id: string }).id;
     const offerTwoId = (offerTwoResponse.json() as { id: string }).id;
 
@@ -399,8 +660,12 @@ test(
     const acceptedOfferId = acceptedIndex === 0 ? offerOneId : offerTwoId;
     const acceptedProposer = acceptedIndex === 0 ? proposerOne : proposerTwo;
     const rejectedProposer = acceptedIndex === 0 ? proposerTwo : proposerOne;
-    const acceptedInventory = acceptedIndex === 0 ? offerOneInventory : offerTwoInventory;
-    const rejectedInventory = acceptedIndex === 0 ? offerTwoInventory : offerOneInventory;
+    const acceptedInventories = acceptedIndex === 0
+      ? [offerOneInventory, offerOneInventoryTwo]
+      : [offerTwoInventory, offerTwoInventoryTwo];
+    const rejectedInventories = acceptedIndex === 0
+      ? [offerTwoInventory, offerTwoInventoryTwo]
+      : [offerOneInventory, offerOneInventoryTwo];
 
     const authorConfirmation = await mutate(
       author.token,
@@ -432,25 +697,32 @@ test(
 
     const inventoryAfter = await pool.query<{ id: string; owner_id: string; status: string }>(
       "SELECT id,owner_id,status FROM inventory_units WHERE id=ANY($1::uuid[]) ORDER BY id",
-      [[listingInventory, acceptedInventory, rejectedInventory]],
+      [[listingInventory, listingInventoryTwo, ...acceptedInventories, ...rejectedInventories]],
     );
     const byId = new Map(inventoryAfter.rows.map((row) => [row.id, row]));
-    assert.deepEqual(byId.get(listingInventory), {
-      id: listingInventory,
-      owner_id: acceptedProposer.actor.userId,
-      status: "OWNED",
-    });
-    assert.deepEqual(byId.get(acceptedInventory), {
-      id: acceptedInventory,
-      owner_id: author.actor.userId,
-      status: "OWNED",
-    });
-    assert.equal(byId.get(rejectedInventory)?.status, "OWNED");
+    for (const inventoryId of [listingInventory, listingInventoryTwo]) {
+      assert.deepEqual(byId.get(inventoryId), {
+        id: inventoryId,
+        owner_id: acceptedProposer.actor.userId,
+        status: "OWNED",
+      });
+    }
+    for (const inventoryId of acceptedInventories) {
+      assert.deepEqual(byId.get(inventoryId), {
+        id: inventoryId,
+        owner_id: author.actor.userId,
+        status: "OWNED",
+      });
+    }
+    for (const inventoryId of rejectedInventories) {
+      assert.equal(byId.get(inventoryId)?.status, "OWNED");
+      assert.equal(byId.get(inventoryId)?.owner_id, rejectedProposer.actor.userId);
+    }
     const transferCount = await pool.query<{ count: string }>(
       "SELECT count(*) FROM inventory_ownership_transfers WHERE exchange_listing_id=$1",
       [listingId],
     );
-    assert.equal(Number(transferCount.rows[0]!.count), 2);
+    assert.equal(Number(transferCount.rows[0]!.count), 4);
     const acceptedOffer = await pool.query<{ status: string }>(
       "SELECT status FROM exchange_offers WHERE id=$1",
       [acceptedOfferId],
@@ -459,7 +731,8 @@ test(
 
     for (const transferred of [
       { inventoryId: listingInventory, owner: acceptedProposer },
-      { inventoryId: acceptedInventory, owner: author },
+      { inventoryId: listingInventoryTwo, owner: acceptedProposer },
+      ...acceptedInventories.map((inventoryId) => ({ inventoryId, owner: author })),
     ]) {
       const transferredInventory = await app.inject({
         method: "GET",
@@ -494,7 +767,7 @@ test(
       {
         title: "양도 상품 제안 차단 테스트",
         details: "양도받은 상품으로 제안할 수 없어야 합니다.",
-        offeredInventoryUnitId: rejectedInventory,
+        offeredInventoryUnitId: rejectedInventories[0],
       },
     );
     assert.equal(transferGuardHost.statusCode, 201, transferGuardHost.body);
@@ -507,20 +780,42 @@ test(
     assert.equal(transferredOffer.statusCode, 409, transferredOffer.body);
     assert.match(transferredOffer.body, /직접 뽑아 보관함에 보관 중인/);
 
+    await completeBundleExchange({
+      label: "1:2",
+      listingInventoryIds: [await addDrawInventory(author.actor.userId, "GACHA")],
+      proposer: proposerOne,
+      offerInventoryIds: [
+        await addDrawInventory(proposerOne.actor.userId, "GACHA"),
+        await addDrawInventory(proposerOne.actor.userId, "GACHA"),
+      ],
+    });
+    await completeBundleExchange({
+      label: "2:1",
+      listingInventoryIds: [
+        await addDrawInventory(author.actor.userId, "GACHA"),
+        await addDrawInventory(author.actor.userId, "GACHA"),
+      ],
+      proposer: proposerTwo,
+      offerInventoryIds: [await addDrawInventory(proposerTwo.actor.userId, "GACHA")],
+    });
+
     const cancelListingInventory = await addDrawInventory(author.actor.userId, "GACHA");
+    const cancelListingInventoryTwo = await addDrawInventory(author.actor.userId, "GACHA");
     const withdrawInventory = await addDrawInventory(proposerOne.actor.userId, "GACHA");
+    const withdrawInventoryTwo = await addDrawInventory(proposerOne.actor.userId, "GACHA");
     const cancelOfferInventory = await addDrawInventory(proposerTwo.actor.userId, "GACHA");
+    const cancelOfferInventoryTwo = await addDrawInventory(proposerTwo.actor.userId, "GACHA");
     const cancelListingResponse = await mutate(author.token, "POST", "/v1/exchange/listings", {
       title: "취소와 철회 테스트",
       details: "예약 상품이 다시 소유 상태가 되어야 합니다.",
-      offeredInventoryUnitId: cancelListingInventory,
+      offeredInventoryUnitIds: [cancelListingInventory, cancelListingInventoryTwo],
     });
     const cancelListingId = (cancelListingResponse.json() as { id: string }).id;
     const withdrawOfferResponse = await mutate(
       proposerOne.token,
       "POST",
       `/v1/exchange/listings/${cancelListingId}/offers`,
-      { offeredInventoryUnitId: withdrawInventory },
+      { offeredInventoryUnitIds: [withdrawInventory, withdrawInventoryTwo] },
     );
     const withdrawOfferId = (withdrawOfferResponse.json() as { id: string }).id;
     const withdrawn = await mutate(
@@ -535,7 +830,7 @@ test(
       proposerTwo.token,
       "POST",
       `/v1/exchange/listings/${cancelListingId}/offers`,
-      { offeredInventoryUnitId: cancelOfferInventory },
+      { offeredInventoryUnitIds: [cancelOfferInventory, cancelOfferInventoryTwo] },
     );
     assert.equal(cancelOfferResponse.statusCode, 201, cancelOfferResponse.body);
     const cancelled = await mutate(
@@ -548,9 +843,17 @@ test(
     assert.equal((cancelled.json() as { status: string }).status, "CANCELLED");
     const released = await pool.query<{ status: string }>(
       "SELECT status FROM inventory_units WHERE id=ANY($1::uuid[]) ORDER BY id",
-      [[cancelListingInventory, withdrawInventory, cancelOfferInventory]],
+      [[
+        cancelListingInventory,
+        cancelListingInventoryTwo,
+        withdrawInventory,
+        withdrawInventoryTwo,
+        cancelOfferInventory,
+        cancelOfferInventoryTwo,
+      ]],
     );
-    assert.deepEqual(released.rows.map((row) => row.status), ["OWNED", "OWNED", "OWNED"]);
+    assert.equal(released.rows.length, 6);
+    assert.ok(released.rows.every((row) => row.status === "OWNED"));
 
     const adminToken = `admin-${randomUUID()}-session-token`;
     const admin = await pool.query<{ id: string }>(

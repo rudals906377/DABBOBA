@@ -13,6 +13,7 @@ test("generated contract includes public and privileged seams", () => {
     "/v1/media/uploads",
     "/v1/media/{mediaId}",
     "/v1/account/basic-info",
+    "/v1/account/inventory",
     "/v1/account/profile",
     "/v1/account/deletion-request",
     "/v1/account/draw-entitlements",
@@ -41,7 +42,22 @@ test("generated contract includes public and privileged seams", () => {
     "/v1/admin/reports/{reportId}/resolution",
     "/v1/admin/audit-logs",
   ];
-  assert.equal(requiredPaths.length, 34);
+  assert.equal(requiredPaths.length, 35);
+});
+
+test("health contracts separate process liveness from database readiness", () => {
+  const liveness = {
+    status: "ok",
+    timestamp: "2026-09-04T00:00:00.000Z",
+  } satisfies components["schemas"]["Liveness"];
+  const readiness = {
+    status: "unavailable",
+    database: "unavailable",
+    timestamp: "2026-09-04T00:00:00.000Z",
+  } satisfies components["schemas"]["Readiness"];
+
+  assert.equal("database" in liveness, false);
+  assert.equal(readiness.database, "unavailable");
 });
 
 test("generated kuji room contract carries server time, one checkout lease, FIFO, and committed activity", () => {
@@ -307,20 +323,36 @@ test("generated point return contract is batch-idempotent and exposes the commit
   assert.equal(result.totalPointAmount, 5_999);
   assert.equal(headers["Idempotency-Key"], "point-return-request-0001");
   assert.equal(returnedInventoryStatus, "POINT_RETURNED");
+  assert.match(pointReturnSchemas, /verified acquisition source is GACHA/);
+  assert.match(pointReturnSchemas, /KUJI, direct purchase, or an admin adjustment is not eligible/);
   assert.match(pointReturnSchemas, /totalPointAmount: \{ type: integer, minimum: 1, maximum: 2147483647 \}/);
   assert.match(pointReturnSchemas, /balance: \{ type: integer, minimum: 0, maximum: 2147483647 \}/);
 });
 
-test("exchange proposal contract accepts only one owned inventory selection and no free text", () => {
+test("exchange proposal contract accepts one or two owned inventory selections and no free text", () => {
   type OfferInput = components["schemas"]["CreateExchangeOfferInput"];
+  type ListingInput = components["schemas"]["CreateExchangeListingInput"];
   type HasNoMessage = "message" extends keyof OfferInput ? false : true;
+  type EmptyOfferAllowed = Record<string, never> extends OfferInput ? true : false;
+  type ListingWithoutInventoryAllowed = {
+    title: string;
+    details: string;
+  } extends ListingInput ? true : false;
+  const offeredInventoryUnitIds = [
+    "11111111-1111-4111-8111-111111111111",
+    "22222222-2222-4222-8222-222222222222",
+  ];
   const input = {
-    offeredInventoryUnitId: "11111111-1111-4111-8111-111111111111",
+    offeredInventoryUnitIds,
   } satisfies OfferInput;
   const hasNoMessage: HasNoMessage = true;
+  const emptyOfferAllowed: EmptyOfferAllowed = false;
+  const listingWithoutInventoryAllowed: ListingWithoutInventoryAllowed = false;
 
-  assert.equal(input.offeredInventoryUnitId, "11111111-1111-4111-8111-111111111111");
+  assert.deepEqual(input.offeredInventoryUnitIds, offeredInventoryUnitIds);
   assert.equal(hasNoMessage, true);
+  assert.equal(emptyOfferAllowed, false);
+  assert.equal(listingWithoutInventoryAllowed, false);
 });
 
 const routeMethods = ["get", "post", "put", "patch", "delete"] as const;

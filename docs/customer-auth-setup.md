@@ -17,11 +17,11 @@
 
 1. 서울 또는 최종 운영 지역에 Supabase project를 만든다.
 2. Dashboard에서 project URL과 publishable key를 확인한다.
-3. 운영 API가 사용할 PostgreSQL connection string을 배포 secret manager의 `DATABASE_URL`에 넣는다. 이 값은 모바일 앱에 넣지 않는다.
+3. 운영 API가 사용할 제한 계정 `dabboba_runtime`의 PostgreSQL connection string을 배포 secret manager의 `DATABASE_URL`에 넣는다. worker는 별도 `dabboba_worker` 연결을 `WORKER_DATABASE_URL`로 받고, schema owner인 `postgres` 연결은 `DATABASE_MIGRATION_URL`에 별도로 보관해 단일 migration job에만 주입한다. 세 값 모두 모바일 앱에 넣지 않는다.
 4. API 환경에는 `SUPABASE_URL`, `SUPABASE_JWT_AUDIENCE=authenticated`를 넣는다.
 5. 모바일 build 환경에는 `EXPO_PUBLIC_SUPABASE_URL`, `EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY`만 넣는다.
 6. JWT signing key가 공개 JWKS로 검증 가능한 `ES256` 또는 `RS256` 비대칭 키인지 확인한다. 현재 API는 공유 secret 방식의 `HS256` 토큰을 받지 않는다.
-7. 값 입력이 끝나면 담당 개발자가 운영 DB migration과 `/readyz`, `/v1/auth/providers`를 다시 검증한다.
+7. 값 입력이 끝나면 담당 개발자가 Session pooler(5432)의 migration 재실행이 no-op인지, runtime 역할의 허용·차단 권한, `/readyz`, `/v1/auth/providers`를 다시 검증한다.
 
 ### 2. 공통 redirect 등록
 

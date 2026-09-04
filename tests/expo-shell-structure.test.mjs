@@ -30,6 +30,7 @@ const exchangeDetailSource = readFileSync(path.join(root, "apps/mobile/src/featu
 const exchangeCreateSource = readOptionalSource("apps/mobile/src/features/exchange/ExchangeCreateScreen.tsx");
 const exchangeOfferSource = readOptionalSource("apps/mobile/src/features/exchange/ExchangeOfferScreen.tsx");
 const exchangeApiSource = readFileSync(path.join(root, "apps/mobile/src/features/exchange/exchange-api.ts"), "utf8");
+const exchangeVisibilitySource = readFileSync(path.join(root, "apps/mobile/src/features/exchange/exchange-visibility.ts"), "utf8");
 const ppobaRouteSource = readFileSync(path.join(root, "apps/mobile/app/(tabs)/ppoba.tsx"), "utf8");
 const productDetailRouteSource = readFileSync(path.join(root, "apps/mobile/app/product/[productId].tsx"), "utf8");
 const checkoutRouteSource = readOptionalSource("apps/mobile/app/checkout/[productId].tsx");
@@ -192,7 +193,7 @@ test("Expo entry is native-first with typed routes, API contracts, secure tokens
   assert.match(rootLayoutSource, /DevelopmentSessionBootstrap enabled=\{__DEV__ && !customerAuthSetupAttempted\}/);
   assert.match(developmentSessionSource, /\/v1\/auth\/me/);
   assert.match(developmentSessionSource, /\/v1\/auth\/dev-session/);
-  assert.match(developmentSessionSource, /app@dabboba\.local/);
+  assert.match(developmentSessionSource, /mobile-test@dabboba\.local/);
   assert.match(developmentSessionSource, /writeAuthTokens/);
   assert.doesNotMatch(`${rootLayoutSource}\n${tabsLayoutSource}\n${homeSource}`, /WebView/);
 });
@@ -453,7 +454,8 @@ test("fixed Korean guidance separates semantic paragraphs without forcing breaks
   assert.match(seedComponentsSource, /paragraphs\?: readonly string\[\]/);
   assert.match(seedComponentsSource, /<BalancedParagraphText[\s\S]*?paragraphs=\{paragraphs\}/);
 
-  assert.match(profileSectionSource, /paragraphs=\{\[\s*"직접 뽑아 보관 중인 가챠·쿠지만 신청할 수 있어요\.",\s*"배송·교환·환급 중이거나 배송 완료된 상품은 제외돼요\."/);
+  assert.match(profileSectionSource, /paragraphs=\{\[\s*"직접 뽑아 보관 중인 가챠·쿠지만 배송 신청할 수 있어요\.",\s*"배송·교환·환급 중이거나 배송 완료된 상품은 제외돼요\."/);
+  assert.match(profileSectionSource, /paragraphs=\{\[\s*"가챠에서 직접 뽑아 보관 중인 상품만 포인트 환급할 수 있어요\.",\s*"쿠지 추첨과 피규어 등 일반 구매 상품은 포인트 환급할 수 없어요\."/);
   assert.match(profileSectionSource, /paragraphs=\{\[\s*"예상 환급 포인트는 상품 기준가의 50%예요\.",\s*"확인 후 신청하면 서버가 최종 포인트를 다시 계산해요\."/);
   assert.doesNotMatch(profileSectionSource, /<Text style=\{styles\.modeDescription\}>상품 기준가의 50%/);
 
@@ -577,7 +579,7 @@ test("native exchange room shows API-backed examples for every category and open
   assert.match(localDatabaseSource, /DATABASE_VERSION = 4/);
   assert.match(localDatabaseSource, /CREATE TABLE IF NOT EXISTS app_preferences/);
   assert.match(localDatabaseSource, /exchange\.rules\.dismissed\.v2/);
-  assert.match(localDatabaseSource, /exchange\.listings\.v2/);
+  assert.match(localDatabaseSource, /exchange\.listings\.v3/);
   assert.match(exchangeRoomSource, /가챠로 직접 뽑아 현재 보관함에 보관 중인 상품만 교환 등록·제안을 신청/);
   assert.match(exchangeRoomSource, /배송 신청이 접수되었거나 배송이 완료된 상품은 환불·교환·포인트 환급을 신청할 수 없어요/);
   assert.doesNotMatch(exchangeRoomSource, /표시 금액은 판매가가 아닌 앱 기준가예요/);
@@ -609,7 +611,8 @@ test("native exchange room shows API-backed examples for every category and open
   assert.doesNotMatch(exchangeCreateSource, /등록하는 동안 이 상품은 교환용으로 안전하게 보관돼요/);
   assert.match(exchangeCreateSource, /등록 가능한 상품이 없어요/);
   assert.match(exchangeCreateSource, /<BalancedParagraphText[\s\S]*?paragraphs=\{\[\s*"가챠로 뽑은 상품만 가능해요\.",\s*"배송을 신청했거나 이미 받은 상품, 포인트 환급·다른 교환에 사용 중인 상품은 표시되지 않아요\.",?\s*\]\}/);
-  assert.match(exchangeCreateSource, /accessibilityRole="radio"/);
+  assert.match(exchangeCreateSource, /accessibilityRole="checkbox"/);
+  assert.match(exchangeCreateSource, /선택 \{selectedIds\.length\}\/2개/);
   assert.match(exchangeCreateSource, /title\.trim\(\)/);
   assert.match(exchangeCreateSource, /details\.trim\(\)/);
   assert.match(exchangeApiSource, /export async function fetchExchangeListingInventory[\s\S]*?snapshot\.items\.filter\(isDrawnExchangeInventory\)/);
@@ -639,11 +642,15 @@ test("native exchange room shows API-backed examples for every category and open
   assert.match(exchangeOfferRouteSource, /ExchangeOfferScreen/);
   assert.match(exchangeOfferSource, /fetchExchangeOfferInventory/);
   assert.match(exchangeOfferSource, /createExchangeOffer/);
-  assert.match(exchangeApiSource, /item\.status === "OWNED" && item\.sourceType === "GACHA"/);
-  assert.doesNotMatch(exchangeApiSource, /item\.sourceType === "KUJI"/);
-  assert.match(exchangeApiSource, /listing\.offeredInventory\.sourceType === "GACHA"/);
-  assert.match(exchangeApiSource, /offer\.offeredInventory\.sourceType === "GACHA"/);
-  assert.match(exchangeOfferSource, /가챠로 직접 뽑아 현재 보관 중인 상품 1개만 선택/);
+  assert.match(exchangeVisibilitySource, /item\.status === "OWNED"[\s\S]*?item\.sourceType === "GACHA"[\s\S]*?item\.product\.category !== "tcg"/);
+  assert.doesNotMatch(exchangeVisibilitySource, /item\.sourceType === "KUJI"/);
+  assert.match(exchangeApiSource, /isCustomerVisibleExchangeBundle\(exchangeListingInventories\(listing\)\)/);
+  assert.match(exchangeApiSource, /isCustomerVisibleExchangeBundle\(exchangeOfferInventories\(offer\)\)/);
+  assert.match(exchangeRoomSource, /areCustomerVisibleExchangeProducts\(item\.products\?\.length \? item\.products : \[item\.product\]\)/);
+  assert.match(exchangeCreateSource, /toggleExchangeInventorySelection/);
+  assert.match(exchangeOfferSource, /toggleExchangeInventorySelection/);
+  assert.match(exchangeOfferSource, /가챠로 직접 뽑아 현재 보관 중인 상품을 최대 2개까지 선택/);
+  assert.match(exchangeOfferSource, /accessibilityRole="checkbox"/);
   assert.match(exchangeOfferSource, /가챠로 뽑은 상품만 가능해요/);
   assert.match(exchangeOfferSource, /교환 신청 완료/);
   assert.doesNotMatch(exchangeOfferSource, /AppTextInput|TextInput|Keyboard/);
@@ -739,13 +746,20 @@ test("native ppoba catalog and product detail coexist with the shared drawn-prod
   assert.doesNotMatch(tabsLayoutSource, /name="dukroom\/\[postId\]"/);
 });
 
-test("native ppoba opens gacha and kuji while figure and card stay in a pixel coming-soon state", () => {
-  assert.match(productCategoriesSource, /\{ value: "gacha", label: "가챠" \}[\s\S]*?\{ value: "kuji", label: "쿠지" \}[\s\S]*?\{ value: "figure", label: "피규어" \}[\s\S]*?\{ value: "tcg", label: "카드" \}/);
+test("native ppoba hides card while figure stays in a pixel coming-soon state", () => {
+  assert.match(productCategoriesSource, /PRODUCT_CATEGORY_OPTIONS = \[[\s\S]*?\{ value: "gacha", label: "가챠" \}[\s\S]*?\{ value: "kuji", label: "쿠지" \}[\s\S]*?\{ value: "figure", label: "피규어" \}[\s\S]*?\] as const/);
+  assert.doesNotMatch(productCategoriesSource, /PRODUCT_CATEGORY_OPTIONS = \[[\s\S]*?\{ value: "tcg", label: "카드" \}[\s\S]*?\] as const/);
+  assert.match(productCategoriesSource, /isCustomerVisibleProductCategory/);
   assert.match(shopSource, /PRODUCT_CATEGORY_OPTIONS\.map/);
   assert.match(homeSource, /\.\.\.PRODUCT_CATEGORY_OPTIONS\.map/);
+  assert.match(productCategoriesSource, /isCustomerBrowsableCatalogCategory/);
+  assert.match(catalogApiSource, /filter\(\(product\) => \([\s\S]*?isCustomerBrowsableCatalogCategory\(product\.category\)/);
+  assert.match(shopApiSource, /filter\(\(product\) => \([\s\S]*?isCustomerBrowsableCatalogCategory\(product\.category\)/);
+  assert.match(shopApiSource, /item\.id === productId[\s\S]*?isCustomerBrowsableCatalogCategory\(item\.category\)/);
+  assert.match(homeSource, /cached\.products\.filter\(\(product\) => \([\s\S]*?isCustomerBrowsableCatalogCategory\(product\.category\)/);
   assert.doesNotMatch(shopSource, /\{ label: "전체" \}/);
   assert.match(shopSource, /useState<ProductCategory>\("gacha"\)/);
-  assert.match(shopSource, /const isComingSoon = selectedCategory === "figure" \|\| selectedCategory === "tcg"/);
+  assert.match(shopSource, /const isComingSoon = selectedCategory === "figure"/);
   assert.match(shopSource, /wide=\{selectedCategory === "kuji"\}/);
   assert.match(shopSource, /kujiProductCard:\s*\{\s*width:\s*"100%"\s*\}/);
   assert.match(shopSource, /isComingSoon \? \([\s\S]*?<KoreanPixelTitle variant="hero">준비중입니다\.<\/KoreanPixelTitle>/);
@@ -837,17 +851,17 @@ test("native my-info hub opens every account utility and nested member detail ou
   assert.doesNotMatch(profileRouteSource, /MigrationScreen/);
   assert.match(profileDetailRouteSource, /ProfileSectionScreen/);
   assert.match(profileMemberRouteSource, /ProfileMemberDetailScreen/);
-  for (const label of ["내 찜 목록", "보관함", "구매 내역", "포인트 내역", "신청방", "고객센터", "회원정보 관리", "설정"]) {
+  for (const label of ["내 찜 목록", "보관함", "배송 신청 내역", "구매 내역", "포인트 내역", "신청방", "고객센터", "회원정보 관리", "설정"]) {
     assert.match(profileHomeSource, new RegExp(label));
   }
   assert.match(profileHomeSource, /배송 신청 · 포인트 환급/);
-  assert.doesNotMatch(profileHomeSource, /section: "shipping", label: "배송 신청"/);
+  assert.match(profileHomeSource, /section: "shipping", label: "배송 신청 내역"/);
   for (const endpoint of [
     "/v1/account/profile",
     "/v1/account/basic-info",
     "/v1/account/default-address",
     "/v1/account/wishlist",
-    "/v1/exchange/inventory",
+    "/v1/account/inventory",
     "/v1/account/orders",
     "/v1/account/points",
     "/v1/account/point-returns",
@@ -860,13 +874,15 @@ test("native my-info hub opens every account utility and nested member detail ou
   ]) {
     assert.match(profileApiSource, new RegExp(endpoint.replaceAll("/", "\\/")));
   }
+  assert.doesNotMatch(profileApiSource, /\/v1\/exchange\/inventory/);
   assert.match(profileSectionSource, /로그인하면 주문·포인트·배송 내역과 나의 수집 기록을 확인할 수 있어요/);
   assert.doesNotMatch(profileSectionSource, /로그인 전 화면 예시/);
   assert.match(profileSectionSource, /배송 신청/);
   assert.match(profileSectionSource, /포인트 환급/);
   assert.match(profileSectionSource, /createPointReturn/);
   assert.match(profileSectionSource, /Math\.floor\(item\.product\.price \/ 2\)/);
-  assert.match(profileSectionSource, /section === "storage" \|\| section === "shipping"/);
+  assert.match(profileSectionSource, /if \(section === "storage"\)[\s\S]*?<StorageHubContent/);
+  assert.match(profileSectionSource, /if \(section === "shipping"\) return <ShippingHistory/);
   assert.match(profileSectionSource, /배송·교환·환급 중이거나 배송 완료된 상품은 제외돼요/);
   assert.match(profileHomeSource, /주문·포인트·배송 상태는 내 계정의 최신 내역/);
   for (const detail of ["개인정보", "기본 배송지", "결제 카드", "결제 설정", "로그인 및 보안", "알림 수신설정", "개인정보·수신 동의", "약관·운영정책", "로그아웃·회원탈퇴"]) {
@@ -906,7 +922,7 @@ test("short fixed profile guidance avoids an orphan tail without forced text sca
   assert.notEqual(sectionLeadEnd, -1);
 
   const sectionLeadSource = profileSectionSource.slice(sectionLeadStart, sectionLeadEnd);
-  assert.match(profileSectionSource, /description="묶음 배송하거나 포인트로 환급할 수 있어요\."/);
+  assert.match(profileSectionSource, /description="묶음 배송하거나 가챠에서 뽑은 상품을 포인트로 환급할 수 있어요\."/);
   assert.doesNotMatch(profileSectionSource, /직접 뽑아 보관 중인 상품을 묶어 배송받거나 포인트로 환급할 수 있어요/);
   assert.match(sectionLeadSource, /BalancedAppText/);
   assert.doesNotMatch(sectionLeadSource, /numberOfLines|adjustsFontSizeToFit|allowFontScaling|minimumFontScale/);
@@ -914,7 +930,7 @@ test("short fixed profile guidance avoids an orphan tail without forced text sca
 
 test("native shipping request shows the category-sensitive free-shipping policy", () => {
   assert.match(profileSectionSource, /가챠 상품만 주문하면 30,000원 이상/);
-  assert.match(profileSectionSource, /쿠지·피규어·카드가 하나라도 포함되면 50,000원 이상 무료배송/);
+  assert.match(profileSectionSource, /쿠지·피규어 등 다른 상품이 하나라도 포함되면 50,000원 이상 무료배송/);
   for (const styleName of [
     "sectionLeadBody",
     "modeDescription",

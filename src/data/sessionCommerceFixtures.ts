@@ -32,7 +32,7 @@ export type SessionInventoryUnit = {
   itemName: string;
   itemImage: string;
   appReferenceValue: number;
-  source: "seed" | "direct-purchase" | "gacha" | "kuji";
+  source: "seed" | "direct-purchase" | "gacha" | "kuji" | "admin-adjustment";
   acquiredAt: string;
   shippingDeadline: string;
   shippingStatus: SessionShippingStatus;
@@ -293,6 +293,7 @@ export function eligibleSessionInventoryUnits(
 ): SessionInventoryUnit[] {
   return state.inventoryUnits.filter((unit) => (
     unit.ownerId === ownerId
+    && unit.source === "gacha"
     && unit.shippingStatus === "stored"
     && unit.exchangeStatus === "available"
   ));
@@ -302,9 +303,7 @@ export function eligibleDrawExchangeProposalUnits(
   state: SessionCommerceState,
   ownerId = CURRENT_USER_ID,
 ): SessionInventoryUnit[] {
-  return eligibleSessionInventoryUnits(state, ownerId).filter((unit) => (
-    unit.source === "gacha" || unit.source === "kuji"
-  ));
+  return eligibleSessionInventoryUnits(state, ownerId);
 }
 
 export function setSessionInventoryExchangeStatus(

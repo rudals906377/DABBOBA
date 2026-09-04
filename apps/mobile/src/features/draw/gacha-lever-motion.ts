@@ -1,6 +1,8 @@
 export const GACHA_LEVER_REQUIRED_TURNS = 2;
 export const GACHA_LEVER_TARGET_RADIANS = Math.PI * 2 * GACHA_LEVER_REQUIRED_TURNS;
 export const GACHA_LEVER_COMPLETION_RADIANS = GACHA_LEVER_TARGET_RADIANS * 0.95;
+export const GACHA_LEVER_REQUIRED_TAPS = 8;
+const GACHA_LEVER_TAP_RADIANS = GACHA_LEVER_TARGET_RADIANS / GACHA_LEVER_REQUIRED_TAPS;
 
 const MAX_SAMPLE_DELTA = Math.PI / 2;
 
@@ -111,6 +113,17 @@ export function advanceGachaLeverRadians(
   const delta = normalizeGachaLeverDelta(nextAngle - previousAngle);
   if (Math.abs(delta) > MAX_SAMPLE_DELTA) return Math.max(0, currentRadians);
   return Math.max(0, Math.min(currentRadians + delta, GACHA_LEVER_TARGET_RADIANS));
+}
+
+export function advanceGachaLeverTapRadians(currentRadians: number): number {
+  "worklet";
+  const boundedCurrent = Number.isFinite(currentRadians)
+    ? Math.max(0, currentRadians)
+    : 0;
+  return Math.min(
+    boundedCurrent + GACHA_LEVER_TAP_RADIANS,
+    GACHA_LEVER_TARGET_RADIANS,
+  );
 }
 
 export function resolveGachaLeverProgress(radians: number): number {

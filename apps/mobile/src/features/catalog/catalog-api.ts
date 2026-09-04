@@ -1,6 +1,7 @@
 import { randomUUID } from "expo-crypto";
 import { errorMessage } from "@dabboba/api-client";
 import type { CatalogIp, CatalogProduct, components } from "@dabboba/contracts";
+import { isCustomerBrowsableCatalogCategory } from "@/features/catalog/product-categories";
 import { createMobileDabbobaClient as createDabbobaClient } from "@/lib/mobile-api-client";
 
 type Notice = components["schemas"]["Notice"];
@@ -32,7 +33,9 @@ export async function fetchHomeCatalog(apiBaseUrl: string): Promise<HomeCatalogS
 
   return {
     ips: ipResult.data.items,
-    products: productResult.data.items,
+    products: productResult.data.items.filter((product) => (
+      isCustomerBrowsableCatalogCategory(product.category)
+    )),
     notices: noticeResult.data?.items ?? [],
     fetchedAt: new Date().toISOString(),
   };

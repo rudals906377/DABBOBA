@@ -20,6 +20,20 @@ test("native login exposes exactly Kakao, Naver, and Korean phone authentication
   assert.match(screen, /resolveAfterLoginPath/);
 });
 
+test("native test login is visible only in development and uses the non-production API session", () => {
+  const screen = read("apps/mobile/src/features/auth/LoginScreen.tsx");
+  const developmentSession = read("apps/mobile/src/lib/development-session.ts");
+  const apiAuth = read("apps/api/src/modules/auth.ts");
+
+  assert.match(screen, /__DEV__\s*\?/);
+  assert.match(screen, /테스트 계정으로 로그인/);
+  assert.match(screen, /ensureDevelopmentAuthSession\(runtime\.apiBaseUrl\)/);
+  assert.match(developmentSession, /mobile-test@dabboba\.local/);
+  assert.match(developmentSession, /\/v1\/auth\/dev-session/);
+  assert.match(apiAuth, /developmentSessionEnabled\(\{/);
+  assert.match(apiAuth, /DABBOBA_ENABLE_DEV_SESSION/);
+});
+
 test("protected customer actions can open login and return to one bounded internal route", () => {
   const navigation = read("apps/mobile/src/features/auth/login-navigation.ts");
   const product = read("apps/mobile/src/features/shop/ProductDetailScreen.tsx");

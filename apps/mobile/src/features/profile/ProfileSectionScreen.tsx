@@ -35,6 +35,7 @@ import {
   setWantedRequestLike,
   updateAccountProfile,
 } from "@/features/profile/profile-api";
+import { isPointReturnEligibleInventory } from "@/features/profile/point-return-eligibility";
 import { calculateShippingPolicy } from "@/features/profile/shipping-policy";
 import { useProfileSnapshot } from "@/features/profile/use-profile-snapshot";
 import { productSubjectTitle } from "@/features/shop/product-title";
@@ -50,7 +51,7 @@ const SECTION_META = {
   edit: { title: "프로필 수정" },
   wishlist: { title: "내 찜 목록" },
   storage: { title: "보관함" },
-  shipping: { title: "보관함" },
+  shipping: { title: "배송 신청 내역" },
   orders: { title: "구매 내역" },
   points: { title: "포인트 내역" },
   requests: { title: "신청방" },
@@ -106,7 +107,7 @@ function SectionContent({
   if (!profileState.snapshot) return null;
   if (section === "edit") return <ProfileEdit profileState={profileState} />;
   if (section === "wishlist") return <Wishlist profileState={profileState} assetBaseUrl={assetBaseUrl} />;
-  if (section === "storage" || section === "shipping") {
+  if (section === "storage") {
     return (
       <StorageHubContent
         profileState={profileState}
@@ -115,6 +116,7 @@ function SectionContent({
       />
     );
   }
+  if (section === "shipping") return <ShippingHistory profileState={profileState} />;
   if (section === "orders") return <Orders profileState={profileState} />;
   if (section === "points") return <Points profileState={profileState} />;
   if (section === "requests") return <RequestRoom profileState={profileState} />;
@@ -245,12 +247,16 @@ export function StorageHubContent({
     () => snapshot.inventory.filter(isStoredDrawInventory),
     [snapshot.inventory],
   );
+  const pointReturnItems = useMemo(
+    () => snapshot.inventory.filter(isPointReturnEligibleInventory),
+    [snapshot.inventory],
+  );
 
   return (
     <>
       <SectionLead
         title={`보관 중인 상품 ${storedDrawItems.length}개`}
-        description="묶음 배송하거나 포인트로 환급할 수 있어요."
+        description="묶음 배송하거나 가챠에서 뽑은 상품을 포인트로 환급할 수 있어요."
       />
       <View accessibilityRole="tablist" style={styles.storageTabs}>
         <SeedChip
@@ -266,17 +272,27 @@ export function StorageHubContent({
           style={styles.storageTab}
         />
       </View>
-      <SeedInlineGuidance
-        style={styles.storageGuidance}
-        paragraphs={[
-          "직접 뽑아 보관 중인 가챠·쿠지만 신청할 수 있어요.",
-          "배송·교환·환급 중이거나 배송 완료된 상품은 제외돼요.",
-        ]}
-      />
+      {mode === "shipping" ? (
+        <SeedInlineGuidance
+          style={styles.storageGuidance}
+          paragraphs={[
+            "직접 뽑아 보관 중인 가챠·쿠지만 배송 신청할 수 있어요.",
+            "배송·교환·환급 중이거나 배송 완료된 상품은 제외돼요.",
+          ]}
+        />
+      ) : (
+        <SeedInlineGuidance
+          style={styles.storageGuidance}
+          paragraphs={[
+            "가챠에서 직접 뽑아 보관 중인 상품만 포인트 환급할 수 있어요.",
+            "쿠지 추첨과 피규어 등 일반 구매 상품은 포인트 환급할 수 없어요.",
+          ]}
+        />
+      )}
       {mode === "shipping" ? (
         <Shipping profileState={profileState} items={storedDrawItems} assetBaseUrl={assetBaseUrl} />
       ) : (
-        <PointReturn profileState={profileState} items={storedDrawItems} assetBaseUrl={assetBaseUrl} />
+        <PointReturn profileState={profileState} items={pointReturnItems} assetBaseUrl={assetBaseUrl} />
       )}
     </>
   );
@@ -348,7 +364,7 @@ function Shipping({
             <Text style={styles.shippingPolicyBadge}>{shippingPolicy.isGachaOnly ? "가챠만 선택" : "다른 카테고리 포함"}</Text>
           ) : null}
         </View>
-        <BalancedAppText style={styles.shippingPolicyDescription}>가챠 상품만 주문하면 30,000원 이상, 쿠지·피규어·카드가 하나라도 포함되면 50,000원 이상 무료배송이에요.</BalancedAppText>
+        <BalancedAppText style={styles.shippingPolicyDescription}>가챠 상품만 주문하면 30,000원 이상, 쿠지·피규어 등 다른 상품이 하나라도 포함되면 50,000원 이상 무료배송이에요.</BalancedAppText>
         {shippingPolicy.hasSelection ? (
           <View style={styles.shippingPolicySummary}>
             <View>
@@ -390,7 +406,18 @@ function Shipping({
         );
       })}
       {items.length ? <PrimaryButton label={submitting ? "신청 중" : `${selected.length}개 배송 신청하기`} disabled={submitting} onPress={() => void submit()} /> : <EmptyState icon="cube-outline" title="배송할 상품이 없어요" body="직접 뽑은 상품이 보관함에 등록되면 여기에서 선택할 수 있어요." />}
-      <Text style={styles.listHeading}>최근 배송 신청</Text>
+    </>
+  );
+}
+
+function ShippingHistory({
+  profileState,
+}: {
+  profileState: ReturnType<typeof useProfileSnapshot>;
+}) {
+  const snapshot = profileState.snapshot!;
+  return (
+    <>
       {snapshot.shippingRequests.length ? snapshot.shippingRequests.map((request) => (
         <Pressable key={request.id} accessibilityRole="button" accessibilityLabel={`${formatDate(request.requestedAt)} 배송 신청 상세`} onPress={() => router.push(`/profile/shipping/${encodeURIComponent(request.id)}` as Href)} style={({ pressed }) => [styles.historyCard, pressed && styles.pressed]}>
           <View style={styles.historyTop}><Text style={styles.historyTitle}>배송 {request.inventoryUnitIds.length}개</Text><Text style={styles.statusBadge}>{shippingStatus(request.status)}</Text></View>
@@ -418,6 +445,10 @@ function PointReturn({
     () => items.filter((item) => selected.includes(item.id)),
     [items, selected],
   );
+  const selectedInventoryUnitIds = useMemo(
+    () => selectedItems.map((item) => item.id),
+    [selectedItems],
+  );
   const estimatedPointAmount = useMemo(
     () => selectedItems.reduce((total, item) => total + Math.floor(item.product.price / 2), 0),
     [selectedItems],
@@ -441,7 +472,7 @@ function PointReturn({
       const result = await createPointReturn(
         profileState.runtime.apiBaseUrl,
         profileState.accessToken,
-        selected,
+        selectedInventoryUnitIds,
       );
       setSelected([]);
       await profileState.reload();
@@ -457,12 +488,12 @@ function PointReturn({
   };
 
   const submit = () => {
-    if (!selected.length) {
+    if (!selectedInventoryUnitIds.length) {
       Alert.alert("환급할 상품을 선택해 주세요");
       return;
     }
 
-    const summary = `${selected.length}개 · 예상 ${estimatedPointAmount.toLocaleString("ko-KR")}P\n환급한 상품은 다시 배송하거나 교환할 수 없어요.`;
+    const summary = `${selectedInventoryUnitIds.length}개 · 예상 ${estimatedPointAmount.toLocaleString("ko-KR")}P\n환급한 상품은 다시 배송하거나 교환할 수 없어요.`;
     if (snapshot.isExample || !profileState.accessToken) {
       Alert.alert(
         "로그인 후 포인트 환급을 신청할 수 있어요",
@@ -489,14 +520,14 @@ function PointReturn({
       <View style={styles.pointReturnSummary}>
         <View>
           <Text style={styles.shippingPolicyCaption}>선택 상품</Text>
-          <Text style={styles.shippingPolicyAmount}>{selected.length}개</Text>
+          <Text style={styles.shippingPolicyAmount}>{selectedInventoryUnitIds.length}개</Text>
         </View>
         <View style={styles.shippingPolicyResultBlock}>
           <Text style={styles.shippingPolicyCaption}>예상 환급 포인트 · 기준가의 50%</Text>
           <Text style={[styles.shippingPolicyResult, styles.shippingPolicyResultFree]}>{estimatedPointAmount.toLocaleString("ko-KR")}P</Text>
         </View>
       </View>
-      <Text style={styles.listHeading}>환급할 상품 선택 · {selected.length}개</Text>
+      <Text style={styles.listHeading}>환급할 상품 선택 · {selectedInventoryUnitIds.length}개</Text>
       {items.map((item) => {
         const ipName = snapshot.ipNames[item.product.ipId] ?? "등록 작품";
         return (
@@ -523,12 +554,12 @@ function PointReturn({
       })}
       {items.length ? (
         <PrimaryButton
-          label={submitting ? "환급 중" : `${selected.length}개 포인트 환급 신청`}
+          label={submitting ? "환급 중" : `${selectedInventoryUnitIds.length}개 포인트 환급 신청`}
           disabled={submitting}
           onPress={submit}
         />
       ) : (
-        <EmptyState icon="wallet-outline" title="환급할 상품이 없어요" body="직접 뽑은 상품이 보관함에 등록되면 예상 포인트를 확인할 수 있어요." />
+        <EmptyState icon="wallet-outline" title="환급할 상품이 없어요" body="가챠에서 직접 뽑은 상품이 보관함에 등록되면 예상 포인트를 확인할 수 있어요." />
       )}
     </>
   );

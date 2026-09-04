@@ -31,6 +31,7 @@ import {
 import {
   GACHA_LEVER_TARGET_RADIANS,
   advanceGachaLeverRadians,
+  advanceGachaLeverTapRadians,
   createGachaLeverMotionState,
   isGachaLeverComplete,
   resolveGachaLeverPointAngle,
@@ -61,6 +62,7 @@ const GESTURE_SIZE = 160;
 const GESTURE_CENTER = GESTURE_SIZE / 2;
 const GESTURE_MIN_RADIUS = 28;
 const GESTURE_MAX_RADIUS = 78;
+const GESTURE_TAP_SLOP = 8;
 const CRANK_PLATE_SIZE = 41;
 const LEVER_CUE_ICON_SIZE = 34;
 const LEVER_CUE_ROTATION_DURATION_MS = 2600;
@@ -82,7 +84,12 @@ export function GachaLeverMachine({
 }: GachaLeverMachineProps) {
   const [phase, setPhase] = useState<GachaLeverMotionPhase>("ready");
   const leverRadians = useSharedValue(0);
+  const interactionRadians = useSharedValue(0);
   const previousAngle = useSharedValue(Number.NaN);
+  const gestureStartRadians = useSharedValue(0);
+  const gestureTravel = useSharedValue(0);
+  const gestureAccepted = useSharedValue(0);
+  const gestureEnded = useSharedValue(0);
   const gestureCompleted = useSharedValue(0);
   const waitingPulse = useSharedValue(0);
   const dispenseProgress = useSharedValue(0);
@@ -148,7 +155,12 @@ export function GachaLeverMachine({
       cancelAnimation(agitationProgress);
       cancelAnimation(clockwiseCueRotation);
       leverRadians.value = 0;
+      interactionRadians.value = 0;
       previousAngle.value = Number.NaN;
+      gestureStartRadians.value = 0;
+      gestureTravel.value = 0;
+      gestureAccepted.value = 0;
+      gestureEnded.value = 0;
       gestureCompleted.value = 0;
       waitingPulse.value = 0;
       dispenseProgress.value = 0;
@@ -157,7 +169,7 @@ export function GachaLeverMachine({
       clockwiseCueRotation.value = 0;
       clockwiseCueOpacity.value = 1;
     }
-  }, [agitationProgress, clockwiseCueOpacity, clockwiseCueRotation, dispenseProgress, gestureCompleted, handleDispenseSettled, leverRadians, previousAngle, triggeredPulseCount, waitingPulse]);
+  }, [agitationProgress, clockwiseCueOpacity, clockwiseCueRotation, dispenseProgress, gestureAccepted, gestureCompleted, gestureEnded, gestureStartRadians, gestureTravel, handleDispenseSettled, interactionRadians, leverRadians, previousAngle, triggeredPulseCount, waitingPulse]);
 
   dispatchRef.current = dispatchMotion;
 
@@ -214,7 +226,12 @@ export function GachaLeverMachine({
     cancelAnimation(agitationProgress);
     cancelAnimation(clockwiseCueRotation);
     leverRadians.value = 0;
+    interactionRadians.value = 0;
     previousAngle.value = Number.NaN;
+    gestureStartRadians.value = 0;
+    gestureTravel.value = 0;
+    gestureAccepted.value = 0;
+    gestureEnded.value = 0;
     gestureCompleted.value = 0;
     waitingPulse.value = 0;
     dispenseProgress.value = 0;
@@ -222,7 +239,7 @@ export function GachaLeverMachine({
     triggeredPulseCount.value = 0;
     clockwiseCueRotation.value = 0;
     clockwiseCueOpacity.value = 1;
-  }, [agitationProgress, clockwiseCueOpacity, clockwiseCueRotation, dispenseProgress, gestureCompleted, leverRadians, previousAngle, reduceMotion, resetSignal, triggeredPulseCount, waitingPulse]);
+  }, [agitationProgress, clockwiseCueOpacity, clockwiseCueRotation, dispenseProgress, gestureAccepted, gestureCompleted, gestureEnded, gestureStartRadians, gestureTravel, interactionRadians, leverRadians, previousAngle, reduceMotion, resetSignal, triggeredPulseCount, waitingPulse]);
 
   useEffect(() => {
     cancelAnimation(entryProgress);
@@ -276,15 +293,17 @@ export function GachaLeverMachine({
 
   const beginOpen = useCallback(() => {
     if (disabled || motionStateRef.current.phase !== "ready") return;
+    interactionRadians.value = GACHA_LEVER_TARGET_RADIANS;
     leverRadians.value = GACHA_LEVER_TARGET_RADIANS;
     dispatchRef.current({ type: "request" });
-  }, [disabled, leverRadians]);
+  }, [disabled, interactionRadians, leverRadians]);
 
   const autoCompleteLever = useCallback(() => {
     if (disabled || motionStateRef.current.phase !== "ready" || gestureCompleted.value) return;
     cancelAnimation(clockwiseCueRotation);
     clockwiseCueOpacity.value = 0;
     gestureCompleted.value = 1;
+    interactionRadians.value = GACHA_LEVER_TARGET_RADIANS;
     if (reduceMotion) {
       leverRadians.value = GACHA_LEVER_TARGET_RADIANS;
       beginOpen();
@@ -297,7 +316,7 @@ export function GachaLeverMachine({
         if (finished) scheduleOnRN(beginOpen);
       },
     );
-  }, [beginOpen, clockwiseCueOpacity, clockwiseCueRotation, disabled, gestureCompleted, leverRadians, reduceMotion]);
+  }, [beginOpen, clockwiseCueOpacity, clockwiseCueRotation, disabled, gestureCompleted, interactionRadians, leverRadians, reduceMotion]);
 
   useEffect(() => {
     if (requestSignalRef.current === requestSignal) return;
@@ -311,6 +330,8 @@ export function GachaLeverMachine({
     .maxPointers(1)
     .shouldCancelWhenOutside(false)
     .onTouchesDown((event, manager) => {
+      gestureAccepted.value = 0;
+      gestureEnded.value = 0;
       const touch = event.allTouches[0];
       if (!touch) {
         manager.fail();
@@ -329,13 +350,22 @@ export function GachaLeverMachine({
         return;
       }
       cancelAnimation(clockwiseCueRotation);
+      cancelAnimation(leverRadians);
       clockwiseCueOpacity.value = 0;
+      leverRadians.value = interactionRadians.value;
+      gestureStartRadians.value = interactionRadians.value;
+      gestureTravel.value = 0;
+      gestureAccepted.value = 1;
       previousAngle.value = start.angle ?? Number.NaN;
       gestureCompleted.value = 0;
       manager.activate();
     })
     .onUpdate((event) => {
       if (gestureCompleted.value) return;
+      gestureTravel.value = Math.max(
+        gestureTravel.value,
+        Math.sqrt(event.translationX * event.translationX + event.translationY * event.translationY),
+      );
       const nextAngle = resolveGachaLeverPointAngle(event.x, event.y, GESTURE_CENTER, GESTURE_CENTER, GESTURE_MIN_RADIUS, GESTURE_MAX_RADIUS);
       if (nextAngle === null) {
         previousAngle.value = Number.NaN;
@@ -346,11 +376,12 @@ export function GachaLeverMachine({
         return;
       }
       const nextRadians = advanceGachaLeverRadians(
-        leverRadians.value,
+        interactionRadians.value,
         previousAngle.value,
         nextAngle,
       );
       previousAngle.value = nextAngle;
+      interactionRadians.value = nextRadians;
       leverRadians.value = nextRadians;
       if (isGachaLeverComplete(nextRadians)) {
         gestureCompleted.value = 1;
@@ -363,13 +394,47 @@ export function GachaLeverMachine({
         );
       }
     })
+    .onEnd(() => {
+      previousAngle.value = Number.NaN;
+      gestureEnded.value = 1;
+      if (!gestureAccepted.value || gestureCompleted.value) return;
+      if (gestureTravel.value <= GESTURE_TAP_SLOP) {
+        const nextRadians = advanceGachaLeverTapRadians(gestureStartRadians.value);
+        interactionRadians.value = nextRadians;
+        if (isGachaLeverComplete(nextRadians)) {
+          gestureCompleted.value = 1;
+          interactionRadians.value = GACHA_LEVER_TARGET_RADIANS;
+          leverRadians.value = withTiming(
+            GACHA_LEVER_TARGET_RADIANS,
+            { duration: reduceMotion ? 0 : 130, easing: smoothEasing },
+            (finished) => {
+              "worklet";
+              if (finished) scheduleOnRN(beginOpen);
+            },
+          );
+          return;
+        }
+        leverRadians.value = reduceMotion
+          ? nextRadians
+          : withTiming(nextRadians, { duration: 110, easing: smoothEasing });
+        return;
+      }
+      interactionRadians.value = gestureStartRadians.value;
+      leverRadians.value = reduceMotion
+        ? gestureStartRadians.value
+        : withTiming(gestureStartRadians.value, { duration: 220, easing: smoothEasing });
+    })
     .onFinalize(() => {
       previousAngle.value = Number.NaN;
-      if (gestureCompleted.value) return;
-      leverRadians.value = reduceMotion
-        ? 0
-        : withTiming(0, { duration: 220, easing: smoothEasing });
-    }), [beginOpen, clockwiseCueOpacity, clockwiseCueRotation, disabled, gestureCompleted, leverRadians, phase, previousAngle, reduceMotion]);
+      if (gestureAccepted.value && !gestureEnded.value && !gestureCompleted.value) {
+        interactionRadians.value = gestureStartRadians.value;
+        leverRadians.value = reduceMotion
+          ? gestureStartRadians.value
+          : withTiming(gestureStartRadians.value, { duration: 220, easing: smoothEasing });
+      }
+      gestureAccepted.value = 0;
+      gestureEnded.value = 0;
+    }), [beginOpen, clockwiseCueOpacity, clockwiseCueRotation, disabled, gestureAccepted, gestureCompleted, gestureEnded, gestureStartRadians, gestureTravel, interactionRadians, leverRadians, phase, previousAngle, reduceMotion]);
 
   const clockwiseCueStyle = useAnimatedStyle(() => ({
     opacity: clockwiseCueOpacity.value * 0.9,
@@ -422,7 +487,7 @@ export function GachaLeverMachine({
       accessible
       accessibilityRole="button"
       accessibilityLabel={busy ? `가챠 레버, ${statusLabel}` : "가챠 레버 돌리기"}
-      accessibilityHint="레버 둘레를 시계 방향으로 두 바퀴 돌립니다"
+      accessibilityHint="레버를 연속으로 터치하거나 둘레를 시계 방향으로 두 바퀴 돌립니다"
       accessibilityState={{ disabled, busy }}
       onAccessibilityTap={autoCompleteLever}
       style={[styles.container, entryStyle]}

@@ -87,7 +87,6 @@ import {
   createInitialSessionCommerceState,
   decideSessionExchangeApplication,
   eligibleDrawExchangeProposalUnits,
-  eligibleSessionInventoryUnits,
   exchangeDecisionKey,
   recordSessionInventoryUnitOnce,
   recordSessionOrderOnce,
@@ -116,9 +115,11 @@ import {
   type DuckroomShowcase,
 } from "./data/socialFixtures";
 import {
-  PRODUCT_CATEGORIES,
-  PRODUCT_CATEGORY_LABELS,
+  CUSTOMER_VISIBLE_PRODUCT_CATEGORIES,
+  CUSTOMER_VISIBLE_PRODUCT_CATEGORY_LABELS,
   categoryLabel,
+  isCustomerBrowsableProductCategory,
+  isCustomerVisibleProductCategory,
   isRandomDrawCategory,
   matchesIpSearch,
   normalizeCatalogSearch,
@@ -337,7 +338,8 @@ function inventoryExchangeItems(inventoryUnits: readonly SessionInventoryUnit[])
   }));
 }
 
-const filters: CategoryFilter[] = ["전체", ...PRODUCT_CATEGORY_LABELS];
+const filters: CategoryFilter[] = ["전체", ...CUSTOMER_VISIBLE_PRODUCT_CATEGORY_LABELS];
+const customerVisibleRequestCategoryIds = REQUEST_CATEGORY_IDS.filter(isCustomerVisibleProductCategory);
 const paymentMethods: PaymentMethod[] = ["간편카드", "카카오페이", "네이버페이"];
 const couponOptions = [1_000, 0] as const;
 const ipDetailTabs: IpDetailTab[] = ["상품", "캐릭터", "스냅", "교환방"];
@@ -710,7 +712,9 @@ function mapApiInventoryUnit(item: ApiInventoryUnit): SessionInventoryUnit {
     ? "gacha"
     : item.sourceType === "KUJI"
       ? "kuji"
-      : "direct-purchase";
+      : item.sourceType === "ADMIN_ADJUSTMENT"
+        ? "admin-adjustment"
+        : "direct-purchase";
   const exchangeStatus: SessionExchangeStatus = item.status === "EXCHANGE_LISTED"
     ? "listed"
     : item.status === "EXCHANGE_OFFERED"
@@ -750,6 +754,7 @@ function mapApiExchangeListing(item: ApiExchangeListing): ExchangePost {
     offeredItem: inventory.itemName,
     offeredItemImage: inventory.itemImage,
     appReferenceValue: inventory.appReferenceValue,
+    sourceType: item.offeredInventory.sourceType,
     body: item.details,
     time: serverDateLabel(item.createdAt),
     applications: item.offerCount,
@@ -773,6 +778,7 @@ function mapApiExchangeOffer(item: ApiExchangeOffer, author: string): ExchangeAp
     offeredItem: inventory.itemName,
     offeredItemImage: inventory.itemImage,
     appReferenceValue: inventory.appReferenceValue,
+    sourceType: item.offeredInventory.sourceType,
     time: serverDateLabel(item.createdAt),
     status: item.status,
   };
@@ -1007,7 +1013,7 @@ type DabbobaContextValue = {
     postId: string,
     application: Pick<
       ExchangeApplication,
-      "offeredInventoryUnitId" | "offeredCatalogItemId" | "ipId" | "categoryId" | "offeredItem" | "offeredItemImage" | "appReferenceValue"
+      "offeredInventoryUnitId" | "offeredCatalogItemId" | "ipId" | "categoryId" | "offeredItem" | "offeredItemImage" | "appReferenceValue" | "sourceType"
     >,
     idempotencyKey?: string,
   ) => Promise<UserMutationResult<ApiExchangeOffer>>;
@@ -1896,7 +1902,7 @@ export default function Prototype() {
     postId: string,
     application: Pick<
       ExchangeApplication,
-      "offeredInventoryUnitId" | "offeredCatalogItemId" | "ipId" | "categoryId" | "offeredItem" | "offeredItemImage" | "appReferenceValue"
+      "offeredInventoryUnitId" | "offeredCatalogItemId" | "ipId" | "categoryId" | "offeredItem" | "offeredItemImage" | "appReferenceValue" | "sourceType"
     >,
     idempotencyKey?: string,
   ): Promise<UserMutationResult<ApiExchangeOffer>> => {
@@ -3116,7 +3122,7 @@ function createLoginScreen(): FlowScreen {
 function createShopScreen(): FlowScreen {
   return {
     id: "root-shop",
-    header: () => <RootTabHeader title="뽀바" subtitle="가챠 · 피규어 · 쿠지 · 카드" showPoints />,
+    header: () => <RootTabHeader title="뽀바" subtitle="가챠 · 피규어 · 쿠지" showPoints />,
     headerHeight: 58,
     footer: (flow) => <RootTabFooter flow={flow} />,
     footerHeight: 70,
@@ -3362,6 +3368,15 @@ function createShippingRequestScreen(): FlowScreen {
   };
 }
 
+function createShippingHistoryScreen(): FlowScreen {
+  return {
+    id: "profile-shipping-history",
+    header: (flow) => <BackHeader title="배송 신청 내역" onBack={flow.pop} />,
+    headerHeight: 56,
+    render: () => <ShippingHistoryPage />,
+  };
+}
+
 function createPurchaseHistoryScreen(): FlowScreen {
   return {
     id: "profile-purchase-history",
@@ -3402,6 +3417,7 @@ const PROFILE_MENU_ITEMS = [
   { label: "내 찜 목록", createScreen: createWishlistScreen },
   { label: "보관함", createScreen: createStorageScreen },
   { label: "배송 신청", createScreen: createShippingRequestScreen },
+  { label: "배송 신청 내역", createScreen: createShippingHistoryScreen },
   { label: "구매 내역", createScreen: createPurchaseHistoryScreen },
   { label: "포인트 내역", createScreen: createPointHistoryScreen },
   { label: "고객센터", createScreen: createCustomerCenterScreen },
@@ -3873,7 +3889,7 @@ function ExchangeRoomPage({ flow }: { flow: FlowControls }) {
   const screenFocusRef = useScreenEntryFocus();
   const pendingListingKeyRef = useRef<{ fingerprint: string; key: string } | null>(null);
   const ownedExchangeItems = useMemo(() => inventoryExchangeItems(
-    eligibleSessionInventoryUnits(sessionCommerce, currentUserId),
+    eligibleDrawExchangeProposalUnits(sessionCommerce, currentUserId),
   ), [currentUserId, sessionCommerce]);
   const firstOwnedExchangeItem = ownedExchangeItems[0];
   const [filter, setFilter] = useState<ExchangeFilter>("전체");
@@ -3908,9 +3924,10 @@ function ExchangeRoomPage({ flow }: { flow: FlowControls }) {
     ? exchangeItemSuggestions(draftOfferedQuery, ownedExchangeItems, catalogIps)
     : ownedExchangeItems;
   const selectedOfferedItem = ownedExchangeItems.find((item) => item.inventoryUnitId === draftOfferedInventoryUnitId);
+  const eligibleExchangePosts = exchangePosts.filter((post) => post.sourceType === "GACHA");
   const visiblePosts = filter === "전체"
-    ? exchangePosts
-    : exchangePosts.filter((post) => categoryLabel(post.categoryId) === filter);
+    ? eligibleExchangePosts
+    : eligibleExchangePosts.filter((post) => categoryLabel(post.categoryId) === filter);
 
   useEffect(() => {
     if (!isAuthenticated || !exchangeComposerRequested) return;
@@ -3952,6 +3969,7 @@ function ExchangeRoomPage({ flow }: { flow: FlowControls }) {
       offeredItem: selectedOfferedItem.name,
       offeredItemImage: selectedOfferedItem.image,
       appReferenceValue: selectedOfferedItem.estimatedPrice,
+      sourceType: "GACHA",
       body,
     }, pending.key);
     setSubmittingListing(false);
@@ -4088,7 +4106,7 @@ function ExchangeRoomPage({ flow }: { flow: FlowControls }) {
       >
         <div className="exchange-compose-form">
           <div className="compose-category-list" role="radiogroup" aria-label="상품 카테고리">
-            {PRODUCT_CATEGORIES.map((category, index) => (
+            {CUSTOMER_VISIBLE_PRODUCT_CATEGORIES.map((category, index) => (
               <button
                 key={category.id}
                 type="button"
@@ -4096,7 +4114,7 @@ function ExchangeRoomPage({ flow }: { flow: FlowControls }) {
                 aria-checked={draftCategoryId === category.id}
                 tabIndex={draftCategoryId === category.id ? 0 : -1}
                 data-selected={draftCategoryId === category.id ? "true" : "false"}
-                onKeyDown={(event) => handleRadioArrow(event, PRODUCT_CATEGORIES, index, (nextCategory) => {
+                onKeyDown={(event) => handleRadioArrow(event, CUSTOMER_VISIBLE_PRODUCT_CATEGORIES, index, (nextCategory) => {
                   setDraftCategoryId(nextCategory.id);
                   clearOfferedSelection();
                 })}
@@ -4492,7 +4510,8 @@ function ExchangeDetailPage({ postId }: { postId: string }) {
   }, [apiMode, refreshRemoteDetail]);
 
   const snapshotPost = exchangePosts.find((item) => item.id === postId);
-  const post = remoteDetail ? mapApiExchangeListing(remoteDetail) : snapshotPost;
+  const candidatePost = remoteDetail ? mapApiExchangeListing(remoteDetail) : snapshotPost;
+  const post = candidatePost?.sourceType === "GACHA" ? candidatePost : undefined;
 
   if (!post) {
     return (
@@ -4506,7 +4525,9 @@ function ExchangeDetailPage({ postId }: { postId: string }) {
     );
   }
 
-  const applications = exchangeApplications[post.id] ?? [];
+  const applications = (exchangeApplications[post.id] ?? []).filter((application) => (
+    application.sourceType === "GACHA"
+  ));
   const applicationCount = exchangeApplicationCount(post, applications);
   const ip = catalogIps.find((item) => item.id === post.ipId);
   const isOwnPost = post.authorId === currentUserId;
@@ -4545,6 +4566,7 @@ function ExchangeDetailPage({ postId }: { postId: string }) {
       offeredItem: selectedApplicationItem.name,
       offeredItemImage: selectedApplicationItem.image,
       appReferenceValue: selectedApplicationItem.estimatedPrice,
+      sourceType: "GACHA",
     }, pending.key);
     offerRequestInFlightRef.current = false;
     setSubmittingOffer(false);
@@ -4885,6 +4907,7 @@ function ShopPage({ flow }: { flow: FlowControls }) {
   const [query, setQuery] = useState("");
   const keyboard = useKeyboard();
   const screenFocusRef = useScreenEntryFocus();
+  const isFigureComingSoon = filter === "피규어";
   const normalizedQuery = normalizeCatalogSearch(query);
   const productSearchIndex = useMemo(() => new Map(catalogProducts.map((product) => {
     const ip = catalogIps.find((candidate) => candidate.id === product.ipId);
@@ -4899,6 +4922,7 @@ function ShopPage({ flow }: { flow: FlowControls }) {
     ].filter(Boolean).join(" "))] as const;
   })), [catalogIps, catalogProducts]);
   const visibleProducts = useMemo(() => catalogProducts.filter((product) => (
+    isCustomerBrowsableProductCategory(product.categoryId) &&
     (filter === "전체" || product.category === filter) &&
     (!normalizedQuery || productSearchIndex.get(product.id)?.includes(normalizedQuery))
   )), [catalogProducts, filter, normalizedQuery, productSearchIndex]);
@@ -4909,7 +4933,7 @@ function ShopPage({ flow }: { flow: FlowControls }) {
       <main ref={screenFocusRef} tabIndex={-1} className="root-tab-page shop-page" aria-label="DABBOBA 뽀바">
         <section className="shop-lead" aria-labelledby="shop-lead-title">
           <h1 id="shop-lead-title">원하는 방식으로 골라보세요.</h1>
-          <p>가챠, 피규어, 쿠지, 카드를 한곳에서 확인할 수 있어요.</p>
+          <p>가챠와 쿠지를 만나고, 준비 중인 피규어도 확인해 보세요.</p>
         </section>
         <div className="shop-search-box ip-search-box">
           <IconMagnifyingglassLine size={21} aria-hidden="true" />
@@ -4959,8 +4983,8 @@ function ShopPage({ flow }: { flow: FlowControls }) {
           ) : (
             <div className="ip-empty-state shop-empty-state" role="status">
               <IconMagnifyingglassLine size={30} aria-hidden="true" />
-              <strong>찾는 상품이 없어요</strong>
-              <span>검색어나 카테고리를 바꿔보세요.</span>
+              <strong>{isFigureComingSoon ? "준비중입니다." : "찾는 상품이 없어요"}</strong>
+              <span>{isFigureComingSoon ? "피규어 상품은 준비가 끝나는 대로 공개할게요." : "검색어나 카테고리를 바꿔보세요."}</span>
             </div>
           )}
         </section>
@@ -6015,16 +6039,12 @@ function ShippingRequestPage() {
     currentUserId,
     memberSettings,
     requestShipping,
-    loadShippingRequests,
-    loadShippingRequestDetail,
     sessionCommerce,
-    accountShippingRequests,
     apiMode,
     remoteAddressState,
   } = useDabboba();
   const screenFocusRef = useScreenEntryFocus();
   const pendingIdempotencyRef = useRef<{ fingerprint: string; key: string } | null>(null);
-  const detailAbortRef = useRef<AbortController | null>(null);
   const requestableInventoryUnits = sessionCommerce.inventoryUnits.filter((item) => (
     item.ownerId === currentUserId
     && item.shippingStatus === "stored"
@@ -6034,10 +6054,6 @@ function ShippingRequestPage() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set(requestableInventoryUnits.slice(0, 20).map((item) => item.id)));
   const [status, setStatus] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const [refreshingHistory, setRefreshingHistory] = useState(false);
-  const [loadingDetailId, setLoadingDetailId] = useState<string | null>(null);
-  const [selectedDetail, setSelectedDetail] = useState<ApiAccountShippingRequest | null>(null);
-  const [historyStatus, setHistoryStatus] = useState("");
   const selectedCount = selectedIds.size;
   const shippingFee = selectedCount >= 2 ? 0 : 3_000;
 
@@ -6045,8 +6061,6 @@ function ShippingRequestPage() {
     const requestableIds = new Set(requestableFingerprint ? requestableFingerprint.split(":") : []);
     setSelectedIds((current) => new Set([...current].filter((id) => requestableIds.has(id))));
   }, [requestableFingerprint]);
-
-  useEffect(() => () => detailAbortRef.current?.abort(), []);
 
   const toggleItem = (itemId: string) => {
     setStatus("");
@@ -6057,42 +6071,6 @@ function ShippingRequestPage() {
       else setStatus("배송 신청은 한 번에 20개까지 선택할 수 있습니다.");
       return next;
     });
-  };
-
-  const refreshHistory = async () => {
-    if (refreshingHistory || apiMode !== "remote") return;
-    setRefreshingHistory(true);
-    setHistoryStatus("");
-    const result = await loadShippingRequests();
-    setRefreshingHistory(false);
-    setHistoryStatus(result.message);
-  };
-
-  const toggleHistoryDetail = async (shippingRequest: ApiAccountShippingRequest) => {
-    if (selectedDetail?.id === shippingRequest.id) {
-      detailAbortRef.current?.abort();
-      detailAbortRef.current = null;
-      setSelectedDetail(null);
-      setLoadingDetailId(null);
-      return;
-    }
-    detailAbortRef.current?.abort();
-    const controller = new AbortController();
-    detailAbortRef.current = controller;
-    setLoadingDetailId(shippingRequest.id);
-    setHistoryStatus("");
-    try {
-      const result = await loadShippingRequestDetail(shippingRequest.id, controller.signal);
-      if (controller.signal.aborted) return;
-      setLoadingDetailId(null);
-      setHistoryStatus(result.message);
-      if (result.ok && result.data) setSelectedDetail(result.data);
-    } catch (error) {
-      if (!(error instanceof Error) || error.name !== "AbortError") {
-        setLoadingDetailId(null);
-        setHistoryStatus(apiErrorMessage(error));
-      }
-    }
   };
 
   return (
@@ -6168,64 +6146,6 @@ function ShippingRequestPage() {
           {submitting ? "신청 중" : "배송 신청하기"}
         </ActionButton>
         {status ? <p className="profile-subpage-status" role="status">{status}</p> : null}
-        {apiMode === "remote" ? (
-          <section className="profile-shipping-history" aria-labelledby="shipping-history-title">
-            <div className="profile-shipping-history-head">
-              <div>
-                <span>RECENT REQUESTS</span>
-                <h2 id="shipping-history-title">최근 배송 신청</h2>
-              </div>
-              <button type="button" disabled={refreshingHistory} onClick={() => { void refreshHistory(); }}>
-                {refreshingHistory ? "불러오는 중" : "내역 새로고침"}
-              </button>
-            </div>
-            <div className="profile-shipping-history-list">
-              {accountShippingRequests.map((shippingRequest) => {
-                const detailOpen = selectedDetail?.id === shippingRequest.id;
-                const detail = detailOpen ? selectedDetail : shippingRequest;
-                const destinationLines = maskedShippingAddressLabel(detail.destination);
-                return (
-                  <article key={shippingRequest.id} className="profile-shipping-history-card" data-status={shippingRequest.status}>
-                    <button
-                      type="button"
-                      className="profile-shipping-history-toggle"
-                      aria-expanded={detailOpen}
-                      disabled={loadingDetailId === shippingRequest.id}
-                      onClick={() => { void toggleHistoryDetail(shippingRequest); }}
-                    >
-                      <span>
-                        <em>{accountShippingStatusLabel(shippingRequest.status)}</em>
-                        <strong>{shippingRequest.inventoryUnitIds.length}개 상품</strong>
-                        <small>{serverDateLabel(shippingRequest.requestedAt)} 신청 · {shippingRequest.id}</small>
-                      </span>
-                      <small>{loadingDetailId === shippingRequest.id ? "확인 중" : detailOpen ? "접기" : "상세"}</small>
-                    </button>
-                    {detailOpen ? (
-                      <div className="profile-shipping-history-detail">
-                        <dl>
-                          <div><dt>받는 분</dt><dd>{detail.destination.recipientMasked} · {detail.destination.phoneMasked}</dd></div>
-                          <div><dt>배송지</dt><dd>{destinationLines || "마스킹 배송지 정보 없음"}</dd></div>
-                          <div><dt>최근 변경</dt><dd>{serverDateLabel(detail.updatedAt)}</dd></div>
-                          {detail.shippedAt ? <div><dt>발송일</dt><dd>{serverDateLabel(detail.shippedAt)}</dd></div> : null}
-                          <div>
-                            <dt>송장</dt>
-                            <dd>{detail.trackingCarrier && detail.trackingNumber
-                              ? `${detail.trackingCarrier} · ${detail.trackingNumber}`
-                              : detail.status === "SHIPPED" || detail.status === "DELIVERED"
-                                ? "송장 정보 확인 중"
-                                : "발송 전"}</dd>
-                          </div>
-                        </dl>
-                      </div>
-                    ) : null}
-                  </article>
-                );
-              })}
-              {accountShippingRequests.length === 0 ? <p role="status">최근 배송 신청 내역이 없습니다.</p> : null}
-            </div>
-            {historyStatus ? <p className="profile-subpage-status" role="status">{historyStatus}</p> : null}
-          </section>
-        ) : null}
         <p className="prototype-disclosure">
           {apiMode === "remote"
             ? remoteAddressState === "ready"
@@ -6233,6 +6153,121 @@ function ShippingRequestPage() {
               : "서버 기본 배송지를 먼저 등록해야 배송을 신청할 수 있습니다."
             : "배송 신청은 화면 확인용 로컬 상태이며 실제 물류 요청은 발생하지 않습니다."}
         </p>
+      </main>
+    </MobileScroll>
+  );
+}
+
+function ShippingHistoryPage() {
+  const {
+    loadShippingRequests,
+    loadShippingRequestDetail,
+    accountShippingRequests,
+    apiMode,
+  } = useDabboba();
+  const screenFocusRef = useScreenEntryFocus();
+  const detailAbortRef = useRef<AbortController | null>(null);
+  const [refreshingHistory, setRefreshingHistory] = useState(false);
+  const [loadingDetailId, setLoadingDetailId] = useState<string | null>(null);
+  const [selectedDetail, setSelectedDetail] = useState<ApiAccountShippingRequest | null>(null);
+  const [historyStatus, setHistoryStatus] = useState("");
+
+  useEffect(() => () => detailAbortRef.current?.abort(), []);
+
+  const refreshHistory = async () => {
+    if (refreshingHistory || apiMode !== "remote") return;
+    setRefreshingHistory(true);
+    setHistoryStatus("");
+    const result = await loadShippingRequests();
+    setRefreshingHistory(false);
+    setHistoryStatus(result.message);
+  };
+
+  const toggleHistoryDetail = async (shippingRequest: ApiAccountShippingRequest) => {
+    if (selectedDetail?.id === shippingRequest.id) {
+      detailAbortRef.current?.abort();
+      detailAbortRef.current = null;
+      setSelectedDetail(null);
+      setLoadingDetailId(null);
+      return;
+    }
+    detailAbortRef.current?.abort();
+    const controller = new AbortController();
+    detailAbortRef.current = controller;
+    setLoadingDetailId(shippingRequest.id);
+    setHistoryStatus("");
+    try {
+      const result = await loadShippingRequestDetail(shippingRequest.id, controller.signal);
+      if (controller.signal.aborted) return;
+      setLoadingDetailId(null);
+      setHistoryStatus(result.message);
+      if (result.ok && result.data) setSelectedDetail(result.data);
+    } catch (error) {
+      if (!(error instanceof Error) || error.name !== "AbortError") {
+        setLoadingDetailId(null);
+        setHistoryStatus(apiErrorMessage(error));
+      }
+    }
+  };
+
+  return (
+    <MobileScroll className="app-screen dabboba-screen">
+      <main ref={screenFocusRef} tabIndex={-1} className="profile-subpage" aria-label="배송 신청 내역">
+        <section className="profile-shipping-history" aria-label="최근 배송 신청 목록">
+          <div className="profile-shipping-history-head">
+            <div><span>최근 신청 순서</span></div>
+            {apiMode === "remote" ? (
+              <button type="button" disabled={refreshingHistory} onClick={() => { void refreshHistory(); }}>
+                {refreshingHistory ? "불러오는 중" : "내역 새로고침"}
+              </button>
+            ) : null}
+          </div>
+          <div className="profile-shipping-history-list">
+            {accountShippingRequests.map((shippingRequest) => {
+              const detailOpen = selectedDetail?.id === shippingRequest.id;
+              const detail = detailOpen ? selectedDetail : shippingRequest;
+              const destinationLines = maskedShippingAddressLabel(detail.destination);
+              return (
+                <article key={shippingRequest.id} className="profile-shipping-history-card" data-status={shippingRequest.status}>
+                  <button
+                    type="button"
+                    className="profile-shipping-history-toggle"
+                    aria-expanded={detailOpen}
+                    disabled={loadingDetailId === shippingRequest.id}
+                    onClick={() => { void toggleHistoryDetail(shippingRequest); }}
+                  >
+                    <span>
+                      <em>{accountShippingStatusLabel(shippingRequest.status)}</em>
+                      <strong>{shippingRequest.inventoryUnitIds.length}개 상품</strong>
+                      <small>{serverDateLabel(shippingRequest.requestedAt)} 신청 · {shippingRequest.id}</small>
+                    </span>
+                    <small>{loadingDetailId === shippingRequest.id ? "확인 중" : detailOpen ? "접기" : "상세"}</small>
+                  </button>
+                  {detailOpen ? (
+                    <div className="profile-shipping-history-detail">
+                      <dl>
+                        <div><dt>받는 분</dt><dd>{detail.destination.recipientMasked} · {detail.destination.phoneMasked}</dd></div>
+                        <div><dt>배송지</dt><dd>{destinationLines || "마스킹 배송지 정보 없음"}</dd></div>
+                        <div><dt>최근 변경</dt><dd>{serverDateLabel(detail.updatedAt)}</dd></div>
+                        {detail.shippedAt ? <div><dt>발송일</dt><dd>{serverDateLabel(detail.shippedAt)}</dd></div> : null}
+                        <div>
+                          <dt>송장</dt>
+                          <dd>{detail.trackingCarrier && detail.trackingNumber
+                            ? `${detail.trackingCarrier} · ${detail.trackingNumber}`
+                            : detail.status === "SHIPPED" || detail.status === "DELIVERED"
+                              ? "송장 정보 확인 중"
+                              : "발송 전"}</dd>
+                        </div>
+                      </dl>
+                    </div>
+                  ) : null}
+                </article>
+              );
+            })}
+            {accountShippingRequests.length === 0 ? <p role="status">최근 배송 신청 내역이 없습니다.</p> : null}
+          </div>
+          {historyStatus ? <p className="profile-subpage-status" role="status">{historyStatus}</p> : null}
+        </section>
       </main>
     </MobileScroll>
   );
@@ -6485,9 +6520,12 @@ function RequestRoomPage({ flow }: { flow: FlowControls }) {
   const [pendingLikeRequestIds, setPendingLikeRequestIds] = useState<Set<string>>(() => new Set());
   const [deleteRequestTarget, setDeleteRequestTarget] = useState<ProductRequest | null>(null);
   const [deletingRequest, setDeletingRequest] = useState(false);
+  const customerVisibleRequests = productRequests.filter((request) => (
+    isCustomerVisibleProductCategory(request.categoryId)
+  ));
   const visibleRequests = filter === "all"
-    ? productRequests
-    : productRequests.filter((request) => request.categoryId === filter);
+    ? customerVisibleRequests
+    : customerVisibleRequests.filter((request) => request.categoryId === filter);
   const emptyRequestMessage = apiMode !== "remote"
     ? "이번 세션에 접수된 상품 신청이 없습니다."
     : apiSyncState === "loading"
@@ -6672,7 +6710,7 @@ function RequestRoomPage({ flow }: { flow: FlowControls }) {
             >
               전체
             </button>
-            {REQUEST_CATEGORY_IDS.map((categoryId) => (
+            {customerVisibleRequestCategoryIds.map((categoryId) => (
               <button
                 key={categoryId}
                 type="button"
@@ -6767,7 +6805,7 @@ function RequestRoomPage({ flow }: { flow: FlowControls }) {
       >
         <div className="request-compose-form">
           <div className="compose-category-list" role="radiogroup" aria-label="신청 카테고리">
-            {REQUEST_CATEGORY_IDS.map((categoryId, index) => (
+            {customerVisibleRequestCategoryIds.map((categoryId, index) => (
               <button
                 key={categoryId}
                 type="button"
@@ -6775,7 +6813,7 @@ function RequestRoomPage({ flow }: { flow: FlowControls }) {
                 aria-checked={draftCategoryId === categoryId}
                 tabIndex={draftCategoryId === categoryId ? 0 : -1}
                 data-selected={draftCategoryId === categoryId ? "true" : "false"}
-                onKeyDown={(event) => handleRadioArrow(event, REQUEST_CATEGORY_IDS, index, setDraftCategoryId)}
+                onKeyDown={(event) => handleRadioArrow(event, customerVisibleRequestCategoryIds, index, setDraftCategoryId)}
                 onClick={() => setDraftCategoryId(categoryId)}
               >
                 {categoryLabel(categoryId)}
@@ -8748,7 +8786,13 @@ function CatalogPage({ flow }: { flow: FlowControls }) {
   const { catalogProducts, apiMode, apiSyncState, apiSyncMessage } = useDabboba();
   const [filter, setFilter] = useState<CategoryFilter>("전체");
   const screenFocusRef = useScreenEntryFocus();
-  const visibleProducts = filter === "전체" ? catalogProducts : catalogProducts.filter((product) => product.category === filter);
+  const isFigureComingSoon = filter === "피규어";
+  const customerBrowsableProducts = catalogProducts.filter((product) => (
+    isCustomerBrowsableProductCategory(product.categoryId)
+  ));
+  const visibleProducts = filter === "전체"
+    ? customerBrowsableProducts
+    : customerBrowsableProducts.filter((product) => product.category === filter);
 
   return (
     <MobileScroll className="app-screen dabboba-screen">
@@ -8765,7 +8809,7 @@ function CatalogPage({ flow }: { flow: FlowControls }) {
           <div className="banner-copy">
             <span>8BIT SELECT</span>
             <h1 id="catalog-title">취향을 고르고<br />오늘 가볍게 골라봐.</h1>
-            <p>가챠부터 카드까지, 한곳에서 가볍게.</p>
+            <p>가챠와 쿠지를 한곳에서, 피규어는 준비 중이에요.</p>
           </div>
         </section>
 
@@ -8796,7 +8840,12 @@ function CatalogPage({ flow }: { flow: FlowControls }) {
             <span>{visibleProducts.length}개</span>
           </div>
           <ProductGrid flow={flow} items={visibleProducts} />
-          {visibleProducts.length === 0 ? <div className="ip-empty-state" role="status"><strong>등록된 상품이 없어요</strong><span>운영 카탈로그가 준비되면 여기에 표시됩니다.</span></div> : null}
+          {visibleProducts.length === 0 ? (
+            <div className="ip-empty-state" role="status">
+              <strong>{isFigureComingSoon ? "준비중입니다." : "등록된 상품이 없어요"}</strong>
+              <span>{isFigureComingSoon ? "피규어 상품은 준비가 끝나는 대로 공개할게요." : "운영 카탈로그가 준비되면 여기에 표시됩니다."}</span>
+            </div>
+          ) : null}
         </section>
         <p className="prototype-disclosure">
           {apiMode === "remote"
@@ -8813,7 +8862,7 @@ function CatalogPage({ flow }: { flow: FlowControls }) {
 function ProductGrid({ flow, items }: { flow: FlowControls; items: Product[] }) {
   return (
     <div className="product-grid">
-      {items.map((product, index) => (
+      {items.filter((product) => isCustomerBrowsableProductCategory(product.categoryId)).map((product, index) => (
         <button
           key={product.id}
           type="button"
@@ -8846,9 +8895,14 @@ function ProductGrid({ flow, items }: { flow: FlowControls; items: Product[] }) 
 }
 
 function PopularIpSection({ flow }: { flow: FlowControls }) {
-  const { catalogIps } = useDabboba();
-  const featuredIps = catalogIps.filter((ip) => ip.featured).slice(0, 8);
-  const visibleIps = featuredIps.length ? featuredIps : catalogIps.slice(0, 8);
+  const { catalogIps, catalogProducts } = useDabboba();
+  const customerBrowsableIps = catalogIps.filter((ip) => (
+    catalogProducts.some((product) => (
+      product.ipId === ip.id && isCustomerBrowsableProductCategory(product.categoryId)
+    ))
+  ));
+  const featuredIps = customerBrowsableIps.filter((ip) => ip.featured).slice(0, 8);
+  const visibleIps = featuredIps.length ? featuredIps : customerBrowsableIps.slice(0, 8);
   return (
     <section className="popular-ip-section" aria-labelledby="popular-ip-title">
       <div className="section-heading popular-ip-heading">
@@ -8883,11 +8937,15 @@ function PopularIpSection({ flow }: { flow: FlowControls }) {
 }
 
 function IpCatalogPage({ flow }: { flow: FlowControls }) {
-  const { catalogIps } = useDabboba();
+  const { catalogIps, catalogProducts } = useDabboba();
   const [query, setQuery] = useState("");
   const keyboard = useKeyboard();
   const screenFocusRef = useScreenEntryFocus();
-  const visibleIps = useMemo(() => catalogIps.filter((ip) => matchesIpSearch(ip, query)), [catalogIps, query]);
+  const visibleIps = useMemo(() => catalogIps.filter((ip) => (
+    catalogProducts.some((product) => (
+      product.ipId === ip.id && isCustomerBrowsableProductCategory(product.categoryId)
+    )) && matchesIpSearch(ip, query)
+  )), [catalogIps, catalogProducts, query]);
 
   return (
     <MobileScroll className="app-screen dabboba-screen">
@@ -8969,6 +9027,9 @@ function IpDetailPage({ flow, ip }: { flow: FlowControls; ip: IpRecord }) {
   const screenFocusRef = useScreenEntryFocus();
   const activeTabIndex = ipDetailTabs.indexOf(activeTab);
   const panelId = `ip-panel-${ip.slug}`;
+  const visibleAvailableCategories = CUSTOMER_VISIBLE_PRODUCT_CATEGORIES.filter((category) => (
+    ip.availableCategories.includes(category.id)
+  ));
 
   const moveTab = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
     if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
@@ -8998,8 +9059,8 @@ function IpDetailPage({ flow, ip }: { flow: FlowControls; ip: IpRecord }) {
         <section className="ip-detail-summary" aria-label="작품 소개">
           <p>{ip.description}</p>
           <div className="ip-category-list" aria-label="운영 카테고리">
-            {ip.availableCategories.map((category) => (
-              <span key={category}>{categoryLabel(category)}</span>
+            {visibleAvailableCategories.map((category) => (
+              <span key={category.id}>{category.label}</span>
             ))}
           </div>
           {ip.sourcePage.startsWith("http") ? <a href={ip.sourcePage} target="_blank" rel="noreferrer">이미지 출처 확인</a> : null}
@@ -9045,7 +9106,9 @@ function IpTabContent({ flow, ip, tab }: { flow: FlowControls; ip: IpRecord; tab
   const { setActiveRootTab, catalogProducts, apiMode } = useDabboba();
 
   if (tab === "상품") {
-    const linkedProducts = catalogProducts.filter((product) => product.ipId === ip.id);
+    const linkedProducts = catalogProducts.filter((product) => (
+      product.ipId === ip.id && isCustomerBrowsableProductCategory(product.categoryId)
+    ));
 
     return (
       <>
@@ -9054,12 +9117,17 @@ function IpTabContent({ flow, ip, tab }: { flow: FlowControls; ip: IpRecord; tab
           <div><strong>카테고리</strong><span>이 작품의 상품 구조를 먼저 확인해 보세요.</span></div>
         </div>
         <div className="ip-category-cards">
-          {PRODUCT_CATEGORIES.map((category) => {
+          {CUSTOMER_VISIBLE_PRODUCT_CATEGORIES.map((category) => {
             const available = ip.availableCategories.includes(category.id);
+            const status = category.id === "figure"
+              ? "준비중입니다."
+              : available
+                ? `${linkedProducts.filter((product) => product.categoryId === category.id).length}개 운영 중`
+                : "입점 예정";
             return (
               <div key={category.id} data-available={available ? "true" : "false"}>
                 <span>{category.label}</span>
-                <small>{available ? `${linkedProducts.filter((product) => product.categoryId === category.id).length}개 운영 중` : "입점 예정"}</small>
+                <small>{status}</small>
               </div>
             );
           })}
@@ -9298,6 +9366,20 @@ function DetailFooter({ flow, product }: { flow: FlowControls; product: Product 
     setWishlistStatus(result.message);
     if (result.ok) pendingWishlistRef.current = null;
   };
+
+  if (!isCustomerBrowsableProductCategory(product.categoryId)) {
+    return (
+      <div className="route-footer detail-footer">
+        <ActionButton
+          type="button"
+          variant="neutralSolid"
+          size="large"
+          className="primary-action"
+          disabled
+        >준비중입니다.</ActionButton>
+      </div>
+    );
+  }
 
   return (
     <>

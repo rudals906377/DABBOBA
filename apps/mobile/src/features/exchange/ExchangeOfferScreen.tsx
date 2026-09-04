@@ -29,6 +29,7 @@ import {
   fetchExchangeOfferInventory,
   type ExchangeOfferInventorySnapshot,
 } from "@/features/exchange/exchange-api";
+import { toggleExchangeInventorySelection } from "@/features/exchange/exchange-selection";
 import { productSubjectTitle } from "@/features/shop/product-title";
 import {
   resolveCatalogImageUrl,
@@ -53,7 +54,7 @@ export function ExchangeOfferScreen() {
   );
   const [snapshot, setSnapshot] = useState<ExchangeOfferInventorySnapshot | null>(null);
   const [accessToken, setAccessToken] = useState<string | null>(null);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [error, setError] = useState("");
   const [refreshing, setRefreshing] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -71,7 +72,7 @@ export function ExchangeOfferScreen() {
       const next = await fetchExchangeOfferInventory(runtime.apiBaseUrl, tokens.accessToken);
       setAccessToken(tokens.accessToken);
       setSnapshot(next);
-      setSelectedId((current) => next.items.some((item) => item.id === current) ? current : null);
+      setSelectedIds((current) => current.filter((id) => next.items.some((item) => item.id === id)).slice(0, 2));
       setError("");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "내가 뽑은 상품을 불러오지 못했습니다.");
@@ -84,15 +85,15 @@ export function ExchangeOfferScreen() {
     void load();
   }, [load]);
 
-  const selected = snapshot?.items.find((item) => item.id === selectedId) ?? null;
+  const selected = snapshot?.items.filter((item) => selectedIds.includes(item.id)) ?? [];
   const assetBaseUrl = runtime.assetBaseUrl
     ?? (__DEV__ ? runtime.apiBaseUrl.replace(/:8788$/, ":4174") : null);
 
   const submit = useCallback(() => {
-    if (!listingId || !accessToken || !selected || submitting) return;
+    if (!listingId || !accessToken || selected.length === 0 || submitting) return;
     Alert.alert(
-      "이 상품으로 신청할까요?",
-      `${selected.product.name}\n\n신청에는 별도 글이 포함되지 않으며 선택한 상품 정보만 전달돼요.`,
+      `선택한 상품 ${selected.length}개로 신청할까요?`,
+      `${selected.map((item) => item.product.name).join("\n")}\n\n신청에는 별도 글이 포함되지 않으며 선택한 상품 정보만 전달돼요.`,
       [
         { text: "취소", style: "cancel" },
         {
@@ -101,8 +102,13 @@ export function ExchangeOfferScreen() {
             void (async () => {
               try {
                 setSubmitting(true);
-                await createExchangeOffer(runtime.apiBaseUrl, accessToken, listingId, selected.id);
-                Alert.alert("교환 신청 완료", "선택한 상품으로 교환을 신청했어요.", [
+                await createExchangeOffer(
+                  runtime.apiBaseUrl,
+                  accessToken,
+                  listingId,
+                  selected.map((item) => item.id),
+                );
+                Alert.alert("교환 신청 완료", `선택한 상품 ${selected.length}개로 교환을 신청했어요.`, [
                   {
                     text: "확인",
                     onPress: () => router.replace(`/exchange/${listingId}`),
@@ -147,8 +153,12 @@ export function ExchangeOfferScreen() {
       >
         <KoreanPixelTitle variant="section">내가 뽑은 상품</KoreanPixelTitle>
         <Text style={styles.description}>
-          가챠로 직접 뽑아 현재 보관 중인 상품 1개만 선택할 수 있어요. 글이나 설명은 작성하지 않아요.
+          가챠로 직접 뽑아 현재 보관 중인 상품을 최대 2개까지 선택할 수 있어요. 글이나 설명은 작성하지 않아요.
         </Text>
+
+        {snapshot && snapshot.items.length > 0 ? (
+          <Text style={styles.selectionCount}>선택 {selectedIds.length}/2개</Text>
+        ) : null}
 
         {!snapshot && !error ? (
           <View style={styles.stateBox}>
@@ -186,8 +196,14 @@ export function ExchangeOfferScreen() {
             item={item}
             ipName={snapshot.ipNames[item.product.ipId] ?? null}
             assetBaseUrl={assetBaseUrl}
-            selected={selectedId === item.id}
-            onSelect={() => setSelectedId(item.id)}
+            selected={selectedIds.includes(item.id)}
+            onSelect={() => {
+              if (!selectedIds.includes(item.id) && selectedIds.length >= 2) {
+                Alert.alert("최대 2개까지 선택할 수 있어요", "선택한 상품을 하나 해제한 뒤 다시 골라 주세요.");
+                return;
+              }
+              setSelectedIds((current) => toggleExchangeInventorySelection(current, item.id));
+            }}
           />
         ))}
       </ScrollView>
@@ -195,18 +211,18 @@ export function ExchangeOfferScreen() {
       <FloatingBottomActionPanel>
         <Pressable
           accessibilityRole="button"
-          disabled={!selected || submitting}
+          disabled={selected.length === 0 || submitting}
           onPress={submit}
           style={({ pressed }) => [
             styles.submitButton,
-            (!selected || submitting) && styles.disabled,
+            (selected.length === 0 || submitting) && styles.disabled,
             pressed && styles.pressed,
           ]}
         >
           {submitting ? (
             <ActivityIndicator color={colors.ink} />
           ) : (
-            <Text style={styles.submitLabel}>{selected ? "이 상품으로 교환 신청하기" : "상품을 선택해 주세요"}</Text>
+            <Text style={styles.submitLabel}>{selected.length ? `선택한 ${selected.length}개로 교환 신청하기` : "상품을 선택해 주세요"}</Text>
           )}
         </Pressable>
       </FloatingBottomActionPanel>
@@ -230,7 +246,7 @@ function InventoryChoice({
   const imageUri = resolveCatalogImageUrl(item.product.imageUrl, assetBaseUrl, item.product.version);
   return (
     <Pressable
-      accessibilityRole="radio"
+      accessibilityRole="checkbox"
       accessibilityState={{ checked: selected }}
       accessibilityLabel={`${item.product.name} 교환 신청 상품 선택`}
       onPress={onSelect}
@@ -264,6 +280,7 @@ const styles = StyleSheet.create({
   headerSpacer: { width: seed.size.touchTarget },
   content: { paddingHorizontal: seed.spacing.globalGutter, paddingTop: seed.spacing.x5, paddingBottom: seed.spacing.screenBottom },
   description: { color: colors.muted, fontSize: 13, lineHeight: 21, marginTop: seed.spacing.x2_5, marginBottom: seed.spacing.x2 },
+  selectionCount: { alignSelf: "flex-end", color: colors.greenInk, fontSize: 12, lineHeight: 18, fontWeight: "800" },
   stateBox: { minHeight: 180, marginTop: seed.spacing.x4, borderRadius: seed.radius.r4, padding: seed.spacing.x5, alignItems: "center", justifyContent: "center", gap: seed.spacing.x2_5, backgroundColor: seed.color.layer.default },
   stateText: { color: colors.muted, fontSize: 13, lineHeight: 20, textAlign: "center" },
   retryButton: { minHeight: seed.size.touchTarget, marginTop: seed.spacing.x2, paddingHorizontal: seed.spacing.x4, alignItems: "center", justifyContent: "center", borderRadius: seed.radius.r3, backgroundColor: seed.color.background.neutralSolid },

@@ -33,6 +33,7 @@ import { SeedChip } from "@/design-system/components";
 import { seed } from "@/design-system/seed";
 import { fetchHomeCatalog, type HomeCatalogSnapshot } from "@/features/catalog/catalog-api";
 import {
+  isCustomerBrowsableCatalogCategory,
   PRODUCT_CATEGORY_OPTIONS,
   productCategoryLabel,
   type ProductCategoryLabel,
@@ -132,7 +133,12 @@ export function HomeScreen() {
       } catch (error) {
         const cached = await readHomeCatalogCache(db);
         if (cached) {
-          setSnapshot(cached);
+          setSnapshot({
+            ...cached,
+            products: cached.products.filter((product) => (
+              isCustomerBrowsableCatalogCategory(product.category)
+            )),
+          });
           setSource("cache");
           setMessage("연결이 불안정해 마지막으로 저장한 목록을 보여드려요.");
         } else {

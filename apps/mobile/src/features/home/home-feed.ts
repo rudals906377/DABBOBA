@@ -10,7 +10,7 @@ export const HOME_PRODUCT_CARD_WIDTH = 164;
 export const HOME_KUJI_CARD_MAX_WIDTH = 520;
 export const HOME_ANNOUNCEMENT_FALLBACKS = [
   "가챠 상품만 배송하면 30,000원 이상 무료배송이에요.",
-  "쿠지·피규어·카드가 포함되면 50,000원 이상 무료배송이에요.",
+  "쿠지·피규어 등 일반 상품이 포함되면 50,000원 이상 무료배송이에요.",
 ] as const;
 
 const DRAW_ACTIVITY_NAMES = ["모찌수집가", "캡슐헌터", "오늘도한번"] as const;
@@ -43,7 +43,10 @@ export function buildHomeCollections<Ip extends HomeIp, Product extends HomeProd
     const ip = ipById.get(ipId);
     if (!ip) return [];
     const collectionProducts = products.filter(
-      (product) => product.ipId === ipId && product.isActive && !product.isPrizeOnly,
+      (product) => product.ipId === ipId
+        && product.isActive
+        && !product.isPrizeOnly
+        && (product.category === "gacha" || product.category === "kuji"),
     );
     if (!collectionProducts.length) return [];
     return [{ id: ip.id, title: `${ip.nameKo} 컬렉션`, ip, products: collectionProducts }];

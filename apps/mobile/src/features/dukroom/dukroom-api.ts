@@ -1,6 +1,7 @@
 import { randomUUID } from "expo-crypto";
 import { errorMessage } from "@dabboba/api-client";
 import type { CatalogIp, CatalogProduct, components } from "@dabboba/contracts";
+import { isCustomerBrowsableCatalogCategory } from "@/features/catalog/product-categories";
 import { createMobileDabbobaClient as createDabbobaClient } from "@/lib/mobile-api-client";
 
 type CommunityPost = components["schemas"]["CommunityPost"];
@@ -112,7 +113,10 @@ export async function fetchDukroomDetail(
   if (!commentResult.data) throw new Error(errorMessage(commentResult.error, "댓글을 불러오지 못했습니다."));
 
   const post = postResult.data;
-  const fallbackProduct = productResult.data.items.find((product) => product.ipId === post.ipId) ?? null;
+  const fallbackProduct = productResult.data.items.find(
+    (product) => product.ipId === post.ipId
+      && isCustomerBrowsableCatalogCategory(product.category),
+  ) ?? null;
   return {
     item: {
       post,
@@ -191,7 +195,10 @@ async function createDukroomItems(
     .filter((post) => (post.kind === "DUKROOM" || post.kind === "SNAP") && !isLocalTestFixture(post))
     .slice(0, actualLimit);
   const actualItems = await Promise.all(visiblePosts.map(async (post) => {
-    const fallbackProduct = catalog.products.find((product) => product.ipId === post.ipId) ?? null;
+    const fallbackProduct = catalog.products.find(
+      (product) => product.ipId === post.ipId
+        && isCustomerBrowsableCatalogCategory(product.category),
+    ) ?? null;
     return {
       post,
       isExample: false,
@@ -212,6 +219,7 @@ function createExampleItems(products: CatalogProduct[], ips: CatalogIp[]): Dukro
   const ipNames = new Map(ips.map((ip) => [ip.id, ip.nameKo]));
   const now = Date.now();
   return products
+    .filter((product) => isCustomerBrowsableCatalogCategory(product.category))
     .filter((product) => product.imageUrl && product.isActive)
     .slice(0, 8)
     .map((product, index) => {

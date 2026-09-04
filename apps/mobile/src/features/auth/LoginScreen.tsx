@@ -26,6 +26,7 @@ import {
   verifyPhoneOtp,
   type DabbobaLoginProvider,
 } from "@/features/auth/supabase-broker";
+import { ensureDevelopmentAuthSession } from "@/lib/development-session";
 import {
   resolveMobileRuntimeConfig,
   type MobilePlatform,
@@ -35,6 +36,7 @@ import { colors } from "@/theme";
 const WORDMARK = require("../../../assets/dabboba-wordmark.png");
 
 type PhoneStep = "NUMBER" | "OTP";
+type LoginMethod = DabbobaLoginProvider | "DEVELOPMENT";
 
 export function LoginScreen() {
   const params = useLocalSearchParams<{ returnTo?: string | string[] }>();
@@ -50,7 +52,7 @@ export function LoginScreen() {
   );
   const [brokerReady, setBrokerReady] = useState(false);
   const [checking, setChecking] = useState(true);
-  const [busy, setBusy] = useState<DabbobaLoginProvider | null>(null);
+  const [busy, setBusy] = useState<LoginMethod | null>(null);
   const [message, setMessage] = useState("");
   const [phoneStep, setPhoneStep] = useState<PhoneStep>("NUMBER");
   const [phoneInput, setPhoneInput] = useState("");
@@ -124,6 +126,19 @@ export function LoginScreen() {
       await finish(await verifyPhoneOtp(verifiedPhone, otp));
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "휴대폰 로그인을 완료하지 못했습니다.");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const loginDevelopment = async () => {
+    setBusy("DEVELOPMENT");
+    setMessage("");
+    try {
+      await ensureDevelopmentAuthSession(runtime.apiBaseUrl);
+      router.replace(resolveAfterLoginPath(params.returnTo));
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "테스트 로그인을 완료하지 못했습니다.");
     } finally {
       setBusy(null);
     }
@@ -233,6 +248,19 @@ export function LoginScreen() {
                 />
               </>
             )}
+
+            {__DEV__ ? (
+              <View style={styles.developmentLogin}>
+                <SeedActionButton
+                  label="테스트 계정으로 로그인"
+                  variant="neutralSolid"
+                  loading={busy === "DEVELOPMENT"}
+                  disabled={busy !== null}
+                  onPress={() => void loginDevelopment()}
+                />
+                <Text style={styles.developmentHint}>개발 빌드에서만 사용할 수 있어요.</Text>
+              </View>
+            ) : null}
           </View>
 
           {checking ? <ActivityIndicator color={colors.ink} style={styles.status} /> : null}
@@ -320,6 +348,14 @@ const styles = StyleSheet.create({
   fieldLabel: { color: colors.ink, fontSize: 13, fontWeight: "700" },
   input: { flex: 1, minHeight: 48, color: colors.ink, fontSize: 15, paddingVertical: 0 },
   phoneButton: { marginTop: 2 },
+  developmentLogin: {
+    marginTop: 12,
+    paddingTop: 20,
+    gap: 8,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: seed.color.stroke.neutral,
+  },
+  developmentHint: { color: colors.muted, fontSize: 11, lineHeight: 17, textAlign: "center" },
   phoneSummaryRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   changePhone: { color: colors.greenInk, fontSize: 12, fontWeight: "700" },
   status: { marginTop: 24 },

@@ -38,6 +38,7 @@ type ProfileSection =
 const COMMERCE_MENU: ReadonlyArray<{ section: ProfileSection; label: string; caption: string; icon: IconName }> = [
   { section: "wishlist", label: "내 찜 목록", caption: "관심 상품을 한곳에서 확인", icon: "heart-outline" },
   { section: "storage", label: "보관함", caption: "배송 신청 · 포인트 환급", icon: "cube-outline" },
+  { section: "shipping", label: "배송 신청 내역", caption: "신청 상태와 배송 진행 확인", icon: "car-outline" },
   { section: "orders", label: "구매 내역", caption: "결제 금액과 주문 상태", icon: "receipt-outline" },
   { section: "points", label: "포인트 내역", caption: "잔액과 적립·사용 기록", icon: "wallet-outline" },
 ];

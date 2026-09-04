@@ -20,19 +20,19 @@ const ips = [
 
 const products = [
   { id: "pokemon-card", ipId: "pokemon", category: "tcg", name: "포켓몬 카드", isActive: true, isPrizeOnly: false },
+  { id: "pokemon-figure", ipId: "pokemon", category: "figure", name: "포켓몬 피규어", isActive: true, isPrizeOnly: false },
   { id: "demon-gacha", ipId: "demon-slayer", category: "gacha", name: "귀멸의 칼날 귀멸 캡슐", isActive: true, isPrizeOnly: false },
   { id: "demon-prize", ipId: "demon-slayer", category: "gacha", name: "직접 판매 불가 경품", isActive: true, isPrizeOnly: true },
   { id: "one-piece-kuji", ipId: "one-piece", category: "kuji", name: "원피스 쿠지", isActive: true, isPrizeOnly: false },
   { id: "inactive", ipId: "pokemon", category: "gacha", name: "판매 종료", isActive: false, isPrizeOnly: false },
 ];
 
-test("home collections follow an externally supplied IP order without hardcoded screen sections", () => {
+test("home collections follow an externally supplied IP order and omit unavailable product categories", () => {
   const collections = buildHomeCollections(ips, products, ["demon-slayer", "pokemon", "missing"]);
 
-  assert.deepEqual(collections.map((collection) => collection.id), ["demon-slayer", "pokemon"]);
-  assert.deepEqual(collections.map((collection) => collection.title), ["귀멸의 칼날 컬렉션", "포켓몬스터 컬렉션"]);
+  assert.deepEqual(collections.map((collection) => collection.id), ["demon-slayer"]);
+  assert.deepEqual(collections.map((collection) => collection.title), ["귀멸의 칼날 컬렉션"]);
   assert.deepEqual(collections[0].products.map((product) => product.id), ["demon-gacha"]);
-  assert.deepEqual(collections[1].products.map((product) => product.id), ["pokemon-card"]);
 });
 
 test("home kuji cards use the available phone width while other categories stay compact", () => {
@@ -52,6 +52,7 @@ test("home announcements prefer published pinned notices and otherwise use safe 
 
   assert.deepEqual(homeAnnouncementMessages(notices), ["홈 상단 공지"]);
   assert.deepEqual(homeAnnouncementMessages([]), [...HOME_ANNOUNCEMENT_FALLBACKS]);
+  assert.ok(HOME_ANNOUNCEMENT_FALLBACKS.every((message) => !message.includes("카드")));
 });
 
 test("home announcement ticker stays still when the full line fits", () => {

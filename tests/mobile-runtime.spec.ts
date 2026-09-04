@@ -281,12 +281,15 @@ test("Expo embed mode fills the native WebView without preview chrome", async ({
   await page.getByRole("navigation", { name: "주요 메뉴" }).getByRole("button", { name: "뽀바" }).click();
   const ppoba = page.getByRole("main", { name: "DABBOBA 뽀바" });
   await expect(ppoba).toBeVisible();
+  await expect(ppoba.getByRole("button", { name: "카드", exact: true })).toHaveCount(0);
+  await expect(ppoba.getByRole("button", { name: "피규어", exact: true })).toBeVisible();
+  await expect(ppoba.getByRole("button", { name: /포켓몬 카드게임 확장팩 스톰 에메랄다/ })).toHaveCount(0);
 
   const search = ppoba.getByRole("searchbox", { name: "뽀바 상품 검색" });
   await search.fill("JJK");
-  await expect(ppoba.getByRole("button", { name: /주술회전 캡슐 피규어 컬렉션 DX 01/ })).toBeVisible();
-  await expect(ppoba.getByText("1개", { exact: true })).toBeVisible();
+  await expect(ppoba.getByRole("button", { name: /주술회전 캡슐 피규어 컬렉션 DX 01/ })).toHaveCount(0);
+  await expect(ppoba.getByText("0개", { exact: true })).toBeVisible();
 
   await ppoba.getByRole("button", { name: "피규어", exact: true }).click();
-  await expect(ppoba.getByText("찾는 상품이 없어요", { exact: true })).toBeVisible();
+  await expect(ppoba.getByText("준비중입니다.", { exact: true })).toBeVisible();
 });

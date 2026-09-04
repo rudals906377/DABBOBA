@@ -4,6 +4,12 @@ import type { FastifyInstance } from "fastify";
 import { withTransaction } from "@dabboba/db";
 import { isAdminRole, type UserRole, type UserStatus } from "@dabboba/domain";
 import { createAdminClientIdentityResolver } from "../lib/admin-client-identity.js";
+import {
+  developmentSessionEnabled,
+  mobileTestFixturesEnabled,
+  MOBILE_TEST_EMAIL,
+  provisionMobileTestAccount,
+} from "../lib/development-fixtures.js";
 import { badRequest, forbidden, notFound, unauthorized } from "../lib/errors.js";
 import { objectInput, stringInput } from "../lib/input.js";
 import { verifyPassword, type PasswordRecord } from "../lib/password.js";
@@ -90,7 +96,10 @@ export async function registerAuthRoutes(app: FastifyInstance, context: ApiConte
   const resolveAdminClientIdentity = createAdminClientIdentityResolver(context.config);
 
   app.post("/v1/auth/dev-session", async (request, reply) => {
-    if (context.config.environment === "production") throw notFound();
+    if (!developmentSessionEnabled({
+      environment: context.config.environment,
+      explicitFlag: process.env.DABBOBA_ENABLE_DEV_SESSION,
+    })) throw notFound();
     const input = objectInput(request.body);
     const email = stringInput(input, "email", { max: 254 })!.toLocaleLowerCase("en-US");
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw badRequest("이메일 형식을 확인해 주세요.");
@@ -120,6 +129,14 @@ export async function registerAuthRoutes(app: FastifyInstance, context: ApiConte
          VALUES ($1,'DEV',$2,now()) ON CONFLICT (provider, provider_subject) DO NOTHING`,
         [row.id, email],
       );
+      if (email === MOBILE_TEST_EMAIL && mobileTestFixturesEnabled({
+        environment: context.config.environment,
+        databaseUrl: context.config.databaseUrl,
+        explicitFlag: process.env.DABBOBA_ENABLE_MOBILE_TEST_FIXTURES,
+        expectedProjectRef: process.env.DABBOBA_MOBILE_TEST_FIXTURE_PROJECT_REF,
+      })) {
+        await provisionMobileTestAccount(client, { userId: row.id, email });
+      }
       return row;
     });
     const requestUserAgent = userAgent(request.headers["user-agent"]);

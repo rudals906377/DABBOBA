@@ -82,7 +82,7 @@ export async function writeExchangeRulesDismissed(
 }
 
 function exchangeListingCacheKey(category?: ExchangeCategory): string {
-  return `exchange.listings.v2.${category ?? "all"}`;
+  return `exchange.listings.v3.${category ?? "all"}`;
 }
 
 export async function readExchangeListingCache(

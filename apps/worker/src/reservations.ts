@@ -43,11 +43,11 @@ export function reservationExpiryAction(
 
 async function refundReservedPoints(client: DatabaseClient, order: OrderPaymentRow) {
   if (Number(order.point_total) <= 0) return;
-  const ledger = await client.query<{ id: string }>(
+  const ledger = await client.query<{ inserted: number }>(
     `INSERT INTO point_ledger_entries(user_id,entry_type,amount,reference_type,reference_id,reason)
      VALUES($1,'REFUND',$2,'ORDER',$3,'Payment reservation expired')
-     ON CONFLICT (user_id,entry_type,reference_type,reference_id) DO NOTHING
-     RETURNING id`,
+     ON CONFLICT DO NOTHING
+     RETURNING 1 AS inserted`,
     [order.user_id, Number(order.point_total), order.id],
   );
   if (ledger.rowCount) {
@@ -89,34 +89,48 @@ async function expireLockedOrder(
   client: DatabaseClient,
   order: OrderPaymentRow,
   now: Date,
+  shouldContinue: () => boolean,
 ): Promise<ExpiryOutcome> {
+  if (!shouldContinue()) throw new Error("Worker run deadline reached before reservation lock");
   const reservations = await client.query<ReservationRow>(
     `SELECT id,product_id,quantity,expires_at
-       FROM stock_reservations
+      FROM stock_reservations
       WHERE order_id=$1 AND status='ACTIVE'
       ORDER BY product_id,id
+      LIMIT 21
       FOR UPDATE`,
     [order.id],
   );
+  if (reservations.rows.length > 20) {
+    throw new Error(`Order ${order.id} exceeds the checkout reservation limit`);
+  }
   if (!reservations.rowCount) return { status: "already_resolved", released: 0 };
   const hasExpired = reservations.rows.some((reservation) => reservation.expires_at.getTime() <= now.getTime());
   const action = reservationExpiryAction(order.status, order.payment_status, hasExpired);
   if (action === "wait") return { status: "not_due", released: 0 };
   if (action === "reconcile") return { status: "requires_reconciliation", released: 0 };
 
+  if (!shouldContinue()) throw new Error("Worker run deadline reached before stock release");
+  const requiredByProduct = new Map<string, number>();
   for (const reservation of reservations.rows) {
-    const stock = await client.query(
-      `UPDATE product_stock
-          SET reserved=reserved-$2,version=version+1
-        WHERE product_id=$1 AND reserved >= $2
-        RETURNING product_id`,
-      [reservation.product_id, Number(reservation.quantity)],
+    requiredByProduct.set(
+      reservation.product_id,
+      (requiredByProduct.get(reservation.product_id) ?? 0) + Number(reservation.quantity),
     );
-    if (!stock.rowCount) {
-      throw new Error(`Reservation stock invariant failed for ${reservation.id}`);
-    }
+  }
+  const stock = await client.query<{ product_id: string }>(
+    `UPDATE product_stock AS stock
+        SET reserved=stock.reserved-required.quantity,version=stock.version+1
+       FROM unnest($1::text[], $2::integer[]) AS required(product_id,quantity)
+      WHERE stock.product_id=required.product_id AND stock.reserved >= required.quantity
+      RETURNING stock.product_id`,
+    [[...requiredByProduct.keys()], [...requiredByProduct.values()]],
+  );
+  if (stock.rowCount !== requiredByProduct.size) {
+    throw new Error(`Reservation stock invariant failed for order ${order.id}`);
   }
 
+  if (!shouldContinue()) throw new Error("Worker run deadline reached after stock release");
   await client.query(
     "UPDATE stock_reservations SET status='EXPIRED',resolved_at=$2 WHERE id=ANY($1::uuid[]) AND status='ACTIVE'",
     [reservations.rows.map((reservation) => reservation.id), now],
@@ -137,11 +151,18 @@ async function expireLockedOrder(
   return { status: "expired", released: reservations.rowCount };
 }
 
-export async function expireOrderReservations(pool: DatabasePool, orderId: string, now = new Date()): Promise<ExpiryOutcome> {
+export async function expireOrderReservations(
+  pool: DatabasePool,
+  orderId: string,
+  now = new Date(),
+  shouldContinue: () => boolean = () => true,
+): Promise<ExpiryOutcome> {
   return withTransaction(pool, async (client) => {
     // Match the API lock order: linked kuji room, payment, order, then stock.
     // The initial linkage lookup is non-locking; order_id becomes immutable once set.
+    if (!shouldContinue()) throw new Error("Worker run deadline reached before reservation transaction");
     const linkedKujiRoom = await lockLinkedKujiRoomForOrder(client, orderId);
+    if (!shouldContinue()) throw new Error("Worker run deadline reached after kuji room lock");
     const payment = await client.query<{ id: string; status: string }>(
       "SELECT id,status FROM payments WHERE order_id=$1 FOR UPDATE",
       [orderId],
@@ -156,13 +177,15 @@ export async function expireOrderReservations(pool: DatabasePool, orderId: strin
       ...order.rows[0]!,
       payment_id: payment.rows[0]!.id,
       payment_status: payment.rows[0]!.status,
-    }, now);
+    }, now, shouldContinue);
     if (outcome.status === "expired" && linkedKujiRoom) {
+      if (!shouldContinue()) throw new Error("Worker run deadline reached before kuji room release");
       await releaseLockedKujiOrderRoom(client, {
         orderId,
         serverNow: now,
         terminalState: "EXPIRED",
       });
+      if (!shouldContinue()) throw new Error("Worker run deadline reached after kuji room release");
     }
     return outcome;
   });
@@ -173,27 +196,67 @@ export async function expireReservationBatch(
   batchSize: number,
   logger: Logger,
   now = new Date(),
+  shouldContinue: () => boolean = () => true,
 ): Promise<{ examined: number; expired: number; released: number; reconciliation: number }> {
-  const candidates = await pool.query<{ order_id: string }>(
-    `SELECT DISTINCT sr.order_id
-       FROM stock_reservations sr
-       JOIN orders o ON o.id=sr.order_id
-      WHERE sr.status='ACTIVE' AND sr.expires_at <= $1
-        AND o.status IN ('PENDING_PAYMENT','CANCELLED')
-      ORDER BY sr.order_id
+  if (!shouldContinue()) return { examined: 0, expired: 0, released: 0, reconciliation: 0 };
+  const candidates = await pool.query<{ order_id: string; payment_id: string }>(
+    `SELECT o.id AS order_id,p.id AS payment_id
+       FROM orders o
+       JOIN payments p ON p.order_id=o.id
+      WHERE o.status IN ('PENDING_PAYMENT','CANCELLED')
+        AND EXISTS (
+          SELECT 1 FROM stock_reservations sr
+           WHERE sr.order_id=o.id AND sr.status='ACTIVE' AND sr.expires_at <= $1
+        )
+        AND (
+          p.status IN ('PENDING','FAILED','CANCELLED')
+          OR (
+            p.status IN ('AUTHORIZED','PAID','REFUND_REVIEW','REFUNDED')
+            AND NOT EXISTS (
+              SELECT 1 FROM outbox_events event
+               WHERE event.aggregate_type='PAYMENT'
+                 AND event.aggregate_id=p.id::text
+                 AND event.event_type='payment.reservation_expired_requires_reconciliation'
+            )
+          )
+        )
+      ORDER BY
+        CASE WHEN p.status IN ('PENDING','FAILED','CANCELLED') THEN 0 ELSE 1 END,
+        o.id
       LIMIT $2`,
     [now, batchSize],
   );
 
-  const summary = { examined: candidates.rows.length, expired: 0, released: 0, reconciliation: 0 };
+  const summary = { examined: 0, expired: 0, released: 0, reconciliation: 0 };
   for (const candidate of candidates.rows) {
-    const outcome = await expireOrderReservations(pool, candidate.order_id, now);
+    if (!shouldContinue()) break;
+    summary.examined += 1;
+    const outcome = await expireOrderReservations(pool, candidate.order_id, now, shouldContinue);
     if (outcome.status === "expired") {
       summary.expired += 1;
       summary.released += outcome.released;
     } else if (outcome.status === "requires_reconciliation") {
+      if (!shouldContinue()) break;
+      const event = await pool.query(
+        `INSERT INTO outbox_events(aggregate_type,aggregate_id,event_type,payload,correlation_id)
+         VALUES('PAYMENT',$1,'payment.reservation_expired_requires_reconciliation',$2,$3)
+         ON CONFLICT DO NOTHING`,
+        [
+          candidate.payment_id,
+          JSON.stringify({
+            paymentId: candidate.payment_id,
+            orderId: candidate.order_id,
+            reason: "EXPIRED_ACTIVE_RESERVATION",
+          }),
+          `worker-reservation-reconciliation-${candidate.order_id}`,
+        ],
+      );
+      const recorded = Boolean(event.rowCount);
       summary.reconciliation += 1;
-      logger.warn({ orderId: candidate.order_id }, "Expired reservation is payment-authorized and requires reconciliation");
+      logger.warn(
+        { orderId: candidate.order_id, paymentId: candidate.payment_id, durableAlertRecorded: recorded },
+        "Expired reservation is payment-authorized and requires reconciliation",
+      );
     }
   }
   return summary;

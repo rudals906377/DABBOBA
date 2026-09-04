@@ -15,6 +15,7 @@ export type ExchangePost = {
   offeredItem: string;
   offeredItemImage: string;
   appReferenceValue: number;
+  sourceType: "PURCHASE" | "GACHA" | "KUJI" | "ADMIN_ADJUSTMENT";
   body: string;
   time: string;
   applications: number;
@@ -35,27 +36,12 @@ export type ExchangeApplication = {
   offeredItem: string;
   offeredItemImage: string;
   appReferenceValue: number;
+  sourceType: "PURCHASE" | "GACHA" | "KUJI" | "ADMIN_ADJUSTMENT";
   time: string;
   status?: "PENDING" | "ACCEPTED" | "REJECTED" | "WITHDRAWN";
 };
 
 export const DEFAULT_EXCHANGE_POSTS: ExchangePost[] = [
-  {
-    id: "exchange-one-piece-card",
-    authorId: "user-card-organizer",
-    author: "카드정리중",
-    categoryId: "tcg",
-    ipId: "one-piece",
-    title: "루피 리더 카드, 교환 제안 받아요",
-    offeredInventoryUnitId: "inventory-card-organizer-luffy-leader",
-    offeredCatalogItemId: "one-piece-luffy-leader",
-    offeredItem: "OP-13 몽키 D. 루피 리더 카드",
-    offeredItemImage: "/assets/dabboba/products/ip/one-piece.jpg",
-    appReferenceValue: 12_000,
-    body: "슬리브와 탑로더에 보관했습니다. 상품 상태와 함께 편하게 교환을 제안해 주세요.",
-    time: "12분 전",
-    applications: 3,
-  },
   {
     id: "exchange-jjk-capsule",
     authorId: "user-capsule-round",
@@ -68,73 +54,14 @@ export const DEFAULT_EXCHANGE_POSTS: ExchangePost[] = [
     offeredItem: "주술회전 캡슐 DX 고죠 사토루",
     offeredItemImage: "/assets/dabboba/products/ip/jujutsu-kaisen.jpg",
     appReferenceValue: 9_000,
+    sourceType: "GACHA",
     body: "개봉 후 구성만 확인했고 바로 보관했습니다. 원하는 상품으로 자유롭게 제안해 주세요.",
     time: "34분 전",
-    applications: 2,
-  },
-  {
-    id: "exchange-frieren-figure",
-    authorId: "user-dawn-mage",
-    author: "새벽의마법사",
-    categoryId: "figure",
-    ipId: "frieren",
-    title: "프리렌 미니 피규어 교환 열어둘게요",
-    offeredInventoryUnitId: "inventory-dawn-mage-frieren",
-    offeredCatalogItemId: "frieren-mini-figure",
-    offeredItem: "프리렌 미니 피규어 미개봉",
-    offeredItemImage: "/assets/dabboba/products/ip/frieren.jpg",
-    appReferenceValue: 54_900,
-    body: "박스 눌림 없는 미개봉 제품입니다. 사진 확인 후 천천히 제안을 살펴볼게요.",
-    time: "1시간 전",
-    applications: 1,
-  },
-  {
-    id: "exchange-gundam-kuji",
-    authorId: "user-universal-century",
-    author: "우주세기보관소",
-    categoryId: "kuji",
-    ipId: "mobile-suit-gundam",
-    title: "건담 쿠지 B상 교환 제안 받습니다",
-    offeredInventoryUnitId: "inventory-universal-century-gundam-b",
-    offeredCatalogItemId: "gundam-kuji-b",
-    offeredItem: "기동전사 건담 쿠지 B상",
-    offeredItemImage: "/assets/dabboba/products/ip/mobile-suit-gundam.jpg",
-    appReferenceValue: 24_000,
-    body: "상품 상태와 구성품을 서로 확인하고 진행하고 싶습니다. 여러 제안을 편하게 남겨주세요.",
-    time: "2시간 전",
     applications: 2,
   },
 ];
 
 export const DEFAULT_EXCHANGE_APPLICATIONS: Record<string, ExchangeApplication[]> = {
-  "exchange-one-piece-card": [
-    {
-      id: "exchange-one-piece-card-1",
-      authorId: "user-green-binder",
-      author: "초록바인더",
-      offeredInventoryUnitId: "inventory-green-binder-pikachu",
-      offeredCatalogItemId: "pokemon-pikachu-card",
-      ipId: "pokemon",
-      categoryId: "tcg",
-      offeredItem: "포켓몬스터 피카츄 카드",
-      offeredItemImage: "/assets/dabboba/products/ip/pokemon.jpg",
-      appReferenceValue: 8_000,
-      time: "7분 전",
-    },
-    {
-      id: "exchange-one-piece-card-2",
-      authorId: "user-charizard-collector",
-      author: "리자몽수집가",
-      offeredInventoryUnitId: "inventory-charizard-collector-charizard",
-      offeredCatalogItemId: "pokemon-charizard-card",
-      ipId: "pokemon",
-      categoryId: "tcg",
-      offeredItem: "포켓몬스터 리자몽 카드",
-      offeredItemImage: "/assets/dabboba/products/ip/pokemon.jpg",
-      appReferenceValue: 18_000,
-      time: "4분 전",
-    },
-  ],
   "exchange-jjk-capsule": [
     {
       id: "exchange-jjk-capsule-1",
@@ -147,23 +74,8 @@ export const DEFAULT_EXCHANGE_APPLICATIONS: Record<string, ExchangeApplication[]
       offeredItem: "주술회전 캡슐 DX 게토 스구루",
       offeredItemImage: "/assets/dabboba/products/ip/jujutsu-kaisen.jpg",
       appReferenceValue: 9_000,
+      sourceType: "GACHA",
       time: "18분 전",
-    },
-  ],
-  "exchange-frieren-figure": [],
-  "exchange-gundam-kuji": [
-    {
-      id: "exchange-gundam-kuji-1",
-      authorId: "user-last-ticket",
-      author: "마지막한장",
-      offeredInventoryUnitId: "inventory-last-ticket-gundam-a",
-      offeredCatalogItemId: "gundam-kuji-a",
-      ipId: "mobile-suit-gundam",
-      categoryId: "kuji",
-      offeredItem: "기동전사 건담 쿠지 A상",
-      offeredItemImage: "/assets/dabboba/products/ip/mobile-suit-gundam.jpg",
-      appReferenceValue: 42_000,
-      time: "53분 전",
     },
   ],
 };

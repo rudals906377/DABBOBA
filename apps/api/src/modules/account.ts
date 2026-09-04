@@ -69,6 +69,34 @@ type WishlistRow = {
   created_at: Date;
 };
 
+type AccountInventorySourceType = "GACHA" | "KUJI";
+
+type AccountInventoryRow = {
+  id: string;
+  owner_id: string;
+  product_id: string;
+  source_type: AccountInventorySourceType;
+  inventory_status: "OWNED";
+  acquired_at: Date;
+  sku: string;
+  ip_id: string;
+  character_ids: string[];
+  category: "gacha" | "figure" | "kuji" | "tcg";
+  product_name: string;
+  manufacturer: string | null;
+  release_date: string | null;
+  price: number | string;
+  available_quantity: number | string;
+  metadata: Record<string, unknown>;
+  image_url: string | null;
+  product_active: boolean;
+  is_prize_only: boolean;
+  product_version: number;
+  product_created_at: Date;
+  product_updated_at: Date;
+  created_at: Date;
+};
+
 type OrderRow = {
   id: string;
   status: "PENDING_PAYMENT" | "PAID" | "FULFILLED" | "CANCELLED" | "REFUND_REVIEW" | "REFUNDED";
@@ -401,6 +429,34 @@ const mapWishlistItem = (row: WishlistRow) => ({
   wishedAt: iso(row.created_at),
 });
 
+const mapAccountInventory = (row: AccountInventoryRow) => ({
+  id: row.id,
+  ownerId: row.owner_id,
+  productId: row.product_id,
+  product: {
+    id: row.product_id,
+    sku: row.sku,
+    ipId: row.ip_id,
+    characterIds: row.character_ids,
+    category: row.category,
+    name: row.product_name,
+    manufacturer: row.manufacturer,
+    releaseDate: row.release_date,
+    price: numberValue(row.price),
+    availableQuantity: numberValue(row.available_quantity),
+    metadata: row.metadata,
+    imageUrl: row.image_url,
+    isActive: row.product_active,
+    isPrizeOnly: row.is_prize_only,
+    version: row.product_version,
+    createdAt: iso(row.product_created_at),
+    updatedAt: iso(row.product_updated_at),
+  },
+  sourceType: row.source_type,
+  status: row.inventory_status,
+  acquiredAt: iso(row.acquired_at),
+});
+
 const mapPointEntry = (row: PointLedgerRow) => ({
   id: row.id,
   entryType: row.entry_type,
@@ -580,7 +636,7 @@ export function isPointReturnEligibleInventory(
   isOriginalDrawOwner: boolean,
 ): boolean {
   return status === "OWNED"
-    && (sourceType === "GACHA" || sourceType === "KUJI")
+    && sourceType === "GACHA"
     && isOriginalDrawOwner;
 }
 
@@ -599,6 +655,20 @@ export function maskShippingPhone(value: string): string {
 const wishlistSelect = `SELECT w.id,w.product_id,p.name AS product_name,p.ip_id,i.name_ko AS ip_name_ko,
   p.category,p.price,p.image_url,p.is_active,w.created_at
   FROM wishlist_items w JOIN catalog_products p ON p.id=w.product_id JOIN catalog_ips i ON i.id=p.ip_id`;
+
+const accountInventorySelect = `SELECT
+  iu.id,iu.owner_id,iu.product_id,iu.source_type,iu.status AS inventory_status,iu.acquired_at,
+  p.sku,p.ip_id,
+  COALESCE((SELECT array_agg(pc.character_id::text ORDER BY pc.character_id)
+    FROM product_characters pc WHERE pc.product_id=p.id),'{}'::text[]) AS character_ids,
+  p.category,p.name AS product_name,p.manufacturer,p.release_date,p.price,
+  COALESCE(s.on_hand-s.reserved,0) AS available_quantity,p.metadata,p.image_url,
+  p.is_active AS product_active,p.is_prize_only,p.version AS product_version,
+  p.created_at AS product_created_at,p.updated_at AS product_updated_at,
+  iu.acquired_at AS created_at
+  FROM inventory_units iu
+  JOIN catalog_products p ON p.id=iu.product_id
+  LEFT JOIN product_stock s ON s.product_id=p.id`;
 
 const shippingRequestSelect = `SELECT s.id,s.status,s.version,s.address_snapshot,s.requested_at,s.updated_at,
   s.shipped_at,s.tracking_carrier,s.tracking_number,s.requested_at AS created_at,
@@ -815,6 +885,34 @@ export async function registerAccountRoutes(app: FastifyInstance, context: ApiCo
     return sendMutation(reply, result);
   });
 
+  app.get("/v1/account/inventory", { preHandler: context.auth.requireUser }, async (request) => {
+    const { limit, cursor } = pagination(queryOf(request));
+    const values: unknown[] = [request.actor!.userId, limit + 1];
+    const filters = [
+      "iu.owner_id=$1",
+      "iu.status='OWNED'",
+      "iu.source_type IN ('GACHA','KUJI')",
+      `EXISTS (
+        SELECT 1 FROM draw_results draw_result
+        WHERE draw_result.prize_inventory_unit_id=iu.id
+          AND draw_result.user_id=iu.owner_id
+          AND draw_result.entitlement_id=iu.source_id
+          AND draw_result.prize_product_id=iu.product_id
+      )`,
+    ];
+    if (cursor) {
+      values.push(cursor.createdAt, uuidInput(cursor.id, "cursor.id"));
+      filters.push(`(iu.acquired_at,iu.id)<($${values.length - 1},$${values.length})`);
+    }
+    const result = await context.pool.query<AccountInventoryRow>(
+      `${accountInventorySelect}
+       WHERE ${filters.join(" AND ")}
+       ORDER BY iu.acquired_at DESC,iu.id DESC LIMIT $2`,
+      values,
+    );
+    return cursorPage(result.rows, limit, mapAccountInventory);
+  });
+
   app.get("/v1/account/orders", { preHandler: context.auth.requireUser }, async (request) => {
     const { limit, cursor } = pagination(queryOf(request));
     return withTransaction(context.pool, async (client) => {
@@ -943,6 +1041,7 @@ export async function registerAccountRoutes(app: FastifyInstance, context: ApiCo
            JOIN catalog_products p ON p.id=iu.product_id
            LEFT JOIN draw_results draw_result ON draw_result.prize_inventory_unit_id=iu.id
            WHERE iu.id=ANY($1::uuid[])
+             AND iu.source_type='GACHA'
            ORDER BY iu.id FOR UPDATE OF iu,p`,
           [inventoryUnitIds],
         );
@@ -962,7 +1061,7 @@ export async function registerAccountRoutes(app: FastifyInstance, context: ApiCo
               originalDrawLinkMatches,
             )
           ) {
-            throw conflict("직접 뽑아 현재 보관함에 보관 중인 가챠·쿠지 상품만 포인트 환급을 신청할 수 있습니다.");
+            throw conflict("직접 뽑아 현재 보관함에 보관 중인 가챠 상품만 포인트 환급을 신청할 수 있습니다.");
           }
           const referenceAmount = numberValue(inventory.price);
           const pointAmount = pointReturnAmount(referenceAmount);

@@ -31,6 +31,7 @@ import {
   fetchExchangeListingInventory,
   type ExchangeListingInventorySnapshot,
 } from "@/features/exchange/exchange-api";
+import { toggleExchangeInventorySelection } from "@/features/exchange/exchange-selection";
 import { productSubjectTitle } from "@/features/shop/product-title";
 import {
   resolveCatalogImageUrl,
@@ -57,7 +58,7 @@ export function ExchangeCreateScreen() {
   );
   const [snapshot, setSnapshot] = useState<ExchangeListingInventorySnapshot | null>(null);
   const [accessToken, setAccessToken] = useState<string | null>(null);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [title, setTitle] = useState("");
   const [details, setDetails] = useState("");
   const [error, setError] = useState("");
@@ -77,7 +78,7 @@ export function ExchangeCreateScreen() {
       const next = await fetchExchangeListingInventory(runtime.apiBaseUrl, tokens.accessToken);
       setAccessToken(tokens.accessToken);
       setSnapshot(next);
-      setSelectedId((current) => next.items.some((item) => item.id === current) ? current : null);
+      setSelectedIds((current) => current.filter((id) => next.items.some((item) => item.id === id)).slice(0, 2));
       setError("");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "보관함 상품을 불러오지 못했습니다.");
@@ -90,18 +91,18 @@ export function ExchangeCreateScreen() {
     void load();
   }, [load]);
 
-  const selected = snapshot?.items.find((item) => item.id === selectedId) ?? null;
-  const formComplete = Boolean(accessToken && selected && title.trim() && details.trim());
+  const selected = snapshot?.items.filter((item) => selectedIds.includes(item.id)) ?? [];
+  const formComplete = Boolean(accessToken && selected.length > 0 && title.trim() && details.trim());
   const assetBaseUrl = runtime.assetBaseUrl
     ?? (__DEV__ ? runtime.apiBaseUrl.replace(/:8788$/, ":4174") : null);
 
   const submit = useCallback(() => {
-    if (!accessToken || !selected || !title.trim() || !details.trim() || submitting) return;
+    if (!accessToken || selected.length === 0 || !title.trim() || !details.trim() || submitting) return;
     const trimmedTitle = title.trim();
     const trimmedDetails = details.trim();
     Alert.alert(
-      "이 상품을 교환방에 올릴까요?",
-      `${selected.product.name}\n\n글이 열려 있는 동안 선택한 상품은 배송·환급·다른 교환에 사용할 수 없어요.`,
+      `선택한 상품 ${selected.length}개를 올릴까요?`,
+      `${selected.map((item) => item.product.name).join("\n")}\n\n글이 열려 있는 동안 선택한 상품은 배송·환급·다른 교환에 사용할 수 없어요.`,
       [
         { text: "취소", style: "cancel" },
         {
@@ -113,9 +114,9 @@ export function ExchangeCreateScreen() {
                 const created = await createExchangeListing(runtime.apiBaseUrl, accessToken, {
                   title: trimmedTitle,
                   details: trimmedDetails,
-                  offeredInventoryUnitId: selected.id,
+                  offeredInventoryUnitIds: selected.map((item) => item.id),
                 });
-                Alert.alert("교환 상품 등록 완료", "선택한 상품을 교환방에 올렸어요.", [
+                Alert.alert("교환 상품 등록 완료", `선택한 상품 ${selected.length}개를 교환방에 올렸어요.`, [
                   {
                     text: "확인",
                     onPress: () => router.replace({
@@ -190,14 +191,27 @@ export function ExchangeCreateScreen() {
             </View>
           ) : null}
 
+          {snapshot && snapshot.items.length > 0 ? (
+            <View style={styles.selectionHeader}>
+              <KoreanPixelTitle variant="section">올릴 상품</KoreanPixelTitle>
+              <Text style={styles.selectionCount}>선택 {selectedIds.length}/2개</Text>
+            </View>
+          ) : null}
+
           {snapshot?.items.map((item) => (
             <InventoryChoice
               key={item.id}
               item={item}
               ipName={snapshot.ipNames[item.product.ipId] ?? null}
               assetBaseUrl={assetBaseUrl}
-              selected={selectedId === item.id}
-              onSelect={() => setSelectedId(item.id)}
+              selected={selectedIds.includes(item.id)}
+              onSelect={() => {
+                if (!selectedIds.includes(item.id) && selectedIds.length >= 2) {
+                  Alert.alert("최대 2개까지 선택할 수 있어요", "선택한 상품을 하나 해제한 뒤 다시 골라 주세요.");
+                  return;
+                }
+                setSelectedIds((current) => toggleExchangeInventorySelection(current, item.id));
+              }}
             />
           ))}
 
@@ -205,7 +219,7 @@ export function ExchangeCreateScreen() {
             <View style={styles.formSection}>
               <KoreanPixelTitle variant="section">교환글 작성</KoreanPixelTitle>
               <Text style={styles.description}>
-                원하는 교환 조건과 상품 상태를 적어 주세요. 신청자는 글 없이 본인이 뽑은 상품 1개만 보낼 수 있어요.
+                원하는 교환 조건과 상품 상태를 적어 주세요. 양쪽 모두 가챠로 뽑은 상품을 최대 2개까지 선택할 수 있어요.
               </Text>
 
               <FieldLabel label="교환글 제목" count={`${title.length}/${TITLE_LIMIT}`} />
@@ -237,7 +251,7 @@ export function ExchangeCreateScreen() {
 
         <FloatingBottomActionPanel>
           <SeedActionButton
-            label={selected ? "교환 상품 올리기" : "상품을 선택해 주세요"}
+            label={selected.length ? "교환 상품 올리기" : "상품을 선택해 주세요"}
             disabled={!formComplete}
             loading={submitting}
             onPress={submit}
@@ -282,7 +296,7 @@ function InventoryChoice({
   const imageUri = resolveCatalogImageUrl(item.product.imageUrl, assetBaseUrl, item.product.version);
   return (
     <Pressable
-      accessibilityRole="radio"
+      accessibilityRole="checkbox"
       accessibilityState={{ checked: selected }}
       accessibilityLabel={`${item.product.name} 등록 상품 선택`}
       onPress={onSelect}
@@ -324,6 +338,8 @@ const styles = StyleSheet.create({
   headerSpacer: { width: seed.size.touchTarget },
   content: { paddingHorizontal: seed.spacing.globalGutter, paddingTop: seed.spacing.x5, paddingBottom: seed.spacing.x7 },
   description: { color: colors.muted, fontSize: 13, lineHeight: 21, marginTop: seed.spacing.x2_5, marginBottom: seed.spacing.x2 },
+  selectionHeader: { marginTop: seed.spacing.x3, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: seed.spacing.x3 },
+  selectionCount: { color: colors.greenInk, fontSize: 12, lineHeight: 18, fontWeight: "800" },
   stateBox: { minHeight: 180, marginTop: seed.spacing.x4, borderRadius: seed.radius.r4, padding: seed.spacing.x5, alignItems: "center", justifyContent: "center", gap: seed.spacing.x2_5, backgroundColor: seed.color.layer.default },
   stateText: { color: colors.muted, fontSize: 13, lineHeight: 20, textAlign: "center" },
   retryButton: { minHeight: seed.size.touchTarget, marginTop: seed.spacing.x2, paddingHorizontal: seed.spacing.x4, alignItems: "center", justifyContent: "center", borderRadius: seed.radius.r3, backgroundColor: seed.color.background.neutralSolid },

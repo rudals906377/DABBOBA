@@ -193,7 +193,10 @@ test(
     );
     assert.notEqual(directEvent.rows[0]!.ip_address, "198.51.100.44");
 
-    const productionConfig: ApiConfig = { ...config, environment: "production" };
+    // Production defaults to the customer-only Cloud Run surface. This branch
+    // exercises production admin identity controls, so opt into the separately
+    // deployed admin surface explicitly.
+    const productionConfig: ApiConfig = { ...config, environment: "production", surface: "admin" };
     const { app: productionApp } = await buildApp({ config: productionConfig, pool, redis: null });
     t.after(async () => productionApp.close());
 

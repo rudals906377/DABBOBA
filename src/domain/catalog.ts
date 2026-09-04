@@ -7,6 +7,13 @@ export const PRODUCT_CATEGORIES = [
 
 export type ProductCategoryId = (typeof PRODUCT_CATEGORIES)[number]["id"];
 export type ProductCategoryLabel = (typeof PRODUCT_CATEGORIES)[number]["label"];
+export type CustomerVisibleProductCategoryId = Exclude<ProductCategoryId, "tcg">;
+export type CustomerVisibleProductCategory = Exclude<(typeof PRODUCT_CATEGORIES)[number], { id: "tcg" }>;
+export type CustomerBrowsableProductCategoryId = Extract<ProductCategoryId, "gacha" | "kuji">;
+export type CustomerBrowsableProductCategory = Extract<
+  (typeof PRODUCT_CATEGORIES)[number],
+  { id: CustomerBrowsableProductCategoryId }
+>;
 export type CommerceMode = "draw" | "purchase";
 export type RandomDrawCategoryId = Extract<ProductCategoryId, "gacha" | "kuji">;
 export type DirectPurchaseCategoryId = Extract<ProductCategoryId, "figure" | "tcg">;
@@ -44,6 +51,30 @@ export type ProductRecord = {
 };
 
 export const PRODUCT_CATEGORY_LABELS = PRODUCT_CATEGORIES.map((category) => category.label);
+
+// Keep the complete category model above so TCG data can be restored without a
+// migration, while exposing only categories that are open to customers today.
+export const CUSTOMER_VISIBLE_PRODUCT_CATEGORIES = PRODUCT_CATEGORIES.filter(
+  (category): category is CustomerVisibleProductCategory => category.id !== "tcg",
+);
+export const CUSTOMER_VISIBLE_PRODUCT_CATEGORY_LABELS = CUSTOMER_VISIBLE_PRODUCT_CATEGORIES.map(
+  (category) => category.label,
+);
+export const CUSTOMER_BROWSABLE_PRODUCT_CATEGORIES = PRODUCT_CATEGORIES.filter(
+  (category): category is CustomerBrowsableProductCategory => category.id === "gacha" || category.id === "kuji",
+);
+
+export function isCustomerVisibleProductCategory(
+  categoryId: ProductCategoryId,
+): categoryId is CustomerVisibleProductCategoryId {
+  return categoryId !== "tcg";
+}
+
+export function isCustomerBrowsableProductCategory(
+  categoryId: ProductCategoryId,
+): categoryId is CustomerBrowsableProductCategoryId {
+  return categoryId === "gacha" || categoryId === "kuji";
+}
 
 export function categoryLabel(categoryId: ProductCategoryId) {
   return PRODUCT_CATEGORIES.find((category) => category.id === categoryId)?.label ?? categoryId;

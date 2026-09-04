@@ -3,7 +3,7 @@ import { withTransaction } from "@dabboba/db";
 import { PRODUCT_CATEGORIES } from "@dabboba/domain";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { adminMutationHeaders, writeAdminAudit, writeOutbox } from "../lib/audit.js";
-import { AppError, conflict, forbidden, notFound } from "../lib/errors.js";
+import { AppError, badRequest, conflict, forbidden, notFound } from "../lib/errors.js";
 import {
   beginIdempotency,
   completeIdempotency,
@@ -36,7 +36,7 @@ type InventoryRow = {
   product_id: string;
   source_type: InventorySourceType;
   inventory_status: InventoryStatus;
-  acquired_at: Date;
+  acquired_at: Date | string;
   sku: string;
   ip_id: string;
   character_ids: string[];
@@ -51,15 +51,16 @@ type InventoryRow = {
   product_active: boolean;
   is_prize_only: boolean;
   product_version: number;
-  product_created_at: Date;
-  product_updated_at: Date;
-  created_at: Date;
+  product_created_at: Date | string;
+  product_updated_at: Date | string;
+  created_at: Date | string;
 };
 
 type ListingLifecycleRow = {
   id: string;
   author_id: string;
   offered_inventory_unit_id: string;
+  offered_inventory_unit_ids: string[];
   status: ListingStatus;
   accepted_offer_id: string | null;
   matched_at: Date | null;
@@ -91,6 +92,7 @@ type ListingRow = InventoryRow & {
   cancel_reason: string | null;
   resolved_by_admin_id: string | null;
   offer_count: number | string;
+  offered_inventories: InventoryRow[];
   listing_created_at: Date;
   listing_updated_at: Date;
 };
@@ -100,6 +102,7 @@ type OfferLifecycleRow = {
   listing_id: string;
   proposer_id: string;
   offered_inventory_unit_id: string;
+  offered_inventory_unit_ids: string[];
   status: OfferStatus;
 };
 
@@ -109,6 +112,7 @@ type OfferRow = InventoryRow & {
   proposer_id: string;
   proposer_nickname: string;
   offer_status: OfferStatus;
+  offered_inventories: InventoryRow[];
   offer_created_at: Date;
   offer_updated_at: Date;
 };
@@ -116,9 +120,13 @@ type OfferRow = InventoryRow & {
 type InventoryLockRow = {
   id: string;
   owner_id: string;
+  product_id: string;
+  source_id: string | null;
   status: InventoryStatus;
   source_type: InventorySourceType;
   draw_owner_id: string | null;
+  draw_entitlement_id: string | null;
+  draw_prize_product_id: string | null;
 };
 
 type Queryable = Pick<DatabaseClient, "query">;
@@ -162,13 +170,115 @@ export function orderedInventoryIds(ids: readonly string[]): string[] {
   return [...new Set(ids)].sort((left, right) => left.localeCompare(right, "en-US"));
 }
 
-const inventorySelect = `
-  iu.id,iu.owner_id,iu.product_id,iu.source_type,iu.status AS inventory_status,iu.acquired_at,
-  p.sku,p.ip_id,COALESCE((SELECT array_agg(pc.character_id::text ORDER BY pc.character_id) FROM product_characters pc WHERE pc.product_id=p.id),'{}'::text[]) AS character_ids,
-  p.category,p.name AS product_name,p.manufacturer,p.release_date,p.price,
-  COALESCE(s.on_hand-s.reserved,0) AS available_quantity,p.metadata,p.image_url,p.is_active AS product_active,
-  p.is_prize_only,p.version AS product_version,p.created_at AS product_created_at,p.updated_at AS product_updated_at,
-  iu.acquired_at AS created_at`;
+export function exchangeInventoryBundleInput(input: Record<string, unknown>): string[] {
+  const canonical = input.offeredInventoryUnitIds;
+  const legacy = input.offeredInventoryUnitId;
+  if (canonical === undefined) {
+    return [uuidInput(legacy, "offeredInventoryUnitId")];
+  }
+  if (!Array.isArray(canonical) || canonical.length < 1 || canonical.length > 2) {
+    throw badRequest("교환 상품은 1개 또는 2개를 선택해 주세요.");
+  }
+  const ids = canonical.map((value, index) => uuidInput(value, `offeredInventoryUnitIds[${index}]`));
+  if (new Set(ids).size !== ids.length) {
+    throw badRequest("같은 교환 상품을 중복해서 선택할 수 없습니다.");
+  }
+  if (legacy !== undefined && uuidInput(legacy, "offeredInventoryUnitId") !== ids[0]) {
+    throw badRequest("기존 교환 상품 값은 첫 번째 교환 상품과 같아야 합니다.");
+  }
+  return ids;
+}
+
+const inventoryProjection = (inventoryAlias: string, productAlias: string, stockAlias: string) => `
+  ${inventoryAlias}.id,${inventoryAlias}.owner_id,${inventoryAlias}.product_id,
+  ${inventoryAlias}.source_type,${inventoryAlias}.status AS inventory_status,${inventoryAlias}.acquired_at,
+  ${productAlias}.sku,${productAlias}.ip_id,
+  COALESCE((SELECT array_agg(pc.character_id::text ORDER BY pc.character_id)
+    FROM product_characters pc WHERE pc.product_id=${productAlias}.id),'{}'::text[]) AS character_ids,
+  ${productAlias}.category,${productAlias}.name AS product_name,${productAlias}.manufacturer,
+  ${productAlias}.release_date,${productAlias}.price,
+  COALESCE(${stockAlias}.on_hand-${stockAlias}.reserved,0) AS available_quantity,
+  ${productAlias}.metadata,${productAlias}.image_url,${productAlias}.is_active AS product_active,
+  ${productAlias}.is_prize_only,${productAlias}.version AS product_version,
+  ${productAlias}.created_at AS product_created_at,${productAlias}.updated_at AS product_updated_at,
+  ${inventoryAlias}.acquired_at AS created_at`;
+
+const inventorySelect = inventoryProjection("iu", "p", "s");
+
+const listingInventoryBundleSelect = `(SELECT COALESCE(
+    jsonb_agg(to_jsonb(bundle_inventory)-'position' ORDER BY bundle_inventory.position),
+    '[]'::jsonb
+  )
+  FROM (
+    SELECT listing_item.position,${inventoryProjection("bundle_iu", "bundle_product", "bundle_stock")}
+    FROM exchange_listing_items listing_item
+    JOIN inventory_units bundle_iu ON bundle_iu.id=listing_item.inventory_unit_id
+    JOIN catalog_products bundle_product ON bundle_product.id=bundle_iu.product_id
+    LEFT JOIN product_stock bundle_stock ON bundle_stock.product_id=bundle_product.id
+    WHERE listing_item.listing_id=l.id
+    ORDER BY listing_item.position
+  ) bundle_inventory) AS offered_inventories`;
+
+const offerInventoryBundleSelect = `(SELECT COALESCE(
+    jsonb_agg(to_jsonb(bundle_inventory)-'position' ORDER BY bundle_inventory.position),
+    '[]'::jsonb
+  )
+  FROM (
+    SELECT offer_item.position,${inventoryProjection("bundle_iu", "bundle_product", "bundle_stock")}
+    FROM exchange_offer_items offer_item
+    JOIN inventory_units bundle_iu ON bundle_iu.id=offer_item.inventory_unit_id
+    JOIN catalog_products bundle_product ON bundle_product.id=bundle_iu.product_id
+    LEFT JOIN product_stock bundle_stock ON bundle_stock.product_id=bundle_product.id
+    WHERE offer_item.offer_id=o.id
+    ORDER BY offer_item.position
+  ) bundle_inventory) AS offered_inventories`;
+
+const listingBundleIsPubliclyEligible = `EXISTS (
+    SELECT 1 FROM exchange_listing_items visible_listing_item
+    WHERE visible_listing_item.listing_id=l.id
+  ) AND NOT EXISTS (
+    SELECT 1
+    FROM exchange_listing_items invalid_listing_item
+    JOIN inventory_units invalid_listing_inventory
+      ON invalid_listing_inventory.id=invalid_listing_item.inventory_unit_id
+    JOIN catalog_products invalid_listing_product
+      ON invalid_listing_product.id=invalid_listing_inventory.product_id
+    JOIN catalog_ips invalid_listing_ip ON invalid_listing_ip.id=invalid_listing_product.ip_id
+    WHERE invalid_listing_item.listing_id=l.id
+      AND (
+        invalid_listing_inventory.source_type<>'GACHA'
+        OR invalid_listing_product.is_active=false
+        OR invalid_listing_ip.is_active=false
+        OR NOT EXISTS (
+          SELECT 1 FROM draw_results listing_draw_result
+          WHERE listing_draw_result.prize_inventory_unit_id=invalid_listing_inventory.id
+            AND listing_draw_result.user_id=l.author_id
+            AND listing_draw_result.entitlement_id=invalid_listing_inventory.source_id
+            AND listing_draw_result.prize_product_id=invalid_listing_inventory.product_id
+        )
+      )
+  )`;
+
+const offerBundleIsVisible = `EXISTS (
+    SELECT 1 FROM exchange_offer_items visible_offer_item
+    WHERE visible_offer_item.offer_id=o.id
+  ) AND NOT EXISTS (
+    SELECT 1
+    FROM exchange_offer_items invalid_offer_item
+    JOIN inventory_units invalid_offer_inventory
+      ON invalid_offer_inventory.id=invalid_offer_item.inventory_unit_id
+    WHERE invalid_offer_item.offer_id=o.id
+      AND (
+        invalid_offer_inventory.source_type<>'GACHA'
+        OR NOT EXISTS (
+          SELECT 1 FROM draw_results offer_draw_result
+          WHERE offer_draw_result.prize_inventory_unit_id=invalid_offer_inventory.id
+            AND offer_draw_result.user_id=o.proposer_id
+            AND offer_draw_result.entitlement_id=invalid_offer_inventory.source_id
+            AND offer_draw_result.prize_product_id=invalid_offer_inventory.product_id
+        )
+      )
+  )`;
 
 const listingSelect = `SELECT
   l.id AS listing_id,l.author_id,u.nickname AS author_nickname,l.title AS listing_title,l.details AS listing_details,
@@ -177,26 +287,38 @@ const listingSelect = `SELECT
   l.created_at AS listing_created_at,l.updated_at AS listing_updated_at,
   (SELECT count(*)
    FROM exchange_offers o
-   JOIN inventory_units offer_inventory ON offer_inventory.id=o.offered_inventory_unit_id
    WHERE o.listing_id=l.id AND o.status<>'WITHDRAWN'
-     AND offer_inventory.source_type='GACHA'
-     AND EXISTS (
-       SELECT 1 FROM draw_results offer_draw_result
-       WHERE offer_draw_result.prize_inventory_unit_id=offer_inventory.id
-         AND offer_draw_result.user_id=o.proposer_id
+     AND EXISTS (SELECT 1 FROM exchange_offer_items counted_item WHERE counted_item.offer_id=o.id)
+     AND NOT EXISTS (
+       SELECT 1
+       FROM exchange_offer_items counted_item
+       JOIN inventory_units offer_inventory ON offer_inventory.id=counted_item.inventory_unit_id
+       WHERE counted_item.offer_id=o.id
+         AND (offer_inventory.source_type<>'GACHA' OR NOT EXISTS (
+           SELECT 1 FROM draw_results offer_draw_result
+           WHERE offer_draw_result.prize_inventory_unit_id=offer_inventory.id
+             AND offer_draw_result.user_id=o.proposer_id
+             AND offer_draw_result.entitlement_id=offer_inventory.source_id
+             AND offer_draw_result.prize_product_id=offer_inventory.product_id
+         ))
      )) AS offer_count,
+  ${listingInventoryBundleSelect},
   ${inventorySelect}
   FROM exchange_listings l JOIN users u ON u.id=l.author_id
-  JOIN inventory_units iu ON iu.id=l.offered_inventory_unit_id
+  JOIN exchange_listing_items primary_listing_item ON primary_listing_item.listing_id=l.id
+    AND primary_listing_item.position=0
+  JOIN inventory_units iu ON iu.id=primary_listing_item.inventory_unit_id
   JOIN catalog_products p ON p.id=iu.product_id
   JOIN catalog_ips i ON i.id=p.ip_id
   LEFT JOIN product_stock s ON s.product_id=p.id`;
 
 const offerSelect = `SELECT
   o.id AS offer_id,o.listing_id,o.proposer_id,proposer.nickname AS proposer_nickname,o.status AS offer_status,
-  o.created_at AS offer_created_at,o.updated_at AS offer_updated_at,${inventorySelect}
+  o.created_at AS offer_created_at,o.updated_at AS offer_updated_at,${offerInventoryBundleSelect},${inventorySelect}
   FROM exchange_offers o JOIN users proposer ON proposer.id=o.proposer_id
-  JOIN inventory_units iu ON iu.id=o.offered_inventory_unit_id
+  JOIN exchange_offer_items primary_offer_item ON primary_offer_item.offer_id=o.id
+    AND primary_offer_item.position=0
+  JOIN inventory_units iu ON iu.id=primary_offer_item.inventory_unit_id
   JOIN catalog_products p ON p.id=iu.product_id LEFT JOIN product_stock s ON s.product_id=p.id`;
 
 const mapProduct = (row: InventoryRow) => ({
@@ -229,14 +351,17 @@ const mapInventory = (row: InventoryRow) => ({
   acquiredAt: iso(row.acquired_at),
 });
 
-const mapListing = (row: ListingRow) => ({
+const mapListing = (row: ListingRow) => {
+  const offeredInventories = row.offered_inventories.map(mapInventory);
+  return {
   id: row.listing_id,
   authorId: row.author_id,
   authorNickname: row.author_nickname,
   title: row.listing_title,
   details: row.listing_details,
   status: row.listing_status,
-  offeredInventory: mapInventory(row),
+  offeredInventory: offeredInventories[0]!,
+  offeredInventories,
   offerCount: numberValue(row.offer_count),
   acceptedOfferId: row.accepted_offer_id,
   matchedAt: nullableIso(row.matched_at),
@@ -250,18 +375,23 @@ const mapListing = (row: ListingRow) => ({
   resolvedByAdminId: row.resolved_by_admin_id,
   createdAt: iso(row.listing_created_at),
   updatedAt: iso(row.listing_updated_at),
-});
+  };
+};
 
-const mapOffer = (row: OfferRow) => ({
+const mapOffer = (row: OfferRow) => {
+  const offeredInventories = row.offered_inventories.map(mapInventory);
+  return {
   id: row.offer_id,
   listingId: row.listing_id,
   proposerId: row.proposer_id,
   proposerNickname: row.proposer_nickname,
-  offeredInventory: mapInventory(row),
+  offeredInventory: offeredInventories[0]!,
+  offeredInventories,
   status: row.offer_status,
   createdAt: iso(row.offer_created_at),
   updatedAt: iso(row.offer_updated_at),
-});
+  };
+};
 
 const listingPage = (rows: ListingRow[], limit: number) => cursorPage(
   rows.map((row) => ({ id: row.listing_id, created_at: row.listing_created_at, listing: row })),
@@ -287,7 +417,10 @@ async function fetchOffer(queryable: Queryable, offerId: string) {
 
 async function lockListing(client: DatabaseClient, listingId: string) {
   const result = await client.query<ListingLifecycleRow>(
-    `SELECT id,author_id,offered_inventory_unit_id,status,accepted_offer_id,matched_at,
+    `SELECT id,author_id,offered_inventory_unit_id,
+      ARRAY(SELECT item.inventory_unit_id FROM exchange_listing_items item
+        WHERE item.listing_id=exchange_listings.id ORDER BY item.position) AS offered_inventory_unit_ids,
+      status,accepted_offer_id,matched_at,
       author_confirmed_at,proposer_confirmed_at,completed_at,completion_mode,cancelled_at,
       cancelled_by,cancel_reason,resolved_by_admin_id
      FROM exchange_listings WHERE id=$1 FOR UPDATE`,
@@ -299,7 +432,10 @@ async function lockListing(client: DatabaseClient, listingId: string) {
 
 async function lockOffers(client: DatabaseClient, listingId: string) {
   const result = await client.query<OfferLifecycleRow>(
-    `SELECT id,listing_id,proposer_id,offered_inventory_unit_id,status
+    `SELECT id,listing_id,proposer_id,offered_inventory_unit_id,
+      ARRAY(SELECT item.inventory_unit_id FROM exchange_offer_items item
+        WHERE item.offer_id=exchange_offers.id ORDER BY item.position) AS offered_inventory_unit_ids,
+      status
      FROM exchange_offers WHERE listing_id=$1 ORDER BY id FOR UPDATE`,
     [listingId],
   );
@@ -310,7 +446,10 @@ async function lockInventoryUnits(client: DatabaseClient, inventoryIds: readonly
   const ids = orderedInventoryIds(inventoryIds);
   if (!ids.length) return new Map<string, InventoryLockRow>();
   const result = await client.query<InventoryLockRow>(
-    `SELECT iu.id,iu.owner_id,iu.status,iu.source_type,draw_result.user_id AS draw_owner_id
+    `SELECT iu.id,iu.owner_id,iu.product_id,iu.source_id,iu.status,iu.source_type,
+       draw_result.user_id AS draw_owner_id,
+       draw_result.entitlement_id AS draw_entitlement_id,
+       draw_result.prize_product_id AS draw_prize_product_id
      FROM inventory_units iu
      LEFT JOIN draw_results draw_result ON draw_result.prize_inventory_unit_id=iu.id
      WHERE iu.id=ANY($1::uuid[]) ORDER BY iu.id FOR UPDATE OF iu`,
@@ -318,6 +457,34 @@ async function lockInventoryUnits(client: DatabaseClient, inventoryIds: readonly
   );
   if (result.rows.length !== ids.length) throw notFound("교환 상품을 찾을 수 없습니다.");
   return new Map(result.rows.map((row) => [row.id, row]));
+}
+
+export function isOriginalGachaDrawProvenance(input: {
+  sourceType: InventorySourceType;
+  inventorySourceId: string | null;
+  inventoryProductId: string;
+  drawOwnerId: string | null;
+  drawEntitlementId: string | null;
+  drawPrizeProductId: string | null;
+  expectedOwnerId: string;
+}): boolean {
+  return isDrawExchangeSource(input.sourceType)
+    && input.drawOwnerId === input.expectedOwnerId
+    && input.inventorySourceId !== null
+    && input.drawEntitlementId === input.inventorySourceId
+    && input.drawPrizeProductId === input.inventoryProductId;
+}
+
+function hasOriginalGachaDrawProvenance(inventory: InventoryLockRow, ownerId: string): boolean {
+  return isOriginalGachaDrawProvenance({
+    sourceType: inventory.source_type,
+    inventorySourceId: inventory.source_id,
+    inventoryProductId: inventory.product_id,
+    drawOwnerId: inventory.draw_owner_id,
+    drawEntitlementId: inventory.draw_entitlement_id,
+    drawPrizeProductId: inventory.draw_prize_product_id,
+    expectedOwnerId: ownerId,
+  });
 }
 
 function requireInventoryState(
@@ -330,6 +497,20 @@ function requireInventoryState(
   if (!inventory) throw notFound("교환 상품을 찾을 수 없습니다.");
   if (inventory.owner_id !== ownerId || inventory.status !== status) {
     throw conflict("교환 상품의 소유권 또는 예약 상태가 변경되었습니다.");
+  }
+}
+
+function requireInventoryBundle(
+  locked: Map<string, InventoryLockRow>,
+  inventoryIds: readonly string[],
+  ownerId: string,
+  status: InventoryStatus,
+) {
+  if (inventoryIds.length < 1 || inventoryIds.length > 2 || new Set(inventoryIds).size !== inventoryIds.length) {
+    throw conflict("교환 상품 묶음 구성이 올바르지 않습니다.");
+  }
+  for (const inventoryId of inventoryIds) {
+    requireInventoryState(locked, inventoryId, ownerId, status);
   }
 }
 
@@ -346,7 +527,7 @@ function requireExchangeEligibleInventory(
   if (!isExchangeEligibleInventory(
     inventory.status,
     inventory.source_type,
-    inventory.draw_owner_id === ownerId,
+    hasOriginalGachaDrawProvenance(inventory, ownerId),
   )) {
     throw conflict("가챠로 직접 뽑아 보관함에 보관 중인 상품만 교환에 사용할 수 있습니다.");
   }
@@ -359,9 +540,48 @@ function requireOriginalGachaDrawInventory(
 ) {
   const inventory = locked.get(inventoryId);
   if (!inventory) throw notFound("교환 상품을 찾을 수 없습니다.");
-  if (!isDrawExchangeSource(inventory.source_type) || inventory.draw_owner_id !== ownerId) {
+  if (!hasOriginalGachaDrawProvenance(inventory, ownerId)) {
     throw conflict("가챠로 직접 뽑아 보관함에 보관 중인 상품만 교환에 사용할 수 있습니다.");
   }
+}
+
+function requireOriginalGachaDrawBundle(
+  locked: Map<string, InventoryLockRow>,
+  inventoryIds: readonly string[],
+  ownerId: string,
+) {
+  for (const inventoryId of inventoryIds) {
+    requireOriginalGachaDrawInventory(locked, inventoryId, ownerId);
+  }
+}
+
+function requireExchangeEligibleBundle(
+  locked: Map<string, InventoryLockRow>,
+  inventoryIds: readonly string[],
+  ownerId: string,
+) {
+  if (inventoryIds.length < 1 || inventoryIds.length > 2 || new Set(inventoryIds).size !== inventoryIds.length) {
+    throw badRequest("교환 상품은 중복 없이 1개 또는 2개를 선택해 주세요.");
+  }
+  for (const inventoryId of inventoryIds) {
+    requireExchangeEligibleInventory(locked, inventoryId, ownerId);
+  }
+}
+
+async function reserveInventoryUnits(
+  client: DatabaseClient,
+  inventoryIds: readonly string[],
+  ownerId: string,
+  reservedStatus: "EXCHANGE_LISTED" | "EXCHANGE_OFFERED",
+) {
+  const ids = orderedInventoryIds(inventoryIds);
+  const reserved = await client.query(
+    `UPDATE inventory_units SET status=$3
+     WHERE id=ANY($1::uuid[]) AND owner_id=$2 AND status='OWNED'
+     RETURNING id`,
+    [ids, ownerId, reservedStatus],
+  );
+  if (reserved.rowCount !== ids.length) throw conflict("이미 다른 처리에 사용 중인 상품입니다.");
 }
 
 async function releaseInventoryUnits(
@@ -418,48 +638,52 @@ async function finalizeOwnershipExchange(
   mode: CompletionMode,
   adminId: string | null,
 ) {
-  const locked = await lockInventoryUnits(client, [
-    listing.offered_inventory_unit_id,
-    offer.offered_inventory_unit_id,
-  ]);
-  requireInventoryState(locked, listing.offered_inventory_unit_id, listing.author_id, "EXCHANGE_LISTED");
-  requireInventoryState(locked, offer.offered_inventory_unit_id, offer.proposer_id, "EXCHANGE_OFFERED");
-  requireOriginalGachaDrawInventory(locked, listing.offered_inventory_unit_id, listing.author_id);
-  requireOriginalGachaDrawInventory(locked, offer.offered_inventory_unit_id, offer.proposer_id);
-  if (listing.offered_inventory_unit_id === offer.offered_inventory_unit_id) {
-    throw conflict("동일한 상품끼리는 교환을 완료할 수 없습니다.");
+  const listingInventoryIds = listing.offered_inventory_unit_ids;
+  const offerInventoryIds = offer.offered_inventory_unit_ids;
+  const allInventoryIds = [...listingInventoryIds, ...offerInventoryIds];
+  if (new Set(allInventoryIds).size !== allInventoryIds.length) {
+    throw conflict("같은 보관 상품은 양쪽 교환 묶음에 함께 포함될 수 없습니다.");
   }
+  const locked = await lockInventoryUnits(client, allInventoryIds);
+  requireInventoryBundle(locked, listingInventoryIds, listing.author_id, "EXCHANGE_LISTED");
+  requireInventoryBundle(locked, offerInventoryIds, offer.proposer_id, "EXCHANGE_OFFERED");
+  requireOriginalGachaDrawBundle(locked, listingInventoryIds, listing.author_id);
+  requireOriginalGachaDrawBundle(locked, offerInventoryIds, offer.proposer_id);
 
   const transferred = await client.query(
     `UPDATE inventory_units
      SET owner_id=CASE
-       WHEN id=$1 THEN $4::uuid
-       WHEN id=$2 THEN $3::uuid
+       WHEN id=ANY($1::uuid[]) THEN $4::uuid
+       WHEN id=ANY($2::uuid[]) THEN $3::uuid
        ELSE owner_id
      END,status='OWNED'
-     WHERE (id=$1 AND owner_id=$3 AND status='EXCHANGE_LISTED')
-        OR (id=$2 AND owner_id=$4 AND status='EXCHANGE_OFFERED')
+     WHERE (id=ANY($1::uuid[]) AND owner_id=$3 AND status='EXCHANGE_LISTED')
+        OR (id=ANY($2::uuid[]) AND owner_id=$4 AND status='EXCHANGE_OFFERED')
      RETURNING id`,
     [
-      listing.offered_inventory_unit_id,
-      offer.offered_inventory_unit_id,
+      listingInventoryIds,
+      offerInventoryIds,
       listing.author_id,
       offer.proposer_id,
     ],
   );
-  if (transferred.rowCount !== 2) throw conflict("교환 상품 소유권이 변경되었습니다.");
+  if (transferred.rowCount !== allInventoryIds.length) throw conflict("교환 상품 소유권이 변경되었습니다.");
 
   await client.query(
     `INSERT INTO inventory_ownership_transfers
       (exchange_listing_id,inventory_unit_id,from_owner_id,to_owner_id,transferred_by_admin_id)
-     VALUES ($1,$2,$3,$4,$6),($1,$5,$4,$3,$6)`,
+     SELECT $1::uuid,item.inventory_unit_id,$2::uuid,$3::uuid,$4::uuid
+       FROM unnest($5::uuid[]) AS item(inventory_unit_id)
+     UNION ALL
+     SELECT $1::uuid,item.inventory_unit_id,$3::uuid,$2::uuid,$4::uuid
+       FROM unnest($6::uuid[]) AS item(inventory_unit_id)`,
     [
       listing.id,
-      listing.offered_inventory_unit_id,
       listing.author_id,
       offer.proposer_id,
-      offer.offered_inventory_unit_id,
       adminId,
+      listingInventoryIds,
+      offerInventoryIds,
     ],
   );
 
@@ -480,13 +704,23 @@ async function cancelMatchedExchange(
   reason: string,
 ) {
   const locked = await lockInventoryUnits(client, [
-    listing.offered_inventory_unit_id,
-    offer.offered_inventory_unit_id,
+    ...listing.offered_inventory_unit_ids,
+    ...offer.offered_inventory_unit_ids,
   ]);
-  requireInventoryState(locked, listing.offered_inventory_unit_id, listing.author_id, "EXCHANGE_LISTED");
-  requireInventoryState(locked, offer.offered_inventory_unit_id, offer.proposer_id, "EXCHANGE_OFFERED");
-  await releaseInventoryUnits(client, [listing.offered_inventory_unit_id], "EXCHANGE_LISTED");
-  await releaseInventoryUnits(client, [offer.offered_inventory_unit_id], "EXCHANGE_OFFERED");
+  requireInventoryBundle(
+    locked,
+    listing.offered_inventory_unit_ids,
+    listing.author_id,
+    "EXCHANGE_LISTED",
+  );
+  requireInventoryBundle(
+    locked,
+    offer.offered_inventory_unit_ids,
+    offer.proposer_id,
+    "EXCHANGE_OFFERED",
+  );
+  await releaseInventoryUnits(client, listing.offered_inventory_unit_ids, "EXCHANGE_LISTED");
+  await releaseInventoryUnits(client, offer.offered_inventory_unit_ids, "EXCHANGE_OFFERED");
   const cancelled = await client.query(
     `UPDATE exchange_listings
      SET status='CANCELLED',cancelled_at=now(),cancelled_by=$2,cancel_reason=$3,resolved_by_admin_id=$2
@@ -513,6 +747,8 @@ export async function registerExchangeRoutes(app: FastifyInstance, context: ApiC
           SELECT 1 FROM draw_results draw_result
           WHERE draw_result.prize_inventory_unit_id=iu.id
             AND draw_result.user_id=iu.owner_id
+            AND draw_result.entitlement_id=iu.source_id
+            AND draw_result.prize_product_id=iu.product_id
         )`,
         "p.is_active=true",
       ];
@@ -546,27 +782,36 @@ export async function registerExchangeRoutes(app: FastifyInstance, context: ApiC
     const values: unknown[] = [limit + 1];
     const filters = [
       "l.status='OPEN'",
-      "iu.source_type='GACHA'",
-      `EXISTS (
-        SELECT 1 FROM draw_results draw_result
-        WHERE draw_result.prize_inventory_unit_id=iu.id
-          AND draw_result.user_id=l.author_id
-      )`,
-      "p.is_active=true",
-      "i.is_active=true",
+      listingBundleIsPubliclyEligible,
     ];
     if (search) {
       values.push(`%${search}%`);
       filters.push(
         `(l.title ILIKE $${values.length} OR l.details ILIKE $${values.length}
-          OR p.name ILIKE $${values.length} OR i.name_ko ILIKE $${values.length}
-          OR i.name_en ILIKE $${values.length} OR i.name_ja ILIKE $${values.length}
-          OR array_to_string(i.aliases, ' ') ILIKE $${values.length})`,
+          OR EXISTS (
+            SELECT 1
+            FROM exchange_listing_items search_listing_item
+            JOIN inventory_units search_inventory ON search_inventory.id=search_listing_item.inventory_unit_id
+            JOIN catalog_products search_product ON search_product.id=search_inventory.product_id
+            JOIN catalog_ips search_ip ON search_ip.id=search_product.ip_id
+            WHERE search_listing_item.listing_id=l.id
+              AND (search_product.name ILIKE $${values.length}
+                OR search_ip.name_ko ILIKE $${values.length}
+                OR search_ip.name_en ILIKE $${values.length}
+                OR search_ip.name_ja ILIKE $${values.length}
+                OR array_to_string(search_ip.aliases, ' ') ILIKE $${values.length})
+          ))`,
       );
     }
     if (category) {
       values.push(category);
-      filters.push(`p.category=$${values.length}`);
+      filters.push(`EXISTS (
+        SELECT 1
+        FROM exchange_listing_items category_listing_item
+        JOIN inventory_units category_inventory ON category_inventory.id=category_listing_item.inventory_unit_id
+        JOIN catalog_products category_product ON category_product.id=category_inventory.product_id
+        WHERE category_listing_item.listing_id=l.id AND category_product.category=$${values.length}
+      )`);
     }
     if (cursor) {
       values.push(cursor.createdAt, cursor.id);
@@ -582,13 +827,8 @@ export async function registerExchangeRoutes(app: FastifyInstance, context: ApiC
   app.get("/v1/exchange/listings/:listingId", async (request) => {
     const listingId = uuidInput((request.params as Record<string, unknown>).listingId, "listingId");
     const result = await context.pool.query<ListingRow>(
-      `${listingSelect} WHERE l.id=$1 AND l.status<>'HIDDEN' AND iu.source_type='GACHA'
-       AND EXISTS (
-         SELECT 1 FROM draw_results draw_result
-         WHERE draw_result.prize_inventory_unit_id=iu.id
-           AND draw_result.user_id=l.author_id
-       )
-       AND p.is_active=true AND i.is_active=true`,
+      `${listingSelect} WHERE l.id=$1 AND l.status<>'HIDDEN'
+       AND ${listingBundleIsPubliclyEligible}`,
       [listingId],
     );
     if (!result.rowCount) throw notFound();
@@ -603,12 +843,7 @@ export async function registerExchangeRoutes(app: FastifyInstance, context: ApiC
     const authorOwnsListing = actor.userId === result.rows[0]!.author_id;
     const offerRows = await context.pool.query<OfferRow>(
       `${offerSelect} WHERE o.listing_id=$1 ${authorOwnsListing ? "" : "AND o.proposer_id=$2"}
-       AND iu.source_type='GACHA'
-       AND EXISTS (
-         SELECT 1 FROM draw_results draw_result
-         WHERE draw_result.prize_inventory_unit_id=iu.id
-           AND draw_result.user_id=o.proposer_id
-       )
+       AND ${offerBundleIsVisible}
        ORDER BY o.created_at DESC,o.id DESC`,
       authorOwnsListing ? [listingId] : [listingId, actor.userId],
     );
@@ -622,34 +857,42 @@ export async function registerExchangeRoutes(app: FastifyInstance, context: ApiC
       const body = objectInput(request.body);
       const title = stringInput(body, "title", { max: 160 })!;
       const details = stringInput(body, "details", { max: 5000 })!;
-      const inventoryId = uuidInput(body.offeredInventoryUnitId, "offeredInventoryUnitId");
+      const inventoryIds = exchangeInventoryBundleInput(body);
       const result = await runIdempotentMutation(
         context,
         request,
         {
           scope: "exchange.listing.create",
-          hashInput: { title, details, inventoryId },
+          hashInput: { title, details, inventoryIds },
           resourceType: "EXCHANGE_LISTING",
         },
         async (client) => {
-          const locked = await lockInventoryUnits(client, [inventoryId]);
-          requireExchangeEligibleInventory(locked, inventoryId, request.actor!.userId);
+          const locked = await lockInventoryUnits(client, inventoryIds);
+          requireExchangeEligibleBundle(locked, inventoryIds, request.actor!.userId);
           const created = await client.query<{ id: string }>(
             `INSERT INTO exchange_listings(author_id,offered_inventory_unit_id,title,details)
              VALUES($1,$2,$3,$4) RETURNING id`,
-            [request.actor!.userId, inventoryId, title, details],
+            [request.actor!.userId, inventoryIds[0], title, details],
           );
-          const reserved = await client.query(
-            "UPDATE inventory_units SET status='EXCHANGE_LISTED' WHERE id=$1 AND status='OWNED' RETURNING id",
-            [inventoryId],
-          );
-          if (!reserved.rowCount) throw conflict("이미 다른 처리에 사용 중인 상품입니다.");
           const listingId = created.rows[0]!.id;
+          if (inventoryIds.length === 2) {
+            await client.query(
+              `INSERT INTO exchange_listing_items(listing_id,inventory_unit_id,position)
+               VALUES($1,$2,1)`,
+              [listingId, inventoryIds[1]],
+            );
+          }
+          await reserveInventoryUnits(client, inventoryIds, request.actor!.userId, "EXCHANGE_LISTED");
           await writeOutbox(client, request.id, {
             aggregateType: "EXCHANGE_LISTING",
             aggregateId: listingId,
             eventType: "exchange.listing.created",
-            payload: { listingId, authorId: request.actor!.userId },
+            payload: {
+              listingId,
+              authorId: request.actor!.userId,
+              inventoryUnitIds: inventoryIds,
+              itemCount: inventoryIds.length,
+            },
           });
           return { statusCode: 201, body: await fetchListing(client, listingId), resourceId: listingId };
         },
@@ -664,13 +907,13 @@ export async function registerExchangeRoutes(app: FastifyInstance, context: ApiC
     async (request, reply) => {
       const listingId = uuidInput((request.params as Record<string, unknown>).listingId, "listingId");
       const body = objectInput(request.body);
-      const inventoryId = uuidInput(body.offeredInventoryUnitId, "offeredInventoryUnitId");
+      const inventoryIds = exchangeInventoryBundleInput(body);
       const result = await runIdempotentMutation(
         context,
         request,
         {
           scope: "exchange.offer.create",
-          hashInput: { listingId, inventoryId },
+          hashInput: { listingId, inventoryIds },
           resourceType: "EXCHANGE_OFFER",
         },
         async (client) => {
@@ -685,41 +928,52 @@ export async function registerExchangeRoutes(app: FastifyInstance, context: ApiC
             [listing.author_id, request.actor!.userId],
           );
           if (blocked.rowCount) throw forbidden();
-          if (inventoryId === listing.offered_inventory_unit_id) {
-            throw conflict("등록 상품과 동일한 상품은 제안할 수 없습니다.");
+          if (inventoryIds.some((inventoryId) => listing.offered_inventory_unit_ids.includes(inventoryId))) {
+            throw conflict("등록 상품과 동일한 보관 상품은 제안할 수 없습니다.");
           }
           const locked = await lockInventoryUnits(client, [
-            listing.offered_inventory_unit_id,
-            inventoryId,
+            ...listing.offered_inventory_unit_ids,
+            ...inventoryIds,
           ]);
-          requireInventoryState(
+          requireInventoryBundle(
             locked,
-            listing.offered_inventory_unit_id,
+            listing.offered_inventory_unit_ids,
             listing.author_id,
             "EXCHANGE_LISTED",
           );
-          requireOriginalGachaDrawInventory(
+          requireOriginalGachaDrawBundle(
             locked,
-            listing.offered_inventory_unit_id,
+            listing.offered_inventory_unit_ids,
             listing.author_id,
           );
-          requireExchangeEligibleInventory(locked, inventoryId, request.actor!.userId);
+          requireExchangeEligibleBundle(locked, inventoryIds, request.actor!.userId);
           const created = await client.query<{ id: string }>(
             `INSERT INTO exchange_offers(listing_id,proposer_id,offered_inventory_unit_id,message)
-             VALUES($1,$2,$3,'이 상품과 교환하실래요?') RETURNING id`,
-            [listingId, request.actor!.userId, inventoryId],
+             VALUES($1,$2,$3,'이 상품 묶음과 교환하실래요?')
+             ON CONFLICT DO NOTHING RETURNING id`,
+            [listingId, request.actor!.userId, inventoryIds[0]],
           );
-          const reserved = await client.query(
-            "UPDATE inventory_units SET status='EXCHANGE_OFFERED' WHERE id=$1 AND status='OWNED' RETURNING id",
-            [inventoryId],
-          );
-          if (!reserved.rowCount) throw conflict("이미 다른 처리에 사용 중인 상품입니다.");
+          if (!created.rowCount) throw conflict("이 교환 글에 이미 진행 중인 제안이 있습니다.");
           const offerId = created.rows[0]!.id;
+          if (inventoryIds.length === 2) {
+            await client.query(
+              `INSERT INTO exchange_offer_items(offer_id,inventory_unit_id,position)
+               VALUES($1,$2,1)`,
+              [offerId, inventoryIds[1]],
+            );
+          }
+          await reserveInventoryUnits(client, inventoryIds, request.actor!.userId, "EXCHANGE_OFFERED");
           await writeOutbox(client, request.id, {
             aggregateType: "EXCHANGE_LISTING",
             aggregateId: listingId,
             eventType: "exchange.offer.created",
-            payload: { listingId, offerId, authorId: listing.author_id },
+            payload: {
+              listingId,
+              offerId,
+              authorId: listing.author_id,
+              inventoryUnitIds: inventoryIds,
+              itemCount: inventoryIds.length,
+            },
           });
           return { statusCode: 201, body: await fetchOffer(client, offerId), resourceId: offerId };
         },
@@ -759,36 +1013,48 @@ export async function registerExchangeRoutes(app: FastifyInstance, context: ApiC
           }
 
           if (decision === "REJECTED") {
-            const locked = await lockInventoryUnits(client, [offer.offered_inventory_unit_id]);
-            requireInventoryState(locked, offer.offered_inventory_unit_id, offer.proposer_id, "EXCHANGE_OFFERED");
-            await client.query(
-              "UPDATE exchange_offers SET status='REJECTED',decided_at=now() WHERE id=$1 AND status='PENDING'",
+            const locked = await lockInventoryUnits(client, offer.offered_inventory_unit_ids);
+            requireInventoryBundle(
+              locked,
+              offer.offered_inventory_unit_ids,
+              offer.proposer_id,
+              "EXCHANGE_OFFERED",
+            );
+            const rejected = await client.query(
+              `UPDATE exchange_offers SET status='REJECTED',decided_at=now()
+               WHERE id=$1 AND status='PENDING' RETURNING id`,
               [offerId],
             );
-            await releaseInventoryUnits(client, [offer.offered_inventory_unit_id], "EXCHANGE_OFFERED");
+            if (!rejected.rowCount) throw conflict("이미 처리된 제안입니다.");
+            await releaseInventoryUnits(client, offer.offered_inventory_unit_ids, "EXCHANGE_OFFERED");
           } else {
             const pendingOffers = offers.filter((candidate) => candidate.status === "PENDING");
             const locked = await lockInventoryUnits(client, [
-              listing.offered_inventory_unit_id,
-              ...pendingOffers.map((candidate) => candidate.offered_inventory_unit_id),
+              ...listing.offered_inventory_unit_ids,
+              ...pendingOffers.flatMap((candidate) => candidate.offered_inventory_unit_ids),
             ]);
-            requireInventoryState(locked, listing.offered_inventory_unit_id, listing.author_id, "EXCHANGE_LISTED");
+            requireInventoryBundle(
+              locked,
+              listing.offered_inventory_unit_ids,
+              listing.author_id,
+              "EXCHANGE_LISTED",
+            );
             for (const pending of pendingOffers) {
-              requireInventoryState(
+              requireInventoryBundle(
                 locked,
-                pending.offered_inventory_unit_id,
+                pending.offered_inventory_unit_ids,
                 pending.proposer_id,
                 "EXCHANGE_OFFERED",
               );
             }
-            requireOriginalGachaDrawInventory(
+            requireOriginalGachaDrawBundle(
               locked,
-              listing.offered_inventory_unit_id,
+              listing.offered_inventory_unit_ids,
               listing.author_id,
             );
-            requireOriginalGachaDrawInventory(
+            requireOriginalGachaDrawBundle(
               locked,
-              offer.offered_inventory_unit_id,
+              offer.offered_inventory_unit_ids,
               offer.proposer_id,
             );
             const accepted = await client.query(
@@ -808,7 +1074,7 @@ export async function registerExchangeRoutes(app: FastifyInstance, context: ApiC
               }
               await releaseInventoryUnits(
                 client,
-                rejected.map((candidate) => candidate.offered_inventory_unit_id),
+                rejected.flatMap((candidate) => candidate.offered_inventory_unit_ids),
                 "EXCHANGE_OFFERED",
               );
             }
@@ -857,12 +1123,22 @@ export async function registerExchangeRoutes(app: FastifyInstance, context: ApiC
           const offers = await lockOffers(client, listingId);
           const pending = offers.filter((offer) => offer.status === "PENDING");
           const locked = await lockInventoryUnits(client, [
-            listing.offered_inventory_unit_id,
-            ...pending.map((offer) => offer.offered_inventory_unit_id),
+            ...listing.offered_inventory_unit_ids,
+            ...pending.flatMap((offer) => offer.offered_inventory_unit_ids),
           ]);
-          requireInventoryState(locked, listing.offered_inventory_unit_id, listing.author_id, "EXCHANGE_LISTED");
+          requireInventoryBundle(
+            locked,
+            listing.offered_inventory_unit_ids,
+            listing.author_id,
+            "EXCHANGE_LISTED",
+          );
           for (const offer of pending) {
-            requireInventoryState(locked, offer.offered_inventory_unit_id, offer.proposer_id, "EXCHANGE_OFFERED");
+            requireInventoryBundle(
+              locked,
+              offer.offered_inventory_unit_ids,
+              offer.proposer_id,
+              "EXCHANGE_OFFERED",
+            );
           }
           if (pending.length) {
             const rejectedResult = await client.query(
@@ -875,11 +1151,11 @@ export async function registerExchangeRoutes(app: FastifyInstance, context: ApiC
             }
             await releaseInventoryUnits(
               client,
-              pending.map((offer) => offer.offered_inventory_unit_id),
+              pending.flatMap((offer) => offer.offered_inventory_unit_ids),
               "EXCHANGE_OFFERED",
             );
           }
-          await releaseInventoryUnits(client, [listing.offered_inventory_unit_id], "EXCHANGE_LISTED");
+          await releaseInventoryUnits(client, listing.offered_inventory_unit_ids, "EXCHANGE_LISTED");
           const cancelled = await client.query(
             `UPDATE exchange_listings
              SET status='CANCELLED',cancelled_at=now(),cancelled_by=$2,cancel_reason='AUTHOR_CANCELLED'
@@ -929,15 +1205,20 @@ export async function registerExchangeRoutes(app: FastifyInstance, context: ApiC
             throw forbidden("제안자만 교환 제안을 철회할 수 있습니다.");
           }
           if (offer.status !== "PENDING") throw conflict("이미 처리된 제안입니다.");
-          const locked = await lockInventoryUnits(client, [offer.offered_inventory_unit_id]);
-          requireInventoryState(locked, offer.offered_inventory_unit_id, offer.proposer_id, "EXCHANGE_OFFERED");
+          const locked = await lockInventoryUnits(client, offer.offered_inventory_unit_ids);
+          requireInventoryBundle(
+            locked,
+            offer.offered_inventory_unit_ids,
+            offer.proposer_id,
+            "EXCHANGE_OFFERED",
+          );
           const withdrawn = await client.query(
             `UPDATE exchange_offers SET status='WITHDRAWN',decided_at=now()
              WHERE id=$1 AND status='PENDING' RETURNING id`,
             [offerId],
           );
           if (!withdrawn.rowCount) throw conflict("이미 처리된 제안입니다.");
-          await releaseInventoryUnits(client, [offer.offered_inventory_unit_id], "EXCHANGE_OFFERED");
+          await releaseInventoryUnits(client, offer.offered_inventory_unit_ids, "EXCHANGE_OFFERED");
           await writeOutbox(client, request.id, {
             aggregateType: "EXCHANGE_LISTING",
             aggregateId: listingId,
@@ -988,13 +1269,18 @@ export async function registerExchangeRoutes(app: FastifyInstance, context: ApiC
           }
 
           const locked = await lockInventoryUnits(client, [
-            listing.offered_inventory_unit_id,
-            acceptedOffer.offered_inventory_unit_id,
+            ...listing.offered_inventory_unit_ids,
+            ...acceptedOffer.offered_inventory_unit_ids,
           ]);
-          requireInventoryState(locked, listing.offered_inventory_unit_id, listing.author_id, "EXCHANGE_LISTED");
-          requireInventoryState(
+          requireInventoryBundle(
             locked,
-            acceptedOffer.offered_inventory_unit_id,
+            listing.offered_inventory_unit_ids,
+            listing.author_id,
+            "EXCHANGE_LISTED",
+          );
+          requireInventoryBundle(
+            locked,
+            acceptedOffer.offered_inventory_unit_ids,
             acceptedOffer.proposer_id,
             "EXCHANGE_OFFERED",
           );
@@ -1004,7 +1290,10 @@ export async function registerExchangeRoutes(app: FastifyInstance, context: ApiC
                author_confirmed_at=CASE WHEN $2 THEN COALESCE(author_confirmed_at,now()) ELSE author_confirmed_at END,
                proposer_confirmed_at=CASE WHEN $3 THEN COALESCE(proposer_confirmed_at,now()) ELSE proposer_confirmed_at END
              WHERE id=$1 AND status='MATCHED'
-             RETURNING id,author_id,offered_inventory_unit_id,status,accepted_offer_id,matched_at,
+             RETURNING id,author_id,offered_inventory_unit_id,
+               ARRAY(SELECT item.inventory_unit_id FROM exchange_listing_items item
+                 WHERE item.listing_id=exchange_listings.id ORDER BY item.position) AS offered_inventory_unit_ids,
+               status,accepted_offer_id,matched_at,
                author_confirmed_at,proposer_confirmed_at,completed_at,completion_mode,cancelled_at,
                cancelled_by,cancel_reason,resolved_by_admin_id`,
             [listingId, isAuthor, isProposer],
@@ -1064,8 +1353,18 @@ export async function registerExchangeRoutes(app: FastifyInstance, context: ApiC
         values.push(`%${search}%`);
         filters.push(
           `(l.title ILIKE $${values.length} OR l.details ILIKE $${values.length}
-            OR u.nickname ILIKE $${values.length} OR p.name ILIKE $${values.length}
-            OR p.sku ILIKE $${values.length} OR l.id::text ILIKE $${values.length})`,
+            OR u.nickname ILIKE $${values.length} OR l.id::text ILIKE $${values.length}
+            OR EXISTS (
+              SELECT 1
+              FROM exchange_listing_items admin_search_item
+              JOIN inventory_units admin_search_inventory
+                ON admin_search_inventory.id=admin_search_item.inventory_unit_id
+              JOIN catalog_products admin_search_product
+                ON admin_search_product.id=admin_search_inventory.product_id
+              WHERE admin_search_item.listing_id=l.id
+                AND (admin_search_product.name ILIKE $${values.length}
+                  OR admin_search_product.sku ILIKE $${values.length})
+            ))`,
         );
       }
       if (status) {
@@ -1142,6 +1441,8 @@ export async function registerExchangeRoutes(app: FastifyInstance, context: ApiC
             metadata: {
               acceptedOfferId: acceptedOffer.id,
               proposerId: acceptedOffer.proposer_id,
+              listingInventoryUnitIds: listing.offered_inventory_unit_ids,
+              offerInventoryUnitIds: acceptedOffer.offered_inventory_unit_ids,
             },
           });
           await writeOutbox(client, request.id, {
@@ -1152,6 +1453,8 @@ export async function registerExchangeRoutes(app: FastifyInstance, context: ApiC
               listingId,
               authorId: listing.author_id,
               proposerId: acceptedOffer.proposer_id,
+              listingInventoryUnitIds: listing.offered_inventory_unit_ids,
+              offerInventoryUnitIds: acceptedOffer.offered_inventory_unit_ids,
               completionMode: action === "COMPLETE" ? "ADMIN_OVERRIDE" : null,
             },
           });

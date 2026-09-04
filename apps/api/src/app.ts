@@ -4,7 +4,7 @@ import helmet from "@fastify/helmet";
 import rateLimit from "@fastify/rate-limit";
 import Fastify from "fastify";
 import { Redis } from "ioredis";
-import type { ApiConfig } from "@dabboba/config";
+import type { ApiConfig, ApiSurface } from "@dabboba/config";
 import { createDatabasePool, type DatabasePool } from "@dabboba/db";
 import { registerErrorHandler } from "./lib/errors.js";
 import { registerAuthRoutes } from "./modules/auth.js";
@@ -36,10 +36,57 @@ export type BuildAppOptions = {
   redis?: Redis | null;
 };
 
+const API_DATABASE_QUERY_TIMEOUT_MS = 12_000;
+const API_DATABASE_STATEMENT_TIMEOUT_MS = 10_000;
+const READINESS_DATABASE_TIMEOUT_MS = 1_000;
+
 function requestId(rawRequest: { headers: Record<string, string | string[] | undefined> }) {
   const provided = rawRequest.headers["x-request-id"];
   const value = Array.isArray(provided) ? provided[0] : provided;
   return value && /^[A-Za-z0-9._:-]{8,128}$/.test(value) ? value : randomUUID();
+}
+
+const ROUTE_METHODS = new Set(["all", "delete", "get", "head", "options", "patch", "post", "put", "route"]);
+
+function effectiveSurface(config: ApiConfig): ApiSurface {
+  return config.surface || (config.environment === "production" ? "customer" : "all");
+}
+
+function routeUrl(input: unknown): string | null {
+  if (typeof input === "string") return input;
+  if (input && typeof input === "object" && "url" in input && typeof input.url === "string") return input.url;
+  return null;
+}
+
+function isAdminRoute(url: string): boolean {
+  return url === "/v1/admin" || url.startsWith("/v1/admin/");
+}
+
+/**
+ * Route modules predate the public/admin deployment split and some contain both
+ * kinds of route. This registrar prevents out-of-surface routes from ever being
+ * added to Fastify while the handlers are incrementally separated by module.
+ */
+function surfaceRouteRegistrar(app: ReturnType<typeof Fastify>, surface: ApiSurface) {
+  if (surface === "all") return app;
+
+  return new Proxy(app, {
+    get(target, property) {
+      const value = Reflect.get(target, property, target) as unknown;
+      if (typeof property === "string" && ROUTE_METHODS.has(property) && typeof value === "function") {
+        return (...args: unknown[]) => {
+          const url = routeUrl(args[0]);
+          if (!url) {
+            throw new Error(`Unsupported ${String(property)} registration on the isolated ${surface} API surface`);
+          }
+          const allowed = surface === "admin" ? isAdminRoute(url) : !isAdminRoute(url);
+          if (allowed) Reflect.apply(value, target, args);
+          return target;
+        };
+      }
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
 }
 
 export async function buildApp(options: BuildAppOptions) {
@@ -50,6 +97,7 @@ export async function buildApp(options: BuildAppOptions) {
       redact: [
         "req.headers.authorization",
         "req.headers.cookie",
+        "req.headers['x-dabboba-signature']",
         "req.headers['x-dabboba-admin-client-signature']",
         "body.password",
         "body.token",
@@ -60,18 +108,47 @@ export async function buildApp(options: BuildAppOptions) {
     trustProxy: false,
   });
   const ownsPool = !options.pool;
-  const ownsRedis = options.redis === undefined;
-  const pool = options.pool || createDatabasePool(options.config.databaseUrl, "dabboba-api");
+  const pool = options.pool || createDatabasePool(
+    options.config.databaseUrl,
+    "dabboba-api",
+    {
+      max: options.config.databasePoolMax ?? 5,
+      queryTimeoutMs: API_DATABASE_QUERY_TIMEOUT_MS,
+      statementTimeoutMs: API_DATABASE_STATEMENT_TIMEOUT_MS,
+    },
+  );
+  // Health probes use their own one-connection pool. Its server-side statement
+  // timeout cancels the PostgreSQL work before Cloud Run's two-second probe
+  // deadline instead of merely abandoning a still-running query promise.
+  const readinessPool = options.pool || createDatabasePool(
+    options.config.databaseUrl,
+    "dabboba-api-readiness",
+    {
+      connectionTimeoutMs: READINESS_DATABASE_TIMEOUT_MS,
+      max: 1,
+      queryTimeoutMs: READINESS_DATABASE_TIMEOUT_MS,
+      statementTimeoutMs: READINESS_DATABASE_TIMEOUT_MS,
+    },
+  );
+  const ownsReadinessPool = !options.pool;
   const redis = options.redis === undefined
-    ? new Redis(options.config.redisUrl, { lazyConnect: true, maxRetriesPerRequest: 1, enableOfflineQueue: false })
+    ? options.config.redisUrl
+      ? new Redis(options.config.redisUrl, { lazyConnect: true, maxRetriesPerRequest: 1, enableOfflineQueue: false })
+      : null
     : options.redis;
-  const allowedOrigins = new Set([...options.config.webOrigins, ...options.config.adminOrigins]);
+  const ownsRedis = options.redis === undefined && redis !== null;
+  const surface = effectiveSurface(options.config);
+  const allowedOrigins = new Set([
+    ...(surface === "admin" ? [] : options.config.webOrigins),
+    ...(surface === "customer" ? [] : options.config.adminOrigins),
+  ]);
 
   if (ownsRedis && redis) {
     try {
       await redis.connect();
     } catch (error) {
       redis.disconnect();
+      if (ownsReadinessPool) await readinessPool.end();
       if (ownsPool) await pool.end();
       throw error;
     }
@@ -110,24 +187,26 @@ export async function buildApp(options: BuildAppOptions) {
     redis,
     auth: createAuthHooks(pool, options.config),
   };
+  const routeApp = surfaceRouteRegistrar(app, surface);
   registerErrorHandler(app);
-  await registerHealthRoutes(app, context);
-  await registerAuthRoutes(app, context);
-  await registerCustomerAuthRoutes(app, context);
-  await registerMediaRoutes(app, context);
-  await registerAccountRoutes(app, context);
-  await registerNotificationPreferenceRoutes(app, context);
-  await registerCatalogRoutes(app, context);
-  await registerCommunityRoutes(app, context);
-  await registerWantedRoutes(app, context);
-  await registerExchangeRoutes(app, context);
-  await registerCommerceRoutes(app, context);
-  await registerKujiRoomRoutes(app, context);
-  await registerAdminCommerceRoutes(app, context);
-  await registerAdminAccountDeletionRoutes(app, context);
-  await registerAdminRoutes(app, context);
+  await registerHealthRoutes(app, context, readinessPool);
+  await registerAuthRoutes(routeApp, context);
+  await registerCustomerAuthRoutes(routeApp, context);
+  await registerMediaRoutes(routeApp, context);
+  await registerAccountRoutes(routeApp, context);
+  await registerNotificationPreferenceRoutes(routeApp, context);
+  await registerCatalogRoutes(routeApp, context);
+  await registerCommunityRoutes(routeApp, context);
+  await registerWantedRoutes(routeApp, context);
+  await registerExchangeRoutes(routeApp, context);
+  await registerCommerceRoutes(routeApp, context);
+  await registerKujiRoomRoutes(routeApp, context);
+  await registerAdminCommerceRoutes(routeApp, context);
+  await registerAdminAccountDeletionRoutes(routeApp, context);
+  await registerAdminRoutes(routeApp, context);
 
   app.addHook("onClose", async () => {
+    if (ownsReadinessPool) await readinessPool.end();
     if (ownsPool) await pool.end();
     if (ownsRedis && redis) redis.disconnect();
   });

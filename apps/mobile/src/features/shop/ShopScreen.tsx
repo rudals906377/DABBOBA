@@ -128,7 +128,7 @@ export function ShopScreen() {
   const openProduct = (product: CatalogProduct) => {
     router.push(`/product/${encodeURIComponent(product.id)}` as Href);
   };
-  const isComingSoon = selectedCategory === "figure" || selectedCategory === "tcg";
+  const isComingSoon = selectedCategory === "figure";
 
   return (
     <SafeAreaView style={styles.safeArea} edges={["top", "left", "right"]}>

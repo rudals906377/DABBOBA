@@ -2,6 +2,11 @@ import { randomUUID } from "expo-crypto";
 import { errorMessage } from "@dabboba/api-client";
 import type { CatalogProduct, ExchangeListing, ExchangeOffer, InventoryUnit } from "@dabboba/contracts";
 import { PRODUCT_CATEGORY_VALUES } from "@/features/catalog/product-categories";
+import {
+  areCustomerVisibleExchangeProducts,
+  isCustomerEligibleExchangeInventory,
+  isCustomerVisibleExchangeBundle,
+} from "@/features/exchange/exchange-visibility";
 import { createMobileDabbobaClient as createDabbobaClient } from "@/lib/mobile-api-client";
 
 export type ExchangeCategory = CatalogProduct["category"];
@@ -12,6 +17,7 @@ export type ExchangeCardItem = {
   title: string;
   details: string;
   product: CatalogProduct;
+  products: CatalogProduct[];
   authorNickname: string;
   offerCount: number;
 };
@@ -29,6 +35,7 @@ export type ExchangeProposalItem = {
   proposerId: string;
   proposerNickname: string;
   product: CatalogProduct;
+  products: CatalogProduct[];
   status: ExchangeOffer["status"];
 };
 
@@ -49,8 +56,8 @@ export type ExchangeDetailSnapshot = {
 };
 
 const EXAMPLE_PREFIX = "example__";
-const EXAMPLE_AUTHORS = ["모찌수집가", "럭키캡슐", "피규어정원", "카드한장"] as const;
-const EXAMPLE_PROPOSERS = ["애니콜렉터", "럭키덕후", "카드여행자", "쿠지마스터"] as const;
+const EXAMPLE_AUTHORS = ["모찌수집가", "럭키캡슐", "피규어정원", "굿즈한상자"] as const;
+const EXAMPLE_PROPOSERS = ["애니콜렉터", "럭키덕후", "굿즈여행자", "쿠지마스터"] as const;
 
 export async function fetchExchangeRoom(
   apiBaseUrl: string,
@@ -82,7 +89,7 @@ export async function fetchExchangeRoom(
     [ip.nameKo, ip.nameEn, ip.nameJa ?? "", ...ip.aliases].join(" "),
   ]));
   let items = listingResult.data.items
-    .filter((listing) => listing.offeredInventory.sourceType === "GACHA")
+    .filter((listing) => isCustomerVisibleExchangeBundle(exchangeListingInventories(listing)))
     .map(toCardItem);
 
   if (items.length === 0 && includePreview) {
@@ -151,8 +158,12 @@ export async function fetchExchangeDetail(
   }
 
   const listing = listingResult.data;
-  if (listing.offeredInventory.sourceType !== "GACHA") {
+  const listingInventories = exchangeListingInventories(listing);
+  if (!listingInventories.every((inventory) => inventory.sourceType === "GACHA")) {
     throw new Error("가챠로 뽑은 상품만 교환할 수 있어요.");
+  }
+  if (!areCustomerVisibleExchangeProducts(listingInventories.map((inventory) => inventory.product))) {
+    throw new Error("현재 참여할 수 없는 교환 상품입니다.");
   }
   const item = toCardItem(listing);
   return {
@@ -160,7 +171,7 @@ export async function fetchExchangeDetail(
     ipName: ipNames[item.product.ipId] ?? null,
     ipNames,
     proposals: (listing.offers ?? [])
-      .filter((offer) => offer.offeredInventory.sourceType === "GACHA")
+      .filter((offer) => isCustomerVisibleExchangeBundle(exchangeOfferInventories(offer)))
       .map(toProposalItem),
     viewerRole: meResult.data?.actor.userId === listing.authorId ? "AUTHOR" : "VISITOR",
     listingStatus: listing.status,
@@ -240,7 +251,7 @@ async function fetchExchangeInventory(
 }
 
 export function isDrawnExchangeInventory(item: InventoryUnit): boolean {
-  return item.status === "OWNED" && item.sourceType === "GACHA";
+  return isCustomerEligibleExchangeInventory(item);
 }
 
 export async function createExchangeListing(
@@ -249,7 +260,7 @@ export async function createExchangeListing(
   input: {
     title: string;
     details: string;
-    offeredInventoryUnitId: string;
+    offeredInventoryUnitIds: string[];
   },
 ): Promise<ExchangeListing> {
   const client = createDabbobaClient({
@@ -271,7 +282,7 @@ export async function createExchangeOffer(
   apiBaseUrl: string,
   accessToken: string,
   listingId: string,
-  offeredInventoryUnitId: string,
+  offeredInventoryUnitIds: string[],
 ): Promise<ExchangeOffer> {
   const client = createDabbobaClient({
     baseUrl: apiBaseUrl,
@@ -283,7 +294,7 @@ export async function createExchangeOffer(
       path: { listingId },
       header: { "Idempotency-Key": randomUUID() },
     },
-    body: { offeredInventoryUnitId },
+    body: { offeredInventoryUnitIds },
   });
   if (!result.data) {
     throw new Error(errorMessage(result.error, "교환 신청을 보내지 못했습니다."));
@@ -292,26 +303,38 @@ export async function createExchangeOffer(
 }
 
 function toCardItem(listing: ExchangeListing): ExchangeCardItem {
+  const products = exchangeListingInventories(listing).map((inventory) => inventory.product);
   return {
     id: listing.id,
     isExample: false,
     title: listing.title,
     details: listing.details,
-    product: listing.offeredInventory.product,
+    product: products[0] ?? listing.offeredInventory.product,
+    products,
     authorNickname: listing.authorNickname,
     offerCount: listing.offerCount,
   };
 }
 
 function toProposalItem(offer: ExchangeOffer): ExchangeProposalItem {
+  const products = exchangeOfferInventories(offer).map((inventory) => inventory.product);
   return {
     id: offer.id,
     isExample: false,
     proposerId: offer.proposerId,
     proposerNickname: offer.proposerNickname,
-    product: offer.offeredInventory.product,
+    product: products[0] ?? offer.offeredInventory.product,
+    products,
     status: offer.status,
   };
+}
+
+function exchangeListingInventories(listing: ExchangeListing): InventoryUnit[] {
+  return listing.offeredInventories?.length ? listing.offeredInventories : [listing.offeredInventory];
+}
+
+function exchangeOfferInventories(offer: ExchangeOffer): InventoryUnit[] {
+  return offer.offeredInventories?.length ? offer.offeredInventories : [offer.offeredInventory];
 }
 
 function createExampleItems(
@@ -320,9 +343,11 @@ function createExampleItems(
   search?: string,
   ipNames: Record<string, string> = {},
 ): ExchangeCardItem[] {
-  const categories: ExchangeCategory[] = selectedCategory
-    ? [selectedCategory]
-    : [...PRODUCT_CATEGORY_VALUES];
+  const categories: ExchangeCategory[] = selectedCategory === "tcg"
+    ? []
+    : selectedCategory
+      ? [selectedCategory]
+      : [...PRODUCT_CATEGORY_VALUES];
 
   return categories.flatMap((category, categoryIndex) => {
     const categoryItems = products
@@ -333,6 +358,7 @@ function createExampleItems(
         title: exampleTitle(category, index),
         details: "",
         product,
+        products: [product],
         authorNickname: EXAMPLE_AUTHORS[(categoryIndex + index) % EXAMPLE_AUTHORS.length] ?? "다뽑아회원",
         offerCount: 4,
       }));
@@ -350,10 +376,12 @@ export function filterExchangeItems(
   return items.filter((item) => normalizeExchangeSearch([
     item.title,
     item.details,
-    item.product.name,
-    item.product.sku,
-    item.product.manufacturer ?? "",
-    ipNames[item.product.ipId] ?? "",
+    ...item.products.flatMap((product) => [
+      product.name,
+      product.sku,
+      product.manufacturer ?? "",
+      ipNames[product.ipId] ?? "",
+    ]),
   ].join(" ")).includes(search));
 }
 
@@ -379,6 +407,7 @@ function createExampleProposals(
       proposerId: `example-proposer-${index + 1}`,
       proposerNickname: EXAMPLE_PROPOSERS[index] ?? `수집가${index + 1}`,
       product,
+      products: [product],
       status: "PENDING",
     }));
 }

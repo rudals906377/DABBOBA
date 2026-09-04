@@ -26,7 +26,7 @@ Expo React Native 앱 ─────────┐
 | 고객 웹/legacy | 저장소 루트 `src/` | 기존 승인 화면을 보존하는 이전 참고 구현이자 향후 웹 확장 채널. 새 고객 기능의 단독 기준이 아님 |
 | 관리자 웹 | `apps/admin` | 별도 Next.js App Router 운영 화면. 브라우저가 DB에 직접 연결하지 않고 서버 측 DAL이 API만 호출 |
 | API | `apps/api` | 인증/RBAC, 계정·배송지·찜, 카탈로그, 커뮤니티, 문의, 교환, 주문·결제·재고·포인트·추첨, 관리자 명령의 권위 있는 경계 |
-| 비동기 작업 | `apps/worker` | outbox 전달, 예약 만료, 결제 재조정 대상 탐지, 알림, 미디어 정리. BullMQ에서 Supabase Queues로 전환 예정 |
+| 비동기 작업 | `apps/worker` | Supabase Queues(`pgmq`) outbox 전달, 예약 만료, 결제 재조정 대상 탐지, 알림, 미디어 정리를 한정된 Cloud Run Job 실행으로 처리 |
 | 계약 | `packages/contracts`, `packages/api-client` | OpenAPI 원본, 생성 TypeScript 타입, 공용 REST 클라이언트 |
 | 도메인 | `packages/domain` | 역할, 상태 전이, 카테고리별 구매/추첨 규칙 |
 | 데이터 | `packages/db` | Supabase PostgreSQL 연결 대상, 체크섬 SQL migration, 로컬 seed. Drizzle을 안정된 module부터 점진 도입 |
@@ -48,7 +48,7 @@ PostgreSQL만 다음 상태의 진실 공급원이다.
 
 상품 카테고리는 주문 스냅샷, 추첨권, 확률표와 보관 자산의 의미를 결정하므로 생성 후 변경하지 않는다. 다른 카테고리로 운영해야 하면 새 상품/SKU를 등록한다. 경품 전용 SKU 여부도 생성 후 변경하지 않는다. 경품 전용 SKU는 공개 판매 카탈로그·찜·직접 주문과 카탈로그 신청의 정규 대상에서는 제외하지만, 확률표·추첨 결과·보관함·배송·교환에서는 실제 상품 식별자로 유지한다.
 
-Redis/BullMQ는 현재 전환 전 adapter에만 남아 있다. 초기 production 목표는 Supabase Queues이며 Redis를 기본 필수 인프라로 추가하지 않는다. 어떤 queue를 사용하더라도 주문·결제·포인트·재고·추첨 결과는 PostgreSQL 원장이며, 미발행 outbox와 공급자 원장을 기준으로 재처리하거나 조정한다.
+운영 worker의 Redis/BullMQ 의존은 제거됐다. API의 `REDIS_URL`은 로컬 호환용 선택 설정일 뿐 Cloud Run 배포에는 주입하지 않으며, 인스턴스 내부 coarse rate-limit 앞단의 실제 client-IP abuse 방어는 별도 edge/WAF 출시 조건으로 남는다. 주문·결제·포인트·재고·추첨 결과는 계속 PostgreSQL 원장이며, 미발행 outbox와 공급자 원장을 기준으로 재처리하거나 조정한다.
 
 ### 주문과 결제
 
@@ -76,7 +76,7 @@ Redis/BullMQ는 현재 전환 전 adapter에만 남아 있다. 초기 production
 
 아래 GCS 절차는 이미 구현된 보안·멱등성·검증 규칙을 잃지 않기 위한 전환 전 기준이다. Supabase Storage adapter는 이 규칙과 동등한 실패/재시도/소유권 증거를 갖춘 뒤 교체한다.
 
-사용자 업로드는 비공개 GCS staging object에 2분짜리 V4 multipart POST policy를 사용한다. 정책은 object key, `Content-Type`, SHA-256·media ID 메타데이터, 선언한 정확한 파일 크기를 서명 조건으로 고정한다. GCS form POST policy는 create-only generation precondition을 제공하지 않으므로 만료 전 동일 key·동일 조건 업로드 재전송 자체는 막지 못한다. 따라서 API는 intent/complete별 `Idempotency-Key`와 요청 해시를 PostgreSQL에 영속 저장하고, 동일 key·동일 요청은 같은 결과를 재생하며 payload가 달라지면 충돌로 닫는다. 만료된 signed intent도 같은 key에는 원래 계약이 재생되므로 새 업로드 intent를 만들 때는 새 key를 사용한다. 고객 adapter는 로컬 만료 또는 서버의 complete `410 MEDIA_UPLOAD_INTENT_EXPIRED`를 받으면 해당 action key와 stage를 폐기해 intent/storage/complete를 같은 key로 다시 호출하지 않고, 게시물·문의 작성 화면만 새 key를 만든다. API는 intent/complete별 IP rate limit, 사용자별 활성 업로드 최대 10건·합계 30 MiB, 최근 24시간 최대 50건·200 MiB, 누적 READY 최대 500건·512 MiB의 durable transaction advisory quota, 사용자·API instance별 동시 decode 2건 상한을 함께 적용한다. 최종 WebP 크기는 READY 전환 transaction에서 다시 한도를 확인한다. 5분이 지난 미완료 intent는 `REJECTED`로 전환하고 staging object 삭제를 시도하며 이후 complete는 410으로 새 intent 생성을 요구한다. 완료 API는 staging generation·메타데이터·크기·SHA-256·magic byte·선언 MIME을 다시 확인하고, 16 MP/8192 px 입력 상한에서 실제 디코드한 뒤 EXIF orientation을 적용한다. 결과는 메타데이터를 보존하지 않은 최대 4096 px WebP로 재인코딩하며 원본을 복사하지 않는다. 원본 staging object 삭제가 성공한 뒤에만 최종 generation, 최종 checksum·byte size·width·height를 DB에 기록하고 `READY`로 공개한다. 인증 사용자는 콘텐츠에 연결되지 않은 자기 미디어만 idempotent하게 `DELETED`로 전환할 수 있다. 존재하지 않거나 다른 사용자의 미디어는 동일한 404로 숨기고, 게시물·문의·카탈로그 요청 등에 연결된 미디어는 409로 거부한다. API는 객체 삭제를 즉시 시도하고 outbox를 남긴다. worker는 1분마다 만료/중단/실패/삭제 record를 찾아 staging과 추적된 미완성 final object를 재삭제하고, READY 전환 후에도 정책 재전송 창이 닫힌 시점에 staging key를 한 번 더 삭제한다. 공개 URL은 공개 상태 게시물에 연결된 READY 미디어에만 발급한다. 배포 시 staging lifecycle, Cloud Billing budget/request alerts, WAF rate control과 계정 생성 abuse 방어를 반드시 추가한다. 실제 버킷 CORS/IAM 검증, 유해 콘텐츠 검사와 CDN 연결은 공급자·정책 확정 후 남아 있다.
+사용자 업로드는 비공개 GCS staging object에 2분짜리 V4 multipart POST policy를 사용한다. 정책은 object key, `Content-Type`, SHA-256·media ID 메타데이터, 선언한 정확한 파일 크기를 서명 조건으로 고정한다. GCS form POST policy는 create-only generation precondition을 제공하지 않으므로 만료 전 동일 key·동일 조건 업로드 재전송 자체는 막지 못한다. 따라서 API는 intent/complete별 `Idempotency-Key`와 요청 해시를 PostgreSQL에 영속 저장하고, 동일 key·동일 요청은 같은 결과를 재생하며 payload가 달라지면 충돌로 닫는다. 만료된 signed intent도 같은 key에는 원래 계약이 재생되므로 새 업로드 intent를 만들 때는 새 key를 사용한다. 고객 adapter는 로컬 만료 또는 서버의 complete `410 MEDIA_UPLOAD_INTENT_EXPIRED`를 받으면 해당 action key와 stage를 폐기해 intent/storage/complete를 같은 key로 다시 호출하지 않고, 게시물·문의 작성 화면만 새 key를 만든다. API는 intent/complete별 IP rate limit, 사용자별 활성 업로드 최대 10건·합계 30 MiB, 최근 24시간 최대 50건·200 MiB, 누적 READY 최대 500건·512 MiB의 durable transaction advisory quota, 사용자·API instance별 동시 decode 2건 상한을 함께 적용한다. 최종 WebP 크기는 READY 전환 transaction에서 다시 한도를 확인한다. 5분이 지난 미완료 intent는 `REJECTED`로 전환하고 staging object 삭제를 시도하며 이후 complete는 410으로 새 intent 생성을 요구한다. 완료 API는 staging generation·메타데이터·크기·SHA-256·magic byte·선언 MIME을 다시 확인하고, 16 MP/8192 px 입력 상한에서 실제 디코드한 뒤 EXIF orientation을 적용한다. 결과는 메타데이터를 보존하지 않은 최대 4096 px WebP로 재인코딩하며 원본을 복사하지 않는다. 원본 staging object 삭제가 성공한 뒤에만 최종 generation, 최종 checksum·byte size·width·height를 DB에 기록하고 `READY`로 공개한다. 인증 사용자는 콘텐츠에 연결되지 않은 자기 미디어만 idempotent하게 `DELETED`로 전환할 수 있다. 존재하지 않거나 다른 사용자의 미디어는 동일한 404로 숨기고, 게시물·문의·카탈로그 요청 등에 연결된 미디어는 409로 거부한다. API는 객체 삭제를 즉시 시도하고 outbox를 남긴다. Cloud Scheduler가 유한 worker Job을 호출할 때마다 만료/중단/실패/삭제 record를 찾아 staging과 추적된 미완성 final object를 재삭제하고, READY 전환 후에도 정책 재전송 창이 닫힌 시점에 staging key를 한 번 더 삭제한다. 무료 구간 우선 기본 15분 일정에서는 정리가 최대 한 주기 지연될 수 있다. 공개 URL은 공개 상태 게시물에 연결된 READY 미디어에만 발급한다. 배포 시 staging lifecycle, Cloud Billing budget/request alerts, WAF rate control과 계정 생성 abuse 방어를 반드시 추가한다. 실제 버킷 CORS/IAM 검증, 유해 콘텐츠 검사와 CDN 연결은 공급자·정책 확정 후 남아 있다.
 
 ### 배송과 알림 수신 설정
 
@@ -123,13 +123,13 @@ Redis/BullMQ는 현재 전환 전 adapter에만 남아 있다. 초기 production
 
 ## 비동기 작업과 장애 복구
 
-API는 업무 상태와 outbox event를 같은 PostgreSQL 트랜잭션에 기록한다. worker는 `FOR UPDATE SKIP LOCKED`로 event를 가져와 안정적인 BullMQ job ID로 게시한다. `published_at`은 Redis가 작업을 받은 시점이지 외부 부수 효과가 끝난 시점이 아니다.
+API는 업무 상태와 outbox event를 같은 PostgreSQL 트랜잭션에 기록한다. 유한 worker는 `FOR UPDATE SKIP LOCKED`로 event를 가져와 같은 DB client/transaction에서 logged pgmq queue에 넣고 `published_at`을 기록한다. consumer는 양수 visibility timeout으로 읽고 성공 시 삭제하며, 실패는 지수 backoff 뒤 재노출하고 상한을 넘으면 `worker_dead_letters`에 원자적으로 격리한다. `published_at`은 queue가 작업을 받은 시점이지 외부 부수 효과가 끝난 시점이 아니다.
 
 현재 worker가 수행하는 작업은 다음과 같다. 작업 handler는 보존하고 전달 adapter만 transactional outbox → Supabase Queues 소비 구조로 바꾼다.
 
 - 미결제 재고 예약 만료와 포인트·쿠폰 보상
 - 오래된 결제의 조정 대상 탐지. 현재 provider adapter는 상태를 임의 변경하지 않고 수동 검토로 남김
-- idempotent 인앱 알림 생성과 사용자 수신 설정을 존중하는 선택적 HTTPS 알림 전달
+- idempotent 인앱 알림 생성. 개발/테스트용 HTTPS adapter는 사용자 수신 설정을 존중하지만, 운영은 receiver가 동일 key·동일 payload 재전송을 영속적으로 중복 제거하고 감사 가능한 전달 receipt를 제공하기 전까지 설정 단계에서 차단
 - 오래된 pending/rejected/deleted 미디어와 READY 전환 후 남은 staging 객체 정리. 연결된 READY 최종 객체는 자동 삭제 대상이 아님
 - API/DB 결과에서 생긴 outbox event 처리
 
@@ -141,6 +141,7 @@ API는 업무 상태와 outbox event를 같은 PostgreSQL 트랜잭션에 기록
 
 - 고객/관리자/API는 서로 다른 HTTPS hostname을 사용하고 CORS는 정확한 origin allowlist만 허용한다.
 - 관리자 앱과 worker는 DB public access를 요구하지 않는 private network에 둔다.
+- API는 `dabboba_runtime`/`DATABASE_URL`, worker는 `dabboba_worker`/`WORKER_DATABASE_URL`, migration은 schema owner/`DATABASE_MIGRATION_URL`을 사용한다. worker만 pgmq와 dead-letter insert 권한을 가지며 세 credential은 별도 secret으로 관리한다.
 - API의 일반 `trustProxy`는 꺼져 있다. 배포 경계를 확정하지 않은 채 forwarding header를 신뢰하지 않는다. 운영에서는 정확한 신뢰 proxy CIDR/hop과 edge header 제거·덮어쓰기를 구성하거나 edge/WAF가 실제 client IP별 일반 API rate-limit을 담당해야 하며, IP 분리·429·header spoofing 통합 증거가 없으면 출시하지 않는다. 관리자 로그인만 신뢰 edge가 덮어쓴 전용 client-IP header를 Next BFF가 HMAC 서명하고 API가 검증하며, 이후 감사 로그는 그 로그인 세션 identity를 사용한다. 운영 배포에서 edge overwrite와 BFF/API secret 일치 여부를 반드시 확인한다.
 - GCS는 public bucket으로 열지 않고 짧은 업로드 권한과 CDN 변형만 노출한다.
 - 결제 webhook은 현재 설정된 외부 공급자와 경로가 정확히 일치한 뒤 공급자 서명 검증과 이벤트 ID 중복 제거를 모두 통과해야 한다. 서버 전용 `INTERNAL_ZERO` 결제와 `UNCONFIGURED` 환경은 webhook을 받지 않는다.
@@ -161,7 +162,7 @@ API는 업무 상태와 outbox event를 같은 PostgreSQL 트랜잭션에 기록
 | 일반 API 실제 IP rate-limit | `trustProxy: false` fail-closed, ingress 전략 미확정 | 신뢰 proxy 또는 edge/WAF 설정과 spoofing·IP 분리 통합 증거 전 출시 불가 |
 | 미디어 | durable intent/complete idempotency·만료 410·미연결 소유 미디어 삭제·exact-size V4 POST policy·사용자 쿼터·generation/checksum/MIME 검증·decode 제한·orientation/EXIF 제거·WebP 재인코딩·worker 정리 경계 구현 | 실제 GCS CORS/IAM/삭제, 유해 콘텐츠 검사·CDN과 권리 자산 검증 필요 |
 | 배송 이력·추첨권 복원 | 소유권 기반 배송 목록/상세·송장, 취소 재신청 복구·배송 완료 중복 방지, `AVAILABLE` 추첨권 조회, 고객 이력/상품별 이어 뽑기 UI와 로컬 회귀 구현 | 실제 물류·PostgreSQL/PG 새로고침 및 실기기 검증 필요 |
-| 알림 | 인앱 + 선택적 HTTP 전달, 영속 수신 설정·append-only 동의 이력·외부 선택 전달 차단, remote 조회/버전 저장/409 재동기화 구현 | APNs/FCM 또는 공급자 계약과 실기기 검증 필요 |
+| 알림 | 인앱, 영속 수신 설정·append-only 동의 이력·외부 선택 전달 차단, remote 조회/버전 저장/409 재동기화 구현. 개발/테스트 HTTP adapter만 허용하고 운영 설정은 fail-closed | 동일 key·동일 payload 중복 제거와 감사 가능한 receipt를 보장하는 APNs/FCM 또는 공급자 계약, 실기기 검증 필요 |
 | 고객 웹 API 전환 | 점진적 전환 중 | fixture/local 상태가 남은 화면은 운영 데이터로 간주 불가 |
 | Expo 고객 앱 | Router·네이티브 탭·API 홈 카탈로그·SQLite cache·SecureStore token 경계 구현, 나머지 화면은 이전 중 | iOS/Android bundle, development build와 실제 iPhone/Android 전체 흐름 검증 필요 |
 | Supabase 전환 | 목표와 단계·보안 경계 문서화 | project/Auth/Storage/Queues 설정, Drizzle module 전환, 실제 provider 통합 검증 필요 |

@@ -198,6 +198,7 @@ test("every profile utility item opens a dedicated footer-free screen", () => {
     ["createWishlistScreen", "profile-wishlist", "내 찜 목록", "WishlistPage"],
     ["createStorageScreen", "profile-storage", "보관함", "StoragePage"],
     ["createShippingRequestScreen", "profile-shipping-request", "배송 신청", "ShippingRequestPage"],
+    ["createShippingHistoryScreen", "profile-shipping-history", "배송 신청 내역", "ShippingHistoryPage"],
     ["createPurchaseHistoryScreen", "profile-purchase-history", "구매 내역", "PurchaseHistoryPage"],
     ["createPointHistoryScreen", "profile-point-history", "포인트 내역", "PointHistoryPage"],
   ];
@@ -238,6 +239,21 @@ test("every profile utility item opens a dedicated footer-free screen", () => {
   ]) {
     assert.match(prototypeStyles, new RegExp(className.replace(".", "\\.")));
   }
+});
+
+test("shipping history is a dedicated profile menu destination instead of part of the shipping task", () => {
+  const shippingPage = functionBlock(prototypeSource, "ShippingRequestPage");
+  const shippingHistoryPage = functionBlock(prototypeSource, "ShippingHistoryPage");
+
+  assert.match(
+    prototypeSource,
+    /\{ label: "배송 신청 내역", createScreen: createShippingHistoryScreen \}/,
+  );
+  assert.doesNotMatch(shippingPage, /최근 배송 신청|accountShippingRequests|loadShippingRequestDetail/);
+  assert.match(shippingHistoryPage, /accountShippingRequests\.map/);
+  assert.match(shippingHistoryPage, /loadShippingRequests\(\)/);
+  assert.match(shippingHistoryPage, /loadShippingRequestDetail\(shippingRequest\.id, controller\.signal\)/);
+  assert.match(shippingHistoryPage, /최근 배송 신청 내역이 없습니다/);
 });
 
 test("checkout confirms payment before an explicit draw or catalog action", () => {

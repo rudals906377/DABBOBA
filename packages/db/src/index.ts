@@ -1,4 +1,6 @@
 import pg from "pg";
+import { SUPABASE_ROOT_2021_CA } from "./supabase-root-ca.js";
+import { RUNTIME_DATABASE_ROLE, WORKER_DATABASE_ROLE } from "./runtime-role.js";
 
 export {
   KUJI_CHECKOUT_LEASE_SECONDS,
@@ -17,6 +19,10 @@ export {
   type KujiRoomEntryState,
   type LockedKujiOrderRoom,
 } from "./kuji-room.js";
+export {
+  RUNTIME_DATABASE_ROLE,
+  WORKER_DATABASE_ROLE,
+} from "./runtime-role.js";
 
 const { Pool } = pg;
 
@@ -24,20 +30,154 @@ export type DatabasePool = pg.Pool;
 export type DatabaseClient = pg.PoolClient;
 export type Queryable = Pick<pg.Pool, "query"> | Pick<pg.PoolClient, "query">;
 
-export function createDatabasePool(databaseUrl: string, applicationName = "dabboba") {
+export type DatabaseConnectionConfig = Pick<pg.PoolConfig, "connectionString" | "ssl">;
+
+export function databaseConnectionConfig(databaseUrl: string): DatabaseConnectionConfig {
+  try {
+    const parsed = new URL(databaseUrl);
+    const hostname = parsed.hostname.toLocaleLowerCase("en-US").replace(/\.$/, "");
+    if (hostname.endsWith(".supabase.com") || hostname.endsWith(".supabase.co")) {
+      // node-postgres lets URL query parameters override the explicit TLS object.
+      // Supabase URLs are canonicalized so sslmode=disable or a query-level host
+      // override cannot silently bypass certificate and hostname verification.
+      parsed.hostname = hostname;
+      parsed.search = "";
+      parsed.hash = "";
+      return {
+        connectionString: parsed.toString(),
+        ssl: {
+          ca: SUPABASE_ROOT_2021_CA,
+          rejectUnauthorized: true,
+        },
+      };
+    }
+  } catch {
+    // Pool construction owns the final invalid-URL error.
+  }
+  return { connectionString: databaseUrl };
+}
+
+export function databaseSslConfig(databaseUrl: string): pg.PoolConfig["ssl"] | undefined {
+  return databaseConnectionConfig(databaseUrl).ssl;
+}
+
+export function createDatabasePool(
+  databaseUrl: string,
+  applicationName = "dabboba",
+  options: {
+    expectedRole?: typeof RUNTIME_DATABASE_ROLE | typeof WORKER_DATABASE_ROLE;
+    connectionTimeoutMs?: number;
+    max?: number;
+    queryTimeoutMs?: number;
+    statementTimeoutMs?: number;
+  } = {},
+) {
+  assertProductionRuntimeDatabaseRole(
+    databaseUrl,
+    process.env.NODE_ENV,
+    options.expectedRole ?? RUNTIME_DATABASE_ROLE,
+  );
   assertDisposableIntegrationDatabaseTarget(
     databaseUrl,
     process.env.DATABASE_URL,
     applicationName,
   );
+  for (const [name, value] of [
+    ["connectionTimeoutMs", options.connectionTimeoutMs],
+    ["queryTimeoutMs", options.queryTimeoutMs],
+    ["statementTimeoutMs", options.statementTimeoutMs],
+  ] as const) {
+    if (value !== undefined && (!Number.isInteger(value) || value < 1 || value > 60_000)) {
+      throw new Error(`${name} must be an integer between 1 and 60000 milliseconds`);
+    }
+  }
+  const connection = databaseConnectionConfig(databaseUrl);
   return new Pool({
-    connectionString: databaseUrl,
+    ...connection,
     application_name: applicationName,
-    max: 15,
+    max: options.max ?? 15,
+    idleTimeoutMillis: 30_000,
+    connectionTimeoutMillis: options.connectionTimeoutMs ?? 5_000,
+    query_timeout: options.queryTimeoutMs,
+    statement_timeout: options.statementTimeoutMs,
+    allowExitOnIdle: false,
+  });
+}
+
+export function createMigrationDatabasePool(databaseUrl: string, applicationName = "dabboba-migrate") {
+  assertProductionMigrationDatabaseTarget(databaseUrl, process.env.NODE_ENV);
+  const connection = databaseConnectionConfig(databaseUrl);
+  return new Pool({
+    ...connection,
+    application_name: applicationName,
+    max: 2,
     idleTimeoutMillis: 30_000,
     connectionTimeoutMillis: 5_000,
     allowExitOnIdle: false,
   });
+}
+
+function productionSupabaseDatabaseUrl(
+  databaseUrl: string,
+  runtimeEnvironment: string | undefined,
+): URL | null {
+  if (runtimeEnvironment !== "production") return null;
+
+  let parsed: URL;
+  try {
+    parsed = new URL(databaseUrl);
+  } catch {
+    throw new Error("Production database URL must be a valid PostgreSQL URL");
+  }
+  if (parsed.protocol !== "postgres:" && parsed.protocol !== "postgresql:") {
+    throw new Error("Production database URL must use postgres:// or postgresql://");
+  }
+
+  const hostname = parsed.hostname.toLowerCase().replace(/\.$/, "");
+  if (!hostname.endsWith(".supabase.com") && !hostname.endsWith(".supabase.co")) {
+    throw new Error("Production database URLs must use an approved Supabase hostname");
+  }
+  return parsed;
+}
+
+export function assertProductionMigrationDatabaseTarget(
+  databaseUrl: string,
+  runtimeEnvironment: string | undefined,
+): void {
+  productionSupabaseDatabaseUrl(databaseUrl, runtimeEnvironment);
+}
+
+export function assertProductionRuntimeDatabaseRole(
+  databaseUrl: string,
+  runtimeEnvironment: string | undefined,
+  expectedRole: typeof RUNTIME_DATABASE_ROLE | typeof WORKER_DATABASE_ROLE = RUNTIME_DATABASE_ROLE,
+): void {
+  const parsed = productionSupabaseDatabaseUrl(databaseUrl, runtimeEnvironment);
+  if (!parsed) return;
+
+  const hostname = parsed.hostname.toLowerCase().replace(/\.$/, "");
+
+  let username: string;
+  try {
+    username = decodeURIComponent(parsed.username);
+  } catch {
+    throw new Error("Production Supabase DATABASE_URL has an invalid database username");
+  }
+
+  const sessionPooler = hostname.endsWith(".pooler.supabase.com");
+  if (expectedRole === WORKER_DATABASE_ROLE && sessionPooler && parsed.port !== "5432") {
+    throw new Error(
+      "Production Supabase worker database URL must use Session mode on port 5432 because the worker holds a session advisory lock",
+    );
+  }
+  const valid = sessionPooler
+    ? new RegExp(`^${expectedRole}\\.[a-z0-9]{20}$`).test(username)
+    : username === expectedRole;
+  if (!valid) {
+    throw new Error(
+      `Production Supabase database URL must use the restricted ${expectedRole} database role`,
+    );
+  }
 }
 
 export function assertDisposableIntegrationDatabaseTarget(

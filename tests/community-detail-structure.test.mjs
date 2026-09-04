@@ -82,6 +82,7 @@ test("seeded exchange listings, applications, and product requests keep complete
       assert.ok(value.trim(), `${post.id} has an empty required field`);
     }
     assert.ok(post.appReferenceValue > 0);
+    assert.equal(post.sourceType, "GACHA", `${post.id} must come from a completed gacha draw`);
     assert.notEqual(post.authorId, CURRENT_USER_ID, `${post.id} must remain a neutral other-user fixture`);
     assert.ok(Number.isInteger(post.applications) && post.applications >= 0);
 
@@ -103,6 +104,7 @@ test("seeded exchange listings, applications, and product requests keep complete
         assert.ok(value.trim(), `${application.id} has an empty required field`);
       }
       assert.equal("message" in application, false, `${application.id} must stay product-only`);
+      assert.equal(application.sourceType, "GACHA", `${application.id} must come from a completed gacha draw`);
       assert.ok(application.appReferenceValue > 0);
     }
   }
@@ -135,7 +137,8 @@ test("exchange room keeps the compatible root id and pushes a footer-free exchan
   assert.match(exchangeRoomPage, /aria-label=\{`\$\{post\.title\} 교환 상세 보기`\}/);
   assert.match(exchangeRoomPage, /addExchangePost\(\{[\s\S]*?categoryId:[\s\S]*?ipId:[\s\S]*?title,[\s\S]*?offeredInventoryUnitId:[\s\S]*?offeredCatalogItemId:[\s\S]*?offeredItemImage:[\s\S]*?appReferenceValue:[\s\S]*?body,/);
   assert.match(exchangeRoomPage, /exchangeItemSuggestions\(draftTitle\)/);
-  assert.match(exchangeRoomPage, /eligibleSessionInventoryUnits\(sessionCommerce, currentUserId\)/);
+  assert.match(exchangeRoomPage, /eligibleDrawExchangeProposalUnits\(sessionCommerce, currentUserId\)/);
+  assert.match(exchangeRoomPage, /exchangePosts\.filter\(\(post\) => post\.sourceType === "GACHA"\)/);
   assert.match(exchangeRoomPage, /offeredSuggestionsOpen \? \(\s*<ExchangeSuggestionList/);
   assert.doesNotMatch(exchangeRoomPage, /draftWanted|wantedCatalogItemIds|원하는 교환품/);
   assert.match(exchangeRoomPage, /className="exchange-listing-product"/);
@@ -148,6 +151,7 @@ test("exchange autocomplete fixtures keep registered ids, popularity signals, an
   const itemIds = new Set(POPULAR_EXCHANGE_CATALOG_ITEMS.map((item) => item.id));
   assert.equal(itemIds.size, POPULAR_EXCHANGE_CATALOG_ITEMS.length);
   const eligibleInventory = eligibleSessionInventoryUnits(createInitialSessionCommerceState());
+  assert.ok(eligibleInventory.every((item) => item.source === "gacha"));
   assert.ok(eligibleInventory.every((item) => itemIds.has(item.catalogItemId)));
 
   const pokemonSuggestions = POPULAR_EXCHANGE_CATALOG_ITEMS.filter((item) => item.name.startsWith("포켓몬스터"));
@@ -169,6 +173,7 @@ test("exchange detail shows one posted item and product-backed proposals with ow
 
   assert.match(detailPage, /exchangePosts\.find\(\(item\)\s*=>\s*item\.id\s*===\s*postId\)/);
   assert.match(detailPage, /exchangeApplications\[post\.id\]\s*\?\?\s*\[\]/);
+  assert.match(detailPage, /application\.sourceType === "GACHA"/);
   assert.match(detailPage, /post\.offeredItem/);
   assert.doesNotMatch(detailPage, /post\.wantedItems|원하는 교환품/);
   assert.match(detailPage, /application\.offeredItemImage/);
@@ -222,7 +227,8 @@ test("profile exposes request room directly and keeps customer support separate"
   assert.match(requestRoomScreen, /id:\s*"request-room"/);
   assert.match(requestRoomScreen, /<BackHeader\s+title="신청방"\s+onBack=\{flow\.pop\}\s*\/>/);
   assert.doesNotMatch(requestRoomScreen, /RootTabFooter|AppBottomNavigation|\bfooter:/);
-  assert.match(requestRoomPage, /productRequests\.filter\(\(request\)\s*=>\s*request\.categoryId\s*===\s*filter\)/);
+  assert.match(requestRoomPage, /productRequests\.filter\(\(request\)\s*=>\s*\([\s\S]*?isCustomerVisibleProductCategory\(request\.categoryId\)[\s\S]*?\)\)/);
+  assert.match(requestRoomPage, /customerVisibleRequests\.filter\(\(request\)\s*=>\s*request\.categoryId\s*===\s*filter\)/);
   assert.match(requestRoomPage, /addProductRequest\(\{[\s\S]*?categoryId:[\s\S]*?ipId:[\s\S]*?desiredItem,[\s\S]*?details,/);
   assert.match(requestRoomPage, /toggleProductRequestLike\(intent\.requestId(?:,\s*pending\.key)?\)/);
   assert.match(requestRoomPage, /setAuthIntent\(intent\)/);

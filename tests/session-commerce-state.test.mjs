@@ -3,6 +3,7 @@ import { test } from "node:test";
 import {
   CURRENT_USER_ID,
   createInitialSessionCommerceState,
+  eligibleDrawExchangeProposalUnits,
   decideSessionExchangeApplication,
   eligibleSessionInventoryUnits,
   exchangeDecisionKey,
@@ -12,7 +13,7 @@ import {
   updateSessionOrderStatus,
 } from "../src/data/sessionCommerceFixtures.ts";
 
-test("initial commerce sessions are isolated and expose exact exchange-eligible inventory units", () => {
+test("initial commerce sessions are isolated and expose only stored gacha inventory for exchange or point return", () => {
   const first = createInitialSessionCommerceState();
   const second = createInitialSessionCommerceState();
 
@@ -23,9 +24,10 @@ test("initial commerce sessions are isolated and expose exact exchange-eligible 
   assert.equal(second.wishlistProductIds.length, 6);
 
   const eligible = eligibleSessionInventoryUnits(second, CURRENT_USER_ID);
-  assert.equal(eligible.length, 4);
+  assert.equal(eligible.length, 2);
   for (const item of eligible) {
     assert.equal(item.ownerId, CURRENT_USER_ID);
+    assert.equal(item.source, "gacha");
     assert.equal(item.shippingStatus, "stored");
     assert.equal(item.exchangeStatus, "available");
     assert.ok(item.itemName.trim());
@@ -34,6 +36,31 @@ test("initial commerce sessions are isolated and expose exact exchange-eligible 
     assert.ok(item.categoryId.trim());
     assert.ok(item.appReferenceValue > 0);
   }
+});
+
+test("exchange and point-return eligibility follows acquisition source instead of product category", () => {
+  const initial = createInitialSessionCommerceState();
+  const gachaTemplate = initial.inventoryUnits.find((item) => item.source === "gacha");
+  assert.ok(gachaTemplate);
+
+  const state = {
+    ...initial,
+    inventoryUnits: [
+      { ...gachaTemplate, id: "gacha-won-figure", categoryId: "figure", source: "gacha" },
+      { ...gachaTemplate, id: "kuji-with-gacha-category", categoryId: "gacha", source: "kuji" },
+      { ...gachaTemplate, id: "purchased-with-gacha-category", categoryId: "gacha", source: "direct-purchase" },
+      { ...gachaTemplate, id: "admin-with-gacha-category", categoryId: "gacha", source: "admin-adjustment" },
+      { ...gachaTemplate, id: "other-users-gacha", ownerId: "another-user", source: "gacha" },
+      { ...gachaTemplate, id: "shipping-gacha", shippingStatus: "requested", source: "gacha" },
+      { ...gachaTemplate, id: "reserved-gacha", exchangeStatus: "listed", source: "gacha" },
+    ],
+  };
+
+  const eligibleIds = eligibleSessionInventoryUnits(state).map((item) => item.id);
+  const proposalIds = eligibleDrawExchangeProposalUnits(state).map((item) => item.id);
+
+  assert.deepEqual(eligibleIds, ["gacha-won-figure"]);
+  assert.deepEqual(proposalIds, eligibleIds);
 });
 
 test("orders, point usage, inventory, and draw completion are recorded exactly once", () => {

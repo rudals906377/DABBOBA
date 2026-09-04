@@ -63,13 +63,30 @@ jobs:
       - name: Run protected mobile-runtime browser tests
         run: pnpm run test:runtime
 
+  cloud-run-artifacts:
+    name: Cloud Run artifact checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up pinned Google Cloud CLI for local context checks
+        uses: google-github-actions/setup-gcloud@v3
+        with:
+          version: 580.0.0
+
+      - name: Validate Cloud Run scripts, configs, contexts, and images
+        run: bash ops/cloud-run/check-artifacts.sh --build
+
   database-migrations:
     name: PostgreSQL migrations
     runs-on: ubuntu-latest
     timeout-minutes: 15
     services:
       postgres:
-        image: postgres:16-alpine
+        # Match the local/Supabase queue runtime and pin the reviewed image.
+        image: tembo.docker.scarf.sh/tembo/pg17-pgmq@sha256:ba00a1ec2694b76be07b9bc5331e2bc0fa671f296919d2bb12a1cb2e22dd15fd
         env:
           POSTGRES_DB: dabboba_ci
           POSTGRES_USER: dabboba
@@ -81,20 +98,14 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 20
-      redis:
-        image: redis:7-alpine
-        ports:
-          - 6379:6379
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 20
     env:
       NODE_ENV: test
-      DATABASE_URL: postgresql://dabboba:dabboba_ci_only@127.0.0.1:5432/dabboba_ci
-      REDIS_URL: redis://127.0.0.1:6379
-      SESSION_TOKEN_PEPPER: ci-migration-only-not-a-production-secret
+      DATABASE_MIGRATION_URL: postgresql://dabboba:dabboba_ci_only@127.0.0.1:5432/dabboba_ci
+      DABBOBA_TEST_DATABASE_URL: postgresql://dabboba:dabboba_ci_only@127.0.0.1:5432/dabboba_ci
+      DABBOBA_RUNTIME_TEST_DATABASE_URL: postgresql://dabboba_runtime:dabboba_runtime_ci_only_32_bytes@127.0.0.1:5432/dabboba_ci
+      DABBOBA_RUNTIME_DATABASE_PASSWORD: dabboba_runtime_ci_only_32_bytes
+      DABBOBA_WORKER_TEST_DATABASE_URL: postgresql://dabboba_worker:dabboba_worker_ci_only_32_bytes_@127.0.0.1:5432/dabboba_ci
+      DABBOBA_WORKER_DATABASE_PASSWORD: dabboba_worker_ci_only_32_bytes_
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -121,6 +132,17 @@ jobs:
       - name: Prove migration re-entry is a no-op
         run: pnpm run db:migrate
 
+      - name: Provision the disposable runtime role login
+        run: pnpm --filter @dabboba/db provision:runtime-role
+
+      - name: Provision the disposable worker role login without command-line secrets
+        run: printf '%s\n' "$DABBOBA_WORKER_DATABASE_PASSWORD" | pnpm --filter @dabboba/db provision:worker-role -- --password-stdin
+
+      - name: Verify runtime database privileges
+        env:
+          DATABASE_URL: ""
+        run: pnpm --filter @dabboba/db test
+
       - name: Build database integration suites
         run: |
           pnpm --filter @dabboba/api build
@@ -129,11 +151,16 @@ jobs:
       - name: Run PostgreSQL-backed API integration tests
         env:
           DATABASE_URL: ""
-          DABBOBA_TEST_DATABASE_URL: postgresql://dabboba:dabboba_ci_only@127.0.0.1:5432/dabboba_ci
+          DABBOBA_RUNTIME_TEST_DATABASE_URL: ""
         run: pnpm --filter @dabboba/api test
+
+      - name: Verify customer API routes with the runtime database role
+        env:
+          DATABASE_URL: ""
+        run: node --test apps/api/dist/runtime-role-routes.integration.test.js
 
       - name: Run PostgreSQL-backed worker integration tests
         env:
           DATABASE_URL: ""
-          DABBOBA_TEST_DATABASE_URL: postgresql://dabboba:dabboba_ci_only@127.0.0.1:5432/dabboba_ci
+          WORKER_DATABASE_URL: ${{ env.DABBOBA_WORKER_TEST_DATABASE_URL }}
         run: pnpm --filter @dabboba/worker test

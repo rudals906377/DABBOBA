@@ -26,11 +26,12 @@ function fakeClient(attempt = 1) {
   return { client, calls };
 }
 
-test("outbox is marked published only after BullMQ accepts the stable job id", async () => {
+test("outbox is marked published only after the durable queue accepts it", async () => {
   const { client, calls } = fakeClient();
   const published: Array<{ name: string; data: unknown; options: unknown }> = [];
   const publisher: OutboxPublisher = {
-    async add(name, data, options) {
+    async add(publishingClient, name, data, options) {
+      assert.equal(publishingClient, client);
       published.push({ name, data, options });
       return {};
     },
@@ -40,13 +41,15 @@ test("outbox is marked published only after BullMQ accepts the stable job id", a
   assert.equal(outcome, "published");
   assert.equal(published[0]!.name, "outbox.event");
   assert.equal((published[0]!.options as { jobId: string }).jobId, `outbox-${row.id}`);
-  assert.match(calls[1]!.sql, /published_at/);
+  assert.match(calls[1]!.sql, /SAVEPOINT/);
+  assert.match(calls[2]!.sql, /published_at/);
+  assert.match(calls[3]!.sql, /RELEASE SAVEPOINT/);
   assert.equal(calls.some((call) => call.sql.includes("available_at=$2")), false);
 });
 
-test("queue failure keeps the event unpublished and schedules a bounded retry", async () => {
+test("queue failure rolls back its savepoint and schedules a bounded retry", async () => {
   const { client, calls } = fakeClient(4);
-  const publisher: OutboxPublisher = { async add() { throw new Error("redis unavailable"); } };
+  const publisher: OutboxPublisher = { async add() { throw new Error("queue unavailable"); } };
   const now = new Date("2026-08-24T00:00:00.000Z");
 
   const outcome = await publishClaimedOutboxEvent(client, publisher, row, { jobAttempts: 8, jobBackoffMs: 1_000 }, now);
@@ -54,7 +57,8 @@ test("queue failure keeps the event unpublished and schedules a bounded retry", 
   const retry = calls.at(-1)!;
   assert.match(retry.sql, /available_at=\$2/);
   assert.equal((retry.values![1] as Date).toISOString(), "2026-08-24T00:00:08.000Z");
-  assert.equal(retry.values![2], "redis unavailable");
+  assert.equal(retry.values![2], "queue unavailable");
+  assert.equal(calls.some((call) => call.sql.startsWith("ROLLBACK TO SAVEPOINT")), true);
   assert.equal(calls.some((call) => call.sql.includes("published_at=$2")), false);
 });
 

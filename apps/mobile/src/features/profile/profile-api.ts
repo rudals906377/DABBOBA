@@ -1,6 +1,10 @@
 import { randomUUID } from "expo-crypto";
 import { errorMessage } from "@dabboba/api-client";
 import type { CatalogProduct, components } from "@dabboba/contracts";
+import {
+  isCustomerBrowsableCatalogCategory,
+  isCustomerVisibleProductCategory,
+} from "@/features/catalog/product-categories";
 import { createMobileDabbobaClient as createDabbobaClient } from "@/lib/mobile-api-client";
 
 type Actor = components["schemas"]["UserActor"];
@@ -95,7 +99,12 @@ export async function fetchProfileSnapshot(
   const ipNames = Object.fromEntries(
     (ipsResult.data?.items ?? []).map((ip) => [ip.id, ip.nameKo]),
   );
-  const wantedRequests = await attachWantedMediaUrls(client, wantedResult.data?.items ?? []);
+  const wantedRequests = await attachWantedMediaUrls(
+    client,
+    (wantedResult.data?.items ?? []).filter((request) => (
+      isCustomerVisibleProductCategory(request.category)
+    )),
+  );
 
   if (!accessToken) {
     if (!products.length) {
@@ -127,7 +136,7 @@ export async function fetchProfileSnapshot(
     client.GET("/v1/account/basic-info"),
     client.GET("/v1/account/default-address"),
     client.GET("/v1/account/wishlist", { params: { query: { limit: 50 } } }),
-    client.GET("/v1/exchange/inventory", { params: { query: { limit: 50 } } }),
+    client.GET("/v1/account/inventory", { params: { query: { limit: 50 } } }),
     client.GET("/v1/account/orders", { params: { query: { limit: 50 } } }),
     client.GET("/v1/account/points", { params: { query: { limit: 50 } } }),
     client.GET("/v1/account/shipping-requests", { params: { query: { limit: 50 } } }),
@@ -158,7 +167,9 @@ export async function fetchProfileSnapshot(
     profile: profileResult.data,
     basicInfo: basicInfoResult.data,
     defaultAddress: addressResult.data ?? null,
-    wishlist: wishlistResult.data?.items ?? [],
+    wishlist: (wishlistResult.data?.items ?? []).filter((item) => (
+      isCustomerBrowsableCatalogCategory(item.product.category)
+    )),
     inventory: inventoryResult.data?.items ?? [],
     orders: ordersResult.data?.items ?? [],
     pointBalance: pointsResult.data.balance,
@@ -298,7 +309,10 @@ function createExampleSnapshot(
   const daysAgo = (days: number) => new Date(now.getTime() - days * 86_400_000).toISOString();
   const first = products[0]!;
   const second = products[1] ?? first;
-  const wishlist = [first, second].map((product, index): WishlistItem => ({
+  const browsableProducts = products.filter((product) => (
+    isCustomerBrowsableCatalogCategory(product.category)
+  ));
+  const wishlist = browsableProducts.slice(0, 2).map((product, index): WishlistItem => ({
     id: index === 0 ? IDS.wishlistOne : IDS.wishlistTwo,
     product: {
       id: product.id,
@@ -323,14 +337,17 @@ function createExampleSnapshot(
     status: "OWNED",
     acquiredAt: daysAgo(index + 3),
   }));
-  const wantedFallback: ProfileWantedRequest = {
+  const wantedFallbackProduct = products.find((product) => (
+    isCustomerVisibleProductCategory(product.category)
+  ));
+  const wantedFallback: ProfileWantedRequest | null = wantedFallbackProduct ? {
     id: IDS.wanted,
     userId: IDS.user,
     authorNickname: "모찌수집가",
-    category: second.category,
-    ipId: second.ipId,
-    ipNameKo: ipNames[second.ipId] ?? "등록 작품",
-    desiredItem: `${second.name} 재입고를 기다려요`,
+    category: wantedFallbackProduct.category,
+    ipId: wantedFallbackProduct.ipId,
+    ipNameKo: ipNames[wantedFallbackProduct.ipId] ?? "등록 작품",
+    desiredItem: `${wantedFallbackProduct.name} 재입고를 기다려요`,
     details: "같이 기다리는 수집가가 얼마나 있는지 알려주세요.",
     mediaId: null,
     mediaUrl: null,
@@ -340,7 +357,7 @@ function createExampleSnapshot(
     version: 1,
     createdAt: daysAgo(4),
     updatedAt: daysAgo(4),
-  };
+  } : null;
   const noticeFallback: Notice = {
     id: IDS.notice,
     title: "DABBOBA 이용 안내",
@@ -432,7 +449,9 @@ function createExampleSnapshot(
       trackingCarrier: null,
       trackingNumber: null,
     }],
-    wantedRequests: publicWanted.length ? publicWanted : [wantedFallback],
+    wantedRequests: publicWanted.length
+      ? publicWanted.filter((request) => isCustomerVisibleProductCategory(request.category))
+      : wantedFallback ? [wantedFallback] : [],
     notices: publicNotices.length ? publicNotices : [noticeFallback],
     inquiries: [{
       id: IDS.inquiry,

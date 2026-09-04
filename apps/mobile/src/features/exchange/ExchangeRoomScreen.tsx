@@ -38,6 +38,7 @@ import {
   type ExchangeCategory,
   type ExchangeRoomSnapshot,
 } from "@/features/exchange/exchange-api";
+import { areCustomerVisibleExchangeProducts } from "@/features/exchange/exchange-visibility";
 import { productSubjectTitle } from "@/features/shop/product-title";
 import {
   readExchangeListingCache,
@@ -110,7 +111,9 @@ export function ExchangeRoomScreen() {
         const cached = await readExchangeListingCache(db, selectedCategory);
         if (sequence !== loadSequence.current) return;
         if (cached) {
-          const cachedItems = __DEV__ ? cached.items : cached.items.filter((item) => !item.isExample);
+          const cachedItems = cached.items
+            .filter((item) => areCustomerVisibleExchangeProducts(item.products?.length ? item.products : [item.product]))
+            .filter((item) => __DEV__ || !item.isExample);
           setSnapshot(debouncedQuery
             ? {
                 ...cached,
@@ -190,7 +193,9 @@ export function ExchangeRoomScreen() {
   const normalizedQuery = normalizeExchangeSearch(query);
   const items = useMemo(
     () => filterExchangeItems(
-      snapshot?.items ?? [],
+      (snapshot?.items ?? []).filter((item) => (
+        areCustomerVisibleExchangeProducts(item.products?.length ? item.products : [item.product])
+      )),
       snapshot?.ipSearchTerms ?? snapshot?.ipNames ?? {},
       normalizedQuery,
     ),
@@ -420,7 +425,7 @@ function ListingCard({
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`${item.product.name} 교환 글 자세히 보기`}
+      accessibilityLabel={`${item.products.length}개 상품 교환 글 자세히 보기`}
       onPress={() => router.push({ pathname: "/exchange/[listingId]", params: { listingId: item.id } })}
       style={({ pressed }) => [styles.listingCard, pressed && styles.pressed]}
     >
@@ -429,11 +434,18 @@ function ListingCard({
         <View style={styles.cardCategoryBadge}>
           <Text style={styles.cardCategoryLabel}>{categoryLabel(item.product.category)}</Text>
         </View>
+        {item.products.length > 1 ? (
+          <View style={styles.bundleCountBadge}>
+            <Text style={styles.bundleCountLabel}>{item.products.length}개 묶음</Text>
+          </View>
+        ) : null}
       </View>
       <View style={styles.cardBody}>
         <Text numberOfLines={2} style={styles.listingTitle}>{item.title}</Text>
         <Text style={styles.productMeta}>{ipName ?? "작품 정보 확인 중"} · {categoryLabel(item.product.category)}</Text>
-        <Text numberOfLines={2} style={styles.productName}>{productSubjectTitle(item.product.name, ipName)}</Text>
+        <Text numberOfLines={2} style={styles.productName}>
+          {productSubjectTitle(item.product.name, ipName)}{item.products.length > 1 ? ` 외 ${item.products.length - 1}개` : ""}
+        </Text>
         {item.details.trim() ? (
           <Text numberOfLines={2} style={styles.listingDetails}>{item.details}</Text>
         ) : null}
@@ -501,6 +513,8 @@ const styles = StyleSheet.create({
   productImage: { width: "100%", height: "100%" },
   cardCategoryBadge: { position: "absolute", top: 8, left: 8, borderRadius: 7, paddingHorizontal: 8, paddingVertical: 6, backgroundColor: colors.brand },
   cardCategoryLabel: { color: colors.ink, fontSize: 10, fontWeight: "900" },
+  bundleCountBadge: { position: "absolute", right: 8, bottom: 8, borderRadius: 7, paddingHorizontal: 8, paddingVertical: 6, backgroundColor: "rgba(17, 20, 17, 0.82)" },
+  bundleCountLabel: { color: colors.white, fontSize: 10, lineHeight: 14, fontWeight: "900" },
   cardBody: { flex: 1, minWidth: 0 },
   listingTitle: { color: colors.ink, fontSize: 16, lineHeight: 22, fontWeight: "900" },
   productName: { color: colors.ink, fontSize: 14, lineHeight: 20, fontWeight: "800", marginTop: 3 },

@@ -160,9 +160,214 @@
 
 final result: passed
 
+## 2026-08-30 — Orange pull-tab kuji selection and peel-open flow
+
+**Source and rendered evidence**
+
+- Source visual truth: `work/audits/kuji-open-reference/frames/frame-01.png` (`440 × 960` px), extracted from the supplied kuji-opening video. The comparison target is the orange landscape ticket, cream inset frame, left pull control, rightward opening affordance, and restrained dark reveal stage; third-party logos, characters, Japanese copy, and prize data are excluded.
+- Generated project asset: `apps/mobile/assets/kuji-ticket-front.png` (`1517 × 1037` px), created with the built-in image-generation tool as an original text-free, brand-free orange ticket face. The app overlays only the stable ticket number and contextual state.
+- Native implementation: `work/audits/kuji-ticket-app/selection-v1.png`, `work/audits/kuji-ticket-app/reveal-sealed-v2.png`, and `work/audits/kuji-ticket-app/summary-v1.png` (`1206 × 2622` px each).
+- Full-view comparison input: `work/audits/kuji-ticket-app/compare-sealed-v2.png` (`1206 × 1311` px). Source and implementation were each normalized to `603 × 1311` px and placed together before judgment.
+- Focused comparison input: `work/audits/kuji-ticket-app/compare-ticket-focused-v2.png` (`1400 × 750` px). The source and implementation ticket regions were normalized to a common 700 px width and padded without stretching.
+- Viewport and density: DABBOBA SDK54 iOS Simulator, `402 × 874` logical points at `3×`; the source is a separately recorded physical kiosk at a similar portrait ratio, so full-screen chrome and exact background geometry are intentionally not treated as fidelity targets.
+- States: 50-ticket five-column customer selection board, one sealed ticket ready to open, and six-result open-all summary with one featured-left region plus a virtualized right rail.
+
+**Findings and comparison history**
+
+- Initial P1 in `reveal-sealed-v1.png`: the raster front face retained intrinsic image dimensions inside the animated layer, so the pull tab and left half were clipped and the inset border appeared in the middle of the ticket.
+- Fix: explicitly bind the generated front-face image to `100% × 100%` of the animated ticket layer. The post-fix full and focused comparisons show the complete left pull tab, arrow, double frame, empty number field, and serial motif at the intended landscape proportion.
+- Initial P2: a visible `임시 화면` badge made the development route look unlike the customer flow and repeated a prototype boundary inside the UI.
+- Fix: remove the developer badge from both sealed and summary layouts while keeping the preview development-only, neutral, and inventory-free in code and QA documentation.
+- Post-fix comparison found no actionable P0, P1, or P2 visual issue. The source brand and prize copy are intentionally replaced by neutral `KUJI` / `NO.` content, and the app's fixed black stage plus green accent remain the established DABBOBA design language.
+
+**Required fidelity surfaces**
+
+- Fonts and typography: short fixed `KUJI`, `NO.`, `READY`, and result codes use the bundled pixel face; Korean actions and product identity stay in the readable app typography. The selection-board numbers are bold tabular numerals and remain readable at five-column density.
+- Spacing and layout rhythm: the existing 50-position, five-column wrap remains intact with 44 pt minimum targets. The large ticket is centered at the same landscape proportion as the source, the stage keeps the shared 12 pt gutter, and the floating action panel clears all scroll content.
+- Colors and tokens: the ticket uses the requested warm orange/burnt-orange/cream/charcoal palette, while `#91E98E` remains reserved for selection, focus, primary action, and restrained reveal accents.
+- Image quality and asset fidelity: the ticket front is a project-owned raster asset rather than CSS/View art or a copied source logo. It decodes sharply at `1517 × 1037`, fills both compact and large ticket slots without checkerboard or external shadow artifacts, and keeps the registered product media behavior unchanged.
+- Copy and content: no tutorial paragraph or customer-facing developer label was added. Before commit the ticket exposes only its number/state; preview results remain neutral `RESULT` placeholders and do not name a prize or rarity.
+
+**Interaction and technical evidence**
+
+- The ticket front uses one horizontal `PanResponder`: vertical scroll intent is left to the parent, a rightward release opens at 58% travel or after an intentional positive fling, and shorter/leftward gestures spring back. The same `onOpen` seam powers the ticket tap and fixed bottom-button fallback.
+- Reduced Motion is read and observed through `AccessibilityInfo`; it skips the wipe/aura travel and resolves the same state immediately. Result state changes announce through accessibility APIs.
+- One-by-one and open-all preview states preserve selected ticket numbers. The all-open summary renders a large representative region on the left and the remaining items in a vertically virtualized right rail; it deliberately avoids claiming `최상위 결과` until a server-ranked `highestResultId` or committed tier rank exists.
+- Native shell automation in this pass could open and capture every route/state but did not provide pointer-drag injection. Gesture thresholds, reset/open decisions, one-by-one transitions, all-open completion, explicit server-consume ownership, and tap fallback are covered by focused deterministic tests; the sealed, selection, and summary layouts were directly observed in the SDK54 simulator.
+- Fresh verification: 24/24 focused kuji selection/reveal/slot tests and all 175 repository unit tests passed. Expo mobile TypeScript, protected-runtime integrity (28 files), production web/Sites build, and `git diff --check` also passed; the existing non-blocking Vite chunk-size advisory remains.
+- Evidence is iOS Simulator/local Expo proof only; Android, physical-device, signed-store-build, production payment, atomic multi-entitlement commit, and authoritative highest-result selection are not claimed.
+
+final result: passed
+
+## 2026-08-30 — Paper-kuji ticket board redesign
+
+**Source and rendered evidence**
+
+- Kuji interaction reference: `/tmp/dabboba-kuji-video.xk8QFY/frame-01.png` (`880 × 1920` px), used for dense selectable-ticket rhythm and explicit picked/available states rather than exact kiosk geometry.
+- Supplied defect screenshot: `/var/folders/ym/kg6qcm917wv2wdk0qby6y6tw0000gn/T/TemporaryItems/NSIRD_screencaptureui_EMHd02/스크린샷 2026-08-30 오후 4.42.17.png` (`826 × 1356` px), showing the prior circular number seals and keypad-like cards.
+- Revised native captures: `work/qa/kuji-paper-ticket-top.png`, `work/qa/kuji-paper-ticket-selected.png`, and `work/qa/kuji-paper-ticket-bottom.png` (`1206 × 2622` px each).
+- Same-input full comparison: `work/qa/kuji-paper-ticket-redesign-comparison.png` (`2072 × 1356` px), containing the video reference, supplied defect crop, and revised native board together. Each panel was normalized to 1356 px height; the kiosk recording and supplied crop are not identical app viewports, so the comparison is intentionally limited to ticket anatomy, state contrast, density, and hierarchy.
+- Viewport and state: DABBOBA SDK54 iOS Simulator, `402 × 874` logical points at `3×`; inspected with available, selected, and sold tickets, then scrolled through ticket 50 and the one-line remaining-tier row.
+
+**Findings and iteration history**
+
+- Initial P1: identical dark rounded rectangles with circular number seals read as a bingo board or keypad instead of physical kuji tickets.
+- Fix: every slot is now a vertical warm-paper ticket with a large serial number, `NO.` marker, dashed tear line, and distinct bottom stub. The circular seal was removed while the five-column, 50-ticket structure remained unchanged.
+- Initial P2: available, selected, and sold tickets depended heavily on low-contrast surface changes and a separate legend.
+- Fix: available tickets use an ivory `쿠지` stub, selected tickets use a brand-green checked `선택` stub plus green outline, and sold tickets use gray paper plus an explicit `완료` stub. The redundant legend and instructional caption were removed.
+- Post-fix comparison shows no actionable P0, P1, or P2 issue: the board reads as a dense rack of tear-off tickets, all three states remain explicit without color alone, and the final ticket and tier row clear the floating action panel.
+
+**Required fidelity surfaces**
+
+- Fonts and typography: serial numbers use bold tabular numerals for fast scanning; `NO.` stays subordinate; the short stub states use the approved readable Korean pixel face at a legible size.
+- Spacing and layout rhythm: the existing five-column density is preserved with approximately 80 pt ticket height, compact 6 pt radii, an internal body/tear-line/stub split, and touch targets well above 44 pt.
+- Colors and tokens: the near-black arcade board remains; warm ivory paper separates kuji selection from gacha, canonical `#91E98E` is reserved for the selected state, and sold tickets use neutral gray without reducing the whole control's opacity.
+- Image quality and asset fidelity: no product asset was replaced or cropped. Ticket styling is the interactive control itself; existing Ionicons supplies the selected check mark, and no fake raster, emoji, handcrafted SVG, or placeholder asset was introduced.
+- Copy and content: the board retains only `쿠지 선택`, counts, and the ticket-state labels `쿠지` / `선택` / `완료`; the instructional sentence and separate legend are absent. The 50-ticket count and one-line S/A/B/C/D quantities remain unchanged.
+
+**Interaction and technical evidence**
+
+- Simulator interaction confirmed that pressing an available ticket toggles the green checked stub and selection count, while sold tickets remain disabled and visually marked `완료`.
+- Drag scrolling confirmed the complete 50-ticket board and compact remaining-tier row are reachable above the persistent floating `쿠지 뽑기` action.
+- A focused regression test now requires the paper-ticket body, dashed perforation, and stub while rejecting the former circular `ticketSeal` and removed helper caption.
+- Consolidated verification passed: Expo mobile TypeScript checking, all 174 unit tests, protected-runtime integrity, production build, and `git diff --check`.
+- Evidence is iOS Simulator/local-preview proof only; Android, signed-native, physical-device, and store-build behavior is not claimed.
+
+final result: passed
+
+## 2026-08-30 — Native kuji 50-ticket selection and reveal flow
+
+**Source and rendered evidence**
+
+- Reference video: `/Users/kyoungmin/Desktop/KakaoTalk_Video_2026-08-30-15-41-51.mp4`; extracted interaction sheet: `/tmp/dabboba-kuji-video.xk8QFY/key-frames.png`.
+- Native selection evidence: `work/qa/kuji-50-board-top.png` and `work/qa/kuji-50-board-tier-remaining.png`.
+- Native reveal evidence: `work/qa/kuji-click-test.png`, `work/qa/kuji-50-all-ready.png`, and `work/qa/kuji-50-all-summary.png`.
+- Flow comparison: `work/qa/kuji-video-flow-comparison.png`.
+- Viewport and state: DABBOBA SDK54 iOS Simulator, `402 × 874` logical points at `3×`; the board top, board bottom, grade inventory, one-by-one opening, 50-ticket all-open readiness, and all-open summary were inspected.
+
+**Findings and iteration history**
+
+- The customer selection screen now presents a stable 50-ticket board in five columns, distinguishes available, selected, and sold tickets, keeps the five-minute pixel timer, and derives payment confirmation from the selected count and product unit price.
+- The requested grade inventory is placed immediately below the board. It shows the remaining quantity per published grade in server order; the current local development catalog has no published grade inventory, so its fallback is explicitly marked `화면 예시` and is unavailable in production builds.
+- The reveal decision remains after payment confirmation: `한 장씩 오픈` advances through sealed tickets one at a time, while `한 번에 오픈` reveals the complete set in one action.
+- Multi-open results place the explicitly highest-ranked committed result in the large left card and the remaining results in a readable vertical rail on the right. Product media uses `contain` to preserve the registered image ratio.
+- Intentional safety divergence from the reference: hidden grade/prize mappings never appear on customer ticket positions before payment. Public selection exposes only ticket identity and availability.
+
+**Interaction and server boundaries**
+
+- The current 50-result visual path is a development-only preview with neutral `RESULT` placeholders; it does not claim that 50 paid results were committed by the current one-entitlement reveal API.
+- A validated server utility now expands operator-entered grade quantities, requires their sum to equal the total, assigns every position exactly once with cryptographic randomness, preserves explicit lower-is-higher `tierRank`, and strips the hidden mapping from the public availability projection.
+- Production wiring still requires a sealed-slot persistence model, idempotent publish transaction, slot reservation, payment-to-result binding, and an API snapshot that returns authoritative availability and aggregate grade counts without leaking position mappings.
+- Consolidated verification passed: mobile and API TypeScript checks, 173 unit tests, protected-runtime integrity, production web build, iOS Expo export, and `git diff --check`.
+- Evidence is iOS Simulator/local-preview proof only; physical-device, signed-store-build, production payment, and production persistence behavior are not claimed.
+
+final result: passed
+
+## 2026-08-30 — Remove generic explanatory copy from 뽀바 and Product Detail
+
+**Source and rendered evidence**
+
+- Source visual truth: `work/qa/explanatory-copy-ppoba-reference.png` (`854 × 658` px) and `work/qa/explanatory-copy-detail-reference.png` (`838 × 1746` px). These are defect references: the intended change is the removal of the visible generic explanatory paragraphs, not pixel-for-pixel preservation of those paragraphs.
+- Rendered implementation: `work/qa/explanatory-copy-ppoba-native.png` and `work/qa/explanatory-copy-detail-native.png`, each `1206 × 2622` px from the DABBOBA SDK54 iOS Simulator (`402 × 874` logical points at `3×`).
+- Combined comparison inputs: `work/qa/explanatory-copy-ppoba-comparison.png` (`1708 × 658` px) and `work/qa/explanatory-copy-detail-comparison.png` (`1676 × 1746` px). Each file places the supplied defect reference on the left and the revised native implementation on the right.
+- Density normalization: the 뽀바 implementation used a `1206 × 930` top crop scaled to the reference's `854 × 658`; the Product Detail implementation was scaled to `838` px wide and top-cropped to `1746` px. The comparison is limited to app-owned content; simulator bezel and clock differences are not evaluated.
+- State: 뽀바 root above the first catalog rows, and the same 죠죠의 기묘한 모험 쿠지 Product Detail. The supplied 뽀바 capture had 쿠지 selected while the native capture had 가챠 selected; category-specific product content is outside this copy-removal judgment.
+
+**Findings and comparison history**
+
+- Initial P2: the 뽀바 root placed a two-line generic introduction between the compact header and search, delaying the primary search and category controls.
+- Fix: removed the introduction component, its exclusive typography import, and its style. The search now follows the header with the existing tokenized top margin.
+- Initial P2: Product Detail inserted a generic registration/helper paragraph after price, duplicating the factual workflow rows beneath it.
+- Fix: removed the description paragraph and its exclusive style. The real product identity and price now lead directly into the required draw, storage, and shipping facts.
+- Post-fix evidence: both combined comparison images show the unwanted paragraphs absent, the vacated vertical space collapsed, and no overlapping or clipped content. No actionable P0/P1/P2 differences remain for this request.
+
+**Required fidelity surfaces**
+
+- Fonts and typography: the existing Galmuri11 screen titles and Noto Sans KR product/content hierarchy are unchanged; removed body copy leaves no orphaned line or fallback font.
+- Spacing and layout rhythm: the search shell and fact card move upward through normal layout flow; screen gutters, control heights, radii, and section spacing remain token-based and symmetric.
+- Colors and visual tokens: the off-white canvas, muted IP line, near-black primary text, and canonical green controls are unchanged.
+- Image quality and asset fidelity: product images retain their complete source aspect ratios and native `contain` behavior. No asset was replaced or synthesized.
+- Copy and content: generic introduction/registration/helper prose is removed. Product title, IP, category, stock, price, workflow facts, probability state, and primary actions remain.
+
+**Interaction and verification**
+
+- Search, category controls, filter drawer, wishlist, quantity controls, and `뽑으러 가기` remain present and visually unobstructed.
+- Fresh checks passed: protected-runtime integrity (`28` files), Expo mobile TypeScript, production build, `139` unit tests, focused structural regression, and `git diff --check`.
+- Evidence is native iOS Simulator proof only; no physical-device or signed-store-build claim is made.
+
+final result: passed
+
+## 2026-08-30 — 보관함 배송 안내 한글 줄바꿈
+
+**Source and implementation evidence**
+
+- Source visual truth: `work/qa/shipping-text-wrap-reference.png` (`768 × 494` px), copied from the supplied screenshot. It shows `교환` split as `교` / `환` and `포함되면` split as `포함` / `되면`.
+- Revised native screen: `work/qa/shipping-text-wrap-after-top-native.png` (`1206 × 2622` px), captured from the DABBOBA SDK54 iOS Simulator at a `402 × 874` pt viewport and `3×` density.
+- Focused same-input comparisons:
+  - `work/qa/shipping-text-wrap-info-comparison.png` (`1536 × 160` px), supplied state on the left and revised 안내 박스 on the right.
+  - `work/qa/shipping-text-wrap-policy-comparison.png` (`1536 × 279` px), supplied state on the left and revised 무료배송 카드 on the right.
+- State: root `보관함`, `배송 신청` selected, no stored inventory, scroll position at the top.
+
+**Findings and comparison history**
+
+- Initial P2: this screen rendered fixed Korean explanatory copy with the ordinary text primitive, so iOS could break individual Hangul words and leave `교` or `포함` at the end of a line.
+- Fix: the shared balanced-description primitive now renders the section lead, eligibility notice, shipping introduction, free-shipping explanation, and empty policy guidance. It keeps iOS on Hangul word boundaries and Android on balanced wrapping without adding forced breaks to product names or user-authored content.
+- Revised result: `교환` and `포함되면` remain intact. Card geometry, font sizing, colors, actions, and shipping policy wording are unchanged. No actionable P0/P1/P2 issue remains.
+
+**Required fidelity surfaces**
+
+- Fonts and typography: Noto Sans KR remains the readable body face; only the shared line-breaking strategy changed. No pixel font or synthetic weight was introduced into explanatory copy.
+- Spacing and layout rhythm: existing gutters, card padding, radii, line heights, tab dimensions, and vertical spacing remain unchanged; text containers continue to size naturally.
+- Colors and tokens: the warm canvas, muted body text, neutral cards, and DABBOBA green guidance remain unchanged.
+- Image quality: the affected region contains no replacement image assets; product and navigation imagery are unaffected.
+- Copy and content: every customer-facing sentence, amount, category, and shipping rule remains verbatim. Only word-boundary layout changed.
+
+**Interaction and technical evidence**
+
+- Root `/dukroom` opened directly in the running iOS Simulator and retained the selected `배송 신청` tab, bottom navigation, and scroll behavior.
+- The focused regression test first failed on the missing balanced text primitive, then passed after the affected descriptions were connected.
+- Consolidated verification passed: protected-runtime integrity (28 files), Expo mobile TypeScript checking, all 139 unit tests, and `git diff --check`.
+- Existing non-blocking Node module-type warnings remain unrelated to this change. Physical-device and signed-store-build behavior are not claimed from Simulator evidence.
+
+final result: passed
+
+## 2026-08-30 — Home 쿠지 wide card
+
+**Evidence and normalization**
+
+- Source visual truth: `work/qa/home-kuji-wide-reference.png` (`796×590`), copied byte-for-byte from the user-provided screenshot for this QA pass.
+- Pre-change native evidence: `work/qa/home-six-section-layout.png` (`1206×2622`), where 쿠지 used the same compact square card geometry as the other categories.
+- Revised native evidence: `work/qa/home-kuji-wide-native.png` (`1206×2622`), iOS Simulator Home with the 쿠지 filter selected.
+- Focused implementation crop: `work/qa/home-kuji-wide-focus.png` (`368×275`). The native capture was normalized to the Xcode screenshot viewport of `368×800`, then cropped to the 쿠지 image and copy region.
+- Combined comparison input: `work/qa/home-kuji-wide-comparison.png` (`760×275`), with the source on the left and revised implementation on the right. The source was normalized to `368×275`; a 24 px neutral gap separates the two artifacts.
+- State: Home root, 쿠지 category selected, first product at the leading edge of the one-row horizontal rail. Evidence is local iOS Simulator output, not a signed build or physical-device result.
+
+**Findings and iteration history**
+
+- Initial P1: the pre-change Home treated 쿠지 as a compact 164 px square card, materially changing the wide promotional-art proportion shown in the source and cropping landscape artwork.
+- Fix: 쿠지 cards now use the available viewport width after the standard side gutters, capped at 520 px on wider layouts. Both 오늘의 뽀바 and IP collection cards measure the source image, preserve its original aspect ratio, and use native `contain`; other categories remain 164 px wide.
+- Post-fix evidence: the focused board shows the same near-full-width landscape hierarchy, rounded image surface, top-left 쿠지 badge, small IP line, and larger subject title. No actionable P0/P1/P2 mismatch remains.
+- Expected product difference: the DABBOBA card retains its existing price line and horizontal next-card hint because the request changes 쿠지 presentation width, not product information or carousel behavior.
+
+**Required fidelity surfaces**
+
+- Fonts and typography: the existing Noto Sans KR product hierarchy is retained. The muted IP line remains smaller than the bold product subject, matching the source hierarchy without changing app-wide typography.
+- Spacing and layout rhythm: the revised card keeps the 16 px Home gutter and nearly fills the phone width, matching the source's proportional side margin. Image-to-IP and IP-to-title spacing remain optically aligned with the reference.
+- Colors and tokens: the warm off-white canvas, canonical green 쿠지 badge, near-black title, and muted IP text remain on existing design tokens.
+- Image quality and asset fidelity: the registered product image is used directly, with no generated substitute. Original-ratio measurement plus `contain` shows the complete landscape artwork without square cropping or distortion.
+- Copy and content: the canonical IP appears once in the small line and the product subject remains the large title. Existing price information is intentionally preserved.
+
+**Interaction and verification**
+
+- The 쿠지 category control was tapped in the Simulator and the wide state rendered immediately.
+- The Home product rail was swiped left; the next wide 쿠지 card moved into view while the vertical feed and floating navigation remained usable.
+- Focused home tests, mobile TypeScript checking, and the final workspace verification cover the category-specific width rule and both Home card variants.
+
+final result: passed
+
 ## 2026-08-30 — Ppoba catalog media follows each source aspect ratio
 
-This section supersedes only the Ppoba-list portion of the older “Edge-to-edge catalog product photography” decision. Home, Exchange, Product History, account, and other compact fixed thumbnail slots continue to use `cover`; Ppoba product cards now follow the latest explicit request to show the complete registered photograph.
+This section supersedes only the Ppoba-list portion of the older “Edge-to-edge catalog product photography” decision. Home 쿠지 cards follow the preceding wide-card rule; other Home categories, Exchange feed items, Product History, account, and compact fixed thumbnail slots continue to use `cover`. Ppoba product cards follow the latest explicit request to show the complete registered photograph.
 
 **Source and rendered evidence**
 
@@ -933,6 +1138,218 @@ final result: passed
 - The existing `교환 상품 올리기` action remains connected to its original authentication-aware handler.
 - The category filters and listing routes remain below the rule card and unchanged.
 - Focused structural regression test and Expo mobile TypeScript check passed before consolidated verification.
+- Evidence is iOS Simulator/local-preview proof only; physical-device and signed-store-build behavior is not claimed.
+
+final result: passed
+
+## 2026-08-30 — Brand-green native search borders
+
+**Source and rendered evidence**
+
+- Source crop: `/var/folders/ym/kg6qcm917wv2wdk0qby6y6tw0000gn/T/TemporaryItems/NSIRD_screencaptureui_7EIJzH/스크린샷 2026-08-30 오후 1.06.49.png` (`786 × 158` px). The supplied geometry and copy are the layout reference; the explicit requested override is the canonical green border.
+- Resting-state implementation: `work/qa/search-border-shop.png` and `work/qa/search-border-exchange.png` (`1206 × 2622` px each).
+- Focused-state implementation: `work/qa/search-border-product-search.png` (`1206 × 2622` px).
+- Same-input focused comparison: `work/qa/search-border-comparison.png` (`1572 × 158` px), with the supplied crop on the left and the revised native search field on the right.
+- Viewport and state: DABBOBA SDK54 iOS Simulator, `402 × 874` logical points at `3×`; 뽀바 and 교환방 are resting, while 전체 검색 is focused.
+
+**Findings and iteration history**
+
+- Initial P2: equivalent native search fields did not share one resting border rule; two used the neutral input border and one owned duplicate search-shell styling.
+- Fix: the shared input shell now exposes a search variant. Resting search fields use a 1 px canonical green border, focus increases the same border to 2 px, and validation errors retain the higher-priority critical border.
+- Revised result: no actionable P0, P1, or P2 mismatch remains across 뽀바, 교환방, and 전체 검색. The requested green reads consistently without changing the existing field geometry.
+
+**Required fidelity surfaces**
+
+- Fonts and typography: placeholder wording, Noto Sans KR sizing, icon size, and text alignment are unchanged.
+- Spacing and layout rhythm: field height, corner radius, internal padding, screen gutter, and adjacent toolbar spacing remain on the shared SEED tokens.
+- Colors and tokens: all native search borders derive from `seed.color.stroke.brand` (`#91E98E`); non-search inputs remain neutral and error borders remain critical red.
+- Image quality: search fields contain no raster image asset; the existing Ionicons search glyph remains crisp at native density.
+- Copy and content: `상품명·작품 검색` and all surrounding product content remain unchanged.
+
+**Interaction and technical evidence**
+
+- Simulator inspection covered the two resting root search fields and the auto-focused full-search screen.
+- A structural regression test discovers every native search input by its search return key and requires the shared search variant, state precedence, and critical error override.
+- Consolidated verification passed: 141 unit tests, mobile TypeScript checking, protected-runtime integrity, production build, and `git diff --check`.
+- Evidence is iOS Simulator/local-preview proof only; physical-device and signed-store-build behavior is not claimed.
+
+final result: passed
+
+## 2026-08-30 — Product Detail floating commerce panel
+
+**Source and rendered evidence**
+
+- Supplied source crop: `/var/folders/ym/kg6qcm917wv2wdk0qby6y6tw0000gn/T/TemporaryItems/NSIRD_screencaptureui_KOWXWb/스크린샷 2026-08-30 오후 1.55.01.png` (`856 × 246` px).
+- Initial native implementation: `work/qa/product-detail-floating-action-native.png` (`1206 × 2622` px).
+- Scrolled native implementation: `work/qa/product-detail-floating-action-scrolled.png` (`1206 × 2622` px).
+- Focus crop: `work/qa/product-detail-floating-action-focus.png` (`1206 × 422` px).
+- Same-input comparison: `work/qa/product-detail-floating-action-comparison.png` (`1206 × 844` px); the supplied footer is above and the revised floating panel is below.
+- Viewport and state: DABBOBA SDK54 iOS Simulator, `402 × 874` logical points at `3×`; 도쿄 리벤저스 쿠지 Product Detail, quantity 1, total 9,900원, inspected both initially and after scrolling to the final probability card.
+
+**Findings and iteration history**
+
+- Initial P2: the full-width white footer and top divider visually reserved the entire bottom strip, so it did not share the Home navigation's floating-over-content behavior.
+- Fix: the quantity, total, and CTA now sit inside one centered rounded panel. Its outer absolute layer is transparent, the warm panel is lightly translucent with a hairline and soft elevation, and the scrolling page remains visible behind it.
+- Revised result: no actionable P0, P1, or P2 issue remains. The final content clears the panel at maximum scroll, while the panel stays optically detached from the screen edge.
+
+**Required fidelity surfaces**
+
+- Fonts and typography: existing Noto Sans KR weights, amount hierarchy, and `뽑으러 가기` wording are unchanged.
+- Spacing and layout rhythm: the panel uses the established 12 px horizontal screen inset, 8 px internal padding, 22 px corner radius, and real bottom Safe Area; both quantity controls retain at least a 44 px touch width.
+- Colors and tokens: the existing canonical green CTA remains unchanged; only the enclosing surface adopts the root navigation's restrained translucent warm layer, neutral hairline, and soft shadow.
+- Image quality: no product or icon asset was resized or substituted by this footer change; the content underneath remains rendered at native density.
+- Copy and content: quantity, computed total, and category-specific CTA copy remain the same, and no new helper or preview explanation was added.
+
+**Interaction and technical evidence**
+
+- Simulator interaction confirmed that the plus control updates quantity 1 → 2 and total 9,900원 → 19,800원, then the minus control restores the original state.
+- A drag through the Product Detail content confirmed that the last probability/status card can scroll completely above the floating panel.
+- The existing commerce action handler and category branch remain unchanged, and the Product Detail-to-checkout structural regression continues to pass.
+- Consolidated verification passed: 142 unit tests, mobile TypeScript checking, protected-runtime integrity, production build, and `git diff --check`.
+- Evidence is iOS Simulator/local-preview proof only; physical-device and signed-store-build behavior is not claimed.
+
+final result: passed
+
+## 2026-08-30 — Shared native frame gutter alignment
+
+**Source and rendered evidence**
+
+- Supplied edge crops: `/var/folders/ym/kg6qcm917wv2wdk0qby6y6tw0000gn/T/TemporaryItems/NSIRD_screencaptureui_VjHmgc/스크린샷 2026-08-30 오후 2.04.32.png` (`42 × 116` px) and `/var/folders/ym/kg6qcm917wv2wdk0qby6y6tw0000gn/T/TemporaryItems/NSIRD_screencaptureui_8k1M4f/스크린샷 2026-08-30 오후 2.04.38.png` (`32 × 62` px).
+- Supplied content-frame reference: `/var/folders/ym/kg6qcm917wv2wdk0qby6y6tw0000gn/T/TemporaryItems/NSIRD_screencaptureui_UaJgD2/스크린샷 2026-08-30 오후 2.05.10.png` (`516 × 278` px).
+- Pre-change Product Detail crop: `work/qa/product-detail-floating-action-focus.png` (`1206 × 422` px).
+- Revised Product Detail: `work/qa/global-frame-gutter-product-detail.png` (`1206 × 2622` px) and `work/qa/global-frame-gutter-product-detail-edge.png` (`1206 × 422` px).
+- Revised root and checkout screens: `work/qa/global-frame-gutter-ppoba.png`, `work/qa/global-frame-gutter-exchange.png`, and `work/qa/global-frame-gutter-checkout.png` (`1206 × 2622` px each).
+- Geometry comparison: `work/qa/global-frame-gutter-comparison.png` (`1206 × 844` px); the pre-change Product Detail crop is above and the revised crop is below. Product content differs between states, so the comparison is limited to horizontal geometry.
+- Viewport and state: DABBOBA SDK54 iOS Simulator, `402 × 874` logical points at `3×`; Product Detail, 뽀바, 교환방, and 결제 준비 were inspected.
+
+**Findings and iteration history**
+
+- Initial P2: shared content frames were inset 16 px per side while the expanded floating root navigation and Product Detail action panel were inset 12 px, producing a visible 4 px step on each edge.
+- Fix: the shared native outer frame gutter is now 12 px. Content frames expand outward to the existing navigation width; the navigation and Product Detail action panel retain their prior width and derive it from the same token.
+- Vertical rhythm was preserved by separating prior shorthand spacing into 12 px horizontal and unchanged 16 px vertical values where required.
+- Revised result: no actionable P0, P1, or P2 mismatch remains on the inspected screens. Cards, search shells, checkout frames, the expanded root navigation, and the Product Detail action panel now share one straight edge.
+
+**Required fidelity surfaces**
+
+- Fonts and typography: existing Noto Sans KR and pixel-title roles, weights, and line heights are unchanged.
+- Spacing and layout rhythm: the app-wide outer horizontal frame is 12 px, while component inner padding, compact navigation geometry, true full-bleed media, and existing vertical spacing remain unchanged.
+- Colors and tokens: no color or elevation treatment changed; only the shared horizontal frame token and its consumers were aligned.
+- Image quality: product images and icons were not resized or substituted; image aspect-ratio behavior remains unchanged.
+- Copy and content: no customer-facing wording, labels, counts, or commerce rules changed.
+
+**Interaction and technical evidence**
+
+- Simulator navigation covered Product Detail, the 뽀바 root, the 교환방 root, and 결제 준비; no clipping, lost touch target, or bottom-panel overlap was observed.
+- A structural regression test now requires the shared 12 px frame token and verifies that the expanded root navigation, Product Detail action panel, and both checkout screens consume it.
+- Consolidated verification passed: 143 unit tests, mobile TypeScript checking, protected-runtime integrity, production build, and `git diff --check`.
+- Evidence is iOS Simulator/local-preview proof only; physical-device and signed-store-build behavior is not claimed.
+
+final result: passed
+
+## 2026-08-30 — App-wide floating route action frame
+
+**Source and rendered evidence**
+
+- Supplied checkout reference: `/var/folders/ym/kg6qcm917wv2wdk0qby6y6tw0000gn/T/TemporaryItems/NSIRD_screencaptureui_uSwQMH/스크린샷 2026-08-30 오후 2.21.34.png` (`886 × 1828` px).
+- Normalized reference crop: `work/qa/app-wide-floating-action-reference-crop.png` (`1206 × 2622` px).
+- Revised checkout: `work/qa/app-wide-floating-action-checkout.png` and `work/qa/app-wide-floating-action-checkout-scrolled.png` (`1206 × 2622` px each).
+- Additional route samples: `work/qa/app-wide-floating-action-kuji.png` and `work/qa/app-wide-floating-action-exchange-create.png` (`1206 × 2622` px each).
+- Same-screen comparison: `work/qa/app-wide-floating-action-comparison.png` (`2412 × 2622` px), with the supplied checkout on the left and the revised native checkout on the right.
+- Viewport and state: DABBOBA SDK54 iOS Simulator, `402 × 874` logical points at `3×`; checkout was inspected near the supplied scroll position and at the final disclosure, with kuji draw and exchange creation inspected as representative sibling routes.
+
+**Findings and iteration history**
+
+- Initial P2: Product Detail already floated over scrolling content, but six sibling route actions still reserved an opaque full-width footer. Their edges and visual behavior therefore diverged from the shared 12 px frame and floating navigation language.
+- Fix: one shared Safe-Area-aware action panel now owns the transparent absolute layer, 12 px outer inset, centered 520 px maximum width, restrained translucent warm surface, hairline, 22 px radius, and soft elevation. Checkout preparation, checkout connection, kuji draw, exchange creation, exchange offer selection, open visitor exchange detail, and Product Detail all consume it.
+- Scroll bodies now receive the shared bottom clearance, the exchange-detail clearance remains conditional on the visible visitor action, and loading/error frames use the same outer gutter.
+- Revised result: no actionable P0, P1, or P2 mismatch remains on the inspected screens. Route content stays visible behind the panel, the final disclosure clears it at maximum scroll, and the panel shares one straight side edge with the page cards.
+
+**Required fidelity surfaces**
+
+- Fonts and typography: route-specific amount, button, and pixel-title roles remain unchanged; the shared panel adds no text styling of its own.
+- Spacing and layout rhythm: every mounted route action uses 12 px outer inset and 8 px internal padding, while each screen retains its existing internal button geometry and vertical content rhythm.
+- Colors and tokens: existing canonical green actions and disabled states remain intact; only the enclosing route-action surface is normalized to the shared warm translucent layer, neutral hairline, and shadow.
+- Image quality: product and ticket imagery is untouched and continues to render at native density and its existing aspect-ratio rule.
+- Copy and content: every route retains its original CTA label and handler. No new helper paragraph, fake transaction result, or preview-only commerce claim was introduced by the shared frame.
+
+**Interaction and technical evidence**
+
+- Native interaction confirmed checkout scrolling with both the payment and amount cards visible behind the panel, complete final-disclosure clearance, and the `결제 준비 완료` alert continuing into `결제 연결 안내`.
+- Kuji draw retained its ticket board and five-minute countdown under the floating `쿠지 뽑기` action. Exchange creation retained its empty-inventory state and disabled `상품을 선택해 주세요` action on the same frame.
+- The exchange-create panel remains inside `KeyboardAvoidingView`; the current simulator account had no eligible inventory, so a focused form-field keyboard state was not available for direct visual evidence in this pass.
+- Structural regression coverage enumerates all seven route-owned fixed actions, requires the shared component and content inset, protects the conditional exchange-detail behavior, and checks loading/error gutters.
+- Consolidated verification passed: 145 unit tests, mobile TypeScript checking, protected-runtime integrity, production build, and `git diff --check`.
+- Evidence is iOS Simulator/local-preview proof only; physical-device and signed-store-build behavior is not claimed.
+
+final result: passed
+
+## 2026-08-30 — Compact kuji prize row and helper-copy removal
+
+**Source and rendered evidence**
+
+- Supplied remaining-prize defect reference: `/var/folders/ym/kg6qcm917wv2wdk0qby6y6tw0000gn/T/TemporaryItems/NSIRD_screencaptureui_Lkz1Dv/스크린샷 2026-08-30 오후 4.25.09.png` (`800 × 390` px).
+- Supplied helper-card defect reference: `/var/folders/ym/kg6qcm917wv2wdk0qby6y6tw0000gn/T/TemporaryItems/NSIRD_screencaptureui_T3fJsI/스크린샷 2026-08-30 오후 4.25.30.png` (`798 × 424` px).
+- Revised native implementation: `work/qa/kuji-prize-row-no-helper-copy.png` (`1206 × 2622` px).
+- Focused comparison inputs: `work/qa/kuji-prize-row-comparison.png` (`1600 × 390` px) and `work/qa/kuji-helper-copy-removal-comparison.png` (`1596 × 424` px).
+- Viewport and state: DABBOBA SDK54 iOS Simulator, `402 × 874` logical points at `3×`; the customer kuji selection screen was inspected at the board bottom where tier inventory and the floating action meet.
+
+**Findings and iteration history**
+
+- Initial P2: the five tier counts occupied a 3+2 wrapped grid, making a simple inventory summary substantially taller than necessary. A `화면 예시` status also competed with the requested information.
+- Fix: the title and all five S/A/B/C/D counts now occupy one compact horizontal row. Each count uses an equal flexible segment with one-line grade and quantity text, retaining grouped accessibility labels.
+- Initial P2: two large helper cards repeated the already-visible five-minute timer and ten-second notification behavior below the board; the timer itself also repeated its duration in a caption.
+- Fix: the helper cards, timer caption, and customer-facing preview bar were removed. The live countdown, ticket selection, expired-entry state, queue return, payment amount confirmation, and open-mode actions remain unchanged.
+- Post-fix comparison shows no actionable P0, P1, or P2 mismatch: all five counts fit without truncation at 402 pt width and the explanatory-card area has collapsed completely.
+
+**Required fidelity surfaces**
+
+- Fonts and typography: the `남은 상` label and grades retain the approved Korean pixel family; quantities remain in the readable app font with tabular numerals. No paragraph text was added.
+- Spacing and layout rhythm: the summary is reduced to a 60 pt minimum card with a single row, equal tier segments, and the shared 12 pt outer gutter. The removed helper blocks leave direct clearance above the floating action.
+- Colors and tokens: the existing warm layer, neutral hairline, brand-weak tier surfaces, green grade labels, and near-black quantities are preserved.
+- Image quality: product and ticket imagery are unchanged; this update introduces no new image or icon asset.
+- Copy and content: `화면 예시`, `50 TICKETS`, the timer helper sentence, and both long rule paragraphs are absent. Required loading, error, expiry, transaction, and action copy remains contextual.
+
+**Interaction and technical evidence**
+
+- The five-minute state machine and one-second countdown continue running in the simulator; removing the helper copy does not alter lease or queue calculations.
+- Structural regression coverage now requires the horizontal tier row and rejects the removed preview bar, timer caption, helper-card styles, and long explanations.
+- Consolidated verification passed: mobile TypeScript checking, 17 focused kuji/frame/reveal tests, all 173 unit tests, protected-runtime integrity, production build, and `git diff --check`.
+- Evidence is iOS Simulator/local-preview proof only; physical-device and signed-store-build behavior is not claimed.
+
+final result: passed
+
+## 2026-08-30 — Physical mustard kuji marker redesign
+
+**Source and rendered evidence**
+
+- Latest supplied source of truth: `/var/folders/ym/kg6qcm917wv2wdk0qby6y6tw0000gn/T/TemporaryItems/NSIRD_screencaptureui_ziYZPL/스크린샷 2026-08-30 오후 4.58.53.png` (`470 × 814` px). The user's follow-up explicitly limits the reference to each individual kuji marker and preserves the existing five-column, 50-ticket spread.
+- Focused source crop: `work/qa/kuji-reference-cells-crop.png` (`1230 × 1260` px), enlarged from the physical board's ivory-and-mustard numbered stock markers.
+- Revised native captures: `work/qa/kuji-mustard-ticket-final.png`, `work/qa/kuji-mustard-ticket-selected.png`, `work/qa/kuji-mustard-ticket-sold-disabled.png`, and `work/qa/kuji-mustard-ticket-bottom.png` (`1206 × 2622` px each).
+- Same-input full comparison: `work/qa/kuji-mustard-full-comparison.png` (`2412 × 2622` px), with the full physical board reference and the selected native state normalized to equal panel width and height.
+- Same-input focused comparison: `work/qa/kuji-mustard-focused-comparison.png` (`2460 × 1260` px), comparing the enlarged source markers with the revised five-column native slots at equal height.
+- Viewport and state: DABBOBA SDK54 iOS Simulator, `402 × 874` logical points at `3×`; available, selected, sold/disabled, all 50 positions, the tier row, and the floating action were inspected.
+
+**Findings and iteration history**
+
+- Superseded P1: the immediately prior warm-paper `NO.` ticket with a dashed tear line and bottom stub followed an earlier interpretation, but it did not match the user's newer physical kuji-board reference.
+- Fix: the five-column wrapped layout and all 50 positions remain unchanged. Each individual slot now uses a compact ivory face between flat mustard top and bottom bands, minimal 3 px corners, a prominent number, and a small visible `쿠지` state.
+- Selected slots replace the mustard bands with canonical green and add both a check and `선택`. Sold slots use a dark face and readable `완료`; neither state relies on color alone.
+- The reference's connected horizontal arrangement, prize-grade labels, prize imagery, and slot-to-tier implication were intentionally not copied because the follow-up preserved the existing spread and sealed prize allocation must remain hidden.
+- Post-fix full and focused comparisons show no actionable P0, P1, or P2 mismatch for the selected target. The physical ivory/mustard marker language is recognizable while the requested grid density, touch geometry, and independent slot states remain intact.
+
+**Required fidelity surfaces**
+
+- Fonts and typography: slot numbers retain the readable app face with bold tabular numerals; the small state uses the approved Galmuri pixel family. No `NO.` marker or extra helper copy remains.
+- Spacing and layout rhythm: the existing five-column wrap, 18.4% slot width, 80 pt minimum height, row gaps, near-black board, 50-slot order, and floating-panel clearance are preserved.
+- Colors and tokens: physical marker bands use restrained mustard `#D4B84E`, faces use warm ivory `#F4EDCF`, selected bands use app green `#91E98E`, and sold markers use a high-contrast dark neutral.
+- Image quality and asset fidelity: the supplied photograph is used only as the visual reference; existing catalog product imagery remains a real source asset rendered with `contain`. No placeholder raster, handcrafted SVG, or emoji asset was introduced.
+- Copy and content: each slot contains only its stable number and contextual `쿠지`, `선택`, or `완료` state. Tier counts remain in the separate one-line panel, and no tutorial, preview legend, grade label, or prize mapping was added to the board.
+
+**Interaction and technical evidence**
+
+- Native interaction selected ticket `02`, changed the visible count from 0 to 1, enabled the floating `쿠지 뽑기` action, and preserved the dark sold states. Scrolling exposed positions `46–50` and the entire one-line S/A/B/C/D remaining-prize row above the floating panel.
+- Every slot remains a checkbox with explicit `checked` and `disabled` accessibility state and at least an 80 pt visible height; the source-level regression rejects horizontal strips, carousels, `NO.`, dashed tear lines, and paper stubs.
+- Consolidated verification passed: all 174 unit tests, mobile TypeScript checking, protected-runtime integrity, production build, and `git diff --check`.
 - Evidence is iOS Simulator/local-preview proof only; physical-device and signed-store-build behavior is not claimed.
 
 final result: passed

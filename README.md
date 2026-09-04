@@ -32,7 +32,7 @@ set -a; source .env; set +a
 corepack pnpm run dev:all
 ```
 
-로그를 프로세스별로 나눠 보려면 터미널 네 개에서 실행합니다. API와 worker 터미널은 시작 전에 같은 `.env`를 export해야 합니다.
+로그를 프로세스별로 나눠 보려면 아래처럼 실행합니다. API와 유한 worker 실행 전에는 같은 `.env`를 export해야 합니다. worker는 상시 서버가 아니라 한 batch를 처리하고 정상 종료합니다.
 
 ```sh
 # 터미널 1 — API :8788
@@ -42,7 +42,7 @@ corepack pnpm run dev:api
 ```
 
 ```sh
-# 터미널 2 — worker :8791
+# 터미널 2 — Supabase Queues worker 1회 실행
 cd dabboba-app
 set -a; source .env; set +a
 corepack pnpm run dev:worker
@@ -63,7 +63,7 @@ corepack pnpm run dev:lan
 - 고객 웹: [http://127.0.0.1:4174](http://127.0.0.1:4174)
 - API 상태: [http://127.0.0.1:8788/readyz](http://127.0.0.1:8788/readyz)
 - 관리자 웹: [http://127.0.0.1:4180](http://127.0.0.1:4180)
-- worker 상태: [http://127.0.0.1:8791/ready](http://127.0.0.1:8791/ready)
+- worker 결과: 해당 실행의 구조화 로그와 PostgreSQL `outbox_events`/`worker_dead_letters`로 확인
 
 고객 remote 모드의 로그인 화면은 개발 환경에서만 `/v1/auth/dev-session`을 사용하며 올바른 형식의 테스트 이메일을 입력하면 됩니다. 운영용 전화·Google·Kakao 인증을 대신하지 않습니다.
 
@@ -129,4 +129,4 @@ corepack pnpm run test:runtime
 git diff --check
 ```
 
-PostgreSQL 통합 테스트와 배포·복원 절차는 [운영 런북](docs/dabboba-operations-runbook.md), 계정·사업·법무·PG·스토어 등 사용자가 준비할 항목은 [사용자 작업 목록](docs/dabboba-user-actions.md)에 있습니다.
+PostgreSQL 통합 테스트와 배포·복원 절차는 [운영 런북](docs/dabboba-operations-runbook.md), Cloud Run 설정·비용·롤백은 [Cloud Run 배포 가이드](docs/cloud-run-deployment.md), 계정·사업·법무·PG·스토어 등 사용자가 준비할 항목은 [사용자 작업 목록](docs/dabboba-user-actions.md)에 있습니다.

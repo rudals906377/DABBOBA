@@ -8,7 +8,7 @@ import { buildApp } from "../app.js";
 const databaseUrl = process.env.DABBOBA_TEST_DATABASE_URL;
 
 test(
-  "inventory point returns credit original stored draws exactly once and reject every ineligible source or state",
+  "inventory point returns credit original stored GACHA draws exactly once and reject every other source or state",
   { skip: !databaseUrl },
   async (t) => {
     const pool = createDatabasePool(databaseUrl!, "dabboba-point-return-integration");
@@ -210,7 +210,7 @@ test(
     });
     const evenInventoryId = await addDrawInventory({
       drawUserId: owner.actor.userId,
-      sourceType: "KUJI",
+      sourceType: "GACHA",
       prizeProductId: prizeEvenId,
     });
     const inventoryUnitIds = [oddInventoryId, evenInventoryId].sort((left, right) => left.localeCompare(right, "en-US"));
@@ -313,11 +313,16 @@ test(
     const secondRequest = await returnPoints(owner.token, inventoryUnitIds);
     assert.equal(secondRequest.statusCode, 409, secondRequest.body);
 
+    const directKujiInventoryId = await addDrawInventory({
+      drawUserId: owner.actor.userId,
+      sourceType: "KUJI",
+    });
     const ineligibleInventoryIds = [
       await addInventory(owner.actor.userId, prizeEvenId, "GACHA"),
       await addInventory(owner.actor.userId, prizeEvenId, "KUJI"),
       await addInventory(owner.actor.userId, prizeEvenId, "PURCHASE"),
       await addInventory(owner.actor.userId, prizeEvenId, "ADMIN_ADJUSTMENT"),
+      directKujiInventoryId,
       await addDrawInventory({ drawUserId: owner.actor.userId, sourceType: "GACHA", status: "EXCHANGE_LISTED" }),
       await addDrawInventory({ drawUserId: owner.actor.userId, sourceType: "GACHA", status: "EXCHANGE_OFFERED" }),
       await addDrawInventory({ drawUserId: owner.actor.userId, sourceType: "KUJI", status: "SHIPPING" }),
@@ -334,6 +339,14 @@ test(
       const rejected = await returnPoints(owner.token, [inventoryId]);
       assert.equal(rejected.statusCode, 409, rejected.body);
     }
+    const kujiAfterRejection = await pool.query<{ status: string; return_count: number }>(
+      `SELECT inventory.status,
+         (SELECT count(*)::integer FROM inventory_point_return_items item
+          WHERE item.inventory_unit_id=inventory.id) AS return_count
+       FROM inventory_units inventory WHERE inventory.id=$1`,
+      [directKujiInventoryId],
+    );
+    assert.deepEqual(kujiAfterRejection.rows, [{ status: "OWNED", return_count: 0 }]);
     const transferredOwnerRejected = await returnPoints(recipient.token, [ineligibleInventoryIds.at(-1)!]);
     assert.equal(transferredOwnerRejected.statusCode, 409, transferredOwnerRejected.body);
 
@@ -344,7 +357,7 @@ test(
     });
     const zeroInventoryId = await addDrawInventory({
       drawUserId: owner.actor.userId,
-      sourceType: "KUJI",
+      sourceType: "GACHA",
       prizeProductId: prizeZeroId,
     });
     const zeroPointBatch = await returnPoints(owner.token, [validRollbackInventoryId, zeroInventoryId]);

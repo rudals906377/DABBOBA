@@ -10,3 +10,4 @@ allowBuilds:
 overrides:
   metro@0.83.3: 0.83.8
   postcss@<=8.5.22: 8.5.26
+  uuid@<11.1.1: 11.1.1

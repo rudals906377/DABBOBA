@@ -3,10 +3,12 @@ import test from "node:test";
 import type { FastifyInstance } from "fastify";
 import type { ApiContext } from "../types.js";
 import {
+  exchangeInventoryBundleInput,
   isDrawExchangeSource,
   isExchangeEligibleInventory,
   isExchangeListingTransitionAllowed,
   isExchangeOfferTransitionAllowed,
+  isOriginalGachaDrawProvenance,
   orderedInventoryIds,
   registerExchangeRoutes,
 } from "./exchange.js";
@@ -63,6 +65,41 @@ test("inventory locks use one stable unique ordering", () => {
   );
 });
 
+test("exchange bundle input accepts one or two canonical ids and one legacy primary id", () => {
+  const first = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  const second = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+
+  assert.deepEqual(exchangeInventoryBundleInput({ offeredInventoryUnitIds: [first] }), [first]);
+  assert.deepEqual(exchangeInventoryBundleInput({ offeredInventoryUnitIds: [first, second] }), [first, second]);
+  assert.deepEqual(exchangeInventoryBundleInput({ offeredInventoryUnitId: first }), [first]);
+  assert.deepEqual(
+    exchangeInventoryBundleInput({
+      offeredInventoryUnitIds: [first, second],
+      offeredInventoryUnitId: first,
+    }),
+    [first, second],
+  );
+});
+
+test("exchange bundle input rejects empty, oversized, duplicate, and divergent legacy values", () => {
+  const first = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  const second = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+  const third = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+
+  for (const input of [
+    { offeredInventoryUnitIds: [] },
+    { offeredInventoryUnitIds: [first, second, third] },
+    { offeredInventoryUnitIds: [first, first] },
+    { offeredInventoryUnitIds: [first], offeredInventoryUnitId: second },
+  ]) {
+    assert.throws(
+      () => exchangeInventoryBundleInput(input),
+      (error: unknown) => typeof error === "object" && error !== null
+        && "statusCode" in error && error.statusCode === 400,
+    );
+  }
+});
+
 test("exchange proposals accept only inventory won from gacha draws", () => {
   assert.equal(isDrawExchangeSource("GACHA"), true);
   assert.equal(isDrawExchangeSource("KUJI"), false);
@@ -91,6 +128,43 @@ test("exchange inventory must be a directly drawn gacha product that is still st
   }
 });
 
+test("exchange draw provenance rejects forged owner, entitlement, and prize links", () => {
+  const ownerId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  const entitlementId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+  const productId = "prize-product";
+  const valid = {
+    sourceType: "GACHA" as const,
+    inventorySourceId: entitlementId,
+    inventoryProductId: productId,
+    drawOwnerId: ownerId,
+    drawEntitlementId: entitlementId,
+    drawPrizeProductId: productId,
+    expectedOwnerId: ownerId,
+  };
+
+  assert.equal(isOriginalGachaDrawProvenance(valid), true);
+  assert.equal(isOriginalGachaDrawProvenance({ ...valid, sourceType: "KUJI" }), false);
+  assert.equal(isOriginalGachaDrawProvenance({ ...valid, inventorySourceId: null }), false);
+  assert.equal(
+    isOriginalGachaDrawProvenance({
+      ...valid,
+      drawOwnerId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+    }),
+    false,
+  );
+  assert.equal(
+    isOriginalGachaDrawProvenance({
+      ...valid,
+      drawEntitlementId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+    }),
+    false,
+  );
+  assert.equal(
+    isOriginalGachaDrawProvenance({ ...valid, drawPrizeProductId: "different-product" }),
+    false,
+  );
+});
+
 test("exchange inventory query exposes only directly drawn gacha inventory", async () => {
   const { app, routes } = routeHarness();
   let capturedSql = "";
@@ -115,6 +189,8 @@ test("exchange inventory query exposes only directly drawn gacha inventory", asy
   assert.match(capturedSql, /iu\.source_type='GACHA'/);
   assert.doesNotMatch(capturedSql, /'KUJI'/);
   assert.match(capturedSql, /draw_result\.user_id=iu\.owner_id/);
+  assert.match(capturedSql, /draw_result\.entitlement_id=iu\.source_id/);
+  assert.match(capturedSql, /draw_result\.prize_product_id=iu\.product_id/);
   assert.deepEqual(capturedValues, [userId, 31]);
 });
 
@@ -139,13 +215,24 @@ test("exchange listing search includes product and IP names", async () => {
   await handler({ query: { q: "포켓몬스터" } });
 
   assert.match(capturedSql, /JOIN catalog_ips i ON i\.id=p\.ip_id/);
-  assert.match(capturedSql, /p\.is_active=true/);
-  assert.match(capturedSql, /i\.is_active=true/);
-  assert.match(capturedSql, /iu\.source_type='GACHA'/);
-  assert.match(capturedSql, /p\.name ILIKE \$2/);
-  assert.match(capturedSql, /i\.name_ko ILIKE \$2/);
-  assert.match(capturedSql, /i\.name_en ILIKE \$2/);
-  assert.match(capturedSql, /array_to_string\(i\.aliases, ' '\) ILIKE \$2/);
+  assert.match(capturedSql, /FROM exchange_listing_items search_listing_item/);
+  assert.match(capturedSql, /invalid_listing_product\.is_active=false/);
+  assert.match(capturedSql, /invalid_listing_ip\.is_active=false/);
+  assert.match(capturedSql, /invalid_listing_inventory\.source_type<>'GACHA'/);
+  assert.match(
+    capturedSql,
+    /listing_draw_result\.entitlement_id=invalid_listing_inventory\.source_id/,
+  );
+  assert.match(
+    capturedSql,
+    /listing_draw_result\.prize_product_id=invalid_listing_inventory\.product_id/,
+  );
+  assert.match(capturedSql, /offer_draw_result\.entitlement_id=offer_inventory\.source_id/);
+  assert.match(capturedSql, /offer_draw_result\.prize_product_id=offer_inventory\.product_id/);
+  assert.match(capturedSql, /search_product\.name ILIKE \$2/);
+  assert.match(capturedSql, /search_ip\.name_ko ILIKE \$2/);
+  assert.match(capturedSql, /search_ip\.name_en ILIKE \$2/);
+  assert.match(capturedSql, /array_to_string\(search_ip\.aliases, ' '\) ILIKE \$2/);
   assert.deepEqual(capturedValues, [31, "%포켓몬스터%"]);
 });
 
@@ -171,6 +258,15 @@ test("exchange listing detail hides non-gacha legacy listings", async () => {
       && error.statusCode === 404,
   );
 
-  assert.match(capturedSql, /iu\.source_type='GACHA'/);
-  assert.match(capturedSql, /draw_result\.user_id=l\.author_id/);
+  assert.match(capturedSql, /FROM exchange_listing_items invalid_listing_item/);
+  assert.match(capturedSql, /invalid_listing_inventory\.source_type<>'GACHA'/);
+  assert.match(capturedSql, /listing_draw_result\.user_id=l\.author_id/);
+  assert.match(
+    capturedSql,
+    /listing_draw_result\.entitlement_id=invalid_listing_inventory\.source_id/,
+  );
+  assert.match(
+    capturedSql,
+    /listing_draw_result\.prize_product_id=invalid_listing_inventory\.product_id/,
+  );
 });

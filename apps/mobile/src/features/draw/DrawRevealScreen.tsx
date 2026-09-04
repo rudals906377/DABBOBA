@@ -28,7 +28,7 @@ import Animated, {
   withSequence,
   withTiming,
 } from "react-native-reanimated";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import {
   FloatingBottomActionPanel,
   useFloatingBottomActionContentInset,
@@ -81,6 +81,7 @@ const smoothRevealEasing = Easing.bezier(0.16, 0.82, 0.28, 1);
 
 export function DrawRevealScreen({ preview = false }: { preview?: boolean }) {
   const router = useRouter();
+  const safeAreaInsets = useSafeAreaInsets();
   const floatingBottomInset = useFloatingBottomActionContentInset();
   const params = useLocalSearchParams<{
     entitlementId?: string | string[];
@@ -130,9 +131,11 @@ export function DrawRevealScreen({ preview = false }: { preview?: boolean }) {
   const [message, setMessage] = useState("");
   const [reduceMotion, setReduceMotion] = useState(false);
   const requestInFlightRef = useRef(false);
+  const skipRequestedRef = useRef(false);
   const lastAnnouncementRef = useRef("");
   const sourceCategory = snapshot?.product.category ?? categoryHint;
   const sourceProductId = result?.productId ?? snapshot?.product.id ?? productId;
+  const gachaBottomInset = safeAreaInsets.bottom + seed.spacing.x4;
 
   useEffect(() => {
     void AccessibilityInfo.isReduceMotionEnabled().then(setReduceMotion);
@@ -181,8 +184,13 @@ export function DrawRevealScreen({ preview = false }: { preview?: boolean }) {
     setRevealResetSignal((current) => current + 1);
     setQueuedPreviewOpen(null);
     requestInFlightRef.current = false;
+    skipRequestedRef.current = false;
     lastAnnouncementRef.current = "";
   }, [count, mode, preview, previewStartsAtSummary]);
+
+  useEffect(() => {
+    skipRequestedRef.current = false;
+  }, [entitlementId, productId]);
 
   useEffect(() => {
     if (!preview || !queuedPreviewOpen || previewState.phase !== "sealed") return;
@@ -305,12 +313,16 @@ export function DrawRevealScreen({ preview = false }: { preview?: boolean }) {
       setSnapshot(committedSnapshot);
       setResult(committed);
       const committedCategory = committedSnapshot?.product.category ?? categoryHint;
-      if (committedCategory !== "kuji" && committedCategory !== "gacha") {
+      if (committedCategory === "gacha" && skipRequestedRef.current) {
+        requestInFlightRef.current = false;
+        setRevealSettled(true);
+      } else if (committedCategory !== "kuji" && committedCategory !== "gacha") {
         requestInFlightRef.current = false;
         setRevealSettled(true);
       }
     } catch (error) {
       requestInFlightRef.current = false;
+      skipRequestedRef.current = false;
       setResult(null);
       setRevealSettled(false);
       setRevealResetSignal((current) => current + 1);
@@ -322,6 +334,7 @@ export function DrawRevealScreen({ preview = false }: { preview?: boolean }) {
 
   const handleRevealSettled = () => {
     requestInFlightRef.current = false;
+    skipRequestedRef.current = false;
     if (preview) {
       setPreviewResultReady(false);
       setPreviewState((current) => (
@@ -334,6 +347,33 @@ export function DrawRevealScreen({ preview = false }: { preview?: boolean }) {
       return;
     }
     if (result) setRevealSettled(true);
+  };
+
+  const handleGachaSkip = () => {
+    if (sourceCategory !== "gacha") return;
+    skipRequestedRef.current = true;
+
+    if (preview) {
+      if (!__DEV__ || previewState.phase === "summary") return;
+      requestInFlightRef.current = false;
+      setPreviewResultReady(false);
+      setPreviewState((current) => (
+        current.mode === "all"
+          ? completePreviewRevealState(current)
+          : current.phase === "sealed"
+            ? advancePreviewRevealState(current)
+            : current
+      ));
+      return;
+    }
+
+    if (result) {
+      requestInFlightRef.current = false;
+      setRevealSettled(true);
+      return;
+    }
+
+    if (!requestInFlightRef.current) void openProduct();
   };
 
   const sourceLabel = sourceCategory === "kuji" ? "쿠지" : sourceCategory === "gacha" ? "가챠" : "상품";
@@ -400,16 +440,10 @@ export function DrawRevealScreen({ preview = false }: { preview?: boolean }) {
               : "다음 상품 준비"
           : sourceCategory === "kuji" && count > 1
             ? `${previewState.openedCount + 1}번째 쿠지 열기`
-            : sourceCategory === "gacha"
-              ? "레버 돌리기"
             : opening
               ? "상품 확인 중"
               : "상품 열기";
-  const footerPanelStyle = showSplitOpenActions
-    ? styles.footerSplitPanel
-    : sourceCategory === "gacha"
-      ? styles.footerGachaPanel
-      : undefined;
+  const footerPanelStyle = showSplitOpenActions ? styles.footerSplitPanel : undefined;
 
   const handleOpenNextTicket = () => {
     const nextAction = resolvePreviewNextTicketAction(previewState);
@@ -469,10 +503,6 @@ export function DrawRevealScreen({ preview = false }: { preview?: boolean }) {
       setRevealRequestSignal((current) => current + 1);
       return;
     }
-    if (gachaMotionVisible && !gachaRevealInProgress) {
-      setRevealRequestSignal((current) => current + 1);
-      return;
-    }
     void openProduct();
   };
 
@@ -494,7 +524,19 @@ export function DrawRevealScreen({ preview = false }: { preview?: boolean }) {
           <Ionicons name="chevron-back" size={28} color={colors.white} />
         </Pressable>
         <KoreanPixelTitle variant="header" style={styles.headerTitle}>{screenTitle}</KoreanPixelTitle>
-        <View style={styles.headerAction} />
+        {sourceCategory === "gacha" && !drawSequenceFinished ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="가챠 애니메이션 건너뛰기"
+            hitSlop={10}
+            onPress={handleGachaSkip}
+            style={({ pressed }) => [styles.headerAction, pressed && styles.pressed]}
+          >
+            <Text style={styles.skipText}>스킵</Text>
+          </Pressable>
+        ) : (
+          <View style={styles.headerAction} />
+        )}
       </View>
 
       {previewLoading ? (
@@ -515,7 +557,12 @@ export function DrawRevealScreen({ preview = false }: { preview?: boolean }) {
       ) : (
         <>
           {previewCompleted ? (
-            <View style={[styles.summaryContent, { paddingBottom: floatingBottomInset }]}>
+            <View
+              style={[
+                styles.summaryContent,
+                { paddingBottom: sourceCategory === "gacha" ? gachaBottomInset : floatingBottomInset },
+              ]}
+            >
               <View style={styles.stageHeader}>
                 <View>
                   <Text style={styles.stageEyebrow}>OPENED</Text>
@@ -536,7 +583,14 @@ export function DrawRevealScreen({ preview = false }: { preview?: boolean }) {
               </View>
             </View>
           ) : (
-            <ScrollView contentContainerStyle={[styles.content, { paddingBottom: floatingBottomInset }]}>
+            <ScrollView
+              style={styles.drawScroll}
+              contentContainerStyle={[
+                styles.content,
+                sourceCategory === "gacha" && styles.gachaContent,
+                { paddingBottom: sourceCategory === "gacha" ? gachaBottomInset : floatingBottomInset },
+              ]}
+            >
               {showStageHeader ? (
                 <View style={styles.stageHeader}>
                   <View>
@@ -546,7 +600,13 @@ export function DrawRevealScreen({ preview = false }: { preview?: boolean }) {
                 </View>
               ) : null}
 
-              <View style={[styles.stage, isDrawCategory && styles.expandedDrawStage]}>
+              <View
+                style={[
+                  styles.stage,
+                  isDrawCategory && styles.expandedDrawStage,
+                  sourceCategory === "gacha" && styles.fullGachaStage,
+                ]}
+              >
                 <StageAmbient
                   sourceCategory={sourceCategory}
                   reduceMotion={reduceMotion}
@@ -602,7 +662,7 @@ export function DrawRevealScreen({ preview = false }: { preview?: boolean }) {
                 )}
               </View>
 
-              {snapshot ? (
+              {snapshot && sourceCategory !== "gacha" ? (
                 <View style={styles.targetRow}>
                   {targetImage ? (
                     <Image source={{ uri: targetImage }} resizeMode="contain" style={styles.targetImage} />
@@ -629,35 +689,35 @@ export function DrawRevealScreen({ preview = false }: { preview?: boolean }) {
             </ScrollView>
           )}
 
-          <FloatingBottomActionPanel
-            panelStyle={footerPanelStyle}
-          >
-            {showSplitOpenActions && previewOpenActions.openAllLabel ? (
-              <View style={styles.footerActions}>
+          {sourceCategory !== "gacha" ? (
+            <FloatingBottomActionPanel panelStyle={footerPanelStyle}>
+              {showSplitOpenActions && previewOpenActions.openAllLabel ? (
+                <View style={styles.footerActions}>
+                  <SeedActionButton
+                    label={previewOpenActions.nextLabel}
+                    disabled={opening || kujiRevealInProgress}
+                    onPress={handleOpenNextTicket}
+                    style={styles.footerSplitAction}
+                  />
+                  <SeedActionButton
+                    label={previewOpenActions.openAllLabel}
+                    variant="neutralWeak"
+                    disabled={opening || kujiRevealInProgress}
+                    onPress={handleOpenAllRemaining}
+                    style={[styles.footerSplitAction, styles.footerOpenAllAction]}
+                  />
+                </View>
+              ) : (
                 <SeedActionButton
-                  label={previewOpenActions.nextLabel}
-                  disabled={opening || kujiRevealInProgress}
-                  onPress={handleOpenNextTicket}
-                  style={styles.footerSplitAction}
-                />
-                <SeedActionButton
-                  label={previewOpenActions.openAllLabel}
-                  variant="neutralWeak"
-                  disabled={opening || kujiRevealInProgress}
-                  onPress={handleOpenAllRemaining}
-                  style={[styles.footerSplitAction, styles.footerOpenAllAction]}
-                />
-              </View>
-            ) : (
-              <SeedActionButton
-                label={actionLabel}
-                loading={opening}
+                  label={actionLabel}
+                  loading={opening}
                   disabled={opening || drawRevealInProgress}
                   onPress={handleAction}
-                style={styles.footerAction}
-              />
-            )}
-          </FloatingBottomActionPanel>
+                  style={styles.footerAction}
+                />
+              )}
+            </FloatingBottomActionPanel>
+          ) : null}
         </>
       )}
     </SafeAreaView>
@@ -1127,17 +1187,21 @@ const styles = StyleSheet.create({
   header: { minHeight: seed.size.topNavigation, paddingHorizontal: seed.spacing.x3, flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "#303730", backgroundColor: colors.ink },
   headerAction: { width: seed.size.touchTarget, height: seed.size.touchTarget, alignItems: "center", justifyContent: "center" },
   headerTitle: { color: colors.white },
+  skipText: { color: colors.brand, ...seed.typography.label, fontWeight: "800" },
   pressed: { opacity: seed.state.pressedOpacity },
   state: { flex: 1, paddingHorizontal: seed.spacing.globalGutter, alignItems: "center", justifyContent: "center", gap: seed.spacing.componentDefault },
   stateText: { maxWidth: 330, color: "#D8DED6", ...seed.typography.body, textAlign: "center" },
   stateAction: { width: "100%", marginTop: seed.spacing.x2 },
   content: { paddingHorizontal: seed.spacing.globalGutter, paddingTop: seed.spacing.x4, paddingBottom: seed.spacing.x7, gap: seed.spacing.componentDefault },
+  drawScroll: { flex: 1 },
+  gachaContent: { flexGrow: 1 },
   summaryContent: { flex: 1, paddingHorizontal: seed.spacing.globalGutter, paddingTop: seed.spacing.x4, gap: seed.spacing.componentDefault },
   stageHeader: { minHeight: 54, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: seed.spacing.x3 },
   stageEyebrow: { marginBottom: seed.spacing.x1, color: colors.brand, fontSize: 10, lineHeight: 14, fontWeight: "900", letterSpacing: 1.2 },
   stageTitle: { color: colors.white },
   stage: { minHeight: 430, padding: seed.spacing.x4, borderRadius: seed.radius.r5, borderWidth: 1, borderColor: "#3A4339", backgroundColor: "#151A15", alignItems: "center", justifyContent: "center", overflow: "hidden" },
   expandedDrawStage: { minHeight: 496 },
+  fullGachaStage: { flexGrow: 1 },
   summaryStage: { flex: 1, minHeight: 0, padding: seed.spacing.x2_5 },
   staticSparkField: { ...StyleSheet.absoluteFillObject },
   spark: { position: "absolute", width: 7, height: 7, backgroundColor: colors.brand },
@@ -1198,7 +1262,6 @@ const styles = StyleSheet.create({
   targetIp: { marginTop: seed.spacing.x0_5, color: colors.muted, ...seed.typography.caption },
   targetName: { marginTop: seed.spacing.x0_5, color: colors.ink, ...seed.typography.bodyStrong },
   footerSplitPanel: { borderWidth: 0, backgroundColor: seed.color.background.transparent, shadowOpacity: 0, shadowRadius: 0, elevation: 0 },
-  footerGachaPanel: { minHeight: 0, padding: 0, borderWidth: 0, backgroundColor: seed.color.background.transparent, shadowOpacity: 0, shadowRadius: 0, elevation: 0 },
   footerActions: { flexDirection: "row", alignItems: "center", gap: seed.spacing.x2 },
   footerSplitAction: { flex: 1, minWidth: 0, paddingHorizontal: seed.spacing.x2 },
   footerOpenAllAction: { backgroundColor: seed.color.layer.elevated },

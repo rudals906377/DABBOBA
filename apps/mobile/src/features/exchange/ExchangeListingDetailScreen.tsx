@@ -120,7 +120,7 @@ export function ExchangeListingDetailScreen() {
       Alert.alert(
         accepting ? "이 제안을 선택할까요?" : "이 제안을 거절할까요?",
         accepting
-          ? `${proposal.proposerNickname}님의 상품을 선택하면 나머지 대기 제안은 자동으로 거절돼요.`
+          ? `${proposal.proposerNickname}님의 상품 ${proposal.products.length}개를 선택하면 나머지 대기 제안은 자동으로 거절돼요.`
           : "거절한 상품은 제안자의 보관함에서 다시 사용할 수 있게 됩니다.",
         [
           { text: "취소", style: "cancel" },
@@ -223,25 +223,29 @@ export function ExchangeListingDetailScreen() {
             <Text style={styles.title}>{item.title}</Text>
             {item.details.trim() ? <Text style={styles.details}>{item.details}</Text> : null}
 
-            <ProductSummary
-              product={item.product}
-              ipName={detail.ipName}
-              assetBaseUrl={assetBaseUrl}
-              label="A가 올린 상품"
-            />
+            {item.products.map((product, index) => (
+              <ProductSummary
+                key={`${product.id}-${index}`}
+                product={product}
+                ipName={detail.ipNames[product.ipId] ?? null}
+                assetBaseUrl={assetBaseUrl}
+                label={`A가 올린 상품 ${index + 1}/${item.products.length}`}
+              />
+            ))}
 
             {detail.viewerRole === "AUTHOR" ? (
               <View style={styles.proposalSection}>
                 <View style={styles.sectionHeader}>
                   <KoreanPixelTitle variant="section" numberOfLines={2} style={styles.sectionTitle}>들어온 제안 {detail.proposals.length}개</KoreanPixelTitle>
-                  <KoreanPixelTitleAccessory style={styles.oneChoiceBadge}>1개 선택</KoreanPixelTitleAccessory>
+                  <KoreanPixelTitleAccessory style={styles.oneChoiceBadge}>제안 1개 선택</KoreanPixelTitleAccessory>
                 </View>
                 {detail.proposals.length ? detail.proposals.map((proposal) => (
                   <ProposalCard
                     key={proposal.id}
                     proposal={proposal}
-                    ipName={detail.ipNames[proposal.product.ipId] ?? null}
+                    ipNames={detail.ipNames}
                     assetBaseUrl={assetBaseUrl}
+                    listingItemCount={item.products.length}
                     processing={processingOfferId === proposal.id}
                     disabled={detail.listingStatus !== "OPEN" || proposal.status !== "PENDING"}
                     onDecision={decide}
@@ -260,8 +264,9 @@ export function ExchangeListingDetailScreen() {
                   <ProposalCard
                     key={proposal.id}
                     proposal={proposal}
-                    ipName={detail.ipNames[proposal.product.ipId] ?? null}
+                    ipNames={detail.ipNames}
                     assetBaseUrl={assetBaseUrl}
+                    listingItemCount={item.products.length}
                     processing={false}
                     disabled
                     onDecision={decide}
@@ -354,15 +359,17 @@ function ProductSummary({
 
 function ProposalCard({
   proposal,
-  ipName,
+  ipNames,
   assetBaseUrl,
+  listingItemCount,
   processing,
   disabled,
   onDecision,
 }: {
   proposal: ExchangeProposalItem;
-  ipName: string | null;
+  ipNames: Record<string, string>;
   assetBaseUrl: string | null;
+  listingItemCount: number;
   processing: boolean;
   disabled: boolean;
   onDecision: (proposal: ExchangeProposalItem, decision: "ACCEPTED" | "REJECTED") => void;
@@ -379,17 +386,21 @@ function ProposalCard({
       <View style={styles.proposerRow}>
         <View style={styles.smallAvatar}><Text style={styles.smallAvatarText}>{proposal.proposerNickname.slice(0, 1)}</Text></View>
         <Text style={styles.proposerName}>@{proposal.proposerNickname}</Text>
+        <Text style={styles.exchangeRatio}>{listingItemCount}:{proposal.products.length}</Text>
         <Text style={[
           styles.proposalStatus,
           proposal.status === "ACCEPTED" && styles.proposalStatusAccepted,
         ]}>{statusLabel}</Text>
       </View>
-      <ProductSummary
-        product={proposal.product}
-        ipName={ipName}
-        assetBaseUrl={assetBaseUrl}
-        label="제안한 상품"
-      />
+      {proposal.products.map((product, index) => (
+        <ProductSummary
+          key={`${product.id}-${index}`}
+          product={product}
+          ipName={ipNames[product.ipId] ?? null}
+          assetBaseUrl={assetBaseUrl}
+          label={`제안한 상품 ${index + 1}/${proposal.products.length}`}
+        />
+      ))}
       {proposal.status === "PENDING" ? (
         <View style={styles.decisionRow}>
           <Pressable
@@ -459,6 +470,7 @@ const styles = StyleSheet.create({
   smallAvatar: { width: 30, height: 30, borderRadius: 15, alignItems: "center", justifyContent: "center", backgroundColor: "#E5E9E6" },
   smallAvatarText: { color: colors.greenInk, fontSize: 11, fontWeight: "900" },
   proposerName: { color: colors.ink, fontSize: 13, fontWeight: "800" },
+  exchangeRatio: { overflow: "hidden", borderRadius: seed.radius.r2, paddingHorizontal: seed.spacing.x2, paddingVertical: seed.spacing.x1, backgroundColor: seed.color.background.brandWeak, color: colors.greenInk, fontSize: 11, lineHeight: 16, fontWeight: "900" },
   proposalStatus: { marginLeft: "auto", overflow: "hidden", borderRadius: 8, paddingHorizontal: 8, paddingVertical: 5, backgroundColor: "#EDF0ED", color: colors.muted, fontSize: 10, fontWeight: "900" },
   proposalStatusAccepted: { backgroundColor: colors.brand, color: colors.ink },
   decisionRow: { flexDirection: "row", gap: seed.spacing.x2_5, marginTop: seed.spacing.x3_5 },

@@ -9,3 +9,8 @@ playwright-report/
 coverage/
 *.log
 *.tsbuildinfo
+.DS_Store
+work/qa/
+work/audits/
+apps/mobile/assets/DABBOBA-logo-selected-*.zip
+apps/mobile/assets/DABBOBA-logo-selected-*/

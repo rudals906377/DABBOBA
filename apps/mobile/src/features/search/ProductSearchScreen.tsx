@@ -10,6 +10,7 @@ import { KoreanPixelTitle, KoreanPixelTitleAccessory } from "@/components/RootCa
 import { AppText as Text, AppTextInput as TextInput } from "@/components/Typography";
 import { SeedInputShell } from "@/design-system/components";
 import { seed } from "@/design-system/seed";
+import { isCustomerBrowsableCatalogCategory } from "@/features/catalog/product-categories";
 import { fetchShopSnapshot, type ShopSnapshot } from "@/features/shop/shop-api";
 import { resolveMobileRuntimeConfig, type MobilePlatform } from "@/lib/runtime-config";
 import { colors } from "@/theme";
@@ -55,12 +56,14 @@ export function ProductSearchScreen() {
   const normalizedQuery = normalize(query);
   const results = useMemo(() => {
     if (!snapshot || !normalizedQuery) return [];
-    return snapshot.products.filter((product) => normalize([
-      product.name,
-      product.sku,
-      product.manufacturer ?? "",
-      ipNames.get(product.ipId) ?? "",
-    ].join(" ")).includes(normalizedQuery));
+    return snapshot.products.filter((product) =>
+      isCustomerBrowsableCatalogCategory(product.category)
+      && normalize([
+        product.name,
+        product.sku,
+        product.manufacturer ?? "",
+        ipNames.get(product.ipId) ?? "",
+      ].join(" ")).includes(normalizedQuery));
   }, [ipNames, normalizedQuery, snapshot]);
 
   const goBack = () => {

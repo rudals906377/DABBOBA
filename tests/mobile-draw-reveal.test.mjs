@@ -243,16 +243,17 @@ test("the native gacha machine opens from a two-turn circular lever gesture", ()
 
   assert.match(screen, /<GachaLeverMachine/);
   assert.match(screen, /sourceCategory === "gacha"/);
-  assert.match(screen, /sourceCategory === "gacha"\s*\?\s*"레버 돌리기"/);
+  assert.doesNotMatch(screen, /sourceCategory === "gacha"\s*\?\s*"레버 돌리기"/);
   assert.doesNotMatch(screen, /레버 두 바퀴 돌리기/);
   assert.match(
     screen,
-    /const footerPanelStyle = showSplitOpenActions[\s\S]*?styles\.footerSplitPanel[\s\S]*?sourceCategory === "gacha"[\s\S]*?styles\.footerGachaPanel/,
+    /sourceCategory !== "gacha" \? \([\s\S]*?<FloatingBottomActionPanel/,
   );
-  assert.match(
-    screen,
-    /footerGachaPanel:\s*\{[\s\S]*?minHeight:\s*0,[\s\S]*?padding:\s*0,[\s\S]*?borderWidth:\s*0,[\s\S]*?backgroundColor:\s*seed\.color\.background\.transparent,[\s\S]*?shadowOpacity:\s*0,[\s\S]*?elevation:\s*0/,
-  );
+  assert.doesNotMatch(screen, /footerGachaPanel/);
+  assert.match(screen, /sourceCategory === "gacha" && styles\.gachaContent/);
+  assert.match(screen, /sourceCategory === "gacha" && styles\.fullGachaStage/);
+  assert.match(screen, /const gachaBottomInset = safeAreaInsets\.bottom \+ seed\.spacing\.x4/);
+  assert.match(screen, /snapshot && sourceCategory !== "gacha"/);
   assert.match(screen, /resultReady=\{preview \? previewResultReady : Boolean\(result\)\}/);
   assert.match(screen, /onRequestOpen=\{\(\) => void openProduct\(\)\}/);
   assert.match(screen, /onRevealSettled=\{handleRevealSettled\}/);
@@ -266,17 +267,41 @@ test("the native gacha machine opens from a two-turn circular lever gesture", ()
   assert.match(machine, /resolveGachaLeverTouchStart\(/);
   assert.match(machine, /resolveGachaLeverPointAngle\(event\.x, event\.y/);
   assert.match(machine, /advanceGachaLeverRadians/);
+  assert.match(machine, /advanceGachaLeverTapRadians/);
+  assert.match(machine, /gestureTravel\.value <= GESTURE_TAP_SLOP/);
+  assert.match(machine, /const gestureAccepted = useSharedValue\(0\)/);
+  assert.match(
+    machine,
+    /gestureAccepted\.value = 0;[\s\S]*?if \(!start\.accepted\) \{[\s\S]*?manager\.fail\(\)[\s\S]*?gestureAccepted\.value = 1/,
+  );
+  assert.match(machine, /\.onEnd\(\(\) => \{[\s\S]*?if \(!gestureAccepted\.value \|\| gestureCompleted\.value\) return/);
   assert.match(machine, /scheduleOnRN\(beginOpen\)/);
   assert.doesNotMatch(machine, /scheduleOnRN\(updateProgress/);
   assert.match(machine, /manualActivation\(true\)/);
-  assert.match(machine, /withTiming\(0, \{ duration: 220/);
+  assert.match(machine, /withTiming\(gestureStartRadians\.value, \{ duration: 220/);
   assert.match(machine, /withTiming\(GACHA_LEVER_TARGET_RADIANS/);
   assert.match(machine, /transitionGachaLeverMotion/);
   assert.match(machine, /onAccessibilityTap=\{autoCompleteLever\}/);
   assert.doesNotMatch(machine, /Math\.random|runOnJS/);
   assert.match(motion, /GACHA_LEVER_REQUIRED_TURNS = 2/);
+  assert.match(motion, /GACHA_LEVER_REQUIRED_TAPS = 8/);
   assert.match(motion, /Math\.atan2\(Math\.sin\(delta\), Math\.cos\(delta\)\)/);
   assert.match(agentGuide, /two clockwise circles[\s\S]*?gacha lever/);
+});
+
+test("gacha skip is a top-right action that reveals only the server-consumed result", () => {
+  const screen = read("apps/mobile/src/features/draw/DrawRevealScreen.tsx");
+
+  assert.match(screen, /accessibilityLabel="가챠 애니메이션 건너뛰기"/);
+  assert.match(screen, />스킵<\/Text>/);
+  assert.match(screen, /const handleGachaSkip = \(\) => \{/);
+  assert.match(screen, /skipRequestedRef\.current = true/);
+  assert.match(screen, /await consumeDrawEntitlement\(/);
+  assert.match(
+    screen,
+    /committedCategory === "gacha" && skipRequestedRef\.current[\s\S]*?setRevealSettled\(true\)/,
+  );
+  assert.doesNotMatch(screen, /const handleGachaSkip[\s\S]*?Math\.random/);
 });
 
 test("gacha and kuji reuse the ready-heading space and share twelve separated seeded embers", () => {
@@ -287,7 +312,10 @@ test("gacha and kuji reuse the ready-heading space and share twelve separated se
   assert.match(screen, /const showStageHeader = !isDrawCategory/);
   assert.match(screen, /showStageHeader \? \([\s\S]*?styles\.stageHeader/);
   assert.match(screen, /previewCompleted \? \([\s\S]*?styles\.summaryContent[\s\S]*?styles\.stageHeader/);
-  assert.match(screen, /style=\{\[styles\.stage, isDrawCategory && styles\.expandedDrawStage\]\}/);
+  assert.match(
+    screen,
+    /styles\.stage,[\s\S]*?isDrawCategory && styles\.expandedDrawStage,[\s\S]*?sourceCategory === "gacha" && styles\.fullGachaStage/,
+  );
   assert.match(screen, /expandedDrawStage: \{ minHeight: 496 \}/);
   assert.match(screen, /<StageAmbient[\s\S]*?sourceCategory=\{sourceCategory\}[\s\S]*?reduceMotion=\{reduceMotion\}/);
   assert.match(screen, /sourceCategory === "kuji" \|\| sourceCategory === "gacha"/);

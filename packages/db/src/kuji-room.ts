@@ -108,7 +108,9 @@ export async function promoteNextKujiRoomEntryLocked(
              AND v.status='ACTIVE'
              AND (e.remaining_quantity IS NULL OR e.remaining_quantity>0)
         )
-      FOR UPDATE OF p,s`,
+      -- The worker needs to serialize inventory changes, but must not receive
+      -- broad UPDATE privileges on catalog metadata merely to lock that row.
+      FOR UPDATE OF s`,
     [input.productId],
   );
   if (!joinable.rowCount) return null;

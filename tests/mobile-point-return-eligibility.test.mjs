@@ -1,0 +1,88 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import test from "node:test";
+import { fileURLToPath } from "node:url";
+
+import { isPointReturnEligibleInventory } from "../apps/mobile/src/features/profile/point-return-eligibility.ts";
+
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const profileSectionSource = readFileSync(
+  path.join(root, "apps/mobile/src/features/profile/ProfileSectionScreen.tsx"),
+  "utf8",
+);
+const profilePolicySource = readFileSync(
+  path.join(root, "apps/mobile/src/features/profile/profile-policies.ts"),
+  "utf8",
+);
+
+function inventory({ sourceType, status = "OWNED", category = "gacha" }) {
+  return {
+    id: `${sourceType}-${status}-${category}`,
+    sourceType,
+    status,
+    product: { category },
+  };
+}
+
+test("point return admits only owned inventory whose source is a gacha draw", () => {
+  for (const category of ["gacha", "kuji", "figure", "tcg"]) {
+    assert.equal(isPointReturnEligibleInventory(inventory({ sourceType: "GACHA", category })), true);
+  }
+
+  for (const sourceType of ["KUJI", "PURCHASE", "ADMIN_ADJUSTMENT"]) {
+    assert.equal(isPointReturnEligibleInventory(inventory({ sourceType })), false);
+  }
+
+  for (const status of [
+    "EXCHANGE_LISTED",
+    "EXCHANGE_OFFERED",
+    "SHIPPING",
+    "DELIVERED",
+    "TRANSFERRED",
+    "REFUNDED",
+    "POINT_RETURNED",
+  ]) {
+    assert.equal(isPointReturnEligibleInventory(inventory({ sourceType: "GACHA", status })), false);
+  }
+
+});
+
+test("storage keeps kuji for shipping while point return receives only the gacha subset", () => {
+  assert.match(
+    profileSectionSource,
+    /storedDrawItems = useMemo\([\s\S]*?snapshot\.inventory\.filter\(isStoredDrawInventory\)/,
+  );
+  assert.match(
+    profileSectionSource,
+    /pointReturnItems = useMemo\([\s\S]*?snapshot\.inventory\.filter\(isPointReturnEligibleInventory\)/,
+  );
+  assert.match(
+    profileSectionSource,
+    /<Shipping[^>]*items=\{storedDrawItems\}/,
+  );
+  assert.match(
+    profileSectionSource,
+    /<PointReturn[^>]*items=\{pointReturnItems\}/,
+  );
+  assert.match(
+    profileSectionSource,
+    /가챠에서 직접 뽑아 보관 중인 상품만 포인트 환급할 수 있어요/,
+  );
+  assert.match(
+    profileSectionSource,
+    /쿠지 추첨과 피규어 등 일반 구매 상품은 포인트 환급할 수 없어요/,
+  );
+  assert.match(
+    profileSectionSource,
+    /createPointReturn\([\s\S]*?selectedInventoryUnitIds/,
+  );
+  assert.match(
+    profilePolicySource,
+    /포인트 환급은 가챠에서 직접 뽑아 현재 보관 중인 상품만 가능하며, 쿠지 추첨 상품과 피규어 등 일반 구매 상품은 대상이 아닙니다/,
+  );
+  assert.match(
+    profilePolicySource,
+    /교환 등록과 제안에는 본인이 가챠에서 직접 뽑아 현재 보관 중인 상품만 각각 한두 개까지 사용할 수 있습니다/,
+  );
+});

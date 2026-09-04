@@ -100,9 +100,9 @@ test("point return ids and amounts are deterministic and use integer floor at 50
   assert.throws(() => canonicalPointReturnInventoryIds([low, low]), AppError);
 });
 
-test("point return eligibility requires original drawn inventory in the owned state", () => {
+test("point return eligibility requires original GACHA-drawn inventory in the owned state", () => {
   assert.equal(isPointReturnEligibleInventory("OWNED", "GACHA", true), true);
-  assert.equal(isPointReturnEligibleInventory("OWNED", "KUJI", true), true);
+  assert.equal(isPointReturnEligibleInventory("OWNED", "KUJI", true), false);
   assert.equal(isPointReturnEligibleInventory("OWNED", "PURCHASE", true), false);
   assert.equal(isPointReturnEligibleInventory("OWNED", "ADMIN_ADJUSTMENT", true), false);
   assert.equal(isPointReturnEligibleInventory("OWNED", "GACHA", false), false);
@@ -117,6 +117,66 @@ test("point return eligibility requires original drawn inventory in the owned st
   ] as const) {
     assert.equal(isPointReturnEligibleInventory(status, "GACHA", true), false);
   }
+});
+
+test("point return endpoint rejects an original OWNED KUJI draw without crediting points", async () => {
+  const actorId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  const inventoryId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+  const entitlementId = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+  const queries: string[] = [];
+  const client = {
+    async query(sql: string) {
+      queries.push(sql);
+      if (sql === "BEGIN" || sql === "ROLLBACK") return { rowCount: null, rows: [] };
+      if (sql.startsWith("DELETE FROM idempotency_keys")) return { rowCount: 0, rows: [] };
+      if (sql.includes("INSERT INTO idempotency_keys")) {
+        return { rowCount: 1, rows: [{ id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd" }] };
+      }
+      if (sql.includes("FROM inventory_units iu") && sql.includes("draw_results")) {
+        return {
+          rowCount: 1,
+          rows: [{
+            id: inventoryId,
+            owner_id: actorId,
+            product_id: "kuji-prize",
+            source_type: "KUJI",
+            source_id: entitlementId,
+            status: "OWNED",
+            price: 2_000,
+            draw_user_id: actorId,
+            draw_entitlement_id: entitlementId,
+            draw_prize_product_id: "kuji-prize",
+          }],
+        };
+      }
+      throw new Error(`Unexpected query: ${sql}`);
+    },
+    release() { /* no-op */ },
+  };
+  const { app, routes } = routeCapture();
+  await registerAccountRoutes(app, testContext({ async connect() { return client; } }));
+  const handler = routes.get("/v1/account/point-returns");
+  assert.ok(handler);
+
+  await assert.rejects(
+    handler({
+      actor: { userId: actorId },
+      headers: { "idempotency-key": "point-return-kuji-reject-0001" },
+      body: { inventoryUnitIds: [inventoryId] },
+      id: "request-point-return-kuji-reject-0001",
+    }, {}),
+    (error: unknown) => error instanceof AppError
+      && error.statusCode === 409
+      && /가챠 상품만/.test(error.message),
+  );
+
+  const inventoryLock = queries.find((sql) => sql.includes("FROM inventory_units iu") && sql.includes("draw_results"));
+  assert.match(inventoryLock || "", /iu\.source_type='GACHA'/);
+  assert.equal(queries.includes("ROLLBACK"), true);
+  assert.equal(queries.includes("COMMIT"), false);
+  assert.equal(queries.some((sql) => sql.includes("INSERT INTO inventory_point_returns")), false);
+  assert.equal(queries.some((sql) => sql.includes("INSERT INTO point_ledger_entries")), false);
+  assert.equal(queries.some((sql) => sql.includes("UPDATE point_accounts SET balance=balance+")), false);
 });
 
 test("shipping contact data is normalized for storage and masked for response", () => {
@@ -242,6 +302,108 @@ test("wishlist reads hide prize-only catalog items", async () => {
   await handler({ actor: { userId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" }, query: {} }, {});
 
   assert.match(capturedSql, /p\.is_prize_only=false/);
+});
+
+test("account inventory returns only the owner's directly drawn stored GACHA and KUJI prizes", async () => {
+  const actorId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  const inventoryId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+  const acquiredAt = new Date("2026-09-01T03:00:00.000Z");
+  const productCreatedAt = new Date("2026-08-01T03:00:00.000Z");
+  const productUpdatedAt = new Date("2026-08-31T03:00:00.000Z");
+  let capturedSql = "";
+  let capturedParams: unknown[] = [];
+  let queryCount = 0;
+  const pool = {
+    async query(sql: string, params: unknown[] = []) {
+      queryCount += 1;
+      capturedSql = sql;
+      capturedParams = params;
+      return {
+        rowCount: 1,
+        rows: [{
+          id: inventoryId,
+          owner_id: actorId,
+          product_id: "inactive-kuji-prize",
+          source_type: "KUJI",
+          inventory_status: "OWNED",
+          acquired_at: acquiredAt,
+          sku: "PRIZE-KUJI-001",
+          ip_id: "test-ip",
+          character_ids: ["cccccccc-cccc-4ccc-8ccc-cccccccccccc"],
+          category: "figure",
+          product_name: "비활성 전환된 쿠지 경품",
+          manufacturer: "DABBOBA",
+          release_date: "2026-08-01",
+          price: "9900",
+          available_quantity: "0",
+          metadata: { rarity: "A" },
+          image_url: "https://cdn.example.test/inactive-kuji-prize.png",
+          product_active: false,
+          is_prize_only: true,
+          product_version: 3,
+          product_created_at: productCreatedAt,
+          product_updated_at: productUpdatedAt,
+          created_at: acquiredAt,
+        }],
+      };
+    },
+  };
+  const { app, routes } = routeCapture();
+  await registerAccountRoutes(app, testContext(pool));
+  const handler = routes.get("/v1/account/inventory");
+  assert.ok(handler);
+
+  const body = await handler({ actor: { userId: actorId }, query: { limit: 2 } }, {});
+
+  assert.deepEqual(body, {
+    items: [{
+      id: inventoryId,
+      ownerId: actorId,
+      productId: "inactive-kuji-prize",
+      product: {
+        id: "inactive-kuji-prize",
+        sku: "PRIZE-KUJI-001",
+        ipId: "test-ip",
+        characterIds: ["cccccccc-cccc-4ccc-8ccc-cccccccccccc"],
+        category: "figure",
+        name: "비활성 전환된 쿠지 경품",
+        manufacturer: "DABBOBA",
+        releaseDate: "2026-08-01",
+        price: 9_900,
+        availableQuantity: 0,
+        metadata: { rarity: "A" },
+        imageUrl: "https://cdn.example.test/inactive-kuji-prize.png",
+        isActive: false,
+        isPrizeOnly: true,
+        version: 3,
+        createdAt: productCreatedAt.toISOString(),
+        updatedAt: productUpdatedAt.toISOString(),
+      },
+      sourceType: "KUJI",
+      status: "OWNED",
+      acquiredAt: acquiredAt.toISOString(),
+    }],
+    nextCursor: null,
+  });
+  assert.deepEqual(capturedParams, [actorId, 3]);
+  assert.match(capturedSql, /iu\.owner_id=\$1/);
+  assert.match(capturedSql, /iu\.status='OWNED'/);
+  assert.match(capturedSql, /iu\.source_type IN \('GACHA','KUJI'\)/);
+  assert.match(capturedSql, /draw_result\.prize_inventory_unit_id=iu\.id/);
+  assert.match(capturedSql, /draw_result\.user_id=iu\.owner_id/);
+  assert.match(capturedSql, /draw_result\.entitlement_id=iu\.source_id/);
+  assert.match(capturedSql, /draw_result\.prize_product_id=iu\.product_id/);
+  assert.doesNotMatch(capturedSql, /p\.is_active\s*=\s*true/);
+
+  const malformedUuidCursor = Buffer.from(JSON.stringify({
+    createdAt: acquiredAt.toISOString(),
+    id: "not-a-uuid",
+  }), "utf8").toString("base64url");
+  await assert.rejects(
+    handler({ actor: { userId: actorId }, query: { cursor: malformedUuidCursor } }, {}),
+    (error: unknown) => error instanceof AppError && error.statusCode === 400,
+  );
+  assert.equal(queryCount, 1);
 });
 
 test("draw entitlements default to AVAILABLE and are scoped to the authenticated owner", async () => {
@@ -509,7 +671,7 @@ test("point return atomically locks original draw inventory, records immutable a
               id: highId,
               owner_id: actorId,
               product_id: "prize-high",
-              source_type: "KUJI",
+              source_type: "GACHA",
               source_id: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
               status: "OWNED",
               price: 2_000,

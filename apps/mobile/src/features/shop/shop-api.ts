@@ -1,6 +1,7 @@
 import { randomUUID } from "expo-crypto";
 import { errorMessage } from "@dabboba/api-client";
 import type { CatalogIp, CatalogProduct, components } from "@dabboba/contracts";
+import { isCustomerBrowsableCatalogCategory } from "@/features/catalog/product-categories";
 import { createMobileDabbobaClient as createDabbobaClient } from "@/lib/mobile-api-client";
 
 export type ProductCategory = CatalogProduct["category"];
@@ -34,7 +35,9 @@ export async function fetchShopSnapshot(apiBaseUrl: string): Promise<ShopSnapsho
   }
 
   return {
-    products: productResult.data.items,
+    products: productResult.data.items.filter((product) => (
+      isCustomerBrowsableCatalogCategory(product.category)
+    )),
     ips: ipResult.data.items,
     fetchedAt: new Date().toISOString(),
   };
@@ -61,7 +64,9 @@ export async function fetchProductDetail(
   if (!productResult.data) {
     throw new Error(errorMessage(productResult.error, "상품 정보를 불러오지 못했습니다."));
   }
-  const product = productResult.data.items.find((item) => item.id === productId);
+  const product = productResult.data.items.find((item) => (
+    item.id === productId && isCustomerBrowsableCatalogCategory(item.category)
+  ));
   if (!product) throw new Error("상품을 찾을 수 없습니다.");
 
   let drawOdds: PublicDrawOdds | null = null;

@@ -164,7 +164,7 @@ test("forged outbox jobs without a canonical PostgreSQL row are rejected before 
   assert.equal(sideEffects, 0);
 });
 
-test("outbox jobs whose Redis payload differs from PostgreSQL are rejected before processing", async () => {
+test("outbox jobs whose queue payload differs from PostgreSQL are rejected before processing", async () => {
   let sideEffects = 0;
   const canonical = outboxEvent();
   const dependencies = {
@@ -191,7 +191,7 @@ test("outbox jobs whose Redis payload differs from PostgreSQL are rejected befor
   assert.equal(sideEffects, 0);
 });
 
-test("a BullMQ outbox job matching the canonical PostgreSQL event is processed", async () => {
+test("a pgmq outbox job matching the canonical PostgreSQL event is processed", async () => {
   const canonical = outboxEvent({ eventType: "notice.published", payload: {} });
   let canonicalQueries = 0;
   const debugEntries: Array<Record<string, unknown>> = [];

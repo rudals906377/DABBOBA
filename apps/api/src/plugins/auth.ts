@@ -62,9 +62,30 @@ export function createAuthHooks(pool: DatabasePool, config: ApiConfig) {
       status: UserStatus;
       suspended_until: Date | null;
     }>(
-      `SELECT s.id AS session_id, s.session_kind, u.id AS user_id, u.email::text, u.nickname, u.role, u.status, u.suspended_until
-       FROM sessions s JOIN users u ON u.id = s.user_id
-       WHERE s.token_digest = $1 AND s.revoked_at IS NULL AND s.expires_at > now()`,
+      `WITH active_session AS MATERIALIZED (
+         SELECT s.id AS session_id, s.session_kind, u.id AS user_id,
+                u.email::text, u.nickname, u.role, u.status, u.suspended_until
+           FROM sessions s
+           JOIN users u ON u.id = s.user_id
+          WHERE s.token_digest = $1
+            AND s.revoked_at IS NULL
+            AND s.expires_at > now()
+          LIMIT 1
+       ), touch_target AS MATERIALIZED (
+         SELECT s.id
+           FROM sessions s
+           JOIN active_session active ON active.session_id = s.id
+          WHERE s.last_seen_at < now() - interval '5 minutes'
+          FOR UPDATE OF s SKIP LOCKED
+       ), touch AS (
+         UPDATE sessions s
+            SET last_seen_at = now()
+           FROM touch_target target
+          WHERE s.id = target.id
+          RETURNING s.id
+       )
+       SELECT active.*, EXISTS(SELECT 1 FROM touch) AS last_seen_touched
+         FROM active_session active`,
       [tokenDigest(token, config.sessionTokenPepper)],
     );
     const row = result.rows[0];
@@ -83,7 +104,6 @@ export function createAuthHooks(pool: DatabasePool, config: ApiConfig) {
       sessionKind: row.session_kind,
     };
     request.actor = actor;
-    void pool.query("UPDATE sessions SET last_seen_at = now() WHERE id = $1 AND last_seen_at < now() - interval '5 minutes'", [row.session_id]);
     return actor;
   };
 

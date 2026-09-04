@@ -907,6 +907,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/account/inventory": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listAccountInventory"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/account/wishlist": {
         parameters: {
             query?: never;
@@ -1840,13 +1856,17 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
-        Health: {
+        Liveness: {
+            /** @constant */
+            status: "ok";
+            /** Format: date-time */
+            timestamp: string;
+        };
+        Readiness: {
             /** @enum {string} */
-            status: "ok" | "degraded";
+            status: "ok" | "unavailable";
             /** @enum {string} */
             database: "ok" | "unavailable";
-            /** @enum {string} */
-            redis: "ok" | "unavailable";
             /** Format: date-time */
             timestamp: string;
         };
@@ -2109,9 +2129,11 @@ export interface components {
             version: number;
             items: components["schemas"]["PointLedgerEntry"][];
         };
+        /** @description Select one to twenty currently stored inventory units whose verified acquisition source is GACHA. Inventory acquired through KUJI, direct purchase, or an admin adjustment is not eligible. */
         CreatePointReturnInput: {
             inventoryUnitIds: string[];
         };
+        /** @description The committed return of inventory acquired through GACHA and the authoritative resulting point balance. */
         PointReturnResult: {
             /** Format: uuid */
             id: string;
@@ -2616,6 +2638,7 @@ export interface components {
             /** @enum {string} */
             status: "OPEN" | "MATCHED" | "COMPLETED" | "CANCELLED" | "HIDDEN";
             offeredInventory: components["schemas"]["InventoryUnit"];
+            offeredInventories: components["schemas"]["InventoryUnit"][];
             offerCount: number;
             /** Format: uuid */
             acceptedOfferId: string | null;
@@ -2645,8 +2668,13 @@ export interface components {
         CreateExchangeListingInput: {
             title: string;
             details: string;
-            /** Format: uuid */
-            offeredInventoryUnitId: string;
+            offeredInventoryUnitIds: string[];
+            /**
+             * Format: uuid
+             * @deprecated
+             * @description Legacy single-item field accepted by the server for older clients.
+             */
+            offeredInventoryUnitId?: string;
         };
         ExchangeListingPage: components["schemas"]["PageMeta"] & {
             items: components["schemas"]["ExchangeListing"][];
@@ -2660,6 +2688,7 @@ export interface components {
             proposerId: string;
             proposerNickname: string;
             offeredInventory: components["schemas"]["InventoryUnit"];
+            offeredInventories: components["schemas"]["InventoryUnit"][];
             /** @enum {string} */
             status: "PENDING" | "ACCEPTED" | "REJECTED" | "WITHDRAWN";
             /** Format: date-time */
@@ -2668,8 +2697,13 @@ export interface components {
             updatedAt: string;
         };
         CreateExchangeOfferInput: {
-            /** Format: uuid */
-            offeredInventoryUnitId: string;
+            offeredInventoryUnitIds: string[];
+            /**
+             * Format: uuid
+             * @deprecated
+             * @description Legacy single-item field accepted by the server for older clients.
+             */
+            offeredInventoryUnitId?: string;
         };
         Order: {
             /** Format: uuid */
@@ -3595,13 +3629,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Process and dependencies are healthy. */
+            /** @description The API process is alive. No external dependency is queried. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Health"];
+                    "application/json": components["schemas"]["Liveness"];
                 };
             };
         };
@@ -3615,22 +3649,22 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Process dependencies are ready to serve traffic. */
+            /** @description PostgreSQL is ready to serve traffic. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Health"];
+                    "application/json": components["schemas"]["Readiness"];
                 };
             };
-            /** @description A required dependency is unavailable. */
+            /** @description PostgreSQL is unavailable. */
             503: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Health"];
+                    "application/json": components["schemas"]["Readiness"];
                 };
             };
         };
@@ -4861,7 +4895,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Listing created from one eligible directly drawn GACHA inventory unit. */
+            /** @description Listing created from one or two eligible directly drawn GACHA inventory units. */
             201: {
                 headers: {
                     [name: string]: unknown;
@@ -4913,7 +4947,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Product-only exchange proposal created from eligible directly drawn GACHA inventory. */
+            /** @description Product-only exchange proposal created from one or two eligible directly drawn GACHA inventory units. */
             201: {
                 headers: {
                     [name: string]: unknown;
@@ -5479,6 +5513,31 @@ export interface operations {
             409: components["responses"]["Conflict"];
         };
     };
+    listAccountInventory: {
+        parameters: {
+            query?: {
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current user's directly drawn, currently OWNED GACHA and KUJI prizes, including prizes whose catalog product is inactive. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InventoryUnitPage"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+        };
+    };
     listWishlist: {
         parameters: {
             query?: {
@@ -5639,7 +5698,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Directly drawn, currently stored inventory atomically returned for 50 percent of its server reference amount in points. */
+            /** @description Eligible directly drawn, currently stored GACHA inventory atomically returned for 50 percent of its server reference amount in points. */
             201: {
                 headers: {
                     [name: string]: unknown;

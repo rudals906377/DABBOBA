@@ -7,7 +7,7 @@ import {
   writeAuthTokens,
 } from "@/lib/session-store";
 
-const DEVELOPMENT_EMAIL = "app@dabboba.local";
+const DEVELOPMENT_EMAIL = "mobile-test@dabboba.local";
 
 export async function ensureDevelopmentAuthSession(
   apiBaseUrl: string,
