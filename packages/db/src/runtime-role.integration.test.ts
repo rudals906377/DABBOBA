@@ -59,7 +59,7 @@ test("runtime database role can operate app data but cannot administer the schem
       [RUNTIME_DATABASE_ROLE],
     );
     assert.equal(tableAccess.rows.filter((row) => row.can_select).length, 64);
-    assert.equal(tableAccess.rows.filter((row) => row.can_insert).length, 65);
+    assert.equal(tableAccess.rows.filter((row) => row.can_insert).length, 67);
     assert.equal(tableAccess.rows.filter((row) => row.can_update).length, 40);
     assert.equal(tableAccess.rows.filter((row) => row.can_delete).length, 7);
     for (const exchangeBundleTable of ["exchange_listing_items", "exchange_offer_items"]) {
