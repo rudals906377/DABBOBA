@@ -1,7 +1,7 @@
 import type { CatalogIp, CatalogProduct, components } from "@dabboba/contracts";
 
 type Notice = components["schemas"]["Notice"];
-type HomeIp = Pick<CatalogIp, "id" | "nameKo">;
+type HomeIp = Pick<CatalogIp, "id" | "nameKo"> & { isActive?: boolean };
 type HomeProduct = Pick<CatalogProduct, "id" | "ipId" | "category" | "name" | "isActive" | "isPrizeOnly">;
 type HomeNotice = Pick<Notice, "title" | "isPinned" | "isPublished" | "status">;
 
@@ -20,6 +20,15 @@ export type HomeCollection<Ip extends HomeIp = CatalogIp, Product extends HomePr
   title: string;
   ip: Ip;
   products: Product[];
+};
+
+type ConfiguredHomeSection<Ip extends HomeIp, Product extends HomeProduct> = {
+  id: string;
+  title: string;
+  sortOrder: number;
+  isActive: boolean;
+  ip: Ip;
+  products: readonly Product[];
 };
 
 export type DrawActivityItem = {
@@ -53,6 +62,28 @@ export function buildHomeCollections<Ip extends HomeIp, Product extends HomeProd
   });
 }
 
+export function buildConfiguredHomeCollections<Ip extends HomeIp, Product extends HomeProduct>(
+  sections: readonly ConfiguredHomeSection<Ip, Product>[],
+): HomeCollection<Ip, Product>[] {
+  return [...sections]
+    .sort((left, right) => left.sortOrder - right.sortOrder || left.id.localeCompare(right.id))
+    .flatMap((section) => {
+      if (!section.isActive || section.ip.isActive === false) return [];
+      const products = section.products.filter(
+        (product) => product.isActive
+          && !product.isPrizeOnly
+          && (product.category === "gacha" || product.category === "kuji"),
+      );
+      if (!products.length) return [];
+      return [{
+        id: section.id,
+        title: section.title,
+        ip: section.ip,
+        products,
+      }];
+    });
+}
+
 export function homeAnnouncementMessages(notices: readonly HomeNotice[]): string[] {
   const pinned = notices
     .filter((notice) => notice.isPinned && notice.isPublished && notice.status === "ACTIVE")
@@ -64,6 +95,15 @@ export function homeAnnouncementMessages(notices: readonly HomeNotice[]): string
 export function getTickerOverflowDistance(viewportWidth: number, textWidth: number): number {
   if (viewportWidth <= 0 || textWidth <= viewportWidth) return 0;
   return textWidth - viewportWidth;
+}
+
+export function getContinuousTickerLoopDistance(
+  viewportWidth: number,
+  textWidth: number,
+  gapWidth: number,
+): number {
+  if (viewportWidth <= 0 || textWidth <= viewportWidth) return 0;
+  return textWidth + Math.max(0, gapWidth);
 }
 
 export function getHomeProductCardWidth(

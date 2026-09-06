@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Image, StyleSheet, View } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, {
@@ -6,7 +6,6 @@ import Animated, {
   Easing,
   Extrapolation,
   interpolate,
-  type SharedValue,
   useAnimatedStyle,
   useSharedValue,
   withRepeat,
@@ -27,6 +26,10 @@ import {
   type KujiOpenMotionEvent,
   type KujiOpenMotionPhase,
 } from "@/features/draw/draw-reveal-state";
+import {
+  isKujiResultGateOpen,
+  sampleKujiTicketRevealMotion,
+} from "@/features/draw/kuji-ticket-reveal-motion";
 import { colors } from "@/theme";
 
 type KujiPeelTicketProps = {
@@ -36,6 +39,8 @@ type KujiPeelTicketProps = {
   reduceMotion: boolean;
   resultReady: boolean;
   resultLabel?: string;
+  settled?: boolean;
+  resultContent?: ReactNode;
   requestSignal?: number;
   resetSignal?: number;
   onRequestOpen: () => void;
@@ -50,19 +55,10 @@ const returnSpring = {
   mass: 0.8,
   overshootClamping: true,
 } as const;
-const IMPACT_PARTICLES = [
-  { x: -118, y: -62, rotate: -28, size: 8 },
-  { x: -92, y: 76, rotate: 18, size: 6 },
-  { x: -42, y: -104, rotate: -12, size: 5 },
-  { x: 38, y: -112, rotate: 26, size: 7 },
-  { x: 88, y: -72, rotate: 38, size: 5 },
-  { x: 122, y: 12, rotate: 52, size: 8 },
-  { x: 76, y: 88, rotate: 22, size: 6 },
-  { x: 8, y: 116, rotate: -18, size: 5 },
-] as const;
 const DABBOBA_WORDMARK = require("../../../assets/dabboba-wordmark.png");
 const KUJI_TICKET_OUTER_LAYER = require("../../../assets/kuji-ticket-outer-layer.png");
 const KUJI_TICKET_PEEL_LAYER = require("../../../assets/kuji-ticket-peel-layer.png");
+const KUJI_TICKET_GLOW = require("../../../assets/gacha-capsule-glow-v1.png");
 
 export function KujiPeelTicket({
   ticketNumber,
@@ -71,6 +67,8 @@ export function KujiPeelTicket({
   reduceMotion,
   resultReady,
   resultLabel = "RESULT",
+  settled = false,
+  resultContent,
   requestSignal = 0,
   resetSignal = 0,
   onRequestOpen,
@@ -85,6 +83,7 @@ export function KujiPeelTicket({
   const cuePulse = useSharedValue(0);
   const gestureEnded = useSharedValue(0);
   const motionStateRef = useRef(createKujiOpenMotionState(reduceMotion));
+  const runGenerationRef = useRef(0);
   const dispatchRef = useRef<(event: KujiOpenMotionEvent) => void>(() => undefined);
   const requestOpenRef = useRef(onRequestOpen);
   const revealSettledRef = useRef(onRevealSettled);
@@ -94,11 +93,13 @@ export function KujiPeelTicket({
   requestOpenRef.current = onRequestOpen;
   revealSettledRef.current = onRevealSettled;
 
-  const handleTravelSettled = useCallback((finished: boolean) => {
+  const handleTravelSettled = useCallback((generation: number, finished: boolean) => {
+    if (generation !== runGenerationRef.current) return;
     dispatchRef.current({ type: "travel-settled", finished });
   }, []);
 
-  const handleImpactSettled = useCallback((finished: boolean) => {
+  const handleImpactSettled = useCallback((generation: number, finished: boolean) => {
+    if (generation !== runGenerationRef.current) return;
     dispatchRef.current({ type: "impact-settled", finished });
   }, []);
 
@@ -108,6 +109,8 @@ export function KujiPeelTicket({
     setPhase(transition.state.phase);
 
     if (transition.effect === "request-and-animate") {
+      const generation = runGenerationRef.current + 1;
+      runGenerationRef.current = generation;
       requestOpenRef.current();
       dragProgress.value = withTiming(
         1,
@@ -117,27 +120,29 @@ export function KujiPeelTicket({
         },
         (finished) => {
           "worklet";
-          scheduleOnRN(handleTravelSettled, Boolean(finished));
+          scheduleOnRN(handleTravelSettled, generation, Boolean(finished));
         },
       );
       return;
     }
 
     if (transition.effect === "request-and-wait") {
+      runGenerationRef.current += 1;
       dragProgress.value = 1;
       requestOpenRef.current();
       return;
     }
 
     if (transition.effect === "start-impact") {
+      const generation = runGenerationRef.current;
       dragProgress.value = 1;
       impactProgress.value = 0;
       impactProgress.value = withTiming(
         1,
-        { duration: DRAW_MOTION.kujiImpactMs, easing: smoothEmphasisEasing },
+        { duration: DRAW_MOTION.kujiImpactMs, easing: Easing.linear },
         (finished) => {
           "worklet";
-          scheduleOnRN(handleImpactSettled, Boolean(finished));
+          scheduleOnRN(handleImpactSettled, generation, Boolean(finished));
         },
       );
       return;
@@ -150,6 +155,7 @@ export function KujiPeelTicket({
     }
 
     if (transition.effect === "reset") {
+      runGenerationRef.current += 1;
       cancelAnimation(dragProgress);
       cancelAnimation(impactProgress);
       dragProgress.value = withSpring(0, returnSpring);
@@ -170,6 +176,7 @@ export function KujiPeelTicket({
   useEffect(() => {
     if (resetSignalRef.current === resetSignal) return;
     resetSignalRef.current = resetSignal;
+    runGenerationRef.current += 1;
     motionStateRef.current = createKujiOpenMotionState(reduceMotion);
     setPhase("sealed");
     cancelAnimation(dragProgress);
@@ -193,6 +200,7 @@ export function KujiPeelTicket({
   }, [entryProgress, reduceMotion, resetSignal]);
 
   useEffect(() => () => {
+    runGenerationRef.current += 1;
     cancelAnimation(dragProgress);
     cancelAnimation(impactProgress);
     cancelAnimation(cuePulse);
@@ -282,18 +290,44 @@ export function KujiPeelTicket({
       { scale: interpolate(pressed.value, [0, 1], [1, 0.99]) },
     ],
   }));
-  const neutralResultStyle = useAnimatedStyle(() => ({
-    opacity: interpolate(impactProgress.value, [0, 0.12, 0.34], [1, 1, 0], Extrapolation.CLAMP),
+  const resultGateOpen = isKujiResultGateOpen(phase, resultReady, settled);
+  const ticketRevealStyle = useAnimatedStyle(() => ({
+    opacity: sampleKujiTicketRevealMotion(
+      impactProgress.value,
+      resultGateOpen,
+      reduceMotion,
+    ).ticketOpacity,
   }));
-  const committedResultStyle = useAnimatedStyle(() => ({
-    opacity: interpolate(impactProgress.value, [0.12, 0.34, 1], [0, 1, 1], Extrapolation.CLAMP),
+  const resultRevealStyle = useAnimatedStyle(() => ({
+    opacity: sampleKujiTicketRevealMotion(
+      impactProgress.value,
+      resultGateOpen,
+      reduceMotion,
+    ).resultOpacity,
+  }));
+  const glowStyle = useAnimatedStyle(() => {
+    const frame = sampleKujiTicketRevealMotion(
+      impactProgress.value,
+      resultGateOpen,
+      reduceMotion,
+    );
+    return {
+      opacity: frame.glowOpacity,
+      transform: [{ scale: frame.glowScale }],
+    };
+  });
+  const peelEdgeGlowStyle = useAnimatedStyle(() => ({
+    opacity: reduceMotion
+      ? 0
+      : interpolate(
+          dragProgress.value,
+          [0, 0.04, 0.72, 1],
+          [0, 0.34, 0.46, 0],
+          Extrapolation.CLAMP,
+        ),
     transform: [{
-      scale: interpolate(impactProgress.value, [0, 0.38, 0.7, 1], [0.86, 1.025, 0.995, 1], Extrapolation.CLAMP),
+      translateX: dragProgress.value * (ticketWidth + 34) - 18,
     }],
-  }));
-  const flashStyle = useAnimatedStyle(() => ({
-    opacity: interpolate(impactProgress.value, [0, 0.08, 0.3, 1], [0, 0.92, 0.2, 0], Extrapolation.CLAMP),
-    transform: [{ scale: interpolate(impactProgress.value, [0, 0.36], [0.58, 1.35], Extrapolation.CLAMP) }],
   }));
   const pullArrowStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: interpolate(cuePulse.value, [0, 1], [0, 5]) }],
@@ -310,123 +344,188 @@ export function KujiPeelTicket({
       ? `${ticketNumber}번 쿠지 열기`
       : "쿠지 열기";
   const busy = phase !== "sealed" && phase !== "revealed";
+  const resultAccessible = resultGateOpen && settled;
 
   return (
-    <GestureDetector gesture={interactionGesture}>
+    <View style={styles.revealStage}>
       <Animated.View
-        accessible
-        accessibilityRole="button"
-        accessibilityLabel={busy ? `${accessibilityLabel}, 결과 확인 중` : accessibilityLabel}
-        accessibilityHint="두 번 탭하거나 왼쪽 손잡이를 오른쪽으로 밀어 엽니다"
-        accessibilityState={{ disabled, busy }}
-        onAccessibilityTap={beginOpen}
-        style={[styles.pressTarget, entryStyle]}
+        pointerEvents="none"
+        accessibilityElementsHidden={!resultAccessible}
+        importantForAccessibility={resultAccessible ? "auto" : "no-hide-descendants"}
+        style={[styles.resultContentLayer, resultRevealStyle]}
       >
-        <View
-          accessibilityElementsHidden
-          importantForAccessibility="no-hide-descendants"
-          onLayout={(event) => setTicketWidth(event.nativeEvent.layout.width)}
-          style={styles.ticketShell}
+        {resultContent ?? (
+          <View style={styles.resultFallback}>
+            <Text numberOfLines={1} adjustsFontSizeToFit style={styles.resultFallbackLabel}>
+              {resultLabel}
+            </Text>
+            <Text style={styles.resultFallbackSerial}>{primaryLabel}</Text>
+          </View>
+        )}
+      </Animated.View>
+
+      <GestureDetector gesture={interactionGesture}>
+        <Animated.View
+          accessible={!settled}
+          accessibilityRole="button"
+          accessibilityLabel={busy ? `${accessibilityLabel}, 결과 확인 중` : accessibilityLabel}
+          accessibilityHint="두 번 탭하거나 왼쪽 손잡이를 오른쪽으로 밀어 엽니다"
+          accessibilityState={{ disabled, busy }}
+          onAccessibilityTap={beginOpen}
+          style={[styles.pressTarget, entryStyle]}
         >
-          <View style={styles.resultFace}>
-            <Animated.View style={[styles.resultLayer, neutralResultStyle]}>
-              <Text style={styles.resultEyebrow}>RESULT</Text>
-              <View style={styles.resultPlate}>
-                <Text style={styles.resultMark}>•••</Text>
-              </View>
-              <Text style={styles.resultSerial}>{primaryLabel}</Text>
-            </Animated.View>
-            <Animated.View style={[styles.resultLayer, committedResultStyle]}>
-              <Text style={styles.resultEyebrow}>OPEN</Text>
-              <View style={[styles.resultPlate, styles.resultPlateReady]}>
-                <Text numberOfLines={1} adjustsFontSizeToFit style={styles.resultReadyLabel}>
-                  {resultLabel}
-                </Text>
-              </View>
-              <Text style={styles.resultSerial}>{primaryLabel}</Text>
-            </Animated.View>
-          </View>
-
-          <Animated.View pointerEvents="none" style={[styles.impactFlash, flashStyle]} />
-          {IMPACT_PARTICLES.map((particle, index) => (
-            <ImpactParticle key={`${particle.x}-${particle.y}`} index={index} progress={impactProgress} />
-          ))}
-
-          <View pointerEvents="none" style={styles.ticketOuterLayer}>
-            <Image
-              accessibilityIgnoresInvertColors
-              resizeMode="stretch"
-              source={KUJI_TICKET_OUTER_LAYER}
-              style={styles.ticketLayerImage}
-            />
-            <View style={styles.tearEdge}>
-              {Array.from({ length: 10 }, (_, index) => (
-                <View key={index} style={styles.tearTooth} />
-              ))}
-            </View>
-          </View>
-          <Animated.View style={[styles.ticketPeelLayer, peelLayerStyle]}>
-            <Image
-              accessibilityIgnoresInvertColors
-              resizeMode="stretch"
-              source={KUJI_TICKET_PEEL_LAYER}
-              style={styles.ticketLayerImage}
-            />
-            <View style={styles.ticketCopy}>
-              <Image
+          <View
+            accessibilityElementsHidden
+            importantForAccessibility="no-hide-descendants"
+            onLayout={(event) => setTicketWidth(event.nativeEvent.layout.width)}
+            style={styles.ticketFrame}
+          >
+            <View collapsable={false} pointerEvents="none" style={styles.ticketGlowClip}>
+              <Animated.Image
                 accessibilityIgnoresInvertColors
                 resizeMode="contain"
-                source={DABBOBA_WORDMARK}
-                style={styles.ticketWordmark}
+                source={KUJI_TICKET_GLOW}
+                style={[styles.ticketPayoffGlow, {
+                  left: ticketWidth * 0.14,
+                  top: (ticketWidth / 1.46 - ticketWidth * 0.72) / 2,
+                  width: ticketWidth * 0.72,
+                  height: ticketWidth * 0.72,
+                }, glowStyle]}
               />
-              <Text style={styles.ticketNumber}>{primaryLabel}</Text>
+              <Animated.Image
+                accessibilityIgnoresInvertColors
+                resizeMode="stretch"
+                source={KUJI_TICKET_GLOW}
+                style={[styles.ticketPeelEdgeGlow, {
+                  top: -ticketWidth / 1.46 * 0.05,
+                  height: ticketWidth / 1.46 * 1.1,
+                }, peelEdgeGlowStyle]}
+              />
             </View>
-            <View pointerEvents="none" style={styles.pullArrowWindow}>
-              <View style={styles.pullArrowEraserShaft} />
-              <View style={styles.pullArrowEraserHead} />
-              <Animated.View style={[styles.pullArrowMotion, pullArrowStyle]}>
-                <View style={styles.pullArrowShaftOutline} />
-                <View style={styles.pullArrowHeadOutline} />
-                <View style={styles.pullArrowShaftFill} />
-                <View style={styles.pullArrowHeadFill} />
-              </Animated.View>
-            </View>
-          </Animated.View>
-        </View>
-      </Animated.View>
-    </GestureDetector>
+            <Animated.View collapsable={false} pointerEvents="none" style={[styles.ticketSurface, ticketRevealStyle]}>
+              <View style={styles.ticketShell}>
+                <View pointerEvents="none" style={styles.ticketOuterLayer}>
+                  <Image
+                    accessibilityIgnoresInvertColors
+                    resizeMode="stretch"
+                    source={KUJI_TICKET_OUTER_LAYER}
+                    style={styles.ticketLayerImage}
+                  />
+                  <View style={styles.tearEdge}>
+                    {Array.from({ length: 10 }, (_, index) => (
+                      <View key={index} style={styles.tearTooth} />
+                    ))}
+                  </View>
+                </View>
+                <Animated.View style={[styles.ticketPeelLayer, peelLayerStyle]}>
+                  <Image
+                    accessibilityIgnoresInvertColors
+                    resizeMode="stretch"
+                    source={KUJI_TICKET_PEEL_LAYER}
+                    style={styles.ticketLayerImage}
+                  />
+                  <View style={styles.ticketCopy}>
+                    <Image
+                      accessibilityIgnoresInvertColors
+                      resizeMode="contain"
+                      source={DABBOBA_WORDMARK}
+                      style={styles.ticketWordmark}
+                    />
+                    <Text style={styles.ticketNumber}>{primaryLabel}</Text>
+                  </View>
+                  <View pointerEvents="none" style={styles.pullArrowWindow}>
+                    <View style={styles.pullArrowEraserShaft} />
+                    <View style={styles.pullArrowEraserHead} />
+                    <Animated.View style={[styles.pullArrowMotion, pullArrowStyle]}>
+                      <View style={styles.pullArrowShaftOutline} />
+                      <View style={styles.pullArrowHeadOutline} />
+                      <View style={styles.pullArrowShaftFill} />
+                      <View style={styles.pullArrowHeadFill} />
+                    </Animated.View>
+                  </View>
+                </Animated.View>
+              </View>
+            </Animated.View>
+          </View>
+        </Animated.View>
+      </GestureDetector>
+    </View>
   );
-}
-
-function ImpactParticle({ index, progress }: { index: number; progress: SharedValue<number> }) {
-  const particle = IMPACT_PARTICLES[index]!;
-  const animatedStyle = useAnimatedStyle(() => ({
-    width: particle.size,
-    height: particle.size,
-    opacity: interpolate(progress.value, [0, 0.08, 0.46, 1], [0, 1, 0.82, 0], Extrapolation.CLAMP),
-    transform: [
-      { translateX: progress.value * particle.x },
-      { translateY: progress.value * particle.y },
-      { rotate: `${progress.value * particle.rotate}deg` },
-      { scale: interpolate(progress.value, [0, 0.16, 1], [0.2, 1, 0.55], Extrapolation.CLAMP) },
-    ],
-  }));
-  return <Animated.View pointerEvents="none" style={[styles.impactParticle, animatedStyle]} />;
 }
 
 const KUJI_ORANGE = "#F36B2C";
 const KUJI_ORANGE_DARK = "#A83C15";
-const KUJI_ORANGE_LIGHT = "#FFAA6B";
 
 const styles = StyleSheet.create({
+  revealStage: {
+    flex: 1,
+    width: "100%",
+    minHeight: 432,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  resultContentLayer: {
+    ...StyleSheet.absoluteFill,
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 1,
+  },
+  resultFallback: {
+    width: "100%",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  resultFallbackLabel: {
+    maxWidth: "90%",
+    color: colors.brand,
+    fontFamily: "Galmuri11",
+    fontSize: 20,
+    lineHeight: 28,
+    fontWeight: "400",
+    textAlign: "center",
+  },
+  resultFallbackSerial: {
+    marginTop: seed.spacing.x2,
+    color: colors.white,
+    fontSize: 11,
+    lineHeight: 16,
+    fontWeight: "800",
+    fontVariant: ["tabular-nums"],
+    letterSpacing: 0.7,
+  },
   pressTarget: {
     width: "100%",
     maxWidth: 316,
     minHeight: seed.size.touchTarget,
+    zIndex: 3,
+  },
+  ticketFrame: {
+    width: "100%",
+    aspectRatio: 1.46,
+  },
+  ticketGlowClip: {
+    ...StyleSheet.absoluteFill,
+    overflow: "hidden",
+    borderRadius: seed.radius.r3,
+    zIndex: 3,
+  },
+  ticketPayoffGlow: {
+    position: "absolute",
+    tintColor: "#FFF8E7",
+  },
+  ticketPeelEdgeGlow: {
+    position: "absolute",
+    left: 0,
+    width: 44,
+    tintColor: "#FFF4DA",
+  },
+  ticketSurface: {
+    ...StyleSheet.absoluteFill,
+    zIndex: 2,
   },
   ticketShell: {
     width: "100%",
-    aspectRatio: 1.46,
+    height: "100%",
     overflow: "hidden",
     borderRadius: seed.radius.r3,
     borderWidth: 4,
@@ -438,96 +537,8 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 8 },
     elevation: 8,
   },
-  resultFace: {
-    ...StyleSheet.absoluteFillObject,
-    margin: 7,
-    overflow: "hidden",
-    borderRadius: seed.radius.r2,
-    borderWidth: 1,
-    borderColor: "#8F4D2D",
-    backgroundColor: "#272421",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  resultLayer: {
-    ...StyleSheet.absoluteFillObject,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  resultEyebrow: {
-    color: KUJI_ORANGE_LIGHT,
-    fontFamily: "Galmuri11",
-    fontSize: 12,
-    lineHeight: 17,
-    fontWeight: "400",
-    letterSpacing: 1,
-  },
-  resultPlate: {
-    width: 112,
-    height: 62,
-    marginTop: seed.spacing.x2,
-    borderRadius: seed.radius.r2,
-    borderWidth: 2,
-    borderColor: "#765442",
-    backgroundColor: "#151413",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  resultPlateReady: {
-    borderColor: colors.brand,
-    backgroundColor: "#182219",
-  },
-  resultMark: {
-    color: colors.white,
-    fontFamily: "Galmuri11",
-    fontSize: 24,
-    lineHeight: 32,
-    fontWeight: "400",
-    letterSpacing: 3,
-  },
-  resultReadyLabel: {
-    maxWidth: 96,
-    paddingHorizontal: seed.spacing.x1,
-    color: colors.brand,
-    fontFamily: "Galmuri11",
-    fontSize: 18,
-    lineHeight: 24,
-    fontWeight: "400",
-    textAlign: "center",
-  },
-  resultSerial: {
-    marginTop: seed.spacing.x2,
-    color: "#B9AAA1",
-    fontSize: 10,
-    lineHeight: 14,
-    fontWeight: "800",
-    fontVariant: ["tabular-nums"],
-    letterSpacing: 0.7,
-  },
-  impactFlash: {
-    position: "absolute",
-    left: "50%",
-    top: "50%",
-    width: 220,
-    height: 220,
-    marginLeft: -110,
-    marginTop: -110,
-    borderRadius: seed.radius.full,
-    backgroundColor: "#FFF7DF",
-    zIndex: 4,
-  },
-  impactParticle: {
-    position: "absolute",
-    left: "50%",
-    top: "50%",
-    marginLeft: -4,
-    marginTop: -4,
-    borderRadius: 2,
-    backgroundColor: colors.brand,
-    zIndex: 5,
-  },
   ticketOuterLayer: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     margin: 4,
     overflow: "hidden",
     borderRadius: seed.radius.r2,
@@ -536,7 +547,7 @@ const styles = StyleSheet.create({
     zIndex: 6,
   },
   ticketPeelLayer: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     margin: 4,
     overflow: "hidden",
     borderRadius: seed.radius.r2,
@@ -545,7 +556,7 @@ const styles = StyleSheet.create({
     zIndex: 7,
   },
   ticketLayerImage: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     width: "100%",
     height: "100%",
   },
@@ -592,7 +603,7 @@ const styles = StyleSheet.create({
     zIndex: 1,
   },
   pullArrowMotion: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
   },
   pullArrowEraserShaft: {
     position: "absolute",

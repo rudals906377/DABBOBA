@@ -5,12 +5,20 @@ set -Eeuo pipefail
 readonly DABBOBA_CLOUD_RUN_REGION="asia-northeast3"
 readonly CLOUD_RUN_OPS_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 readonly DABBOBA_REPO_ROOT="$(cd -- "$CLOUD_RUN_OPS_DIR/../.." && pwd -P)"
-readonly DABBOBA_DATABASE_RELEASE_MIGRATION="packages/db/migrations/0033_exchange_bundle_items.sql"
-readonly DABBOBA_DATABASE_RELEASE_SHA256="1a4f88b4bc6707d9b985c0a29fb0fac1dda228af4fd87850d4eb6b1f7bd60c62"
-readonly DABBOBA_REQUIRED_DATABASE_RELEASE_ATTESTATION="0033:${DABBOBA_DATABASE_RELEASE_SHA256}:runtime+worker"
+readonly DABBOBA_DATABASE_RELEASE_MIGRATION="packages/db/migrations/0037_draw_result_published_version.sql"
+readonly DABBOBA_DATABASE_RELEASE_SHA256="b2f4a6eb8f79685c33d4fbd3eb63b1d947182dc78fa2dd5596663319f2c7ffa9"
+readonly DABBOBA_REQUIRED_DATABASE_RELEASE_ATTESTATION="0037:${DABBOBA_DATABASE_RELEASE_SHA256}:runtime+worker"
+readonly DABBOBA_WORKER_SCHEDULER_CRON="* * * * *"
+readonly DABBOBA_WORKER_SCHEDULER_TIME_ZONE="Asia/Seoul"
+readonly DABBOBA_WORKER_SCHEDULER_ATTEMPT_DEADLINE="30s"
+readonly DABBOBA_WORKER_SCHEDULER_MAX_RETRY_ATTEMPTS="0"
+readonly DABBOBA_WORKER_SCHEDULER_DESCRIPTION="DABBOBA finite pgmq worker every minute (Asia/Seoul)"
 
 export CLOUDSDK_CORE_DISABLE_PROMPTS=1
 export CLOUDSDK_GCLOUDIGNORE_ENABLED=true
+
+# shellcheck source=ops/cloud-run/_media-storage.sh
+source "$CLOUD_RUN_OPS_DIR/_media-storage.sh"
 
 die() {
   printf 'ERROR: %s\n' "$*" >&2
@@ -49,7 +57,7 @@ assert_database_release_migration_checksum() {
   local actual
   actual="$(sha256_file "$migration")"
   [[ "$actual" == "$DABBOBA_DATABASE_RELEASE_SHA256" ]] \
-    || die "Migration 0033 checksum changed; review the migration and intentionally rotate the database release attestation"
+    || die "Migration 0037 checksum changed; review the migration and intentionally rotate the database release attestation"
 }
 
 require_env() {
@@ -104,7 +112,10 @@ assert_no_raw_secret_envs() {
     SESSION_TOKEN_PEPPER \
     ADMIN_PROXY_IDENTITY_SECRET \
     PAYMENT_WEBHOOK_SECRET \
-    NOTIFICATION_DELIVERY_TOKEN; do
+    NOTIFICATION_DELIVERY_TOKEN \
+    SUPABASE_STORAGE_SERVICE_KEY \
+    SUPABASE_STORAGE_S3_ACCESS_KEY_ID \
+    SUPABASE_STORAGE_S3_SECRET_ACCESS_KEY; do
     [[ -z "${!name:-}" ]] \
       || die "Unset raw secret environment variable $name; Cloud Run operations accept Secret Manager references only"
   done
@@ -238,6 +249,30 @@ configured_service_account_env_names() {
     DABBOBA_SCHEDULER_SERVICE_ACCOUNT
 }
 
+required_release_service_account_env_names() {
+  printf '%s\n' \
+    DABBOBA_API_SERVICE_ACCOUNT \
+    DABBOBA_WORKER_SERVICE_ACCOUNT \
+    DABBOBA_MIGRATION_SERVICE_ACCOUNT \
+    DABBOBA_SCHEDULER_SERVICE_ACCOUNT
+}
+
+assert_release_service_accounts_are_declared() {
+  local name
+  local purpose
+  while IFS= read -r name; do
+    require_env "$name"
+    case "$name" in
+      DABBOBA_API_SERVICE_ACCOUNT) purpose="API runtime" ;;
+      DABBOBA_WORKER_SERVICE_ACCOUNT) purpose="Worker job" ;;
+      DABBOBA_MIGRATION_SERVICE_ACCOUNT) purpose="Migration job" ;;
+      DABBOBA_SCHEDULER_SERVICE_ACCOUNT) purpose="Worker scheduler" ;;
+      *) die "Unknown required release service account variable: $name" ;;
+    esac
+    assert_service_account "${!name}" "$purpose"
+  done < <(required_release_service_account_env_names)
+}
+
 assert_configured_service_accounts_are_distinct() {
   local name
   local value
@@ -256,31 +291,10 @@ assert_configured_service_accounts_are_distinct() {
   done < <(configured_service_account_env_names)
 }
 
-is_configured_dabboba_service_account() {
-  local candidate="$1"
-  local name
-  local configured
-  while IFS= read -r name; do
-    configured="${!name:-}"
-    if [[ -n "$configured" && "$candidate" == "$configured" ]]; then
-      return 0
-    fi
-  done < <(configured_service_account_env_names)
-  return 1
-}
-
-assert_no_project_level_secret_accessor_for_configured_service_accounts() {
+assert_no_project_level_secret_accessor_bindings() {
   local project
   local members
   local member
-  local account
-  local has_configured_account=""
-  local name
-  while IFS= read -r name; do
-    [[ -z "${!name:-}" ]] || has_configured_account="yes"
-  done < <(configured_service_account_env_names)
-  [[ "$has_configured_account" == "yes" ]] || return 0
-
   project="$(expected_project_id)"
   members="$(gcloud projects get-iam-policy "$project" \
     --flatten='bindings[].members' \
@@ -288,18 +302,45 @@ assert_no_project_level_secret_accessor_for_configured_service_accounts() {
     --format='value(bindings.members)' 2>/dev/null)" \
     || die "Unable to inspect project-level Secret Manager IAM"
   while IFS= read -r member; do
-    [[ "$member" == serviceAccount:* ]] || continue
-    account="${member#serviceAccount:}"
-    if is_configured_dabboba_service_account "$account"; then
-      die "$account must not have project-level roles/secretmanager.secretAccessor; grant only per-secret access"
-    fi
+    [[ -z "$member" ]] && continue
+    die "$member must not have project-level roles/secretmanager.secretAccessor; grant Secret Manager payload access only through exact per-secret policies"
   done <<< "$members"
   return 0
 }
 
 assert_cloud_identity_boundaries() {
+  # Every release command declares the complete identity boundary. Otherwise a
+  # worker or migration command could omit the API peer and reuse its identity.
+  assert_release_service_accounts_are_declared
   assert_configured_service_accounts_are_distinct
-  assert_no_project_level_secret_accessor_for_configured_service_accounts
+  assert_no_project_level_secret_accessor_bindings
+}
+
+assert_release_secret_id_boundaries() {
+  require_env DABBOBA_DATABASE_SECRET
+  require_env DABBOBA_WORKER_DATABASE_SECRET
+  require_env DABBOBA_MIGRATION_DATABASE_SECRET
+  require_env DABBOBA_SESSION_PEPPER_SECRET
+  [[ "$DABBOBA_DATABASE_SECRET" != "$DABBOBA_WORKER_DATABASE_SECRET" ]] \
+    || die "API and worker database secrets must be different"
+  [[ "$DABBOBA_DATABASE_SECRET" != "$DABBOBA_MIGRATION_DATABASE_SECRET" ]] \
+    || die "Runtime and migration database secrets must be different"
+  [[ "$DABBOBA_WORKER_DATABASE_SECRET" != "$DABBOBA_MIGRATION_DATABASE_SECRET" ]] \
+    || die "Worker and migration database secrets must be different"
+  [[ "$DABBOBA_SESSION_PEPPER_SECRET" != "$DABBOBA_DATABASE_SECRET" ]] \
+    || die "Session pepper and API database secrets must be different"
+  [[ "$DABBOBA_SESSION_PEPPER_SECRET" != "$DABBOBA_WORKER_DATABASE_SECRET" ]] \
+    || die "Session pepper and worker database secrets must be different"
+  [[ "$DABBOBA_SESSION_PEPPER_SECRET" != "$DABBOBA_MIGRATION_DATABASE_SECRET" ]] \
+    || die "Session pepper and migration database secrets must be different"
+}
+
+assert_cloud_release_boundaries() {
+  assert_cloud_identity_boundaries
+  # Require the complete peer set even for a single-component command so an
+  # omitted variable cannot conceal reuse of a more privileged DB secret.
+  assert_release_secret_id_boundaries
+  assert_media_storage_config
 }
 
 assert_service_account() {
@@ -377,11 +418,13 @@ image_uri_for() {
   local project
   local repository
   local tag
-  project="$(expected_project_id)"
-  repository="$(artifact_repository)"
-  tag="$(image_tag)"
+  local name
+  project="$(expected_project_id)" || return 1
+  repository="$(artifact_repository)" || return 1
+  tag="$(image_tag)" || return 1
+  name="$(image_name_for "$kind")" || return 1
   printf '%s-docker.pkg.dev/%s/%s/%s:%s\n' \
-    "$DABBOBA_CLOUD_RUN_REGION" "$project" "$repository" "$(image_name_for "$kind")" "$tag"
+    "$DABBOBA_CLOUD_RUN_REGION" "$project" "$repository" "$name" "$tag"
 }
 
 assert_image_exists() {
@@ -447,6 +490,8 @@ assert_https_origin_list() {
   local label="$2"
   local origins=()
   local origin
+  [[ "$value" != *[[:cntrl:]~]* && "$value" != ,* && "$value" != *, && "$value" != *,,* ]] \
+    || die "$label must not contain control characters, deployment delimiters, or empty origins"
   IFS=',' read -r -a origins <<< "$value"
   ((${#origins[@]} > 0)) || die "$label must include at least one HTTPS origin"
   for origin in "${origins[@]}"; do
@@ -455,18 +500,7 @@ assert_https_origin_list() {
 }
 
 assert_runtime_migration_separation() {
-  if [[ -n "${DABBOBA_WORKER_DATABASE_SECRET:-}" ]]; then
-    [[ "$DABBOBA_DATABASE_SECRET" != "$DABBOBA_WORKER_DATABASE_SECRET" ]] \
-      || die "API and worker database secrets must be different"
-  fi
-  if [[ -n "${DABBOBA_MIGRATION_DATABASE_SECRET:-}" ]]; then
-    [[ "$DABBOBA_DATABASE_SECRET" != "$DABBOBA_MIGRATION_DATABASE_SECRET" ]] \
-      || die "Runtime and migration database secrets must be different"
-    if [[ -n "${DABBOBA_WORKER_DATABASE_SECRET:-}" ]]; then
-      [[ "$DABBOBA_WORKER_DATABASE_SECRET" != "$DABBOBA_MIGRATION_DATABASE_SECRET" ]] \
-        || die "Worker and migration database secrets must be different"
-    fi
-  fi
+  assert_release_secret_id_boundaries
 }
 
 assert_public_api_abuse_controls_attestation() {
@@ -477,18 +511,381 @@ assert_public_api_abuse_controls_attestation() {
 assert_database_release_attestation() {
   assert_database_release_migration_checksum
   [[ "${DABBOBA_DATABASE_RELEASE_ATTESTATION:-}" == "$DABBOBA_REQUIRED_DATABASE_RELEASE_ATTESTATION" ]] \
-    || die "API and worker deployment is blocked. Set DABBOBA_DATABASE_RELEASE_ATTESTATION to the documented release value only after migration 0033 and both restricted database roles are verified against the target database"
+    || die "API and worker deployment is blocked. Set DABBOBA_DATABASE_RELEASE_ATTESTATION to the documented release value only after migration 0037 and both restricted database roles are verified against the target database"
+}
+
+api_candidate_tag() {
+  require_env DABBOBA_API_CANDIDATE_TAG
+  [[ "$DABBOBA_API_CANDIDATE_TAG" =~ ^candidate-[a-z0-9]([a-z0-9-]{0,51}[a-z0-9])?$ ]] \
+    || die "DABBOBA_API_CANDIDATE_TAG must be a unique lowercase candidate-* tag of at most 63 characters"
+  printf '%s\n' "$DABBOBA_API_CANDIDATE_TAG"
+}
+
+expected_api_candidate_smoke_attestation() {
+  local service="${DABBOBA_API_SERVICE:-dabboba-api}"
+  local revision
+  assert_resource_name "$service" DABBOBA_API_SERVICE
+  require_env DABBOBA_API_CANDIDATE_REVISION
+  revision="$DABBOBA_API_CANDIDATE_REVISION"
+  [[ "$revision" =~ ^${service}-[a-z0-9-]+$ ]] \
+    || die "DABBOBA_API_CANDIDATE_REVISION is not a valid revision for Cloud Run API service $service"
+  printf 'api-candidate:%s:%s:%s:PASSED\n' \
+    "$(image_tag)" \
+    "$(api_candidate_tag)" \
+    "$revision"
+}
+
+assert_api_candidate_smoke_attestation() {
+  local expected
+  expected="$(expected_api_candidate_smoke_attestation)"
+  [[ "${DABBOBA_API_CANDIDATE_SMOKE_ATTESTATION:-}" == "$expected" ]] \
+    || die "API promotion is blocked. Set DABBOBA_API_CANDIDATE_SMOKE_ATTESTATION=$expected only after the candidate smoke script passes for this immutable image, tag, and exact Cloud Run revision"
+}
+
+api_service_json() {
+  local service="$1"
+  local project
+  project="$(expected_project_id)"
+  gcloud run services describe "$service" \
+    --project="$project" \
+    --region="$DABBOBA_CLOUD_RUN_REGION" \
+    --format=json 2>/dev/null \
+    || die "Cloud Run API service $service must already exist with a serving baseline revision"
+}
+
+api_service_exists() {
+  local service="$1"
+  local project
+  local services
+  local listed_service
+  project="$(expected_project_id)"
+  services="$(gcloud run services list \
+    --project="$project" \
+    --region="$DABBOBA_CLOUD_RUN_REGION" \
+    --format='value(metadata.name)' 2>/dev/null)" \
+    || die "Unable to inspect existing Cloud Run services"
+  while IFS= read -r listed_service; do
+    [[ "${listed_service##*/}" == "$service" ]] && return 0
+  done <<< "$services"
+  return 1
+}
+
+assert_api_service_absent() {
+  local service="$1"
+  if api_service_exists "$service"; then
+    die "Cloud Run API service $service already exists; private bootstrap is only for the first revision"
+  fi
+}
+
+public_principal_bindings_from_policy() {
+  local policy_json="$1"
+  require_command jq
+  printf '%s\n' "$policy_json" | jq -er '
+    [
+      .bindings[]? as $binding
+      | $binding.members[]?
+      | select(. == "allUsers" or . == "allAuthenticatedUsers")
+      | "\($binding.role)=\(.)"
+    ]
+    | unique
+    | join(",")
+  '
+}
+
+assert_iam_policy_has_no_public_principals() {
+  local policy_json="$1"
+  local resource_label="$2"
+  local public_bindings
+  public_bindings="$(public_principal_bindings_from_policy "$policy_json")" \
+    || die "Unable to inspect public principal bindings on $resource_label"
+  [[ -z "$public_bindings" ]] \
+    || die "$resource_label grants a role to a public principal ($public_bindings); private API bootstrap is blocked"
+}
+
+assert_no_public_principals_in_project_hierarchy() {
+  local project
+  local ancestors_json
+  local hierarchy_entries
+  local project_entry_count
+  local resource_type
+  local resource_id
+  local policy_json
+  project="$(expected_project_id)"
+  require_command jq
+
+  ancestors_json="$(gcloud projects get-ancestors "$project" --format=json 2>/dev/null)" \
+    || die "Unable to inspect the project, folder, and organization ancestry for $project; private API bootstrap fails closed"
+  project_entry_count="$(printf '%s\n' "$ancestors_json" | jq -er --arg project "$project" '
+    [.[]? | select(.type == "project" and .id == $project)] | length
+  ')" || die "Unable to validate the resource ancestry for $project"
+  [[ "$project_entry_count" == "1" ]] \
+    || die "Google Cloud returned an incomplete or unexpected ancestry for $project; private API bootstrap fails closed"
+  hierarchy_entries="$(printf '%s\n' "$ancestors_json" | jq -er '
+    if type == "array" and length > 0
+    then .[] | [(.type // ""), ((.id // "") | tostring)] | @tsv
+    else error("empty ancestry")
+    end
+  ')" || die "Unable to parse the resource ancestry for $project"
+
+  while IFS=$'\t' read -r resource_type resource_id; do
+    case "$resource_type" in
+      project)
+        [[ "$resource_id" == "$project" ]] \
+          || die "Google Cloud returned an unexpected project ancestor: $resource_id"
+        policy_json="$(gcloud projects get-iam-policy "$resource_id" --format=json 2>/dev/null)" \
+          || die "Unable to inspect project IAM for $resource_id; private API bootstrap fails closed"
+        ;;
+      folder)
+        [[ "$resource_id" =~ ^[0-9]+$ ]] \
+          || die "Google Cloud returned an invalid folder ancestor ID"
+        policy_json="$(gcloud resource-manager folders get-iam-policy "$resource_id" --format=json 2>/dev/null)" \
+          || die "Unable to inspect folder IAM for $resource_id; private API bootstrap fails closed"
+        ;;
+      organization)
+        [[ "$resource_id" =~ ^[0-9]+$ ]] \
+          || die "Google Cloud returned an invalid organization ancestor ID"
+        policy_json="$(gcloud organizations get-iam-policy "$resource_id" --format=json 2>/dev/null)" \
+          || die "Unable to inspect organization IAM for $resource_id; private API bootstrap fails closed"
+        ;;
+      *)
+        die "Google Cloud returned an unsupported ancestor type: $resource_type"
+        ;;
+    esac
+    assert_iam_policy_has_no_public_principals "$policy_json" "$resource_type $resource_id"
+  done <<< "$hierarchy_entries"
+}
+
+assert_api_service_has_no_public_principals() {
+  local service="$1"
+  local project
+  local policy_json
+  project="$(expected_project_id)"
+  policy_json="$(gcloud run services get-iam-policy "$service" \
+    --project="$project" \
+    --region="$DABBOBA_CLOUD_RUN_REGION" \
+    --format=json 2>/dev/null)" \
+    || die "Unable to inspect service IAM for Cloud Run API service $service; private API bootstrap fails closed"
+  assert_iam_policy_has_no_public_principals "$policy_json" "Cloud Run API service $service"
+}
+
+assert_api_deploy_mode_preconditions() {
+  local mode="$1"
+  local service="$2"
+  local candidate_tag="$3"
+  case "$mode" in
+    candidate)
+      assert_api_service_has_baseline_traffic "$service"
+      # A private first revision must pass the dedicated authenticated smoke
+      # and bootstrap promotion. A later candidate deploy must not make that
+      # service public as a side effect and bypass the bootstrap attestation.
+      assert_api_invoker_iam_disabled "$service" true
+      assert_api_candidate_tag_available "$service" "$candidate_tag"
+      ;;
+    bootstrap)
+      [[ "${DABBOBA_APPROVE_PRIVATE_API_BOOTSTRAP:-}" == "YES" ]] \
+        || die "First-service bootstrap is blocked. Set DABBOBA_APPROVE_PRIVATE_API_BOOTSTRAP=YES for this private bootstrap command only"
+      assert_api_service_absent "$service"
+      # Invoker grants inherited from the project, folder, or organization
+      # remain effective on a new service. Role definitions and custom roles
+      # can also include run.routes.invoke, so reject every public principal
+      # binding in each readable ancestor policy before create.
+      assert_no_public_principals_in_project_hierarchy
+      ;;
+    *)
+      die "Unknown API deployment mode: $mode"
+      ;;
+  esac
+}
+
+api_deploy_traffic_args() {
+  local mode="$1"
+  local candidate_tag="$2"
+  case "$mode" in
+    candidate)
+      printf '%s\n' '--no-traffic' "--tag=$candidate_tag"
+      ;;
+    bootstrap)
+      # Cloud Run rejects --no-traffic when the service does not exist. The
+      # sole first revision therefore owns 100% traffic while IAM stays private.
+      printf '%s\n' "--tag=$candidate_tag"
+      ;;
+    *)
+      die "Unknown API deployment mode: $mode"
+      ;;
+  esac
+}
+
+assert_api_service_has_baseline_traffic() {
+  local service="$1"
+  local service_json
+  local traffic_total
+  require_command jq
+  service_json="$(api_service_json "$service")"
+  traffic_total="$(printf '%s\n' "$service_json" | jq -er '
+    [(.status.traffic // .trafficStatuses // [])[]? | (.percent // 0)] | add // 0
+  ')" || die "Unable to inspect baseline traffic for Cloud Run API service $service"
+  [[ "$traffic_total" == "100" ]] \
+    || die "Cloud Run API service $service needs an existing 100 percent serving baseline before a no-traffic candidate deployment"
+}
+
+assert_api_candidate_tag_available() {
+  local service="$1"
+  local candidate_tag="$2"
+  local service_json
+  local matching_tags
+  require_command jq
+  service_json="$(api_service_json "$service")"
+  matching_tags="$(printf '%s\n' "$service_json" | jq -er --arg tag "$candidate_tag" '
+    [(.status.traffic // .trafficStatuses // [])[]? | select(.tag == $tag)] | length
+  ')" || die "Unable to inspect existing traffic tags for Cloud Run API service $service"
+  [[ "$matching_tags" == "0" ]] \
+    || die "Candidate tag $candidate_tag already exists; use a unique release-specific DABBOBA_API_CANDIDATE_TAG"
+}
+
+assert_api_candidate_release() {
+  local service="$1"
+  local candidate_tag="$2"
+  local expected_percent="$3"
+  local expected_revision="${4:-}"
+  local service_json
+  local revision
+  local candidate_url
+  local actual_percent
+  local latest_ready_revision
+  local revision_json
+  local expected_image
+  local expected_digest
+  local expected_digest_image
+  local details
+  local expected_plain_env expected_secret_env project project_number
+  require_command jq
+  [[ "$expected_percent" == "0" || "$expected_percent" == "100" ]] \
+    || die "Candidate traffic assertion accepts only 0 or 100 percent"
+  if [[ -n "$expected_revision" ]]; then
+    [[ "$expected_revision" =~ ^${service}-[a-z0-9-]+$ ]] \
+      || die "Expected candidate revision is not valid for Cloud Run API service $service"
+  fi
+
+  service_json="$(api_service_json "$service")"
+  details="$(printf '%s\n' "$service_json" | jq -er --arg tag "$candidate_tag" '
+    [(.status.traffic // .trafficStatuses // [])[]? | select(.tag == $tag)]
+    | if length == 1 then .[0] else error("candidate tag must identify exactly one revision") end
+    | [(.revisionName // .revision // ""), (.url // .uri // ""), ((.percent // 0) | tostring)]
+    | @tsv
+  ')" || die "Candidate tag $candidate_tag does not identify exactly one Cloud Run revision"
+  IFS=$'\t' read -r revision candidate_url actual_percent <<< "$details"
+  revision="${revision##*/}"
+  [[ "$revision" =~ ^${service}-[a-z0-9-]+$ ]] \
+    || die "Candidate tag $candidate_tag returned an invalid revision name"
+  [[ -z "$expected_revision" || "$revision" == "$expected_revision" ]] \
+    || die "Candidate tag $candidate_tag points to revision $revision; smoke attested revision $expected_revision"
+  [[ "$candidate_url" =~ ^https://${candidate_tag}---[a-z0-9-]+(\.[a-z0-9-]+)*\.run\.app$ ]] \
+    || die "Candidate tag $candidate_tag returned an unexpected Cloud Run URL"
+  [[ "$actual_percent" == "$expected_percent" ]] \
+    || die "Candidate tag $candidate_tag serves $actual_percent percent traffic; expected $expected_percent percent"
+
+  latest_ready_revision="$(printf '%s\n' "$service_json" | jq -er '.status.latestReadyRevisionName // .latestReadyRevision // empty')" \
+    || die "Unable to inspect the latest ready revision for Cloud Run API service $service"
+  latest_ready_revision="${latest_ready_revision##*/}"
+  [[ "$revision" == "$latest_ready_revision" ]] \
+    || die "Candidate tag $candidate_tag does not point to the latest ready revision"
+
+  revision_json="$(gcloud run revisions describe "$revision" \
+    --project="$(expected_project_id)" \
+    --region="$DABBOBA_CLOUD_RUN_REGION" \
+    --format=json 2>/dev/null)" \
+    || die "Unable to inspect candidate revision $revision"
+  expected_image="$(image_uri_for api)" || return 1
+  expected_digest="$(image_digest_for "$expected_image")" || return 1
+  expected_digest_image="${expected_image%:*}@$expected_digest"
+  require_env DABBOBA_API_SERVICE_ACCOUNT
+  project="$(expected_project_id)" || return 1
+  project_number="$(expected_project_number)" || return 1
+  expected_plain_env="$(api_plain_env)" || return 1
+  expected_secret_env="$(api_secret_env)" || return 1
+  printf '%s\n' "$expected_plain_env" | plain_env_flag >/dev/null || return 1
+  printf '%s\n' "$expected_secret_env" | secret_env_flag >/dev/null || return 1
+  printf '%s\n' "$revision_json" | jq -e \
+    --arg expected_project "$project" --arg expected_project_number "$project_number" \
+    --arg expected_region "$DABBOBA_CLOUD_RUN_REGION" --arg expected_service "$service" \
+    --arg expected_revision "$revision" --arg expected_image "$expected_image" \
+    --arg expected_digest_image "$expected_digest_image" \
+    --arg expected_service_account "$DABBOBA_API_SERVICE_ACCOUNT" \
+    --argjson expected_plain_env "$expected_plain_env" --argjson expected_secret_env "$expected_secret_env" \
+    -f "$CLOUD_RUN_OPS_DIR/verify-api-revision.jq" >/dev/null 2>/dev/null \
+    || die "Candidate revision $revision does not match the approved API image, identity, environment or pinned secret references"
+
+  printf '%s\n' "$candidate_url"
+}
+
+api_candidate_revision() {
+  local service="$1"
+  local candidate_tag="$2"
+  local service_json
+  local revision
+  require_command jq
+  service_json="$(api_service_json "$service")"
+  revision="$(printf '%s\n' "$service_json" | jq -er --arg tag "$candidate_tag" '
+    [(.status.traffic // .trafficStatuses // [])[]? | select(.tag == $tag)]
+    | if length == 1 then .[0] else error("candidate tag must identify exactly one revision") end
+    | (.revisionName // .revision // "")
+  ')" || die "Candidate tag $candidate_tag does not identify exactly one Cloud Run revision"
+  revision="${revision##*/}"
+  [[ "$revision" =~ ^${service}-[a-z0-9-]+$ ]] \
+    || die "Candidate tag $candidate_tag returned an invalid revision name"
+  printf '%s\n' "$revision"
+}
+
+api_candidate_smoke_target() {
+  local service="$1"
+  local candidate_tag="$2"
+  local expected_percent="$3"
+  local revision
+  local candidate_url
+  # Capture the tag's revision first, then require the same revision while
+  # resolving its URL. This closes the pre-probe tag-move window.
+  revision="$(api_candidate_revision "$service" "$candidate_tag")" || return 1
+  candidate_url="$(assert_api_candidate_release \
+    "$service" \
+    "$candidate_tag" \
+    "$expected_percent" \
+    "$revision")" || return 1
+  printf '%s\t%s\n' "$revision" "$candidate_url"
+}
+
+assert_api_invoker_iam_disabled() {
+  local service="$1"
+  local expected="$2"
+  local service_json
+  local actual
+  require_command jq
+  [[ "$expected" == "true" || "$expected" == "false" ]] \
+    || die "Invoker IAM assertion accepts only true or false"
+  service_json="$(api_service_json "$service")"
+  actual="$(printf '%s\n' "$service_json" | jq -er '
+    (.invokerIamDisabled
+      // .metadata.annotations["run.googleapis.com/invoker-iam-disabled"]
+      // false)
+    | tostring
+    | ascii_downcase
+  ')" || die "Unable to inspect the Invoker IAM check for Cloud Run API service $service"
+  [[ "$actual" == "$expected" ]] \
+    || die "Cloud Run API service $service Invoker IAM disabled state is $actual; expected $expected"
 }
 
 expected_worker_execution_attestation() {
-  printf 'worker-job:%s:SUCCEEDED\n' "$(image_tag)"
+  local tag fingerprint
+  tag="$(image_tag)" || return 1
+  fingerprint="$(worker_storage_release_fingerprint)" || return 1
+  printf 'worker-job:%s:storage-v1:%s:SUCCEEDED\n' "$tag" "$fingerprint"
 }
 
 assert_worker_execution_attestation() {
   local expected
-  expected="$(expected_worker_execution_attestation)"
+  require_env DABBOBA_WORKER_EXECUTION_ATTESTATION
+  expected="$(expected_worker_execution_attestation)" || return 1
   [[ "${DABBOBA_WORKER_EXECUTION_ATTESTATION:-}" == "$expected" ]] \
-    || die "Worker scheduling is blocked. Set DABBOBA_WORKER_EXECUTION_ATTESTATION=$expected only after this immutable worker image completes one approved manual Job execution"
+    || die "Worker scheduling is blocked. Set DABBOBA_WORKER_EXECUTION_ATTESTATION=$expected only after the immutable image with these exact deployed storage settings and secret versions completes one approved manual Job execution"
 }
 
 assert_service_revisions_scale_to_zero() {
@@ -577,7 +974,8 @@ assert_worker_job_matches_scheduler_contract() {
   local expected_image
   local expected_digest
   local expected_digest_image
-  local expected_bucket
+  local expected_plain_env
+  local expected_secret_env
   local expected_queue
   local job_json
   require_command jq
@@ -587,7 +985,10 @@ assert_worker_job_matches_scheduler_contract() {
   expected_image="$(image_uri_for worker)"
   expected_digest="$(image_digest_for "$expected_image")"
   expected_digest_image="${expected_image%:*}@$expected_digest"
-  expected_bucket="$(normalize_bucket_name "$DABBOBA_GCS_BUCKET")"
+  expected_plain_env="$(worker_plain_env)" || return 1
+  expected_secret_env="$(worker_secret_env)" || return 1
+  printf '%s\n' "$expected_plain_env" | plain_env_flag >/dev/null || return 1
+  printf '%s\n' "$expected_secret_env" | secret_env_flag >/dev/null || return 1
   expected_queue="${DABBOBA_WORKER_QUEUE_NAME:-dabboba_worker}"
   [[ "$expected_queue" == "dabboba_worker" ]] \
     || die "DABBOBA_WORKER_QUEUE_NAME must be dabboba_worker to match the migrated queue ACL"
@@ -602,12 +1003,35 @@ assert_worker_job_matches_scheduler_contract() {
     --arg expected_digest_image "$expected_digest_image" \
     --arg expected_service_account "$DABBOBA_WORKER_SERVICE_ACCOUNT" \
     --arg expected_queue "$expected_queue" \
-    --arg expected_bucket "$expected_bucket" \
+    --argjson expected_plain_env "$expected_plain_env" \
+    --argjson expected_secret_env "$expected_secret_env" \
     --arg expected_project "$project" \
-    --arg expected_secret "$DABBOBA_WORKER_DATABASE_SECRET" \
-    --arg expected_secret_version "$DABBOBA_WORKER_DATABASE_SECRET_VERSION" \
     -f "$CLOUD_RUN_OPS_DIR/verify-worker-job.jq" >/dev/null \
     || die "Worker job $worker_job does not match the approved scheduling contract"
+}
+
+assert_worker_job_trigger_iam_policy() {
+  local worker_job="$1"
+  local scheduler_service_account="$2"
+  local project
+  local policy_json
+  project="$(expected_project_id)"
+  require_command jq
+  policy_json="$(gcloud run jobs get-iam-policy "$worker_job" \
+    --project="$project" \
+    --region="$DABBOBA_CLOUD_RUN_REGION" \
+    --format=json 2>/dev/null)" \
+    || die "Unable to inspect trigger IAM for worker job $worker_job"
+  printf '%s\n' "$policy_json" | jq -e \
+    --arg expected_member "serviceAccount:$scheduler_service_account" '
+      (.bindings // []) as $bindings
+      | ($bindings | length) == 1
+        and $bindings[0].role == "roles/run.invoker"
+        and (($bindings[0].condition // null) == null)
+        and (($bindings[0].members // []) | length) == 1
+        and $bindings[0].members[0] == $expected_member
+    ' >/dev/null \
+    || die "Worker job $worker_job IAM must contain only one unconditioned roles/run.invoker binding for serviceAccount:$scheduler_service_account"
 }
 
 check_build_prerequisites() {
@@ -630,8 +1054,13 @@ check_build_prerequisites() {
 }
 
 check_api_prerequisites() {
+  local predeploy_mode="${1:-existing-service}"
   local service_account
   local service
+  case "$predeploy_mode" in
+    existing-service|private-bootstrap) ;;
+    *) die "Unknown API prerequisite mode: $predeploy_mode" ;;
+  esac
   assert_api_enabled run.googleapis.com
   assert_api_enabled secretmanager.googleapis.com
   assert_api_enabled artifactregistry.googleapis.com
@@ -647,10 +1076,9 @@ check_api_prerequisites() {
   service_account="$DABBOBA_API_SERVICE_ACCOUNT"
   assert_service_account "$service_account" "API runtime"
   assert_runtime_migration_separation
-  [[ "$DABBOBA_DATABASE_SECRET" != "$DABBOBA_SESSION_PEPPER_SECRET" ]] \
-    || die "DATABASE_URL and SESSION_TOKEN_PEPPER must use different secrets"
   assert_secret_version "$DABBOBA_DATABASE_SECRET" "$DABBOBA_DATABASE_SECRET_VERSION" "$service_account" "API runtime database"
   assert_secret_version "$DABBOBA_SESSION_PEPPER_SECRET" "$DABBOBA_SESSION_PEPPER_SECRET_VERSION" "$service_account" "API session pepper"
+  assert_media_storage_secret_access api
   assert_https_origin "$DABBOBA_SUPABASE_URL" DABBOBA_SUPABASE_URL
   assert_https_origin_list "$DABBOBA_WEB_ORIGINS" DABBOBA_WEB_ORIGINS
   if [[ -n "${DABBOBA_GCS_BUCKET:-}" ]]; then
@@ -659,7 +1087,9 @@ check_api_prerequisites() {
   assert_image_exists "$(image_uri_for api)"
   service="${DABBOBA_API_SERVICE:-dabboba-api}"
   assert_resource_name "$service" DABBOBA_API_SERVICE
-  assert_service_revisions_scale_to_zero "$service"
+  if [[ "$predeploy_mode" == "existing-service" ]]; then
+    assert_service_revisions_scale_to_zero "$service"
+  fi
 }
 
 check_worker_prerequisites() {
@@ -672,7 +1102,10 @@ check_worker_prerequisites() {
   require_env DABBOBA_DATABASE_SECRET
   require_env DABBOBA_WORKER_DATABASE_SECRET
   require_env DABBOBA_WORKER_DATABASE_SECRET_VERSION
-  require_env DABBOBA_GCS_BUCKET
+  assert_media_storage_config
+  if [[ -z "${DABBOBA_GCS_BUCKET:-}" ]] && ! media_storage_supabase_enabled; then
+    die "Worker media requires an existing GCS bucket or a complete Supabase Storage configuration"
+  fi
   service_account="$DABBOBA_WORKER_SERVICE_ACCOUNT"
   assert_service_account "$service_account" "Worker job"
   assert_runtime_migration_separation
@@ -681,7 +1114,10 @@ check_worker_prerequisites() {
       || die "API and worker must use separate service accounts"
   fi
   assert_secret_version "$DABBOBA_WORKER_DATABASE_SECRET" "$DABBOBA_WORKER_DATABASE_SECRET_VERSION" "$service_account" "Worker database"
-  assert_existing_seoul_bucket "$DABBOBA_GCS_BUCKET" "Worker media"
+  assert_media_storage_secret_access worker
+  if [[ -n "${DABBOBA_GCS_BUCKET:-}" ]]; then
+    assert_existing_seoul_bucket "$DABBOBA_GCS_BUCKET" "Worker media"
+  fi
   assert_image_exists "$(image_uri_for worker)"
 }
 
@@ -717,7 +1153,6 @@ check_scheduler_prerequisites() {
   local scheduler_service_account
   local scheduler_service_agent
   local members
-  local found_invoker=""
   local found_service_agent=""
   local member
   project="$(expected_project_id)"
@@ -740,21 +1175,11 @@ check_scheduler_prerequisites() {
   fi
 
   assert_worker_job_matches_scheduler_contract "$worker_job"
-
-  members="$(gcloud run jobs get-iam-policy "$worker_job" \
-    --project="$project" \
-    --region="$DABBOBA_CLOUD_RUN_REGION" \
-    --flatten='bindings[].members' \
-    --filter='bindings.role=roles/run.invoker' \
-    --format='value(bindings.members)' 2>/dev/null)" \
-    || die "Unable to inspect invoker IAM for worker job $worker_job"
-  while IFS= read -r member; do
-    if [[ "$member" == "serviceAccount:$scheduler_service_account" ]]; then
-      found_invoker="yes"
-    fi
-  done <<< "$members"
-  [[ "$found_invoker" == "yes" ]] \
-    || die "$scheduler_service_account needs a job-level roles/run.invoker binding on $worker_job"
+  # Reject public principals anywhere above the Job, then require an exact
+  # Job-local allow-list. This blocks alternate predefined/custom execution
+  # roles and extra members from silently widening the Scheduler boundary.
+  assert_no_public_principals_in_project_hierarchy
+  assert_worker_job_trigger_iam_policy "$worker_job" "$scheduler_service_account"
 
   project_number="$(expected_project_number)"
   scheduler_service_agent="service-$project_number@gcp-sa-cloudscheduler.iam.gserviceaccount.com"
@@ -774,17 +1199,88 @@ check_scheduler_prerequisites() {
 
 assert_scheduler_job_absent() {
   local scheduler_job="$1"
+  local target_uri="${2:-}"
   local project
-  local existing_jobs
-  local existing_job
+  local existing_jobs_json
+  local conflicts
   project="$(expected_project_id)"
-  existing_jobs="$(gcloud scheduler jobs list \
+  require_command jq
+  existing_jobs_json="$(gcloud scheduler jobs list \
     --project="$project" \
     --location="$DABBOBA_CLOUD_RUN_REGION" \
-    --format='value(name)' 2>/dev/null)" \
+    --format=json 2>/dev/null)" \
     || die "Unable to inspect existing Cloud Scheduler jobs"
-  while IFS= read -r existing_job; do
-    [[ "${existing_job##*/}" != "$scheduler_job" ]] \
-      || die "Cloud Scheduler job already exists and will not be overwritten: $scheduler_job"
-  done <<< "$existing_jobs"
+  conflicts="$(printf '%s\n' "$existing_jobs_json" | jq -cer \
+    --arg expected_name "$scheduler_job" \
+    --arg expected_uri "$target_uri" '
+      [ .[]
+        | select(
+            ((.name // "") | split("/") | last) == $expected_name
+            or ($expected_uri != "" and (.httpTarget.uri // "") == $expected_uri)
+          )
+        | {name: (.name // "unknown"), uri: (.httpTarget.uri // "")}
+      ]
+    ')" || die "Unable to validate existing Cloud Scheduler jobs"
+  [[ "$conflicts" == "[]" ]] \
+    || die "A Cloud Scheduler job already uses this name or worker target and will not be overwritten: $conflicts"
+}
+
+create_worker_scheduler_job() {
+  local project="$1"
+  local scheduler_job="$2"
+  local target_uri="$3"
+  local scheduler_service_account="$4"
+
+  gcloud scheduler jobs create http "$scheduler_job" \
+    --quiet \
+    --project="$project" \
+    --location="$DABBOBA_CLOUD_RUN_REGION" \
+    --schedule="$DABBOBA_WORKER_SCHEDULER_CRON" \
+    --time-zone="$DABBOBA_WORKER_SCHEDULER_TIME_ZONE" \
+    --uri="$target_uri" \
+    --http-method=POST \
+    --oauth-service-account-email="$scheduler_service_account" \
+    --oauth-token-scope='https://www.googleapis.com/auth/cloud-platform' \
+    --attempt-deadline="$DABBOBA_WORKER_SCHEDULER_ATTEMPT_DEADLINE" \
+    --max-retry-attempts="$DABBOBA_WORKER_SCHEDULER_MAX_RETRY_ATTEMPTS" \
+    --description="$DABBOBA_WORKER_SCHEDULER_DESCRIPTION"
+}
+
+assert_worker_scheduler_matches_contract() {
+  local scheduler_job="$1"
+  local target_uri="$2"
+  local scheduler_service_account="$3"
+  local project
+  local scheduler_json
+  project="$(expected_project_id)"
+  require_command jq
+  scheduler_json="$(gcloud scheduler jobs describe "$scheduler_job" \
+    --project="$project" \
+    --location="$DABBOBA_CLOUD_RUN_REGION" \
+    --format=json 2>/dev/null)" \
+    || die "Unable to inspect the created Cloud Scheduler job $scheduler_job"
+  printf '%s\n' "$scheduler_json" | jq -e \
+    --arg expected_name "projects/$project/locations/$DABBOBA_CLOUD_RUN_REGION/jobs/$scheduler_job" \
+    --arg expected_schedule "$DABBOBA_WORKER_SCHEDULER_CRON" \
+    --arg expected_time_zone "$DABBOBA_WORKER_SCHEDULER_TIME_ZONE" \
+    --arg expected_uri "$target_uri" \
+    --arg expected_service_account "$scheduler_service_account" \
+    --arg expected_attempt_deadline "$DABBOBA_WORKER_SCHEDULER_ATTEMPT_DEADLINE" \
+    --arg expected_description "$DABBOBA_WORKER_SCHEDULER_DESCRIPTION" '
+      . as $job
+      | (($job.retryConfig.retryCount // 0) | tonumber) as $retry_count
+      | ($job.name == $expected_name)
+        and ($job.schedule == $expected_schedule)
+        and ($job.timeZone == $expected_time_zone)
+        and ($job.state == "ENABLED")
+        and ($job.description == $expected_description)
+        and ($job.httpTarget.uri == $expected_uri)
+        and ($job.httpTarget.httpMethod == "POST")
+        and ($job.httpTarget.oauthToken.serviceAccountEmail == $expected_service_account)
+        and ($job.httpTarget.oauthToken.scope == "https://www.googleapis.com/auth/cloud-platform")
+        and (($job.httpTarget.oidcToken // null) == null)
+        and ($job.attemptDeadline == $expected_attempt_deadline)
+        and ($retry_count == 0)
+    ' >/dev/null \
+    || die "Cloud Scheduler job $scheduler_job does not match the approved one-minute, no-retry contract"
 }

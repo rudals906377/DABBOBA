@@ -51,7 +51,7 @@ export default function RootLayout() {
 
   return (
     <GestureHandlerRootView style={styles.gestureRoot}>
-      <StatusBar style="dark" backgroundColor={colors.canvas} />
+      <StatusBar style="dark" />
       <Suspense fallback={<AppBootFallback />}>
         <DevelopmentSessionBootstrap enabled={__DEV__ && !customerAuthSetupAttempted}>
           <>

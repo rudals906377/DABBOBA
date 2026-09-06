@@ -12,6 +12,7 @@ export {
   kujiDrawingExpiry,
   lockExistingKujiRoom,
   lockKujiRoomAdvisories,
+  lockKujiProductRoomAdvisory,
   lockLinkedKujiRoomForOrder,
   promoteNextKujiRoomEntryLocked,
   releaseLockedKujiOrderRoom,

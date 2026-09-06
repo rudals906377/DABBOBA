@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { runInNewContext } from "node:vm";
 import { inflateSync } from "node:zlib";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -100,7 +101,27 @@ test("a real product reveal consumes only the explicitly opened server entitleme
   assert.doesNotMatch(mountEffect, /consumeDrawEntitlement/);
   assert.match(state, /createKujiOpenMotionState/);
   assert.match(state, /transitionKujiOpenMotion/);
-  assert.doesNotMatch(screen, /Math\.random|recordInventoryUnit|SQLite/);
+  // SQLite retains only purchase recovery identity; prizes/inventory stay server-owned.
+  assert.doesNotMatch(screen, /Math\.random|recordInventoryUnit|INSERT INTO inventory|UPDATE inventory/);
+});
+
+test("a paid multi-kuji route reveals server entitlements one at a time and keeps the active entitlement in the URL", () => {
+  const screen = read("apps/mobile/src/features/draw/DrawRevealScreen.tsx");
+  const sequence = read("apps/mobile/src/features/draw/draw-reveal-sequence.ts");
+
+  assert.match(screen, /resolveCommittedDrawSequence/);
+  assert.match(screen, /firstParam\(params\.entitlementIds\)/);
+  assert.match(screen, /Math\.max\(1, committedSequence\.total\)/);
+  assert.match(screen, /assertCommittedDrawResultMatchesRoute\(committed/);
+  assert.match(screen, /committedSequence\.nextEntitlementId/);
+  assert.match(screen, /prepareNextCommittedResult/);
+  assert.match(screen, /router\.setParams\(\{ entitlementId: nextEntitlementId \}\)/);
+  assert.match(screen, /setResult\(null\)[\s\S]*?setRevealResetSignal/);
+  assert.match(screen, /accessibilityLabel="다음 가챠 캡슐 준비하기"/);
+  assert.match(screen, />NEXT<\/Text>/);
+  assert.doesNotMatch(screen, /Promise\.all\([\s\S]*?consumeDrawEntitlement/);
+  assert.match(sequence, /pathId[\s\S]*?parsedIds\.findIndex/);
+  assert.match(sequence, /nextEntitlementId: entitlementIds\[safeActiveIndex \+ 1\] \?\? null/);
 });
 
 test("preview sequencing stays bounded and never invents a prize", () => {
@@ -116,8 +137,8 @@ test("preview sequencing stays bounded and never invents a prize", () => {
   assert.match(screen, /FlatList/);
   assert.match(screen, /summaryRail/);
   assert.doesNotMatch(screen, /가상 당첨|예시 당첨|획득 완료/);
-  assert.match(kuji, /\/draw\/preview\/\$\{encodeURIComponent\(productId\)\}/);
-  assert.match(kuji, /buildKujiPreviewParams\(selectedTickets, "single"\)/);
+  assert.match(kuji, /bindPaidKujiSlots/);
+  assert.match(kuji, /paidKujiRevealPath/);
   assert.match(screen, /parseKujiTicketNumbers\(firstParam\(params\.tickets\)\)/);
   assert.match(screen, /KUJI \{featured\.ticketNumber\}/);
 });
@@ -137,9 +158,9 @@ test("kuji selection enters reveal without an open-mode picker and reveal owns b
   const kuji = read("apps/mobile/src/features/kuji/KujiDrawScreen.tsx");
   const screen = read("apps/mobile/src/features/draw/DrawRevealScreen.tsx");
 
-  assert.match(kuji, /buildKujiPreviewParams\(selectedTickets, "single"\)/);
+  assert.match(kuji, /validateKujiSlotBinding/);
   assert.match(kuji, /selectedTickets\.length !== purchasedCount/);
-  assert.match(kuji, /onPress=\{openSelectedTickets\}/);
+  assert.match(kuji, /onPress=\{\(\) => void openSelectedTickets\(\)\}/);
   assert.doesNotMatch(kuji, /결제 금액 확인|buildKujiPaymentConfirmation/);
   assert.doesNotMatch(kuji, /오픈 방식 선택|chooseOpenMode|confirmOpenMode/);
   assert.match(screen, /buildPreviewOpenActions\(previewState\)/);
@@ -160,6 +181,126 @@ test("each sequential kuji returns to a sealed ticket that can be dragged before
   assert.match(screen, /setQueuedPreviewOpen\("all"\)/);
   assert.match(ticket, /Gesture\.Pan\(\)[\s\S]*?resolveKujiPeelRelease/);
   assert.match(ticket, /phase === "sealed"/);
+});
+
+test("kuji retains its ticket surface and pre-mounted committed result through the settled handoff", () => {
+  const screen = read("apps/mobile/src/features/draw/DrawRevealScreen.tsx");
+  const start = screen.indexOf("<KujiPeelTicket");
+  const end = screen.indexOf(') : sourceCategory === "gacha"', start);
+  assert.ok(start >= 0 && end > start);
+  const ticket = screen.slice(start, end);
+  assert.match(screen, /sourceCategory === "kuji" \? \(\s*<KujiPeelTicket/);
+  assert.doesNotMatch(screen, /kujiMotionVisible \? \(\s*<KujiPeelTicket/,
+    "completion must not unmount the ticket/result surface and replay another entrance");
+  assert.match(ticket, /settled=\{completed\}/);
+  assert.match(ticket, /disabled=\{opening \|\| completed\}/);
+  assert.match(ticket, /resultReady=\{preview \? previewResultReady : Boolean\(result\)\}/);
+  assert.match(ticket, /onRequestOpen=\{\(\) => void openProduct\(\)\}/);
+  assert.match(ticket, /onRevealSettled=\{handleRevealSettled\}/);
+  assert.match(ticket, /resultContent=\{result \? \(\s*<CommittedResult[\s\S]*?result=\{result\}[\s\S]*?imageUri=\{resolveCatalogImageUrl\(result.prizeImageUrl, runtime.assetBaseUrl\)\}/);
+  assert.match(ticket, /<CommittedResult[\s\S]*?\sreduceMotion\s*\/>/,
+    "the ticket's shared progress owns appearance, not a second autonomous result animation");
+  assert.match(ticket, /<PreviewResultStage[\s\S]*?\sopened\s[\s\S]*?\sreduceMotion\s*\/>/);
+  assert.doesNotMatch(ticket, /snapshot\.product\.imageUrl|Math\.random|selectHighestRankedResultId/,
+    "the hidden real card may only consume the immutable prize snapshot, not catalog art or a client draw");
+  assert.match(ticket, /key=\{preview[\s\S]*?previewItems\[currentPreviewIndex\]\?\.ticketNumber[\s\S]*?: entitlementId \|\| productId\}/);
+  assert.match(ticket, /requestSignal=\{revealRequestSignal\}/);
+  assert.match(ticket, /resetSignal=\{revealResetSignal\}/);
+
+  const ordinal = ticket.match(/openedIndex=\{([^}]+)\}/)?.[1];
+  assert.ok(ordinal);
+  for (const order of [1, 2, 7, 50]) {
+    const evaluate = (openedCount, previewOpened) => runInNewContext(`(${ordinal})`, {
+      previewState: { openedCount }, previewOpened,
+    });
+    assert.equal(evaluate(order - 1, false), order);
+    assert.equal(evaluate(order, true), order,
+      "the result's number must not jump when the completion callback increments openedCount");
+  }
+});
+
+test("premium kuji presentation does not expand preview batch mode into a production consume loop", () => {
+  const screen = read("apps/mobile/src/features/draw/DrawRevealScreen.tsx");
+  assert.match(screen, /requestedMode: RevealMode = preview && firstParam\(params.mode\) === "all" \? "all" : "single"/);
+  const batch = screen.slice(screen.indexOf("const handleOpenAllRemaining ="), screen.indexOf("const handleAction ="));
+  assert.match(batch, /if \(\s*!preview\s*\|\| sourceCategory !== "kuji"/);
+  assert.match(batch, /startPreviewOpenAll\(current\)/);
+  assert.match(batch, /setRevealResetSignal/);
+  assert.match(batch, /setQueuedPreviewOpen\("all"\)/);
+  assert.doesNotMatch(batch, /consumeDrawEntitlement|Promise\.all|fetch\(/);
+  assert.match(screen, /total=\{preview && activeMode === "all" \? remainingPreviewCount : undefined\}/);
+  const prepare = screen.slice(screen.indexOf("const prepareNextCommittedResult ="), screen.indexOf("const handleGachaSkip ="));
+  assert.match(prepare, /if \(preview \|\| !result \|\| !revealSettled \|\| !nextEntitlementId\) return/);
+  assert.match(prepare, /setResult\(null\)/);
+  assert.match(prepare, /setRevealResetSignal/);
+  assert.match(prepare, /router.setParams\(\{ entitlementId: nextEntitlementId \}\)/);
+  assert.doesNotMatch(prepare, /consumeDrawEntitlement|openProduct\(|setRevealRequestSignal/,
+    "preparing the next sealed ticket must never immediately consume it");
+});
+
+test("kuji parent settlement keeps a completed preview visible after clearing its temporary result-ready flag", async () => {
+  const state = await import("../apps/mobile/src/features/draw/draw-reveal-state.ts");
+  const motion = await import("../apps/mobile/src/features/draw/kuji-ticket-reveal-motion.ts");
+  const screen = read("apps/mobile/src/features/draw/DrawRevealScreen.tsx");
+  const ticket = read("apps/mobile/src/features/draw/KujiPeelTicket.tsx");
+  const settlement = screen.slice(screen.indexOf("const handleRevealSettled ="), screen.indexOf("const prepareNextCommittedResult ="));
+  const completedExpression = screen.match(/const completed = ([^;]+);/)?.[1];
+  assert.ok(completedExpression);
+  assert.match(ticket, /isKujiResultGateOpen\(phase, resultReady, settled\)/);
+  assert.match(ticket, /resultAccessible = resultGateOpen && settled/);
+
+  // Execute the actual parent callback, not a replacement completion reducer.
+  // A preview clears resultReady at the exact moment it marks the ticket settled.
+  for (const mode of ["single", "all"]) {
+    for (const count of [1, 3, 8]) {
+      let previewState = state.createPreviewRevealState(mode, count);
+      let previewResultReady = true;
+      let revealSettled = false;
+      const context = {
+        ...state,
+        preview: true,
+        result: null,
+        requestInFlightRef: { current: true },
+        skipRequestedRef: { current: false },
+        setPreviewResultReady: (value) => { previewResultReady = value; },
+        setPreviewState: (update) => { previewState = update(previewState); },
+        setRevealSettled: (value) => { revealSettled = value; },
+      };
+      runInNewContext(`${settlement}\nglobalThis.finish = handleRevealSettled;`, context);
+      context.finish();
+      context.finish();
+      assert.equal(previewResultReady, false);
+      assert.equal(revealSettled, false, "preview completion must not invent a committed server result");
+      assert.equal(previewState.openedCount, mode === "all" ? count : 1,
+        "a duplicate settlement must not advance another sealed ticket");
+      const completed = runInNewContext(completedExpression, {
+        committedResultPresented: false,
+        previewOpened: previewState.phase === "revealed",
+        previewCompleted: previewState.phase === "summary",
+      });
+      assert.equal(completed, true);
+      const gate = motion.isKujiResultGateOpen("revealed", previewResultReady, completed);
+      for (const reduceMotion of [false, true]) {
+        const frame = motion.sampleKujiTicketRevealMotion(1, gate, reduceMotion);
+        assert.equal(frame.resultOpacity, 1, "the finished preview must not disappear on its parent's rerender");
+        assert.equal(frame.ticketOpacity, 0);
+        assert.equal(frame.glowOpacity, 0, "completion must not restart the payoff glow");
+      }
+      if (mode === "single" && count > 1) {
+        previewState = state.advancePreviewRevealState(previewState);
+        assert.equal(previewState.phase, "sealed");
+        const nextCompleted = runInNewContext(completedExpression, {
+          committedResultPresented: false,
+          previewOpened: false,
+          previewCompleted: false,
+        });
+        assert.equal(nextCompleted, false);
+        const nextGate = motion.isKujiResultGateOpen("sealed", false, nextCompleted);
+        assert.equal(motion.sampleKujiTicketRevealMotion(1, nextGate).resultOpacity, 0,
+          "a stale finished motion value cannot expose the next sealed result");
+      }
+    }
+  }
 });
 
 test("the sequential kuji result footer distinguishes selecting from opening and stays visually flat", () => {
@@ -191,8 +332,9 @@ test("finished gacha and kuji reveals return to their source product detail", ()
   const agentGuide = read("AGENTS.md");
 
   assert.match(screen, /const sourceProductId = result\?\.productId \?\? snapshot\?\.product\.id \?\? productId/);
-  assert.match(screen, /const returnToSourceProduct = \(\) => \{[\s\S]*?router\.dismissTo\(\s*`\/product\/\$\{encodeURIComponent\(sourceProductId\)\}` as Href/);
-  assert.match(screen, /const drawSequenceFinished = committedResultPresented \|\| previewCompleted \|\| singlePreviewFinished/);
+  assert.match(screen, /const returnToSourceProduct = async \(\) => \{[\s\S]*?router\.dismissTo\(\s*`\/product\/\$\{encodeURIComponent\(sourceProductId\)\}` as Href/);
+  assert.match(screen, /const committedSequenceFinished = committedResultPresented[\s\S]*?committedSequence\.nextEntitlementId === null/);
+  assert.match(screen, /const drawSequenceFinished = committedSequenceFinished \|\| previewCompleted \|\| singlePreviewFinished/);
   assert.match(screen, /onPress=\{drawSequenceFinished \? returnToSourceProduct : goBack\}/);
   assert.doesNotMatch(screen, /router\.replace\("\/\(tabs\)\/dukroom"\)/);
   assert.match(agentGuide, /completed gacha or kuji reveal sequence[\s\S]*source catalog product detail/);
@@ -235,7 +377,7 @@ test("native draw motion keeps gesture frames on the UI thread and reveals compl
   assert.match(screen, /translateY:[\s\S]*?scale:/);
 });
 
-test("the native gacha machine opens from a two-turn circular lever gesture", () => {
+test("the native gacha machine offers one clockwise turn or six taps with matching visible and accessible instructions", () => {
   const screen = read("apps/mobile/src/features/draw/DrawRevealScreen.tsx");
   const machine = read("apps/mobile/src/features/draw/GachaLeverMachine.tsx");
   const motion = read("apps/mobile/src/features/draw/gacha-lever-motion.ts");
@@ -254,16 +396,20 @@ test("the native gacha machine opens from a two-turn circular lever gesture", ()
   assert.match(screen, /sourceCategory === "gacha" && styles\.fullGachaStage/);
   assert.match(screen, /const gachaBottomInset = safeAreaInsets\.bottom \+ seed\.spacing\.x4/);
   assert.match(screen, /snapshot && sourceCategory !== "gacha"/);
+  assert.match(
+    screen,
+    /opacity: gachaMotionVisible && !gachaRevealInProgress \? 1 : 0[\s\S]*?<SeedInlineGuidance[\s\S]*?레버 6회 연속 터치 또는 시계 방향 1바퀴 드래그[\s\S]*?<\/SeedInlineGuidance>/,
+  );
   assert.match(screen, /resultReady=\{preview \? previewResultReady : Boolean\(result\)\}/);
   assert.match(screen, /onRequestOpen=\{\(\) => void openProduct\(\)\}/);
   assert.match(screen, /onRevealSettled=\{handleRevealSettled\}/);
   assert.match(screen, /sourceCategory === "kuji" && ticketNumber/);
   assert.match(machine, /Gesture\.Pan\(\)/);
   assert.match(machine, /capsule-machine-front-empty\.png/);
-  assert.match(machine, /MACHINE_PRESENTATION_SCALE = 1\.58/);
+  assert.doesNotMatch(machine, /MACHINE_PRESENTATION_SCALE/);
   assert.match(machine, /MACHINE_SLOT_HEIGHT = 390/);
   assert.match(machine, /style=\{styles\.machineSlot\}/);
-  assert.match(machine, /scale: MACHINE_PRESENTATION_SCALE/);
+  assert.match(machine, /scale: camera\.presentationScale \* camera\.scale/);
   assert.match(machine, /resolveGachaLeverTouchStart\(/);
   assert.match(machine, /resolveGachaLeverPointAngle\(event\.x, event\.y/);
   assert.match(machine, /advanceGachaLeverRadians/);
@@ -274,26 +420,32 @@ test("the native gacha machine opens from a two-turn circular lever gesture", ()
     machine,
     /gestureAccepted\.value = 0;[\s\S]*?if \(!start\.accepted\) \{[\s\S]*?manager\.fail\(\)[\s\S]*?gestureAccepted\.value = 1/,
   );
-  assert.match(machine, /\.onEnd\(\(\) => \{[\s\S]*?if \(!gestureAccepted\.value \|\| gestureCompleted\.value\) return/);
-  assert.match(machine, /scheduleOnRN\(beginOpen\)/);
+  assert.match(machine, /\.onFinalize\(\(_event, success\) => \{[\s\S]*?if \(gestureEnded\.value\) return/);
+  assert.match(machine, /if \(success && gestureTravel\.value <= GESTURE_TAP_SLOP\)/);
+  assert.match(machine, /scheduleOnRN\(beginOpen, run\)/);
   assert.doesNotMatch(machine, /scheduleOnRN\(updateProgress/);
   assert.match(machine, /manualActivation\(true\)/);
   assert.match(machine, /withTiming\(gestureStartRadians\.value, \{ duration: 220/);
   assert.match(machine, /withTiming\(GACHA_LEVER_TARGET_RADIANS/);
   assert.match(machine, /transitionGachaLeverMotion/);
   assert.match(machine, /onAccessibilityTap=\{autoCompleteLever\}/);
+  assert.match(
+    machine,
+    /accessibilityHint="레버를 6회 연속 터치하거나 둘레를 시계 방향으로 한 바퀴 드래그합니다"/,
+  );
   assert.doesNotMatch(machine, /Math\.random|runOnJS/);
-  assert.match(motion, /GACHA_LEVER_REQUIRED_TURNS = 2/);
-  assert.match(motion, /GACHA_LEVER_REQUIRED_TAPS = 8/);
+  assert.match(motion, /GACHA_LEVER_REQUIRED_TURNS = 1/);
+  assert.match(motion, /GACHA_LEVER_REQUIRED_TAPS = 6/);
   assert.match(motion, /Math\.atan2\(Math\.sin\(delta\), Math\.cos\(delta\)\)/);
-  assert.match(agentGuide, /two clockwise circles[\s\S]*?gacha lever/);
+  assert.match(agentGuide, /one clockwise circle[\s\S]*?gacha lever/);
+  assert.doesNotMatch(`${screen}\n${machine}`, /레버 8회|레버를 8회|시계 방향 2바퀴|시계 방향으로 두 바퀴/);
 });
 
 test("gacha skip is a top-right action that reveals only the server-consumed result", () => {
   const screen = read("apps/mobile/src/features/draw/DrawRevealScreen.tsx");
 
   assert.match(screen, /accessibilityLabel="가챠 애니메이션 건너뛰기"/);
-  assert.match(screen, />스킵<\/Text>/);
+  assert.match(screen, />SKIP<\/Text>/);
   assert.match(screen, /const handleGachaSkip = \(\) => \{/);
   assert.match(screen, /skipRequestedRef\.current = true/);
   assert.match(screen, /await consumeDrawEntitlement\(/);
@@ -304,7 +456,30 @@ test("gacha skip is a top-right action that reveals only the server-consumed res
   assert.doesNotMatch(screen, /const handleGachaSkip[\s\S]*?Math\.random/);
 });
 
-test("gacha and kuji reuse the ready-heading space and share twelve separated seeded embers", () => {
+test("gacha hands off the validated server prize through light before the final completion state", () => {
+  const screen = read("apps/mobile/src/features/draw/DrawRevealScreen.tsx");
+  const machine = read("apps/mobile/src/features/draw/GachaLeverMachine.tsx");
+
+  assert.match(machine, /testID="gacha-capsule-cinematic"/);
+  assert.match(machine, /styles\.capsuleLightWash/);
+  assert.match(machine, /<GachaPrizeReveal/);
+  assert.match(machine, /settled=\{settled\}/);
+  assert.doesNotMatch(machine, /entryProgress|entryStyle/);
+  assert.match(machine, /motionStateRef.current = \{ \.\.\.motionStateRef.current, phase: "revealed" \}/);
+  assert.match(
+    machine,
+    /revealProgress\.value = withDelay\([\s\S]*?scheduleOnRN\(handleRevealSettled/,
+  );
+  assert.match(screen, /const committedResultPresented = Boolean\(result && revealSettled\)/);
+  assert.match(screen, /committedResultPresented[\s\S]*?<CommittedResult/);
+  assert.match(screen, /result=\{result\}/);
+  assert.match(screen, /result\.prizeName/);
+  assert.match(screen, /result\.prizeImageUrl/);
+  assert.match(screen, /result\.rarity/);
+  assert.doesNotMatch(screen, /Math\.random/);
+});
+
+test("gacha and kuji share the same measured thirty-six-ember field and one clock", () => {
   const screen = read("apps/mobile/src/features/draw/DrawRevealScreen.tsx");
   const fireflyMotion = read("apps/mobile/src/features/draw/kuji-firefly-motion.ts");
 
@@ -320,6 +495,10 @@ test("gacha and kuji reuse the ready-heading space and share twelve separated se
   assert.match(screen, /<StageAmbient[\s\S]*?sourceCategory=\{sourceCategory\}[\s\S]*?reduceMotion=\{reduceMotion\}/);
   assert.match(screen, /sourceCategory === "kuji" \|\| sourceCategory === "gacha"/);
   assert.match(screen, /return <DrawEmbers seed=\{seed\} reduceMotion=\{reduceMotion\} \/>/);
+  assert.match(screen, /createGachaFireflyConfigs\(seed, stageSize\)/);
+  assert.match(fireflyMotion, /export const GACHA_FIREFLY_COUNT = 36/);
+  assert.match(screen, /function DrawEmberLoop[\s\S]*?useEmberPhase\(GACHA_FIREFLY_DURATION_MS\)/);
+  assert.doesNotMatch(screen, /KujiEmberLoop|createKujiFireflyConfigs/);
   assert.match(screen, /function DrawEmbers[\s\S]*?if \(reduceMotion\) return null;/);
   assert.match(screen, /withRepeat\([\s\S]*?withTiming\(1[\s\S]*?-1,/);
   assert.match(screen, /sampleKujiFireflyMotion\(particle, localProgress\)/);
@@ -475,5 +654,5 @@ test("the settled reveal displays only committed server snapshot fields", () => 
   assert.match(screen, /AccessibilityInfo\.isReduceMotionEnabled/);
   assert.match(screen, /reduceMotionChanged/);
   assert.match(screen, /announceForAccessibility/);
-  assert.doesNotMatch(screen, /Math\.random|recordInventoryUnit|SQLite/);
+  assert.doesNotMatch(screen, /Math\.random|recordInventoryUnit|INSERT INTO inventory|UPDATE inventory/);
 });

@@ -14,7 +14,7 @@ export function KujiNotificationObserver() {
     const openResponse = (response: Notifications.NotificationResponse | null) => {
       if (!response) return;
       const data = response.notification.request.content.data;
-      if (data.kind !== "KUJI_TURN" || typeof data.productId !== "string") return;
+      if (!data || data.kind !== "KUJI_TURN" || typeof data.productId !== "string") return;
       if (
         typeof data.entryId !== "string"
         || typeof data.checkoutExpiresAt !== "string"

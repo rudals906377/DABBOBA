@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { FastifyInstance, FastifyRequest } from "fastify";
-import { Storage, type File, type FileMetadata, type GenerateSignedPostPolicyV4Options } from "@google-cloud/storage";
+import type { GenerateSignedPostPolicyV4Options } from "@google-cloud/storage";
+import { storedMediaLocation } from "@dabboba/config";
 import sharp from "sharp";
 import { withTransaction, type DatabaseClient, type DatabasePool, type Queryable } from "@dabboba/db";
 import { isAdminRole } from "@dabboba/domain";
@@ -9,6 +10,7 @@ import { AppError, badRequest, conflict, forbidden, notFound } from "../lib/erro
 import { beginIdempotency, completeIdempotency, idempotencyKey, requestHash } from "../lib/idempotency.js";
 import { enumInput, integerInput, objectInput, stringInput, uuidInput } from "../lib/input.js";
 import type { ApiContext } from "../types.js";
+import { configuredMediaStorage, validMediaObjectVersion, type MediaObject, type MediaObjectInfo } from "../lib/media-storage.js";
 
 const MEDIA_PURPOSES = ["PROFILE", "POST", "COMMENT", "INQUIRY", "EXCHANGE", "CATALOG_REQUEST", "WANTED_REQUEST"] as const;
 const SUPPORTED_MIME_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"] as const;
@@ -57,6 +59,7 @@ export type MediaUploadReservationInput = {
   byteSize: number;
   checksumSha256: string;
   intentExpiresAt?: Date;
+  storageLocation?: { provider: "gcs" | "supabase"; bucket: string };
 };
 
 export type MediaUploadReservation = {
@@ -86,6 +89,7 @@ export function mediaUploadIntentFingerprint(input: {
   mimeType: (typeof SUPPORTED_MIME_TYPES)[number];
   byteSize: number;
   checksumSha256: string;
+  acceptedUploadMethods?: readonly ("POST" | "PUT")[];
 }): string {
   return requestHash({
     actorId: input.actorId,
@@ -95,6 +99,7 @@ export function mediaUploadIntentFingerprint(input: {
     mimeType: input.mimeType,
     byteSize: input.byteSize,
     checksumSha256: input.checksumSha256.toLocaleLowerCase("en-US"),
+    ...(input.acceptedUploadMethods?.includes("PUT") ? { acceptedUploadMethods: [...input.acceptedUploadMethods].sort() } : {}),
   });
 }
 
@@ -265,7 +270,7 @@ async function reserveMediaUploadIntentWithClient(
       `INSERT INTO media_assets
           (id,owner_id,purpose,object_key,original_filename,declared_mime_type,byte_size,checksum_sha256,metadata)
          VALUES($1,$2,$3,$4,$5,$6,$7,$8,
-           jsonb_strip_nulls(jsonb_build_object('uploadIntentExpiresAt',$9::text)))`,
+           jsonb_strip_nulls(jsonb_build_object('uploadIntentExpiresAt',$9::text,'storage',$10::jsonb)))`,
       [
         input.id,
         input.ownerId,
@@ -276,6 +281,7 @@ async function reserveMediaUploadIntentWithClient(
         input.byteSize,
         input.checksumSha256,
         input.intentExpiresAt?.toISOString() ?? null,
+        input.storageLocation ? JSON.stringify(input.storageLocation) : null,
       ],
     );
   }
@@ -292,7 +298,7 @@ async function reserveMediaUploadIntentWithClient(
 }
 
 async function readAndVerify(
-  file: File,
+  stream: AsyncIterable<Uint8Array>,
   expectedBytes: number,
   expectedSha256: string,
   expectedMimeType: string,
@@ -301,7 +307,7 @@ async function readAndVerify(
   const chunks: Buffer[] = [];
   let size = 0;
   let header = Buffer.alloc(0);
-  for await (const rawChunk of file.createReadStream()) {
+  for await (const rawChunk of stream) {
     const chunk = Buffer.isBuffer(rawChunk) ? rawChunk : Buffer.from(rawChunk as Uint8Array);
     size += chunk.length;
     if (size > MAX_UPLOAD_BYTES || size > expectedBytes) {
@@ -381,18 +387,10 @@ export async function sanitizeImage(
   }
 }
 
-function storageFor(context: ApiContext): { storage: Storage; bucket: string } {
-  if (!context.config.gcsBucket) throw new AppError(503, "MEDIA_NOT_CONFIGURED", "미디어 저장소가 구성되지 않았습니다.");
-  return {
-    storage: new Storage(context.config.gcsProjectId ? { projectId: context.config.gcsProjectId } : {}),
-    bucket: context.config.gcsBucket,
-  };
-}
-
-function verifiedStagingGeneration(metadata: FileMetadata, asset: MediaRow): string {
-  const generation = String(metadata.generation ?? "");
+function verifiedStagingGeneration(metadata: MediaObjectInfo, asset: MediaRow, provider: "gcs" | "supabase"): string {
+  const generation = metadata.version;
   const customMetadata = metadata.metadata ?? {};
-  if (!/^\d+$/.test(generation)) throw mediaImageInvalid("업로드 객체 세대를 확인할 수 없습니다.");
+  if (!validMediaObjectVersion(provider, generation)) throw mediaImageInvalid("업로드 객체 세대를 확인할 수 없습니다.");
   if (Number(metadata.size) !== Number(asset.byte_size)) {
     throw mediaImageInvalid("업로드된 파일 크기가 신청 값과 일치하지 않습니다.");
   }
@@ -405,16 +403,22 @@ function verifiedStagingGeneration(metadata: FileMetadata, asset: MediaRow): str
   return generation;
 }
 
-async function deleteObjectsBestEffort(files: File[]): Promise<void> {
-  await Promise.all(files.map((file) => file.delete({ ignoreNotFound: true }).catch(() => undefined)));
+async function deleteObjectsBestEffort(files: MediaObject[]): Promise<void> {
+  await Promise.all(files.map((file) => file.delete().catch(() => undefined)));
 }
 
 async function deleteMediaObjectKeysBestEffort(context: ApiContext, objectKeys: string[]): Promise<void> {
-  if (!context.config.gcsBucket || objectKeys.length === 0) return;
-  const { storage, bucket } = storageFor(context);
-  await deleteObjectsBestEffort(
-    [...new Set(objectKeys)].map((objectKey) => storage.bucket(bucket).file(objectKey)),
-  );
+  for (const objectKey of new Set(objectKeys)) {
+    try {
+      const result = await context.pool.query<{ metadata: unknown }>(
+        `SELECT metadata FROM media_assets WHERE object_key=$1
+          OR metadata->'processing'->>'finalObjectKey'=$1
+          OR metadata->'processingFailure'->>'finalObjectKey'=$1
+          OR metadata->'original'->>'stagingObjectKey'=$1 LIMIT 1`, [objectKey],
+      );
+      if (result.rowCount) await configuredMediaStorage(context.config, result.rows[0]!.metadata).file(objectKey).delete();
+    } catch { /* Durable Worker cleanup retries against the original provider. */ }
+  }
 }
 
 function mediaUploadQuotaError(reservation: MediaUploadReservation, requestedBytes: number): AppError {
@@ -545,11 +549,11 @@ function terminalMediaProcessingError(error: unknown): boolean {
   return error instanceof AppError && error.code === "MEDIA_IMAGE_INVALID";
 }
 
-function verifiedFinalGeneration(metadata: FileMetadata, sanitized: SanitizedImage, mediaIdValue: string): string {
-  const generation = String(metadata.generation ?? "");
+function verifiedFinalGeneration(metadata: MediaObjectInfo, sanitized: SanitizedImage, mediaIdValue: string, provider: "gcs" | "supabase"): string {
+  const generation = metadata.version;
   const customMetadata = metadata.metadata ?? {};
   if (
-    !/^\d+$/.test(generation)
+    !validMediaObjectVersion(provider, generation)
     || Number(metadata.size) !== sanitized.byteSize
     || metadata.contentType !== sanitized.mimeType
     || customMetadata.sha256 !== sanitized.checksumSha256
@@ -558,36 +562,6 @@ function verifiedFinalGeneration(metadata: FileMetadata, sanitized: SanitizedIma
     throw new AppError(502, "MEDIA_FINALIZE_FAILED", "안전 변환된 첨부 파일의 저장 결과를 확인할 수 없습니다.");
   }
   return generation;
-}
-
-async function saveSanitizedImage(file: File, sanitized: SanitizedImage, mediaIdValue: string): Promise<string> {
-  try {
-    await file.save(sanitized.data, {
-      contentType: sanitized.mimeType,
-      metadata: {
-        cacheControl: "private, max-age=31536000, immutable",
-        contentDisposition: "inline",
-        contentType: sanitized.mimeType,
-        metadata: {
-          sha256: sanitized.checksumSha256,
-          "media-id": mediaIdValue,
-          sanitized: "true",
-        },
-      },
-      preconditionOpts: { ifGenerationMatch: 0 },
-      resumable: false,
-      validation: "crc32c",
-    });
-  } catch (saveError) {
-    try {
-      const [existingMetadata] = await file.getMetadata();
-      return verifiedFinalGeneration(existingMetadata, sanitized, mediaIdValue);
-    } catch {
-      throw saveError;
-    }
-  }
-  const [metadata] = await file.getMetadata();
-  return verifiedFinalGeneration(metadata, sanitized, mediaIdValue);
 }
 
 function accountDeletionApprovedError(): AppError {
@@ -658,7 +632,7 @@ async function settleMediaProcessingFailure(
     finalObjectKey: string | null;
   },
 ): Promise<
-  | { kind: "READY"; body: { mediaId: string; status: "READY"; mimeType: string | null } }
+  | { kind: "READY"; body: { mediaId: string; status: "READY"; mimeType: string | null }; objectKey: string }
   | { kind: "ACCOUNT_DELETION_APPROVED"; objectKeys: string[] }
   | { kind: "DELETED" }
   | { kind: "FAILED"; terminal: boolean }
@@ -687,7 +661,7 @@ async function settleMediaProcessingFailure(
         resourceType: "MEDIA",
         resourceId: input.id,
       });
-      return { kind: "READY" as const, body };
+      return { kind: "READY" as const, body, objectKey: asset.object_key };
     }
     if (asset.status === "DELETED") {
       await client.query(
@@ -779,13 +753,11 @@ function mediaId(request: FastifyRequest): string {
 }
 
 async function signAsset(context: ApiContext, asset: MediaRow) {
-  const { storage, bucket } = storageFor(context);
+  const storage = configuredMediaStorage(context.config, asset.metadata);
   const expiresAt = new Date(Date.now() + 5 * 60_000);
-  const file = storage.bucket(bucket).file(
-    asset.object_key,
-    asset.object_generation === null ? undefined : { generation: String(asset.object_generation) },
-  );
-  const [url] = await file.getSignedUrl({ version: "v4", action: "read", expires: expiresAt });
+  const version = storage.provider === "supabase" ? storedMediaLocation(asset.metadata).version
+    : asset.object_generation === null ? null : String(asset.object_generation);
+  const url = await storage.signedRead(asset.object_key, version);
   return { mediaId: asset.id, url, expiresAt: expiresAt.toISOString(), mimeType: asset.detected_mime_type };
 }
 
@@ -812,6 +784,12 @@ export async function registerMediaRoutes(app: FastifyInstance, context: ApiCont
     const byteSize = integerInput(body, "byteSize", { min: 1, max: MAX_UPLOAD_BYTES })!;
     const checksumSha256 = stringInput(body, "checksumSha256", { min: 64, max: 64 })!.toLocaleLowerCase("en-US");
     if (!/^[0-9a-f]{64}$/.test(checksumSha256)) throw badRequest("checksumSha256 형식을 확인해 주세요.");
+    const methods = body.acceptedUploadMethods ?? ["POST"];
+    if (!Array.isArray(methods) || methods.length < 1 || methods.length > 2
+      || new Set(methods).size !== methods.length || methods.some((method) => method !== "POST" && method !== "PUT")) {
+      throw badRequest("acceptedUploadMethods 형식을 확인해 주세요.");
+    }
+    const acceptedUploadMethods = methods as ("POST" | "PUT")[];
     const actorId = request.actor!.userId;
     const key = idempotencyKey(request.headers);
     const hash = mediaUploadIntentFingerprint({
@@ -821,28 +799,30 @@ export async function registerMediaRoutes(app: FastifyInstance, context: ApiCont
       mimeType,
       byteSize,
       checksumSha256,
+      acceptedUploadMethods,
     });
-    const { storage, bucket } = storageFor(context);
+    const needsLegacyPost = context.config.mediaStorageProvider === "supabase" && !acceptedUploadMethods.includes("PUT");
+    if (needsLegacyPost && !context.config.gcsBucket) {
+      throw new AppError(426, "MEDIA_UPLOAD_CLIENT_UPDATE_REQUIRED", "사진 업로드를 위해 앱을 업데이트해 주세요.");
+    }
+    const storage = configuredMediaStorage(needsLegacyPost ? { ...context.config, mediaStorageProvider: "gcs" } : context.config);
+    if (storage.provider === "gcs" && !acceptedUploadMethods.includes("POST")) throw badRequest("지원하지 않는 업로드 방식입니다.");
     const id = randomUUID();
     const objectKey = `uploads/${actorId}/${id}/${filename}`;
     const expiresAt = new Date(Date.now() + UPLOAD_POLICY_TTL_MS);
     const intentExpiresAt = new Date(Date.now() + PENDING_UPLOAD_TTL_MS);
-    const stagingFile = storage.bucket(bucket).file(objectKey);
-    const [postPolicy] = await stagingFile.generateSignedPostPolicyV4(buildUploadPostPolicyOptions({
+    const signedUpload = await storage.upload({
+      key: objectKey,
       mediaId: id,
       mimeType,
       byteSize,
       checksumSha256,
       expiresAt,
-    }));
+      postPolicy: buildUploadPostPolicyOptions({ mediaId: id, mimeType, byteSize, checksumSha256, expiresAt }),
+    });
     const responseBody = {
       mediaId: id,
-      uploadUrl: postPolicy.url,
-      method: "POST" as const,
-      fields: postPolicy.fields,
-      fileFieldName: "file" as const,
-      expiresAt: expiresAt.toISOString(),
-      maxBytes: byteSize,
+      ...signedUpload,
     };
     const result = await withTransaction(context.pool, async (client) => {
       const idem = await beginIdempotency(client, {
@@ -864,6 +844,7 @@ export async function registerMediaRoutes(app: FastifyInstance, context: ApiCont
         byteSize,
         checksumSha256,
         intentExpiresAt,
+        storageLocation: storage.location,
       }, new Date());
       if (!reservation.reserved) throw mediaUploadQuotaError(reservation, byteSize);
       await completeIdempotency(client, idem.id, {
@@ -874,7 +855,7 @@ export async function registerMediaRoutes(app: FastifyInstance, context: ApiCont
       });
       return { replay: false, statusCode: 201, body: responseBody, expiredObjectKeys: reservation.expiredObjectKeys };
     });
-    await deleteObjectsBestEffort(result.expiredObjectKeys.map((expiredKey) => storage.bucket(bucket).file(expiredKey)));
+    await deleteMediaObjectKeysBestEffort(context, result.expiredObjectKeys);
     if (result.replay) reply.header("x-idempotent-replay", "true");
     return reply.code(result.statusCode).send(result.body);
   });
@@ -887,7 +868,10 @@ export async function registerMediaRoutes(app: FastifyInstance, context: ApiCont
     const ownerId = request.actor!.userId;
     const key = idempotencyKey(request.headers);
     const hash = mediaUploadCompleteFingerprint(ownerId, id);
-    const { storage, bucket } = storageFor(context);
+    const stored = await context.pool.query<Pick<MediaRow, "owner_id" | "metadata">>("SELECT owner_id,metadata FROM media_assets WHERE id=$1", [id]);
+    if (!stored.rowCount) throw notFound();
+    if (stored.rows[0]!.owner_id !== ownerId) throw forbidden();
+    const storage = configuredMediaStorage(context.config, stored.rows[0]!.metadata);
     const releaseProcessingSlot = processingLimiter.acquire();
     if (!releaseProcessingSlot) {
       throw new AppError(503, "MEDIA_PROCESSING_BUSY", "이미지 처리 요청이 많습니다. 잠시 후 다시 시도해 주세요.");
@@ -1051,26 +1035,28 @@ export async function registerMediaRoutes(app: FastifyInstance, context: ApiCont
       return reply.code(200).send(claim.body);
     }
 
-    const stagingFile = storage.bucket(bucket).file(claim.asset.object_key);
+    const stagingFile = storage.file(claim.asset.object_key);
     if (claim.kind === "EXPIRED") {
       await deleteObjectsBestEffort([stagingFile]);
       throw mediaUploadIntentExpiredError();
     }
 
-    let finalFile: File | null = null;
+    let finalFile: MediaObject | null = null;
     try {
-      const [stagingMetadata] = await stagingFile.getMetadata();
-      const stagingGeneration = verifiedStagingGeneration(stagingMetadata, claim.asset);
-      const immutableStagingFile = storage.bucket(bucket).file(claim.asset.object_key, { generation: stagingGeneration });
+      const stagingMetadata = await stagingFile.info();
+      const stagingGeneration = verifiedStagingGeneration(stagingMetadata, claim.asset, storage.provider);
       const verified = await readAndVerify(
-        immutableStagingFile,
+        stagingFile.read(stagingGeneration),
         Number(claim.asset.byte_size),
         claim.asset.checksum_sha256,
         claim.asset.declared_mime_type,
       );
       const sanitized = await sanitizeImage(verified.data, verified.detectedMimeType);
-      const finalObjectKey = `media/${id}/${sanitized.checksumSha256}.webp`;
-      finalFile = storage.bucket(bucket).file(finalObjectKey);
+      // Supabase lacks GCS's atomic create-generation precondition. Each
+      // processing claim therefore owns a different server-only final key;
+      // stale writers can never replace the winning claim's committed object.
+      const finalObjectKey = `media/${id}/${sanitized.checksumSha256}${storage.provider === "supabase" ? `-${claim.claimToken}` : ""}.webp`;
+      finalFile = storage.file(finalObjectKey);
       const trackedFinalObject = await context.pool.query(
         `UPDATE media_assets
             SET metadata=jsonb_set(
@@ -1080,13 +1066,20 @@ export async function registerMediaRoutes(app: FastifyInstance, context: ApiCont
                     'finalObjectKey',$3::text,'trackedAt',now()::text
                   ),
                   true
-                )
+                ) || CASE WHEN $5::boolean THEN jsonb_build_object(
+                  'storageCleanup', COALESCE(metadata->'storageCleanup','{}'::jsonb) || jsonb_build_object(
+                    'pendingFinalObjectKeys', COALESCE(metadata->'storageCleanup'->'pendingFinalObjectKeys','[]'::jsonb)
+                      || jsonb_build_array($3::text)
+                  )
+                ) ELSE '{}'::jsonb END
           WHERE id=$1 AND owner_id=$2 AND status='PROCESSING'
-            AND metadata->'processing'->>'claimToken'=$4`,
-        [id, ownerId, finalObjectKey, claim.claimToken],
+            AND metadata->'processing'->>'claimToken'=$4
+            AND (NOT $5::boolean OR jsonb_array_length(COALESCE(metadata->'storageCleanup'->'pendingFinalObjectKeys','[]'::jsonb)) < 64)`,
+        [id, ownerId, finalObjectKey, claim.claimToken, storage.provider === "supabase"],
       );
       if (trackedFinalObject.rowCount !== 1) throw conflict("첨부 처리 권한이 이미 변경되었습니다.");
-      const finalGeneration = await saveSanitizedImage(finalFile, sanitized, id);
+      const finalInfo = await storage.saveFinal(finalObjectKey, sanitized.data, { mediaId: id, checksumSha256: sanitized.checksumSha256 });
+      const finalGeneration = verifiedFinalGeneration(finalInfo, sanitized, id, storage.provider);
 
       const result = await withTransaction(context.pool, async (client) => {
         await lockAccountMutation(client, ownerId);
@@ -1111,7 +1104,7 @@ export async function registerMediaRoutes(app: FastifyInstance, context: ApiCont
             resourceType: "MEDIA",
             resourceId: id,
           });
-          return { kind: "READY" as const, replay: true, body };
+          return { kind: "READY" as const, replay: true, body, cleanupFinal: currentAsset.object_key !== finalObjectKey };
         }
         if (currentAsset.status !== "PROCESSING" || mediaProcessingClaimToken(currentAsset) !== claim.claimToken) {
           throw conflict("첨부 처리 권한이 이미 변경되었습니다.");
@@ -1150,6 +1143,11 @@ export async function registerMediaRoutes(app: FastifyInstance, context: ApiCont
                   width=$8,
                   height=$9,
                   metadata=(metadata - 'processing') || $10::jsonb
+                    || CASE WHEN $12::boolean THEN jsonb_build_object(
+                      'storageCleanup', COALESCE(metadata->'storageCleanup','{}'::jsonb) || jsonb_build_object(
+                        'pendingFinalObjectKeys', COALESCE(metadata->'storageCleanup'->'pendingFinalObjectKeys','[]'::jsonb) - $4::text
+                      )
+                    ) ELSE '{}'::jsonb END
             WHERE id=$1 AND owner_id=$2 AND status='PROCESSING'
               AND metadata->'processing'->>'claimToken'=$11
             RETURNING id`,
@@ -1158,12 +1156,13 @@ export async function registerMediaRoutes(app: FastifyInstance, context: ApiCont
             ownerId,
             sanitized.mimeType,
             finalObjectKey,
-            finalGeneration,
+            storage.provider === "gcs" ? finalGeneration : null,
             sanitized.checksumSha256,
             sanitized.byteSize,
             sanitized.width,
             sanitized.height,
             JSON.stringify({
+              storage: { ...storage.location, version: finalGeneration },
               original: {
                 byteSize: Number(claim.asset.byte_size),
                 checksumSha256: claim.asset.checksum_sha256,
@@ -1179,6 +1178,7 @@ export async function registerMediaRoutes(app: FastifyInstance, context: ApiCont
               },
             }),
             claim.claimToken,
+            storage.provider === "supabase",
           ],
         );
         if (!updated.rowCount) throw badRequest("첨부 상태가 이미 변경되었습니다.");
@@ -1202,12 +1202,13 @@ export async function registerMediaRoutes(app: FastifyInstance, context: ApiCont
           resourceType: "MEDIA",
           resourceId: id,
         });
-        return { kind: "READY" as const, replay: false, body };
+        return { kind: "READY" as const, replay: false, body, cleanupFinal: false };
       });
       if (result.kind === "ACCOUNT_DELETION_APPROVED") {
         throw accountDeletionApprovedError();
       }
       await deleteObjectsBestEffort([stagingFile]);
+      if (result.cleanupFinal && finalFile) await deleteObjectsBestEffort([finalFile]);
       if (result.replay) reply.header("x-idempotent-replay", "true");
       return reply.code(200).send(result.body);
     } catch (error) {
@@ -1222,7 +1223,7 @@ export async function registerMediaRoutes(app: FastifyInstance, context: ApiCont
         finalObjectKey: finalFile?.name ?? null,
       }).catch(() => ({ kind: "SUPERSEDED" as const }));
       if (settlement.kind === "READY") {
-        await deleteObjectsBestEffort([stagingFile]);
+        await deleteObjectsBestEffort([stagingFile, ...(finalFile && finalFile.name !== settlement.objectKey ? [finalFile] : [])]);
         reply.header("x-idempotent-replay", "true");
         return reply.code(200).send(settlement.body);
       }
@@ -1243,6 +1244,9 @@ export async function registerMediaRoutes(app: FastifyInstance, context: ApiCont
           ...(settlement.terminal ? [stagingFile] : []),
           ...(finalFile ? [finalFile] : []),
         ]);
+      }
+      if (settlement.kind === "SUPERSEDED" && storage.provider === "supabase" && finalFile) {
+        await deleteObjectsBestEffort([finalFile]);
       }
       throw error;
     }

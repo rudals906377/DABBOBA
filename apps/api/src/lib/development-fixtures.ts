@@ -67,6 +67,7 @@ type DrawFixture = (typeof STORAGE_FIXTURES)[number] & {
   probabilityVersionId: string;
   probabilityVersion: number;
   poolEntryId: string;
+  kujiSlotAssignmentId: string | null;
 };
 
 type PlayableKujiFixtureRow = {
@@ -278,28 +279,25 @@ async function provisionStoredDraws(client: DatabaseClient, userId: string): Pro
     fixtures.push({ ...fixture, source: drawSource.rows[0]!, ...drawConfiguration });
   }
 
-  if (!fixtures.length) return;
-  const total = fixtures.reduce((sum, fixture) => sum + Number(fixture.source.price), 0);
-  const order = await client.query<{ id: string }>(
-    `INSERT INTO orders(user_id,status,subtotal,total,paid_at)
-     VALUES($1,'FULFILLED',$2,$2,now()) RETURNING id`,
-    [userId, total],
-  );
-  const orderId = order.rows[0]!.id;
-  const payment = await client.query<{ id: string }>(
-    `INSERT INTO payments(order_id,provider,provider_payment_id,status,amount,paid_at)
-     VALUES($1,'DEV_FIXTURE',$2,'PAID',$3,now()) RETURNING id`,
-    [orderId, `${FIXTURE_KEY}:${orderId}`, total],
-  );
-  await client.query(
-    `INSERT INTO payment_ledger_entries(
-       payment_id,order_id,entry_type,amount,reference_id,reason
-     ) VALUES($1,$2,'PAYMENT',$3,$4,'개발 테스트 계정 보관함 준비')`,
-    [payment.rows[0]!.id, orderId, total, `${FIXTURE_KEY}:${orderId}`],
-  );
-
   for (const fixture of fixtures) {
     const price = Number(fixture.source.price);
+    const order = await client.query<{ id: string }>(
+      `INSERT INTO orders(user_id,status,subtotal,total,paid_at)
+       VALUES($1,'FULFILLED',$2,$2,now()) RETURNING id`,
+      [userId, price],
+    );
+    const orderId = order.rows[0]!.id;
+    const payment = await client.query<{ id: string }>(
+      `INSERT INTO payments(order_id,provider,provider_payment_id,status,amount,paid_at)
+       VALUES($1,'DEV_FIXTURE',$2,'PAID',$3,now()) RETURNING id`,
+      [orderId, `${FIXTURE_KEY}:${orderId}`, price],
+    );
+    await client.query(
+      `INSERT INTO payment_ledger_entries(
+         payment_id,order_id,entry_type,amount,reference_id,reason
+       ) VALUES($1,$2,'PAYMENT',$3,$4,'개발 테스트 계정 보관함 준비')`,
+      [payment.rows[0]!.id, orderId, price, `${FIXTURE_KEY}:${orderId}`],
+    );
     const orderLine = await client.query<{ id: string }>(
       `INSERT INTO order_lines(
          order_id,product_id,product_name_snapshot,category_snapshot,probability_version_id,
@@ -316,8 +314,8 @@ async function provisionStoredDraws(client: DatabaseClient, userId: string): Pro
     );
     const entitlement = await client.query<{ id: string }>(
       `INSERT INTO draw_entitlements(
-         order_line_id,user_id,product_id,probability_version_id,status,consumed_at
-       ) VALUES($1,$2,$3,$4,'CONSUMED',now()) RETURNING id`,
+         order_line_id,user_id,product_id,probability_version_id,status
+       ) VALUES($1,$2,$3,$4,'AVAILABLE') RETURNING id`,
       [orderLine.rows[0]!.id, userId, fixture.source.id, fixture.probabilityVersionId],
     );
     const inventory = await client.query<{ id: string }>(
@@ -325,15 +323,56 @@ async function provisionStoredDraws(client: DatabaseClient, userId: string): Pro
        VALUES($1,$2,$3,$4,'OWNED') RETURNING id`,
       [userId, fixture.prizeProductId, fixture.sourceType, entitlement.rows[0]!.id],
     );
-    const marker = `${FIXTURE_KEY}:${userId}:${fixture.slot}`;
-    const entropyHex = createHash("sha256").update(marker).digest("hex");
-    const entropyDigest = createHash("sha256").update(Buffer.from(entropyHex, "hex")).digest("hex");
+    let selectionAlgorithm = "SHA256_REJECTION_V1";
+    let entropyHex: string | null;
+    let entropyDigest: string | null;
+    let rollValue: number | null = 0;
+    let totalWeight: number | null = 1;
+    let selectionSnapshot: Array<Record<string, unknown>>;
+    let kujiSlotBindingId: string | null = null;
+    if (fixture.kujiSlotAssignmentId) {
+      await client.query(
+        "INSERT INTO kuji_rooms(product_id) VALUES($1) ON CONFLICT (product_id) DO NOTHING",
+        [fixture.source.id],
+      );
+      const roomEntry = await client.query<{ id: string }>(
+        `INSERT INTO kuji_room_entries(product_id,user_id,order_id,state,resolved_at)
+         VALUES($1,$2,$3,'EXPIRED',now()) RETURNING id`,
+        [fixture.source.id, userId, orderId],
+      );
+      const binding = await client.query<{ id: string }>(
+        `INSERT INTO kuji_slot_bindings(slot_assignment_id,entitlement_id,room_entry_id)
+         VALUES($1,$2,$3) RETURNING id`,
+        [fixture.kujiSlotAssignmentId, entitlement.rows[0]!.id, roomEntry.rows[0]!.id],
+      );
+      const decremented = await client.query(
+        `UPDATE draw_pool_entries
+         SET remaining_quantity=remaining_quantity-1
+         WHERE id=$1 AND remaining_quantity>0 RETURNING id`,
+        [fixture.poolEntryId],
+      );
+      if (decremented.rowCount !== 1) {
+        throw new Error(`Development kuji prize pool is exhausted: ${fixture.source.id}`);
+      }
+      selectionAlgorithm = "KUJI_SEALED_SLOT_V1";
+      entropyHex = null;
+      entropyDigest = null;
+      rollValue = null;
+      totalWeight = null;
+      kujiSlotBindingId = binding.rows[0]!.id;
+      selectionSnapshot = [{ slotId: fixture.kujiSlotAssignmentId, slotNumber: 1 }];
+    } else {
+      const marker = `${FIXTURE_KEY}:${userId}:${fixture.slot}`;
+      entropyHex = createHash("sha256").update(marker).digest("hex");
+      entropyDigest = createHash("sha256").update(Buffer.from(entropyHex, "hex")).digest("hex");
+      selectionSnapshot = [{ poolEntryId: fixture.poolEntryId, effectiveWeight: 1 }];
+    }
     await client.query(
       `INSERT INTO draw_results(
          entitlement_id,user_id,product_id,pool_entry_id,prize_product_id,prize_inventory_unit_id,
          probability_version,selection_algorithm,entropy_hex,entropy_digest,roll_value,total_weight,
-         selection_snapshot
-       ) VALUES($1,$2,$3,$4,$5,$6,$7,'SHA256_REJECTION_V1',$8,$9,0,1,$10)`,
+         selection_snapshot,kuji_slot_binding_id
+       ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
       [
         entitlement.rows[0]!.id,
         userId,
@@ -342,10 +381,18 @@ async function provisionStoredDraws(client: DatabaseClient, userId: string): Pro
         fixture.prizeProductId,
         inventory.rows[0]!.id,
         fixture.probabilityVersion,
+        selectionAlgorithm,
         entropyHex,
         entropyDigest,
-        JSON.stringify([{ poolEntryId: fixture.poolEntryId, effectiveWeight: 1 }]),
+        rollValue,
+        totalWeight,
+        JSON.stringify(selectionSnapshot),
+        kujiSlotBindingId,
       ],
+    );
+    await client.query(
+      "UPDATE draw_entitlements SET status='CONSUMED',consumed_at=now() WHERE id=$1",
+      [entitlement.rows[0]!.id],
     );
   }
 }
@@ -355,7 +402,12 @@ async function ensureDevelopmentDrawConfiguration(
   fixture: (typeof STORAGE_FIXTURES)[number],
   source: SourceProductRow,
   userId: string,
-): Promise<{ probabilityVersionId: string; probabilityVersion: number; poolEntryId: string }> {
+): Promise<{
+  probabilityVersionId: string;
+  probabilityVersion: number;
+  poolEntryId: string;
+  kujiSlotAssignmentId: string | null;
+}> {
   await client.query(
     "SELECT pg_advisory_xact_lock(hashtextextended($1,0))",
     [`${FIXTURE_KEY}:${source.id}`],
@@ -364,11 +416,18 @@ async function ensureDevelopmentDrawConfiguration(
     probability_version_id: string;
     probability_version: number;
     pool_entry_id: string;
+    kuji_deck_id: string | null;
+    kuji_slot_assignment_id: string | null;
   }>(
     `SELECT version.id AS probability_version_id,version.version AS probability_version,
-       entry.id AS pool_entry_id
+       entry.id AS pool_entry_id,deck.probability_version_id AS kuji_deck_id,
+       assignment.id AS kuji_slot_assignment_id
      FROM draw_probability_versions version
      JOIN draw_pool_entries entry ON entry.probability_version_id=version.id
+     LEFT JOIN kuji_decks deck ON deck.probability_version_id=version.id
+     LEFT JOIN kuji_slot_assignments assignment
+       ON assignment.probability_version_id=version.id
+      AND assignment.pool_entry_id=entry.id
      WHERE version.product_id=$1 AND version.status='ACTIVE' AND entry.rarity=$2
        AND entry.prize_product_id=$3
        AND entry.prize_name_snapshot=$4
@@ -376,7 +435,7 @@ async function ensureDevelopmentDrawConfiguration(
        AND entry.prize_sku_snapshot=$6
        AND entry.prize_ip_id_snapshot=$7
        AND entry.prize_category_snapshot=$8
-     ORDER BY version.version DESC LIMIT 1`,
+     ORDER BY version.version DESC,assignment.slot_number LIMIT 1`,
     [
       source.id,
       fixtureRarity(fixture.slot),
@@ -390,6 +449,9 @@ async function ensureDevelopmentDrawConfiguration(
   );
   if (existing.rowCount) {
     const row = existing.rows[0]!;
+    if (row.kuji_deck_id && !row.kuji_slot_assignment_id) {
+      throw new Error(`Development kuji deck has no usable slot assignment: ${source.id}`);
+    }
     await client.query(
       `UPDATE catalog_products SET is_active=false,updated_at=now()
        WHERE id=$1 AND metadata->>'developmentFixture'=$2`,
@@ -399,6 +461,7 @@ async function ensureDevelopmentDrawConfiguration(
       probabilityVersionId: row.probability_version_id,
       probabilityVersion: Number(row.probability_version),
       poolEntryId: row.pool_entry_id,
+      kujiSlotAssignmentId: row.kuji_slot_assignment_id,
     };
   }
 
@@ -421,8 +484,9 @@ async function ensureDevelopmentDrawConfiguration(
   const poolEntry = await client.query<{ id: string }>(
     `INSERT INTO draw_pool_entries(
        probability_version_id,prize_product_id,prize_name_snapshot,prize_image_url_snapshot,
-       prize_sku_snapshot,prize_ip_id_snapshot,prize_category_snapshot,rarity,weight
-     ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,1) RETURNING id`,
+       prize_sku_snapshot,prize_ip_id_snapshot,prize_category_snapshot,rarity,weight,
+       initial_quantity,remaining_quantity
+     ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,1,$9,$9) RETURNING id`,
     [
       version.rows[0]!.id,
       fixture.prizeProductId,
@@ -432,8 +496,27 @@ async function ensureDevelopmentDrawConfiguration(
       source.ip_id,
       source.category,
       fixtureRarity(fixture.slot),
+      source.category === "kuji" ? 1 : null,
     ],
   );
+  let kujiSlotAssignmentId: string | null = null;
+  if (source.category === "kuji") {
+    await client.query(
+      "INSERT INTO kuji_decks(probability_version_id,total_slots) VALUES($1,1)",
+      [version.rows[0]!.id],
+    );
+    await client.query(
+      `INSERT INTO kuji_deck_tiers(probability_version_id,pool_entry_id,tier_code,tier_rank)
+       VALUES($1,$2,$3,0)`,
+      [version.rows[0]!.id, poolEntry.rows[0]!.id, fixtureRarity(fixture.slot)],
+    );
+    const assignment = await client.query<{ id: string }>(
+      `INSERT INTO kuji_slot_assignments(probability_version_id,slot_number,pool_entry_id)
+       VALUES($1,1,$2) RETURNING id`,
+      [version.rows[0]!.id, poolEntry.rows[0]!.id],
+    );
+    kujiSlotAssignmentId = assignment.rows[0]!.id;
+  }
   const activated = await client.query(
     `UPDATE draw_probability_versions
      SET status='ACTIVE',published_by=$2,published_at=now()
@@ -452,6 +535,7 @@ async function ensureDevelopmentDrawConfiguration(
     probabilityVersionId: version.rows[0]!.id,
     probabilityVersion,
     poolEntryId: poolEntry.rows[0]!.id,
+    kujiSlotAssignmentId,
   };
 }
 
@@ -495,11 +579,26 @@ async function provisionPlayableKujiCatalog(client: DatabaseClient, userId: stri
     );
     if (!product.rowCount) continue;
 
-    const active = await client.query(
-      "SELECT 1 FROM draw_probability_versions WHERE product_id=$1 AND status='ACTIVE' LIMIT 1",
+    const active = await client.query<{ id: string; kuji_deck_id: string | null }>(
+      `SELECT version.id,deck.probability_version_id AS kuji_deck_id
+       FROM draw_probability_versions version
+       LEFT JOIN kuji_decks deck ON deck.probability_version_id=version.id
+       WHERE version.product_id=$1 AND version.status='ACTIVE'
+       ORDER BY version.version DESC LIMIT 1
+       FOR UPDATE OF version`,
       [fixture.templateProductId],
     );
-    if (active.rowCount) continue;
+    if (active.rows[0]?.kuji_deck_id) continue;
+    if (active.rowCount) {
+      const retired = await client.query(
+        `UPDATE draw_probability_versions SET status='RETIRED'
+         WHERE id=$1 AND status='ACTIVE' RETURNING id`,
+        [active.rows[0]!.id],
+      );
+      if (retired.rowCount !== 1) {
+        throw new Error(`Legacy development kuji version could not be retired: ${fixture.templateProductId}`);
+      }
+    }
 
     const row = product.rows[0]!;
     const quantity = Number(row.on_hand);
@@ -516,12 +615,12 @@ async function provisionPlayableKujiCatalog(client: DatabaseClient, userId: stri
        VALUES($1,$2,'DRAFT') RETURNING id`,
       [fixture.templateProductId, versionNumber],
     );
-    await client.query(
+    const poolEntry = await client.query<{ id: string }>(
       `INSERT INTO draw_pool_entries(
          probability_version_id,prize_product_id,prize_name_snapshot,prize_image_url_snapshot,
          prize_sku_snapshot,prize_ip_id_snapshot,prize_category_snapshot,rarity,weight,
          initial_quantity,remaining_quantity
-       ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,1,$9,$9)`,
+       ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,1,$9,$9) RETURNING id`,
       [
         version.rows[0]!.id,
         fixture.prizeProductId,
@@ -533,6 +632,21 @@ async function provisionPlayableKujiCatalog(client: DatabaseClient, userId: stri
         `${fixtureRarity(fixture.slot)}_PLAYABLE`,
         quantity,
       ],
+    );
+    await client.query(
+      "INSERT INTO kuji_decks(probability_version_id,total_slots) VALUES($1,$2)",
+      [version.rows[0]!.id, quantity],
+    );
+    await client.query(
+      `INSERT INTO kuji_deck_tiers(probability_version_id,pool_entry_id,tier_code,tier_rank)
+       VALUES($1,$2,$3,0)`,
+      [version.rows[0]!.id, poolEntry.rows[0]!.id, `${fixtureRarity(fixture.slot)}_PLAYABLE`],
+    );
+    await client.query(
+      `INSERT INTO kuji_slot_assignments(probability_version_id,slot_number,pool_entry_id)
+       SELECT $1,slot_number,$2
+       FROM generate_series(1,$3) AS slot_number`,
+      [version.rows[0]!.id, poolEntry.rows[0]!.id, quantity],
     );
     const activated = await client.query(
       `UPDATE draw_probability_versions

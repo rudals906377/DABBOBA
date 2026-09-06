@@ -18,7 +18,7 @@ test("loadWorkerConfig applies bounded operational defaults", () => {
   assert.equal(config.queueName, "dabboba_worker");
   assert.equal(config.outboxBatchSize, 50);
   assert.equal(config.queueVisibilitySeconds, 900);
-  assert.equal(config.maxRunSeconds, 240);
+  assert.equal(config.maxRunSeconds, 45);
   assert.equal(config.maxMessagesPerRun, 100);
   assert.equal(config.databasePoolMax, 3);
   assert.equal(config.databaseOperationTimeoutMs, 30_000);
@@ -96,7 +96,7 @@ test("loadWorkerConfig keeps visibility beyond the Cloud Run task timeout and sa
 });
 
 test("loadWorkerConfig reserves shutdown time inside the Cloud Run task timeout", () => {
-  assert.equal(MAX_WORKER_RUN_SECONDS, 240);
+  assert.equal(MAX_WORKER_RUN_SECONDS, 45);
   assert.ok(MAX_WORKER_RUN_SECONDS < CLOUD_RUN_TASK_TIMEOUT_SECONDS);
   assert.throws(
     () => loadWorkerConfig({

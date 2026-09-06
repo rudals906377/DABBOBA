@@ -19,6 +19,7 @@ COPY packages/config/package.json packages/config/tsconfig.json ./packages/confi
 COPY packages/contracts/package.json packages/contracts/tsconfig.json ./packages/contracts/
 COPY packages/db/package.json packages/db/tsconfig.json ./packages/db/
 COPY packages/domain/package.json packages/domain/tsconfig.json ./packages/domain/
+COPY packages/media-storage/package.json packages/media-storage/tsconfig.json ./packages/media-storage/
 
 RUN --mount=type=cache,id=dabboba-pnpm-store,target=/pnpm/store \
   pnpm install --frozen-lockfile \
@@ -34,6 +35,7 @@ COPY packages/contracts/src ./packages/contracts/src
 COPY packages/db/migrations ./packages/db/migrations
 COPY packages/db/src ./packages/db/src
 COPY packages/domain/src ./packages/domain/src
+COPY packages/media-storage/src ./packages/media-storage/src
 
 RUN pnpm --filter @dabboba/api... --filter @dabboba/worker... run build
 
@@ -68,14 +70,14 @@ RUN pnpm --config.inject-workspace-packages=true --filter @dabboba/api deploy --
     \( -name '.env' -o -name '.env.*' -o -name '*.ts' -o -name '*.cts' \
        -o -name '*.mts' -o -name '*.map' -o -name '*.tsbuildinfo' \
        -o -name '*.test.js' -o -name '*.test.cjs' -o -name '*.test.mjs' \
-       -o -name '*.integration.test.js' -o -name '*.spec.js' -o -name '*.spec.cjs' \
+       -o -name '*.integration.test.js' -o -name '*.conformance.js' -o -name '*.spec.js' -o -name '*.spec.cjs' \
        -o -name '*.spec.mjs' \) \
     -delete \
   && ! find /out -type f \
     \( -name '.env' -o -name '.env.*' -o -name '*.ts' -o -name '*.cts' \
        -o -name '*.mts' -o -name '*.map' -o -name '*.tsbuildinfo' \
        -o -name '*.test.js' -o -name '*.test.cjs' -o -name '*.test.mjs' \
-       -o -name '*.integration.test.js' -o -name '*.spec.js' -o -name '*.spec.cjs' \
+       -o -name '*.integration.test.js' -o -name '*.conformance.js' -o -name '*.spec.js' -o -name '*.spec.cjs' \
        -o -name '*.spec.mjs' \) \
     -print -quit | grep -q .
 

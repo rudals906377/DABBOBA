@@ -125,22 +125,41 @@ function loadRuntimeConfigModule() {
 const runtimeConfig = loadRuntimeConfigModule();
 
 test("Expo entry is native-first with typed routes, API contracts, secure tokens, and disposable cache", () => {
-  assert.equal(mobilePackage.dependencies.expo, "~54.0.37");
+  assert.equal(mobilePackage.dependencies.expo, "~57.0.18");
+  assert.equal(mobilePackage.dependencies.react, "19.2.3");
+  assert.equal(mobilePackage.dependencies["react-dom"], "19.2.3");
+  assert.equal(mobilePackage.dependencies["expo-splash-screen"], "~57.0.8");
+  assert.equal(mobilePackage.dependencies["react-native"], "0.86.3");
+  assert.equal(mobilePackage.dependencies["react-native-reanimated"], "4.5.1");
+  assert.equal(mobilePackage.dependencies["react-native-worklets"], "0.10.1");
   assert.equal(mobilePackage.main, "expo-router/entry");
   assert.equal(mobilePackage.dependencies["@dabboba/api-client"], "workspace:*");
-  assert.equal(mobilePackage.dependencies["expo-secure-store"], "~15.0.8");
-  assert.equal(mobilePackage.dependencies["expo-sqlite"], "~16.0.10");
-  assert.equal(mobilePackage.dependencies["expo-image-picker"], "~17.0.11");
-  assert.equal(mobilePackage.dependencies["expo-image-manipulator"], "~14.0.8");
-  assert.equal(mobilePackage.dependencies["expo-notifications"], "~0.32.17");
-  assert.equal(mobilePackage.dependencies["expo-auth-session"], "~7.0.11");
-  assert.equal(mobilePackage.dependencies["expo-web-browser"], "~15.0.11");
+  assert.equal(mobilePackage.dependencies["expo-secure-store"], "~57.0.2");
+  assert.equal(mobilePackage.dependencies["expo-sqlite"], "~57.0.2");
+  assert.equal(mobilePackage.dependencies["expo-image-picker"], "~57.0.14");
+  assert.equal(mobilePackage.dependencies["expo-image-manipulator"], "~57.0.14");
+  assert.equal(mobilePackage.dependencies["expo-notifications"], "~57.0.15");
+  assert.equal(mobilePackage.dependencies["expo-auth-session"], "~57.0.10");
+  assert.equal(mobilePackage.dependencies["expo-web-browser"], "~57.0.2");
+  assert.equal(mobilePackage.dependencies["expo-router"], "~57.0.17");
+  assert.equal(mobilePackage.dependencies["@react-navigation/bottom-tabs"], undefined);
   assert.ok(mobilePackage.dependencies["@supabase/supabase-js"]);
-  assert.equal(mobilePackage.scripts.start, "expo start --go");
+  assert.equal(mobilePackage.scripts.start, "node ../../scripts/dabboba-mobile-launch.mjs");
+  assert.equal(mobilePackage.scripts.ios, "node ../../scripts/dabboba-mobile-launch.mjs --ios");
+  assert.equal(mobilePackage.scripts.android, "node ../../scripts/dabboba-mobile-launch.mjs --android");
+  for (const hook of ["prestart", "preios", "preandroid"]) {
+    assert.equal(mobilePackage.scripts[hook], "corepack pnpm run prepare:workspace");
+  }
   assert.equal(mobilePackage.scripts.test, "node --test ../../tests/expo-shell-structure.test.mjs");
   assert.equal(mobileAppConfig.expo.scheme, "dabboba");
   assert.equal(mobileAppConfig.expo.experiments.typedRoutes, true);
   assert.deepEqual(Array.from(mobileAppConfig.expo.plugins), [
+    ["expo-splash-screen", {
+      image: "./assets/dabboba-wordmark.png",
+      imageWidth: 200,
+      resizeMode: "contain",
+      backgroundColor: "#F5F5F1",
+    }],
     "expo-router",
     "expo-secure-store",
     "expo-sqlite",
@@ -156,6 +175,7 @@ test("Expo entry is native-first with typed routes, API contracts, secure tokens
     "expo-notifications",
     "expo-web-browser",
   ]);
+  assert.equal(mobileAppConfig.expo.splash, undefined, "SDK57 uses the splash plugin, not the removed config field");
   assert.match(rootLayoutSource, /SQLiteProvider/);
   assert.match(tabsLayoutSource, /name="exchange"/);
   assert.match(tabsLayoutSource, /name="ppoba"/);
@@ -173,6 +193,8 @@ test("Expo entry is native-first with typed routes, API contracts, secure tokens
   assert.doesNotMatch(tabsLayoutSource, /title: "덕룸"/);
   assert.match(tabsLayoutSource, /name="profile"/);
   assert.match(catalogApiSource, /createDabbobaClient/);
+  assert.match(catalogApiSource, /\/v1\/catalog\/home-sections/);
+  assert.match(catalogApiSource, /homeSections:\s*homeSectionResult\.data \?\? null/);
   assert.match(homeSource, /fetchHomeCatalog/);
   assert.match(homeSource, /readHomeCatalogCache/);
   assert.match(homeSource, /header:\s*\{[\s\S]*?minHeight:\s*48,[\s\S]*?paddingHorizontal:\s*seed\.spacing\.globalGutter,/);
@@ -219,6 +241,9 @@ test("native home follows the compact announcement, draw activity, today, collec
   assert.doesNotMatch(homeSource, /productGrid|flexWrap:\s*"wrap"/);
   assert.doesNotMatch(homeSource, /다뽀바 인기 작품|다뽀바 덕룸|fetchDukroomHomePreview/);
   assert.match(homeSource, /buildHomeCollections/);
+  assert.match(homeSource, /snapshot\.homeSections\?\.configured/);
+  assert.match(homeSource, /buildConfiguredHomeCollections\(snapshot\.homeSections\.items\)/);
+  assert.match(localDatabaseSource, /homeSections:\s*parsed\.homeSections \?\? null/);
   assert.match(homeFeedSource, /orderedIpIds\.flatMap/);
   assert.match(homeFeedSource, /`\$\{ip\.nameKo\} 컬렉션`/);
   assert.match(announcementTickerSource, /Animated\.timing\(translateX/);
@@ -231,8 +256,18 @@ test("native home follows the compact announcement, draw activity, today, collec
   assert.match(homeSource, /activityProduct:\s*\{[^}]*color:\s*seed\.color\.foreground\.brand/);
   assert.match(homeSource, /__DEV__[\s\S]*?buildDrawActivityExamples\(snapshot\?\.products \?\? \[\], snapshot\?\.ips \?\? \[\], productSubjectTitle\)/);
   assert.match(homeFeedSource, /productNameForActivity\(product\.name, ipNameById\.get\(product\.ipId\)\)/);
-  assert.match(homeSource, /getTickerOverflowDistance/);
-  assert.match(homeSource, /Animated\.loop/);
+  assert.match(homeSource, /getContinuousTickerLoopDistance/);
+  const activityMarqueeSource = homeSource.slice(
+    homeSource.indexOf("function DrawActivityMarquee"),
+    homeSource.indexOf("function DrawActivityMessage"),
+  );
+  assert.match(activityMarqueeSource, /Animated\.loop\(Animated\.timing/);
+  assert.match(activityMarqueeSource, /toValue:\s*-loopDistance/);
+  assert.doesNotMatch(activityMarqueeSource, /Animated\.delay|toValue:\s*0/);
+  assert.match(activityMarqueeSource, /activityTextLoopGap/);
+  assert.match(activityMarqueeSource, /width=\{shouldLoop \? textWidth : Math\.max\(textWidth, viewportWidth\)\}/);
+  assert.match(activityMarqueeSource, /<DrawActivityMessage item=\{item\} width=\{textWidth\} \/>/);
+  assert.match(activityMarqueeSource, /accessibilityElementsHidden/);
   assert.match(homeSource, /AccessibilityInfo\.isReduceMotionEnabled/);
 });
 
@@ -996,7 +1031,7 @@ test("native runtime config requires HTTPS in production and derives the Metro h
 });
 
 test("legacy WebView compatibility remains bounded while screens migrate", () => {
-  assert.equal(mobilePackage.dependencies["react-native-webview"], "13.15.0");
+  assert.equal(mobilePackage.dependencies["react-native-webview"], "13.16.1");
   assert.match(mobileSource, /EXPO_PUBLIC_DABBOBA_WEB_URL/);
   assert.match(mobileSource, /EXPO_PUBLIC_DABBOBA_ALLOWED_ORIGINS/);
   assert.match(mobileSource, /Constants\.expoConfig\?\.hostUri/);

@@ -33,14 +33,14 @@ test("ticket selection remains numeric, unique, and reversible", () => {
   assert.deepEqual(selected, ["01", "50"]);
 });
 
-test("ticket route parsing keeps valid selected identities through 50", () => {
+test("ticket route parsing keeps valid operator-configured slot identities", () => {
   const tickets = parseKujiTicketNumbers("01,09,10,50,50,00,51,x");
 
-  assert.deepEqual(tickets, ["01", "09", "10", "50"]);
+  assert.deepEqual(tickets, ["01", "09", "10", "50", "51"]);
   assert.deepEqual(buildKujiPreviewParams(tickets, "all"), {
     mode: "all",
-    count: "4",
-    tickets: "01,09,10,50",
+    count: "5",
+    tickets: "01,09,10,50,51",
   });
 });
 

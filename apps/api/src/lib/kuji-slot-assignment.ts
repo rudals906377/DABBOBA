@@ -25,6 +25,7 @@ export type KujiRandomInt = (maxExclusive: number) => number;
 
 const secureRandomInt: KujiRandomInt = (maxExclusive) => cryptoRandomInt(maxExclusive);
 export const MAX_SEALED_KUJI_SLOT_TOTAL = 10_000;
+export const SEALED_KUJI_TIER_CODE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,39}$/;
 
 export function assignSealedKujiSlots(
   total: number,
@@ -111,7 +112,9 @@ function validateAndNormalizeTiers(
     poolEntryIds.add(poolEntryId);
 
     const tierCode = typeof tier?.tierCode === "string" ? tier.tierCode.trim() : "";
-    if (!tierCode) throw new RangeError("Each sealed kuji tierCode must be nonempty.");
+    if (!SEALED_KUJI_TIER_CODE_PATTERN.test(tierCode)) {
+      throw new RangeError("Each sealed kuji tierCode must use 1-40 ASCII letters, digits, underscores, or hyphens.");
+    }
     if (tierCodes.has(tierCode)) throw new RangeError(`Duplicate sealed kuji tierCode: ${tierCode}.`);
     tierCodes.add(tierCode);
 

@@ -143,5 +143,99 @@ test(
     assert.equal(rejected.status, "DELETED");
     assert.equal(malformedReady.status, "READY");
     assert.equal(malformedReady.staging_cleanup_at, null);
+
+    // An old claim may write again even after a successful delete. Each new
+    // sweep below is restricted to this test's IDs, using the real SQL predicate.
+    const orphanReadyId = randomUUID();
+    const orphanDeletedId = randomUUID();
+    const activeId = randomUUID();
+    const invalidArrayId = randomUUID();
+    const foreignOnlyId = randomUUID();
+    fixtureMediaIds.push(orphanReadyId, orphanDeletedId, activeId, invalidArrayId, foreignOnlyId);
+    const winner = `media/${orphanReadyId}/${"e".repeat(64)}-${randomUUID()}.webp`;
+    const readyOrphan = `media/${orphanReadyId}/${"f".repeat(64)}-${randomUUID()}.webp`;
+    const deletedOrphan = `media/${orphanDeletedId}/${"a".repeat(64)}-${randomUUID()}.webp`;
+    const activeFinal = `media/${activeId}/${"b".repeat(64)}-${randomUUID()}.webp`;
+    const foreignKey = `media/${randomUUID()}/${"c".repeat(64)}-${randomUUID()}.webp`;
+    const checkTime = new Date(Date.now() + 60_000);
+    const completedAt = new Date("1999-01-01T00:00:00.000Z").toISOString();
+    const pendingList = [readyOrphan, readyOrphan, winner, foreignKey, "uploads/invalid", 123];
+    for (const fixture of [
+      { id: orphanReadyId, status: "READY", key: winner, pending: pendingList, updatedAt: new Date("1800-01-01T00:00:00Z") },
+      { id: orphanDeletedId, status: "DELETED", key: deletedOrphan, pending: [deletedOrphan], updatedAt: new Date("1800-01-01T00:00:00Z") },
+      { id: activeId, status: "PROCESSING", key: activeFinal, pending: [activeFinal], updatedAt: new Date(checkTime.getTime() - 6 * 60_000) },
+      { id: invalidArrayId, status: "READY", key: `media/${invalidArrayId}/${"d".repeat(64)}.webp`, pending: readyOrphan, updatedAt: new Date("1700-01-01T00:00:00Z") },
+      { id: foreignOnlyId, status: "READY", key: `media/${foreignOnlyId}/${"d".repeat(64)}.webp`, pending: [foreignKey, 42, null], updatedAt: new Date("1700-01-01T00:00:00Z") },
+    ]) {
+      await fixturePool.query(
+        `INSERT INTO media_assets
+          (id,owner_id,purpose,object_key,original_filename,declared_mime_type,
+           byte_size,checksum_sha256,status,metadata,created_at,updated_at)
+         VALUES($1,$2,'POST',$3,'orphan.png','image/png',100,$4,$5,$6::jsonb,$7,$7)`,
+        [fixture.id, ownerId, fixture.key, "a".repeat(64), fixture.status, JSON.stringify({
+          storage: { provider: "supabase", bucket: "worker-fixture", version: randomUUID() },
+          ...(fixture.status !== "PROCESSING" ? { cleanup: { completedAt } } : {}),
+          stagingCleanup: { completedAt },
+          storageCleanup: { pendingFinalObjectKeys: fixture.pending },
+        }), fixture.updatedAt],
+      );
+    }
+    const objects = new Set([winner, readyOrphan, deletedOrphan, activeFinal, foreignKey]);
+    const orphanDeletions: string[] = [];
+    const orphanStore: MediaStore = {
+      async deleteObject(key, metadata) {
+        assert.ok(key === readyOrphan || key === deletedOrphan, `unexpected cleanup key: ${key}`);
+        assert.equal((metadata as { storage: { provider: string } }).storage.provider, "supabase");
+        orphanDeletions.push(key);
+        objects.delete(key);
+        return "deleted";
+      },
+    };
+    // This adds only a fixture-ID conjunct; selection, JSON validation, locking,
+    // privileges and updates still execute on PostgreSQL as the actual worker.
+    const candidateScope = new Proxy(workerPool, {
+      get(target, property) {
+        if (property === "query") return (sql: string, values: unknown[]) => {
+          assert.ok(sql.includes("WHERE (metadata"));
+          return target.query(
+            sql.replace("WHERE (metadata", "WHERE id=ANY($9::uuid[]) AND ((metadata")
+              .replace("ORDER BY updated_at,id", ") ORDER BY updated_at,id"),
+            [...values, [orphanReadyId, orphanDeletedId, activeId, invalidArrayId, foreignOnlyId]],
+          );
+        };
+        const value = Reflect.get(target, property);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+    const cleanupOptions = { batchSize: 2, pendingTtlMinutes: 60, rejectedTtlHours: 24 };
+    assert.deepEqual(await cleanupMediaBatch(candidateScope, orphanStore, cleanupOptions, checkTime),
+      { examined: 2, deleted: 2, skipped: 0 });
+    assert.deepEqual(new Set(orphanDeletions), new Set([readyOrphan, deletedOrphan]));
+    assert.deepEqual(objects, new Set([winner, activeFinal, foreignKey]));
+    const orphanRows = await fixturePool.query<{ id: string; status: string; object_key: string; metadata: {
+      storageCleanup: { checkedAt: string; pendingFinalObjectKeys: unknown[] }; cleanup: { completedAt: string };
+    } }>("SELECT id,status,object_key,metadata FROM media_assets WHERE id=ANY($1::uuid[])",
+    [[orphanReadyId, orphanDeletedId]]);
+    const readyOrphanRow = orphanRows.rows.find((row) => row.id === orphanReadyId)!;
+    assert.equal(readyOrphanRow.status, "READY");
+    assert.equal(readyOrphanRow.object_key, winner);
+    assert.deepEqual(readyOrphanRow.metadata.storageCleanup.pendingFinalObjectKeys, pendingList);
+    for (const row of orphanRows.rows) {
+      assert.equal(row.metadata.storageCleanup.checkedAt, checkTime.toISOString());
+      assert.equal(row.metadata.cleanup.completedAt, completedAt);
+    }
+
+    // Use the same worker transaction and selector against only our rows here:
+    // completed cleanup rows with invalid JSON or foreign keys must not starve
+    // the valid candidates, and checkedAt must throttle actual repeated checks.
+    const fourMinutesLater = new Date(checkTime.getTime() + 4 * 60_000);
+    assert.deepEqual(await cleanupMediaBatch(candidateScope, orphanStore, cleanupOptions, fourMinutesLater),
+      { examined: 0, deleted: 0, skipped: 0 });
+    objects.add(readyOrphan); // A stale process resumes after the first deletion.
+    const fiveMinutesLater = new Date(checkTime.getTime() + 5 * 60_000);
+    assert.deepEqual(await cleanupMediaBatch(candidateScope, orphanStore, cleanupOptions, fiveMinutesLater),
+      { examined: 2, deleted: 2, skipped: 0 });
+    assert.deepEqual(objects, new Set([winner, activeFinal, foreignKey]));
+    assert.equal(orphanDeletions.length, 4);
   },
 );

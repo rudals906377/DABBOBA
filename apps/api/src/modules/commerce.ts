@@ -4,6 +4,7 @@ import {
   completeLockedKujiOrderRoomIfDrawn,
   expireLockedKujiOrderDrawing,
   lockExistingKujiRoom,
+  lockKujiProductRoomAdvisory,
   lockKujiRoomAdvisories,
   lockLinkedKujiRoomForOrder,
   releaseLockedKujiOrderRoom,
@@ -17,11 +18,17 @@ import { adminIdempotentMutation, sendAdminMutation } from "../lib/admin-idempot
 import { writeAdminAudit, writeOutbox } from "../lib/audit.js";
 import { AppError, badRequest, conflict, forbidden, notFound, unauthorized } from "../lib/errors.js";
 import { assertDrawCapacity } from "../lib/draw-capacity.js";
+import {
+  assignSealedKujiSlots,
+  MAX_SEALED_KUJI_SLOT_TOTAL,
+  SEALED_KUJI_TIER_CODE_PATTERN,
+} from "../lib/kuji-slot-assignment.js";
 import { beginIdempotency, completeIdempotency, idempotencyKey, requestHash } from "../lib/idempotency.js";
 import { enumInput, integerInput, nullableStringInput, objectInput, slugIdInput, stringInput, uuidInput } from "../lib/input.js";
 import { iso, nullableIso, numberValue } from "../lib/rows.js";
 import { releasePendingOrder } from "../lib/pending-order-release.js";
 import type { ApiContext } from "../types.js";
+import { KUJI_SLOT_SELECTION_ALGORITHM, loadSealedKujiSlotForConsume } from "./kuji-slots.js";
 
 type ProductOrderRow = {
   id: string; name: string; category: "gacha" | "figure" | "kuji" | "tcg"; price: number;
@@ -44,6 +51,8 @@ type DrawVersionRow = {
   published_by: string | null;
   published_at: Date | null;
   created_at: Date;
+  total_slots: number | null;
+  assignment_algorithm: "CSPRNG_FISHER_YATES_V1" | "LEGACY_SINGLE_TIER_V1" | null;
   entries: Array<{
     id: string;
     prizeProductId: string;
@@ -56,6 +65,8 @@ type DrawVersionRow = {
     weight: number;
     initialQuantity: number | null;
     remainingQuantity: number | null;
+    tierCode: string | null;
+    tierRank: number | null;
   }>;
 };
 
@@ -91,6 +102,14 @@ type DrawPrizeSnapshotRow = {
   prize_category_snapshot: DrawPrizeCatalogRow["category"];
 };
 
+type ConsumableDrawPoolRow = {
+  id: string;
+  prize_product_id: string;
+  rarity: string;
+  weight: number;
+  remaining_quantity: number | null;
+} & DrawPrizeSnapshotRow;
+
 export function assertDirectPurchaseAllowed(product: { name: string; isPrizeOnly: boolean }) {
   if (product.isPrizeOnly) throw conflict(`경품 전용 상품은 직접 구매할 수 없습니다: ${product.name}`);
 }
@@ -100,6 +119,41 @@ export function assertUniqueDrawPrizeProductIds(prizeProductIds: readonly string
   for (const prizeProductId of prizeProductIds) {
     if (seen.has(prizeProductId)) throw badRequest(`같은 경품 상품은 확률표에 한 번만 등록할 수 있습니다: ${prizeProductId}`);
     seen.add(prizeProductId);
+  }
+}
+
+export async function assertNoUnfinishedKujiVersion(
+  client: Queryable,
+  input: { productId: string; category: "gacha" | "kuji" },
+): Promise<void> {
+  if (input.category !== "kuji") return;
+  const priorActive = await client.query<{ id: string }>(
+    "SELECT id FROM draw_probability_versions WHERE product_id=$1 AND status='ACTIVE' FOR UPDATE",
+    [input.productId],
+  );
+  if (!priorActive.rowCount) return;
+  const unfinished = await client.query<{ blocked: boolean }>(
+    `SELECT
+      EXISTS (
+        SELECT 1 FROM draw_entitlements
+         WHERE probability_version_id=$1 AND product_id=$2 AND status='AVAILABLE'
+      ) OR EXISTS (
+        SELECT 1 FROM order_lines AS line
+        JOIN orders ON orders.id=line.order_id
+         WHERE line.probability_version_id=$1
+           AND line.product_id=$2
+           AND line.category_snapshot='kuji'
+           AND orders.status='PENDING_PAYMENT'
+      ) OR EXISTS (
+        SELECT 1 FROM kuji_room_entries
+         WHERE product_id=$2
+           AND state='CHECKOUT_PENDING'
+           AND order_id IS NULL
+      ) AS blocked`,
+    [priorActive.rows[0]!.id, input.productId],
+  );
+  if (unfinished.rows[0]?.blocked) {
+    throw conflict("기존 쿠지의 결제 또는 뽑기가 남아 있습니다. 미완료 고객 처리를 마친 뒤 다시 공개해 주세요.");
   }
 }
 
@@ -296,6 +350,54 @@ export function assertKujiRoomOrderBinding(
   }
 }
 
+type DrawVersionEntryInput = {
+  prizeProductId: string;
+  rarity: string;
+  weight: number | null;
+  quantity: number | null;
+  tierCode: string | null;
+  tierRank: number | null;
+};
+
+export function assertDrawVersionCategoryConfiguration(
+  category: ProductOrderRow["category"],
+  totalSlots: number | null,
+  entries: readonly DrawVersionEntryInput[],
+): void {
+  if (category === "kuji") {
+    if (totalSlots === null) throw badRequest("쿠지는 전체 쿠지 장수가 필요합니다.");
+    const tierCodes = new Set<string>();
+    const tierRanks = new Set<number>();
+    let quantityTotal = 0;
+    for (const entry of entries) {
+      if (entry.weight !== null) throw badRequest("봉인 쿠지는 가중치를 사용하지 않습니다.");
+      if (entry.quantity === null || entry.tierCode === null || entry.tierRank === null) {
+        throw badRequest("쿠지 경품마다 유한 수량, tierCode, tierRank가 필요합니다.");
+      }
+      if (!SEALED_KUJI_TIER_CODE_PATTERN.test(entry.tierCode)) {
+        throw badRequest("쿠지 tierCode는 영문, 숫자, 밑줄, 하이픈만 1~40자로 사용할 수 있습니다.");
+      }
+      if (tierCodes.has(entry.tierCode)) throw badRequest(`쿠지 tierCode가 중복되었습니다: ${entry.tierCode}`);
+      if (tierRanks.has(entry.tierRank)) throw badRequest(`쿠지 tierRank가 중복되었습니다: ${entry.tierRank}`);
+      tierCodes.add(entry.tierCode);
+      tierRanks.add(entry.tierRank);
+      quantityTotal += entry.quantity;
+    }
+    if (!Number.isSafeInteger(quantityTotal) || quantityTotal !== totalSlots) {
+      throw badRequest("쿠지 경품 수량의 합계가 전체 쿠지 장수와 정확히 같아야 합니다.");
+    }
+    return;
+  }
+
+  if (totalSlots !== null) throw badRequest("가챠·일반 구매 상품에는 쿠지 전체 장수를 보낼 수 없습니다.");
+  for (const entry of entries) {
+    if (entry.weight === null) throw badRequest("가챠 경품마다 가중치가 필요합니다.");
+    if (entry.tierCode !== null || entry.tierRank !== null) {
+      throw badRequest("가챠 확률표에는 쿠지 tierCode 또는 tierRank를 보낼 수 없습니다.");
+    }
+  }
+}
+
 type LockedKujiCheckoutEntry = {
   id: string;
   product_id: string;
@@ -409,8 +511,16 @@ export async function registerCommerceRoutes(app:FastifyInstance,context:ApiCont
       const activeProducts=await client.query<{product_id:string;quantity:string}>(`SELECT r.product_id,sum(r.quantity) AS quantity FROM stock_reservations r JOIN orders o ON o.id=r.order_id WHERE o.user_id=$1 AND o.status='PENDING_PAYMENT' AND r.status='ACTIVE' AND r.expires_at>now() GROUP BY r.product_id`,[request.actor!.userId]);const activeByProduct=new Map(activeProducts.rows.map((row)=>[row.product_id,numberValue(row.quantity)]));const pressureRow=pressure.rows[0]!;const violation=checkoutReservationViolation({attemptCount:numberValue(pressureRow.attempt_count),activeOrderCount:numberValue(pressureRow.active_order_count),activeUnitCount:numberValue(pressureRow.active_unit_count),requestedUnitCount:input.items.reduce((sum,item)=>sum+item.quantity,0),productQuantities:input.items.map((item)=>({active:activeByProduct.get(item.productId)||0,requested:item.quantity}))});
       if(violation==="ATTEMPT_RATE")throw new AppError(429,"CHECKOUT_RATE_LIMITED","15분 뒤 다시 주문해 주세요.");if(violation)throw conflict("미결제 재고 예약 한도를 초과했습니다. 기존 주문을 결제하거나 만료 후 다시 시도해 주세요.");
       const productRows:ProductOrderRow[]=[];for(const item of input.items){const product=await client.query<ProductOrderRow>(`SELECT p.id,p.name,p.category,p.price,p.is_active,p.is_prize_only,s.on_hand,s.reserved,
-          (SELECT v.id FROM draw_probability_versions v WHERE v.product_id=p.id AND v.status='ACTIVE') AS probability_version_id,
-          (SELECT v.version FROM draw_probability_versions v WHERE v.product_id=p.id AND v.status='ACTIVE') AS probability_version
+          (SELECT v.id FROM draw_probability_versions v
+            WHERE v.product_id=p.id AND v.status='ACTIVE'
+              AND (p.category<>'kuji' OR EXISTS (
+                SELECT 1 FROM kuji_decks deck WHERE deck.probability_version_id=v.id
+              ))) AS probability_version_id,
+          (SELECT v.version FROM draw_probability_versions v
+            WHERE v.product_id=p.id AND v.status='ACTIVE'
+              AND (p.category<>'kuji' OR EXISTS (
+                SELECT 1 FROM kuji_decks deck WHERE deck.probability_version_id=v.id
+              ))) AS probability_version
           FROM catalog_products p JOIN product_stock s ON s.product_id=p.id WHERE p.id=$1 FOR UPDATE OF p,s`,[item.productId]);if(!product.rowCount||!product.rows[0]!.is_active)throw notFound(`판매 중인 상품을 찾을 수 없습니다: ${item.productId}`);const row=product.rows[0]!;assertDirectPurchaseAllowed({name:row.name,isPrizeOnly:row.is_prize_only});if(row.on_hand-row.reserved<item.quantity)throw conflict(`${row.name} 재고가 부족합니다.`);if(isDrawCategory(row.category)){if(!row.probability_version_id||row.probability_version===null)throw conflict(`${row.name} 추첨 확률표가 아직 공개되지 않았습니다.`);if(item.expectedDrawVersion===null)throw badRequest(`${row.name} 결제 전 확인한 확률표 버전이 필요합니다.`);if(numberValue(row.probability_version)!==item.expectedDrawVersion)throw conflict(`${row.name} 확률표가 변경됐습니다. 최신 경품·확률을 다시 확인해 주세요.`);}else if(item.expectedDrawVersion!==null)throw badRequest("일반 구매 상품에는 확률표 버전을 보낼 수 없습니다.");if(row.probability_version_id)await assertDrawCapacity(client,{probabilityVersionId:row.probability_version_id,productId:row.id,onHand:numberValue(row.on_hand)});productRows.push(row);}assertKujiRoomOrderBinding(productRows,input.kujiRoomEntryId);
       const subtotal=input.items.reduce((sum,item)=>sum+productRows.find((product)=>product.id===item.productId)!.price*item.quantity,0);let couponId:string|null=null;let discountTotal=0;
       if(input.couponCode){const coupon=await client.query<{id:string;discount_type:"FIXED"|"PERCENT";discount_value:number;maximum_discount:number|null;minimum_order:number;usage_limit:number|null;used_count:number}>(`SELECT id,discount_type,discount_value,maximum_discount,minimum_order,usage_limit,used_count FROM coupons WHERE code=$1 AND is_active=true AND starts_at<=now() AND ends_at>now() FOR UPDATE`,[input.couponCode]);if(!coupon.rowCount)throw conflict("사용할 수 없는 쿠폰입니다.");const value=coupon.rows[0]!;if(subtotal<value.minimum_order||value.usage_limit!==null&&value.used_count>=value.usage_limit)throw conflict("쿠폰 사용 조건을 충족하지 못했습니다.");discountTotal=value.discount_type==="FIXED"?value.discount_value:Math.floor(subtotal*value.discount_value/100);if(value.maximum_discount!==null)discountTotal=Math.min(discountTotal,value.maximum_discount);discountTotal=Math.min(discountTotal,subtotal);couponId=value.id;await client.query("UPDATE coupons SET used_count=used_count+1 WHERE id=$1",[value.id]);}
@@ -476,44 +586,71 @@ export async function registerCommerceRoutes(app:FastifyInstance,context:ApiCont
     const result=await withTransaction(context.pool,async(client)=>{
       const idem=await beginIdempotency(client,{actorId:request.actor!.userId,scope:"CONSUME_DRAW",key,hash});
       if(!idem.fresh)return {replay:true,statusCode:idem.statusCode,body:idem.body};
-      const lookup=await client.query<{product_id:string;probability_version_id:string;order_id:string}>("SELECT e.product_id,e.probability_version_id,l.order_id FROM draw_entitlements e JOIN order_lines l ON l.id=e.order_line_id WHERE e.id=$1",[entitlementId]);if(!lookup.rowCount)throw notFound("추첨권을 찾을 수 없습니다.");const lockTarget=lookup.rows[0]!;const linkedKujiRoom=await lockLinkedKujiRoomForOrder(client,lockTarget.order_id);if(linkedKujiRoom){const linkedOrder=await client.query<{status:string}>("SELECT status FROM orders WHERE id=$1 FOR UPDATE",[lockTarget.order_id]);if(!linkedOrder.rowCount||!["PAID","FULFILLED"].includes(linkedOrder.rows[0]!.status))throw conflict("결제 완료된 쿠지 추첨권만 사용할 수 있습니다.");const roomTime=await client.query<{server_now:Date}>("SELECT clock_timestamp() AS server_now");const serverNow=roomTime.rows[0]!.server_now;if(linkedKujiRoom.state==="DRAWING"){if(linkedKujiRoom.drawing_expires_at===null)throw conflict("쿠지 뽑기 시간을 확인할 수 없습니다.");if(serverNow.getTime()>=linkedKujiRoom.drawing_expires_at.getTime()){const expiredRoom=await expireLockedKujiOrderDrawing(client,{orderId:lockTarget.order_id,serverNow});if(expiredRoom)await writeOutbox(client,request.id,{aggregateType:"ORDER",aggregateId:lockTarget.order_id,eventType:"kuji.drawing_lease_expired",payload:{orderId:lockTarget.order_id,roomEntryId:linkedKujiRoom.id,entitlementsRemainConsumable:true}});}}else if(!["EXPIRED","COMPLETED"].includes(linkedKujiRoom.state)){throw conflict("현재 쿠지 추첨권을 사용할 수 없습니다.");}}await client.query("SELECT p.id FROM catalog_products p JOIN product_stock s ON s.product_id=p.id WHERE p.id=$1 FOR UPDATE OF p,s",[lockTarget.product_id]);await client.query("SELECT id FROM draw_probability_versions WHERE id=$1 FOR UPDATE",[lockTarget.probability_version_id]);await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1::text,0))",[`draw-capacity:${lockTarget.probability_version_id}`]);
+      const lookup=await client.query<{product_id:string;probability_version_id:string;order_id:string}>("SELECT e.product_id,e.probability_version_id,l.order_id FROM draw_entitlements e JOIN order_lines l ON l.id=e.order_line_id WHERE e.id=$1",[entitlementId]);if(!lookup.rowCount)throw notFound("추첨권을 찾을 수 없습니다.");const lockTarget=lookup.rows[0]!;const linkedKujiRoom=await lockLinkedKujiRoomForOrder(client,lockTarget.order_id);const linkedOrder=await client.query<{status:string}>("SELECT status FROM orders WHERE id=$1 FOR UPDATE",[lockTarget.order_id]);if(!linkedOrder.rowCount||!["PAID","FULFILLED"].includes(linkedOrder.rows[0]!.status))throw conflict("결제 완료된 추첨권만 사용할 수 있습니다.");if(linkedKujiRoom){const roomTime=await client.query<{server_now:Date}>("SELECT clock_timestamp() AS server_now");const serverNow=roomTime.rows[0]!.server_now;if(linkedKujiRoom.state==="DRAWING"){if(linkedKujiRoom.drawing_expires_at===null)throw conflict("쿠지 뽑기 시간을 확인할 수 없습니다.");if(serverNow.getTime()>=linkedKujiRoom.drawing_expires_at.getTime()){const expiredRoom=await expireLockedKujiOrderDrawing(client,{orderId:lockTarget.order_id,serverNow});if(expiredRoom)await writeOutbox(client,request.id,{aggregateType:"ORDER",aggregateId:lockTarget.order_id,eventType:"kuji.drawing_lease_expired",payload:{orderId:lockTarget.order_id,roomEntryId:linkedKujiRoom.id,entitlementsRemainConsumable:true}});}}else if(!["EXPIRED","COMPLETED"].includes(linkedKujiRoom.state)){throw conflict("현재 쿠지 추첨권을 사용할 수 없습니다.");}}await client.query("SELECT p.id FROM catalog_products p JOIN product_stock s ON s.product_id=p.id WHERE p.id=$1 FOR UPDATE OF p,s",[lockTarget.product_id]);await client.query("SELECT id FROM draw_probability_versions WHERE id=$1 FOR UPDATE",[lockTarget.probability_version_id]);await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1::text,0))",[`draw-capacity:${lockTarget.probability_version_id}`]);
       const entitlement=await client.query<{id:string;user_id:string;product_id:string;probability_version_id:string;status:string;version:number}>(`SELECT e.*,v.version FROM draw_entitlements e JOIN draw_probability_versions v ON v.id=e.probability_version_id WHERE e.id=$1 FOR UPDATE OF e`,[entitlementId]);
       if(!entitlement.rowCount)throw notFound("추첨권을 찾을 수 없습니다.");
       const ticket=entitlement.rows[0]!;
       if(ticket.user_id!==request.actor!.userId)throw forbidden();
       if(linkedKujiRoom?.state==="COMPLETED"&&ticket.status!=="CONSUMED")throw conflict("이미 완료된 쿠지 뽑기방입니다.");
       if(ticket.status==="CONSUMED"){
-        const existing=await client.query<{id:string;entitlement_id:string;product_id:string;prize_product_id:string;prize_inventory_unit_id:string;probability_version:number;rarity:string;committed_at:Date} & DrawPrizeSnapshotRow>(`SELECT r.*,e.rarity,e.prize_name_snapshot,e.prize_image_url_snapshot,e.prize_sku_snapshot,e.prize_ip_id_snapshot,e.prize_category_snapshot FROM draw_results r JOIN draw_pool_entries e ON e.id=r.pool_entry_id WHERE r.entitlement_id=$1`,[entitlementId]);
+        const existing=await client.query<{id:string;entitlement_id:string;product_id:string;prize_product_id:string;prize_inventory_unit_id:string;probability_version:number;rarity:string;committed_at:Date;slot_number:number|null} & DrawPrizeSnapshotRow>(`SELECT r.*,e.rarity,e.prize_name_snapshot,e.prize_image_url_snapshot,e.prize_sku_snapshot,e.prize_ip_id_snapshot,e.prize_category_snapshot,assignment.slot_number FROM draw_results r JOIN draw_pool_entries e ON e.id=r.pool_entry_id LEFT JOIN kuji_slot_bindings binding ON binding.id=r.kuji_slot_binding_id LEFT JOIN kuji_slot_assignments assignment ON assignment.id=binding.slot_assignment_id WHERE r.entitlement_id=$1`,[entitlementId]);
         const row=existing.rows[0]!;
-        const body={id:row.id,entitlementId:row.entitlement_id,productId:row.product_id,prizeProductId:row.prize_product_id,...drawPrizeSnapshotFields(row),prizeInventoryUnitId:row.prize_inventory_unit_id,probabilityVersion:row.probability_version,rarity:row.rarity,committedAt:iso(row.committed_at)};
+        const body={id:row.id,entitlementId:row.entitlement_id,productId:row.product_id,prizeProductId:row.prize_product_id,...drawPrizeSnapshotFields(row),prizeInventoryUnitId:row.prize_inventory_unit_id,probabilityVersion:row.probability_version,rarity:row.rarity,...(row.slot_number===null?{}:{kujiSlotNumber:numberValue(row.slot_number)}),committedAt:iso(row.committed_at)};
         await completeIdempotency(client,idem.id,{statusCode:200,body,resourceType:"DRAW_RESULT",resourceId:row.id});
         return {replay:true,statusCode:200,body};
       }
       if(ticket.status!=="AVAILABLE")throw conflict("사용할 수 없는 추첨권입니다.");
-      const entries=await client.query<{id:string;prize_product_id:string;rarity:string;weight:number;remaining_quantity:number|null} & DrawPrizeSnapshotRow>("SELECT id,prize_product_id,prize_name_snapshot,prize_image_url_snapshot,prize_sku_snapshot,prize_ip_id_snapshot,prize_category_snapshot,rarity,weight,remaining_quantity FROM draw_pool_entries WHERE probability_version_id=$1 AND (remaining_quantity IS NULL OR remaining_quantity>0) ORDER BY id FOR UPDATE",[ticket.probability_version_id]);
-      if(!entries.rowCount)throw conflict("남은 경품이 없습니다.");
-      const weighted=entries.rows.map((entry)=>({entry,effective:numberValue(entry.weight)*(entry.remaining_quantity===null?1:numberValue(entry.remaining_quantity))}));
-      const totalWeight=weighted.reduce((sum,item)=>sum+item.effective,0);
-      if(!Number.isSafeInteger(totalWeight)||totalWeight<=0)throw conflict("추첨 확률표가 올바르지 않습니다.");
-      const evidence=createDrawSelectionEvidence(totalWeight);
-      const selected=weighted[weightedSelectionIndex(weighted.map((item)=>item.effective),evidence.roll)]!.entry;
-      const selectionSnapshot=weighted.map((item)=>({poolEntryId:item.entry.id,effectiveWeight:item.effective}));
+      const category=(await client.query<{category:ProductOrderRow["category"]}>("SELECT category FROM catalog_products WHERE id=$1",[ticket.product_id])).rows[0]!.category;
+      const sealedSlot=category==="kuji"?await loadSealedKujiSlotForConsume(client,{entitlementId,probabilityVersionId:ticket.probability_version_id}):null;
+      let selected:ConsumableDrawPoolRow;
+      let selectionAlgorithm:string;
+      let entropyHex:string|null;
+      let entropyDigest:string|null;
+      let rollValue:number|null;
+      let totalWeight:number|null;
+      let selectionSnapshot:Array<Record<string,unknown>>;
+      let kujiSlotBindingId:string|null=null;
+      let kujiSlotNumber:number|null=null;
+      if(sealedSlot){
+        selected=sealedSlot;
+        selectionAlgorithm=KUJI_SLOT_SELECTION_ALGORITHM;
+        entropyHex=null;
+        entropyDigest=null;
+        rollValue=null;
+        totalWeight=null;
+        kujiSlotBindingId=sealedSlot.binding_id;
+        kujiSlotNumber=numberValue(sealedSlot.slot_number);
+        selectionSnapshot=[{slotId:sealedSlot.slot_id,slotNumber:kujiSlotNumber}];
+      }else{
+        const entries=await client.query<ConsumableDrawPoolRow>("SELECT id,prize_product_id,prize_name_snapshot,prize_image_url_snapshot,prize_sku_snapshot,prize_ip_id_snapshot,prize_category_snapshot,rarity,weight,remaining_quantity FROM draw_pool_entries WHERE probability_version_id=$1 AND (remaining_quantity IS NULL OR remaining_quantity>0) ORDER BY id FOR UPDATE",[ticket.probability_version_id]);
+        if(!entries.rowCount)throw conflict("남은 경품이 없습니다.");
+        const weighted=entries.rows.map((entry)=>({entry,effective:numberValue(entry.weight)*(entry.remaining_quantity===null?1:numberValue(entry.remaining_quantity))}));
+        totalWeight=weighted.reduce((sum,item)=>sum+item.effective,0);
+        if(!Number.isSafeInteger(totalWeight)||totalWeight<=0)throw conflict("추첨 확률표가 올바르지 않습니다.");
+        const evidence=createDrawSelectionEvidence(totalWeight);
+        selected=weighted[weightedSelectionIndex(weighted.map((item)=>item.effective),evidence.roll)]!.entry;
+        selectionAlgorithm=evidence.algorithm;
+        entropyHex=evidence.entropyHex;
+        entropyDigest=evidence.entropyDigest;
+        rollValue=evidence.roll;
+        selectionSnapshot=weighted.map((item)=>({poolEntryId:item.entry.id,effectiveWeight:item.effective}));
+      }
       if(selected.remaining_quantity!==null){
         const decremented=await client.query("UPDATE draw_pool_entries SET remaining_quantity=remaining_quantity-1 WHERE id=$1 AND remaining_quantity>0 RETURNING id",[selected.id]);
         if(!decremented.rowCount)throw conflict("경품 재고가 소진되었습니다.");
       }
-      const sourceType=(await client.query<{category:string}>("SELECT category FROM catalog_products WHERE id=$1",[ticket.product_id])).rows[0]!.category==="kuji"?"KUJI":"GACHA";
+      const sourceType=category==="kuji"?"KUJI":"GACHA";
       const inventory=await client.query<{id:string}>("INSERT INTO inventory_units(owner_id,product_id,source_type,source_id) VALUES($1,$2,$3,$4) RETURNING id",[request.actor!.userId,selected.prize_product_id,sourceType,entitlementId]);
       const created=await client.query<{id:string;committed_at:Date}>(`INSERT INTO draw_results(
           entitlement_id,user_id,product_id,pool_entry_id,prize_product_id,prize_inventory_unit_id,
-          probability_version,selection_algorithm,entropy_hex,entropy_digest,roll_value,total_weight,selection_snapshot
-        ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id,committed_at`,[
+          probability_version,selection_algorithm,entropy_hex,entropy_digest,roll_value,total_weight,selection_snapshot,kuji_slot_binding_id
+        ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING id,committed_at`,[
         entitlementId,request.actor!.userId,ticket.product_id,selected.id,selected.prize_product_id,inventory.rows[0]!.id,
-        ticket.version,evidence.algorithm,evidence.entropyHex,evidence.entropyDigest,evidence.roll,evidence.totalWeight,JSON.stringify(selectionSnapshot),
+        ticket.version,selectionAlgorithm,entropyHex,entropyDigest,rollValue,totalWeight,JSON.stringify(selectionSnapshot),kujiSlotBindingId,
       ]);
       await client.query("UPDATE draw_entitlements SET status='CONSUMED',consumed_at=now() WHERE id=$1",[entitlementId]);
-      if(linkedKujiRoom){const completionTime=await client.query<{server_now:Date}>("SELECT clock_timestamp() AS server_now");await completeLockedKujiOrderRoomIfDrawn(client,{orderId:lockTarget.order_id,serverNow:completionTime.rows[0]!.server_now});}
-      const body={id:created.rows[0]!.id,entitlementId,productId:ticket.product_id,prizeProductId:selected.prize_product_id,...drawPrizeSnapshotFields(selected),prizeInventoryUnitId:inventory.rows[0]!.id,probabilityVersion:ticket.version,rarity:selected.rarity,committedAt:iso(created.rows[0]!.committed_at)};
+      if(linkedKujiRoom){const completionTime=await client.query<{server_now:Date}>("SELECT clock_timestamp() AS server_now");await completeLockedKujiOrderRoomIfDrawn(client,{orderId:lockTarget.order_id,productId:linkedKujiRoom.product_id,serverNow:completionTime.rows[0]!.server_now});}
+      const body={id:created.rows[0]!.id,entitlementId,productId:ticket.product_id,prizeProductId:selected.prize_product_id,...drawPrizeSnapshotFields(selected),prizeInventoryUnitId:inventory.rows[0]!.id,probabilityVersion:ticket.version,rarity:selected.rarity,...(kujiSlotNumber===null?{}:{kujiSlotNumber}),committedAt:iso(created.rows[0]!.committed_at)};
       await writeOutbox(client,request.id,{aggregateType:"DRAW_RESULT",aggregateId:body.id,eventType:"draw.committed",payload:{...body,userId:request.actor!.userId}});
       await completeIdempotency(client,idem.id,{statusCode:200,body,resourceType:"DRAW_RESULT",resourceId:body.id});
       return {replay:false,statusCode:200,body};
@@ -522,32 +659,39 @@ export async function registerCommerceRoutes(app:FastifyInstance,context:ApiCont
     return reply.code(result.statusCode).send(result.body);
   });
 
-  app.get("/v1/admin/products/:productId/draw-versions",{preHandler:context.auth.requirePermission("catalog.read")},async(request)=>{const productId=slugIdInput((request.params as Record<string,unknown>).productId,"productId");const product=await context.pool.query("SELECT 1 FROM catalog_products WHERE id=$1 AND category IN ('gacha','kuji') AND is_prize_only=false",[productId]);if(!product.rowCount)throw notFound("가챠·쿠지 판매 상품을 찾을 수 없습니다.");const result=await context.pool.query<DrawVersionRow>(`SELECT v.id,v.product_id,v.version,v.status,v.published_by,v.published_at,v.created_at,
+  app.get("/v1/admin/products/:productId/draw-versions",{preHandler:context.auth.requirePermission("catalog.read")},async(request)=>{const productId=slugIdInput((request.params as Record<string,unknown>).productId,"productId");const product=await context.pool.query("SELECT 1 FROM catalog_products WHERE id=$1 AND category IN ('gacha','kuji') AND is_prize_only=false",[productId]);if(!product.rowCount)throw notFound("가챠·쿠지 판매 상품을 찾을 수 없습니다.");const result=await context.pool.query<DrawVersionRow>(`SELECT v.id,v.product_id,v.version,v.status,v.published_by,v.published_at,v.created_at,deck.total_slots,deck.assignment_algorithm,
       COALESCE(jsonb_agg(jsonb_build_object(
         'id',e.id,'prizeProductId',e.prize_product_id,
         'prizeName',e.prize_name_snapshot,'prizeImageUrl',e.prize_image_url_snapshot,
         'prizeSku',e.prize_sku_snapshot,'prizeIpId',e.prize_ip_id_snapshot,'prizeCategory',e.prize_category_snapshot,
         'rarity',e.rarity,'weight',e.weight,
-        'initialQuantity',e.initial_quantity,'remainingQuantity',e.remaining_quantity
+        'initialQuantity',e.initial_quantity,'remainingQuantity',e.remaining_quantity,
+        'tierCode',tier.tier_code,'tierRank',tier.tier_rank
       ) ORDER BY e.created_at,e.id) FILTER (WHERE e.id IS NOT NULL),'[]'::jsonb) AS entries
-    FROM draw_probability_versions v LEFT JOIN draw_pool_entries e ON e.probability_version_id=v.id
-    WHERE v.product_id=$1 GROUP BY v.id ORDER BY v.version DESC`,[productId]);return{items:result.rows.map((row)=>{const entries=row.entries.map((entry)=>({...entry,weight:numberValue(entry.weight),initialQuantity:entry.initialQuantity===null?null:numberValue(entry.initialQuantity),remainingQuantity:entry.remainingQuantity===null?null:numberValue(entry.remainingQuantity)}));const totalEffectiveWeight=entries.reduce((sum,entry)=>sum+entry.weight*(entry.remainingQuantity===null?1:entry.remainingQuantity),0);return{id:row.id,productId:row.product_id,version:row.version,status:row.status,publishedBy:row.published_by,publishedAt:nullableIso(row.published_at),createdAt:iso(row.created_at),totalEffectiveWeight,entries};})};});
+    FROM draw_probability_versions v
+    LEFT JOIN draw_pool_entries e ON e.probability_version_id=v.id
+    LEFT JOIN kuji_deck_tiers tier ON tier.pool_entry_id=e.id
+    LEFT JOIN kuji_decks deck ON deck.probability_version_id=v.id
+    WHERE v.product_id=$1 GROUP BY v.id,deck.total_slots,deck.assignment_algorithm ORDER BY v.version DESC`,[productId]);return{items:result.rows.map((row)=>{const entries=row.entries.map((entry)=>({...entry,weight:numberValue(entry.weight),initialQuantity:entry.initialQuantity===null?null:numberValue(entry.initialQuantity),remainingQuantity:entry.remainingQuantity===null?null:numberValue(entry.remainingQuantity),tierCode:entry.tierCode??null,tierRank:entry.tierRank==null?null:numberValue(entry.tierRank)}));const totalEffectiveWeight=entries.reduce((sum,entry)=>sum+entry.weight*(entry.remainingQuantity===null?1:entry.remainingQuantity),0);return{id:row.id,productId:row.product_id,version:row.version,status:row.status,publishedBy:row.published_by,publishedAt:nullableIso(row.published_at),createdAt:iso(row.created_at),totalSlots:row.total_slots==null?null:numberValue(row.total_slots),assignmentAlgorithm:row.assignment_algorithm,totalEffectiveWeight,entries};})};});
 
   app.post("/v1/admin/products/:productId/draw-versions",{preHandler:context.auth.requirePermission("catalog.write")},async(request,reply)=>{
     const productId=slugIdInput((request.params as Record<string,unknown>).productId,"productId");
     const body=objectInput(request.body);
     if(!Array.isArray(body.entries)||body.entries.length<1||body.entries.length>200)throw badRequest("경품 구성을 확인해 주세요.");
-    const entries=body.entries.map((raw)=>{const item=objectInput(raw);return{prizeProductId:slugIdInput(item.prizeProductId,"prizeProductId"),rarity:stringInput(item,"rarity",{max:40})!,weight:integerInput(item,"weight",{min:1,max:1_000_000})!,quantity:item.quantity===null||item.quantity===undefined?null:integerInput(item,"quantity",{min:1,max:10_000})!};});
+    const totalSlots=body.totalSlots===undefined||body.totalSlots===null?null:integerInput(body,"totalSlots",{min:1,max:MAX_SEALED_KUJI_SLOT_TOTAL})!;
+    const entries:DrawVersionEntryInput[]=body.entries.map((raw)=>{const item=objectInput(raw);return{prizeProductId:slugIdInput(item.prizeProductId,"prizeProductId"),rarity:stringInput(item,"rarity",{max:40})!,weight:item.weight===undefined||item.weight===null?null:integerInput(item,"weight",{min:1,max:1_000_000})!,quantity:item.quantity===null||item.quantity===undefined?null:integerInput(item,"quantity",{min:1,max:MAX_SEALED_KUJI_SLOT_TOTAL})!,tierCode:item.tierCode===undefined||item.tierCode===null?null:stringInput(item,"tierCode",{max:40})!,tierRank:item.tierRank===undefined||item.tierRank===null?null:integerInput(item,"tierRank",{min:0,max:2_147_483_647})!};});
     assertUniqueDrawPrizeProductIds(entries.map((entry)=>entry.prizeProductId));
     const mutation=await adminIdempotentMutation(context,request,{target:{type:"PRODUCT_DRAW_VERSION",productId},work:async(client)=>{
       const product=await client.query<{ip_id:string;category:string;is_active:boolean;is_prize_only:boolean}>("SELECT ip_id,category,is_active,is_prize_only FROM catalog_products WHERE id=$1 FOR UPDATE",[productId]);
       if(!product.rowCount)throw notFound("가챠·쿠지 상품을 찾을 수 없습니다.");
       if(!["gacha","kuji"].includes(product.rows[0]!.category))throw badRequest("가챠·쿠지 상품만 확률표를 가질 수 있습니다.");
       if(!product.rows[0]!.is_active||product.rows[0]!.is_prize_only)throw conflict("활성 판매용 가챠·쿠지 상품만 확률표를 만들 수 있습니다.");
+      assertDrawVersionCategoryConfiguration(product.rows[0]!.category as ProductOrderRow["category"],totalSlots,entries);
       const prizeSnapshots=await loadValidatedDrawPrizeSnapshots(client,{drawIpId:product.rows[0]!.ip_id,prizeProductIds:entries.map((entry)=>entry.prizeProductId)});
       const snapshotsById=new Map(prizeSnapshots.map((snapshot)=>[snapshot.id,snapshot]));
       const next=await client.query<{version:number}>("SELECT COALESCE(max(version),0)+1 AS version FROM draw_probability_versions WHERE product_id=$1",[productId]);
       const created=await client.query<{id:string;version:number;created_at:Date}>("INSERT INTO draw_probability_versions(product_id,version) VALUES($1,$2) RETURNING id,version,created_at",[productId,next.rows[0]!.version]);
+      if(totalSlots!==null)await client.query("INSERT INTO kuji_decks(probability_version_id,total_slots) VALUES($1,$2)",[created.rows[0]!.id,totalSlots]);
       const savedEntries=[];
       for(const entry of entries){
         const snapshot=snapshotsById.get(entry.prizeProductId)!;
@@ -555,13 +699,14 @@ export async function registerCommerceRoutes(app:FastifyInstance,context:ApiCont
           probability_version_id,prize_product_id,prize_name_snapshot,prize_image_url_snapshot,
           prize_sku_snapshot,prize_ip_id_snapshot,prize_category_snapshot,rarity,weight,initial_quantity,remaining_quantity
         ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$10) RETURNING id`,[
-          created.rows[0]!.id,entry.prizeProductId,snapshot.name,snapshot.imageUrl,snapshot.sku,snapshot.ipId,snapshot.category,entry.rarity,entry.weight,entry.quantity,
+          created.rows[0]!.id,entry.prizeProductId,snapshot.name,snapshot.imageUrl,snapshot.sku,snapshot.ipId,snapshot.category,entry.rarity,entry.weight??1,entry.quantity,
         ]);
-        savedEntries.push({id:saved.rows[0]!.id,prizeProductId:entry.prizeProductId,prizeName:snapshot.name,prizeImageUrl:snapshot.imageUrl,prizeSku:snapshot.sku,prizeIpId:snapshot.ipId,prizeCategory:snapshot.category,rarity:entry.rarity,weight:entry.weight,initialQuantity:entry.quantity,remainingQuantity:entry.quantity});
+        if(entry.tierCode!==null&&entry.tierRank!==null)await client.query("INSERT INTO kuji_deck_tiers(probability_version_id,pool_entry_id,tier_code,tier_rank) VALUES($1,$2,$3,$4)",[created.rows[0]!.id,saved.rows[0]!.id,entry.tierCode,entry.tierRank]);
+        savedEntries.push({id:saved.rows[0]!.id,prizeProductId:entry.prizeProductId,prizeName:snapshot.name,prizeImageUrl:snapshot.imageUrl,prizeSku:snapshot.sku,prizeIpId:snapshot.ipId,prizeCategory:snapshot.category,rarity:entry.rarity,weight:entry.weight??1,initialQuantity:entry.quantity,remainingQuantity:entry.quantity,tierCode:entry.tierCode,tierRank:entry.tierRank});
       }
-      await writeAdminAudit(client,request,request.actor!,{action:"DRAW_VERSION_CREATED",targetType:"DRAW_PROBABILITY_VERSION",targetId:created.rows[0]!.id,after:{productId,version:created.rows[0]!.version,entries:entries.length}});
+      await writeAdminAudit(client,request,request.actor!,{action:"DRAW_VERSION_CREATED",targetType:"DRAW_PROBABILITY_VERSION",targetId:created.rows[0]!.id,after:{productId,version:created.rows[0]!.version,entries:entries.length,totalSlots}});
       const totalEffectiveWeight=savedEntries.reduce((sum,entry)=>sum+entry.weight*(entry.remainingQuantity===null?1:entry.remainingQuantity),0);
-      const response={id:created.rows[0]!.id,productId,version:created.rows[0]!.version,status:"DRAFT" as const,publishedBy:null,publishedAt:null,createdAt:iso(created.rows[0]!.created_at),totalEffectiveWeight,entries:savedEntries};
+      const response={id:created.rows[0]!.id,productId,version:created.rows[0]!.version,status:"DRAFT" as const,publishedBy:null,publishedAt:null,createdAt:iso(created.rows[0]!.created_at),totalSlots,assignmentAlgorithm:totalSlots===null?null:"CSPRNG_FISHER_YATES_V1" as const,totalEffectiveWeight,entries:savedEntries};
       return{statusCode:201,body:response,resourceType:"DRAW_PROBABILITY_VERSION",resourceId:created.rows[0]!.id};
     }});
     return sendAdminMutation(reply,mutation);
@@ -574,11 +719,13 @@ export async function registerCommerceRoutes(app:FastifyInstance,context:ApiCont
     const body=objectInput(request.body);
     const reason=stringInput(body,"reason",{max:1000})!;
     const mutation=await adminIdempotentMutation(context,request,{target:{type:"DRAW_PROBABILITY_VERSION",productId,versionId},bodyReason:reason,work:async(client)=>{
-      const stock=await client.query<{ip_id:string;on_hand:number}>("SELECT p.ip_id,s.on_hand FROM catalog_products p JOIN product_stock s ON s.product_id=p.id WHERE p.id=$1 AND p.category IN ('gacha','kuji') AND p.is_active=true AND p.is_prize_only=false FOR UPDATE OF p,s",[productId]);
+      await lockKujiProductRoomAdvisory(client,productId);
+      const stock=await client.query<{ip_id:string;category:"gacha"|"kuji";on_hand:number}>("SELECT p.ip_id,p.category,s.on_hand FROM catalog_products p JOIN product_stock s ON s.product_id=p.id WHERE p.id=$1 AND p.category IN ('gacha','kuji') AND p.is_active=true AND p.is_prize_only=false FOR UPDATE OF p,s",[productId]);
       if(!stock.rowCount)throw notFound("활성 가챠·쿠지 판매 상품을 찾을 수 없습니다.");
       const version=await client.query<{id:string;status:string;version:number}>("SELECT id,status,version FROM draw_probability_versions WHERE id=$1 AND product_id=$2 FOR UPDATE",[versionId,productId]);
       if(!version.rowCount)throw notFound("확률표 버전을 찾을 수 없습니다.");
       if(version.rows[0]!.status!=="DRAFT")throw conflict("초안 확률표만 공개할 수 있습니다.");
+      await assertNoUnfinishedKujiVersion(client,{productId,category:stock.rows[0]!.category});
       const versionNumber=numberValue(version.rows[0]!.version);
       await assertLatestDrawDraft(client,{productId,version:versionNumber});
       const prizeEntries=await client.query<{prize_product_id:string} & DrawPrizeSnapshotRow>("SELECT prize_product_id,prize_name_snapshot,prize_image_url_snapshot,prize_sku_snapshot,prize_ip_id_snapshot,prize_category_snapshot FROM draw_pool_entries WHERE probability_version_id=$1 ORDER BY created_at,id FOR UPDATE",[versionId]);
@@ -594,9 +741,31 @@ export async function registerCommerceRoutes(app:FastifyInstance,context:ApiCont
       const effectiveWeight=Number(pool.effective_weight);
       if(!Number.isSafeInteger(effectiveWeight)||effectiveWeight<=0)throw conflict("경품 가중치 합계를 확인해 주세요.");
       await assertDrawCapacity(client,{probabilityVersionId:versionId,productId,onHand:numberValue(stock.rows[0]!.on_hand)});
+      let sealedSlotTotal:null|number=null;
+      if(stock.rows[0]!.category==="kuji"){
+        const deck=await client.query<{total_slots:number}>("SELECT total_slots FROM kuji_decks WHERE probability_version_id=$1",[versionId]);
+        if(!deck.rowCount)throw conflict("쿠지 전체 장수와 등급 구성이 없습니다. 새 초안을 만들어 주세요.");
+        sealedSlotTotal=numberValue(deck.rows[0]!.total_slots);
+        const priorAssignments=await client.query("SELECT 1 FROM kuji_slot_assignments WHERE probability_version_id=$1 LIMIT 1",[versionId]);
+        if(priorAssignments.rowCount)throw conflict("이 쿠지 초안에는 이미 봉인 번호 배치가 생성되어 있습니다.");
+        const allocations=await client.query<{pool_entry_id:string;tier_code:string;tier_rank:number;quantity:number|null}>(`SELECT entry.id AS pool_entry_id,tier.tier_code,tier.tier_rank,entry.initial_quantity AS quantity
+          FROM draw_pool_entries AS entry
+          JOIN kuji_deck_tiers AS tier ON tier.pool_entry_id=entry.id AND tier.probability_version_id=entry.probability_version_id
+          WHERE entry.probability_version_id=$1
+          ORDER BY tier.tier_rank,tier.tier_code
+          FOR UPDATE OF entry`,[versionId]);
+        const assignments=assignSealedKujiSlots(sealedSlotTotal,allocations.rows.map((allocation)=>({poolEntryId:allocation.pool_entry_id,tierCode:allocation.tier_code,tierRank:numberValue(allocation.tier_rank),quantity:allocation.quantity===null?0:numberValue(allocation.quantity)})));
+        await client.query(`INSERT INTO kuji_slot_assignments(probability_version_id,slot_number,pool_entry_id)
+          SELECT $1,input.slot_number,input.pool_entry_id
+            FROM unnest($2::integer[],$3::uuid[]) AS input(slot_number,pool_entry_id)`,[
+          versionId,
+          assignments.map((assignment)=>assignment.slotNumber),
+          assignments.map((assignment)=>assignment.poolEntryId),
+        ]);
+      }
       await client.query("UPDATE draw_probability_versions SET status='RETIRED' WHERE product_id=$1 AND status='ACTIVE'",[productId]);
       await client.query("UPDATE draw_probability_versions SET status='ACTIVE',published_by=$2,published_at=now() WHERE id=$1",[versionId,request.actor!.userId]);
-      await writeAdminAudit(client,request,request.actor!,{action:"DRAW_VERSION_PUBLISHED",targetType:"DRAW_PROBABILITY_VERSION",targetId:versionId,reason,after:{productId,version:versionNumber}});
+      await writeAdminAudit(client,request,request.actor!,{action:"DRAW_VERSION_PUBLISHED",targetType:"DRAW_PROBABILITY_VERSION",targetId:versionId,reason,after:{productId,version:versionNumber,sealedSlotTotal,assignmentAlgorithm:sealedSlotTotal===null?null:"CSPRNG_FISHER_YATES_V1"}});
       return{statusCode:200,body:{id:versionId,productId,version:versionNumber,status:"ACTIVE" as const},resourceType:"DRAW_PROBABILITY_VERSION",resourceId:versionId};
     }});
     return sendAdminMutation(reply,mutation);

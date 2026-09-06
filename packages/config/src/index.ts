@@ -1,6 +1,8 @@
 type Environment = Record<string, string | undefined>;
+import { loadMediaStorageConfig, type MediaStorageConfiguration } from "./media-storage.js";
 
 export * from "./admin-proxy-identity.js";
+export * from "./media-storage.js";
 
 export type RuntimeEnvironment = "development" | "test" | "production";
 export type ApiSurface = "customer" | "admin" | "all";
@@ -26,6 +28,8 @@ export type ApiConfig = {
   paymentWebhookSecret: string | null;
   gcsBucket: string | null;
   gcsProjectId: string | null;
+  mediaStorageProvider?: MediaStorageConfiguration["mediaStorageProvider"];
+  supabaseStorage?: MediaStorageConfiguration["supabaseStorage"];
   logLevel: string;
 };
 
@@ -286,6 +290,7 @@ export function loadApiConfig(env: Environment = process.env): ApiConfig {
     ...payment,
     gcsBucket: optional(env, "GCS_BUCKET"),
     gcsProjectId: optional(env, "GCS_PROJECT_ID"),
+    ...loadMediaStorageConfig(env, runtime),
     logLevel: env.LOG_LEVEL?.trim() || (runtime === "production" ? "info" : "debug"),
   };
 }

@@ -8,9 +8,14 @@ playwright-report/
 .turbo/
 coverage/
 *.log
+*.dbbenc
+*.pgdump
+*.dump
 *.tsbuildinfo
 .DS_Store
 work/qa/
 work/audits/
 apps/mobile/assets/DABBOBA-logo-selected-*.zip
 apps/mobile/assets/DABBOBA-logo-selected-*/
+scripts/storage-conformance/docker-client/*
+!scripts/storage-conformance/docker-client/config.json

@@ -19,6 +19,13 @@ test("kuji room participant names are masked without randomness", () => {
   assert.equal(maskKujiDisplayName("A"), "A*");
 });
 
+test("room snapshots expose the absolute draw deadline for drawing and expired viewers", async () => {
+  const source = await readFile(new URL("../../src/modules/kuji-rooms.ts", import.meta.url), "utf8");
+  assert.match(source, /drawingExpiresAt: \["DRAWING", "EXPIRED"\]\.includes\(viewerRow\.state\)/);
+  assert.match(source, /nullableIso\(viewerRow\.drawing_expires_at\)/);
+  assert.match(source, /checkoutExpiresAt: viewerRow\.state === "CHECKOUT_PENDING"/);
+});
+
 test("kuji room migration enforces active occupancy, active user uniqueness, FIFO, and terminal history", async () => {
   const sql = await readFile(
     new URL("../../../../packages/db/migrations/0022_kuji_room_entries.sql", import.meta.url),
@@ -43,9 +50,26 @@ test("new room occupancy requires stock and an active drawable pool", async () =
   const source = await readFile(new URL("../../src/modules/kuji-rooms.ts", import.meta.url), "utf8");
   assert.match(source, /s\.on_hand-s\.reserved>0/);
   assert.match(source, /v\.status='ACTIVE'/);
+  assert.match(source, /JOIN kuji_decks deck ON deck\.probability_version_id=v\.id/);
   assert.match(source, /e\.remaining_quantity IS NULL OR e\.remaining_quantity>0/);
   assert.match(source, /if \(!joinable\) \{/);
   assert.match(source, /"unavailable" in result/);
+});
+
+test("new room promotion and checkout reject legacy active kuji versions without a sealed deck", async () => {
+  const roomSource = await readFile(new URL("../../src/modules/kuji-rooms.ts", import.meta.url), "utf8");
+  const sharedRoomSource = await readFile(
+    new URL("../../../../packages/db/src/kuji-room.ts", import.meta.url),
+    "utf8",
+  );
+  const commerceSource = await readFile(new URL("../../src/modules/commerce.ts", import.meta.url), "utf8");
+
+  assert.match(roomSource, /JOIN kuji_decks deck ON deck\.probability_version_id=v\.id/);
+  assert.match(sharedRoomSource, /JOIN kuji_decks deck ON deck\.probability_version_id=v\.id/);
+  assert.match(
+    commerceSource,
+    /p\.category<>'kuji' OR EXISTS \(\s*SELECT 1 FROM kuji_decks deck WHERE deck\.probability_version_id=v\.id/,
+  );
 });
 
 test("linked room leave releases the pending order benefits and stock atomically", async () => {

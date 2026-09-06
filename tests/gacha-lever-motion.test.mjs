@@ -17,31 +17,58 @@ import {
   transitionGachaLeverMotion,
 } from "../apps/mobile/src/features/draw/gacha-lever-motion.ts";
 
-test("the gacha lever requires about two clockwise circles", () => {
-  assert.equal(GACHA_LEVER_REQUIRED_TURNS, 2);
-  assert.equal(isGachaLeverComplete(Math.PI * 2), false);
+test("the gacha lever requires one clockwise circle with a five-percent completion tolerance", () => {
+  assert.equal(GACHA_LEVER_REQUIRED_TURNS, 1);
+  assert.equal(GACHA_LEVER_TARGET_RADIANS, Math.PI * 2);
+  assert.equal(GACHA_LEVER_COMPLETION_RADIANS, Math.PI * 2 * 0.95);
+  assert.equal(isGachaLeverComplete(Math.PI * 2 * 0.949), false);
+  assert.equal(isGachaLeverComplete(Math.PI * 2), true);
   assert.equal(isGachaLeverComplete(GACHA_LEVER_COMPLETION_RADIANS - 0.01), false);
   assert.equal(isGachaLeverComplete(GACHA_LEVER_COMPLETION_RADIANS), true);
   assert.equal(resolveGachaLeverProgress(0), 0);
   assert.equal(resolveGachaLeverProgress(GACHA_LEVER_TARGET_RADIANS), 1);
 });
 
-test("repeated lever taps reach the same two-turn target without skipping the result gate", () => {
-  assert.equal(GACHA_LEVER_REQUIRED_TAPS, 8);
+test("five taps stay incomplete and the sixth reaches the same one-turn target", () => {
+  assert.equal(GACHA_LEVER_REQUIRED_TAPS, 6);
   let radians = 0;
 
-  for (let tap = 1; tap < GACHA_LEVER_REQUIRED_TAPS; tap += 1) {
+  for (let tap = 1; tap <= 5; tap += 1) {
     radians = advanceGachaLeverTapRadians(radians);
+    assert.ok(Math.abs(radians - Math.PI * 2 * tap / 6) < 1e-12);
     assert.equal(isGachaLeverComplete(radians), false);
   }
 
   radians = advanceGachaLeverTapRadians(radians);
-  assert.equal(radians, GACHA_LEVER_TARGET_RADIANS);
+  assert.ok(Math.abs(radians - Math.PI * 2) < 1e-12);
   assert.equal(isGachaLeverComplete(radians), true);
   assert.equal(
     advanceGachaLeverTapRadians(GACHA_LEVER_TARGET_RADIANS),
     GACHA_LEVER_TARGET_RADIANS,
   );
+});
+
+test("mixed taps and drag share net clockwise progress with the same one-turn threshold", () => {
+  let radians = advanceGachaLeverTapRadians(advanceGachaLeverTapRadians(0));
+  assert.ok(Math.abs(radians - Math.PI * 2 / 3) < 1e-12);
+  const sweep = (turns) => {
+    let previous = 0;
+    for (let step = 1; step <= 120; step += 1) {
+      const next = turns * Math.PI * 2 * step / 120;
+      radians = advanceGachaLeverRadians(radians, previous, next);
+      previous = next;
+    }
+  };
+  sweep(0.5);
+  sweep(-0.1);
+  assert.ok(Math.abs(radians / (Math.PI * 2) - (1 / 3 + 0.4)) < 1e-12,
+    "reverse drag subtracts progress instead of counting total distance traveled");
+  assert.equal(isGachaLeverComplete(radians), false);
+  sweep(0.95 - (1 / 3 + 0.4) - 1e-6);
+  assert.equal(isGachaLeverComplete(radians), false);
+  sweep(2e-6);
+  assert.equal(isGachaLeverComplete(radians), true);
+  assert.ok(radians < Math.PI * 2);
 });
 
 test("clockwise samples unwrap continuously across the angle boundary", () => {

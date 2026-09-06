@@ -60,7 +60,7 @@ export type KujiOpenMotionTransition = {
 export const DRAW_MOTION = {
   kujiTravelMinMs: 120,
   kujiTravelMaxMs: 320,
-  kujiImpactMs: 600,
+  kujiImpactMs: 1000,
   kujiCueHalfCycleMs: 720,
   kujiEntryMs: 280,
   resultEnterMs: 520,
@@ -123,6 +123,9 @@ export function transitionKujiOpenMotion(
 
   if (event.type === "request") {
     if (state.phase !== "sealed") return { state, effect: "none" };
+    if (state.reduceMotion && state.resultReady) {
+      return { state: { ...state, phase: "revealed" }, effect: "notify-settled" };
+    }
     return state.reduceMotion
       ? {
           state: { ...state, phase: "waiting-result" },

@@ -56,10 +56,12 @@ test("authenticated media upload binds the exact file to the signed form before 
     mimeType: "image/png",
     byteSize: file.size,
     checksumSha256,
+    acceptedUploadMethods: ["POST", "PUT"],
   });
 
   assert.equal(calls[1].init.method, "POST");
   assert.equal(calls[1].init.credentials, "omit");
+  assert.equal(calls[1].init.redirect, "error");
   assert.equal(calls[1].init.headers, undefined);
   assert.ok(calls[1].init.body instanceof FormData);
   assert.equal(calls[1].init.body.get("key"), "uploads/user/media/my-photo.png");
@@ -321,4 +323,113 @@ test("public Duckroom media is resolved through the public media contract after 
   assert.equal(calls[0].init.headers.has("authorization"), false);
   assert.match(prototypeSource, /apiRuntime\.client\.getPublicMediaUrl\(id, controller\.signal\)/);
   assert.match(prototypeSource, /src=\{showcase\.mediaUrl \?\? product\?\.asset \?\? EMPTY_PRODUCT_IMAGE_SRC\}/);
+});
+
+function rawUploadHarness(change = () => {}, options = {}) {
+  const calls = [];
+  const bytes = new Uint8Array([0, 1, 2, 127, 128, 255]);
+  const file = new File([bytes], "raw.png", { type: "image/png" });
+  const mediaId = "77777777-7777-4777-8777-777777777777";
+  const checksum = createHash("sha256").update(bytes).digest("hex");
+  const intent = {
+    mediaId, uploadUrl: "https://storage.example.test/signed-put?signature=opaque-capability", method: "PUT", bodyEncoding: "raw",
+    expiresAt: "2099-01-01T00:00:00.000Z", maxBytes: file.size,
+    headers: {
+      "content-type": file.type, "content-length": String(file.size), "x-amz-content-sha256": "UNSIGNED-PAYLOAD",
+      "x-amz-meta-sha256": checksum, "x-amz-meta-media-id": mediaId,
+    },
+  };
+  change(intent);
+  let completionCalls = 0;
+  const client = new DabbobaApiClient({
+    configuration: { mode: "remote", baseUrl: "https://api.dabboba.test", token: "application-bearer-not-for-storage" },
+    ...options,
+    fetch: async (url, init) => {
+      calls.push({ url, init });
+      if (url.endsWith("/v1/media/uploads")) return Response.json(intent, { status: 201 });
+      if (url.endsWith("/complete")) {
+        if (options.failFirstComplete && completionCalls++ === 0) throw new TypeError("completion response lost");
+        return Response.json({ mediaId, status: "READY", mimeType: "image/webp" });
+      }
+      if (options.storageResponse) return options.storageResponse;
+      return new Response(null, { status: 204 });
+    },
+  });
+  return { client, file, bytes, calls, intent };
+}
+
+test("raw PUT advertises both transports and sends exact bytes without app credentials or forbidden length header", async () => {
+  const h = rawUploadHarness();
+  await h.client.uploadMedia(h.file, "POST", "raw-put-action");
+  assert.deepEqual(JSON.parse(h.calls[0].init.body).acceptedUploadMethods, ["POST", "PUT"]);
+  const sent = h.calls[1].init;
+  assert.equal(sent.method, "PUT");
+  assert.equal(sent.body instanceof FormData, false);
+  const body = sent.body instanceof Blob ? await sent.body.arrayBuffer() : sent.body;
+  assert.deepEqual(new Uint8Array(body), h.bytes);
+  const headers = new Headers(sent.headers);
+  assert.equal(headers.get("content-type"), "image/png");
+  assert.equal(headers.get("x-amz-content-sha256"), "UNSIGNED-PAYLOAD");
+  assert.equal(headers.has("content-length"), false, "fetch computes signed length from the exact raw body");
+  assert.equal(headers.has("authorization"), false);
+  assert.equal(headers.has("cookie"), false);
+  assert.equal(headers.has("apikey"), false);
+  assert.equal(sent.credentials, "omit");
+  assert.equal(sent.redirect, "error");
+});
+
+test("raw PUT policy tampering fails before storage or completion", async () => {
+  for (const change of [
+    (i) => { i.maxBytes += 1; },
+    (i) => { i.bodyEncoding = "multipart"; },
+    (i) => { i.fields = { file: "invalid" }; },
+    (i) => { i.fileFieldName = "file"; },
+    (i) => { i.headers["content-length"] = "999"; },
+    (i) => { i.headers["content-type"] = "text/plain"; },
+    (i) => { i.headers["x-amz-content-sha256"] = "invalid"; },
+    (i) => { i.headers["x-amz-meta-sha256"] = "0".repeat(64); },
+    (i) => { i.headers["x-amz-meta-media-id"] = "foreign-media"; },
+    (i) => { i.headers.Authorization = "secret"; },
+    (i) => { i.headers.Cookie = "secret"; },
+    (i) => { i.headers.apikey = "secret"; },
+    (i) => { i.headers["Content-Type"] = "image/png"; },
+    (i) => { delete i.headers["content-length"]; },
+    (i) => { i.uploadUrl = "http://storage.example.test/upload"; },
+    (i) => { i.uploadUrl = "https://user:password@storage.example.test/upload"; },
+    (i) => { i.expiresAt = "invalid"; },
+    (i) => { i.expiresAt = "2000-01-01T00:00:00.000Z"; },
+  ]) {
+    const h = rawUploadHarness(change);
+    await assert.rejects(h.client.uploadMedia(h.file, "POST", "bad-put-policy"));
+    assert.equal(h.calls.length, 1);
+  }
+});
+
+test("raw PUT complete-only retry preserves one upload and the same idempotency key", async () => {
+  const h = rawUploadHarness(undefined, { failFirstComplete: true });
+  await assert.rejects(h.client.uploadMedia(h.file, "POST", "raw-complete-retry"));
+  await h.client.uploadMedia(h.file, "POST", "raw-complete-retry");
+  assert.equal(h.calls.filter((c) => c.init.method === "PUT").length, 1);
+  assert.equal(h.calls.filter((c) => c.url.endsWith("/v1/media/uploads")).length, 1);
+  const completed = h.calls.filter((c) => c.url.endsWith("/complete"));
+  assert.equal(completed.length, 2);
+  assert.ok(completed.every((c) => c.init.headers.get("idempotency-key") === "raw-complete-retry"));
+});
+
+test("loopback HTTP uploads require explicit development mode", async () => {
+  const change = (i) => { i.uploadUrl = "http://127.0.0.1:55433/signed-put"; };
+  const release = rawUploadHarness(change, { development: false });
+  await assert.rejects(release.client.uploadMedia(release.file, "POST", "release-http"));
+  assert.equal(release.calls.length, 1);
+  const local = rawUploadHarness(change, { development: true });
+  await local.client.uploadMedia(local.file, "POST", "dev-http");
+  assert.equal(local.calls[1].init.method, "PUT");
+});
+
+test("raw PUT never completes after failed or redirected storage responses", async () => {
+  for (const storageResponse of [{ ok: false, status: 403, redirected: false }, { ok: true, status: 200, redirected: true }]) {
+    const h = rawUploadHarness(undefined, { storageResponse });
+    await assert.rejects(h.client.uploadMedia(h.file, "POST", "rejected-storage-response"), { code: "MEDIA_UPLOAD_FAILED" });
+    assert.equal(h.calls.length, 2);
+  }
 });

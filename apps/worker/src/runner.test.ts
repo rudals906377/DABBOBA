@@ -5,12 +5,183 @@ import { loadWorkerConfig } from "./config.js";
 import type { JobDependencies } from "./jobs.js";
 import type { Logger } from "./logger.js";
 import type { PgmqMessage } from "./pgmq.js";
-import { consumeQueue, queueRetryDelaySeconds, type WorkerRunSummary } from "./runner.js";
+import {
+  consumeQueue,
+  queueRetryDelaySeconds,
+  runWorkerOnce,
+  type WorkerRunOperations,
+  type WorkerRunSummary,
+} from "./runner.js";
 
 test("pgmq retry delay is exponential, rounded up to seconds, and bounded", () => {
   assert.equal(queueRetryDelaySeconds(1, 100), 1);
   assert.equal(queueRetryDelaySeconds(5, 1_000), 16);
   assert.equal(queueRetryDelaySeconds(50, 1_000), 900);
+});
+
+test("an overlapping scheduled execution exits successfully without doing worker work", async () => {
+  const config = loadWorkerConfig({
+    NODE_ENV: "test",
+    WORKER_DATABASE_URL: "postgresql://worker:secret@127.0.0.1:5432/dabboba",
+  });
+  const queries: string[] = [];
+  const infoMessages: string[] = [];
+  let released = false;
+  let poolEnded = false;
+  const pool = {
+    async connect() {
+      return {
+        async query(sql: string) {
+          queries.push(sql);
+          return { rowCount: 1, rows: [{ locked: false }] };
+        },
+        release() {
+          released = true;
+        },
+      };
+    },
+    async end() {
+      poolEnded = true;
+    },
+  } as unknown as DatabasePool;
+  const logger: Logger = {
+    debug() {},
+    info(_fields, message) { infoMessages.push(message); },
+    warn() {},
+    error() {},
+  };
+
+  const summary = await runWorkerOnce(config, logger, () => false, () => pool);
+
+  assert.equal(summary.status, "overlap_skipped");
+  assert.deepEqual(queries, ["SELECT pg_try_advisory_lock($1::bigint) AS locked"]);
+  assert.equal(released, true);
+  assert.equal(poolEnded, true);
+  assert.match(infoMessages.at(-1) || "", /exiting cleanly/);
+});
+
+test("a productive run prioritizes lease-sensitive periodic work before queue consumption", async () => {
+  const config = loadWorkerConfig({
+    NODE_ENV: "test",
+    WORKER_DATABASE_URL: "postgresql://worker:secret@127.0.0.1:5432/dabboba",
+  });
+  const trace: string[] = [];
+  const pool = {
+    async connect() {
+      return {
+        async query(sql: string) {
+          return sql.includes("pg_try_advisory_lock")
+            ? { rowCount: 1, rows: [{ locked: true }] }
+            : { rowCount: 1, rows: [{ pg_advisory_unlock: true }] };
+        },
+        release() {},
+      };
+    },
+    async end() {},
+  } as unknown as DatabasePool;
+  const logger = { debug() {}, info() {}, warn() {}, error() {} } as Logger;
+  const operations: WorkerRunOperations = {
+    async assertPgmqRuntime() {
+      trace.push("acl");
+      return "1.5.1";
+    },
+    createPgmqOutboxPublisher() {
+      return {} as never;
+    },
+    async dispatchOutboxBatch() {
+      trace.push("dispatch");
+      return { published: 0, deferred: 0, skipped: 0 };
+    },
+    async consumeQueue() {
+      trace.push("queue");
+    },
+    async processJob(_dependencies, raw) {
+      trace.push(`periodic:${(raw as { kind: string }).kind}`);
+    },
+  };
+
+  const summary = await runWorkerOnce(config, logger, () => false, () => pool, operations);
+
+  assert.equal(summary.periodicCompleted, 3);
+  assert.equal(summary.periodicFailed, 0);
+  assert.deepEqual(trace.slice(0, 6), [
+    "acl",
+    "periodic:reservation.sweep",
+    "periodic:payment.reconcile",
+    "periodic:media.cleanup",
+    "dispatch",
+    "queue",
+  ]);
+});
+
+test("a failed periodic class does not starve later maintenance or one bounded queue pass", async () => {
+  const config = loadWorkerConfig({
+    NODE_ENV: "test",
+    WORKER_DATABASE_URL: "postgresql://worker:secret@127.0.0.1:5432/dabboba",
+  });
+  const trace: string[] = [];
+  const errors: Array<{ fields: Record<string, unknown>; message: string }> = [];
+  let released = false;
+  let poolEnded = false;
+  const pool = {
+    async connect() {
+      return {
+        async query(sql: string) {
+          trace.push(sql.includes("pg_try_advisory_lock") ? "lock" : "unlock");
+          return sql.includes("pg_try_advisory_lock")
+            ? { rowCount: 1, rows: [{ locked: true }] }
+            : { rowCount: 1, rows: [{ pg_advisory_unlock: true }] };
+        },
+        release() { released = true; },
+      };
+    },
+    async end() { poolEnded = true; },
+  } as unknown as DatabasePool;
+  const logger: Logger = {
+    debug() {},
+    info() {},
+    warn() {},
+    error(fields, message) { errors.push({ fields, message }); },
+  };
+  const operations: WorkerRunOperations = {
+    async assertPgmqRuntime() { return "1.5.1"; },
+    createPgmqOutboxPublisher() { return {} as never; },
+    async dispatchOutboxBatch() {
+      trace.push("dispatch");
+      return { published: 1, deferred: 0, skipped: 0 };
+    },
+    async consumeQueue(_pool, _dependencies, _config, summary) {
+      trace.push("queue");
+      summary.queueCompleted += 1;
+    },
+    async processJob(_dependencies, raw) {
+      const kind = (raw as { kind: string }).kind;
+      trace.push(`periodic:${kind}`);
+      if (kind === "reservation.sweep") throw new Error("poison reservation row");
+    },
+  };
+
+  await assert.rejects(
+    () => runWorkerOnce(config, logger, () => false, () => pool, operations),
+    /reservation\.sweep/,
+  );
+
+  assert.deepEqual(trace.slice(1, 7), [
+    "periodic:reservation.sweep",
+    "periodic:payment.reconcile",
+    "periodic:media.cleanup",
+    "dispatch",
+    "queue",
+    "dispatch",
+  ]);
+  assert.equal(trace.filter((item) => item === "queue").length, 2);
+  assert.equal(trace.at(-1), "unlock");
+  assert.equal(released, true);
+  assert.equal(poolEnded, true);
+  assert.equal(errors.length, 2);
+  assert.equal(errors[0]?.fields.periodicJobKind, "reservation.sweep");
+  assert.match(errors[0]?.message ?? "", /failed; continuing/i);
+  assert.match(errors[1]?.message ?? "", /failed after queue processing/i);
 });
 
 test("one execution does not process a deferred pgmq message ID twice", async () => {
@@ -34,6 +205,7 @@ test("one execution does not process a deferred pgmq message ID twice", async ()
     queueRetried: 0,
     queueDeadLettered: 0,
     periodicCompleted: 0,
+    periodicFailed: 0,
   };
   const firstRead: PgmqMessage = {
     id: "42",
@@ -106,6 +278,7 @@ test("stopping after one handler never claims an unprocessed tail message", asyn
     queueRetried: 0,
     queueDeadLettered: 0,
     periodicCompleted: 0,
+    periodicFailed: 0,
   };
   const logger = { debug() {}, info() {}, warn() {}, error() {} } as Logger;
   let stopped = false;

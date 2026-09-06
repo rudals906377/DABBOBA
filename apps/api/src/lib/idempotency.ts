@@ -30,8 +30,14 @@ export async function beginIdempotency(
   client: DatabaseClient,
   input: { actorId: string; scope: string; key: string; hash: string },
 ): Promise<IdempotencyStart> {
+  // A completed purchase key is durable order identity, not an expiring cache.
+  // Dropping it after 24h lets a delayed retry create a second paid order. Keep
+  // its original payload hash/response; new purchases must use a new key. Other
+  // scopes retain their existing TTL (and their own domain-ledger safeguards).
   await client.query(
-    "DELETE FROM idempotency_keys WHERE actor_id=$1 AND scope=$2 AND idempotency_key=$3 AND expires_at<=now()",
+    `DELETE FROM idempotency_keys
+     WHERE actor_id=$1 AND scope=$2 AND idempotency_key=$3 AND expires_at<=now()
+       AND NOT (scope='CREATE_ORDER' AND state='COMPLETED')`,
     [input.actorId, input.scope, input.key],
   );
   const inserted = await client.query<{ id: string }>(

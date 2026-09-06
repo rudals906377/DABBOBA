@@ -5,6 +5,7 @@ import test from "node:test";
 import {
   GACHA_AGITATION_DURATION_MS,
   GACHA_AGITATION_PULSE_TURNS,
+  GACHA_CAPSULE_REVEAL_DURATION_MS,
   GACHA_CHAMBER_CAPSULES,
   GACHA_CHAMBER_HEIGHT,
   GACHA_CHAMBER_WIDTH,
@@ -12,8 +13,10 @@ import {
   sampleGachaAgitatorMotion,
   sampleGachaCapsuleDispenseMotion,
   sampleGachaCapsuleMotion,
+  sampleGachaCapsuleRevealMotion,
 } from "../apps/mobile/src/features/draw/gacha-capsule-motion.ts";
 import { GACHA_LEVER_TARGET_RADIANS } from "../apps/mobile/src/features/draw/gacha-lever-motion.ts";
+import { GACHA_PICKUP_GEOMETRY } from "../apps/mobile/src/features/draw/gacha-camera-motion.ts";
 
 const component = readFileSync(
   new URL("../apps/mobile/src/features/draw/GachaLeverMachine.tsx", import.meta.url),
@@ -21,6 +24,10 @@ const component = readFileSync(
 );
 const motionSource = readFileSync(
   new URL("../apps/mobile/src/features/draw/gacha-capsule-motion.ts", import.meta.url),
+  "utf8",
+);
+const capsuleVisual = readFileSync(
+  new URL("../apps/mobile/src/features/draw/GachaCapsuleVisual.tsx", import.meta.url),
   "utf8",
 );
 
@@ -93,12 +100,12 @@ const hasMeaningfulCapsuleOverlap = (first, second) => (
   >= Math.min(renderedCapsuleDiameter(first), renderedCapsuleDiameter(second)) * 0.08
 );
 
-test("the chamber contains twenty bounded capsules in a staggered three-depth pile", () => {
-  assert.equal(GACHA_CHAMBER_CAPSULES.length, 20);
-  assert.equal(new Set(GACHA_CHAMBER_CAPSULES.map((capsule) => capsule.id)).size, 20);
+test("the chamber contains twenty-six bounded capsules in a dense three-depth pile", () => {
+  assert.equal(GACHA_CHAMBER_CAPSULES.length, 26);
+  assert.equal(new Set(GACHA_CHAMBER_CAPSULES.map((capsule) => capsule.id)).size, 26);
   assert.deepEqual(
     GACHA_CHAMBER_CAPSULES.map((capsule) => capsule.index),
-    Array.from({ length: 20 }, (_, index) => index),
+    Array.from({ length: 26 }, (_, index) => index),
   );
   assert.deepEqual(
     new Set(GACHA_CHAMBER_CAPSULES.map((capsule) => capsule.tone)),
@@ -111,7 +118,7 @@ test("the chamber contains twenty bounded capsules in a staggered three-depth pi
       GACHA_CHAMBER_CAPSULES.filter((capsule) => capsule.mechanicalRow === row).length,
     ]),
   );
-  assert.deepEqual(rowCounts, { upper: 6, middle: 9, lower: 5 });
+  assert.deepEqual(rowCounts, { upper: 12, middle: 9, lower: 5 });
 
   const depthCounts = new Map();
   for (const capsule of GACHA_CHAMBER_CAPSULES) {
@@ -130,7 +137,7 @@ test("the chamber contains twenty bounded capsules in a staggered three-depth pi
   assert.ok([...depthCounts.values()].every((count) => count >= 6));
   assert.deepEqual(
     GACHA_CHAMBER_CAPSULES.map((capsule) => capsule.stackOrder).sort((a, b) => a - b),
-    Array.from({ length: 20 }, (_, index) => index + 1),
+    Array.from({ length: 26 }, (_, index) => index + 1),
   );
   assert.ok(
     new Set(GACHA_CHAMBER_CAPSULES.map((capsule) => capsule.top)).size >= 14,
@@ -178,8 +185,8 @@ test("the chamber contains twenty bounded capsules in a staggered three-depth pi
       }
     }
   }
-  assert.ok(overlapPairs.length >= 24, "the pile needs visible contact and overlap instead of grid gaps");
-  assert.ok(crossDepthOverlapPairs.length >= 18, "front capsules must visibly occlude back capsules");
+  assert.ok(overlapPairs.length >= GACHA_CHAMBER_CAPSULES.length * 1.2, "the pile needs visible contact and overlap instead of grid gaps");
+  assert.ok(crossDepthOverlapPairs.length >= GACHA_CHAMBER_CAPSULES.length * 0.9, "front capsules must visibly occlude back capsules");
 
   const overlapNeighbors = new Map(
     GACHA_CHAMBER_CAPSULES.map((capsule) => [capsule.id, new Set()]),
@@ -189,7 +196,7 @@ test("the chamber contains twenty bounded capsules in a staggered three-depth pi
     overlapNeighbors.get(secondId).add(firstId);
   }
   assert.ok(
-    [...overlapNeighbors.values()].filter((neighbors) => neighbors.size > 0).length >= 18,
+    [...overlapNeighbors.values()].filter((neighbors) => neighbors.size > 0).length >= Math.ceil(GACHA_CHAMBER_CAPSULES.length * 0.9),
     "almost every capsule must participate in the packed mass",
   );
   assert.ok(
@@ -205,7 +212,7 @@ test("the chamber contains twenty bounded capsules in a staggered three-depth pi
     visited.add(current);
     for (const neighbor of overlapNeighbors.get(current)) pending.push(neighbor);
   }
-  assert.ok(visited.size >= 18, "the pile must read as one connected mass");
+  assert.ok(visited.size >= Math.ceil(GACHA_CHAMBER_CAPSULES.length * 0.9), "the pile must read as one connected mass");
 
   for (const frontCapsule of GACHA_CHAMBER_CAPSULES.filter((capsule) => capsule.depth === 2)) {
     assert.ok(
@@ -263,11 +270,11 @@ test("each mechanical row has a restrained local roll instead of a chamber-wide 
 
 test("the finite agitator sweep leads the lower, middle, and upper responses", () => {
   const tau = 2 * Math.PI;
-  assert.deepEqual(GACHA_AGITATION_PULSE_TURNS, [0.18, 1.18]);
-  assert.equal(resolveGachaAgitationPulseCount(0.17 * tau), 0);
-  assert.equal(resolveGachaAgitationPulseCount(0.18 * tau), 1);
-  assert.equal(resolveGachaAgitationPulseCount(1.17 * tau), 1);
-  assert.equal(resolveGachaAgitationPulseCount(1.18 * tau), 2);
+  assert.deepEqual(GACHA_AGITATION_PULSE_TURNS, [0.09, 0.59]);
+  assert.equal(resolveGachaAgitationPulseCount(0.08 * tau), 0);
+  assert.equal(resolveGachaAgitationPulseCount(0.09 * tau), 1);
+  assert.equal(resolveGachaAgitationPulseCount(0.58 * tau), 1);
+  assert.equal(resolveGachaAgitationPulseCount(0.59 * tau), 2);
   assert.equal(resolveGachaAgitationPulseCount(GACHA_LEVER_TARGET_RADIANS), 2);
 
   const agitatorFrames = Array.from(
@@ -341,22 +348,15 @@ test("exactly one lower-right capsule is aligned and hidden for dispensing", () 
   assert.deepEqual(fadedCapsules.map((capsule) => capsule.id), [candidate.id]);
 
   const chamberStyleMatch = component.match(/capsuleChamber:\s*\{[\s\S]*?left:\s*(\d+),/);
-  const chuteTrackStyleMatch = component.match(/dispenseTrack:\s*\{[\s\S]*?left:\s*(\d+),/);
-  const chuteCapsuleStyleMatch = component.match(
-    /dispensedCapsule:\s*\{[\s\S]*?left:\s*(\d+),[\s\S]*?width:\s*(\d+),/,
-  );
   assert.ok(chamberStyleMatch);
-  assert.ok(chuteTrackStyleMatch);
-  assert.ok(chuteCapsuleStyleMatch);
+  assert.match(component, /dispenseTrack:\s*\{[\s\S]*?left: GACHA_PICKUP_GEOMETRY.left/);
+  assert.match(component, /dispensedCapsule:\s*\{[\s\S]*?left: GACHA_PICKUP_GEOMETRY.restLeft/);
   const chamberLeft = Number(chamberStyleMatch[1]);
-  const chuteTrackLeft = Number(chuteTrackStyleMatch[1]);
-  const chuteCapsuleLeft = Number(chuteCapsuleStyleMatch[1]);
-  const chuteCapsuleWidth = Number(chuteCapsuleStyleMatch[2]);
   const exitingCenter = chamberLeft
     + candidate.left
     + candidate.dispenseX
     + candidate.size / 2;
-  const chuteCenter = chuteTrackLeft + chuteCapsuleLeft + chuteCapsuleWidth / 2;
+  const chuteCenter = GACHA_PICKUP_GEOMETRY.left + GACHA_PICKUP_GEOMETRY.restLeft + GACHA_PICKUP_GEOMETRY.capsuleSize / 2;
   assert.ok(Math.abs(exitingCenter - chuteCenter) <= 3);
 });
 
@@ -408,6 +408,99 @@ test("the result-driven exit settles only the supporting neighborhood into the v
   }
 });
 
+test("the capsule opens gently during approach without rattles or a rectangular background flash", () => {
+  assert.equal(GACHA_CAPSULE_REVEAL_DURATION_MS, 3_000);
+
+  const atChute = sampleGachaCapsuleRevealMotion(0, false);
+  const focused = sampleGachaCapsuleRevealMotion(0.34, false);
+  const stableFrames = [0.36, 0.41, 0.46, 0.52, 0.57, 0.62, 0.68]
+    .map((progress) => sampleGachaCapsuleRevealMotion(progress, false));
+  const flashPeak = sampleGachaCapsuleRevealMotion(0.81, false);
+  const opened = sampleGachaCapsuleRevealMotion(0.96, false);
+  const finished = sampleGachaCapsuleRevealMotion(1, false);
+
+  assert.equal(atChute.capsuleTranslateY, 0);
+  assert.equal(atChute.capsuleTranslateX, 0);
+  assert.equal(atChute.capsuleScale, 1);
+  assert.ok(Math.abs(focused.capsuleTranslateX) < 0.1);
+  assert.ok(Math.abs(focused.capsuleTranslateY) < 0.1);
+  assert.ok(focused.capsuleScale >= 1);
+  assert.equal(new Set(stableFrames.map((frame) => frame.capsuleRotateDeg)).size, 1);
+  assert.ok(stableFrames.every((frame) => frame.capsuleTranslateX === 0));
+  assert.equal(flashPeak.flashOpacity, 0);
+  const held = [0, 0.08, 0.16].map((progress) => sampleGachaCapsuleRevealMotion(progress, false));
+  assert.ok(held.every((frame) => frame.upperTranslateY === 0 && frame.lowerTranslateY === 0));
+  assert.equal(held[0].capsuleScale, held[2].capsuleScale, "only the camera magnifies the world capsule");
+  const sealCrack = sampleGachaCapsuleRevealMotion(0.25, false);
+  assert.ok(Math.abs(sealCrack.upperTranslateY) <= 4, "the light leaks through a small gap before release");
+  assert.ok((0.84 - 0.18) * GACHA_CAPSULE_REVEAL_DURATION_MS >= 1_900, "the quiet overlapping opening is intentionally gentle");
+  assert.ok(focused.upperTranslateY < 0 && focused.lowerTranslateY > 0, "the fallback opens before the camera finishes approaching");
+  assert.ok(opened.upperTranslateY < -30);
+  assert.ok(opened.lowerTranslateY > 30);
+  assert.ok(finished.capsuleOpacity === 1);
+  assert.ok(finished.machineOpacity === 0);
+  let previousGap = 0;
+  for (let index = 0; index <= 1_000; index += 1) {
+    const frame = sampleGachaCapsuleRevealMotion(index / 1_000, false);
+    assert.equal(frame.upperTranslateX, 0);
+    assert.equal(frame.lowerTranslateX, 0);
+    assert.equal(frame.upperRotateDeg, 0);
+    assert.equal(frame.lowerRotateDeg, 0);
+    assert.ok(Math.abs(frame.upperTranslateY + frame.lowerTranslateY) < 1e-12,
+      "the fallback halves must open symmetrically around the same inner source");
+    const gap = frame.lowerTranslateY - frame.upperTranslateY;
+    assert.ok(gap >= previousGap, "the quiet opening must not rattle back closed");
+    previousGap = gap;
+  }
+
+  const reduced = sampleGachaCapsuleRevealMotion(0.62, true);
+  assert.equal(reduced.capsuleTranslateX, 0);
+  assert.equal(reduced.capsuleTranslateY, 0);
+  assert.equal(reduced.capsuleRotateDeg, 0);
+  assert.equal(reduced.flashOpacity, 0);
+  assert.equal(reduced.upperTranslateY, 0);
+  assert.equal(reduced.lowerTranslateY, 0);
+});
+
+test("the chamber, chute, and cinematic reveal reuse one capsule visual", () => {
+  assert.match(capsuleVisual, /export function GachaCapsuleVisual/);
+  assert.match(capsuleVisual, /tone: GachaCapsuleTone/);
+  assert.match(component, /import \{ GachaCapsuleVisual \}/);
+  assert.ok(
+    (component.match(/<GachaCapsuleVisual/g) ?? []).length >= 2,
+    "the chamber and emitted capsule must share the same visual primitive",
+  );
+  assert.match(component, /testID="gacha-capsule-cinematic"/);
+  assert.match(component, /sampleGachaCapsuleRevealMotion\(revealProgress\.value, reduceMotion\)/);
+  assert.match(
+    component,
+    /revealActive\.value = 1/,
+  );
+  assert.match(
+    component,
+    /revealProgress\.value = withDelay\([\s\S]*?GACHA_CAPSULE_REVEAL_DURATION_MS[\s\S]*?scheduleOnRN\(handleRevealSettled/,
+  );
+  assert.match(component, /styles\.cinematicCapsuleLayer, closedCapsuleStyle/);
+  assert.match(component, /styles\.cinematicCapsuleLayer, splitCapsuleStyle/);
+  assert.match(component, /styles.capsuleLightWash, lightWashStyle/);
+  assert.doesNotMatch(component, /styles.revealFlash/);
+  assert.ok(
+    (component.match(/heroDetail/g) ?? []).length >= 3,
+    "the emitted and opening capsule must preserve the detailed shared finish",
+  );
+  assert.match(capsuleVisual, /heroGlossStepWide/);
+  assert.match(capsuleVisual, /heroMakerMark/);
+  assert.match(capsuleVisual, /heroLightRim/);
+  assert.match(capsuleVisual, /heroDarkRim/);
+  assert.match(capsuleVisual, /heroCouplingGroove/);
+  assert.match(capsuleVisual, /heroUpperCavity/);
+  assert.match(capsuleVisual, /heroLowerCavity/);
+  assert.match(component, /styles\.dispenseCapsuleShadow/);
+  assert.match(component, /styles\.cinematicShadowOuter/);
+  assert.match(component, /styles\.cinematicShadowCore/);
+  assert.doesNotMatch(component, /Math\.random|setTimeout|setInterval/);
+});
+
 test("the native chamber wires agitation and result-time settlement on the UI thread", () => {
   assert.match(component, /GACHA_CHAMBER_CAPSULES\.map/);
   assert.match(component, /function GachaChamberCapsule/);
@@ -437,9 +530,9 @@ test("the native chamber wires agitation and result-time settlement on the UI th
   assert.match(component, /20 \+ capsule\.stackOrder \* 2/);
   assert.match(component, /chamberGlassTint:[\s\S]*?zIndex:\s*200/);
   assert.match(component, /chamberFrontLip:[\s\S]*?zIndex:\s*203/);
-  assert.match(component, /styles\.chamberCapsuleHighlightPixel/);
-  assert.match(component, /styles\.chamberCapsuleSideShade/);
-  assert.match(component, /styles\.chamberCapsuleBottomShade/);
+  assert.match(capsuleVisual, /styles\.highlightPixel/);
+  assert.match(capsuleVisual, /styles\.upperSideShade/);
+  assert.match(capsuleVisual, /styles\.bottomShade/);
 });
 
 test("the motion model is seeded by configuration and contains no render-time randomness", () => {
@@ -454,25 +547,38 @@ test("the motion model is seeded by configuration and contains no render-time ra
   }
 });
 
-test("the circular lever rotates one foreground clockwise cue until the lever is touched", () => {
+test("the packed chamber keeps simple capsule faces and builds depth through opaque overlap", () => {
+  const chamber = component.split("function GachaChamberCapsule(")[1]?.split("const styles = StyleSheet.create")[0] ?? "";
+  assert.match(chamber, /<GachaCapsuleVisual tone=\{capsule.tone\} depth=\{capsule.depth\} diameter=\{capsule.size\} \/>/);
+  assert.doesNotMatch(chamber, /heroDetail|GachaCapsule3D|GachaCapsuleFrames|GachaChamberCapsuleVisual/);
+  assert.match(chamber, /opacity: dispenseFrame.opacity,/);
+  assert.doesNotMatch(chamber, /depthOpacity/);
+  assert.match(chamber, /shadowOpacity: capsule.depth === 2 \? 0.34 : capsule.depth === 1 \? 0.22 : 0.12/);
+  assert.match(component, /top: capsule.top \+ capsule.size \* 0.78/);
+});
+
+test("one small arrow orbits outside the lever plate clockwise until the lever is touched", () => {
   const readPresentationConstant = (name) => {
     const match = component.match(new RegExp(`const ${name} = ([\\d.]+);`));
     assert.ok(match, `${name} must remain an explicit presentation constant`);
     return Number(match[1]);
   };
   const crankPlateSize = readPresentationConstant("CRANK_PLATE_SIZE");
-  const cueIconSize = readPresentationConstant("LEVER_CUE_ICON_SIZE");
+  const arrowWidth = readPresentationConstant("LEVER_CUE_ARROW_WIDTH");
+  const arrowHeight = readPresentationConstant("LEVER_CUE_ARROW_HEIGHT");
   const cueRotationDurationMs = readPresentationConstant("LEVER_CUE_ROTATION_DURATION_MS");
 
   assert.equal(crankPlateSize, 41);
-  assert.equal(cueIconSize, 34);
+  assert.equal(arrowWidth, 10);
+  assert.equal(arrowHeight, 8);
   assert.equal(cueRotationDurationMs, 2600);
-  assert.ok(cueIconSize < crankPlateSize, "the cue must remain optically inside the crank plate");
+  assert.ok(arrowWidth < crankPlateSize / 4, "the orbit carries a small arrow, not another plate-sized icon");
+  assert.match(component, /const LEVER_CUE_ORBIT_SIZE = CRANK_PLATE_SIZE \+ 14;/);
   assert.match(component, /<GestureDetector gesture=\{interactionGesture\}>[\s\S]*?styles\.leverTouchTarget/);
   assert.equal((component.match(/testID="gacha-lever-clockwise-cue"/g) ?? []).length, 1);
   assert.match(
     component,
-    /<Animated\.View[\s\S]*?testID="gacha-lever-clockwise-cue"[\s\S]*?pointerEvents="none"[\s\S]*?styles\.leverRotationCue[\s\S]*?clockwiseCueStyle[\s\S]*?<Ionicons[\s\S]*?name="refresh-outline"/,
+    /<Animated\.View[\s\S]*?testID="gacha-lever-clockwise-cue"[\s\S]*?pointerEvents="none"[\s\S]*?styles\.leverRotationCue[\s\S]*?clockwiseCueStyle[\s\S]*?<Svg[\s\S]*?styles\.leverRotationArrow[\s\S]*?<Path/,
   );
   assert.match(component, /const clockwiseCueRotation = useSharedValue\(0\)/);
   assert.match(component, /const clockwiseCueOpacity = useSharedValue\(1\)/);
@@ -500,21 +606,99 @@ test("the circular lever rotates one foreground clockwise cue until the lever is
   const handleIndex = component.indexOf("source={GACHA_CRANK_HANDLE}");
   const cueIndex = component.indexOf('testID="gacha-lever-clockwise-cue"');
   assert.ok(handleIndex >= 0 && cueIndex > handleIndex, "the cue must render in front of the crank handle");
-  assert.match(component, /<Ionicons\s+name="refresh-outline"\s+size=\{LEVER_CUE_ICON_SIZE\}/);
+  assert.doesNotMatch(component, /refresh-outline|LEVER_CUE_ICON_SIZE/);
+  const cue = component.slice(cueIndex, component.indexOf("</Animated.View>", cueIndex));
+  assert.equal((cue.match(/<Svg\b/g) ?? []).length, 1);
+  assert.equal((cue.match(/<Path\b/g) ?? []).length, 1);
+  assert.doesNotMatch(cue, /<Circle|<Ellipse|<Line|<Polyline|<Ionicons/);
+  assert.match(cue, /width=\{LEVER_CUE_ARROW_WIDTH\}[\s\S]*?height=\{LEVER_CUE_ARROW_HEIGHT\}[\s\S]*?viewBox="0 0 10 8"/);
+  assert.match(cue, /fill=\{colors.brand\}/);
   assert.match(
     component,
-    /leverRotationCue:\s*\{[\s\S]*?left:\s*GESTURE_CENTER - CRANK_PLATE_SIZE \/ 2,[\s\S]*?top:\s*GESTURE_CENTER - CRANK_PLATE_SIZE \/ 2,[\s\S]*?width:\s*CRANK_PLATE_SIZE,[\s\S]*?height:\s*CRANK_PLATE_SIZE/,
+    /leverRotationCue:\s*\{[\s\S]*?left:\s*GESTURE_CENTER - LEVER_CUE_ORBIT_SIZE \/ 2,[\s\S]*?top:\s*GESTURE_CENTER - LEVER_CUE_ORBIT_SIZE \/ 2,[\s\S]*?width:\s*LEVER_CUE_ORBIT_SIZE,[\s\S]*?height:\s*LEVER_CUE_ORBIT_SIZE/,
   );
+  assert.match(component, /leverRotationArrow:\s*\{[\s\S]*?left:\s*\(LEVER_CUE_ORBIT_SIZE - LEVER_CUE_ARROW_WIDTH\) \/ 2,[\s\S]*?top:\s*-LEVER_CUE_ARROW_HEIGHT \/ 2/);
+  const arrowStyle = component.match(/leverRotationArrow:\s*\{([^}]+)\}/)?.[1] ?? "";
+  assert.doesNotMatch(arrowStyle, /transform|border|backgroundColor/,
+    "the arrow must keep the same tangent heading as its rotating parent");
+  const orbitStyle = component.match(/leverRotationCue:\s*\{([^}]+)\}/)?.[1] ?? "";
+  assert.doesNotMatch(orbitStyle, /border|backgroundColor|shadow|opacity|overflow|transformOrigin/,
+    "the orbit box must be invisible and use its centered pivot, not draw a ring");
   assert.match(
     component,
     /crankPlate:\s*\{[\s\S]*?left:\s*GESTURE_CENTER - CRANK_PLATE_SIZE \/ 2,[\s\S]*?top:\s*GESTURE_CENTER - CRANK_PLATE_SIZE \/ 2,[\s\S]*?width:\s*CRANK_PLATE_SIZE,[\s\S]*?height:\s*CRANK_PLATE_SIZE/,
   );
   assert.match(component, /leverRotationCue:\s*\{[\s\S]*?zIndex:\s*\d+/);
+  assert.match(component, /opacity: clockwiseCueOpacity.value \* 0.9/);
+  assert.match(component, /cancelAnimation\(clockwiseCueRotation\);\s*clockwiseCueRotation.value = 0;\s*if \(reduceMotion/);
+  assert.match(component, /return \(\) => cancelAnimation\(clockwiseCueRotation\)/);
+  assert.match(component, /clockwiseCueRotation.value = 0;\s*clockwiseCueOpacity.value = 1;/,
+    "a new draw must restore the cue to its original visible twelve-o'clock pose");
   assert.doesNotMatch(component, /<Text\b|styles\.instruction|styles\.status/);
   assert.doesNotMatch(
     component,
     /PROGRESS_DOTS|PROGRESS_SEGMENTS|leverOrbit|progressDot|resolveGachaLeverProgress/,
   );
+});
+
+test("the complete arrow stays clear of the plate and points along its clockwise orbit tangent", () => {
+  const number = (name) => Number(component.match(new RegExp(`const ${name} = ([\\d.]+);`))?.[1]);
+  const plateSize = number("CRANK_PLATE_SIZE");
+  const arrowWidth = number("LEVER_CUE_ARROW_WIDTH");
+  const arrowHeight = number("LEVER_CUE_ARROW_HEIGHT");
+  const extraDiameter = Number(component.match(/const LEVER_CUE_ORBIT_SIZE = CRANK_PLATE_SIZE \+ ([\d.]+);/)?.[1]);
+  const radius = (plateSize + extraDiameter) / 2;
+  assert.ok([plateSize, arrowWidth, arrowHeight, radius].every(Number.isFinite));
+  const cueStart = component.indexOf('testID="gacha-lever-clockwise-cue"');
+  const cue = component.slice(cueStart, component.indexOf("</Animated.View>", cueStart));
+  const path = cue.match(/<Path d="([^"]+)"/)?.[1];
+  assert.ok(path, "the single rendered arrow must have inspectable geometry");
+  assert.doesNotMatch(path, /[ACQSTacqst]/, "the arrow is a straight silhouette, not a circular refresh arc");
+  const tokens = path.match(/[MLHVZ]|-?\d+(?:\.\d+)?/g);
+  const points = [];
+  let x = 0;
+  let y = 0;
+  for (let index = 0; index < tokens.length;) {
+    const command = tokens[index++];
+    if (command === "Z") break;
+    if (command === "M" || command === "L") { x = Number(tokens[index++]); y = Number(tokens[index++]); }
+    else if (command === "H") x = Number(tokens[index++]);
+    else if (command === "V") y = Number(tokens[index++]);
+    else assert.fail(`unsupported arrow command ${command}`);
+    points.push([x, y]);
+  }
+  assert.ok(points.every(([px, py]) => px >= 0 && px <= arrowWidth && py >= 0 && py <= arrowHeight));
+  assert.deepEqual(points.filter(([px]) => px === arrowWidth), [[arrowWidth, arrowHeight / 2]],
+    "at twelve o'clock the single tip must point right, not inward or counterclockwise");
+  for (const [px, py] of points) {
+    assert.ok(points.some(([otherX, otherY]) => otherX === px && otherY === arrowHeight - py),
+      "the arrow must remain balanced above and below its tangent axis");
+  }
+  const rotate = ([px, py], angle) => [px * Math.cos(angle) - py * Math.sin(angle), px * Math.sin(angle) + py * Math.cos(angle)];
+  const edgeDistance = (a, b) => {
+    const dx = b[0] - a[0];
+    const dy = b[1] - a[1];
+    const t = Math.max(0, Math.min(1, -(a[0] * dx + a[1] * dy) / (dx * dx + dy * dy)));
+    return Math.hypot(a[0] + t * dx, a[1] + t * dy);
+  };
+  for (let degree = 0; degree < 360; degree += 2) {
+    const angle = degree * Math.PI / 180;
+    const outline = points.map(([px, py]) => rotate([px - arrowWidth / 2, py - arrowHeight / 2 - radius], angle));
+    for (let index = 0; index < outline.length; index += 1) {
+      assert.ok(edgeDistance(outline[index], outline[(index + 1) % outline.length]) >= plateSize / 2 + 3 - 1e-9,
+        "every filled arrow edge keeps a three-point clearance outside the fixed metal plate");
+    }
+    const center = rotate([0, -radius], angle);
+    const heading = rotate([1, 0], angle);
+    assert.ok(Math.abs(Math.hypot(...center) - radius) < 1e-10, "the arrow orbits; it does not just spin at the plate center");
+    assert.ok(Math.abs(center[0] * heading[0] + center[1] * heading[1]) < 1e-10);
+    assert.ok(center[0] * heading[1] - center[1] * heading[0] > 0,
+      "in screen coordinates the tip follows the positive clockwise tangent");
+  }
+  const touchingOutline = points.map(([px, py]) => [px - arrowWidth / 2, py - arrowHeight / 2 - plateSize / 2]);
+  const touchingDistance = Math.min(...touchingOutline.map((point, index) => edgeDistance(point, touchingOutline[(index + 1) % touchingOutline.length])));
+  assert.ok(touchingDistance < plateSize / 2,
+    "negative control: the actual arrow intersects the plate when its orbit radius is only the plate radius");
 });
 
 test("the machine marquee reuses the canonical DABBOBA wordmark", () => {

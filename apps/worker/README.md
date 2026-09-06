@@ -6,30 +6,35 @@ PostgreSQL remains authoritative; no Redis or always-on process is required.
 Each invocation:
 
 1. takes one PostgreSQL advisory lock so scheduled executions cannot overlap;
-2. publishes claimed `outbox_events` to the logged `dabboba_worker` queue in the
+2. runs the reservation sweep first, followed by payment reconciliation
+   observation and media cleanup, so queue backlog cannot starve lease expiry;
+3. publishes claimed `outbox_events` to the logged `dabboba_worker` queue in the
    same database transaction that records `published_at`;
-3. uses `pgmq.read` with a 900-second default visibility timeout, processes the
+4. uses `pgmq.read` with a 900-second default visibility timeout, processes the
    existing idempotent handler, then deletes the message;
-4. defers failures with bounded exponential backoff and moves exhausted jobs to
-   `worker_dead_letters` atomically;
-5. runs the reservation sweep, payment reconciliation observation, and media
-   cleanup once before exiting.
+5. defers failures with bounded exponential backoff and moves exhausted jobs to
+   `worker_dead_letters` atomically.
 
 The deployed Cloud Run task timeout is fixed at 600 seconds. Configuration
 requires queue visibility to be at least 900 seconds (the task timeout plus a
 300-second safety margin), and caps the entire worker run—including database
-connection and ACL checks—at 240 seconds. Cooperative deadline checks stop
-between bounded units and roll back an in-flight transaction when needed,
-leaving six minutes for one already-started operation and shutdown. Queue reads
+connection and ACL checks—at 45 seconds. Cooperative deadline checks stop
+between bounded units and roll back an in-flight transaction when needed. The
+session lock safely rejects the next tick if one bounded operation runs past the
+45-second start-work window. Queue reads
 claim one message at a time, and retry visibility is never shorter than the
 remaining run window, so unprocessed tail messages do not consume `read_ct` and
 one execution cannot consume the same failed message twice.
 
 `pgmq.pop` is intentionally never used. Successful messages are deleted because
 the canonical event remains in `outbox_events`; this bounds Supabase Free storage.
-The free-tier-first baseline invokes one Cloud Run Job every fifteen minutes;
-operators can shorten that interval only after accepting the higher minimum-task
-billing and measuring the required reservation latency.
+The production baseline invokes one Cloud Run Job every minute so an expired
+three-minute Kuji checkout lease gets a new sweep attempt on the next minute.
+The session-level `pg_try_advisory_lock` is non-blocking: an overlapping
+invocation exits successfully before publishing, consuming, or periodic work.
+This protects consistency but does not remove Cloud Run Jobs' one-minute minimum
+billing per execution. The one-minute latency target therefore replaces, and is
+more expensive than, the earlier fifteen-minute free-tier-first baseline.
 
 ## Database boundary
 

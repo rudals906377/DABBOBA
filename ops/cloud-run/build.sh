@@ -21,7 +21,7 @@ esac
 assert_mutation_approval
 assert_no_raw_secret_envs
 assert_gcloud_context
-assert_cloud_identity_boundaries
+assert_cloud_release_boundaries
 check_build_prerequisites
 
 declare -a kinds

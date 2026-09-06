@@ -221,6 +221,8 @@ test(
         weight: number;
         initialQuantity: number | null;
         remainingQuantity: number | null;
+        tierCode: string | null;
+        tierRank: number | null;
       }>;
     };
     const createDrawDraft = async (reason: string) => app.inject({
@@ -246,6 +248,8 @@ test(
       weight: 1,
       initialQuantity: 3,
       remainingQuantity: 3,
+      tierCode: null,
+      tierRank: null,
     });
     const publishReason = "유한 추첨 확률표 공개";
     const publishedDraw = await app.inject({

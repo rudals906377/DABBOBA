@@ -86,6 +86,7 @@ async function lockKujiProductState(
             EXISTS (
               SELECT 1
                 FROM draw_probability_versions v
+                JOIN kuji_decks deck ON deck.probability_version_id=v.id
                 JOIN draw_pool_entries e ON e.probability_version_id=v.id
                WHERE v.product_id=p.id
                  AND v.status='ACTIVE'
@@ -309,6 +310,9 @@ async function roomSnapshot(
       peopleAhead: viewerPosition === null ? 0 : viewerPosition - 1,
       checkoutExpiresAt: viewerRow.state === "CHECKOUT_PENDING"
         ? nullableIso(viewerRow.checkout_expires_at)
+        : null,
+      drawingExpiresAt: ["DRAWING", "EXPIRED"].includes(viewerRow.state)
+        ? nullableIso(viewerRow.drawing_expires_at)
         : null,
     },
     active: activeRow

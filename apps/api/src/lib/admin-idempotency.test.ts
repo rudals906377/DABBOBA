@@ -13,6 +13,8 @@ const coveredRoutes = [
   ["catalog.ts", "post", "/v1/admin/products"],
   ["catalog.ts", "patch", "/v1/admin/products/:productId"],
   ["catalog.ts", "post", "/v1/admin/catalog-requests/:requestId/decision"],
+  ["home-catalog.ts", "post", "/v1/admin/home-sections"],
+  ["home-catalog.ts", "patch", "/v1/admin/home-sections/:sectionId"],
   ["commerce.ts", "post", "/v1/admin/products/:productId/draw-versions"],
   ["commerce.ts", "post", "/v1/admin/products/:productId/draw-versions/:versionId/publish"],
   ["community.ts", "post", "/v1/admin/notices"],
@@ -38,7 +40,7 @@ test("admin mutation fingerprint binds method, path, target, body, and audit rea
   assert.match(source, /statusCode === 204/);
 });
 
-test("every audited legacy admin mutation is wrapped by the durable ledger", async () => {
+test("every audited admin mutation is wrapped by the durable ledger", async () => {
   const files = new Map<string, string>();
   for (const [file] of coveredRoutes) {
     if (!files.has(file)) {

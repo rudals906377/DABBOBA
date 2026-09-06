@@ -16,7 +16,7 @@ mode="${1:-all}"
 
 assert_no_raw_secret_envs
 assert_gcloud_context
-assert_cloud_identity_boundaries
+assert_cloud_release_boundaries
 
 case "$mode" in
   base)

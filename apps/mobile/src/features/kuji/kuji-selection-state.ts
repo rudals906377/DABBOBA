@@ -1,4 +1,5 @@
 export const KUJI_BOARD_TICKET_COUNT = 50;
+export const KUJI_MAX_SLOT_NUMBER = 10_000;
 
 export type DrawPaymentUnit = "개" | "장";
 export type KujiOpenMode = "single" | "all";
@@ -27,7 +28,7 @@ export function parseKujiTicketNumbers(value: string | undefined): string[] {
   const seen = new Set<number>();
   for (const part of value.split(",")) {
     const ticket = Number(part);
-    if (Number.isInteger(ticket) && ticket >= 1 && ticket <= KUJI_BOARD_TICKET_COUNT) {
+    if (Number.isInteger(ticket) && ticket >= 1 && ticket <= KUJI_MAX_SLOT_NUMBER) {
       seen.add(ticket);
     }
   }
@@ -47,7 +48,7 @@ export function toggleKujiTicketSelection(
     return current.filter((value) => value !== canonical);
   }
   const limit = Number.isFinite(maxSelections)
-    ? Math.max(0, Math.min(Math.trunc(maxSelections), KUJI_BOARD_TICKET_COUNT))
+    ? Math.max(0, Math.min(Math.trunc(maxSelections), KUJI_MAX_SLOT_NUMBER))
     : 0;
   if (current.length >= limit) return current;
   const next = [...current, canonical];
@@ -59,7 +60,7 @@ export function hasExactKujiTicketSelection(
   purchasedCount: number,
 ): boolean {
   const count = Number.isFinite(purchasedCount)
-    ? Math.max(0, Math.min(Math.trunc(purchasedCount), KUJI_BOARD_TICKET_COUNT))
+    ? Math.max(0, Math.min(Math.trunc(purchasedCount), KUJI_MAX_SLOT_NUMBER))
     : 0;
   const canonical = parseKujiTicketNumbers(tickets.join(","));
   return count > 0 && canonical.length === count && canonical.length === tickets.length;

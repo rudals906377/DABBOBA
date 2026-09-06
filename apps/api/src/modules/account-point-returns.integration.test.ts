@@ -92,10 +92,9 @@ test(
       | "DELIVERED"
       | "TRANSFERRED"
       | "REFUNDED";
-    const drawDefinition = new Map<SourceType, { productId: string; versionId: string; entries: Map<string, string> }>();
+    const drawDefinition = new Map<"GACHA", { productId: string; versionId: string; entries: Map<string, string> }>();
     for (const [sourceType, productId] of [
       ["GACHA", gachaProductId],
-      ["KUJI", kujiProductId],
     ] as const) {
       const version = await pool.query<{ id: string }>(
         "INSERT INTO draw_probability_versions(product_id,version) VALUES($1,1) RETURNING id",
@@ -116,6 +115,10 @@ test(
         );
         entries.set(prizeId, entry.rows[0]!.id);
       }
+      await pool.query(
+        "UPDATE draw_probability_versions SET status='ACTIVE',published_by=$2,published_at=now() WHERE id=$1",
+        [version.rows[0]!.id, owner.actor.userId],
+      );
       drawDefinition.set(sourceType, { productId, versionId: version.rows[0]!.id, entries });
     }
 
@@ -136,7 +139,7 @@ test(
     const addDrawInventory = async (input: {
       drawUserId: string;
       currentOwnerId?: string;
-      sourceType: SourceType;
+      sourceType: "GACHA";
       prizeProductId?: string;
       status?: InventoryStatus;
     }) => {
@@ -162,15 +165,15 @@ test(
       );
       const entitlement = await pool.query<{ id: string }>(
         `INSERT INTO draw_entitlements(
-           order_line_id,user_id,product_id,probability_version_id,status,consumed_at
-         ) VALUES($1,$2,$3,$4,'CONSUMED',now()) RETURNING id`,
+           order_line_id,user_id,product_id,probability_version_id
+         ) VALUES($1,$2,$3,$4) RETURNING id`,
         [line.rows[0]!.id, input.drawUserId, definition.productId, definition.versionId],
       );
       const inventoryId = await addInventory(
-        input.currentOwnerId ?? input.drawUserId,
+        input.drawUserId,
         prizeProductId,
         input.sourceType,
-        input.status,
+        "OWNED",
         entitlement.rows[0]!.id,
       );
       await pool.query(
@@ -190,8 +193,29 @@ test(
           "1".repeat(64),
         ],
       );
+      await pool.query(
+        "UPDATE draw_entitlements SET status='CONSUMED',consumed_at=now() WHERE id=$1",
+        [entitlement.rows[0]!.id],
+      );
+      if (input.currentOwnerId !== undefined || (input.status !== undefined && input.status !== "OWNED")) {
+        await pool.query(
+          "UPDATE inventory_units SET owner_id=$2,status=$3 WHERE id=$1",
+          [inventoryId, input.currentOwnerId ?? input.drawUserId, input.status ?? "OWNED"],
+        );
+      }
       return inventoryId;
     };
+    const addKujiInventory = async (input: {
+      ownerId: string;
+      currentOwnerId?: string;
+      status?: InventoryStatus;
+    }) => addInventory(
+      input.currentOwnerId ?? input.ownerId,
+      prizeEvenId,
+      "KUJI",
+      input.status,
+      randomUUID(),
+    );
     const returnPoints = (
       token: string,
       inventoryUnitIds: string[],
@@ -313,9 +337,8 @@ test(
     const secondRequest = await returnPoints(owner.token, inventoryUnitIds);
     assert.equal(secondRequest.statusCode, 409, secondRequest.body);
 
-    const directKujiInventoryId = await addDrawInventory({
-      drawUserId: owner.actor.userId,
-      sourceType: "KUJI",
+    const directKujiInventoryId = await addKujiInventory({
+      ownerId: owner.actor.userId,
     });
     const ineligibleInventoryIds = [
       await addInventory(owner.actor.userId, prizeEvenId, "GACHA"),
@@ -325,14 +348,13 @@ test(
       directKujiInventoryId,
       await addDrawInventory({ drawUserId: owner.actor.userId, sourceType: "GACHA", status: "EXCHANGE_LISTED" }),
       await addDrawInventory({ drawUserId: owner.actor.userId, sourceType: "GACHA", status: "EXCHANGE_OFFERED" }),
-      await addDrawInventory({ drawUserId: owner.actor.userId, sourceType: "KUJI", status: "SHIPPING" }),
-      await addDrawInventory({ drawUserId: owner.actor.userId, sourceType: "KUJI", status: "DELIVERED" }),
+      await addKujiInventory({ ownerId: owner.actor.userId, status: "SHIPPING" }),
+      await addKujiInventory({ ownerId: owner.actor.userId, status: "DELIVERED" }),
       await addDrawInventory({ drawUserId: owner.actor.userId, sourceType: "GACHA", status: "TRANSFERRED" }),
       await addDrawInventory({ drawUserId: owner.actor.userId, sourceType: "GACHA", status: "REFUNDED" }),
-      await addDrawInventory({
-        drawUserId: owner.actor.userId,
+      await addKujiInventory({
+        ownerId: owner.actor.userId,
         currentOwnerId: recipient.actor.userId,
-        sourceType: "KUJI",
       }),
     ];
     for (const inventoryId of ineligibleInventoryIds.slice(0, -1)) {

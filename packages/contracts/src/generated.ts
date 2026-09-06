@@ -487,6 +487,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/catalog/home-sections": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Render-ready Home catalog sections. When configured is false, clients may use their legacy preview layout. Once configured is true, items is authoritative even when empty. */
+        get: operations["getHomeCatalogSections"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/catalog/characters": {
         parameters: {
             query?: never;
@@ -760,6 +777,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/catalog/products/{productId}/kuji-slots": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Returns one uncached MVCC-consistent projection of the active sealed deck. Slot-to-tier and slot-to-prize mappings are never returned. */
+        get: operations["getProductKujiSlots"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/kuji/rooms/{productId}/entries": {
         parameters: {
             query?: never;
@@ -795,6 +829,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/kuji/rooms/{productId}/entries/{entryId}/slots": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description Atomically binds every paid available entitlement in the owned DRAWING or expired paid room to the same number of unique available sealed slots. Reusing the same idempotency key or exact existing binding is safe. */
+        post: operations["bindOwnPaidKujiSlots"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/orders": {
         parameters: {
             query?: never;
@@ -819,6 +870,54 @@ export interface paths {
             cookie?: never;
         };
         get: operations["getOrder"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/orders/{orderId}/draw-completion": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getOwnPaidGachaDrawCompletion"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/orders/{orderId}/draw-recovery": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getOwnPaidKujiDrawRecovery"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/orders/{orderId}/kuji-selection": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getOwnPaidKujiSelection"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1468,6 +1567,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/home-sections": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listAdminHomeCatalogSections"];
+        put?: never;
+        post: operations["createAdminHomeCatalogSection"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/home-sections/{sectionId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch: operations["updateAdminHomeCatalogSection"];
+        trace?: never;
+    };
     "/v1/admin/ips": {
         parameters: {
             query?: never;
@@ -1921,13 +2052,19 @@ export interface components {
             mimeType: components["schemas"]["MediaMimeType"];
             byteSize: number;
             checksumSha256: string;
+            /** @description Supported upload transports. Defaults to [POST] when omitted, preserving legacy multipart POST behavior; PUT means an exact raw file body, never multipart. The property remains optional in generated clients. */
+            acceptedUploadMethods?: ("POST" | "PUT")[];
         };
-        MediaUploadIntent: {
+        MediaUploadIntent: components["schemas"]["MediaMultipartPostUploadIntent"] | components["schemas"]["MediaRawPutUploadIntent"];
+        MediaMultipartPostUploadIntent: {
             /** Format: uuid */
             mediaId: string;
             /** Format: uri */
             uploadUrl: string;
-            /** @constant */
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
             method: "POST";
             /** @description Append every field to multipart FormData before appending the file. */
             fields: {
@@ -1938,6 +2075,27 @@ export interface components {
             /** Format: date-time */
             expiresAt: string;
             /** @description Exact declared byte size enforced by the signed policy. */
+            maxBytes: number;
+        };
+        MediaRawPutUploadIntent: {
+            /** Format: uuid */
+            mediaId: string;
+            /** Format: uri */
+            uploadUrl: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            method: "PUT";
+            /** @constant */
+            bodyEncoding: "raw";
+            /** @description Required signed headers are content-type (declared MIME), content-length (exact byte size), x-amz-content-sha256 (UNSIGNED-PAYLOAD), x-amz-meta-sha256 (declared SHA-256), and x-amz-meta-media-id (this mediaId). Reject other headers or mismatched values. Validate content-length but let the browser/native transport derive it from the exact raw body; never forward application credentials or cookies. */
+            headers: {
+                [key: string]: string;
+            };
+            /** Format: date-time */
+            expiresAt: string;
+            /** @description Exact declared byte size bound to the signed request and independently verified at completion. */
             maxBytes: number;
         };
         MediaReady: {
@@ -2523,6 +2681,55 @@ export interface components {
         CatalogProductPage: components["schemas"]["PageMeta"] & {
             items: components["schemas"]["CatalogProduct"][];
         };
+        /** @description Render-ready active Home section. Products are active, customer-sellable, non-prize gacha or kuji records linked to the section IP. */
+        HomeCatalogSection: {
+            id: string;
+            title: string;
+            sortOrder: number;
+            isActive: boolean;
+            version: number;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+            ip: components["schemas"]["CatalogIp"];
+            products: components["schemas"]["CatalogProduct"][];
+        };
+        /** @description configured is true after any Home section record has been created, including when every record is inactive and items is empty. */
+        HomeCatalogSectionList: {
+            configured: boolean;
+            items: components["schemas"]["HomeCatalogSection"][];
+        };
+        AdminHomeCatalogSection: {
+            id: string;
+            title: string;
+            ipId: string;
+            sortOrder: number;
+            isActive: boolean;
+            version: number;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        AdminHomeCatalogSectionList: {
+            configured: boolean;
+            items: components["schemas"]["AdminHomeCatalogSection"][];
+        };
+        CreateHomeCatalogSectionInput: {
+            id: string;
+            title: string;
+            ipId: string;
+            sortOrder: number;
+            isActive: boolean;
+        };
+        UpdateHomeCatalogSectionInput: {
+            title: string;
+            ipId: string;
+            sortOrder: number;
+            isActive: boolean;
+            expectedVersion: number;
+        };
         CatalogRequest: {
             /** Format: uuid */
             id: string;
@@ -2778,6 +2985,8 @@ export interface components {
             prizeInventoryUnitId: string;
             probabilityVersion: number;
             rarity: string;
+            /** @description Present only after a sealed kuji slot has been committed and consumed. */
+            kujiSlotNumber?: number;
             /** Format: date-time */
             committedAt: string;
         };
@@ -2795,6 +3004,10 @@ export interface components {
             weight: number;
             initialQuantity: number | null;
             remainingQuantity: number | null;
+            /** @description Required only for kuji; null for weighted gacha. */
+            tierCode: string | null;
+            /** @description Required only for kuji; lower values are higher tiers. */
+            tierRank: number | null;
         };
         DrawProbabilityVersion: {
             /** Format: uuid */
@@ -2809,6 +3022,13 @@ export interface components {
             publishedAt: string | null;
             /** Format: date-time */
             createdAt: string;
+            /** @description Required for finite kuji and null for weighted gacha. */
+            totalSlots: number | null;
+            /**
+             * @description Stored sealed-kuji slot assignment algorithm; null for weighted gacha.
+             * @enum {string|null}
+             */
+            assignmentAlgorithm: "CSPRNG_FISHER_YATES_V1" | "LEGACY_SINGLE_TIER_V1" | null;
             totalEffectiveWeight: number;
             entries: components["schemas"]["DrawPoolEntry"][];
         };
@@ -2816,11 +3036,18 @@ export interface components {
             items: components["schemas"]["DrawProbabilityVersion"][];
         };
         CreateDrawVersionInput: {
+            /** @description Required for kuji and rejected for gacha. */
+            totalSlots?: number;
             entries: {
                 prizeProductId: string;
                 rarity: string;
-                weight: number;
-                quantity: number | null;
+                /** @description Required for gacha and rejected for sealed kuji. */
+                weight?: number;
+                quantity?: number | null;
+                /** @description Required for kuji and rejected for gacha. */
+                tierCode?: string;
+                /** @description Required for kuji and rejected for gacha; lower values are higher tiers. */
+                tierRank?: number;
             }[];
         };
         UserSummary: {
@@ -2979,6 +3206,11 @@ export interface components {
             peopleAhead: number;
             /** Format: date-time */
             checkoutExpiresAt: string | null;
+            /**
+             * Format: date-time
+             * @description Absolute five-minute draw-room lease deadline for DRAWING and EXPIRED entries. Paid entitlements remain consumable after room expiry.
+             */
+            drawingExpiresAt: string | null;
         };
         KujiRoomActiveEntry: {
             displayName: string;
@@ -3015,6 +3247,115 @@ export interface components {
             waitingCount: number;
             waitingPeople: components["schemas"]["KujiRoomWaitingPerson"][];
             recentActivity: components["schemas"]["KujiRoomRecentActivity"][];
+        };
+        PublicKujiSlot: {
+            slotNumber: number;
+            available: boolean;
+        };
+        PublicKujiTierRemaining: {
+            tierCode: string;
+            tierRank: number;
+            label: string;
+            initialQuantity: number;
+            /** @description Unrevealed quantity. A RESERVED slot remains included and is removed only after committed consume. */
+            remainingQuantity: number;
+        };
+        /** @description Public projection only. No slot item contains a tier, prize, pool-entry, seed, or assignment mapping. */
+        PublicKujiDeckSnapshot: {
+            productId: string;
+            probabilityVersion: number;
+            snapshotVersion: number;
+            totalSlots: number;
+            /** Format: date-time */
+            publishedAt: string;
+            /** Format: date-time */
+            calculatedAt: string;
+            slots: components["schemas"]["PublicKujiSlot"][];
+            tiers: components["schemas"]["PublicKujiTierRemaining"][];
+        };
+        BindKujiSlotsInput: {
+            probabilityVersion: number;
+            slotNumbers: number[];
+        };
+        KujiSlotBinding: {
+            /** Format: uuid */
+            entitlementId: string;
+            slotNumber: number;
+            /** @enum {string} */
+            state: "RESERVED" | "CONSUMED";
+        };
+        KujiSlotBindingResult: {
+            productId: string;
+            /** Format: uuid */
+            roomEntryId: string;
+            probabilityVersion: number;
+            bindings: components["schemas"]["KujiSlotBinding"][];
+        };
+        PaidGachaDrawCompletion: {
+            /** Format: uuid */
+            orderId: string;
+            /** Format: uuid */
+            userId: string;
+            productId: string;
+            probabilityVersion: number;
+            /** Format: date-time */
+            serverNow: string;
+            /** @description Exactly one existing immutable result for every original paid-order entitlement, in original entitlement order. */
+            results: {
+                /** Format: uuid */
+                entitlementId: string;
+                /** Format: uuid */
+                resultId: string;
+                /** Format: date-time */
+                committedAt: string;
+            }[];
+        };
+        PaidKujiDrawRecovery: {
+            /** Format: uuid */
+            orderId: string;
+            /** Format: uuid */
+            userId: string;
+            productId: string;
+            /** Format: uuid */
+            roomEntryId: string;
+            /** @enum {string} */
+            roomState: "DRAWING" | "EXPIRED" | "COMPLETED";
+            /** Format: date-time */
+            serverNow: string;
+            /**
+             * Format: date-time
+             * @description Original non-renewing occupancy deadline, including an elapsed deadline. This response never grants a new lease.
+             */
+            drawingExpiresAt: string;
+            probabilityVersion: number;
+            totalSlots: number;
+            /** @description Only AVAILABLE entitlements from this paid order. Empty when every purchased draw has already been consumed. */
+            entitlementIds: string[];
+            /** @description Existing RESERVED slot numbers for the remaining entitlements, in matching entitlement order. Empty only before original slot selection or after all draws have been consumed. */
+            bindings: {
+                /** Format: uuid */
+                entitlementId: string;
+                slotNumber: number;
+                /** @constant */
+                state: "RESERVED";
+            }[];
+        };
+        PaidKujiSelectionSnapshot: {
+            recovery: components["schemas"]["PaidKujiDrawRecovery"];
+            product: {
+                /** @description Immutable product name recorded on the paid order line. */
+                name: string;
+                /** @constant */
+                category: "kuji";
+                /** @description Immutable unit price recorded on the paid order line. */
+                unitPrice: number;
+                /** @description Optional current catalog image for display, not a historical purchase image snapshot. */
+                currentImageUrl: string | null;
+                /** @description Optional current IP display name, not purchase authority. */
+                currentIpName: string | null;
+            };
+            /** @description Original paid-version availability and aggregate tiers only while every purchased entitlement is still unbound and available. Null once binding or consumption has begun. */
+            board: components["schemas"]["PublicKujiDeckSnapshot"] | null;
         };
         PublicDrawOddsEntry: {
             /** Format: uuid */
@@ -3926,7 +4267,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Short-lived multipart POST policy bound to the staging object, declared media metadata, and exact byte size. */
+            /** @description Short-lived staging upload capability using a negotiated multipart POST policy or raw PUT request. Clients that omit acceptedUploadMethods receive POST only. */
             201: {
                 headers: {
                     [name: string]: unknown;
@@ -4601,6 +4942,26 @@ export interface operations {
             };
         };
     };
+    getHomeCatalogSections: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Active Home sections with their active IP and visible customer-sellable gacha or kuji products. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HomeCatalogSectionList"];
+                };
+            };
+        };
+    };
     listCatalogCharacters: {
         parameters: {
             query?: {
@@ -5159,6 +5520,30 @@ export interface operations {
             409: components["responses"]["Conflict"];
         };
     };
+    getProductKujiSlots: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                productId: components["parameters"]["ProductId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Numbered slot availability and aggregate unrevealed tier counts for one active sealed kuji version. Reserved slots are unavailable, but remain in tier counts until their committed consume reveals the result. */
+            200: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicKujiDeckSnapshot"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+        };
+    };
     joinKujiRoom: {
         parameters: {
             query?: never;
@@ -5249,6 +5634,52 @@ export interface operations {
             409: components["responses"]["Conflict"];
         };
     };
+    bindOwnPaidKujiSlots: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                productId: components["parameters"]["ProductId"];
+                entryId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BindKujiSlotsInput"];
+            };
+        };
+        responses: {
+            /** @description The exact previously committed binding was replayed. */
+            200: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    "X-Idempotent-Replay"?: "true";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KujiSlotBindingResult"];
+                };
+            };
+            /** @description All requested slots were bound atomically to paid entitlements. */
+            201: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KujiSlotBindingResult"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
     createOrder: {
         parameters: {
             query?: never;
@@ -5304,6 +5735,87 @@ export interface operations {
                 };
             };
             404: components["responses"]["NotFound"];
+        };
+    };
+    getOwnPaidGachaDrawCompletion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orderId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description One owner-scoped snapshot proving every original entitlement of a currently paid gacha order has an immutable committed result. Only identities and timestamps are returned. Never purchases or consumes a draw. */
+            200: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaidGachaDrawCompletion"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    getOwnPaidKujiDrawRecovery: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orderId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description One owner-scoped snapshot of the original paid kuji order, room deadline, remaining entitlements, and already selected slot numbers. Does not consume, create, renew, or reacquire room occupancy. EXPIRED paid rights keep the existing recovery policy; no unrevealed prize or tier mapping is disclosed. */
+            200: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaidKujiDrawRecovery"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    getOwnPaidKujiSelection: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orderId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description One owner-scoped snapshot of the original paid version, original product name and unit price, room deadline, remaining rights and selection board. Independent of public catalog pages and current sale visibility. Existing bindings return with a null board. No occupancy renewal, selection, consumption or hidden slot-to-prize mapping. */
+            200: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaidKujiSelectionSnapshot"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
         };
     };
     receivePaymentWebhook: {
@@ -6655,6 +7167,90 @@ export interface operations {
                     "application/json": components["schemas"]["Report"];
                 };
             };
+            409: components["responses"]["Conflict"];
+        };
+    };
+    listAdminHomeCatalogSections: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Full Home catalog section configuration including inactive rows. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminHomeCatalogSectionList"];
+                };
+            };
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    createAdminHomeCatalogSection: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                "X-Admin-Reason": components["parameters"]["AdminReason"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateHomeCatalogSectionInput"];
+            };
+        };
+        responses: {
+            /** @description Home catalog section created and audited. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminHomeCatalogSection"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    updateAdminHomeCatalogSection: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                "X-Admin-Reason": components["parameters"]["AdminReason"];
+            };
+            path: {
+                sectionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateHomeCatalogSectionInput"];
+            };
+        };
+        responses: {
+            /** @description Home catalog section updated and audited with optimistic concurrency. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminHomeCatalogSection"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
         };
     };

@@ -6,11 +6,6 @@
     "orientation": "portrait",
     "userInterfaceStyle": "light",
     "scheme": "dabboba",
-    "splash": {
-      "image": "./assets/dabboba-wordmark.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#F5F5F1"
-    },
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.dabboba.mobile"
@@ -19,6 +14,15 @@
       "package": "com.dabboba.mobile"
     },
     "plugins": [
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/dabboba-wordmark.png",
+          "imageWidth": 200,
+          "resizeMode": "contain",
+          "backgroundColor": "#F5F5F1"
+        }
+      ],
       "expo-router",
       "expo-secure-store",
       "expo-sqlite",

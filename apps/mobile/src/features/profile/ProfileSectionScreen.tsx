@@ -36,6 +36,7 @@ import {
   updateAccountProfile,
 } from "@/features/profile/profile-api";
 import { isPointReturnEligibleInventory } from "@/features/profile/point-return-eligibility";
+import { PaidDrawRecovery } from "@/features/profile/PaidDrawRecovery";
 import { calculateShippingPolicy } from "@/features/profile/shipping-policy";
 import { useProfileSnapshot } from "@/features/profile/use-profile-snapshot";
 import { productSubjectTitle } from "@/features/shop/product-title";
@@ -570,6 +571,15 @@ function Orders({ profileState }: { profileState: ReturnType<typeof useProfileSn
   const orders = snapshot.orders;
   return (
     <>
+      {!snapshot.isExample && profileState.accessToken ? (
+        <PaidDrawRecovery
+          apiBaseUrl={profileState.runtime.apiBaseUrl}
+          actorId={snapshot.profile.id}
+          refreshKey={snapshot.fetchedAt}
+          catalogProducts={snapshot.catalogProducts}
+          ipNames={snapshot.ipNames}
+        />
+      ) : null}
       <SectionLead title={`주문 ${orders.length}건`} description="서버에서 확정한 결제 금액과 주문 상태를 그대로 표시합니다." />
       {orders.length ? orders.map((order) => (
         <Pressable key={order.id} accessibilityRole="button" accessibilityLabel={`${formatDate(order.createdAt)} 주문 상세`} onPress={() => router.push(`/profile/orders/${encodeURIComponent(order.id)}` as Href)} style={({ pressed }) => [styles.historyCard, pressed && styles.pressed]}>
@@ -719,7 +729,11 @@ function ProductThumb({ product, assetBaseUrl, catalogFrameCategory }: { product
 }
 
 export function DetailHeader({ title }: { title: string }) {
-  return <View style={styles.header}><Pressable accessibilityRole="button" accessibilityLabel="뒤로 가기" hitSlop={10} onPress={() => router.back()} style={({ pressed }) => [styles.backButton, pressed && styles.pressed]}><Ionicons name="chevron-back" size={24} color={colors.ink} /></Pressable><View style={styles.headerTitleBlock}><KoreanPixelTitle variant="header">{title}</KoreanPixelTitle></View><View style={styles.headerSpacer} /></View>;
+  const goBack = () => {
+    if (router.canGoBack()) router.back();
+    else router.replace("/(tabs)/profile");
+  };
+  return <View style={styles.header}><Pressable accessibilityRole="button" accessibilityLabel="뒤로 가기" hitSlop={10} onPress={goBack} style={({ pressed }) => [styles.backButton, pressed && styles.pressed]}><Ionicons name="chevron-back" size={24} color={colors.ink} /></Pressable><View style={styles.headerTitleBlock}><KoreanPixelTitle variant="header">{title}</KoreanPixelTitle></View><View style={styles.headerSpacer} /></View>;
 }
 
 function SectionLead({ title, description }: { title: string; description?: string }) {

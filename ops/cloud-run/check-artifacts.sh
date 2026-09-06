@@ -25,6 +25,8 @@ require_command() {
 }
 
 require_command bash
+require_command node
+require_command jq
 require_command diff
 require_command find
 require_command grep
@@ -36,16 +38,23 @@ require_command sort
 
 bash -n \
   "$SCRIPT_DIR/_common.sh" \
+  "$SCRIPT_DIR/_media-storage.sh" \
   "$SCRIPT_DIR/build.sh" \
   "$SCRIPT_DIR/check-artifacts.sh" \
   "$SCRIPT_DIR/deploy.sh" \
   "$SCRIPT_DIR/preflight.sh" \
+  "$SCRIPT_DIR/promote-api-candidate.sh" \
+  "$SCRIPT_DIR/smoke-api-candidate.sh" \
+  "$SCRIPT_DIR/test-api-candidate-release.sh" \
   "$SCRIPT_DIR/test-build-guards.sh" \
   "$SCRIPT_DIR/test-release-attestations.sh" \
   "$SCRIPT_DIR/schedule-worker.sh"
 
 bash "$SCRIPT_DIR/test-build-guards.sh"
+bash "$SCRIPT_DIR/test-api-candidate-release.sh"
 bash "$SCRIPT_DIR/test-release-attestations.sh"
+node --test "$SCRIPT_DIR/test-media-storage.test.mjs"
+node --test "$SCRIPT_DIR/test-api-revision.test.mjs"
 
 ruby - "$SCRIPT_DIR/cloudbuild.yaml" "$SCRIPT_DIR/cloudbuild-all.yaml" <<'RUBY'
 require "yaml"
@@ -168,7 +177,9 @@ actual_context="$context_check_dir/actual.txt"
       packages/db/src/runtime-role.ts \
       packages/db/src/supabase-root-ca.ts \
       packages/domain/package.json \
-      packages/domain/tsconfig.json
+      packages/domain/tsconfig.json \
+      packages/media-storage/package.json \
+      packages/media-storage/tsconfig.json
     find \
       apps/api/src \
       apps/api/src/lib \
@@ -178,9 +189,11 @@ actual_context="$context_check_dir/actual.txt"
       packages/config/src \
       packages/contracts/src \
       packages/domain/src \
+      packages/media-storage/src \
       -maxdepth 1 -type f -name '*.ts' \
       ! -name '*.test.ts' \
       ! -name '*.integration.test.ts' \
+      ! -name '*.conformance.ts' \
       ! -name '*.test-d.ts' \
       -print
     find packages/contracts/openapi -maxdepth 1 -type f -name '*.yaml' -print

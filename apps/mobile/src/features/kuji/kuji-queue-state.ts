@@ -119,6 +119,7 @@ export function createKujiRoomFallback(
         checkoutExpiresAt: new Date(
           startedAtMs + KUJI_LOCAL_CHECKOUT_SECONDS * 1_000,
         ).toISOString(),
+        drawingExpiresAt: null,
       },
       active: {
         displayName: "나",
@@ -143,6 +144,7 @@ export function createKujiRoomFallback(
       position: 3,
       peopleAhead: 2,
       checkoutExpiresAt: null,
+      drawingExpiresAt: null,
     },
     active: {
       displayName: "럭키덕후",

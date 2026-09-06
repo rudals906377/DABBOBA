@@ -58,10 +58,17 @@ test("runtime database role can operate app data but cannot administer the schem
        ORDER BY relation.relname`,
       [RUNTIME_DATABASE_ROLE],
     );
-    assert.equal(tableAccess.rows.filter((row) => row.can_select).length, 64);
-    assert.equal(tableAccess.rows.filter((row) => row.can_insert).length, 67);
-    assert.equal(tableAccess.rows.filter((row) => row.can_update).length, 40);
+    assert.equal(tableAccess.rows.filter((row) => row.can_select).length, 69);
+    assert.equal(tableAccess.rows.filter((row) => row.can_insert).length, 72);
+    assert.equal(tableAccess.rows.filter((row) => row.can_update).length, 42);
     assert.equal(tableAccess.rows.filter((row) => row.can_delete).length, 7);
+    assert.deepEqual(tableAccess.rows.find((row) => row.relname === "home_catalog_sections"), {
+      relname: "home_catalog_sections",
+      can_select: true,
+      can_insert: true,
+      can_update: true,
+      can_delete: false,
+    });
     for (const exchangeBundleTable of ["exchange_listing_items", "exchange_offer_items"]) {
       assert.deepEqual(tableAccess.rows.find((row) => row.relname === exchangeBundleTable), {
         relname: exchangeBundleTable,
@@ -71,6 +78,22 @@ test("runtime database role can operate app data but cannot administer the schem
         can_delete: false,
       });
     }
+    for (const immutableKujiTable of ["kuji_deck_tiers", "kuji_decks", "kuji_slot_assignments"]) {
+      assert.deepEqual(tableAccess.rows.find((row) => row.relname === immutableKujiTable), {
+        relname: immutableKujiTable,
+        can_select: true,
+        can_insert: true,
+        can_update: false,
+        can_delete: false,
+      });
+    }
+    assert.deepEqual(tableAccess.rows.find((row) => row.relname === "kuji_slot_bindings"), {
+      relname: "kuji_slot_bindings",
+      can_select: true,
+      can_insert: true,
+      can_update: true,
+      can_delete: false,
+    });
     for (const deniedTable of ["admin_permissions", "schema_migrations"]) {
       assert.deepEqual(tableAccess.rows.find((row) => row.relname === deniedTable), {
         relname: deniedTable,

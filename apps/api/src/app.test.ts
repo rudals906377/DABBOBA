@@ -42,6 +42,18 @@ test("API surface registration keeps customer and admin routes out of each other
         surface !== "admin",
       );
       assert.equal(
+        app.hasRoute({ method: "GET", url: "/v1/catalog/home-sections" }),
+        surface !== "admin",
+      );
+      assert.equal(
+        app.hasRoute({ method: "GET", url: "/v1/catalog/products/:productId/kuji-slots" }),
+        surface !== "admin",
+      );
+      assert.equal(
+        app.hasRoute({ method: "GET", url: "/v1/admin/home-sections" }),
+        surface !== "customer",
+      );
+      assert.equal(
         app.hasRoute({ method: "GET", url: "/v1/admin/dashboard" }),
         surface !== "customer",
       );

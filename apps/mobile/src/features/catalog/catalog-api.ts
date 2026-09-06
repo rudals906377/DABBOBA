@@ -1,6 +1,6 @@
 import { randomUUID } from "expo-crypto";
 import { errorMessage } from "@dabboba/api-client";
-import type { CatalogIp, CatalogProduct, components } from "@dabboba/contracts";
+import type { CatalogIp, CatalogProduct, HomeCatalogSectionList, components } from "@dabboba/contracts";
 import { isCustomerBrowsableCatalogCategory } from "@/features/catalog/product-categories";
 import { createMobileDabbobaClient as createDabbobaClient } from "@/lib/mobile-api-client";
 
@@ -10,6 +10,7 @@ export type HomeCatalogSnapshot = {
   ips: CatalogIp[];
   products: CatalogProduct[];
   notices: Notice[];
+  homeSections: HomeCatalogSectionList | null;
   fetchedAt: string;
 };
 
@@ -18,10 +19,11 @@ export async function fetchHomeCatalog(apiBaseUrl: string): Promise<HomeCatalogS
     baseUrl: apiBaseUrl,
     requestId: randomUUID,
   });
-  const [ipResult, productResult, noticeResult] = await Promise.all([
+  const [ipResult, productResult, noticeResult, homeSectionResult] = await Promise.all([
     client.GET("/v1/catalog/ips", { params: { query: { limit: 30 } } }),
     client.GET("/v1/catalog/products", { params: { query: { limit: 50 } } }),
     client.GET("/v1/notices", { params: { query: { limit: 12 } } }),
+    client.GET("/v1/catalog/home-sections"),
   ]);
 
   if (!ipResult.data) {
@@ -37,6 +39,7 @@ export async function fetchHomeCatalog(apiBaseUrl: string): Promise<HomeCatalogS
       isCustomerBrowsableCatalogCategory(product.category)
     )),
     notices: noticeResult.data?.items ?? [],
+    homeSections: homeSectionResult.data ?? null,
     fetchedAt: new Date().toISOString(),
   };
 }

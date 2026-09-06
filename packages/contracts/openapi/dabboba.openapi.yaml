@@ -208,7 +208,7 @@ paths:
             schema: { $ref: "#/components/schemas/CreateMediaUploadInput" }
       responses:
         "201":
-          description: Short-lived multipart POST policy bound to the staging object, declared media metadata, and exact byte size.
+          description: Short-lived staging upload capability using a negotiated multipart POST policy or raw PUT request. Clients that omit acceptedUploadMethods receive POST only.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/MediaUploadIntent" }
@@ -621,6 +621,17 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/CatalogIpPage" }
+  /v1/catalog/home-sections:
+    get:
+      tags: [Catalog]
+      operationId: getHomeCatalogSections
+      description: Render-ready Home catalog sections. When configured is false, clients may use their legacy preview layout. Once configured is true, items is authoritative even when empty.
+      responses:
+        "200":
+          description: Active Home sections with their active IP and visible customer-sellable gacha or kuji products.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/HomeCatalogSectionList" }
   /v1/catalog/characters:
     get:
       tags: [Catalog]
@@ -1028,6 +1039,23 @@ paths:
               schema: { $ref: "#/components/schemas/PublicDrawOdds" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
+  /v1/catalog/products/{productId}/kuji-slots:
+    get:
+      tags: [Catalog, Kuji, Commerce]
+      operationId: getProductKujiSlots
+      description: Returns one uncached MVCC-consistent projection of the active sealed deck. Slot-to-tier and slot-to-prize mappings are never returned.
+      parameters:
+        - $ref: "#/components/parameters/ProductId"
+      responses:
+        "200":
+          description: Numbered slot availability and aggregate unrevealed tier counts for one active sealed kuji version. Reserved slots are unavailable, but remain in tier counts until their committed consume reveals the result.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PublicKujiDeckSnapshot" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /v1/kuji/rooms/{productId}/entries:
     post:
       tags: [Kuji, Commerce]
@@ -1104,6 +1132,48 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
+  /v1/kuji/rooms/{productId}/entries/{entryId}/slots:
+    post:
+      tags: [Kuji, Commerce]
+      operationId: bindOwnPaidKujiSlots
+      description: Atomically binds every paid available entitlement in the owned DRAWING or expired paid room to the same number of unique available sealed slots. Reusing the same idempotency key or exact existing binding is safe.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/ProductId"
+        - name: entryId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BindKujiSlotsInput" }
+      responses:
+        "200":
+          description: The exact previously committed binding was replayed.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+            X-Idempotent-Replay:
+              schema: { type: string, const: "true" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/KujiSlotBindingResult" }
+        "201":
+          description: All requested slots were bound atomically to paid entitlements.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/KujiSlotBindingResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
   /v1/orders:
     post:
       tags: [Commerce]
@@ -1141,6 +1211,75 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Order" }
         "404": { $ref: "#/components/responses/NotFound" }
+  /v1/orders/{orderId}/draw-completion:
+    get:
+      tags: [Commerce]
+      operationId: getOwnPaidGachaDrawCompletion
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: One owner-scoped snapshot proving every original entitlement of a currently paid gacha order has an immutable committed result. Only identities and timestamps are returned. Never purchases or consumes a draw.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PaidGachaDrawCompletion" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /v1/orders/{orderId}/draw-recovery:
+    get:
+      tags: [Commerce, Kuji]
+      operationId: getOwnPaidKujiDrawRecovery
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: One owner-scoped snapshot of the original paid kuji order, room deadline, remaining entitlements, and already selected slot numbers. Does not consume, create, renew, or reacquire room occupancy. EXPIRED paid rights keep the existing recovery policy; no unrevealed prize or tier mapping is disclosed.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PaidKujiDrawRecovery" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /v1/orders/{orderId}/kuji-selection:
+    get:
+      tags: [Commerce, Kuji]
+      operationId: getOwnPaidKujiSelection
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: One owner-scoped snapshot of the original paid version, original product name and unit price, room deadline, remaining rights and selection board. Independent of public catalog pages and current sale visibility. Existing bindings return with a null board. No occupancy renewal, selection, consumption or hidden slot-to-prize mapping.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PaidKujiSelectionSnapshot" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
   /v1/payments/webhooks/{provider}:
     post:
       tags: [Commerce]
@@ -2110,6 +2249,69 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Report" }
         "409": { $ref: "#/components/responses/Conflict" }
+  /v1/admin/home-sections:
+    get:
+      tags: [Admin]
+      operationId: listAdminHomeCatalogSections
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Full Home catalog section configuration including inactive rows.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminHomeCatalogSectionList" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    post:
+      tags: [Admin]
+      operationId: createAdminHomeCatalogSection
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/AdminReason"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateHomeCatalogSectionInput" }
+      responses:
+        "201":
+          description: Home catalog section created and audited.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminHomeCatalogSection" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /v1/admin/home-sections/{sectionId}:
+    patch:
+      tags: [Admin]
+      operationId: updateAdminHomeCatalogSection
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: sectionId
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+            maxLength: 120
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/AdminReason"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateHomeCatalogSectionInput" }
+      responses:
+        "200":
+          description: Home catalog section updated and audited with optimistic concurrency.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminHomeCatalogSection" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
   /v1/admin/ips:
     get:
       tags: [Admin]
@@ -2893,7 +3095,23 @@ components:
         mimeType: { $ref: "#/components/schemas/MediaMimeType" }
         byteSize: { type: integer, minimum: 1, maximum: 10485760 }
         checksumSha256: { type: string, pattern: "^[0-9A-Fa-f]{64}$" }
+        acceptedUploadMethods:
+          type: array
+          minItems: 1
+          maxItems: 2
+          uniqueItems: true
+          items: { type: string, enum: [POST, PUT] }
+          description: Supported upload transports. Defaults to [POST] when omitted, preserving legacy multipart POST behavior; PUT means an exact raw file body, never multipart. The property remains optional in generated clients.
     MediaUploadIntent:
+      oneOf:
+        - $ref: "#/components/schemas/MediaMultipartPostUploadIntent"
+        - $ref: "#/components/schemas/MediaRawPutUploadIntent"
+      discriminator:
+        propertyName: method
+        mapping:
+          POST: "#/components/schemas/MediaMultipartPostUploadIntent"
+          PUT: "#/components/schemas/MediaRawPutUploadIntent"
+    MediaMultipartPostUploadIntent:
       type: object
       additionalProperties: false
       required: [mediaId, uploadUrl, method, fields, fileFieldName, expiresAt, maxBytes]
@@ -2909,6 +3127,23 @@ components:
         fileFieldName: { type: string, const: file }
         expiresAt: { type: string, format: date-time }
         maxBytes: { type: integer, minimum: 1, maximum: 10485760, description: Exact declared byte size enforced by the signed policy. }
+    MediaRawPutUploadIntent:
+      type: object
+      additionalProperties: false
+      required: [mediaId, uploadUrl, method, bodyEncoding, headers, expiresAt, maxBytes]
+      properties:
+        mediaId: { type: string, format: uuid }
+        uploadUrl: { type: string, format: uri }
+        method: { type: string, const: PUT }
+        bodyEncoding: { type: string, const: raw }
+        headers:
+          type: object
+          minProperties: 5
+          maxProperties: 5
+          additionalProperties: { type: string }
+          description: Required signed headers are content-type (declared MIME), content-length (exact byte size), x-amz-content-sha256 (UNSIGNED-PAYLOAD), x-amz-meta-sha256 (declared SHA-256), and x-amz-meta-media-id (this mediaId). Reject other headers or mismatched values. Validate content-length but let the browser/native transport derive it from the exact raw body; never forward application credentials or cookies.
+        expiresAt: { type: string, format: date-time }
+        maxBytes: { type: integer, minimum: 1, maximum: 10485760, description: Exact declared byte size bound to the signed request and independently verified at completion. }
     MediaReady:
       type: object
       additionalProperties: false
@@ -3612,6 +3847,93 @@ components:
           required: [items]
           properties:
             items: { type: array, items: { $ref: "#/components/schemas/CatalogProduct" } }
+    HomeCatalogSection:
+      type: object
+      additionalProperties: false
+      description: Render-ready active Home section. Products are active, customer-sellable, non-prize gacha or kuji records linked to the section IP.
+      required: [id, title, sortOrder, isActive, version, createdAt, updatedAt, ip, products]
+      properties:
+        id:
+          type: string
+          pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+          maxLength: 120
+        title: { type: string, minLength: 1, maxLength: 120 }
+        sortOrder: { type: integer, minimum: 0, maximum: 2147483647 }
+        isActive: { type: boolean }
+        version: { type: integer, minimum: 1, maximum: 2147483647 }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        ip: { $ref: "#/components/schemas/CatalogIp" }
+        products:
+          type: array
+          items: { $ref: "#/components/schemas/CatalogProduct" }
+    HomeCatalogSectionList:
+      type: object
+      additionalProperties: false
+      description: configured is true after any Home section record has been created, including when every record is inactive and items is empty.
+      required: [configured, items]
+      properties:
+        configured: { type: boolean }
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/HomeCatalogSection" }
+    AdminHomeCatalogSection:
+      type: object
+      additionalProperties: false
+      required: [id, title, ipId, sortOrder, isActive, version, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+          maxLength: 120
+        title: { type: string, minLength: 1, maxLength: 120 }
+        ipId:
+          type: string
+          pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+          maxLength: 120
+        sortOrder: { type: integer, minimum: 0, maximum: 2147483647 }
+        isActive: { type: boolean }
+        version: { type: integer, minimum: 1, maximum: 2147483647 }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    AdminHomeCatalogSectionList:
+      type: object
+      additionalProperties: false
+      required: [configured, items]
+      properties:
+        configured: { type: boolean }
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/AdminHomeCatalogSection" }
+    CreateHomeCatalogSectionInput:
+      type: object
+      additionalProperties: false
+      required: [id, title, ipId, sortOrder, isActive]
+      properties:
+        id:
+          type: string
+          pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+          maxLength: 120
+        title: { type: string, minLength: 1, maxLength: 120 }
+        ipId:
+          type: string
+          pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+          maxLength: 120
+        sortOrder: { type: integer, minimum: 0, maximum: 2147483647 }
+        isActive: { type: boolean }
+    UpdateHomeCatalogSectionInput:
+      type: object
+      additionalProperties: false
+      required: [title, ipId, sortOrder, isActive, expectedVersion]
+      properties:
+        title: { type: string, minLength: 1, maxLength: 120 }
+        ipId:
+          type: string
+          pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+          maxLength: 120
+        sortOrder: { type: integer, minimum: 0, maximum: 2147483647 }
+        isActive: { type: boolean }
+        expectedVersion: { type: integer, minimum: 1, maximum: 2147483647 }
     CatalogRequest:
       type: object
       additionalProperties: false
@@ -3912,11 +4234,16 @@ components:
         prizeInventoryUnitId: { type: string, format: uuid }
         probabilityVersion: { type: integer, minimum: 1 }
         rarity: { type: string }
+        kujiSlotNumber:
+          type: integer
+          minimum: 1
+          maximum: 10000
+          description: Present only after a sealed kuji slot has been committed and consumed.
         committedAt: { type: string, format: date-time }
     DrawPoolEntry:
       type: object
       additionalProperties: false
-      required: [id, prizeProductId, prizeName, prizeImageUrl, prizeSku, prizeIpId, prizeCategory, rarity, weight, initialQuantity, remainingQuantity]
+      required: [id, prizeProductId, prizeName, prizeImageUrl, prizeSku, prizeIpId, prizeCategory, rarity, weight, initialQuantity, remainingQuantity, tierCode, tierRank]
       properties:
         id: { type: string, format: uuid }
         prizeProductId: { type: string, maxLength: 120 }
@@ -3929,10 +4256,18 @@ components:
         weight: { type: integer, minimum: 1, maximum: 1000000 }
         initialQuantity: { type: [integer, "null"], minimum: 1, maximum: 10000 }
         remainingQuantity: { type: [integer, "null"], minimum: 0, maximum: 10000 }
+        tierCode:
+          type: [string, "null"]
+          maxLength: 40
+          description: Required only for kuji; null for weighted gacha.
+        tierRank:
+          type: [integer, "null"]
+          minimum: 0
+          description: Required only for kuji; lower values are higher tiers.
     DrawProbabilityVersion:
       type: object
       additionalProperties: false
-      required: [id, productId, version, status, publishedBy, publishedAt, createdAt, totalEffectiveWeight, entries]
+      required: [id, productId, version, status, publishedBy, publishedAt, createdAt, totalSlots, assignmentAlgorithm, totalEffectiveWeight, entries]
       properties:
         id: { type: string, format: uuid }
         productId: { type: string, maxLength: 120 }
@@ -3941,6 +4276,15 @@ components:
         publishedBy: { type: [string, "null"], format: uuid }
         publishedAt: { type: [string, "null"], format: date-time }
         createdAt: { type: string, format: date-time }
+        totalSlots:
+          type: [integer, "null"]
+          minimum: 1
+          maximum: 10000
+          description: Required for finite kuji and null for weighted gacha.
+        assignmentAlgorithm:
+          type: [string, "null"]
+          enum: [CSPRNG_FISHER_YATES_V1, LEGACY_SINGLE_TIER_V1, null]
+          description: Stored sealed-kuji slot assignment algorithm; null for weighted gacha.
         totalEffectiveWeight: { type: integer, minimum: 0, maximum: 9007199254740991 }
         entries: { type: array, minItems: 1, maxItems: 200, items: { $ref: "#/components/schemas/DrawPoolEntry" } }
     DrawProbabilityVersionList:
@@ -3954,6 +4298,11 @@ components:
       additionalProperties: false
       required: [entries]
       properties:
+        totalSlots:
+          type: integer
+          minimum: 1
+          maximum: 10000
+          description: Required for kuji and rejected for gacha.
         entries:
           type: array
           minItems: 1
@@ -3961,12 +4310,26 @@ components:
           items:
             type: object
             additionalProperties: false
-            required: [prizeProductId, rarity, weight, quantity]
+            required: [prizeProductId, rarity]
             properties:
               prizeProductId: { type: string, maxLength: 120 }
               rarity: { type: string, minLength: 1, maxLength: 40 }
-              weight: { type: integer, minimum: 1, maximum: 1000000 }
+              weight:
+                type: integer
+                minimum: 1
+                maximum: 1000000
+                description: Required for gacha and rejected for sealed kuji.
               quantity: { type: [integer, "null"], minimum: 1, maximum: 10000 }
+              tierCode:
+                type: string
+                minLength: 1
+                maxLength: 40
+                pattern: "^[A-Za-z0-9][A-Za-z0-9_-]{0,39}$"
+                description: Required for kuji and rejected for gacha.
+              tierRank:
+                type: integer
+                minimum: 0
+                description: Required for kuji and rejected for gacha; lower values are higher tiers.
     UserSummary:
       type: object
       additionalProperties: false
@@ -4165,13 +4528,17 @@ components:
     KujiRoomViewer:
       type: object
       additionalProperties: false
-      required: [entryId, state, position, peopleAhead, checkoutExpiresAt]
+      required: [entryId, state, position, peopleAhead, checkoutExpiresAt, drawingExpiresAt]
       properties:
         entryId: { type: string, format: uuid }
         state: { $ref: "#/components/schemas/KujiRoomEntryState" }
         position: { type: [integer, "null"], minimum: 1 }
         peopleAhead: { type: integer, minimum: 0 }
         checkoutExpiresAt: { type: [string, "null"], format: date-time }
+        drawingExpiresAt:
+          type: [string, "null"]
+          format: date-time
+          description: Absolute five-minute draw-room lease deadline for DRAWING and EXPIRED entries. Paid entitlements remain consumable after room expiry.
     KujiRoomActiveEntry:
       type: object
       additionalProperties: false
@@ -4221,6 +4588,174 @@ components:
           type: array
           maxItems: 8
           items: { $ref: "#/components/schemas/KujiRoomRecentActivity" }
+    PublicKujiSlot:
+      type: object
+      additionalProperties: false
+      required: [slotNumber, available]
+      properties:
+        slotNumber: { type: integer, minimum: 1, maximum: 10000 }
+        available: { type: boolean }
+    PublicKujiTierRemaining:
+      type: object
+      additionalProperties: false
+      required: [tierCode, tierRank, label, initialQuantity, remainingQuantity]
+      properties:
+        tierCode:
+          type: string
+          minLength: 1
+          maxLength: 40
+          pattern: "^[A-Za-z0-9][A-Za-z0-9_-]{0,39}$"
+        tierRank: { type: integer, minimum: 0 }
+        label: { type: string, minLength: 1, maxLength: 40 }
+        initialQuantity: { type: integer, minimum: 1, maximum: 10000 }
+        remainingQuantity:
+          type: integer
+          minimum: 0
+          maximum: 10000
+          description: Unrevealed quantity. A RESERVED slot remains included and is removed only after committed consume.
+    PublicKujiDeckSnapshot:
+      type: object
+      additionalProperties: false
+      description: Public projection only. No slot item contains a tier, prize, pool-entry, seed, or assignment mapping.
+      required: [productId, probabilityVersion, snapshotVersion, totalSlots, publishedAt, calculatedAt, slots, tiers]
+      properties:
+        productId: { type: string, maxLength: 120 }
+        probabilityVersion: { type: integer, minimum: 1 }
+        snapshotVersion: { type: integer, minimum: 0 }
+        totalSlots: { type: integer, minimum: 1, maximum: 10000 }
+        publishedAt: { type: string, format: date-time }
+        calculatedAt: { type: string, format: date-time }
+        slots:
+          type: array
+          minItems: 1
+          maxItems: 10000
+          items: { $ref: "#/components/schemas/PublicKujiSlot" }
+        tiers:
+          type: array
+          minItems: 1
+          maxItems: 200
+          items: { $ref: "#/components/schemas/PublicKujiTierRemaining" }
+    BindKujiSlotsInput:
+      type: object
+      additionalProperties: false
+      required: [probabilityVersion, slotNumbers]
+      properties:
+        probabilityVersion: { type: integer, minimum: 1, maximum: 2147483647 }
+        slotNumbers:
+          type: array
+          minItems: 1
+          maxItems: 20
+          uniqueItems: true
+          items: { type: integer, minimum: 1, maximum: 10000 }
+    KujiSlotBinding:
+      type: object
+      additionalProperties: false
+      required: [entitlementId, slotNumber, state]
+      properties:
+        entitlementId: { type: string, format: uuid }
+        slotNumber: { type: integer, minimum: 1, maximum: 10000 }
+        state: { type: string, enum: [RESERVED, CONSUMED] }
+    KujiSlotBindingResult:
+      type: object
+      additionalProperties: false
+      required: [productId, roomEntryId, probabilityVersion, bindings]
+      properties:
+        productId: { type: string, maxLength: 120 }
+        roomEntryId: { type: string, format: uuid }
+        probabilityVersion: { type: integer, minimum: 1, maximum: 2147483647 }
+        bindings:
+          type: array
+          minItems: 1
+          maxItems: 20
+          items: { $ref: "#/components/schemas/KujiSlotBinding" }
+    PaidGachaDrawCompletion:
+      type: object
+      additionalProperties: false
+      required: [orderId, userId, productId, probabilityVersion, serverNow, results]
+      properties:
+        orderId: { type: string, format: uuid }
+        userId: { type: string, format: uuid }
+        productId: { type: string, maxLength: 120 }
+        probabilityVersion: { type: integer, minimum: 1, maximum: 2147483647 }
+        serverNow: { type: string, format: date-time }
+        results:
+          type: array
+          minItems: 1
+          maxItems: 20
+          description: Exactly one existing immutable result for every original paid-order entitlement, in original entitlement order.
+          items:
+            type: object
+            additionalProperties: false
+            required: [entitlementId, resultId, committedAt]
+            properties:
+              entitlementId: { type: string, format: uuid }
+              resultId: { type: string, format: uuid }
+              committedAt: { type: string, format: date-time }
+    PaidKujiDrawRecovery:
+      type: object
+      additionalProperties: false
+      required: [orderId, userId, productId, roomEntryId, roomState, serverNow, drawingExpiresAt, probabilityVersion, totalSlots, entitlementIds, bindings]
+      properties:
+        orderId: { type: string, format: uuid }
+        userId: { type: string, format: uuid }
+        productId: { type: string, maxLength: 120 }
+        roomEntryId: { type: string, format: uuid }
+        roomState: { type: string, enum: [DRAWING, EXPIRED, COMPLETED] }
+        serverNow: { type: string, format: date-time }
+        drawingExpiresAt:
+          type: string
+          format: date-time
+          description: Original non-renewing occupancy deadline, including an elapsed deadline. This response never grants a new lease.
+        probabilityVersion: { type: integer, minimum: 1, maximum: 2147483647 }
+        totalSlots: { type: integer, minimum: 1, maximum: 10000 }
+        entitlementIds:
+          type: array
+          maxItems: 20
+          uniqueItems: true
+          description: Only AVAILABLE entitlements from this paid order. Empty when every purchased draw has already been consumed.
+          items: { type: string, format: uuid }
+        bindings:
+          type: array
+          maxItems: 20
+          description: Existing RESERVED slot numbers for the remaining entitlements, in matching entitlement order. Empty only before original slot selection or after all draws have been consumed.
+          items:
+            type: object
+            additionalProperties: false
+            required: [entitlementId, slotNumber, state]
+            properties:
+              entitlementId: { type: string, format: uuid }
+              slotNumber: { type: integer, minimum: 1, maximum: 10000 }
+              state: { type: string, const: RESERVED }
+    PaidKujiSelectionSnapshot:
+      type: object
+      additionalProperties: false
+      required: [recovery, product, board]
+      properties:
+        recovery: { $ref: "#/components/schemas/PaidKujiDrawRecovery" }
+        product:
+          type: object
+          additionalProperties: false
+          required: [name, category, unitPrice, currentImageUrl, currentIpName]
+          properties:
+            name:
+              type: string
+              description: Immutable product name recorded on the paid order line.
+            category: { type: string, const: kuji }
+            unitPrice:
+              type: integer
+              minimum: 0
+              description: Immutable unit price recorded on the paid order line.
+            currentImageUrl:
+              type: [string, "null"]
+              description: Optional current catalog image for display, not a historical purchase image snapshot.
+            currentIpName:
+              type: [string, "null"]
+              description: Optional current IP display name, not purchase authority.
+        board:
+          description: Original paid-version availability and aggregate tiers only while every purchased entitlement is still unbound and available. Null once binding or consumption has begun.
+          anyOf:
+            - $ref: "#/components/schemas/PublicKujiDeckSnapshot"
+            - type: "null"
     PublicDrawOddsEntry:
       type: object
       additionalProperties: false

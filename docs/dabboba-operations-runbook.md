@@ -34,7 +34,13 @@ corepack pnpm run db:migrate
 
 `db:migrate`는 advisory lock, 파일 순서, 체크섬, `schema_migrations`를 사용한다. 이미 적용한 SQL 파일을 수정하면 체크섬 오류로 중단된다. 적용된 migration을 고치지 말고 새 번호의 forward migration을 추가한다.
 
-운영에서는 API `DATABASE_URL`에 `dabboba_runtime`, worker `WORKER_DATABASE_URL`에 `dabboba_worker`, 단일 migration job의 `DATABASE_MIGRATION_URL`에 schema owner를 사용한다. 세 credential은 서로 다른 secret이어야 한다. `0027`부터 `0031`까지의 원자적 queue 보안 migration 묶음, `0032` worker reconciliation migration, `0033` exchange bundle migration까지 적용한다. 새 DB를 만들거나 의도적으로 credential을 회전할 때만 각기 다른 새 비밀번호를 `provision:runtime-role -- --password-stdin`과 `provision:worker-role -- --password-stdin`에 표준입력으로 주입한다. 기존 credential을 release마다 불필요하게 회전하지 않는다. Supabase pooler에서 migration과 worker는 세션 advisory lock이 유지되는 Session mode(5432)만 허용하며 Transaction mode(6543)는 사용하지 않는다. 비밀번호는 migration SQL, 인자, Git에 넣지 말고 secret manager에서 별도로 회전한다. 이 migration 묶음은 `dabboba_runtime`의 pgmq/dead-letter 및 worker 전용 reconciliation 테이블 권한을 회수하므로 API는 해당 경로를 직접 다룰 수 없다.
+운영에서는 API `DATABASE_URL`에 `dabboba_runtime`, worker `WORKER_DATABASE_URL`에 `dabboba_worker`, 단일 migration job의 `DATABASE_MIGRATION_URL`에 schema owner를 사용한다. 세 credential은 서로 다른 secret이어야 한다. `0027`부터 `0031`까지의 원자적 queue 보안 migration 묶음, `0032` worker reconciliation migration, `0033` exchange bundle migration, `0034` Home catalog section migration, `0035` sealed kuji slot migration, `0036` draw result integrity migration, `0037` published draw version guard migration까지 적용한다. 새 DB를 만들거나 의도적으로 credential을 회전할 때만 각기 다른 새 비밀번호를 `provision:runtime-role -- --password-stdin`과 `provision:worker-role -- --password-stdin`에 표준입력으로 주입한다. 기존 credential을 release마다 불필요하게 회전하지 않는다. Supabase pooler에서 migration과 worker는 세션 advisory lock이 유지되는 Session mode(5432)만 허용하며 Transaction mode(6543)는 사용하지 않는다. 비밀번호는 migration SQL, 인자, Git에 넣지 말고 secret manager에서 별도로 회전한다. 이 migration 묶음은 `dabboba_runtime`의 pgmq/dead-letter 및 worker 전용 reconciliation 테이블 권한을 회수하므로 API는 해당 경로를 직접 다룰 수 없다.
+
+`0035`는 아직 추첨권·주문·대기자가 없고 재고와 한 개의 유한 경품 풀이 정확히 일치하는 기존 단일 등급 ACTIVE 쿠지만 `LEGACY_SINGLE_TIER_V1` 봉인 덱으로 전환한다. 이 조건에서 벗어난 ACTIVE 쿠지가 하나라도 있거나 변환 중 쓰기 잠금을 즉시 얻지 못하면 전체 migration을 rollback하므로, API 쓰기 트래픽을 먼저 중단하고 상태를 다시 확인한 뒤 재시도한다. 봉인 덱 전환 뒤에는 번호 binding을 지원하는 API와 모바일 클라이언트를 함께 사용해야 하며, 구 API 코드로 rollback하거나 구 모바일 버전의 쿠지 소비를 계속 허용하지 않는다.
+
+`0036`은 새 추첨 결과를 기록할 때 추첨권, 결제 완료 주문과 주문 항목, 확률표 버전, 선택 경품, 발급 재고의 사용자·상품·출처·상태가 모두 일치하는지 데이터베이스에서 재검증한다. 쿠지는 예약된 봉인 번호와 결과 snapshot까지 정확히 일치해야 한다. 적용 전에 정상 가챠·쿠지 소비 통합 테스트와 불일치 원장 차단 테스트를 통과시키고, 적용 뒤에는 제한 runtime 역할로 같은 소비 경로를 다시 확인한다.
+
+`0037`은 이미 적용된 `0036`의 체크섬을 보존하면서, 새 결과가 `ACTIVE` 또는 `RETIRED` 상태의 실제 공개 확률표만 참조하도록 추가 차단한다. 미공개 `DRAFT` 확률표를 참조한 결과는 `23514`로 거부한다.
 
 로컬 PostgreSQL 이미지는 pgmq를 포함하고 이전 PostgreSQL 16 volume과 다른 이름을 사용하므로 기존 로컬 데이터를 삭제하지 않는다. worker는 Redis/BullMQ 없이 한 batch를 처리하고 종료한다. Compose의 Redis는 `REDIS_URL`을 명시한 로컬 API의 선택적 공유 rate-limit 호환용일 뿐이며 Cloud Run API/worker에는 배포하지 않는다. `0027_supabase_worker_queue.sql`은 logged queue만 만들고 `pgmq_public`, `anon`, `authenticated`, `service_role`에 queue 접근을 주지 않는다.
 
@@ -191,12 +197,12 @@ WORKER_DATABASE_URL="$DABBOBA_DISPOSABLE_WORKER_DATABASE_URL" \
 
 1. CI의 workspace와 disposable DB migration job이 모두 통과했는지 확인한다. `corepack pnpm audit --prod --audit-level high`도 통과시키고, EAS가 루트 `pnpm-lock.yaml`을 사용하는지 확인한다.
 2. 운영 PostgreSQL의 자동 백업/PITR 상태와 최신 복원 훈련 결과를 확인한다.
-3. 운영 secret manager에 새 release가 필요로 하는 환경값이 있는지 확인한다.
+3. 운영 secret manager에 새 release가 필요로 하는 환경값이 있는지 확인한다. 모든 release 명령에는 API·worker·migration·scheduler 네 서비스 계정과 API·worker·migration DB secret ID 세 개, session pepper secret ID를 전부 선언한다. 사전점검이 계정의 존재·상호 분리와 네 secret ID의 상호 분리를 확인하며, secret version은 실제로 점검·배포하는 component 것만 필수다. 프로젝트 레벨 `roles/secretmanager.secretAccessor`는 누구에게도 부여하지 않고 각 secret의 정확한 단일 계정 정책만 사용한다. 다른 predefined/custom role이나 상위 폴더·조직에서 상속된 `secretmanager.versions.access`는 자동 분석 대상이 아니므로 유효 권한을 별도로 감사한다.
    관리자 배포에서는 BFF/API의 `ADMIN_PROXY_IDENTITY_SECRET` 일치, edge의 `ADMIN_EDGE_CLIENT_IP_HEADER` overwrite, 서버 시계 동기화도 함께 확인한다.
    일반 API는 신뢰 proxy 범위/hop 또는 edge/WAF 실제 client IP별 rate-limit 구성을 확인하고, 애플리케이션에서 미검증 `trustProxy`를 켜지 않는다.
-4. schema owner의 `DATABASE_MIGRATION_URL`을 받은 단일 migration job에서 `corepack pnpm run db:migrate`를 실행한다. 새 DB/credential rotation이면 두 제한 login을 운영자 호스트에서 프로비저닝한다. API에는 `dabboba_runtime`의 `DATABASE_URL`, worker에는 `dabboba_worker`의 `WORKER_DATABASE_URL`만 주고, replica 각각에서 migration을 자동 실행하지 않는다. 대상 DB에서 0033 체크섬과 두 역할 suite를 검증한 뒤에만 문서의 정확한 `DABBOBA_DATABASE_RELEASE_ATTESTATION`을 설정한다. 이 값이 없으면 API/worker 배포 스크립트가 중단된다.
-5. 이전 앱 버전과 새 schema가 함께 동작하는 expand/contract 방식인지 확인한 뒤 API를 점진 배포한다.
-6. 유한 worker Job을 한 번 수동 실행해 성공 종료, unpublished outbox depth, pgmq queue depth와 `worker_dead_letters`를 확인한다. 실행한 immutable image tag에 맞는 `DABBOBA_WORKER_EXECUTION_ATTESTATION`을 설정한 뒤에만 인증된 Scheduler 호출을 연결한다. 이 값이나 DB release attestation이 없으면 Scheduler 생성 스크립트가 중단된다.
+4. schema owner의 `DATABASE_MIGRATION_URL`을 받은 단일 migration job에서 `corepack pnpm run db:migrate`를 실행한다. 새 DB/credential rotation이면 두 제한 login을 운영자 호스트에서 프로비저닝한다. API에는 `dabboba_runtime`의 `DATABASE_URL`, worker에는 `dabboba_worker`의 `WORKER_DATABASE_URL`만 주고, replica 각각에서 migration을 자동 실행하지 않는다. 대상 DB에서 0037 체크섬과 두 역할 suite를 검증한 뒤에만 문서의 정확한 `DABBOBA_DATABASE_RELEASE_ATTESTATION`을 설정한다. 이 값이 없으면 API/worker 배포 스크립트가 중단된다.
+5. 이전 앱 버전과 새 schema가 함께 동작하는 expand/contract 방식인지 확인한다. 고유한 `candidate-*` 태그로 API를 `--no-traffic` 배포한 뒤, 첫 HTTP 요청 전에 태그가 가리키는 정확한 revision을 고정해 검증하고 태그 URL에서 `/healthz`, `/readyz`, 공개 Home catalog 및 `/v1/auth/providers` API의 200과 실제 관리자 route `/v1/admin/products`의 404를 확인한다. smoke 뒤에도 같은 revision과 운영 트래픽 0%를 다시 확인하고, 그 image·tag·정확한 Cloud Run revision에 묶인 attestation을 설정한 다음에만 별도 승인으로 `--to-revisions=<attested-revision>=100` 승격한다. 첫 서비스는 생성 전에 프로젝트와 반환된 모든 상위 폴더·조직 IAM을 읽는다. `roles/run.invoker` 외의 predefined/custom role에도 호출 권한이 포함될 수 있으므로 `allUsers`/`allAuthenticatedUsers`에 어떤 역할이든 연결돼 있으면 중단하고, 상위 정책을 읽을 권한이 없어도 중단한다. Invoker IAM 검사를 유지한 private bootstrap 생성 후 서비스 IAM에도 같은 검사를 적용하고 인증된 smoke를 통과시킨 다음, 별도 승인에서 정확히 검증된 revision의 100% 지정과 공개 접근 전환을 수행한다. 이 검사는 점검 이후 관리자의 동시 IAM 변경까지 잠그지는 못하고 그룹·도메인 구성원을 확장 분석하지 않으므로 배포 중 IAM 변경을 금지하고 Audit Log를 확인한다.
+6. 유한 worker Job을 한 번 수동 실행해 성공 종료, unpublished outbox depth, pgmq queue depth와 `worker_dead_letters`를 확인한다. 실행한 immutable image tag에 맞는 `DABBOBA_WORKER_EXECUTION_ATTESTATION`을 설정한 뒤에만 인증된 Scheduler 호출을 연결한다. 기본 일정은 쿠지의 3분 결제 lease가 만료된 뒤 다음 1분 안에 정리 작업을 시작하도록 서울 시간 `* * * * *`이며 Scheduler 자체 재시도는 0회다. Worker의 새 작업 시작 구간은 검증 가능한 `WORKER_MAX_RUN_SECONDS=45`로 제한하고 예약 만료 sweep을 queue보다 먼저 실행한다. 같은 Worker를 가리키는 기존 15분 일정이 남아 있으면 새 일정을 만들지 않고 중단하고, 생성 후에도 정확한 1분·OAuth·활성 상태를 다시 읽어 검증한다. Job 자체 IAM은 조건 없는 `roles/run.invoker` 한 개와 지정 Scheduler 계정 한 명만 허용하며, 추가 멤버·공개 주체·`roles/run.jobsExecutor`·custom role·조건부/기타 바인딩이 있으면 중단한다. Worker는 Session mode 연결의 non-blocking session advisory lock을 먼저 얻으며, 겹친 실행은 queue와 주기 작업 전에 정상 종료한다. 다만 Cloud Run Job은 실행마다 최소 1분 과금될 수 있어 30일 기준 최대 43,200회인 1분 기본 일정은 종전 15분 무료 우선안보다 비용이 크다. USD 1/USD 5 예산 알림과 billable instance time을 확인한다. 이 값이나 DB release attestation이 없으면 Scheduler 생성 스크립트가 중단된다.
 7. 관리자 웹을 배포하고 정확한 HTTPS origin/CORS를 확인한다. 고객 Expo 앱은 서명된 iOS·Android 후보 빌드로 만들고, 이전 고객 웹은 필요한 마이그레이션 참고·웹 확장 범위만 배포한다.
 8. 읽기 smoke test 후 공지 작성→공개 조회, 문의 작성→관리자 답변→사용자 조회, 신고→처리→감사 로그의 sandbox 흐름을 확인한다.
 9. PG sandbox에서 주문 idempotency, webhook 서명 거부, 중복 event, 재고 확정, 환불 검토, 추첨권 단일 소비를 확인한다.
@@ -225,6 +231,8 @@ WORKER_DATABASE_URL="$DABBOBA_DISPOSABLE_WORKER_DATABASE_URL" \
 RPO, RTO, 보존 기간, 복구 승인자는 사용자가 정해야 한다. 설정 화면을 캡처한 것만으로 끝내지 말고 최소 분기마다 별도 복원 환경에서 훈련한다.
 
 ### 논리 백업 예시
+
+2026-09-06 추가: 평문 dump 예시를 직접 실행하기 전에 [암호화 백업·로컬 복원 도구](database-backup-restore.md)를 우선 사용한다. 해당 도구는 저장소 밖의 암호화 archive, 전체 인증 태그 확인, 빈 로컬 훈련 DB 제한을 강제한다. v2 묶음은 일반 dump에서 제외되는 pgmq 메시지·아카이브를 같은 읽기 스냅샷으로 보존한다. 38개 migration, public·pgmq 84개 테이블, 제약 469개, 동시 쓰기 격리 및 복원 실패 전체 롤백을 disposable DB에서 검증했다. 실제 Supabase 전체 복구·역할 권한·Storage 파일 복구는 별도 검증 항목이다. 아래 명령은 PostgreSQL 원리 설명으로 유지하며 암호화되지 않은 저장 위치에 실행하지 않는다.
 
 다음은 읽기 가능한 source URL과 저장소 밖의 암호화된 backup directory를 준비한 뒤 실행하는 예시다. `DABBOBA_BACKUP_DIR`은 미리 만든 명시적인 절대 경로여야 한다.
 

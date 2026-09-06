@@ -147,6 +147,17 @@ test("reduced motion still waits for the committed result and notifies only once
   );
 });
 
+test("an already committed reduced-motion kuji still waits for explicit open and settles once", () => {
+  const ready = transitionKujiOpenMotion(createKujiOpenMotionState(true), { type: "result-ready" });
+  assert.equal(ready.state.phase, "sealed");
+  assert.equal(ready.effect, "none");
+  const opened = transitionKujiOpenMotion(ready.state, { type: "request" });
+  assert.equal(opened.state.phase, "revealed");
+  assert.equal(opened.effect, "notify-settled");
+  assert.equal(transitionKujiOpenMotion(opened.state, { type: "request" }).effect, "none");
+  assert.equal(transitionKujiOpenMotion(opened.state, { type: "result-ready" }).effect, "none");
+});
+
 test("enabling reduced motion mid-open skips impact without exposing an absent result", () => {
   let transition = transitionKujiOpenMotion(
     createKujiOpenMotionState(false),

@@ -22,7 +22,9 @@ test("generated contract includes public and privileged seams", () => {
     "/v1/account/shipping-requests",
     "/v1/account/shipping-requests/{shippingRequestId}",
     "/v1/catalog/characters",
+    "/v1/catalog/home-sections",
     "/v1/catalog/products/{productId}/draw-odds",
+    "/v1/catalog/products/{productId}/kuji-slots",
     "/v1/community/blocks",
     "/v1/community/posts/{postId}/like",
     "/v1/wanted-requests",
@@ -30,7 +32,11 @@ test("generated contract includes public and privileged seams", () => {
     "/v1/exchange/listings",
     "/v1/kuji/rooms/{productId}/entries",
     "/v1/kuji/rooms/{productId}/entries/{entryId}",
+    "/v1/kuji/rooms/{productId}/entries/{entryId}/slots",
     "/v1/orders",
+    "/v1/orders/{orderId}/draw-recovery",
+    "/v1/orders/{orderId}/kuji-selection",
+    "/v1/orders/{orderId}/draw-completion",
     "/v1/admin/dashboard",
     "/v1/admin/account-deletions",
     "/v1/admin/commerce/orders",
@@ -38,11 +44,123 @@ test("generated contract includes public and privileged seams", () => {
     "/v1/admin/commerce/inventory/{productId}/adjustments",
     "/v1/admin/commerce/shipping/{shippingRequestId}/status",
     "/v1/admin/exchange/listings",
+    "/v1/admin/home-sections",
+    "/v1/admin/home-sections/{sectionId}",
     "/v1/admin/products/{productId}/draw-versions",
     "/v1/admin/reports/{reportId}/resolution",
     "/v1/admin/audit-logs",
   ];
-  assert.equal(requiredPaths.length, 35);
+  assert.equal(requiredPaths.length, 43);
+});
+
+test("generated gacha completion proof exposes immutable identities without prize or mutation data", () => {
+  const proof: components["schemas"]["PaidGachaDrawCompletion"] = {
+    orderId: "10000000-0000-4000-8000-000000000001",
+    userId: "20000000-0000-4000-8000-000000000001",
+    productId: "original-gacha", probabilityVersion: 3, serverNow: "2026-09-06T00:00:02.000Z",
+    results: [{
+      entitlementId: "30000000-0000-4000-8000-000000000001",
+      resultId: "40000000-0000-4000-8000-000000000001", committedAt: "2026-09-06T00:00:01.000Z",
+    }],
+  };
+  assert.deepEqual(Object.keys(proof.results[0]!).sort(), ["committedAt", "entitlementId", "resultId"]);
+  assert.doesNotMatch(JSON.stringify(proof), /prize|pool|inventory|rarity/i);
+});
+
+test("generated home catalog section contract separates render-ready public data from admin mutations", () => {
+  const publicSection = {
+    id: "demon-slayer",
+    title: "귀멸의 칼날 컬렉션",
+    sortOrder: 10,
+    isActive: true,
+    version: 2,
+    createdAt: "2026-09-05T00:00:00.000Z",
+    updatedAt: "2026-09-05T01:00:00.000Z",
+    ip: {
+      id: "demon-slayer",
+      slug: "demon-slayer",
+      nameKo: "귀멸의 칼날",
+      nameEn: "Demon Slayer",
+      nameJa: null,
+      aliases: [],
+      description: "",
+      imageUrl: null,
+      isActive: true,
+      version: 1,
+      createdAt: "2026-09-04T00:00:00.000Z",
+      updatedAt: "2026-09-04T00:00:00.000Z",
+    },
+    products: [{
+      id: "demon-slayer-kuji",
+      sku: "DS-KUJI-001",
+      ipId: "demon-slayer",
+      characterIds: [],
+      category: "kuji",
+      name: "귀멸의 칼날 쿠지",
+      manufacturer: null,
+      releaseDate: null,
+      price: 9_900,
+      availableQuantity: 36,
+      metadata: {},
+      imageUrl: null,
+      isActive: true,
+      isPrizeOnly: false,
+      version: 1,
+      createdAt: "2026-09-04T00:00:00.000Z",
+      updatedAt: "2026-09-04T00:00:00.000Z",
+    }],
+  } satisfies components["schemas"]["HomeCatalogSection"];
+  const publicLayout = {
+    configured: true,
+    items: [publicSection],
+  } satisfies components["schemas"]["HomeCatalogSectionList"];
+  const adminSection = {
+    id: publicSection.id,
+    title: publicSection.title,
+    ipId: publicSection.ip.id,
+    sortOrder: publicSection.sortOrder,
+    isActive: publicSection.isActive,
+    version: publicSection.version,
+    createdAt: publicSection.createdAt,
+    updatedAt: publicSection.updatedAt,
+  } satisfies components["schemas"]["AdminHomeCatalogSection"];
+  const adminLayout = {
+    configured: true,
+    items: [adminSection],
+  } satisfies components["schemas"]["AdminHomeCatalogSectionList"];
+  const create = {
+    id: "demon-slayer",
+    title: "귀멸의 칼날 컬렉션",
+    ipId: "demon-slayer",
+    sortOrder: 10,
+    isActive: true,
+  } satisfies components["schemas"]["CreateHomeCatalogSectionInput"];
+  const update = {
+    title: "귀멸의 칼날 추천",
+    ipId: "demon-slayer",
+    sortOrder: 20,
+    isActive: false,
+    expectedVersion: 2,
+  } satisfies components["schemas"]["UpdateHomeCatalogSectionInput"];
+  const headers = {
+    "Idempotency-Key": "home-section-update-0001",
+    "X-Admin-Reason": "홈 노출 순서 변경",
+  } satisfies paths["/v1/admin/home-sections/{sectionId}"]["patch"]["parameters"]["header"];
+  const publicMethod: keyof paths["/v1/catalog/home-sections"] = "get";
+  const adminCreateMethod: keyof paths["/v1/admin/home-sections"] = "post";
+  const createdResponse: keyof paths["/v1/admin/home-sections"]["post"]["responses"] = 201;
+  const conflictResponse: keyof paths["/v1/admin/home-sections/{sectionId}"]["patch"]["responses"] = 409;
+
+  assert.equal(publicLayout.configured, true);
+  assert.equal(adminLayout.items[0]?.ipId, publicSection.ip.id);
+  assert.equal(publicSection.ip.id, create.ipId);
+  assert.equal(publicSection.products[0]?.isPrizeOnly, false);
+  assert.equal(update.expectedVersion, 2);
+  assert.equal(headers["Idempotency-Key"], "home-section-update-0001");
+  assert.equal(publicMethod, "get");
+  assert.equal(adminCreateMethod, "post");
+  assert.equal(createdResponse, 201);
+  assert.equal(conflictResponse, 409);
 });
 
 test("health contracts separate process liveness from database readiness", () => {
@@ -71,6 +189,7 @@ test("generated kuji room contract carries server time, one checkout lease, FIFO
       position: 2,
       peopleAhead: 1,
       checkoutExpiresAt: null,
+      drawingExpiresAt: null,
     },
     active: {
       displayName: "럭**후",
@@ -99,6 +218,7 @@ test("generated kuji room contract carries server time, one checkout lease, FIFO
   assert.equal(joinPath, "post");
   assert.equal(roomPath, "get");
   assert.equal(snapshot.viewer.peopleAhead, 1);
+  assert.equal(snapshot.viewer.drawingExpiresAt, null);
   assert.equal(snapshot.active.checkoutExpiresAt, "2026-09-01T03:03:00.000Z");
 });
 
@@ -109,6 +229,89 @@ test("generated order input links kuji checkout to one room entry", () => {
     kujiRoomEntryId: "11111111-1111-4111-8111-111111111111",
   } satisfies components["schemas"]["CreateOrderInput"];
   assert.equal(input.kujiRoomEntryId, "11111111-1111-4111-8111-111111111111");
+});
+
+test("generated sealed kuji contract exposes availability without internal assignment ids or mappings", () => {
+  const snapshot = {
+    productId: "evangelion-kuji",
+    probabilityVersion: 3,
+    snapshotVersion: 8,
+    totalSlots: 3,
+    publishedAt: "2026-09-05T00:00:00.000Z",
+    calculatedAt: "2026-09-05T00:01:00.000Z",
+    slots: [
+      { slotNumber: 1, available: true },
+      { slotNumber: 2, available: false },
+      { slotNumber: 3, available: true },
+    ],
+    tiers: [
+      { tierCode: "A", tierRank: 0, label: "A상", initialQuantity: 1, remainingQuantity: 1 },
+      { tierCode: "B", tierRank: 1, label: "B상", initialQuantity: 2, remainingQuantity: 2 },
+    ],
+  } satisfies components["schemas"]["PublicKujiDeckSnapshot"];
+  const selection = {
+    probabilityVersion: 3,
+    slotNumbers: [1, 3],
+  } satisfies components["schemas"]["BindKujiSlotsInput"];
+  const result = {
+    productId: snapshot.productId,
+    roomEntryId: "11111111-1111-4111-8111-111111111111",
+    probabilityVersion: snapshot.probabilityVersion,
+    bindings: [
+      {
+        entitlementId: "22222222-2222-4222-8222-222222222222",
+        slotNumber: 1,
+        state: "RESERVED",
+      },
+      {
+        entitlementId: "33333333-3333-4333-8333-333333333333",
+        slotNumber: 3,
+        state: "RESERVED",
+      },
+    ],
+  } satisfies components["schemas"]["KujiSlotBindingResult"];
+  const publicMethod: keyof paths["/v1/catalog/products/{productId}/kuji-slots"] = "get";
+  const bindMethod: keyof paths["/v1/kuji/rooms/{productId}/entries/{entryId}/slots"] = "post";
+
+  assert.equal(publicMethod, "get");
+  assert.equal(bindMethod, "post");
+  assert.deepEqual(Object.keys(snapshot.slots[0]!).sort(), ["available", "slotNumber"]);
+  assert.deepEqual(Object.keys(result.bindings[0]!).sort(), ["entitlementId", "slotNumber", "state"]);
+  assert.deepEqual(selection.slotNumbers, [1, 3]);
+  assert.equal(snapshot.slots.filter(({ available }) => available).length, 2);
+  assert.equal(snapshot.tiers.reduce((sum, tier) => sum + tier.remainingQuantity, 0), 3);
+});
+
+test("admin draw versions expose the stored sealed-kuji assignment algorithm", () => {
+  const version = {
+    id: "11111111-1111-4111-8111-111111111111",
+    productId: "legacy-kuji",
+    version: 1,
+    status: "ACTIVE",
+    publishedBy: null,
+    publishedAt: "2026-09-05T00:00:00.000Z",
+    createdAt: "2026-09-05T00:00:00.000Z",
+    totalSlots: 20,
+    assignmentAlgorithm: "LEGACY_SINGLE_TIER_V1",
+    totalEffectiveWeight: 20,
+    entries: [{
+      id: "22222222-2222-4222-8222-222222222222",
+      prizeProductId: "legacy-prize",
+      prizeName: "기존 쿠지 경품",
+      prizeImageUrl: null,
+      prizeSku: "LEGACY-PRIZE",
+      prizeIpId: "legacy-ip",
+      prizeCategory: "figure",
+      rarity: "일반",
+      weight: 1,
+      initialQuantity: 20,
+      remainingQuantity: 20,
+      tierCode: "LEGACY",
+      tierRank: 0,
+    }],
+  } satisfies components["schemas"]["DrawProbabilityVersion"];
+
+  assert.equal(version.assignmentAlgorithm, "LEGACY_SINGLE_TIER_V1");
 });
 
 test("generated account basic info contract keeps verified contacts read-only", () => {
@@ -195,6 +398,42 @@ test("generated media contract requires idempotency and exposes delete and expir
   assert.match(mediaContract, /operationId: createMediaUploadIntent[\s\S]*?#\/components\/parameters\/IdempotencyKey/);
   assert.match(mediaContract, /operationId: completeMediaUpload[\s\S]*?#\/components\/parameters\/IdempotencyKey[\s\S]*?"410"/);
   assert.match(mediaContract, /operationId: deleteOwnUnattachedMedia[\s\S]*?#\/components\/parameters\/IdempotencyKey[\s\S]*?"204"/);
+});
+
+test("media transport negotiation remains optional and PUT cannot be mistaken for a signed form", () => {
+  // This must compile without acceptedUploadMethods for already released clients.
+  const legacyInput = {
+    purpose: "WANTED_REQUEST", filename: "reference.jpg", mimeType: "image/jpeg", byteSize: 5,
+    checksumSha256: "a".repeat(64),
+  } satisfies components["schemas"]["CreateMediaUploadInput"];
+  const negotiated = { ...legacyInput, acceptedUploadMethods: ["POST", "PUT"] } satisfies components["schemas"]["CreateMediaUploadInput"];
+  const common = {
+    mediaId: "88888888-8888-4888-8888-888888888888", uploadUrl: "https://storage.example.test/staging",
+    expiresAt: "2099-01-01T00:00:00.000Z", maxBytes: 5,
+  };
+  const post = { ...common, method: "POST", fields: { policy: "signed-policy" }, fileFieldName: "file" } satisfies components["schemas"]["MediaUploadIntent"];
+  const put = { ...common, method: "PUT", bodyEncoding: "raw", headers: {
+    "content-type": legacyInput.mimeType, "content-length": "5", "x-amz-content-sha256": "UNSIGNED-PAYLOAD",
+    "x-amz-meta-sha256": legacyInput.checksumSha256, "x-amz-meta-media-id": common.mediaId,
+  } } satisfies components["schemas"]["MediaUploadIntent"];
+  const transport = (intent: components["schemas"]["MediaUploadIntent"]) => {
+    if (intent.method === "POST") return intent.fileFieldName;
+    // A discriminated PUT has only raw headers, not multipart field declarations.
+    return intent.bodyEncoding;
+  };
+  assert.deepEqual(negotiated.acceptedUploadMethods, ["POST", "PUT"]);
+  assert.equal(transport(post), "file");
+  assert.equal(transport(put), "raw");
+  assert.equal("fields" in put || "fileFieldName" in put, false);
+  const document = readFileSync(fileURLToPath(new URL("../openapi/dabboba.openapi.yaml", import.meta.url)), "utf8");
+  const input = document.slice(document.indexOf("    CreateMediaUploadInput:\n"), document.indexOf("    MediaUploadIntent:\n"));
+  assert.match(input, /required: \[purpose, filename, mimeType, byteSize, checksumSha256\]/);
+  assert.match(input, /acceptedUploadMethods:[\s\S]*?minItems: 1[\s\S]*?maxItems: 2[\s\S]*?uniqueItems: true/);
+  assert.match(input, /enum: \[POST, PUT\]/);
+  const raw = document.slice(document.indexOf("    MediaRawPutUploadIntent:\n"), document.indexOf("    MediaReady:\n"));
+  assert.match(raw, /additionalProperties: false/);
+  assert.match(raw, /required: \[mediaId, uploadUrl, method, bodyEncoding, headers, expiresAt, maxBytes\]/);
+  assert.doesNotMatch(raw, /fileFieldName|\n        fields:/);
 });
 
 test("generated notification preference contract keeps required alerts immutable and optional consent exact", () => {

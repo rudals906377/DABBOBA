@@ -58,11 +58,17 @@
 !packages/domain/tsconfig.json
 !packages/domain/src/
 !packages/domain/src/*.ts
+!packages/media-storage/
+!packages/media-storage/package.json
+!packages/media-storage/tsconfig.json
+!packages/media-storage/src/
+!packages/media-storage/src/*.ts
 
 # Explicitly keep development and operator-only sources out even if an allow
 # rule is broadened later.
 **/*.test.ts
 **/*.integration.test.ts
+**/*.conformance.ts
 **/*.test-d.ts
 **/*.tsbuildinfo
 packages/db/src/provision-runtime-role.ts

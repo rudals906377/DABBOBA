@@ -122,14 +122,28 @@ test(
         "INSERT INTO draw_probability_versions(product_id,version) VALUES($1,1) RETURNING id",
         [productId],
       );
-      await pool.query(
+      const poolEntry = await pool.query<{ id: string }>(
         `INSERT INTO draw_pool_entries(
            probability_version_id,prize_product_id,prize_name_snapshot,prize_image_url_snapshot,
            prize_sku_snapshot,prize_ip_id_snapshot,prize_category_snapshot,rarity,weight,
            initial_quantity,remaining_quantity
          ) SELECT $1,p.id,p.name,p.image_url,p.sku,p.ip_id,p.category,'A',1,$3,$3
-             FROM catalog_products p WHERE p.id=$2`,
+             FROM catalog_products p WHERE p.id=$2
+           RETURNING id`,
         [version.rows[0]!.id, prizeProductId, onHand],
+      );
+      await pool.query(
+        "INSERT INTO kuji_decks(probability_version_id,total_slots) VALUES($1,$2)",
+        [version.rows[0]!.id, onHand],
+      );
+      await pool.query(
+        "INSERT INTO kuji_deck_tiers(probability_version_id,pool_entry_id,tier_code,tier_rank) VALUES($1,$2,'A',0)",
+        [version.rows[0]!.id, poolEntry.rows[0]!.id],
+      );
+      await pool.query(
+        `INSERT INTO kuji_slot_assignments(probability_version_id,slot_number,pool_entry_id)
+         SELECT $1,slot_number,$2 FROM generate_series(1,$3) AS slot_number`,
+        [version.rows[0]!.id, poolEntry.rows[0]!.id, onHand],
       );
       await pool.query(
         "UPDATE draw_probability_versions SET status='ACTIVE',published_by=$2,published_at=now() WHERE id=$1",
@@ -172,6 +186,28 @@ test(
       assert.equal(response.statusCode, 201, response.body);
       return response.json() as OrderResponse;
     };
+    const bindSlots = async (input: {
+      session: Session;
+      productId: string;
+      entryId: string;
+      slotNumbers: number[];
+    }) => {
+      const response = await app.inject({
+        method: "POST",
+        url: `/v1/kuji/rooms/${input.productId}/entries/${input.entryId}/slots`,
+        headers: { ...auth(input.session), "idempotency-key": `kuji-slots-${randomUUID()}` },
+        payload: { probabilityVersion: 1, slotNumbers: input.slotNumbers },
+      });
+      assert.equal(response.statusCode, 201, response.body);
+    };
+    const readDeckSnapshotVersion = async (productId: string): Promise<number> => {
+      const response = await app.inject({
+        method: "GET",
+        url: `/v1/catalog/products/${productId}/kuji-slots`,
+      });
+      assert.equal(response.statusCode, 200, response.body);
+      return (response.json() as { snapshotVersion: number }).snapshotVersion;
+    };
     const expireRoomAt = async (input: {
       session: Session;
       productId: string;
@@ -212,6 +248,12 @@ test(
     });
     assert.equal(zeroOrder.status, "PAID");
     assert.equal(zeroOrder.drawEntitlementIds.length, 2);
+    await bindSlots({
+      session: zeroUser,
+      productId: zeroProduct,
+      entryId: zeroRoom.viewer.entryId,
+      slotNumbers: [1, 2],
+    });
     const zeroDrawing = await pool.query<{
       state: string;
       order_id: string;
@@ -224,6 +266,7 @@ test(
       zeroDrawing.rows[0]!.drawing_expires_at.getTime() - zeroDrawing.rows[0]!.drawing_started_at.getTime(),
       300_000,
     );
+    let zeroDeckSnapshotVersion = await readDeckSnapshotVersion(zeroProduct);
     for (const [index, entitlementId] of zeroOrder.drawEntitlementIds.entries()) {
       const consumed = await app.inject({
         method: "POST",
@@ -233,6 +276,9 @@ test(
       assert.equal(consumed.statusCode, 200, consumed.body);
       const state = await pool.query<{ state: string }>("SELECT state FROM kuji_room_entries WHERE id=$1", [zeroRoom.viewer.entryId]);
       assert.equal(state.rows[0]!.state, index === 0 ? "DRAWING" : "COMPLETED");
+      const nextSnapshotVersion = await readDeckSnapshotVersion(zeroProduct);
+      assert.equal(nextSnapshotVersion, zeroDeckSnapshotVersion + 1);
+      zeroDeckSnapshotVersion = nextSnapshotVersion;
     }
     const promotedWaiter = await pool.query<{ state: string; checkout_started_at: Date; checkout_expires_at: Date }>(
       "SELECT state,checkout_started_at,checkout_expires_at FROM kuji_room_entries WHERE id=$1",
@@ -416,6 +462,12 @@ test(
       [successOrder.id],
     );
     assert.deepEqual(paidDrawing.rows[0], { order_status: "PAID", payment_status: "PAID", room_state: "DRAWING" });
+    await bindSlots({
+      session: successUser,
+      productId: successProduct,
+      entryId: successRoom.viewer.entryId,
+      slotNumbers: [1],
+    });
 
     const drawingFixture = await pool.query<{
       entitlement_id: string;
@@ -453,12 +505,17 @@ test(
       waiter_state: "CHECKOUT_PENDING",
       entitlement_status: "AVAILABLE",
     });
+    const expiredDeckSnapshotVersion = await readDeckSnapshotVersion(successProduct);
     const consumedAfterDrawingExpiry = await app.inject({
       method: "POST",
       url: `/v1/draws/${drawingFixture.rows[0]!.entitlement_id}/consume`,
       headers: { ...auth(successUser), "idempotency-key": `kuji-expired-consume-${randomUUID()}` },
     });
     assert.equal(consumedAfterDrawingExpiry.statusCode, 200, consumedAfterDrawingExpiry.body);
+    assert.equal(
+      await readDeckSnapshotVersion(successProduct),
+      expiredDeckSnapshotVersion + 1,
+    );
     const consumedExpiryState = await pool.query<{ room_state: string; entitlement_status: string }>(
       `SELECT r.state AS room_state,e.status AS entitlement_status
          FROM kuji_room_entries r

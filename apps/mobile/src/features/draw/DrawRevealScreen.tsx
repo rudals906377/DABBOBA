@@ -1,11 +1,13 @@
 import { Ionicons } from "@expo/vector-icons";
 import Constants from "expo-constants";
-import { type Href, useLocalSearchParams, useRouter } from "expo-router";
+import { type Href, useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
+import { useSQLiteContext } from "expo-sqlite";
 import { StatusBar } from "expo-status-bar";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   AccessibilityInfo,
   ActivityIndicator,
+  Alert,
   FlatList,
   Image,
   Platform,
@@ -38,10 +40,24 @@ import { AppText as Text, BalancedAppText } from "@/components/Typography";
 import { SeedActionButton, SeedInlineGuidance } from "@/design-system/components";
 import { seed } from "@/design-system/seed";
 import {
+  clearPendingGachaCheckoutOrderIntent,
+  fetchCheckoutActorId,
+  fetchCheckoutOrder,
+  paidGachaOrderEntitlementIds,
+  readPendingGachaCheckoutOrderIntent,
+} from "@/features/checkout/checkout-api";
+import {
   consumeDrawEntitlement,
   type DrawResult,
 } from "@/features/draw/draw-reveal-api";
+import {
+  assertCommittedDrawResultMatchesRoute,
+  isCommittedDrawSequenceConsumed,
+  resolveCommittedDrawSequence,
+} from "@/features/draw/draw-reveal-sequence";
 import { GachaLeverMachine } from "@/features/draw/GachaLeverMachine";
+import { fetchPaidGachaDrawCompletion } from "@/features/draw/gacha-completion-api";
+import { assertPaidGachaDrawCompletion } from "@/features/draw/gacha-completion-state";
 import { KujiPeelTicket } from "@/features/draw/KujiPeelTicket";
 import {
   DRAW_MOTION,
@@ -56,7 +72,8 @@ import {
   type PreviewResultItem,
 } from "@/features/draw/draw-reveal-state";
 import {
-  createKujiFireflyConfigs,
+  createGachaFireflyConfigs,
+  GACHA_FIREFLY_DURATION_MS,
   sampleKujiFireflyMotion,
   type KujiFireflyConfig,
 } from "@/features/draw/kuji-firefly-motion";
@@ -81,25 +98,38 @@ const smoothRevealEasing = Easing.bezier(0.16, 0.82, 0.28, 1);
 
 export function DrawRevealScreen({ preview = false }: { preview?: boolean }) {
   const router = useRouter();
+  const db = useSQLiteContext();
   const safeAreaInsets = useSafeAreaInsets();
   const floatingBottomInset = useFloatingBottomActionContentInset();
   const params = useLocalSearchParams<{
     entitlementId?: string | string[];
     productId?: string | string[];
+    entitlementIds?: string | string[];
+    orderId?: string | string[];
     category?: string | string[];
     mode?: string | string[];
     count?: string | string[];
     tickets?: string | string[];
     stage?: string | string[];
   }>();
-  const entitlementId = firstParam(params.entitlementId) ?? "";
+  const routeEntitlementId = firstParam(params.entitlementId) ?? "";
+  const committedSequence = useMemo(
+    () => resolveCommittedDrawSequence(
+      routeEntitlementId,
+      firstParam(params.entitlementIds),
+    ),
+    [params.entitlementIds, routeEntitlementId],
+  );
+  const entitlementId = committedSequence.activeEntitlementId ?? "";
   const productId = firstParam(params.productId) ?? "";
+  const routeOrderId = firstParam(params.orderId) ?? "";
   const categoryHint = drawCategoryFromParam(firstParam(params.category));
   const requestedMode: RevealMode = preview && firstParam(params.mode) === "all" ? "all" : "single";
-  const previewTickets = preview ? parseKujiTicketNumbers(firstParam(params.tickets)) : [];
+  const routeTickets = parseKujiTicketNumbers(firstParam(params.tickets));
+  const previewTickets = preview ? routeTickets : [];
   const count = preview
     ? previewTickets.length || boundedCount(firstParam(params.count))
-    : 1;
+    : Math.max(1, committedSequence.total);
   const mode: RevealMode = count === 1 ? "single" : requestedMode;
   const previewStartsAtSummary = preview
     && __DEV__
@@ -129,19 +159,66 @@ export function DrawRevealScreen({ preview = false }: { preview?: boolean }) {
   const [revealResetSignal, setRevealResetSignal] = useState(0);
   const [queuedPreviewOpen, setQueuedPreviewOpen] = useState<"all" | null>(null);
   const [message, setMessage] = useState("");
-  const [reduceMotion, setReduceMotion] = useState(false);
+  const [reduceMotion, setReduceMotion] = useState(true);
   const requestInFlightRef = useRef(false);
   const skipRequestedRef = useRef(false);
   const lastAnnouncementRef = useRef("");
+  const completionScope = `${routeOrderId}:${productId}:${committedSequence.entitlementIds.join(",").toLowerCase()}`;
+  const routeKey = `${preview ? "preview" : "committed"}:${entitlementId}:${completionScope}`;
+  const consumedSequenceRef = useRef<{ scope: string; ids: Set<string> }>({ scope: "", ids: new Set() });
+  const returningRef = useRef(false);
+  const completionFocusRef = useRef(false);
+  const completionGenerationRef = useRef(0);
+  const activeRouteKeyRef = useRef(routeKey);
+  const requestGenerationRef = useRef(0);
+  const requestMountedRef = useRef(true);
+  // A parameter round-trip must not revive a completion from an earlier render.
+  if (activeRouteKeyRef.current !== routeKey) completionGenerationRef.current += 1;
+  activeRouteKeyRef.current = routeKey;
+  const isCurrentRequest = useCallback((generation: number, owner: string) => (
+    requestMountedRef.current
+    && requestGenerationRef.current === generation
+    && activeRouteKeyRef.current === owner
+  ), []);
   const sourceCategory = snapshot?.product.category ?? categoryHint;
   const sourceProductId = result?.productId ?? snapshot?.product.id ?? productId;
   const gachaBottomInset = safeAreaInsets.bottom + seed.spacing.x4;
+
+  useFocusEffect(useCallback(() => {
+    completionFocusRef.current = true;
+    return () => {
+      completionFocusRef.current = false;
+      completionGenerationRef.current += 1;
+    };
+  }, []));
 
   useEffect(() => {
     void AccessibilityInfo.isReduceMotionEnabled().then(setReduceMotion);
     const subscription = AccessibilityInfo.addEventListener("reduceMotionChanged", setReduceMotion);
     return () => subscription.remove();
   }, []);
+
+  useEffect(() => {
+    requestMountedRef.current = true;
+    return () => {
+      requestMountedRef.current = false;
+      requestGenerationRef.current += 1;
+    };
+  }, []);
+
+  useEffect(() => {
+    requestGenerationRef.current += 1;
+    requestInFlightRef.current = false;
+    skipRequestedRef.current = false;
+    lastAnnouncementRef.current = "";
+    setOpening(false);
+    setPreviewLoading(preview);
+    setSnapshot(null);
+    setResult(null);
+    setRevealSettled(false);
+    setMessage("");
+    setRevealResetSignal((current) => current + 1);
+  }, [preview, routeKey]);
 
   const loadPreview = useCallback(async () => {
     if (!preview) return;
@@ -155,22 +232,27 @@ export function DrawRevealScreen({ preview = false }: { preview?: boolean }) {
       setPreviewLoading(false);
       return;
     }
+    const generation = ++requestGenerationRef.current;
+    const owner = routeKey;
     setPreviewLoading(true);
     try {
       const tokens = await readAuthTokens();
+      if (!isCurrentRequest(generation, owner)) return;
       const next = await fetchProductDetail(runtime.apiBaseUrl, productId, tokens?.accessToken);
+      if (!isCurrentRequest(generation, owner)) return;
       if (!isProductDrawCategory(next.product.category)) {
         throw new Error("가챠와 쿠지 상품만 오픈 화면을 사용할 수 있어요.");
       }
       setSnapshot(next);
       setMessage("");
     } catch (error) {
+      if (!isCurrentRequest(generation, owner)) return;
       setSnapshot(null);
       setMessage(error instanceof Error ? error.message : "오픈 화면을 준비하지 못했습니다.");
     } finally {
-      setPreviewLoading(false);
+      if (isCurrentRequest(generation, owner)) setPreviewLoading(false);
     }
-  }, [preview, productId, runtime.apiBaseUrl]);
+  }, [isCurrentRequest, preview, productId, routeKey, runtime.apiBaseUrl]);
 
   useEffect(() => {
     void loadPreview();
@@ -186,11 +268,7 @@ export function DrawRevealScreen({ preview = false }: { preview?: boolean }) {
     requestInFlightRef.current = false;
     skipRequestedRef.current = false;
     lastAnnouncementRef.current = "";
-  }, [count, mode, preview, previewStartsAtSummary]);
-
-  useEffect(() => {
-    skipRequestedRef.current = false;
-  }, [entitlementId, productId]);
+  }, [count, mode, preview, previewStartsAtSummary, productId]);
 
   useEffect(() => {
     if (!preview || !queuedPreviewOpen || previewState.phase !== "sealed") return;
@@ -245,11 +323,68 @@ export function DrawRevealScreen({ preview = false }: { preview?: boolean }) {
   ]);
 
   const goBack = () => {
+    completionFocusRef.current = false;
+    completionGenerationRef.current += 1;
     if (router.canGoBack()) router.back();
     else router.replace("/(tabs)/ppoba");
   };
 
-  const returnToSourceProduct = () => {
+  const returnToSourceProduct = async () => {
+    if (returningRef.current || !completionFocusRef.current) return;
+    returningRef.current = true;
+    const owner = routeKey;
+    const generation = completionGenerationRef.current;
+    const isCurrentReturn = () => requestMountedRef.current && completionFocusRef.current
+      && completionGenerationRef.current === generation && activeRouteKeyRef.current === owner;
+    try {
+      if (
+        !preview && sourceCategory === "gacha" && routeOrderId
+        && result && revealSettled && !committedSequence.nextEntitlementId
+        && consumedSequenceRef.current.scope === completionScope
+      ) {
+        const tokens = await readAuthTokens();
+        if (!isCurrentReturn()) return;
+        if (!tokens?.accessToken) throw new Error("로그인 계정을 확인하지 못했습니다.");
+        const actorId = await fetchCheckoutActorId(runtime.apiBaseUrl, tokens.accessToken);
+        if (!isCurrentReturn()) return;
+        const intent = await readPendingGachaCheckoutOrderIntent(db, { actorId, productId });
+        if (!isCurrentReturn()) return;
+        if (intent?.orderId === routeOrderId) {
+          const order = await fetchCheckoutOrder(runtime.apiBaseUrl, tokens.accessToken, routeOrderId);
+          if (!isCurrentReturn()) return;
+          // The route may omit tickets or include tickets from another order.
+          // Only the current user's exact server order can authorize retirement.
+          const expectedIds = paidGachaOrderEntitlementIds(order, intent);
+          let complete = expectedIds && isCommittedDrawSequenceConsumed(expectedIds, consumedSequenceRef.current.ids);
+          if (
+            expectedIds && !complete
+            && isCommittedDrawSequenceConsumed(committedSequence.entitlementIds, consumedSequenceRef.current.ids)
+          ) {
+            const proof = await fetchPaidGachaDrawCompletion(runtime.apiBaseUrl, tokens.accessToken, routeOrderId);
+            if (!isCurrentReturn()) return;
+            assertPaidGachaDrawCompletion(proof, {
+              intent, entitlementIds: expectedIds, currentEntitlementIds: committedSequence.entitlementIds,
+              settledResult: result,
+            });
+            complete = true;
+          }
+          if (complete) {
+            const latestTokens = await readAuthTokens();
+            if (!isCurrentReturn()) return;
+            if (latestTokens?.accessToken !== tokens.accessToken) throw new Error("로그인 정보가 변경되었습니다.");
+            await clearPendingGachaCheckoutOrderIntent(db, intent, isCurrentReturn);
+          }
+        }
+      }
+    } catch {
+      if (!isCurrentReturn()) return;
+      Alert.alert("결과는 안전하게 보관됐어요", "구매 완료 확인이 지연되어 복구 정보를 유지했어요. 다음 구매 화면에서 이전 주문을 다시 확인할 수 있어요.");
+    } finally {
+      returningRef.current = false;
+    }
+    if (!isCurrentReturn()) return;
+    completionFocusRef.current = false;
+    completionGenerationRef.current += 1;
     if (!sourceProductId) {
       router.replace("/(tabs)/ppoba");
       return;
@@ -281,18 +416,26 @@ export function DrawRevealScreen({ preview = false }: { preview?: boolean }) {
       return;
     }
 
+    const generation = ++requestGenerationRef.current;
+    const owner = routeKey;
     requestInFlightRef.current = true;
     setOpening(true);
     setRevealSettled(false);
     setMessage("");
     try {
       const tokens = await readAuthTokens();
+      if (!isCurrentRequest(generation, owner)) return;
       if (!tokens?.accessToken) throw new Error("로그인 후 상품을 열어 주세요.");
       const committed = await consumeDrawEntitlement(
         runtime.apiBaseUrl,
         tokens.accessToken,
         entitlementId,
       );
+      if (!isCurrentRequest(generation, owner)) return;
+      assertCommittedDrawResultMatchesRoute(committed, {
+        entitlementId,
+        productId: productId || undefined,
+      });
       const committedImageUri = resolveCatalogImageUrl(
         committed.prizeImageUrl,
         runtime.assetBaseUrl,
@@ -310,9 +453,25 @@ export function DrawRevealScreen({ preview = false }: { preview?: boolean }) {
       } catch {
         committedSnapshot = null;
       }
+      if (!isCurrentRequest(generation, owner)) return;
+      const committedCategory = committedSnapshot?.product.category ?? categoryHint;
+      const expectedKujiSlot = committedCategory === "kuji"
+        && routeTickets.length === committedSequence.total
+        ? Number(routeTickets[committedSequence.activeIndex])
+        : undefined;
+      assertCommittedDrawResultMatchesRoute(committed, {
+        entitlementId,
+        productId: productId || undefined,
+        kujiSlotNumber: Number.isInteger(expectedKujiSlot) ? expectedKujiSlot : undefined,
+      });
+      if (committedCategory === "gacha" && routeOrderId) {
+        if (consumedSequenceRef.current.scope !== completionScope) {
+          consumedSequenceRef.current = { scope: completionScope, ids: new Set() };
+        }
+        consumedSequenceRef.current.ids.add(committed.entitlementId.toLowerCase());
+      }
       setSnapshot(committedSnapshot);
       setResult(committed);
-      const committedCategory = committedSnapshot?.product.category ?? categoryHint;
       if (committedCategory === "gacha" && skipRequestedRef.current) {
         requestInFlightRef.current = false;
         setRevealSettled(true);
@@ -321,6 +480,7 @@ export function DrawRevealScreen({ preview = false }: { preview?: boolean }) {
         setRevealSettled(true);
       }
     } catch (error) {
+      if (!isCurrentRequest(generation, owner)) return;
       requestInFlightRef.current = false;
       skipRequestedRef.current = false;
       setResult(null);
@@ -328,7 +488,7 @@ export function DrawRevealScreen({ preview = false }: { preview?: boolean }) {
       setRevealResetSignal((current) => current + 1);
       setMessage(error instanceof Error ? error.message : "상품 결과를 확인하지 못했습니다.");
     } finally {
-      setOpening(false);
+      if (isCurrentRequest(generation, owner)) setOpening(false);
     }
   };
 
@@ -349,8 +509,25 @@ export function DrawRevealScreen({ preview = false }: { preview?: boolean }) {
     if (result) setRevealSettled(true);
   };
 
+  const prepareNextCommittedResult = () => {
+    const nextEntitlementId = committedSequence.nextEntitlementId;
+    if (preview || !result || !revealSettled || !nextEntitlementId) return;
+
+    requestInFlightRef.current = false;
+    skipRequestedRef.current = false;
+    setResult(null);
+    setRevealSettled(false);
+    setMessage("");
+    setRevealResetSignal((current) => current + 1);
+    router.setParams({ entitlementId: nextEntitlementId });
+  };
+
   const handleGachaSkip = () => {
     if (sourceCategory !== "gacha") return;
+    if (result && revealSettled && committedSequence.nextEntitlementId) {
+      prepareNextCommittedResult();
+      return;
+    }
     skipRequestedRef.current = true;
 
     if (preview) {
@@ -382,7 +559,9 @@ export function DrawRevealScreen({ preview = false }: { preview?: boolean }) {
   const previewCompleted = previewState.phase === "summary";
   const singlePreviewFinished = preview && count === 1 && previewOpened;
   const committedResultPresented = Boolean(result && revealSettled);
-  const drawSequenceFinished = committedResultPresented || previewCompleted || singlePreviewFinished;
+  const committedSequenceFinished = committedResultPresented
+    && committedSequence.nextEntitlementId === null;
+  const drawSequenceFinished = committedSequenceFinished || previewCompleted || singlePreviewFinished;
   const kujiMotionVisible = sourceCategory === "kuji"
     && !previewOpened
     && !previewCompleted
@@ -419,6 +598,11 @@ export function DrawRevealScreen({ preview = false }: { preview?: boolean }) {
       ? `${count}개 한 장씩 오픈`
       : "상품 오픈";
   const currentPreviewIndex = currentPreviewTicketIndex(previewState);
+  const currentCommittedTicket = !preview
+    && committedSequence.activeIndex >= 0
+    && routeTickets.length === committedSequence.total
+    ? routeTickets[committedSequence.activeIndex]
+    : undefined;
   const previewItems = useMemo(
     () => createPreviewResultItems(previewTickets, count),
     [count, previewTickets.join(",")],
@@ -426,8 +610,10 @@ export function DrawRevealScreen({ preview = false }: { preview?: boolean }) {
   const drawEmberSeed = `${sourceProductId || sourceCategory || "draw"}:${previewItems[currentPreviewIndex]?.ticketNumber ?? `${activeMode}-${count}`}`;
   const actionLabel = drawSequenceFinished
     ? "상품으로 돌아가기"
-      : drawRevealInProgress
-        ? "결과 확인 중"
+    : !preview && committedResultPresented && committedSequence.nextEntitlementId
+      ? `${committedSequence.activeIndex + 2}번째 쿠지 선택`
+    : drawRevealInProgress
+      ? "결과 확인 중"
       : activeMode === "all"
         ? `${remainingPreviewCount}개 한 번에 열기`
         : preview && sourceCategory === "kuji"
@@ -439,7 +625,7 @@ export function DrawRevealScreen({ preview = false }: { preview?: boolean }) {
               ? "전체 결과 보기"
               : "다음 상품 준비"
           : sourceCategory === "kuji" && count > 1
-            ? `${previewState.openedCount + 1}번째 쿠지 열기`
+            ? `${preview ? previewState.openedCount + 1 : committedSequence.activeIndex + 1}번째 쿠지 열기`
             : opening
               ? "상품 확인 중"
               : "상품 열기";
@@ -490,6 +676,10 @@ export function DrawRevealScreen({ preview = false }: { preview?: boolean }) {
       returnToSourceProduct();
       return;
     }
+    if (!preview && committedResultPresented && committedSequence.nextEntitlementId) {
+      prepareNextCommittedResult();
+      return;
+    }
     if (
       preview
       && sourceCategory === "kuji"
@@ -512,7 +702,7 @@ export function DrawRevealScreen({ preview = false }: { preview?: boolean }) {
 
   return (
     <SafeAreaView style={styles.safeArea} edges={["top", "left", "right"]}>
-      <StatusBar style="light" backgroundColor={colors.ink} />
+      <StatusBar style="light" />
       <View style={styles.header}>
         <Pressable
           accessibilityRole="button"
@@ -524,7 +714,17 @@ export function DrawRevealScreen({ preview = false }: { preview?: boolean }) {
           <Ionicons name="chevron-back" size={28} color={colors.white} />
         </Pressable>
         <KoreanPixelTitle variant="header" style={styles.headerTitle}>{screenTitle}</KoreanPixelTitle>
-        {sourceCategory === "gacha" && !drawSequenceFinished ? (
+        {sourceCategory === "gacha" && !drawSequenceFinished ? committedResultPresented ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="다음 가챠 캡슐 준비하기"
+            hitSlop={10}
+            onPress={prepareNextCommittedResult}
+            style={({ pressed }) => [styles.headerAction, pressed && styles.pressed]}
+          >
+            <Text style={styles.skipText}>NEXT</Text>
+          </Pressable>
+        ) : (
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="가챠 애니메이션 건너뛰기"
@@ -532,7 +732,7 @@ export function DrawRevealScreen({ preview = false }: { preview?: boolean }) {
             onPress={handleGachaSkip}
             style={({ pressed }) => [styles.headerAction, pressed && styles.pressed]}
           >
-            <Text style={styles.skipText}>스킵</Text>
+            <Text style={styles.skipText}>SKIP</Text>
           </Pressable>
         ) : (
           <View style={styles.headerAction} />
@@ -605,23 +805,23 @@ export function DrawRevealScreen({ preview = false }: { preview?: boolean }) {
                   styles.stage,
                   isDrawCategory && styles.expandedDrawStage,
                   sourceCategory === "gacha" && styles.fullGachaStage,
+                  sourceCategory === "gacha" && completed && styles.lightGachaStage,
                 ]}
               >
-                <StageAmbient
-                  sourceCategory={sourceCategory}
-                  reduceMotion={reduceMotion}
-                  seed={drawEmberSeed}
-                />
-                {kujiMotionVisible ? (
+                {!(sourceCategory === "gacha" && completed) ? (
+                  <StageAmbient sourceCategory={sourceCategory} reduceMotion={reduceMotion} seed={drawEmberSeed} />
+                ) : null}
+                {sourceCategory === "kuji" ? (
                   <KujiPeelTicket
                     key={preview
                       ? previewItems[currentPreviewIndex]?.ticketNumber ?? `all-${count}`
                       : entitlementId || productId}
                     ticketNumber={preview && activeMode === "single"
                       ? previewItems[currentPreviewIndex]?.ticketNumber
-                      : undefined}
+                      : currentCommittedTicket}
                     total={preview && activeMode === "all" ? remainingPreviewCount : undefined}
-                    disabled={opening}
+                    disabled={opening || completed}
+                    settled={completed}
                     reduceMotion={reduceMotion}
                     resultReady={preview ? previewResultReady : Boolean(result)}
                     resultLabel={preview
@@ -631,17 +831,41 @@ export function DrawRevealScreen({ preview = false }: { preview?: boolean }) {
                     resetSignal={revealResetSignal}
                     onRequestOpen={() => void openProduct()}
                     onRevealSettled={handleRevealSettled}
+                    resultContent={result ? (
+                      <CommittedResult
+                        result={result}
+                        imageUri={resolveCatalogImageUrl(result.prizeImageUrl, runtime.assetBaseUrl)}
+                        ipName={snapshot?.ip?.nameKo ?? "등록 작품"}
+                        reduceMotion
+                      />
+                    ) : (
+                      <PreviewResultStage
+                        opened
+                        openedIndex={previewState.openedCount + (previewOpened ? 0 : 1)}
+                        total={count}
+                        ticketNumber={previewItems[currentPreviewIndex]?.ticketNumber}
+                        sourceCategory={sourceCategory}
+                        reduceMotion
+                      />
+                    )}
                   />
-                ) : gachaMotionVisible ? (
+                ) : sourceCategory === "gacha" ? (
                   <GachaLeverMachine
                     key={entitlementId || productId}
-                    disabled={opening}
+                    disabled={opening || completed}
+                    settled={completed}
                     reduceMotion={reduceMotion}
                     resultReady={preview ? previewResultReady : Boolean(result)}
                     requestSignal={revealRequestSignal}
                     resetSignal={revealResetSignal}
                     onRequestOpen={() => void openProduct()}
                     onRevealSettled={handleRevealSettled}
+                    prize={{
+                      result,
+                      imageUri: result ? resolveCatalogImageUrl(result.prizeImageUrl, runtime.assetBaseUrl) : null,
+                      ipName: snapshot?.ip?.nameKo,
+                      previewLabel: `RESULT ${String(previewState.openedCount + (previewOpened ? 0 : 1)).padStart(2, "0")}`,
+                    }}
                   />
                 ) : result ? (
                   <CommittedResult
@@ -662,6 +886,18 @@ export function DrawRevealScreen({ preview = false }: { preview?: boolean }) {
                 )}
               </View>
 
+              {sourceCategory === "gacha" ? (
+                <View
+                  accessibilityElementsHidden={!gachaMotionVisible || gachaRevealInProgress}
+                  importantForAccessibility={!gachaMotionVisible || gachaRevealInProgress ? "no-hide-descendants" : "auto"}
+                  style={{ opacity: gachaMotionVisible && !gachaRevealInProgress ? 1 : 0 }}
+                >
+                  <SeedInlineGuidance style={styles.gachaInteractionHint}>
+                    레버 6회 연속 터치 또는 시계 방향 1바퀴 드래그
+                  </SeedInlineGuidance>
+                </View>
+              ) : null}
+
               {snapshot && sourceCategory !== "gacha" ? (
                 <View style={styles.targetRow}>
                   {targetImage ? (
@@ -681,7 +917,7 @@ export function DrawRevealScreen({ preview = false }: { preview?: boolean }) {
                 </View>
               ) : null}
 
-              {committedResultPresented ? (
+              {committedResultPresented && sourceCategory !== "gacha" ? (
                 <SeedInlineGuidance>
                   서버에서 확정된 상품이 보관함에 등록됐어요.
                 </SeedInlineGuidance>
@@ -890,8 +1126,13 @@ function StageAmbient({
   );
 }
 
-function DrawEmbers({ seed, reduceMotion }: { seed: string; reduceMotion: boolean }) {
-  const particles = useMemo(() => createKujiFireflyConfigs(seed), [seed]);
+function DrawEmbers({ seed, reduceMotion }: {
+  seed: string;
+  reduceMotion: boolean;
+}) {
+  const [stageSize, setStageSize] = useState({ width: 0, height: 0 });
+  // Both draw types use the same dispersed field, sized to their own stage.
+  const particles = useMemo(() => createGachaFireflyConfigs(seed, stageSize), [seed, stageSize]);
   if (reduceMotion) return null;
 
   return (
@@ -900,15 +1141,17 @@ function DrawEmbers({ seed, reduceMotion }: { seed: string; reduceMotion: boolea
       accessibilityElementsHidden
       importantForAccessibility="no-hide-descendants"
       style={styles.drawEmberField}
+      onLayout={({ nativeEvent }) => {
+        const { width, height } = nativeEvent.layout;
+        setStageSize((current) => current.width === width && current.height === height ? current : { width, height });
+      }}
     >
-      {particles.map((particle) => (
-        <DrawEmber key={particle.id} particle={particle} />
-      ))}
+      {particles.length > 0 && <DrawEmberLoop key={seed} particles={particles} />}
     </View>
   );
 }
 
-function DrawEmber({ particle }: { particle: KujiFireflyConfig }) {
+function useEmberPhase(durationMs: number) {
   const phase = useSharedValue(0);
 
   useEffect(() => {
@@ -916,14 +1159,28 @@ function DrawEmber({ particle }: { particle: KujiFireflyConfig }) {
     phase.value = 0;
     phase.value = withRepeat(
       withTiming(1, {
-        duration: particle.durationMs,
+        duration: durationMs,
         easing: Easing.linear,
       }),
       -1,
       false,
     );
     return () => cancelAnimation(phase);
-  }, [particle.durationMs, phase]);
+  }, [durationMs, phase]);
+
+  return phase;
+}
+
+function DrawEmberLoop({ particles }: { particles: KujiFireflyConfig[] }) {
+  const phase = useEmberPhase(GACHA_FIREFLY_DURATION_MS);
+  return <>{particles.map((particle) => <DrawEmber key={particle.id} particle={particle} phase={phase} dispersed />)}</>;
+}
+
+function DrawEmber({ particle, phase, dispersed = false }: {
+  particle: KujiFireflyConfig;
+  phase: SharedValue<number>;
+  dispersed?: boolean;
+}) {
 
   const fireflyStyle = useAnimatedStyle(() => {
     const localProgress = (phase.value + particle.startOffset) % 1;
@@ -943,6 +1200,7 @@ function DrawEmber({ particle }: { particle: KujiFireflyConfig }) {
     <Animated.View
       style={[
         styles.drawEmber,
+        dispersed && styles.dispersedGachaEmber,
         {
           left: `${particle.leftPercent}%`,
           top: `${particle.startTopPercent}%`,
@@ -1195,6 +1453,7 @@ const styles = StyleSheet.create({
   content: { paddingHorizontal: seed.spacing.globalGutter, paddingTop: seed.spacing.x4, paddingBottom: seed.spacing.x7, gap: seed.spacing.componentDefault },
   drawScroll: { flex: 1 },
   gachaContent: { flexGrow: 1 },
+  gachaInteractionHint: { alignSelf: "center", color: "#CBD2C9", textAlign: "center" },
   summaryContent: { flex: 1, paddingHorizontal: seed.spacing.globalGutter, paddingTop: seed.spacing.x4, gap: seed.spacing.componentDefault },
   stageHeader: { minHeight: 54, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: seed.spacing.x3 },
   stageEyebrow: { marginBottom: seed.spacing.x1, color: colors.brand, fontSize: 10, lineHeight: 14, fontWeight: "900", letterSpacing: 1.2 },
@@ -1202,14 +1461,16 @@ const styles = StyleSheet.create({
   stage: { minHeight: 430, padding: seed.spacing.x4, borderRadius: seed.radius.r5, borderWidth: 1, borderColor: "#3A4339", backgroundColor: "#151A15", alignItems: "center", justifyContent: "center", overflow: "hidden" },
   expandedDrawStage: { minHeight: 496 },
   fullGachaStage: { flexGrow: 1 },
+  lightGachaStage: { backgroundColor: "#FCFCF8", borderColor: "#FCFCF8" },
   summaryStage: { flex: 1, minHeight: 0, padding: seed.spacing.x2_5 },
-  staticSparkField: { ...StyleSheet.absoluteFillObject },
+  staticSparkField: { ...StyleSheet.absoluteFill },
   spark: { position: "absolute", width: 7, height: 7, backgroundColor: colors.brand },
   sparkOne: { top: 42, left: 32 },
   sparkTwo: { top: 78, right: 38, width: 4, height: 4 },
   sparkThree: { bottom: 48, right: 58, width: 5, height: 5 },
-  drawEmberField: { ...StyleSheet.absoluteFillObject },
+  drawEmberField: { ...StyleSheet.absoluteFill },
   drawEmber: { position: "absolute", borderRadius: 1.5, backgroundColor: colors.brand, shadowColor: colors.brand, shadowOpacity: 0.58, shadowRadius: 5, shadowOffset: { width: 0, height: 0 } },
+  dispersedGachaEmber: { shadowOpacity: 0.36, shadowRadius: 3.5 },
   sealedBlock: { alignItems: "center" },
   capsule: { width: 156, height: 104, borderRadius: 54, borderWidth: 3, borderColor: colors.white, overflow: "hidden", transform: [{ rotate: "-8deg" }] },
   capsuleTop: { flex: 1, backgroundColor: colors.brand },

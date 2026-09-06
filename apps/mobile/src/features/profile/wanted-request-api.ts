@@ -1,8 +1,9 @@
 import { CryptoDigestAlgorithm, digest, randomUUID } from "expo-crypto";
+import { fetch as fetchRawUpload } from "expo/fetch";
 import { manipulateAsync, SaveFormat } from "expo-image-manipulator";
 import * as ImagePicker from "expo-image-picker";
 import { errorMessage } from "@dabboba/api-client";
-import type { CatalogIp, components } from "@dabboba/contracts";
+import type { CatalogIp, MediaUploadIntent, components } from "@dabboba/contracts";
 import { createMobileDabbobaClient as createDabbobaClient } from "@/lib/mobile-api-client";
 
 export type WantedRequest = components["schemas"]["WantedRequest"];
@@ -61,8 +62,11 @@ export async function uploadWantedRequestImage(
   accessToken: string,
   image: WantedRequestImage,
 ): Promise<string> {
-  const localResponse = await fetch(image.uri);
+  const localResponse = await fetchRawUpload(image.uri);
   if (!localResponse.ok) throw new Error("선택한 사진을 읽지 못했습니다.");
+  // Both transports must upload the same snapshot that supplies the size and checksum.
+  // Clone before consuming: native Blob does not universally expose arrayBuffer().
+  const multipartResponse = localResponse.clone();
   const bytes = await localResponse.arrayBuffer();
   if (!bytes.byteLength || bytes.byteLength > MAX_IMAGE_BYTES) {
     throw new Error("사진은 10MB 이하만 첨부할 수 있습니다.");
@@ -77,19 +81,28 @@ export async function uploadWantedRequestImage(
       mimeType: image.mimeType,
       byteSize: bytes.byteLength,
       checksumSha256,
+      acceptedUploadMethods: ["POST", "PUT"],
     },
   });
   if (!intentResult.data) throw new Error(errorMessage(intentResult.error, "사진 업로드를 준비하지 못했습니다."));
   const intent = intentResult.data;
-  const form = new FormData();
-  for (const [key, value] of Object.entries(intent.fields)) form.append(key, value);
-  form.append(intent.fileFieldName, {
-    uri: image.uri,
-    name: image.filename,
-    type: image.mimeType,
-  } as unknown as Blob);
-  const uploaded = await fetch(intent.uploadUrl, { method: "POST", body: form });
-  if (!uploaded.ok) throw new Error("사진을 업로드하지 못했습니다. 다시 시도해 주세요.");
+  const upload = validateWantedImageUpload(intent, image.mimeType, bytes.byteLength, checksumSha256);
+  let body: ArrayBuffer | FormData = bytes;
+  if (intent.method === "POST") {
+    body = new FormData();
+    for (const [key, value] of Object.entries(intent.fields)) body.append(key, value);
+    const blob = await multipartResponse.blob();
+    const file = Object.assign(blob.slice(0, blob.size, image.mimeType), { name: image.filename });
+    body.append(intent.fileFieldName, file);
+  }
+  // SDK 57's Expo transport needs a real Blob, not a URI-only React Native part.
+  // Use the same explicit transport for POST and PUT so redirects remain forbidden.
+  const uploaded = await fetchRawUpload(upload.url.toString(), {
+    method: intent.method, body,
+    ...(upload.headers ? { headers: upload.headers } : {}),
+    credentials: "omit", redirect: "error",
+  });
+  if (!uploaded.ok || uploaded.redirected) throw new Error("사진을 업로드하지 못했습니다. 다시 시도해 주세요.");
   const completed = await client.POST("/v1/media/{mediaId}/complete", {
     params: {
       path: { mediaId: intent.mediaId },
@@ -102,6 +115,53 @@ export async function uploadWantedRequestImage(
 
 function toHex(value: ArrayBuffer): string {
   return Array.from(new Uint8Array(value), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function validateWantedImageUpload(
+  intent: MediaUploadIntent,
+  mimeType: string,
+  byteSize: number,
+  checksumSha256: string,
+): { url: URL; headers?: Record<string, string> } {
+  const invalid = () => new Error("사진 업로드 정책이 선택한 파일과 일치하지 않습니다.");
+  if (!intent || intent.maxBytes !== byteSize || !Number.isSafeInteger(intent.maxBytes)
+    || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(intent.mediaId)) throw invalid();
+  const expiresAt = Date.parse(intent.expiresAt);
+  if (!Number.isFinite(expiresAt)) throw invalid();
+  if (Date.now() >= expiresAt) {
+    throw Object.assign(new Error("사진 업로드 주소가 만료됐습니다. 다시 시도해 주세요."), { code: "MEDIA_UPLOAD_INTENT_EXPIRED" });
+  }
+  let url: URL;
+  try { url = new URL(intent.uploadUrl); } catch { throw invalid(); }
+  const localHttp = __DEV__ && url.protocol === "http:"
+    && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
+  if ((url.protocol !== "https:" && !localHttp) || url.username || url.password || url.hash) throw invalid();
+  if (intent.method === "POST") {
+    if (intent.fileFieldName !== "file" || !intent.fields || typeof intent.fields !== "object" || Array.isArray(intent.fields)
+      || !Object.keys(intent.fields).length || Object.values(intent.fields).some((value) => typeof value !== "string")
+      || "headers" in intent || "bodyEncoding" in intent) throw invalid();
+    return { url };
+  }
+  if (intent.method !== "PUT" || intent.bodyEncoding !== "raw" || "fields" in intent || "fileFieldName" in intent
+    || !intent.headers || typeof intent.headers !== "object" || Array.isArray(intent.headers)) throw invalid();
+  const expected: Record<string, string> = {
+    "content-type": mimeType,
+    "content-length": String(byteSize),
+    "x-amz-content-sha256": "UNSIGNED-PAYLOAD",
+    "x-amz-meta-sha256": checksumSha256,
+    "x-amz-meta-media-id": intent.mediaId,
+  };
+  const headers: Record<string, string> = {};
+  const seen = new Set<string>();
+  for (const [name, value] of Object.entries(intent.headers)) {
+    const lower = name.toLowerCase();
+    if (!Object.hasOwn(expected, lower) || seen.has(lower) || value !== expected[lower]) throw invalid();
+    seen.add(lower);
+    // The raw ArrayBuffer fixes Content-Length; browser/native networking supplies this signed header.
+    if (lower !== "content-length") headers[lower] = value;
+  }
+  if (seen.size !== Object.keys(expected).length) throw invalid();
+  return { url, headers };
 }
 
 export async function createWantedRequest(

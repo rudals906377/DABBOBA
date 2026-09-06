@@ -494,7 +494,7 @@ const styles = StyleSheet.create({
   retryButton: { minHeight: 42, justifyContent: "center", paddingHorizontal: 16, marginTop: 15, borderRadius: 10, backgroundColor: colors.ink },
   retryLabel: { color: colors.white, fontSize: 13, fontWeight: "800" },
   drawerOverlay: { flex: 1, justifyContent: "flex-end" },
-  drawerBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(7, 16, 11, 0.42)" },
+  drawerBackdrop: { ...StyleSheet.absoluteFill, backgroundColor: "rgba(7, 16, 11, 0.42)" },
   drawerSheet: { paddingHorizontal: seed.spacing.globalGutter, paddingTop: seed.spacing.x2, borderTopLeftRadius: seed.radius.r6, borderTopRightRadius: seed.radius.r6, backgroundColor: seed.color.layer.elevated },
   drawerHandle: { alignSelf: "center", width: 38, height: 4, marginBottom: seed.spacing.x2, borderRadius: 2, backgroundColor: seed.color.stroke.contrast },
   drawerHeader: { minHeight: seed.size.topNavigation, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },

@@ -11,35 +11,28 @@ assert_no_raw_secret_envs
 assert_database_release_attestation
 assert_worker_execution_attestation
 assert_gcloud_context
-assert_cloud_identity_boundaries
+assert_cloud_release_boundaries
 check_scheduler_prerequisites
 
 project="$(expected_project_id)"
 worker_job="${DABBOBA_WORKER_JOB:-dabboba-worker}"
-scheduler_job="${DABBOBA_WORKER_SCHEDULER_JOB:-dabboba-worker-every-15m}"
+scheduler_job="${DABBOBA_WORKER_SCHEDULER_JOB:-dabboba-worker-every-minute}"
 assert_resource_name "$scheduler_job" DABBOBA_WORKER_SCHEDULER_JOB
-assert_scheduler_job_absent "$scheduler_job"
 
 target_uri="https://run.googleapis.com/v2/projects/$project/locations/$DABBOBA_CLOUD_RUN_REGION/jobs/$worker_job:run"
+assert_scheduler_job_absent "$scheduler_job" "$target_uri"
 
-note "Creating approved 15-minute worker schedule $scheduler_job without running it immediately"
-gcloud scheduler jobs create http "$scheduler_job" \
-  --quiet \
-  --project="$project" \
-  --location="$DABBOBA_CLOUD_RUN_REGION" \
-  --schedule='*/15 * * * *' \
-  --time-zone='Asia/Seoul' \
-  --uri="$target_uri" \
-  --http-method=POST \
-  --oauth-service-account-email="$DABBOBA_SCHEDULER_SERVICE_ACCOUNT" \
-  --oauth-token-scope='https://www.googleapis.com/auth/cloud-platform' \
-  --attempt-deadline=30s \
-  --max-retry-attempts=1 \
-  --max-retry-duration=120s \
-  --min-backoff=30s \
-  --max-backoff=60s \
-  --max-doublings=1 \
-  --description='DABBOBA finite pgmq worker every 15 minutes (Asia/Seoul)'
+note "Creating approved one-minute worker schedule $scheduler_job without running it immediately"
+create_worker_scheduler_job \
+  "$project" \
+  "$scheduler_job" \
+  "$target_uri" \
+  "$DABBOBA_SCHEDULER_SERVICE_ACCOUNT"
+
+assert_worker_scheduler_matches_contract \
+  "$scheduler_job" \
+  "$target_uri" \
+  "$DABBOBA_SCHEDULER_SERVICE_ACCOUNT"
 
 gcloud scheduler jobs describe "$scheduler_job" \
   --project="$project" \

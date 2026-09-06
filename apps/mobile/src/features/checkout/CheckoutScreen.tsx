@@ -1,6 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import Constants from "expo-constants";
 import { type Href, useLocalSearchParams, useNavigation, useRouter } from "expo-router";
+import { useSQLiteContext } from "expo-sqlite";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AccessibilityInfo,
@@ -25,11 +26,26 @@ import { AppText as Text } from "@/components/Typography";
 import { SeedActionButton, SeedInlineGuidance } from "@/design-system/components";
 import { seed } from "@/design-system/seed";
 import {
+  canRetireGachaIntentAfterCreateError,
+  claimPendingGachaCheckoutOrderIntent,
+  clearPendingGachaCheckoutOrderIntent,
   CheckoutOrderApiError,
+  createGachaCheckoutOrder,
   createKujiCheckoutOrder,
+  fetchCheckoutActorId,
+  fetchCheckoutOrder,
   fetchCheckoutPointBalance,
+  paidGachaOrderEntitlementIds,
   paidKujiOrderEntitlementIds,
+  readPendingGachaCheckoutOrderIntent,
+  recordPendingGachaCheckoutOrder,
 } from "@/features/checkout/checkout-api";
+import {
+  canAutomaticallyReplayGachaOrderCreation,
+  canRetireGachaCheckoutIntentForOrderStatus,
+  sameGachaCheckoutOrderPayload,
+  type GachaCheckoutOrderIntent,
+} from "@/features/checkout/gacha-checkout-intent";
 import {
   DRAW_PURCHASE_MAX_QUANTITY,
   normalizeDrawPurchaseCount,
@@ -76,6 +92,7 @@ const PAYMENT_METHODS: Array<{
 export function CheckoutScreen() {
   const router = useRouter();
   const navigation = useNavigation();
+  const db = useSQLiteContext();
   const floatingBottomInset = useFloatingBottomActionContentInset();
   const params = useLocalSearchParams<{
     productId?: string | string[];
@@ -126,6 +143,7 @@ export function CheckoutScreen() {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState("");
+  const [pendingGachaIntent, setPendingGachaIntent] = useState<GachaCheckoutOrderIntent | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
   const checkoutCompletedRef = useRef(false);
   const checkoutExpiredHandledRef = useRef(false);
@@ -133,9 +151,29 @@ export function CheckoutScreen() {
 
   const load = useCallback(async () => {
     setLoading(true);
+    setPendingGachaIntent(null);
     try {
       const tokens = await readAuthTokens();
       if (!tokens?.accessToken) throw new Error("로그인 후 결제 준비 화면을 확인할 수 있어요.");
+      const actorId = await fetchCheckoutActorId(runtime.apiBaseUrl, tokens.accessToken);
+      let nextPendingGachaIntent = await readPendingGachaCheckoutOrderIntent(db, {
+        actorId,
+        productId,
+      });
+      setPendingGachaIntent(nextPendingGachaIntent);
+      if (nextPendingGachaIntent?.orderId) {
+        const pendingOrder = await fetchCheckoutOrder(
+          runtime.apiBaseUrl,
+          tokens.accessToken,
+          nextPendingGachaIntent.orderId,
+        );
+        nextPendingGachaIntent = await recordPendingGachaCheckoutOrder(
+          db,
+          nextPendingGachaIntent,
+          pendingOrder,
+        );
+        setPendingGachaIntent(nextPendingGachaIntent);
+      }
       const [nextSnapshot, nextPointBalance] = await Promise.all([
         fetchProductDetail(runtime.apiBaseUrl, productId, tokens.accessToken),
         fetchCheckoutPointBalance(runtime.apiBaseUrl, tokens.accessToken),
@@ -192,6 +230,7 @@ export function CheckoutScreen() {
       setLoading(false);
     }
   }, [
+    db,
     kujiCheckoutExpiresAt,
     kujiEntryId,
     kujiRoomFixture,
@@ -394,6 +433,253 @@ export function CheckoutScreen() {
     } as Href);
   };
 
+  const openCommittedGachaReveal = (
+    intent: GachaCheckoutOrderIntent,
+    orderId: string,
+    entitlementIds: string[],
+  ) => {
+    const query = new URLSearchParams({
+      productId: intent.payload.productId,
+      category: "gacha",
+      orderId,
+      entitlementIds: entitlementIds.join(","),
+    });
+    router.replace(
+      `/draw/reveal/${encodeURIComponent(entitlementIds[0]!)}?${query.toString()}` as Href,
+    );
+  };
+
+  const offerRecoveredGachaOrder = (
+    intent: GachaCheckoutOrderIntent,
+    orderId: string,
+    entitlementIds: string[],
+  ) => {
+    Alert.alert(
+      "이전 구매가 확인됐어요",
+      "결제 완료된 가챠 결과를 이어서 확인할 수 있어요.",
+      [
+        { text: "닫기", style: "cancel" },
+        {
+          text: "결과 보기",
+          onPress: () => openCommittedGachaReveal(intent, orderId, entitlementIds),
+        },
+      ],
+    );
+  };
+
+  const showGachaOrderError = (error: unknown) => {
+    const providerUnavailable = error instanceof CheckoutOrderApiError
+      && error.code === "PAYMENT_NOT_CONFIGURED";
+    Alert.alert(
+      providerUnavailable ? "외부 결제 연결 준비 중" : "주문을 접수하지 못했어요",
+      providerUnavailable
+        ? "카드·간편결제 제공 서비스가 아직 연결되지 않아 주문과 결제를 접수하지 않았어요. 포인트로 전액 결제할 수 있는 경우에는 서버에서 바로 완료돼요."
+        : error instanceof Error
+          ? error.message
+          : "가챠 주문을 다시 확인해 주세요.",
+    );
+  };
+
+  const executeGachaOrderIntent = async (
+    intent: GachaCheckoutOrderIntent,
+    accessToken: string,
+    options: {
+      intentCreatedThisAttempt: boolean;
+      offerRecoveryChoice: boolean;
+    },
+  ) => {
+    if (
+      !intent.orderId
+      && !canAutomaticallyReplayGachaOrderCreation(intent, Date.now())
+    ) {
+      Alert.alert(
+        "이전 주문 확인이 필요해요",
+        "24시간이 지난 미확정 주문 요청은 중복 결제를 막기 위해 자동으로 다시 보내지 않아요. 내정보의 주문 내역을 먼저 확인해 주세요.",
+      );
+      return;
+    }
+
+    const creatingOrder = !intent.orderId;
+    try {
+      let order = intent.orderId
+        ? await fetchCheckoutOrder(runtime.apiBaseUrl, accessToken, intent.orderId)
+        : await createGachaCheckoutOrder(
+          runtime.apiBaseUrl,
+          accessToken,
+          { ...intent.payload, idempotencyKey: intent.idempotencyKey },
+        );
+      let recordedIntent = await recordPendingGachaCheckoutOrder(db, intent, order);
+      if (creatingOrder && !options.intentCreatedThisAttempt) {
+        order = await fetchCheckoutOrder(runtime.apiBaseUrl, accessToken, order.id);
+        recordedIntent = await recordPendingGachaCheckoutOrder(db, recordedIntent, order);
+      }
+      setPendingGachaIntent(recordedIntent);
+      const entitlementIds = paidGachaOrderEntitlementIds(order, recordedIntent);
+      if (entitlementIds) {
+        if (options.offerRecoveryChoice) {
+          offerRecoveredGachaOrder(recordedIntent, order.id, entitlementIds);
+        } else {
+          openCommittedGachaReveal(recordedIntent, order.id, entitlementIds);
+        }
+        return;
+      }
+
+      if (order.status === "PENDING_PAYMENT") {
+        Alert.alert(
+          "외부 결제 연결 준비 중",
+          "주문은 서버에 접수됐지만 결제 제공 화면이 아직 앱에 연결되지 않아 뽑기로 이동하지 않았어요. 결제가 확인되기 전에는 추첨권이나 결과를 만들지 않아요.",
+        );
+        return;
+      }
+      if (canRetireGachaCheckoutIntentForOrderStatus(order.status)) {
+        await clearPendingGachaCheckoutOrderIntent(db, recordedIntent);
+        setPendingGachaIntent(null);
+        Alert.alert(
+          "이전 주문이 종료됐어요",
+          "새 주문은 상품·수량·포인트와 구매 금액을 다시 확인한 뒤 진행해 주세요.",
+        );
+        return;
+      }
+      Alert.alert(
+        order.status === "REFUND_REVIEW" ? "결제 상태 확인이 필요해요" : "추첨권을 확인하고 있어요",
+        order.status === "REFUND_REVIEW"
+          ? "결제 확인이 끝나기 전에는 새 주문이나 가챠 뽑기를 진행하지 않아요."
+          : "서버에서 결제 완료와 정확한 추첨권 발급이 모두 확인되지 않아 뽑기로 이동하지 않았어요.",
+      );
+    } catch (error) {
+      if (
+        creatingOrder
+        && options.intentCreatedThisAttempt
+        && canRetireGachaIntentAfterCreateError(error)
+      ) {
+        try {
+          await clearPendingGachaCheckoutOrderIntent(db, intent);
+          setPendingGachaIntent(null);
+        } catch {
+          // Persistence is authoritative when cleanup cannot be confirmed.
+        }
+      }
+      showGachaOrderError(error);
+    }
+  };
+
+  const resumeStoredGachaIntent = async (intent: GachaCheckoutOrderIntent) => {
+    if (orderSubmittingRef.current) return;
+    orderSubmittingRef.current = true;
+    setSubmitting(true);
+    try {
+      const tokens = await readAuthTokens();
+      if (!tokens?.accessToken) throw new Error("로그인 후 이전 가챠 주문을 확인해 주세요.");
+      const actorId = await fetchCheckoutActorId(runtime.apiBaseUrl, tokens.accessToken);
+      const storedIntent = await readPendingGachaCheckoutOrderIntent(db, {
+        actorId,
+        productId: intent.payload.productId,
+      });
+      if (!storedIntent || storedIntent.idempotencyKey !== intent.idempotencyKey) {
+        throw new Error("이전 가챠 주문 요청이 변경되어 다시 확인이 필요해요.");
+      }
+      await executeGachaOrderIntent(storedIntent, tokens.accessToken, {
+        intentCreatedThisAttempt: false,
+        offerRecoveryChoice: Boolean(storedIntent.orderId),
+      });
+    } catch (error) {
+      showGachaOrderError(error);
+    } finally {
+      orderSubmittingRef.current = false;
+      setSubmitting(false);
+    }
+  };
+
+  const promptGachaPayloadConflict = (intent: GachaCheckoutOrderIntent) => {
+    Alert.alert(
+      "이전 주문 요청이 남아 있어요",
+      `중복 결제를 막기 위해 이전 요청(${intent.payload.quantity}개 · 포인트 ${intent.payload.pointAmount.toLocaleString("ko-KR")}원)을 먼저 확인해야 해요. 현재 선택으로 새 주문을 자동 생성하지 않아요.`,
+      [
+        { text: "닫기", style: "cancel" },
+        {
+          text: "이전 주문 확인",
+          onPress: () => void resumeStoredGachaIntent(intent),
+        },
+      ],
+    );
+  };
+
+  const submitGachaOrder = async () => {
+    if (orderSubmittingRef.current) return;
+    orderSubmittingRef.current = true;
+    setSubmitting(true);
+    try {
+      const tokens = await readAuthTokens();
+      if (!tokens?.accessToken) throw new Error("로그인 후 가챠 주문을 진행해 주세요.");
+      const actorId = await fetchCheckoutActorId(runtime.apiBaseUrl, tokens.accessToken);
+      const existingIntent = await readPendingGachaCheckoutOrderIntent(db, {
+        actorId,
+        productId,
+      });
+      if (existingIntent) {
+        setPendingGachaIntent(existingIntent);
+        const currentPayload = product?.category === "gacha"
+          && quantity > 0
+          && snapshot?.drawOdds?.version
+          ? {
+            productId: product.id,
+            quantity,
+            expectedDrawVersion: snapshot.drawOdds.version,
+            pointAmount: pointUsed,
+          }
+          : null;
+        const payloadChanged = currentPayload
+          ? !sameGachaCheckoutOrderPayload(existingIntent.payload, currentPayload)
+          : false;
+        if (payloadChanged && !existingIntent.orderId) {
+          promptGachaPayloadConflict(existingIntent);
+          return;
+        }
+        await executeGachaOrderIntent(existingIntent, tokens.accessToken, {
+          intentCreatedThisAttempt: false,
+          offerRecoveryChoice: Boolean(existingIntent.orderId),
+        });
+        return;
+      }
+
+      if (
+        !product
+        || product.category !== "gacha"
+        || quantity <= 0
+        || !drawAvailable
+      ) {
+        throw new Error("현재 새로 구매할 수 있는 가챠 상품이 아닙니다.");
+      }
+      const expectedDrawVersion = snapshot?.drawOdds?.version;
+      if (!expectedDrawVersion) {
+        throw new Error("결제 전 확인한 최신 확률표가 없어 주문을 접수하지 않았어요.");
+      }
+      const claim = await claimPendingGachaCheckoutOrderIntent(db, {
+        actorId,
+        payload: {
+          productId: product.id,
+          quantity,
+          expectedDrawVersion,
+          pointAmount: pointUsed,
+        },
+      });
+      setPendingGachaIntent(claim.intent);
+      if (claim.kind === "payload-conflict" && !claim.intent.orderId) {
+        promptGachaPayloadConflict(claim.intent);
+        return;
+      }
+      await executeGachaOrderIntent(claim.intent, tokens.accessToken, {
+        intentCreatedThisAttempt: claim.kind === "created",
+        offerRecoveryChoice: Boolean(claim.intent.orderId),
+      });
+    } catch (error) {
+      showGachaOrderError(error);
+    } finally {
+      orderSubmittingRef.current = false;
+      setSubmitting(false);
+    }
+  };
+
   const submitKujiOrder = async () => {
     if (
       orderSubmittingRef.current
@@ -459,6 +745,7 @@ export function CheckoutScreen() {
       const query = new URLSearchParams({
         count: String(entitlementIds.length),
         orderId: order.id,
+        kujiEntryId,
         entitlementIds: entitlementIds.join(","),
       });
       router.replace(
@@ -483,6 +770,17 @@ export function CheckoutScreen() {
   const finishPreparation = () => {
     if (!product) return;
     if (isDrawCategory(product.category)) {
+      if (product.category === "gacha" && pendingGachaIntent) {
+        Alert.alert(
+          "이전 주문 확인",
+          "저장된 주문 상태를 먼저 확인한 뒤 결제가 완료된 결과를 이어서 볼 수 있어요.",
+          [
+            { text: "닫기", style: "cancel" },
+            { text: "확인하기", onPress: () => void submitGachaOrder() },
+          ],
+        );
+        return;
+      }
       if (
         product.category === "kuji"
         && kujiCheckoutRemainingSeconds(kujiCheckoutClock, Date.now()) <= 0
@@ -515,19 +813,13 @@ export function CheckoutScreen() {
         );
         return;
       }
-      if (!__DEV__) {
-        Alert.alert(
-          "구매 연결 준비 중",
-          "실제 결제와 추첨권 발급이 연결된 뒤 이용할 수 있어요.",
-        );
-        return;
-      }
       Alert.alert(
         "구매 금액 확인",
-        `${paymentConfirmation.message}${pointLine}\n최종 결제 예정 ${paymentTotal.toLocaleString("ko-KR")}원 · ${selectedPayment.label}\n현재 개발 화면에서는 결제와 주문이 접수되지 않으며 체험용 뽑기 화면으로 이동해요.`,
+        `${paymentConfirmation.message}${pointLine}\n최종 결제 예정 ${paymentTotal.toLocaleString("ko-KR")}원 · ${selectedPayment.label}`,
         [
           { text: "취소", style: "cancel" },
-          { text: "뽑기 시작", onPress: openGachaPreview },
+          ...(__DEV__ ? [{ text: "체험하기", onPress: openGachaPreview }] : []),
+          { text: "구매하기", onPress: () => void submitGachaOrder() },
         ],
       );
       return;
@@ -564,6 +856,13 @@ export function CheckoutScreen() {
         <View style={styles.state}>
           <Ionicons name="alert-circle-outline" size={34} color={colors.muted} />
           <Text style={styles.stateTitle}>{message || "상품을 찾을 수 없습니다."}</Text>
+          {pendingGachaIntent ? (
+            <SeedActionButton
+              label="이전 주문 확인"
+              disabled={submitting}
+              onPress={() => void submitGachaOrder()}
+            />
+          ) : null}
           <SeedActionButton label="다시 불러오기" variant="neutralSolid" onPress={() => void load()} />
         </View>
       ) : (
@@ -707,7 +1006,7 @@ export function CheckoutScreen() {
             <View style={styles.section}>
               <KoreanPixelTitle variant="section" style={styles.sectionTitle}>결제 수단</KoreanPixelTitle>
               <Text style={styles.sectionCaption}>
-                {product.category === "kuji"
+                {isDrawCategory(product.category)
                   ? paymentTotal === 0
                     ? "포인트 전액 결제는 서버 확인 후 바로 추첨권이 발급돼요."
                     : "카드·간편결제 제공 화면은 연결 준비 중이며, 완료 전에는 추첨권이 발급되지 않아요."
@@ -763,10 +1062,10 @@ export function CheckoutScreen() {
             ) : null}
 
             <SeedInlineGuidance
-              paragraphs={product.category === "kuji"
+              paragraphs={isDrawCategory(product.category)
                 ? [
-                  "서버가 최신 가격·재고·확률표, 대기 순서와 포인트를 다시 확인한 뒤 주문을 접수해요.",
-                  "결제 완료와 추첨권 발급이 모두 확인된 경우에만 쿠지 뽑기 화면으로 이동해요.",
+                  `서버가 최신 가격·재고·확률표${product.category === "kuji" ? ", 대기 순서" : ""}와 포인트를 다시 확인한 뒤 주문을 접수해요.`,
+                  `결제 완료와 추첨권 발급이 모두 확인된 경우에만 ${product.category === "kuji" ? "쿠지" : "가챠"} 뽑기 화면으로 이동해요.`,
                 ]
                 : [
                   "현재는 결제 서비스 연결 전이라 결제와 주문이 접수되지 않아요.",
@@ -782,7 +1081,11 @@ export function CheckoutScreen() {
             </View>
             <SeedActionButton
               label={submitting ? "주문 확인 중" : drawMode ? "구매하기" : "결제 준비 완료"}
-              disabled={submitting || (drawMode && (kujiCheckoutExpired || !drawAvailable || quantity <= 0))}
+              disabled={submitting || (
+                drawMode
+                && !(product.category === "gacha" && pendingGachaIntent)
+                && (kujiCheckoutExpired || !drawAvailable || quantity <= 0)
+              )}
               onPress={finishPreparation}
               style={styles.footerAction}
             />

@@ -8,30 +8,34 @@ def ensure($condition; $message):
 | ensure(($containers | length) == 1; "worker Job must contain exactly one container")
 | $containers[0] as $container
 | ($container.env // []) as $env
-| ([$env[] | select(.name == "WORKER_DATABASE_URL")]) as $database_envs
-| ($database_envs[0] // {}) as $database_env
-| ({
-    "NODE_ENV": "production",
-    "LOG_LEVEL": "info",
-    "WORKER_QUEUE_NAME": $expected_queue,
-    "WORKER_QUEUE_VISIBILITY_SECONDS": "900",
-    "WORKER_MAX_RUN_SECONDS": "240",
-    "WORKER_MAX_MESSAGES_PER_RUN": "100",
-    "WORKER_DATABASE_OPERATION_TIMEOUT_MS": "30000",
-    "DATABASE_POOL_MAX": "3",
-    "GCS_BUCKET": $expected_bucket,
-    "GCS_PROJECT_ID": $expected_project
-  }) as $expected_plain_env
+| ensure(($env | type) == "array"; "worker Job environment must be an array")
+| ensure(all($env[]; type == "object" and (.name | type) == "string"); "invalid worker environment entry")
+| ensure(all($env[];
+    if has("value") then
+      (keys | sort) == ["name", "value"] and (.value | type) == "string"
+    elif has("valueFrom") then
+      (keys | sort) == ["name", "valueFrom"]
+      and (.valueFrom | type) == "object" and (.valueFrom | keys) == ["secretKeyRef"]
+      and (.valueFrom.secretKeyRef | type) == "object"
+      and (.valueFrom.secretKeyRef | keys | sort) == ["key", "name"]
+      and (.valueFrom.secretKeyRef.name | type) == "string" and (.valueFrom.secretKeyRef.key | type) == "string"
+    elif has("valueSource") then
+      (keys | sort) == ["name", "valueSource"]
+      and (.valueSource | type) == "object" and (.valueSource | keys) == ["secretKeyRef"]
+      and (.valueSource.secretKeyRef | type) == "object"
+      and (.valueSource.secretKeyRef | keys | sort) == ["secret", "version"]
+      and (.valueSource.secretKeyRef.secret | type) == "string" and (.valueSource.secretKeyRef.version | type) == "string"
+    else false end); "worker environment must contain plain values or unambiguous Secret Manager references only")
 | ([$env[]
-    | select((.valueFrom // .valueSource // null) == null)
-    | {key: .name, value: (.value | tostring)}]
+    | select(has("value"))
+    | {key: .name, value: .value}]
     | from_entries) as $actual_plain_env
-| (($database_env.valueFrom.secretKeyRef.name
-    // $database_env.valueSource.secretKeyRef.secret
-    // "") | tostring) as $database_secret
-| (($database_env.valueFrom.secretKeyRef.key
-    // $database_env.valueSource.secretKeyRef.version
-    // "") | tostring) as $database_secret_version
+| ([$env[] | select(has("value") | not)
+    | {key:.name, value:{
+        secret:((.valueFrom.secretKeyRef.name // .valueSource.secretKeyRef.secret)
+          | if startswith("projects/\($expected_project)/secrets/") then ltrimstr("projects/\($expected_project)/secrets/") else . end),
+        version:(.valueFrom.secretKeyRef.key // .valueSource.secretKeyRef.version)}}]
+    | from_entries) as $actual_secret_env
 | (($task.timeoutSeconds // $task.timeout // "") | tostring | sub("s$"; "") | tonumber) as $timeout_seconds
 | (($execution.taskCount // -1) | tonumber) as $task_count
 | (($execution.parallelism // -1) | tonumber) as $parallelism
@@ -70,21 +74,12 @@ def ensure($condition; $message):
       (($container.resources.limits // {} | keys | sort) == ["cpu", "memory"]);
       "worker Job must not request extra resource types"
     ),
-    ensure(($env | length) == 11; "worker Job environment must contain exactly the approved variables"),
+    ensure(($env | length) == (($expected_plain_env | length) + ($expected_secret_env | length)); "worker Job environment must contain exactly the approved variables"),
     ensure(
       ([$env[].name] | length) == ([$env[].name] | unique | length);
       "worker Job environment contains duplicate variable names"
     ),
     ensure($actual_plain_env == $expected_plain_env; "worker Job plain environment does not match"),
-    ensure(($database_envs | length) == 1; "worker Job must contain one WORKER_DATABASE_URL secret reference"),
-    ensure(
-      ($database_secret == $expected_secret
-        or $database_secret == "projects/\($expected_project)/secrets/\($expected_secret)");
-      "worker Job WORKER_DATABASE_URL references the wrong secret"
-    ),
-    ensure(
-      $database_secret_version == $expected_secret_version;
-      "worker Job WORKER_DATABASE_URL references the wrong secret version"
-    )
+    ensure($actual_secret_env == $expected_secret_env; "worker Job secret references or exact versions do not match")
   ]
 | all

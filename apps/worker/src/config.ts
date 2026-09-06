@@ -1,4 +1,5 @@
 type Environment = Record<string, string | undefined>;
+import { loadMediaStorageConfig, type MediaStorageConfiguration } from "@dabboba/config";
 
 export type RuntimeEnvironment = "development" | "test" | "production";
 
@@ -9,9 +10,11 @@ export const CLOUD_RUN_TASK_TIMEOUT_SECONDS = 600;
 export const QUEUE_VISIBILITY_SAFETY_MARGIN_SECONDS = 300;
 export const MIN_QUEUE_VISIBILITY_SECONDS =
   CLOUD_RUN_TASK_TIMEOUT_SECONDS + QUEUE_VISIBILITY_SAFETY_MARGIN_SECONDS;
-// Stop starting work after four minutes. The remaining six minutes cover one
-// already-started bounded unit, transaction rollback, and platform shutdown.
-export const MAX_WORKER_RUN_SECONDS = 240;
+// The production scheduler starts a run each minute. Stop starting work after
+// 45 seconds so normal runs release the session advisory lock before the next
+// tick; the lock still rejects a delayed overlap safely. The larger platform
+// timeout remains a fail-safe for one already-started bounded operation.
+export const MAX_WORKER_RUN_SECONDS = 45;
 
 export type WorkerConfig = {
   environment: RuntimeEnvironment;
@@ -30,6 +33,8 @@ export type WorkerConfig = {
   databaseOperationTimeoutMs: number;
   gcsBucket: string | null;
   gcsProjectId: string | null;
+  mediaStorageProvider?: MediaStorageConfiguration["mediaStorageProvider"];
+  supabaseStorage?: MediaStorageConfiguration["supabaseStorage"];
   notificationDeliveryUrl: string | null;
   notificationDeliveryToken: string | null;
   logLevel: "debug" | "info" | "warn" | "error";
@@ -90,13 +95,14 @@ export function loadWorkerConfig(env: Environment = process.env): WorkerConfig {
   }
 
   const gcsBucket = optional(env, "GCS_BUCKET");
+  const mediaStorage = loadMediaStorageConfig(env, environment);
   const notificationDeliveryUrlRaw = optional(env, "NOTIFICATION_DELIVERY_URL");
   const notificationDeliveryUrl = notificationDeliveryUrlRaw
     ? validateUrl(notificationDeliveryUrlRaw, "NOTIFICATION_DELIVERY_URL", ["http:", "https:"])
     : null;
 
   if (environment === "production") {
-    if (!gcsBucket) throw new Error("GCS_BUCKET is required in production");
+    if (!gcsBucket && !mediaStorage.supabaseStorage) throw new Error("GCS_BUCKET or Supabase Storage is required in production");
     if (notificationDeliveryUrl) {
       throw new Error(
         "NOTIFICATION_DELIVERY_URL is disabled in production until receiver-enforced idempotency is implemented",
@@ -137,6 +143,7 @@ export function loadWorkerConfig(env: Environment = process.env): WorkerConfig {
     databaseOperationTimeoutMs: integer(env, "WORKER_DATABASE_OPERATION_TIMEOUT_MS", 30_000, 1_000, 30_000),
     gcsBucket,
     gcsProjectId: optional(env, "GCS_PROJECT_ID"),
+    ...mediaStorage,
     notificationDeliveryUrl,
     notificationDeliveryToken: optional(env, "NOTIFICATION_DELIVERY_TOKEN"),
     logLevel: logLevel(env),

@@ -1,6 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { Tabs } from "expo-router";
 import type { ComponentProps } from "react";
+import type { ColorValue } from "react-native";
 import { PpobaMachineIcon } from "@/components/PpobaMachineIcon";
 import {
   RootFloatingTabBar,
@@ -11,7 +12,7 @@ import { seed } from "@/design-system/seed";
 type IconName = ComponentProps<typeof Ionicons>["name"];
 
 function tabIcon(name: IconName) {
-  return ({ color, size }: { color: string; size: number }) => (
+  return ({ color, size }: { color: ColorValue; size: number }) => (
     <Ionicons name={name} color={color} size={size} />
   );
 }

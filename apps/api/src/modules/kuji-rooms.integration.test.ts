@@ -18,6 +18,7 @@ type RoomSnapshot = {
     position: number | null;
     peopleAhead: number;
     checkoutExpiresAt: string | null;
+    drawingExpiresAt: string | null;
   };
   active: { displayName: string; phase: string; checkoutExpiresAt: string | null } | null;
   waitingCount: number;
@@ -85,14 +86,28 @@ test("kuji room join, expiry, FIFO promotion, and leave stay server-authoritativ
       "INSERT INTO draw_probability_versions(product_id,version) VALUES($1,$2) RETURNING id",
       [targetProductId, version],
     );
-    await pool.query(
+    const poolEntry = await pool.query<{ id: string }>(
       `INSERT INTO draw_pool_entries(
          probability_version_id,prize_product_id,prize_name_snapshot,prize_image_url_snapshot,
          prize_sku_snapshot,prize_ip_id_snapshot,prize_category_snapshot,rarity,weight,
          initial_quantity,remaining_quantity
        ) SELECT $1,p.id,p.name,p.image_url,p.sku,p.ip_id,p.category,'A',1,50,50
-           FROM catalog_products p WHERE p.id=$2`,
+           FROM catalog_products p WHERE p.id=$2
+         RETURNING id`,
       [created.rows[0]!.id, prizeProductId],
+    );
+    await pool.query(
+      "INSERT INTO kuji_decks(probability_version_id,total_slots) VALUES($1,50)",
+      [created.rows[0]!.id],
+    );
+    await pool.query(
+      "INSERT INTO kuji_deck_tiers(probability_version_id,pool_entry_id,tier_code,tier_rank) VALUES($1,$2,'A',0)",
+      [created.rows[0]!.id, poolEntry.rows[0]!.id],
+    );
+    await pool.query(
+      `INSERT INTO kuji_slot_assignments(probability_version_id,slot_number,pool_entry_id)
+       SELECT $1,slot_number,$2 FROM generate_series(1,50) AS slot_number`,
+      [created.rows[0]!.id, poolEntry.rows[0]!.id],
     );
     await pool.query(
       "UPDATE draw_probability_versions SET status='ACTIVE',published_by=$2,published_at=now() WHERE id=$1",
@@ -281,6 +296,18 @@ test("kuji room join, expiry, FIFO promotion, and leave stay server-authoritativ
      WHERE id=$1`,
     [activeContenderEntryId],
   );
+  const drawingSnapshotResponse = await app.inject({
+    method: "GET",
+    url: `/v1/kuji/rooms/${contentionProductId}/entries/${activeContenderEntryId}`,
+    headers: auth(contenders[activeContenderIndex]!),
+  });
+  assert.equal(drawingSnapshotResponse.statusCode, 200, drawingSnapshotResponse.body);
+  const drawingSnapshot = drawingSnapshotResponse.json() as RoomSnapshot;
+  assert.equal(drawingSnapshot.viewer.state, "DRAWING");
+  assert.equal(drawingSnapshot.viewer.checkoutExpiresAt, null);
+  const drawingLeaseMs = Date.parse(drawingSnapshot.viewer.drawingExpiresAt!)
+    - Date.parse(drawingSnapshot.serverNow);
+  assert.ok(drawingLeaseMs > 299_000 && drawingLeaseMs <= 300_000);
   const drawingLeave = await app.inject({
     method: "DELETE",
     url: `/v1/kuji/rooms/${contentionProductId}/entries/${activeContenderEntryId}`,

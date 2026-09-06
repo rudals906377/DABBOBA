@@ -106,6 +106,7 @@ test("API and worker database identities are isolated around pgmq", {
       ["catalog_products", new Set(["select"])],
       ["draw_probability_versions", new Set(["select"])],
       ["draw_pool_entries", new Set(["select"])],
+      ["kuji_decks", new Set(["select"])],
       ["media_assets", new Set(["select", "update"])],
       ["worker_dead_letters", new Set(["insert"])],
       ["worker_payment_reconciliations", new Set(["select", "insert", "update"])],

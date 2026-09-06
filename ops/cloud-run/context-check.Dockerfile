@@ -9,6 +9,7 @@ RUN test -f package.json \
   && test -f apps/api/src/index.ts \
   && test -f apps/worker/src/index.ts \
   && test -f packages/db/src/migrate.ts \
+  && test -f packages/media-storage/src/index.ts \
   && test -d packages/db/migrations \
   && test ! -e .git \
   && test ! -e .github \
@@ -22,6 +23,6 @@ RUN test -f package.json \
   && test ! -e packages/db/src/seed.ts \
   && ! find . -type f \
     \( -name '.env' -o -name '.env.*' -o -name '.DS_Store' \
-       -o -name '*.test.ts' -o -name '*.integration.test.ts' \
+       -o -name '*.test.ts' -o -name '*.integration.test.ts' -o -name '*.conformance.ts' \
        -o -name '*.test-d.ts' -o -name '*.tsbuildinfo' \) \
     -print -quit | grep -q .

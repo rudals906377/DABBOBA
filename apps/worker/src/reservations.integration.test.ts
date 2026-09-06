@@ -68,14 +68,28 @@ test(
       "INSERT INTO draw_probability_versions(product_id,version) VALUES($1,1) RETURNING id",
       [productId],
     );
-    await fixturePool.query(
+    const poolEntry = await fixturePool.query<{ id: string }>(
       `INSERT INTO draw_pool_entries(
          probability_version_id,prize_product_id,prize_name_snapshot,prize_image_url_snapshot,
          prize_sku_snapshot,prize_ip_id_snapshot,prize_category_snapshot,rarity,weight,
          initial_quantity,remaining_quantity
        ) SELECT $1,p.id,p.name,p.image_url,p.sku,p.ip_id,p.category,'A',1,5,5
-           FROM catalog_products p WHERE p.id=$2`,
+           FROM catalog_products p WHERE p.id=$2
+       RETURNING id`,
       [version.rows[0]!.id, prizeProductId],
+    );
+    await fixturePool.query(
+      "INSERT INTO kuji_decks(probability_version_id,total_slots) VALUES($1,5)",
+      [version.rows[0]!.id],
+    );
+    await fixturePool.query(
+      "INSERT INTO kuji_deck_tiers(probability_version_id,pool_entry_id,tier_code,tier_rank) VALUES($1,$2,'A',0)",
+      [version.rows[0]!.id, poolEntry.rows[0]!.id],
+    );
+    await fixturePool.query(
+      `INSERT INTO kuji_slot_assignments(probability_version_id,slot_number,pool_entry_id)
+       SELECT $1,slot_number,$2 FROM generate_series(1,5) AS slot_number`,
+      [version.rows[0]!.id, poolEntry.rows[0]!.id],
     );
     await fixturePool.query(
       "UPDATE draw_probability_versions SET status='ACTIVE',published_by=$2,published_at=now() WHERE id=$1",

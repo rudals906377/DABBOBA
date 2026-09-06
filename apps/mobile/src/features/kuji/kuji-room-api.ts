@@ -37,6 +37,7 @@ export type KujiRoomViewer = {
   position: number | null;
   peopleAhead: number;
   checkoutExpiresAt: string | null;
+  drawingExpiresAt: string | null;
 };
 
 export type KujiRoomSnapshot = {
@@ -176,6 +177,7 @@ function readViewer(value: unknown): KujiRoomViewer {
     || typeof value.entryId !== "string"
     || !(value.position === null || (typeof value.position === "number" && Number.isInteger(value.position) && value.position >= 0))
     || !(value.checkoutExpiresAt === null || typeof value.checkoutExpiresAt === "string")
+    || !(value.drawingExpiresAt === null || typeof value.drawingExpiresAt === "string")
   ) {
     throw invalidSnapshot();
   }
@@ -185,6 +187,7 @@ function readViewer(value: unknown): KujiRoomViewer {
     position: value.position,
     peopleAhead: readNonNegativeInteger(value.peopleAhead, "peopleAhead"),
     checkoutExpiresAt: value.checkoutExpiresAt,
+    drawingExpiresAt: value.drawingExpiresAt,
   };
 }
 

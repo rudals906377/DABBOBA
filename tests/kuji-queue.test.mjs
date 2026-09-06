@@ -118,15 +118,14 @@ test("native kuji products expose a footer-free room gate with live results befo
   assert.match(queueScreen, /대기를 취소할까요/);
   assert.doesNotMatch(queueScreen, /Math\.random|결제 완료|추첨권 발급 완료/);
   assert.match(drawRoute, /KujiDrawScreen/);
-  for (const developmentOnlyRoute of [drawRoute, previewRoute]) {
-    assert.match(developmentOnlyRoute, /import \{ Redirect \} from "expo-router"/);
-    assert.match(developmentOnlyRoute, /if \(!__DEV__\) return <Redirect href="\/\(tabs\)\/ppoba" \/>/);
-  }
-  for (const copy of ["쿠지 뽑기", "남은 시간", "쿠지 선택", "총 50장", "남은 상", "KUJI_EXAMPLE_REMAINING"]){
+  assert.doesNotMatch(drawRoute, /Redirect|__DEV__/);
+  assert.match(previewRoute, /import \{ Redirect \} from "expo-router"/);
+  assert.match(previewRoute, /if \(!__DEV__\) return <Redirect href="\/\(tabs\)\/ppoba" \/>/);
+  for (const copy of ["쿠지 뽑기", "남은 시간", "쿠지 선택", "남은 상", "board.totalSlots"]){
     assert.match(drawScreen, new RegExp(copy));
   }
   assert.match(drawScreen, /selectedTickets/);
-  assert.match(drawScreen, /const purchasedCount = normalizeDrawPurchaseCount/);
+  assert.match(drawScreen, /const purchasedCount = paidDrawRoute\?\.entitlementIds\.length \?\? 0/);
   assert.match(drawScreen, /<FloatingBottomActionPanel panelStyle=\{styles\.footer\}>/);
   assert.match(drawScreen, /accessibilityLabel=\{`구매한 \$\{purchasedCount\}장 중 \$\{selectedTickets\.length\}장 선택`\}/);
   assert.match(drawScreen, /선택 \{selectedTickets\.length\} \/ \{purchasedCount\}장/);
@@ -134,7 +133,10 @@ test("native kuji products expose a footer-free room gate with live results befo
   assert.match(drawScreen, /footerAction:\s*\{ flex: 1 \}/);
   assert.match(drawScreen, /hasExactKujiTicketSelection\(selectedTickets, purchasedCount\)/);
   assert.match(drawScreen, /selectedTickets\.length !== purchasedCount/);
-  assert.match(drawScreen, /buildKujiPreviewParams\(selectedTickets, "single"\)/);
+  assert.match(drawScreen, /fetchPaidKujiSelection/);
+  assert.match(drawScreen, /bindPaidKujiSlots/);
+  assert.match(drawScreen, /validateKujiSlotBinding/);
+  assert.match(drawScreen, /paidKujiRevealPath/);
   assert.doesNotMatch(drawScreen, /결제 금액 확인|buildKujiPaymentConfirmation/);
   assert.doesNotMatch(drawScreen, /오픈 방식 선택|chooseOpenMode|confirmOpenMode/);
   assert.match(drawScreen, /timerValue:\s*\{[^}]*fontFamily:\s*"Galmuri11"/);

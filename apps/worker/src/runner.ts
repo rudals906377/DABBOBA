@@ -2,7 +2,7 @@ import { createDatabasePool, type DatabasePool, WORKER_DATABASE_ROLE } from "@da
 import type { WorkerConfig } from "./config.js";
 import { processWorkerJob, type JobDependencies } from "./jobs.js";
 import { createLogger, errorFields, type Logger } from "./logger.js";
-import { DisabledMediaStore, GcsMediaStore } from "./media.js";
+import { RoutedMediaStore } from "./media.js";
 import { HttpNotificationDelivery, LogOnlyNotificationDelivery } from "./notifications.js";
 import { dispatchOutboxBatch, outboxRetryDelayMs } from "./outbox.js";
 import { ManualReviewPaymentProvider } from "./payments.js";
@@ -25,6 +25,16 @@ type QueueConsumerOperations = {
   deadLetterMessage: typeof deadLetterPgmqMessage;
 };
 
+type WorkerDatabasePoolFactory = typeof createDatabasePool;
+
+export type WorkerRunOperations = {
+  assertPgmqRuntime: typeof assertPgmqRuntime;
+  createPgmqOutboxPublisher: typeof createPgmqOutboxPublisher;
+  dispatchOutboxBatch: typeof dispatchOutboxBatch;
+  consumeQueue: typeof consumeQueue;
+  processJob: typeof processWorkerJob;
+};
+
 const queueConsumerOperations: QueueConsumerOperations = {
   readMessages: readPgmqMessages,
   processJob: processWorkerJob,
@@ -42,6 +52,7 @@ export type WorkerRunSummary = {
   queueRetried: number;
   queueDeadLettered: number;
   periodicCompleted: number;
+  periodicFailed: number;
 };
 
 function queueRetryDelaySeconds(readCount: number, baseDelayMs: number): number {
@@ -131,13 +142,21 @@ export async function runWorkerOnce(
   config: WorkerConfig,
   logger: Logger = createLogger(config.logLevel),
   shouldStop: () => boolean = () => false,
+  createPool: WorkerDatabasePoolFactory = createDatabasePool,
+  operations: WorkerRunOperations = {
+    assertPgmqRuntime,
+    createPgmqOutboxPublisher,
+    dispatchOutboxBatch,
+    consumeQueue,
+    processJob: processWorkerJob,
+  },
 ): Promise<WorkerRunSummary> {
   // Startup, connection, lock acquisition, and ACL attestation all consume the
   // same bounded work window. Slow startup reduces work instead of erasing the
   // margin to Cloud Run's 600-second task timeout.
   const deadline = Date.now() + config.maxRunSeconds * 1_000;
   const shouldContinue = () => Date.now() < deadline && !shouldStop();
-  const pool = createDatabasePool(config.databaseUrl, "dabboba-worker-job", {
+  const pool = createPool(config.databaseUrl, "dabboba-worker-job", {
     expectedRole: WORKER_DATABASE_ROLE,
     max: config.databasePoolMax,
     queryTimeoutMs: config.databaseOperationTimeoutMs,
@@ -154,6 +173,7 @@ export async function runWorkerOnce(
     queueRetried: 0,
     queueDeadLettered: 0,
     periodicCompleted: 0,
+    periodicFailed: 0,
   };
 
   try {
@@ -168,14 +188,12 @@ export async function runWorkerOnce(
       return summary;
     }
 
-    summary.pgmqVersion = await assertPgmqRuntime(pool);
-    const publisher = createPgmqOutboxPublisher(config.queueName);
+    summary.pgmqVersion = await operations.assertPgmqRuntime(pool);
+    const publisher = operations.createPgmqOutboxPublisher(config.queueName);
     const notificationDelivery = config.notificationDeliveryUrl
       ? new HttpNotificationDelivery(config.notificationDeliveryUrl, config.notificationDeliveryToken)
       : new LogOnlyNotificationDelivery(logger);
-    const mediaStore = config.gcsBucket
-      ? new GcsMediaStore(config.gcsBucket, config.gcsProjectId)
-      : new DisabledMediaStore(logger);
+    const mediaStore = new RoutedMediaStore(config, logger);
     const dependencies: JobDependencies = {
       pool,
       config,
@@ -193,27 +211,63 @@ export async function runWorkerOnce(
       jobAttempts: config.jobAttempts,
       jobBackoffMs: config.jobBackoffMs,
     };
+    const periodicFailures: Array<{ kind: string; error: unknown }> = [];
 
-    const firstDispatch = await dispatchOutboxBatch(pool, publisher, dispatchOptions, logger, shouldContinue);
-    summary.outboxPublished += firstDispatch.published;
-    summary.outboxDeferred += firstDispatch.deferred;
-    await consumeQueue(pool, dependencies, config, summary, seenMessageIds, deadline, shouldStop);
-
+    // Lease expiry is latency-sensitive. Run periodic reconciliation before a
+    // queue backlog can consume this short, once-per-minute execution window.
     for (const job of [
       { kind: "reservation.sweep" } as const,
       { kind: "payment.reconcile" } as const,
       { kind: "media.cleanup" } as const,
     ]) {
       if (!shouldContinue()) break;
-      await processWorkerJob(dependencies, job);
-      summary.periodicCompleted += 1;
+      try {
+        await operations.processJob(dependencies, job);
+        summary.periodicCompleted += 1;
+      } catch (error) {
+        summary.periodicFailed += 1;
+        periodicFailures.push({ kind: job.kind, error });
+        logger.error(
+          { periodicJobKind: job.kind, ...errorFields(error) },
+          "Periodic worker job failed; continuing to outbox and queue work",
+        );
+      }
     }
 
+    const firstDispatch = await operations.dispatchOutboxBatch(
+      pool,
+      publisher,
+      dispatchOptions,
+      logger,
+      shouldContinue,
+    );
+    summary.outboxPublished += firstDispatch.published;
+    summary.outboxDeferred += firstDispatch.deferred;
+    await operations.consumeQueue(pool, dependencies, config, summary, seenMessageIds, deadline, shouldStop);
+
     if (shouldContinue()) {
-      const secondDispatch = await dispatchOutboxBatch(pool, publisher, dispatchOptions, logger, shouldContinue);
+      const secondDispatch = await operations.dispatchOutboxBatch(
+        pool,
+        publisher,
+        dispatchOptions,
+        logger,
+        shouldContinue,
+      );
       summary.outboxPublished += secondDispatch.published;
       summary.outboxDeferred += secondDispatch.deferred;
-      await consumeQueue(pool, dependencies, config, summary, seenMessageIds, deadline, shouldStop);
+      await operations.consumeQueue(pool, dependencies, config, summary, seenMessageIds, deadline, shouldStop);
+    }
+
+    if (periodicFailures.length) {
+      const failedPeriodicJobs = periodicFailures.map(({ kind }) => kind);
+      logger.error(
+        { ...summary, failedPeriodicJobs },
+        "Periodic worker work failed after queue processing; execution will be retried",
+      );
+      throw new AggregateError(
+        periodicFailures.map(({ error }) => error),
+        `Periodic worker jobs failed after queue processing: ${failedPeriodicJobs.join(", ")}`,
+      );
     }
 
     logger.info(summary, "Finite DABBOBA worker execution completed");

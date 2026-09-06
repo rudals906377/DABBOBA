@@ -188,7 +188,7 @@ export default function App() {
 
   return (
     <SafeAreaProvider>
-      <StatusBar style="dark" backgroundColor="#F5F5F1" />
+      <StatusBar style="dark" />
       <SafeAreaView style={styles.safeArea} edges={["top", "right", "bottom", "left"]}>
         {shellConfiguration ? (
           <WebView
@@ -278,7 +278,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#F5F5F1",
   },
   loadingLayer: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     alignItems: "center",
     justifyContent: "center",
     gap: 14,
@@ -298,7 +298,7 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
   errorLayer: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: 28,

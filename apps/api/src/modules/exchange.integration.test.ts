@@ -80,10 +80,7 @@ test(
       [productId],
     );
 
-    const createDrawDefinition = async (
-      drawProductId: string,
-      category: "gacha" | "kuji",
-    ) => {
+    const createDrawDefinition = async (drawProductId: string) => {
       const version = await pool.query<{ id: string }>(
         "INSERT INTO draw_probability_versions(product_id,version) VALUES($1,1) RETURNING id",
         [drawProductId],
@@ -95,17 +92,17 @@ test(
         ) VALUES($1,$2,'교환 테스트 상품',NULL,$3,$4,'figure','A',1) RETURNING id`,
         [version.rows[0]!.id, productId, `EXCHANGE-${suffix.toUpperCase()}`, ipId],
       );
+      await pool.query(
+        "UPDATE draw_probability_versions SET status='ACTIVE',published_by=$2,published_at=now() WHERE id=$1",
+        [version.rows[0]!.id, author.actor.userId],
+      );
       return {
-        category,
         drawProductId,
         poolEntryId: poolEntry.rows[0]!.id,
         versionId: version.rows[0]!.id,
       };
     };
-    const drawDefinitions = {
-      GACHA: await createDrawDefinition(gachaDrawProductId, "gacha"),
-      KUJI: await createDrawDefinition(kujiDrawProductId, "kuji"),
-    };
+    const gachaDrawDefinition = await createDrawDefinition(gachaDrawProductId);
 
     const addInventory = async (
       ownerId: string,
@@ -130,11 +127,15 @@ test(
         drawPrizeProductId?: string;
       } = {},
     ) => {
-      const definition = drawDefinitions[sourceType];
+      if (sourceType === "KUJI") {
+        return addInventory(ownerId, "KUJI", status);
+      }
+      const definition = gachaDrawDefinition;
+      const drawOwnerId = overrides.drawOwnerId ?? ownerId;
       const order = await pool.query<{ id: string }>(
         `INSERT INTO orders(user_id,status,subtotal,total,paid_at)
          VALUES($1,'PAID',1000,1000,now()) RETURNING id`,
-        [ownerId],
+        [drawOwnerId],
       );
       const line = await pool.query<{ id: string }>(
         `INSERT INTO order_lines(
@@ -144,26 +145,24 @@ test(
         [
           order.rows[0]!.id,
           definition.drawProductId,
-          `교환 테스트 ${sourceType === "GACHA" ? "가챠" : "쿠지"}`,
-          definition.category,
+          "교환 테스트 가챠",
+          "gacha",
           definition.versionId,
         ],
       );
       const entitlement = await pool.query<{ id: string }>(
         `INSERT INTO draw_entitlements(
-          order_line_id,user_id,product_id,probability_version_id,status,consumed_at
-        ) VALUES($1,$2,$3,$4,'CONSUMED',now()) RETURNING id`,
-        [line.rows[0]!.id, ownerId, definition.drawProductId, definition.versionId],
+          order_line_id,user_id,product_id,probability_version_id
+        ) VALUES($1,$2,$3,$4) RETURNING id`,
+        [line.rows[0]!.id, drawOwnerId, definition.drawProductId, definition.versionId],
       );
       const inventory = await pool.query<{ id: string }>(
         `INSERT INTO inventory_units(owner_id,product_id,source_type,source_id,status)
-         VALUES($1,$2,$3,$4,$5) RETURNING id`,
+         VALUES($1,$2,'GACHA',$3,'OWNED') RETURNING id`,
         [
-          ownerId,
-          overrides.inventoryProductId ?? productId,
-          sourceType,
-          overrides.sourceId === undefined ? entitlement.rows[0]!.id : overrides.sourceId,
-          status,
+          drawOwnerId,
+          productId,
+          entitlement.rows[0]!.id,
         ],
       );
       const inventoryId = inventory.rows[0]!.id;
@@ -177,15 +176,40 @@ test(
         )`,
         [
           entitlement.rows[0]!.id,
-          overrides.drawOwnerId ?? ownerId,
+          drawOwnerId,
           definition.drawProductId,
           definition.poolEntryId,
-          overrides.drawPrizeProductId ?? productId,
+          productId,
           inventoryId,
           "0".repeat(64),
           "1".repeat(64),
         ],
       );
+      await pool.query(
+        "UPDATE draw_entitlements SET status='CONSUMED',consumed_at=now() WHERE id=$1",
+        [entitlement.rows[0]!.id],
+      );
+      if (
+        drawOwnerId !== ownerId
+        || status !== "OWNED"
+        || overrides.sourceId !== undefined
+        || overrides.inventoryProductId !== undefined
+        || overrides.drawPrizeProductId !== undefined
+      ) {
+        await pool.query(
+          `UPDATE inventory_units
+           SET owner_id=$2,product_id=$3,source_id=$4,status=$5
+           WHERE id=$1`,
+          [
+            inventoryId,
+            ownerId,
+            overrides.inventoryProductId
+              ?? (overrides.drawPrizeProductId === undefined ? productId : gachaDrawProductId),
+            overrides.sourceId === undefined ? entitlement.rows[0]!.id : overrides.sourceId,
+            status,
+          ],
+        );
+      }
       return inventoryId;
     };
     const mutate = (

@@ -29,6 +29,15 @@ export function kujiDrawingExpiry(startedAt: Date): Date {
   return new Date(startedAt.getTime() + KUJI_DRAW_LEASE_SECONDS * 1_000);
 }
 
+export async function lockKujiProductRoomAdvisory(
+  client: DatabaseClient,
+  productId: string,
+): Promise<void> {
+  await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1::text,0))", [
+    `kuji-room:${productId}`,
+  ]);
+}
+
 export async function lockKujiRoomAdvisories(
   client: DatabaseClient,
   input: { userId: string; productId: string },
@@ -36,9 +45,7 @@ export async function lockKujiRoomAdvisories(
   await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1::text,0))", [
     `kuji-user:${input.userId}`,
   ]);
-  await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1::text,0))", [
-    `kuji-room:${input.productId}`,
-  ]);
+  await lockKujiProductRoomAdvisory(client, input.productId);
 }
 
 export async function lockExistingKujiRoom(
@@ -103,6 +110,7 @@ export async function promoteNextKujiRoomEntryLocked(
         AND EXISTS (
           SELECT 1
             FROM draw_probability_versions v
+            JOIN kuji_decks deck ON deck.probability_version_id=v.id
             JOIN draw_pool_entries e ON e.probability_version_id=v.id
            WHERE v.product_id=p.id
              AND v.status='ACTIVE'
@@ -199,7 +207,7 @@ export async function expireLockedKujiOrderDrawing(
 
 export async function completeLockedKujiOrderRoomIfDrawn(
   client: DatabaseClient,
-  input: { orderId: string; serverNow: Date },
+  input: { orderId: string; productId: string; serverNow: Date },
 ): Promise<boolean> {
   const remaining = await client.query<{ count: string }>(
     `SELECT count(*) AS count
@@ -208,18 +216,31 @@ export async function completeLockedKujiOrderRoomIfDrawn(
       WHERE l.order_id=$1 AND e.status='AVAILABLE'`,
     [input.orderId],
   );
-  if (Number(remaining.rows[0]!.count) > 0) return false;
+  let completed = false;
+  if (Number(remaining.rows[0]!.count) === 0) {
+    const transition = await client.query<{ product_id: string }>(
+      `UPDATE kuji_room_entries
+          SET state='COMPLETED',completed_at=$2,resolved_at=$2
+        WHERE order_id=$1 AND state='DRAWING'
+        RETURNING product_id`,
+      [input.orderId, input.serverNow],
+    );
+    if (transition.rowCount) {
+      const transitionedProductId = transition.rows[0]!.product_id;
+      if (transitionedProductId !== input.productId) {
+        throw new Error(`Kuji room product changed for order ${input.orderId}`);
+      }
+      await promoteNextKujiRoomEntryLocked(client, {
+        productId: input.productId,
+        serverNow: input.serverNow,
+      });
+      completed = true;
+    }
+  }
 
-  const completed = await client.query<{ product_id: string }>(
-    `UPDATE kuji_room_entries
-        SET state='COMPLETED',completed_at=$2,resolved_at=$2
-      WHERE order_id=$1 AND state='DRAWING'
-      RETURNING product_id`,
-    [input.orderId, input.serverNow],
-  );
-  if (!completed.rowCount) return false;
-  const productId = completed.rows[0]!.product_id;
-  await promoteNextKujiRoomEntryLocked(client, { productId, serverNow: input.serverNow });
-  await bumpKujiRoomVersion(client, productId);
-  return true;
+  // Every committed reveal changes the public tier projection. Keep its version
+  // moving for partial and expired-room consumes as well as final completion,
+  // while representing a final completion and its FIFO promotion with one bump.
+  await bumpKujiRoomVersion(client, input.productId);
+  return completed;
 }

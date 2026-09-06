@@ -1,7 +1,7 @@
-import { StyleSheet, View } from "react-native";
+import { StyleSheet, View, type ColorValue } from "react-native";
 
 type PpobaMachineIconProps = {
-  color: string;
+  color: ColorValue;
   size: number;
 };
 

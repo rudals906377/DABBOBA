@@ -10,6 +10,7 @@ import {
   assertDirectPurchaseAllowed,
   assertDrawPrizeSnapshotsCurrent,
   assertLatestDrawDraft,
+  assertNoUnfinishedKujiVersion,
   assertKujiRoomOrderBinding,
   assertUniqueDrawPrizeProductIds,
   createDrawSelectionEvidence,
@@ -151,6 +152,45 @@ test("kuji orders require one kuji-only product and a room entry", () => {
     (error: unknown) => error instanceof AppError && error.statusCode === 400,
   );
   assert.doesNotThrow(() => assertKujiRoomOrderBinding([{ category: "gacha" }], null));
+});
+
+test("only unfinished kuji versions block replacement publishing", async () => {
+  const untouched = {
+    async query() { throw new Error("gacha publishing must not query kuji in-flight state"); },
+  } as unknown as Queryable;
+  await assert.doesNotReject(assertNoUnfinishedKujiVersion(untouched, {
+    productId: "gacha-product",
+    category: "gacha",
+  }));
+
+  const observed: string[] = [];
+  const blocked = {
+    async query(sql: string) {
+      observed.push(sql);
+      if (sql.includes("status='ACTIVE'")) return { rowCount: 1, rows: [{ id: "active-kuji-version" }] };
+      return { rowCount: 1, rows: [{ blocked: true }] };
+    },
+  } as unknown as Queryable;
+  await assert.rejects(
+    assertNoUnfinishedKujiVersion(blocked, { productId: "kuji-product", category: "kuji" }),
+    (error: unknown) => error instanceof AppError
+      && error.statusCode === 409
+      && /미완료 고객 처리를 마친 뒤/.test(error.message),
+  );
+  assert.match(observed[1]!, /draw_entitlements[\s\S]*status='AVAILABLE'/);
+  assert.match(observed[1]!, /orders\.status='PENDING_PAYMENT'/);
+  assert.match(observed[1]!, /kuji_room_entries[\s\S]*state='CHECKOUT_PENDING'[\s\S]*order_id IS NULL/);
+
+  const terminal = {
+    async query(sql: string) {
+      if (sql.includes("status='ACTIVE'")) return { rowCount: 1, rows: [{ id: "active-kuji-version" }] };
+      return { rowCount: 1, rows: [{ blocked: false }] };
+    },
+  } as unknown as Queryable;
+  await assert.doesNotReject(assertNoUnfinishedKujiVersion(terminal, {
+    productId: "kuji-product",
+    category: "kuji",
+  }));
 });
 
 test("kuji payment, draw, and worker paths lock the room before payment or stock", async () => {
@@ -417,6 +457,8 @@ test("admin draw versions return the stored prize snapshot", async () => {
           published_by: "22222222-2222-4222-8222-222222222222",
           published_at: new Date("2026-08-24T00:00:00.000Z"),
           created_at: new Date("2026-08-23T00:00:00.000Z"),
+          total_slots: 50,
+          assignment_algorithm: "LEGACY_SINGLE_TIER_V1",
           entries: [{
             id: "33333333-3333-4333-8333-333333333333",
             prizeProductId: "prize-a",
@@ -443,6 +485,8 @@ test("admin draw versions return the stored prize snapshot", async () => {
   };
 
   assert.match(queries[1]!, /e\.prize_name_snapshot/);
+  assert.match(queries[1]!, /deck\.assignment_algorithm/);
+  assert.equal((result.items[0] as Record<string, unknown>).assignmentAlgorithm, "LEGACY_SINGLE_TIER_V1");
   assert.deepEqual(result.items[0]!.entries[0], {
     id: "33333333-3333-4333-8333-333333333333",
     prizeProductId: "prize-a",
@@ -455,6 +499,8 @@ test("admin draw versions return the stored prize snapshot", async () => {
     weight: 3,
     initialQuantity: 10,
     remainingQuantity: 5,
+    tierCode: null,
+    tierRank: null,
   });
 });
 
@@ -538,6 +584,7 @@ test("creating a draw draft validates and stores the canonical prize snapshot in
     prizeIpId: "ip-1",
     prizeCategory: "figure",
   });
+  assert.equal((responseBody as Record<string, unknown>).assignmentAlgorithm, null);
 });
 
 test("publishing a stale draft rolls back before replacing the active draw version", async () => {
@@ -548,7 +595,8 @@ test("publishing a stale draft rolls back before replacing the active draw versi
       if (sql === "BEGIN" || sql === "ROLLBACK") return { rowCount: null, rows: [] };
       if (sql.startsWith("DELETE FROM idempotency_keys")) return { rowCount: 0, rows: [] };
       if (sql.includes("INSERT INTO idempotency_keys")) return { rowCount: 1, rows: [{ id: "idem-publish" }] };
-      if (sql.startsWith("SELECT p.ip_id,s.on_hand")) return { rowCount: 1, rows: [{ ip_id: "ip-1", on_hand: 1 }] };
+      if (sql.startsWith("SELECT pg_advisory_xact_lock")) return { rowCount: 1, rows: [{}] };
+      if (sql.startsWith("SELECT p.ip_id,p.category,s.on_hand")) return { rowCount: 1, rows: [{ ip_id: "ip-1", category: "gacha", on_hand: 1 }] };
       if (sql.startsWith("SELECT id,status,version FROM draw_probability_versions")) return { rowCount: 1, rows: [{ id: "11111111-1111-4111-8111-111111111111", status: "DRAFT", version: 3 }] };
       if (sql.startsWith("SELECT version FROM draw_probability_versions")) return { rowCount: 1, rows: [{ version: 4 }] };
       throw new Error(`Unexpected query: ${sql}`);
@@ -569,6 +617,9 @@ test("publishing a stale draft rolls back before replacing the active draw versi
     url: "/v1/admin/products/draw-product/draw-versions/11111111-1111-4111-8111-111111111111/publish",
     routeOptions: { url: "/v1/admin/products/:productId/draw-versions/:versionId/publish" },
   }, {}), (error: unknown) => error instanceof AppError && error.statusCode === 409 && /더 최신 확률표 버전\(v4\)/.test(error.message));
+  const roomAdvisoryLock = queries.findIndex((sql) => sql.startsWith("SELECT pg_advisory_xact_lock"));
+  const productStockLock = queries.findIndex((sql) => sql.startsWith("SELECT p.ip_id,p.category,s.on_hand"));
+  assert.ok(roomAdvisoryLock >= 0 && roomAdvisoryLock < productStockLock);
   assert.equal(queries.some((sql) => sql.includes("SET status='RETIRED'")), false);
   assert.equal(queries.at(-1), "ROLLBACK");
 });
@@ -581,7 +632,8 @@ test("publishing revalidates prize-only active same-IP catalog state before acti
       if (sql === "BEGIN" || sql === "ROLLBACK") return { rowCount: null, rows: [] };
       if (sql.startsWith("DELETE FROM idempotency_keys")) return { rowCount: 0, rows: [] };
       if (sql.includes("INSERT INTO idempotency_keys")) return { rowCount: 1, rows: [{ id: "idem-publish-validation" }] };
-      if (sql.startsWith("SELECT p.ip_id,s.on_hand")) return { rowCount: 1, rows: [{ ip_id: "ip-1", on_hand: 1 }] };
+      if (sql.startsWith("SELECT pg_advisory_xact_lock")) return { rowCount: 1, rows: [{}] };
+      if (sql.startsWith("SELECT p.ip_id,p.category,s.on_hand")) return { rowCount: 1, rows: [{ ip_id: "ip-1", category: "gacha", on_hand: 1 }] };
       if (sql.startsWith("SELECT id,status,version FROM draw_probability_versions")) return { rowCount: 1, rows: [{ id: "11111111-1111-4111-8111-111111111111", status: "DRAFT", version: 4 }] };
       if (sql.startsWith("SELECT version FROM draw_probability_versions")) return { rowCount: 0, rows: [] };
       if (sql.startsWith("SELECT prize_product_id,prize_name_snapshot")) return { rowCount: 1, rows: [{
@@ -635,6 +687,7 @@ test("an already consumed draw returns immutable prize snapshot fields", async (
       if (sql.includes("INSERT INTO idempotency_keys")) return { rowCount: 1, rows: [{ id: "idem-1" }] };
       if (sql.includes("SELECT e.product_id,e.probability_version_id,l.order_id FROM draw_entitlements")) return { rowCount: 1, rows: [{ product_id: "draw-product", probability_version_id: "version-id", order_id: "order-id" }] };
       if (sql.includes("FROM kuji_room_entries WHERE order_id=$1")) return { rowCount: 0, rows: [] };
+      if (sql === "SELECT status FROM orders WHERE id=$1 FOR UPDATE") return { rowCount: 1, rows: [{ status: "PAID" }] };
       if (sql.startsWith("SELECT p.id FROM catalog_products")) return { rowCount: 1, rows: [{ id: "draw-product" }] };
       if (sql === "SELECT id FROM draw_probability_versions WHERE id=$1 FOR UPDATE") return { rowCount: 1, rows: [{ id: "version-id" }] };
       if (sql.startsWith("SELECT pg_advisory_xact_lock")) return { rowCount: 1, rows: [{}] };
@@ -706,6 +759,7 @@ test("a newly consumed draw returns the selected pool entry snapshot", async () 
       if (sql.includes("INSERT INTO idempotency_keys")) return { rowCount: 1, rows: [{ id: "idem-2" }] };
       if (sql.includes("SELECT e.product_id,e.probability_version_id,l.order_id FROM draw_entitlements")) return { rowCount: 1, rows: [{ product_id: "draw-product", probability_version_id: "version-id", order_id: "order-id" }] };
       if (sql.includes("FROM kuji_room_entries WHERE order_id=$1")) return { rowCount: 0, rows: [] };
+      if (sql === "SELECT status FROM orders WHERE id=$1 FOR UPDATE") return { rowCount: 1, rows: [{ status: "PAID" }] };
       if (sql.startsWith("SELECT p.id FROM catalog_products")) return { rowCount: 1, rows: [{ id: "draw-product" }] };
       if (sql === "SELECT id FROM draw_probability_versions WHERE id=$1 FOR UPDATE") return { rowCount: 1, rows: [{ id: "version-id" }] };
       if (sql.startsWith("SELECT pg_advisory_xact_lock")) return { rowCount: 1, rows: [{}] };

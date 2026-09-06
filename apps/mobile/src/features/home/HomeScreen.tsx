@@ -45,9 +45,10 @@ import {
   type DrawActivityItem,
   buildDrawActivityExamples,
   buildDrawActivityTickerWindow,
+  buildConfiguredHomeCollections,
   buildHomeCollections,
+  getContinuousTickerLoopDistance,
   getHomeProductCardWidth,
-  getTickerOverflowDistance,
   homeAnnouncementMessages,
 } from "@/features/home/home-feed";
 import { productSubjectTitle } from "@/features/shop/product-title";
@@ -68,6 +69,7 @@ const DRAW_ACTIVITY_ROW_HEIGHT = 40;
 const DRAW_ACTIVITY_VISIBLE_ROWS = 3;
 const DRAW_ACTIVITY_HOLD_MS = 4_000;
 const DRAW_ACTIVITY_RISE_MS = 1_050;
+const DRAW_ACTIVITY_MARQUEE_GAP = 24;
 
 type LoadSource = "live" | "cache" | "empty";
 
@@ -116,6 +118,9 @@ export function HomeScreen() {
   );
   const homeCollections = useMemo(() => {
     if (!snapshot) return [];
+    if (snapshot.homeSections?.configured) {
+      return buildConfiguredHomeCollections(snapshot.homeSections.items);
+    }
     const configured = buildHomeCollections(snapshot.ips, snapshot.products, DEFAULT_HOME_COLLECTION_IP_IDS);
     if (configured.length) return configured;
     return buildHomeCollections(snapshot.ips, snapshot.products, snapshot.ips.slice(0, 2).map((ip) => ip.id));
@@ -372,7 +377,7 @@ function DrawActivityPanel({
             <Animated.View style={{ transform: [{ translateY }] }}>
               {tickerItems.map((item, index) => (
                 <Pressable
-                  key={`${index}-${item.id}`}
+                  key={`${item.id}-${tickerItems.slice(0, index).filter((candidate) => candidate.id === item.id).length}`}
                   accessibilityRole="button"
                   accessibilityLabel={`${item.message} 상품 보기`}
                   accessibilityElementsHidden={index >= visibleRowCount}
@@ -406,7 +411,12 @@ function DrawActivityMarquee({ item }: { item: DrawActivityItem }) {
   const [textWidth, setTextWidth] = useState(0);
   const [reduceMotion, setReduceMotion] = useState(false);
   const translateX = useRef(new Animated.Value(0)).current;
-  const overflow = getTickerOverflowDistance(viewportWidth, textWidth);
+  const loopDistance = getContinuousTickerLoopDistance(
+    viewportWidth,
+    textWidth,
+    DRAW_ACTIVITY_MARQUEE_GAP,
+  );
+  const shouldLoop = loopDistance > 0;
 
   useEffect(() => {
     let active = true;
@@ -423,27 +433,17 @@ function DrawActivityMarquee({ item }: { item: DrawActivityItem }) {
   useEffect(() => {
     translateX.stopAnimation();
     translateX.setValue(0);
-    if (reduceMotion || overflow <= 0) return undefined;
+    if (reduceMotion || !shouldLoop) return undefined;
 
-    const animation = Animated.loop(Animated.sequence([
-      Animated.delay(900),
-      Animated.timing(translateX, {
-        toValue: -overflow,
-        duration: Math.max(2_600, overflow * 28),
-        easing: Easing.linear,
-        useNativeDriver: true,
-      }),
-      Animated.delay(700),
-      Animated.timing(translateX, {
-        toValue: 0,
-        duration: 260,
-        easing: Easing.out(Easing.cubic),
-        useNativeDriver: true,
-      }),
-    ]));
+    const animation = Animated.loop(Animated.timing(translateX, {
+      toValue: -loopDistance,
+      duration: Math.max(4_800, loopDistance * 28),
+      easing: Easing.linear,
+      useNativeDriver: true,
+    }));
     animation.start();
     return () => animation.stop();
-  }, [overflow, reduceMotion, translateX]);
+  }, [loopDistance, reduceMotion, shouldLoop, translateX]);
 
   return (
     <View
@@ -462,8 +462,30 @@ function DrawActivityMarquee({ item }: { item: DrawActivityItem }) {
           onMeasured={(width) => setTextWidth((current) => current === width ? current : width)}
         />
       </View>
-      <Animated.View style={[styles.activityTextTrack, { width: Math.max(textWidth, viewportWidth), transform: [{ translateX }] }]}>
-        <DrawActivityMessage item={item} />
+      <Animated.View
+        style={[
+          styles.activityTextTrack,
+          shouldLoop && styles.activityTextLoopTrack,
+          {
+            width: shouldLoop
+              ? textWidth * 2 + DRAW_ACTIVITY_MARQUEE_GAP
+              : Math.max(textWidth, viewportWidth),
+            transform: [{ translateX }],
+          },
+        ]}
+      >
+        <DrawActivityMessage
+          item={item}
+          width={shouldLoop ? textWidth : Math.max(textWidth, viewportWidth)}
+        />
+        {shouldLoop ? (
+          <>
+            <View style={styles.activityTextLoopGap} />
+            <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+              <DrawActivityMessage item={item} width={textWidth} />
+            </View>
+          </>
+        ) : null}
       </Animated.View>
     </View>
   );
@@ -473,16 +495,18 @@ function DrawActivityMessage({
   item,
   measure = false,
   onMeasured,
+  width,
 }: {
   item: DrawActivityItem;
   measure?: boolean;
   onMeasured?: (width: number) => void;
+  width?: number;
 }) {
   return (
     <Text
       numberOfLines={1}
       ellipsizeMode="clip"
-      style={[styles.activityText, measure && styles.activityMeasureText]}
+      style={[styles.activityText, measure && styles.activityMeasureText, width ? { width } : null]}
       onTextLayout={measure ? (event) => onMeasured?.(event.nativeEvent.lines[0]?.width ?? 0) : undefined}
     >
       <Text style={styles.activityPerson}>{item.personName}님</Text>
@@ -698,6 +722,8 @@ const styles = StyleSheet.create({
   activityDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.brand },
   activityTextViewport: { flex: 1, height: 20, justifyContent: "center", overflow: "hidden" },
   activityTextTrack: { justifyContent: "center" },
+  activityTextLoopTrack: { flexDirection: "row", alignItems: "center", justifyContent: "flex-start" },
+  activityTextLoopGap: { width: DRAW_ACTIVITY_MARQUEE_GAP },
   activityMeasureLayer: { position: "absolute", width: 10_000, opacity: 0 },
   activityMeasureText: { width: 10_000 },
   activityText: { color: colors.ink, fontSize: 12, lineHeight: 18, fontWeight: "600" },

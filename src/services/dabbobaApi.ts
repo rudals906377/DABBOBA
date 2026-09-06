@@ -1,3 +1,5 @@
+import type { components } from "../../packages/contracts/src/generated";
+
 const DEFAULT_PAGE_LIMIT = 100;
 const MAX_PAGE_REQUESTS = 100;
 const MAX_BRIDGE_MESSAGE_BYTES = 8_192;
@@ -264,15 +266,7 @@ export type ApiBlockResult = {
 
 export type ApiMediaPurpose = "PROFILE" | "POST" | "COMMENT" | "INQUIRY" | "EXCHANGE" | "CATALOG_REQUEST";
 
-export type ApiMediaUploadIntent = {
-  mediaId: string;
-  uploadUrl: string;
-  method: "POST";
-  fields: Record<string, string>;
-  fileFieldName: "file";
-  expiresAt: string;
-  maxBytes: number;
-};
+export type ApiMediaUploadIntent = components["schemas"]["MediaUploadIntent"];
 
 export type ApiMediaReady = {
   mediaId: string;
@@ -715,6 +709,8 @@ type DabbobaApiClientOptions = {
   configuration?: ApiRuntimeConfiguration;
   fetch?: typeof globalThis.fetch;
   createId?: () => string;
+  /** Explicit local test construction only; production builds always reject HTTP uploads. */
+  development?: boolean;
 };
 
 type RequestOptions = {
@@ -746,6 +742,7 @@ export class DabbobaApiClient {
   readonly configuration: ApiRuntimeConfiguration;
   private readonly fetchImplementation: typeof globalThis.fetch;
   private readonly createId: () => string;
+  private readonly developmentMediaUploads: boolean;
   private readonly mediaUploadStages = new Map<string, MediaUploadStage>();
   private readonly mediaUploadTasks = new Map<string, MediaUploadTask>();
   private readonly mediaUploadActionFingerprints = new Map<string, string>();
@@ -757,6 +754,8 @@ export class DabbobaApiClient {
     this.configuration = options.configuration ?? resolveApiRuntimeConfiguration();
     this.fetchImplementation = options.fetch ?? globalThis.fetch.bind(globalThis);
     this.createId = options.createId ?? createClientRequestId;
+    this.developmentMediaUploads = import.meta.env?.PROD !== true
+      && (options.development ?? import.meta.env?.DEV === true);
   }
 
   get remoteEnabled() {
@@ -1151,6 +1150,7 @@ export class DabbobaApiClient {
             mimeType: input.file.type,
             byteSize: input.file.size,
             checksumSha256: input.checksumSha256,
+            acceptedUploadMethods: ["POST", "PUT"],
           },
           requiresAuth: true,
           idempotencyKey: input.actionKey,
@@ -1166,7 +1166,7 @@ export class DabbobaApiClient {
         throw error;
       }
       this.assertMediaUploadSession(input.sessionToken);
-      this.mediaUploadUrl(intent, input.file.size);
+      this.mediaUploadRequest(intent, input.file, input.checksumSha256);
       stage = {
         fingerprint: input.fingerprint,
         intent,
@@ -1192,21 +1192,26 @@ export class DabbobaApiClient {
           "MEDIA_UPLOAD_INTENT_EXPIRED",
         );
       }
-      const uploadUrl = this.mediaUploadUrl(stage.intent, input.file.size);
-      const form = new FormData();
-      for (const [name, value] of Object.entries(stage.intent.fields)) form.append(name, value);
-      form.append(stage.intent.fileFieldName, input.file, input.file.name);
+      const upload = this.mediaUploadRequest(stage.intent, input.file, input.checksumSha256);
+      let body: File | FormData = input.file;
+      if (stage.intent.method === "POST") {
+        body = new FormData();
+        for (const [name, value] of Object.entries(stage.intent.fields)) body.append(name, value);
+        body.append(stage.intent.fileFieldName, input.file, input.file.name);
+      }
       let uploadResponse: Response;
       try {
-        uploadResponse = await this.fetchImplementation(uploadUrl.toString(), {
-          method: "POST",
-          body: form,
+        uploadResponse = await this.fetchImplementation(upload.url.toString(), {
+          method: stage.intent.method,
+          body,
+          ...(upload.headers ? { headers: upload.headers } : {}),
           credentials: "omit",
+          redirect: "error",
         });
       } catch {
         throw new DabbobaApiError("이미지를 저장소에 전송하지 못했습니다. 다시 시도해 주세요.", 0, "MEDIA_UPLOAD_FAILED");
       }
-      if (!uploadResponse.ok) {
+      if (!uploadResponse.ok || uploadResponse.redirected) {
         throw new DabbobaApiError("이미지 업로드가 완료되지 않았습니다. 다시 시도해 주세요.", uploadResponse.status, "MEDIA_UPLOAD_FAILED");
       }
       stage.uploaded = true;
@@ -1237,8 +1242,10 @@ export class DabbobaApiClient {
     return ready;
   }
 
-  private mediaUploadUrl(intent: ApiMediaUploadIntent, fileSize: number) {
-    if (intent.method !== "POST" || intent.fileFieldName !== "file" || intent.maxBytes !== fileSize) {
+  private mediaUploadRequest(intent: ApiMediaUploadIntent, file: File, checksumSha256: string): { url: URL; headers?: Record<string, string> } {
+    const invalid = () => new DabbobaApiError("업로드 정책이 선택한 파일과 일치하지 않습니다.", 502, "MEDIA_UPLOAD_POLICY_INVALID");
+    if (!intent || intent.maxBytes !== file.size || !Number.isSafeInteger(intent.maxBytes)
+      || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(intent.mediaId)) {
       throw new DabbobaApiError("업로드 정책이 선택한 파일과 일치하지 않습니다.", 502, "MEDIA_UPLOAD_POLICY_INVALID");
     }
     let uploadUrl: URL;
@@ -1247,10 +1254,38 @@ export class DabbobaApiClient {
     } catch {
       throw new DabbobaApiError("업로드 주소를 확인할 수 없습니다.", 502, "MEDIA_UPLOAD_POLICY_INVALID");
     }
-    if (uploadUrl.protocol !== "https:") {
+    const localHttp = this.developmentMediaUploads && uploadUrl.protocol === "http:"
+      && ["localhost", "127.0.0.1", "[::1]"].includes(uploadUrl.hostname);
+    if ((uploadUrl.protocol !== "https:" && !localHttp) || uploadUrl.username || uploadUrl.password || uploadUrl.hash) {
       throw new DabbobaApiError("안전한 업로드 주소가 아닙니다.", 502, "MEDIA_UPLOAD_POLICY_INVALID");
     }
-    return uploadUrl;
+    if (intent.method === "POST") {
+      if (intent.fileFieldName !== "file" || !intent.fields || Array.isArray(intent.fields)
+        || typeof intent.fields !== "object" || !Object.keys(intent.fields).length
+        || Object.values(intent.fields).some((value) => typeof value !== "string")
+        || "headers" in intent || "bodyEncoding" in intent) throw invalid();
+      return { url: uploadUrl };
+    }
+    if (intent.method !== "PUT" || intent.bodyEncoding !== "raw" || "fields" in intent || "fileFieldName" in intent
+      || !intent.headers || typeof intent.headers !== "object" || Array.isArray(intent.headers)) throw invalid();
+    const expected: Record<string, string> = {
+      "content-type": file.type,
+      "content-length": String(file.size),
+      "x-amz-content-sha256": "UNSIGNED-PAYLOAD",
+      "x-amz-meta-sha256": checksumSha256,
+      "x-amz-meta-media-id": intent.mediaId,
+    };
+    const headers: Record<string, string> = {};
+    const seen = new Set<string>();
+    for (const [name, value] of Object.entries(intent.headers)) {
+      const lower = name.toLowerCase();
+      if (!Object.hasOwn(expected, lower) || seen.has(lower) || value !== expected[lower]) throw invalid();
+      seen.add(lower);
+      // Content-Length is signed but forbidden to browser code. The exact raw File determines it.
+      if (lower !== "content-length") headers[lower] = value;
+    }
+    if (seen.size !== Object.keys(expected).length) throw invalid();
+    return { url: uploadUrl, headers };
   }
 
   private assertMediaUploadSession(expectedToken: string | null) {

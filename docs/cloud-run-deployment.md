@@ -9,14 +9,15 @@ scheduler step creates only its pre-approved trigger.
 
 - Run `ops/cloud-run/preflight.sh` first. It performs read-only `describe`,
   `list`, and IAM-policy checks and never requires mutation approval.
-- `build.sh`, `deploy.sh`, and `schedule-worker.sh` stop unless
+- `build.sh`, `deploy.sh`, `promote-api-candidate.sh`, and
+  `schedule-worker.sh` stop unless
   `DABBOBA_APPROVE_GCP_MUTATIONS=YES`, the configured gcloud project equals
   `DABBOBA_GCP_PROJECT_ID`, and that project is linked to exactly
   `DABBOBA_GCP_BILLING_ACCOUNT_ID`.
 - Raw database URLs and secret values are rejected. Only enabled, numeric Secret
   Manager versions are accepted; `latest` is forbidden.
 - API and worker deployment require an exact release attestation tied to the
-  reviewed `0033` checksum and successful runtime/worker role verification.
+  reviewed `0037` checksum and successful runtime/worker role verification.
   Scheduling additionally requires a successful manual execution attestation
   tied to the same immutable worker image tag. These values are operator gates,
   not substitutes for the underlying database and Job evidence.
@@ -44,6 +45,11 @@ scheduler step creates only its pre-approved trigger.
   then builds and publishes API, worker, and migration images under that single
   build. The three individual modes remain available for an explicitly scoped
   rebuild.
+- API releases use a unique lowercase `candidate-*` traffic tag. Deployment
+  creates a zero-traffic revision, the read-only smoke script probes its tagged
+  URL, and a separately approved promotion moves traffic to the exact attested
+  revision with `gcloud run services update-traffic --to-revisions`. A smoke
+  result for another image, tag, or revision cannot authorize promotion.
 
 ## Required operator inputs
 
@@ -54,6 +60,7 @@ export DABBOBA_GCP_PROJECT_ID='your-project-id'
 export DABBOBA_GCP_BILLING_ACCOUNT_ID='000000-000000-000000'
 export DABBOBA_ARTIFACT_REPOSITORY='dabboba'
 export DABBOBA_IMAGE_TAG='git-commit-or-release-id'
+export DABBOBA_API_CANDIDATE_TAG='candidate-git-commit-or-release-id'
 
 export DABBOBA_CLOUD_BUILD_BUCKET='existing-seoul-staging-bucket'
 export DABBOBA_CLOUD_BUILD_SERVICE_ACCOUNT='dabboba-build@your-project-id.iam.gserviceaccount.com'
@@ -72,17 +79,64 @@ export DABBOBA_MIGRATION_DATABASE_SECRET_VERSION='1'
 export DABBOBA_SESSION_PEPPER_SECRET='dabboba-session-pepper'
 export DABBOBA_SESSION_PEPPER_SECRET_VERSION='1'
 
-export DABBOBA_SUPABASE_URL='https://project-ref.supabase.co'
+export DABBOBA_SUPABASE_URL='https://abcdefghijklmnopqrst.supabase.co' # replace the 20-character example project ref
 export DABBOBA_WEB_ORIGINS='https://customer.example.com'
-export DABBOBA_GCS_BUCKET='existing-seoul-media-bucket'
+export DABBOBA_MEDIA_STORAGE_PROVIDER='supabase'
+export DABBOBA_SUPABASE_STORAGE_BUCKET='existing-private-media'
+export DABBOBA_SUPABASE_STORAGE_S3_ENDPOINT='https://abcdefghijklmnopqrst.storage.supabase.co/storage/v1/s3'
+export DABBOBA_SUPABASE_STORAGE_S3_REGION='ap-northeast-2' # verify the actual Supabase project region
+
+# These are Secret Manager resource IDs and exact numeric versions, never keys.
+export DABBOBA_API_SUPABASE_STORAGE_SERVICE_KEY_SECRET='dabboba-api-storage-service-key'
+export DABBOBA_API_SUPABASE_STORAGE_SERVICE_KEY_SECRET_VERSION='1'
+export DABBOBA_API_SUPABASE_STORAGE_S3_ACCESS_KEY_ID_SECRET='dabboba-api-storage-s3-access-key'
+export DABBOBA_API_SUPABASE_STORAGE_S3_ACCESS_KEY_ID_SECRET_VERSION='1'
+export DABBOBA_API_SUPABASE_STORAGE_S3_SECRET_ACCESS_KEY_SECRET='dabboba-api-storage-s3-secret-key'
+export DABBOBA_API_SUPABASE_STORAGE_S3_SECRET_ACCESS_KEY_SECRET_VERSION='1'
+export DABBOBA_WORKER_SUPABASE_STORAGE_SERVICE_KEY_SECRET='dabboba-worker-storage-service-key'
+export DABBOBA_WORKER_SUPABASE_STORAGE_SERVICE_KEY_SECRET_VERSION='1'
+export DABBOBA_WORKER_SUPABASE_STORAGE_S3_ACCESS_KEY_ID_SECRET='dabboba-worker-storage-s3-access-key'
+export DABBOBA_WORKER_SUPABASE_STORAGE_S3_ACCESS_KEY_ID_SECRET_VERSION='1'
+export DABBOBA_WORKER_SUPABASE_STORAGE_S3_SECRET_ACCESS_KEY_SECRET='dabboba-worker-storage-s3-secret-key'
+export DABBOBA_WORKER_SUPABASE_STORAGE_S3_SECRET_ACCESS_KEY_SECRET_VERSION='1'
+
+# Retain this only while existing GCS objects or POST-only clients need it.
+# export DABBOBA_GCS_BUCKET='existing-seoul-media-bucket'
 
 # Set only after completing the public API abuse-control review below.
 export DABBOBA_PUBLIC_API_ABUSE_CONTROLS_VERIFIED='YES'
 ```
 
+Every release command requires all four API, worker, migration, and scheduler
+service-account variables above, verifies that each account exists in the
+selected project, and requires them to be pairwise distinct. This complete peer
+set is required even when the command operates on only one component, so an
+omitted peer cannot hide identity reuse. The API, worker, and migration database
+secret IDs plus the session-pepper secret ID are likewise all required and
+pairwise distinct on every release command; only each component's secret
+version remains component-specific.
+
+Supabase media configuration additionally declares all six distinct API/Worker
+Storage secret resource IDs and their numeric versions. Each deploy grants no
+permissions: it reads and verifies only that runtime's existing secret-level
+access. Do not reuse database, migration, pepper, or peer-runtime secret IDs.
+Never export raw `SUPABASE_STORAGE_SERVICE_KEY`, `SUPABASE_STORAGE_S3_ACCESS_KEY_ID`
+or `SUPABASE_STORAGE_S3_SECRET_ACCESS_KEY` in the deployment shell. Those values
+are delivered to the deployed container only by Secret Manager references.
+Numeric environment-secret version pinning follows the
+[Cloud Run secret guidance](https://cloud.google.com/run/docs/configuring/services/secrets).
+
+The media flag defaults to `gcs` for old installations, but new target deployments
+explicitly select `supabase`. Keeping `DABBOBA_GCS_BUCKET` supports old objects;
+switching the default back to `gcs` must retain the full secondary Supabase config
+for already-uploaded Supabase objects. Partial config and local HTTP are rejected.
+Supabase selection removes the media GCS requirement, **not** the existing
+Cloud Build staging-bucket prerequisite. No script creates a Storage bucket,
+secret payload, IAM grant, or paid resource implicitly.
+
 Every runtime service account needs a secret-level
 `roles/secretmanager.secretAccessor` binding only on its listed secret. Apply
-all migrations through `0033_exchange_bundle_items.sql`. For
+all migrations through `0037_draw_result_published_version.sql`. For
 a fresh database, or only when deliberately rotating a credential, provision
 both restricted login roles from a controlled operator host by streaming their
 separately generated passwords to:
@@ -97,20 +151,26 @@ accepted as command arguments, printed, or stored in migration SQL; store the
 resulting Session-pooler URLs directly in their separate API and worker
 secrets. These provisioning CLIs remain host/operator-only and are not present
 in any runtime image. The migration account must be distinct from API and
-worker accounts. The scheduler
-account must also be distinct and needs `roles/run.invoker` on only the worker
-Job. The Cloud Scheduler service agent must retain
+worker accounts. The scheduler account must also be distinct. The worker Job's
+entire direct IAM policy must contain exactly one unconditioned binding:
+`roles/run.invoker` for that scheduler account alone. Extra members, public
+principals, `roles/run.jobsExecutor`, custom roles, conditions, and any other
+Job-local binding block scheduling. Preflight also rejects any public principal
+binding returned from the project/folder/organization hierarchy. The Cloud
+Scheduler service agent must retain
 `roles/cloudscheduler.serviceAgent`; do not grant that role to the scheduler
 account. The operator creating the schedule also needs
 `iam.serviceAccounts.actAs` on that account. The Cloud Build account needs
 Artifact Registry write, source-staging object, and Logging write permissions.
 Grant API/worker bucket permissions only when the existing media bucket and
 retention policy have been reviewed; do not use downloadable service-account
-keys. Do not grant any DABBOBA runtime account project-level
-`roles/secretmanager.secretAccessor`; grant only the exact secret-level bindings
-listed above. Preflight detects direct service-account members on project and
-secret policies. It cannot expand Google Group membership or inherited
-organization/folder policies, so review those separately before release.
+keys. Do not grant any principal project-level
+`roles/secretmanager.secretAccessor`; preflight rejects every member of that
+role. Grant only the exact secret-level bindings listed above, where each secret
+policy is also checked as a one-account allow-list. This automated check does
+not resolve custom roles containing `secretmanager.versions.access` and does
+not expand group membership or inherited folder/organization secret access;
+audit those effective permissions separately before release.
 
 `DABBOBA_PUBLIC_API_ABUSE_CONTROLS_VERIFIED=YES` is a deliberate, fail-closed
 operator attestation, not an automatically created control. Set it only after
@@ -154,18 +214,56 @@ DABBOBA_APPROVE_GCP_MUTATIONS=YES ops/cloud-run/deploy.sh migration
 # gcloud run jobs execute dabboba-migration --wait \
 #   --project="$DABBOBA_GCP_PROJECT_ID" --region=asia-northeast3
 
-# Set this exact, non-secret value only after migration 0033's checksum and the
+# Set this exact, non-secret value only after migration 0037's checksum and the
 # dabboba_runtime/dabboba_worker role suites pass against the target database.
-export DABBOBA_DATABASE_RELEASE_ATTESTATION='0033:1a4f88b4bc6707d9b985c0a29fb0fac1dda228af4fd87850d4eb6b1f7bd60c62:runtime+worker'
+export DABBOBA_DATABASE_RELEASE_ATTESTATION='0037:b2f4a6eb8f79685c33d4fbd3eb63b1d947182dc78fa2dd5596663319f2c7ffa9:runtime+worker'
 
 DABBOBA_APPROVE_GCP_MUTATIONS=YES ops/cloud-run/deploy.sh worker
+# Normal releases require an existing public service with a 100% serving
+# baseline and create a new revision at 0% production traffic. A private first
+# revision cannot enter this path before its dedicated bootstrap promotion.
+# Use a new candidate tag every release.
 DABBOBA_APPROVE_GCP_MUTATIONS=YES ops/cloud-run/deploy.sh api
+
+# Read-only Google Cloud inspection plus HTTPS GET smoke probes. The script
+# prints the exact revision and non-secret attestation only after all checks
+# pass and the candidate is re-confirmed at 0% traffic.
+bash ops/cloud-run/smoke-api-candidate.sh
+export DABBOBA_API_CANDIDATE_REVISION='dabboba-api-00002-abc'
+export DABBOBA_API_CANDIDATE_SMOKE_ATTESTATION='api-candidate:git-commit-or-release-id:candidate-git-commit-or-release-id:dabboba-api-00002-abc:PASSED'
+
+# Separate, explicitly approved traffic mutation. This rechecks the same image,
+# tag, exact attested latest-ready revision, 0% state, and smoke attestation
+# before routing traffic to that revision name.
+DABBOBA_APPROVE_GCP_MUTATIONS=YES bash ops/cloud-run/promote-api-candidate.sh
+
+# First service only: create the first revision with Invoker IAM still enabled,
+# without --no-traffic (Cloud Run rejects that flag for a new service). It is
+# not publicly callable while it necessarily owns 100% service traffic.
+# This has a second, explicit bootstrap approval and cannot target an existing
+# service. Before create it reads project, folder, and organization IAM and
+# fails closed if any ancestor policy is unreadable or grants any role to
+# allUsers/allAuthenticatedUsers. After create it checks service IAM before the
+# bootstrap smoke first proves an unauthenticated request is denied, then
+# repeats the route probes with the operator token.
+DABBOBA_APPROVE_GCP_MUTATIONS=YES \
+DABBOBA_APPROVE_PRIVATE_API_BOOTSTRAP=YES \
+  ops/cloud-run/deploy.sh api-bootstrap
+bash ops/cloud-run/smoke-api-candidate.sh --private-bootstrap
+export DABBOBA_API_CANDIDATE_REVISION='dabboba-api-00001-abc'
+export DABBOBA_API_CANDIDATE_SMOKE_ATTESTATION='api-candidate:git-commit-or-release-id:candidate-git-commit-or-release-id:dabboba-api-00001-abc:PASSED'
+DABBOBA_APPROVE_GCP_MUTATIONS=YES \
+  bash ops/cloud-run/promote-api-candidate.sh --private-bootstrap
 
 # Separately approve and manually execute this exact worker image once. Inspect
 # successful exit, queue/DLQ, outbox, and reconciliation state before attesting.
 # gcloud run jobs execute dabboba-worker --wait \
 #   --project="$DABBOBA_GCP_PROJECT_ID" --region=asia-northeast3
-export DABBOBA_WORKER_EXECUTION_ATTESTATION="worker-job:${DABBOBA_IMAGE_TAG}:SUCCEEDED"
+# Print/record this only AFTER inspecting that exact deployed Job's successful
+# execution and its unchanged provider/bucket/secret-version configuration.
+export DABBOBA_WORKER_EXECUTION_ATTESTATION="$(
+  bash -c 'source ops/cloud-run/_common.sh; expected_worker_execution_attestation'
+)"
 
 # Only after that execution and the job-level invoker IAM binding are verified.
 ops/cloud-run/preflight.sh scheduler
@@ -177,31 +275,89 @@ secret version, migration checksums, and target database before a separately
 approved execution. Do not deploy the worker or API until the migration
 execution has succeeded and the runtime/worker role suites pass. The deploy
 script enforces the exact database release attestation above; the scheduling
-script enforces it again plus the image-bound successful execution attestation.
+script enforces it again plus the image-and-configuration-bound execution attestation
+`worker-job:<image-tag>:storage-v1:<SHA-256>:SUCCEEDED`. The fingerprint includes
+the full immutable image URI (including its repository), project/region/Job/service account, complete worker plain settings, legacy GCS
+settings, and exact worker DB/Storage Secret Manager IDs and versions. The actual
+Job environment and references are compared after deploy and before scheduling.
+Changing storage settings with the same image invalidates the old attestation.
+Computing the fingerprint alone is not proof that a Job was executed.
 Migration and worker execution are intentionally not wrapped by repository
 automation. `schedule-worker.sh`
 creates, but does not immediately
-run, a fixed `*/15 * * * *` Asia/Seoul trigger. Its 15-minute latency keeps
-executions within the free-tier-first plan more effectively than a five-minute
-schedule. The target is the Cloud Run v2 `jobs:run` Google API, so Scheduler
-must use OAuth, not OIDC. It uses a dedicated invoker account, one bounded
-control-plane retry, and a 30-second attempt deadline. Before creating the
-schedule, preflight requires a Ready, fully observed Worker Job whose immutable
-image tag/digest, service account, one task, parallelism one, three retries,
-600-second timeout, 1 vCPU/512MiB limits, command/arguments, complete plain
-environment, lack of extra mounts/resources, and numeric `WORKER_DATABASE_URL`
-secret version exactly match the approved deployment contract. This prevents a
+run, a fixed `* * * * *` Asia/Seoul trigger so a new sweep attempt is requested
+within the next minute after a three-minute Kuji checkout lease expires. The
+target is the Cloud Run v2 `jobs:run` Google API, so Scheduler must use OAuth,
+not OIDC.
+
+The API candidate gate now compares the complete actual v1/v2 Revision environment
+against the same plain-value and pinned Secret Manager reference maps used by deploy.
+It verifies the immutable image, runtime identity, customer surface and exact storage
+configuration; same-project ID/number references and used v1 aliases normalize before
+comparison. Duplicate/extra variables, foreign/unknown aliases, raw secrets and
+execution overrides fail closed. The combined local artifact check includes eight
+new Revision tests; cloud calls are stubbed, not production evidence.
+[Official secret reference guidance](https://docs.cloud.google.com/run/docs/configuring/services/secrets)
+recommends pinned versions for environment secrets; the gate requires numeric versions.
+
+The API health/catalog/auth smoke still does not upload or read media. A separately
+authorized authenticated hosted-media smoke remains a release gate; do not use a
+green health probe to claim Storage production readiness. Serialize deployment,
+smoke and promotion under one operator/release owner: pre/post revision checks do
+not provide a control-plane lock against concurrent tag A-to-B-to-A changes.
+
+Scheduler uses a dedicated invoker account, no control-plane retry, and a
+30-second attempt deadline; the next minute is the retry opportunity. Before
+creating the schedule, preflight requires a Ready, fully observed Worker Job
+whose immutable image tag/digest, service account, one task, parallelism one,
+three retries, 600-second timeout, 45-second application work window,
+1 vCPU/512MiB limits, command/arguments, complete plain environment, lack of
+extra mounts/resources, and numeric `WORKER_DATABASE_URL` secret version
+exactly match the approved deployment contract. This prevents a
 correct Scheduler target from invoking a drifted or more expensive Job. The
-worker's advisory lock and durable queue protect against overlap, but handlers
-must remain idempotent because delivery is not exactly once.
+create script rejects an existing job name and any existing Scheduler job that
+already targets the same Worker, including the legacy fifteen-minute default.
+After creation it reads the resource back and requires the exact enabled
+one-minute, OAuth, no-retry contract. The worker holds a session-level
+`pg_try_advisory_lock` for its finite run; an overlapping execution that cannot
+take it exits successfully before queue or periodic work. The durable queue and
+idempotent handlers remain required because delivery is not exactly once.
 
 The API deploy is fixed to 1 CPU, 512MiB, request-based CPU throttling, no
 startup CPU boost, automatic scaling, service-level min 0, revision-level min
 0, max 2, and port 8080. API preflight rejects manual scaling and any existing
 service or retained revision with a nonzero minimum, and deployment repeats
 that check after the new revision is ready; this includes tagged revisions that
-could otherwise continue billing at zero traffic. Both startup and readiness
-use the PostgreSQL-aware `/readyz`,
+could otherwise continue billing at zero traffic. A normal API deploy refuses a
+first-ever service or a reused candidate tag: Cloud Run's documented
+zero-traffic tagged rollout applies to a new revision of an existing service.
+For the first service only, `deploy.sh api-bootstrap` instead creates the tagged
+revision with the Invoker IAM check enabled. Although that sole revision owns
+100 percent of the service traffic, unauthenticated requests remain blocked;
+before creation the deploy script reads the direct IAM policies on the project
+and every returned parent folder/organization. Because predefined and custom
+roles other than `roles/run.invoker` may contain `run.routes.invoke`, bootstrap
+rejects every role binding whose member is `allUsers` or
+`allAuthenticatedUsers`; it fails closed when the operator cannot read any
+ancestor policy. After creation, both the deploy and smoke scripts apply the
+same strict check to the service IAM policy before any HTTP smoke. This guard
+does not freeze IAM: an administrator can still change an ancestor or service
+policy concurrently after the check, and it does not expand group/domain
+membership. Keep IAM changes out of the release window and review Cloud Audit
+Logs.
+The smoke script obtains a short-lived gcloud identity token without printing
+it or putting it in a process argument. Only the separately approved bootstrap
+promotion routes the exact attested revision and then disables the Invoker IAM
+check.
+After deployment, `smoke-api-candidate.sh` verifies `/healthz`, `/readyz`, the
+public Home catalog and auth-provider discovery routes, and the absence of the
+admin surface through the tag URL while production traffic stays at zero.
+It then emits a smoke attestation containing the immutable image tag, candidate
+tag, and exact Cloud Run revision. `promote-api-candidate.sh` rejects a moved
+tag or different revision and routes production traffic with
+`--to-revisions=<attested-revision>=100`; it is the only scripted path that
+assigns the candidate 100 percent traffic. Both startup
+and readiness use the PostgreSQL-aware `/readyz`,
 because Cloud Run can route before the first readiness check. Liveness uses
 process-only `/healthz`. The service sets `API_SURFACE=customer`, so
 `/v1/admin/*` routes are not registered. It is publicly reachable for the
@@ -210,13 +366,15 @@ Supabase/DABBOBA session authorization remains application-level. Deploy the
 admin surface as a separate authenticated/internal service after a dedicated
 review.
 
-The worker Job has a 10-minute task timeout, a four-minute bounded application
-run, 30-second per-query client/server timeouts, and a 15-minute queue
-visibility timeout. Visibility therefore exceeds the platform timeout by five
-minutes, preventing a still-running task from making its message eligible for
-early redelivery. Its Supabase URL must use the Session pooler on port 5432,
-not Transaction mode on 6543, because the worker holds a session-level
-PostgreSQL advisory lock for the run.
+The worker Job has a 10-minute fail-safe task timeout, a 45-second bounded
+application work window, 30-second per-query client/server timeouts, and a
+15-minute queue visibility timeout. Periodic work starts with reservation
+expiry before queue consumption, so queue backlog cannot starve the Kuji lease
+sweep. Visibility exceeds the platform timeout by five minutes, preventing a
+still-running task from making its message eligible for early redelivery. Its
+Supabase URL must use the Session pooler on port 5432, not Transaction mode on
+6543, because the worker holds a session-level PostgreSQL advisory lock for the
+run.
 
 ## Budget and expected cost
 
@@ -252,7 +410,13 @@ deployments, so it is not a hard cost ceiling. The headline service free tier
 is the Tier 1-priced spending equivalent of 180,000 vCPU-seconds, 360,000
 GiB-seconds, and two million requests per billing account per month; Seoul Tier
 2 usage consumes that discount faster. Jobs use instance-based billing with a
-one-minute minimum per execution.
+one-minute minimum per execution. A one-minute Worker schedule means up to
+43,200 scheduled Job executions in a 30-day month before platform retries or
+manual runs. Even a lock-miss execution can incur that one-minute minimum, so
+this low-latency schedule is not the earlier free-tier-first fifteen-minute
+baseline and can exceed the headline CPU/RAM allowance. Confirm the USD 1/USD 5
+budget notifications and inspect billable instance time during beta; frequency
+changes require a separate latency and cost review.
 
 Internet responses from Seoul to Korean destinations currently start at USD
 0.19/GiB; the Cloud Run North America 1GiB allowance does not apply. Artifact
@@ -262,7 +426,9 @@ billing account/month. Cloud Scheduler includes three jobs per billing account
 each month, then costs USD 0.10/job/month; paused jobs still count. Keep logs
 free of request bodies, tokens, and URLs.
 
-Official references: [Cloud Run pricing](https://cloud.google.com/run/pricing),
+Official references: [tagged zero-traffic rollouts and revision traffic migration](https://cloud.google.com/run/docs/rollouts-rollbacks-traffic-migration),
+[public access and the Invoker IAM check](https://cloud.google.com/run/docs/authenticating/public),
+[Cloud Run pricing](https://cloud.google.com/run/pricing),
 [health checks](https://docs.cloud.google.com/run/docs/configuring/healthchecks),
 [minimum instances](https://docs.cloud.google.com/run/docs/configuring/min-instances),
 [scheduled Jobs](https://docs.cloud.google.com/run/docs/execute/jobs-on-schedule),
@@ -276,8 +442,8 @@ Official references: [Cloud Run pricing](https://cloud.google.com/run/pricing),
 
 ## Release, rollback, and current blockers
 
-Before release, record the image digest; confirm `API_SURFACE=customer`; probe
-`/healthz` and `/readyz`; verify `/v1/admin/*` is 404; exercise authenticated
+Before release, record the image digest; confirm `API_SURFACE=customer`; run the
+candidate smoke script at zero production traffic; exercise authenticated
 customer reads and denied writes; inspect Error Reporting and billing alerts;
 and leave migrations, worker execution, and API traffic as distinct approvals.
 The current restricted-role route integration covers catalog and notification
@@ -308,7 +474,9 @@ confirmed by preflight are a dedicated DABBOBA project and exact billing link,
 enabled APIs, existing immutable-tag Artifact Registry repository,
 existing Cloud Build and media buckets, least-privilege service accounts and
 IAM, enabled numeric secret versions, budget recipients, and produced image
-digests. A documented, evidenced abuse-control review is also required before
+digests. A normal candidate release additionally needs an existing known-good
+API baseline revision; a first release uses the private bootstrap path above.
+A documented, evidenced abuse-control review is also required before
 setting the public API attestation. Payment remains `UNCONFIGURED`; media
 remains unavailable without an approved bucket; no worker schedule or external
 notification provider is created. Production also rejects

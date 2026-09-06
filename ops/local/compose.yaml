@@ -1,3 +1,5 @@
+name: dabboba-local
+
 services:
   postgres:
     # Official pgmq development image, pinned to the inspected multi-arch digest.
@@ -37,3 +39,7 @@ services:
 volumes:
   dabboba_postgres17_pgmq_data:
   dabboba_redis_data:
+    # Adopt the existing local-redis-1 data without replacing either Redis volume.
+    # External ownership also keeps Compose from creating an empty substitute.
+    name: local_dabboba_redis_data
+    external: true

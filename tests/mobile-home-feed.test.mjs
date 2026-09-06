@@ -5,7 +5,9 @@ import {
   HOME_ANNOUNCEMENT_FALLBACKS,
   buildDrawActivityExamples,
   buildDrawActivityTickerWindow,
+  buildConfiguredHomeCollections,
   buildHomeCollections,
+  getContinuousTickerLoopDistance,
   getHomeProductCardWidth,
   getTickerOverflowDistance,
   homeAnnouncementMessages,
@@ -33,6 +35,41 @@ test("home collections follow an externally supplied IP order and omit unavailab
   assert.deepEqual(collections.map((collection) => collection.id), ["demon-slayer"]);
   assert.deepEqual(collections.map((collection) => collection.title), ["귀멸의 칼날 컬렉션"]);
   assert.deepEqual(collections[0].products.map((product) => product.id), ["demon-gacha"]);
+});
+
+test("configured Home sections keep the admin title and order while filtering unsafe products", () => {
+  const configured = buildConfiguredHomeCollections([
+    {
+      id: "one-piece-featured",
+      title: "해적왕 추천",
+      sortOrder: 20,
+      isActive: true,
+      ip: ips[2],
+      products: [products[4]],
+    },
+    {
+      id: "demon-featured",
+      title: "귀멸 특집",
+      sortOrder: 10,
+      isActive: true,
+      ip: ips[0],
+      products: [products[2], products[3]],
+    },
+    {
+      id: "hidden-featured",
+      title: "숨긴 특집",
+      sortOrder: 0,
+      isActive: false,
+      ip: ips[1],
+      products: [products[0]],
+    },
+  ]);
+
+  assert.deepEqual(configured.map(({ id, title }) => [id, title]), [
+    ["demon-featured", "귀멸 특집"],
+    ["one-piece-featured", "해적왕 추천"],
+  ]);
+  assert.deepEqual(configured[0].products.map((product) => product.id), ["demon-gacha"]);
 });
 
 test("home kuji cards use the available phone width while other categories stay compact", () => {
@@ -63,6 +100,13 @@ test("home announcement ticker stays still when the full line fits", () => {
 test("home announcement ticker scrolls only by the actual overflow distance", () => {
   assert.ok(Math.abs(getTickerOverflowDistance(280, 312.4) - 32.4) < 0.001);
   assert.equal(getTickerOverflowDistance(0, 312.4), 0);
+});
+
+test("long draw activity copy loops through a full duplicate instead of reversing at the edge", () => {
+  assert.equal(getContinuousTickerLoopDistance(280, 280, 24), 0);
+  assert.equal(getContinuousTickerLoopDistance(280, 264.5, 24), 0);
+  assert.ok(Math.abs(getContinuousTickerLoopDistance(280, 312.4, 24) - 336.4) < 0.001);
+  assert.equal(getContinuousTickerLoopDistance(0, 312.4, 24), 0);
 });
 
 test("draw activity examples use only draw categories and stay explicitly non-live", () => {

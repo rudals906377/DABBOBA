@@ -81,10 +81,18 @@ packages/domain/**
 !packages/domain/src
 packages/domain/src/**
 !packages/domain/src/*.ts
+!packages/media-storage
+packages/media-storage/**
+!packages/media-storage/package.json
+!packages/media-storage/tsconfig.json
+!packages/media-storage/src
+packages/media-storage/src/**
+!packages/media-storage/src/*.ts
 
 # Tests and development-only TypeScript never enter the build context. Secret
 # files remain excluded because there is no allow rule for any .env path.
 **/*.test.ts
 **/*.integration.test.ts
+**/*.conformance.ts
 **/*.test-d.ts
 **/*.tsbuildinfo

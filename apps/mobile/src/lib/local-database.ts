@@ -129,7 +129,11 @@ export async function readHomeCatalogCache(
   try {
     const parsed = JSON.parse(row.payload) as HomeCatalogSnapshot;
     if (!Array.isArray(parsed.ips) || !Array.isArray(parsed.products) || !parsed.fetchedAt) return null;
-    return { ...parsed, notices: Array.isArray(parsed.notices) ? parsed.notices : [] };
+    return {
+      ...parsed,
+      notices: Array.isArray(parsed.notices) ? parsed.notices : [],
+      homeSections: parsed.homeSections ?? null,
+    };
   } catch {
     return null;
   }
