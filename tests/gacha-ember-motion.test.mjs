@@ -155,17 +155,24 @@ test("gacha spreads 36 deterministic embers evenly across twelve three-particle 
 });
 
 test("the legacy twelve-particle kuji helper is preserved as a reference, not the production field", () => {
+  // V8 may differ below machine precision for trigonometric functions across
+  // supported Node releases. Quantize motion frames before hashing so this
+  // reference guards visible behavior instead of a runtime-specific last bit.
+  const stableFrame = (frame) => Object.fromEntries(
+    Object.entries(frame).map(([key, value]) => [key, Math.round(value * 1e9) / 1e9]),
+  );
   const baseline = ["product-1:ticket-13", "product-1:ticket-14", "preview:gacha"].map((seed) => {
     const particles = motion.createKujiFireflyConfigs(seed);
     return {
       seed,
       particles,
-      frames: particles.map((particle) => [0, 0.15, 0.5, 0.85, 1].map((p) => motion.sampleKujiFireflyMotion(particle, p))),
+      frames: particles.map((particle) => [0, 0.15, 0.5, 0.85, 1]
+        .map((p) => stableFrame(motion.sampleKujiFireflyMotion(particle, p)))),
     };
   });
   assert.equal(motion.KUJI_FIREFLY_COUNT, 12);
   assert.equal(createHash("sha256").update(JSON.stringify(baseline)).digest("hex"),
-    "5685125ad527f7a75ec39a66191230aa5eaba194207bf9ebaefdc9d28f2dd90a");
+    "e3703faf887909e9e1643efc25857d9ae0c284e9d494e3ab6ffc9d13e13a3104");
 });
 
 test("complete gacha paths fit narrow and tall stages with separate horizontal lanes", () => {
