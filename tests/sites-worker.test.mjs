@@ -64,6 +64,8 @@ test("serves existing static assets without a fallback", async () => {
 
 test("serves every public policy URL from its static document with security headers", async () => {
   const routes = new Map([
+    ["/", "/legal/index.html"],
+    ["/index.html", "/legal/index.html"],
     ["/privacy", "/legal/privacy/index.html"],
     ["/privacy/", "/legal/privacy/index.html"],
     ["/terms", "/legal/terms/index.html"],
@@ -487,6 +489,18 @@ test("account deletion page stores only the receipt and presents an accessible r
   assert.doesNotMatch(callback, /localStorage/);
 });
 
+test("public root explains the prelaunch scope without promising live commerce", async () => {
+  const html = await readFile(new URL("../public/legal/index.html", import.meta.url), "utf8");
+  assert.match(html, /PRELAUNCH/);
+  assert.match(html, /결제, 뽑기와 배송 신청은 정식 오픈 전까지 사용할 수 없습니다/);
+  assert.match(html, /href="\/privacy"/);
+  assert.match(html, /href="\/terms"/);
+  assert.match(html, /href="\/support"/);
+  assert.match(html, /href="\/account-deletion"/);
+  assert.match(html, /support@dabboba\.com/);
+  assert.doesNotMatch(html, /결제하기|지금 뽑기|구매하기/);
+});
+
 test("falls back to index.html for an unknown app route", async () => {
   const calls = [];
   const response = await worker.fetch(
@@ -535,6 +549,7 @@ test("emits the files required by Sites packaging", async () => {
   await access(new URL("../dist/client/_worker.js", import.meta.url));
   await access(new URL("../dist/server/index.js", import.meta.url));
   await access(new URL("../dist/.openai/hosting.json", import.meta.url));
+  await access(new URL("../dist/client/legal/index.html", import.meta.url));
   for (const policy of ["privacy", "terms", "support", "account-deletion", "community-operations"]) {
     await access(new URL(`../dist/client/legal/${policy}/index.html`, import.meta.url));
   }

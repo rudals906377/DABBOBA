@@ -10,6 +10,8 @@ export default {
     if (accountDeletionResponse) return accountDeletionResponse;
 
     const policyRoutes = new Map([
+      ["/", "/legal/index.html"],
+      ["/index.html", "/legal/index.html"],
       ["/privacy", "/legal/privacy/index.html"],
       ["/privacy/", "/legal/privacy/index.html"],
       ["/terms", "/legal/terms/index.html"],

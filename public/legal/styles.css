@@ -63,9 +63,21 @@ button.button { font: inherit; cursor: pointer; }
 [hidden] { display: none !important; }
 footer { margin-top: 40px; color: #69716b; font-size: 13px; line-height: 1.7; }
 footer a { min-height: 44px; display: inline-flex; align-items: center; }
+.landing-hero { padding: 32px; border: 1px solid #d8ddd7; border-radius: 28px; background: #fff; }
+.landing-hero h1 { max-width: 520px; }
+.landing-lead { max-width: 620px; margin: 0 0 22px; color: #4f5851; font-size: 17px; line-height: 1.7; }
+.landing-hero .status-chip { width: fit-content; margin: 0; }
+.link-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.guide-link { min-height: 112px; display: flex; flex-direction: column; justify-content: center; padding: 18px; border: 1px solid #d8ddd7; border-radius: 18px; color: inherit; text-decoration: none; background: #f7f8f4; }
+.guide-link strong { font-size: 16px; }
+.guide-link span { margin-top: 6px; color: #69716b; font-size: 13px; line-height: 1.55; }
+.guide-link:hover { border-color: #90b69a; background: #eef8ef; }
 @media (max-width: 560px) {
   main { padding-top: 32px; }
   section { padding: 20px; border-radius: 20px; }
+  .landing-hero { padding: 24px 20px; border-radius: 22px; }
+  .link-grid { grid-template-columns: 1fr; }
+  .guide-link { min-height: 96px; }
   table, tbody, tr, th, td { display: block; }
   th { width: auto; border-bottom: 0; padding-bottom: 0; }
   .button-row { display: grid; grid-template-columns: 1fr; }
