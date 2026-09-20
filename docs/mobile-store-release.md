@@ -15,6 +15,12 @@ physical devices. A green local check is not App Store or Google Play approval.
   package IDs, and the approved app icon are explicit in
   `apps/mobile/app.json`. Bump both platform build identifiers for every
   uploaded binary.
+- Local Expo CLI resolution matches the configured
+  `@dabboba-team/dabboba-mobile` project ID
+  `fa48d52e-3b3c-4e2b-82d5-ae0726382587`. This does not prove the friend's
+  organization ownership or durable access. Sign in with Apple is declared,
+  but the friend's Apple Team ID, certificates, provisioning profiles, App
+  Store Connect record, and signed artifacts still require the account owner.
 - Android uses a separate transparent safe-zone foreground and the DABBOBA
   green background for its adaptive icon. The signed AAB still needs launcher
   inspection across circle, squircle, and manufacturer masks.
@@ -33,11 +39,21 @@ physical devices. A green local check is not App Store or Google Play approval.
   → KG INICIS LIVE channel, production webhooks, cancellation/refund and
   reconciliation evidence, and a production server reporting commerce mode
   `LIVE`. Changing only the server can never upgrade a PRELAUNCH binary.
+- `apps/mobile/app.config.js` omits the PortOne native config plugin unless the
+  build capability is exactly `LIVE`. The later payment implementation remains
+  in source, while PRELAUNCH avoids adding bank-app URL schemes and Android
+  payment-app package queries to the native manifest.
 - The internal `pg-review` profile may be used to capture the test-channel
   payment screens requested during KG INICIS onboarding. The ordinary `preview`
   keeps payment disabled. Those screenshots are design/onboarding evidence,
   not proof that payment return URLs, webhooks, refunds, reconciliation, or
   duplicate-payment prevention work.
+- EAS release profiles run the repository gates automatically after dependency
+  installation. Store profiles run the full configuration and bundle checks;
+  the internal `pg-review` profile requires its API, Supabase publishable key,
+  PortOne Store ID and Channel Key, plus the same bundle scan. It exempts only
+  public-LIVE legal/server checks that do not apply to the isolated test-channel
+  capture and therefore cannot pass as a public LIVE release.
 - PortOne's published requirements describe APK plus payment-path screenshots;
   they do not explicitly promise that a TestFlight or Play closed-test link
   alone is accepted. Keep the written confirmation request and capture sequence
@@ -105,10 +121,10 @@ checker.
 
 ## External account steps — not performed by repository work
 
-1. Create or select the exact Expo organization/project, run `eas init` from
-   `apps/mobile`, review the resulting project ID, and commit that association.
-   Do not reuse an unrelated Expo project.
-2. Confirm the Apple Developer team, App Store Connect app record, Google Play
+1. Confirm the linked Expo project remains `@dabboba-team/dabboba-mobile` and
+   that its project ID matches `apps/mobile/app.json` before every signed build.
+2. Complete Apple Bundle ID registration and create the App Store Connect app
+   record. Confirm the Apple Developer team, Google Play
    app record, package ownership, agreements, tax/banking state where relevant,
    and least-privilege submit access. Add submit IDs only after those exact
    records exist; never add signing keys or service-account JSON to Git.
@@ -121,8 +137,10 @@ checker.
    App Store Connect and Play Console: <https://docs.expo.dev/deploy/submit-to-app-stores/>.
 5. Do not promote either build until the signed-artifact checks below pass.
 
-No `eas login`, `eas init`, cloud build, credential generation, TestFlight/Play
-upload, or store submission is performed by the repository setup above.
+Local Expo CLI project resolution has been observed. The account owner must
+still confirm organization ownership and least-privilege access. No cloud
+build, credential generation, TestFlight/Play upload, or store submission is
+performed by the repository setup above.
 
 ## Signed artifact and device QA
 

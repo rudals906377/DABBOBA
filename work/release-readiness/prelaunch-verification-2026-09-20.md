@@ -3,7 +3,7 @@
 - 검증 기준일: 2026-09-20 (Asia/Seoul)
 - 대상: DABBOBA `1.0.0`, iOS build `1`, Android versionCode `1`
 - 출시 형태: `PRELAUNCH` 상품 탐색·검색·찜·공지·계정 중심 사전오픈판
-- 기준 소스: `feat/dabboba-capsule-gacha`, HEAD `7fa57f9`
+- 기준 소스: `feat/dabboba-capsule-gacha`의 본 보고서 포함 제출 커밋
 - 최종 판단: **공개 심사 제출 NO-GO**
 
 ## 1. 판단 요약
@@ -50,16 +50,18 @@ PRELAUNCH 코드 범위와 자동검증은 대부분 완료됐고, 결제·주�
 
 | 검증 | 결과 |
 |---|---:|
-| 루트 단위 테스트 | 770/770 통과 |
+| 루트 Node 단위 테스트 | 789/789 통과 |
 | 루트 TypeScript 테스트 | 6/6 통과 |
-| API 테스트 | 267/267 통과 |
+| API 테스트 | 267건 중 243 통과, 24 의도적 skip, 실패 0 |
 | Worker 테스트 | 105/105 통과 |
 | Admin 테스트 | 41/41 통과 |
 | Mobile 구조 테스트 | 38/38 통과 |
 | Contracts 테스트 | 25/25 통과 |
-| 공개 사이트 테스트 | 14/14 통과 |
+| 공개 사이트 테스트 | 17/17 통과 |
 | Playwright runtime 테스트 | 9/9 통과 |
 | 전체 build 작업 | 11/11 통과 |
+| 전체 typecheck 작업 | 19/19 통과 |
+| 전체 package test 작업 | 19/19 통과 |
 | Expo Doctor | 21/21 통과 |
 | Expo 권장 의존성 검사 | 최신 권장 범위 통과 |
 | iOS·Android production bundle 금칙어 검사 | 통과 |
@@ -116,9 +118,9 @@ PRELAUNCH 코드 범위와 자동검증은 대부분 완료됐고, 결제·주�
 
 ### 해결된 출시 기반
 
-- HEAD `7fa57f9`에 migration `0064`까지의 출시 범위를 원자적 PRELAUNCH 기준 커밋으로 고정했다.
-- 전체 자동 검증 35/35 작업과 `db:release-source:check`를 통과했고, 검사 시점의 worktree는 깨끗하다.
-- 원격 Git push는 이 검증 범위에 포함하지 않았다.
+- `7fa57f9`에 migration `0064`까지의 출시 범위를 원자적 PRELAUNCH 기준으로 고정했고, 이후 커밋에서 공개 정책 사이트와 제출 방어선을 보강했다.
+- 전체 build 11/11, typecheck 19/19, package test 19/19, Playwright 9/9, 공개 사이트 17/17을 통과했다.
+- 이 보고서가 포함된 제출 커밋에서 `db:release-source:check`와 원격 PR 검사를 다시 확인한다.
 
 ### P0 — 제출 전에 반드시 해결
 
@@ -129,7 +131,7 @@ PRELAUNCH 코드 범위와 자동검증은 대부분 완료됐고, 결제·주�
    - Cloudflare Pages 배포, 루트/www 리디렉션, TLS, 정책 버전·시행일·해시 일치, 실제 메일 송수신을 확인해야 한다.
 
 2. **서명 빌드·스토어 자격증명·실기기 검증 부재**
-   - EAS project, Apple 배포 인증서·프로비저닝, Android keystore, App Store Connect/Play Console 제출 증거가 없다.
+   - 로컬 Expo CLI가 앱 설정의 EAS project ID를 해석하는 것은 확인했지만, 친구 명의 조직 소유권·지속 가능한 접근 권한·Apple 배포 인증서·프로비저닝·Android keystore·App Store Connect/Play Console 제출 증거가 없다.
    - 서명 IPA/AAB에서 아이콘·adaptive mask·URL scheme·APNs·권한·Privacy Manifest·export compliance를 확인해야 한다.
    - 보관함 `/storage` 딥링크를 포함해 실기기에서 전 경로를 다시 검증해야 한다.
 
@@ -174,3 +176,14 @@ PRELAUNCH 코드 범위와 자동검증은 대부분 완료됐고, 결제·주�
 7. TestFlight와 Play 내부 테스트 승인 후 열린 P0/P1 결함이 0건인지 다시 확인한다.
 
 결제 로직은 보존하되 PRELAUNCH에서 접근 불가능하게 유지한다. 결제 제공자 등록 이후의 LIVE 전환은 이 보고서의 승인 범위가 아니며, PortOne V2·KG이니시스·웹훅·취소·환불·중복 콜백·대사와 Google 정책 분류를 별도 출시 게이트에서 검증해야 한다.
+
+## 6. 2026-09-20 후속 준비 기록
+
+- 기존에 설정된 사업자 연락처는 앱 사업자정보·공개 약관·개인정보처리방침에서 동일하게 유지한다. 소유자 검증을 마친 연락처로 간주하지 않으며, PG 심사용 유선 또는 대표번호는 계정 소유자가 실제 번호를 확인하기 전까지 출시 게이트를 통과시키지 않는다.
+- iOS 앱 설정에 Sign in with Apple capability 선언을 추가했다. Apple Developer Team ID와 서명 자격 증명은 계정 소유자가 확인한 값만 사용한다.
+- 공개 정책 도메인용 산출물을 `dist/public-site`로 분리해 앱 프로토타입과 내부 자산이 정책 사이트에 함께 배포되지 않도록 했다. 임시 검수용 `https://dabboba.pages.dev`는 친구 계정의 최종 운영 배포가 아니며, 공개 사이트 Worker 테스트는 17/17 통과했다.
+- 모바일 출시 구조 검사, 모바일 타입검사, Expo Doctor 21/21, Expo 의존성 검사, production 의존성 보안 감사, PRELAUNCH iOS·Android 번들 금칙어 검사가 통과했다.
+- 전체 workspace 검증은 build 11/11, typecheck 19/19, package test 19/19, Playwright 9/9, 사이트 테스트 17/17로 통과했다. 테스트 단계는 생성 디렉터리 경합과 고부하 타임아웃을 피하도록 순차화했고, 제품의 실제 미디어 타임아웃 경계는 별도 16/16 테스트로 확인했다.
+- EAS `production-prelaunch`와 `production-live` 설정은 고정된 Node·pnpm 버전과 각 commerce capability를 사용하며, EAS lifecycle hook이 출시 설정 및 실제 iOS·Android 번들 검사를 자동 실행한다. 현재 EAS Production 환경의 운영 변수와 서명 자격증명은 아직 소유자가 등록·검증해야 한다.
+- PRELAUNCH Expo config에서는 PortOne native plugin이 제거되어 결제 앱 URL scheme과 package query가 들어가지 않고, LIVE config에만 포함되는 것을 구조 테스트와 Expo config introspection으로 확인했다.
+- `dabboba.com`은 여전히 DNS 해석이 되지 않아 정책·지원·계정삭제 URL과 지원 메일 검증은 미완료다. Apple 서명 인증과 App Store Connect 앱 레코드, Google Play 계정 확인도 외부 계정 단계로 남아 있으므로 공개 제출 판정은 계속 **NO-GO**다.

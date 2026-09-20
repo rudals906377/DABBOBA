@@ -10,6 +10,7 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.dabboba.mobile",
+      "usesAppleSignIn": true,
       "buildNumber": "1",
       "config": {
         "usesNonExemptEncryption": false

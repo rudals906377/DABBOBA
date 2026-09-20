@@ -5,12 +5,13 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 const adminRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
+const generatedDirectories = new Set([".next", ".turbo", "dist", "node_modules", "tests"]);
 
 async function sourceFiles(directory) {
   const entries = await readdir(directory, { withFileTypes: true });
   const nested = await Promise.all(entries.map((entry) => {
     const path = join(directory, entry.name);
-    if (entry.isDirectory() && entry.name !== "tests") return sourceFiles(path);
+    if (entry.isDirectory() && !generatedDirectories.has(entry.name)) return sourceFiles(path);
     return /\.(?:ts|tsx)$/.test(entry.name) ? [path] : [];
   }));
   return nested.flat();

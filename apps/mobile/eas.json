@@ -4,24 +4,37 @@
     "requireCommit": true
   },
   "build": {
+    "base": {
+      "node": "24.21.0",
+      "corepack": true,
+      "pnpm": "11.22.0"
+    },
     "preview": {
+      "extends": "base",
       "distribution": "internal",
+      "environment": "preview",
       "env": {
         "EXPO_PUBLIC_COMMERCE_CAPABILITY": "PRELAUNCH"
       }
     },
     "pg-review": {
+      "extends": "base",
       "distribution": "internal",
+      "environment": "preview",
       "env": {
         "EXPO_PUBLIC_COMMERCE_CAPABILITY": "LIVE"
       }
     },
     "production-prelaunch": {
+      "extends": "base",
+      "environment": "production",
       "env": {
         "EXPO_PUBLIC_COMMERCE_CAPABILITY": "PRELAUNCH"
       }
     },
     "production-live": {
+      "extends": "base",
+      "environment": "production",
       "env": {
         "EXPO_PUBLIC_COMMERCE_CAPABILITY": "LIVE"
       }

@@ -4,6 +4,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 import {
+  PG_REVIEW_PUBLIC_BUILD_VARIABLES,
   REQUIRED_PUBLIC_BUILD_VARIABLES,
   inspectMobileReleaseConfig,
 } from "../scripts/check-mobile-release-config.mjs";
@@ -36,6 +37,7 @@ test("mobile release structure is store-shaped without external credentials", ()
   assert.deepEqual(report.errors, []);
   assert.equal(report.warnings.some((issue) => issue.code === "ANDROID_ADAPTIVE_ICON_REQUIRED"), false);
   assert.equal(report.warnings.some((issue) => issue.code === "PG_REVIEW_BUSINESS_PHONE_MOBILE"), true);
+  assert.equal(report.errors.some((issue) => issue.code === "IOS_APPLE_SIGN_IN_CAPABILITY_MISSING"), false);
   assert.equal(report.errors.some((issue) => issue.code === "EAS_PG_REVIEW_PROFILE_INVALID"), false);
 });
 
@@ -67,6 +69,54 @@ test("production mobile release gate fails closed when public endpoints are abse
   assert.ok(codes.has("PG_REVIEW_BUSINESS_PHONE_MOBILE"));
   assert.equal(codes.has("PAYMENT_CONNECTION_PLACEHOLDER_PRESENT"), false);
   assert.equal(codes.has("CHECKOUT_PAYMENT_PLACEHOLDER_PRESENT"), false);
+});
+
+test("PG-review gate requires payment client values without requiring public legal URLs", () => {
+  const report = inspectMobileReleaseConfig({
+    rootDir,
+    environment: {
+      EXPO_PUBLIC_COMMERCE_CAPABILITY: "LIVE",
+      EXPO_PUBLIC_DABBOBA_API_URL: "https://api-review.dabboba.com",
+      EXPO_PUBLIC_SUPABASE_URL: "https://dabbobareview.supabase.co",
+      EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY: "sb_publishable_pg_review_validation",
+      EXPO_PUBLIC_PORTONE_STORE_ID: "store-dabboba-review",
+      EXPO_PUBLIC_PORTONE_CHANNEL_KEY: "channel-key-dabboba-review",
+    },
+    pgReview: true,
+  });
+  const codes = new Set(report.errors.map((issue) => issue.code));
+
+  for (const variable of PG_REVIEW_PUBLIC_BUILD_VARIABLES) {
+    assert.equal(codes.has(`ENV_${variable}_MISSING`), false, `${variable} should be accepted`);
+  }
+  for (const variable of [
+    "EXPO_PUBLIC_DABBOBA_PRIVACY_POLICY_URL",
+    "EXPO_PUBLIC_DABBOBA_TERMS_URL",
+    "EXPO_PUBLIC_DABBOBA_SUPPORT_URL",
+    "EXPO_PUBLIC_DABBOBA_ACCOUNT_DELETION_URL",
+  ]) {
+    assert.equal(codes.has(`ENV_${variable}_MISSING`), false, `${variable} is not a PG capture prerequisite`);
+  }
+  assert.equal(codes.has("LIVE_LEGAL_DOCUMENTS_PRELAUNCH_COPY"), false);
+  assert.equal(codes.has("CHECKOUT_PAYMENT_PLACEHOLDER_PRESENT"), false);
+  assert.equal(codes.has("PG_REVIEW_BUSINESS_PHONE_MOBILE"), true);
+});
+
+test("PG-review gate fails closed when PortOne client identifiers are absent", () => {
+  const report = inspectMobileReleaseConfig({
+    rootDir,
+    environment: {
+      EXPO_PUBLIC_COMMERCE_CAPABILITY: "LIVE",
+      EXPO_PUBLIC_DABBOBA_API_URL: "https://api-review.dabboba.com",
+      EXPO_PUBLIC_SUPABASE_URL: "https://dabbobareview.supabase.co",
+      EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY: "sb_publishable_pg_review_validation",
+    },
+    pgReview: true,
+  });
+  const codes = new Set(report.errors.map((issue) => issue.code));
+
+  assert.ok(codes.has("ENV_EXPO_PUBLIC_PORTONE_STORE_ID_MISSING"));
+  assert.ok(codes.has("ENV_EXPO_PUBLIC_PORTONE_CHANNEL_KEY_MISSING"));
 });
 
 test("production mobile release gate accepts a payment-disabled public prelaunch", () => {

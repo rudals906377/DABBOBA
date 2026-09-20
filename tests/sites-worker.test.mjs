@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { access, readFile } from "node:fs/promises";
+import { access, readFile, readdir } from "node:fs/promises";
 import test from "node:test";
 import worker, { handleAccountDeletionService } from "../worker/index.js";
 
@@ -64,15 +64,15 @@ test("serves existing static assets without a fallback", async () => {
 
 test("serves every public policy URL from its static document with security headers", async () => {
   const routes = new Map([
-    ["/", "/legal/index.html"],
-    ["/index.html", "/legal/index.html"],
-    ["/privacy", "/legal/privacy/index.html"],
-    ["/privacy/", "/legal/privacy/index.html"],
-    ["/terms", "/legal/terms/index.html"],
-    ["/support", "/legal/support/index.html"],
-    ["/account-deletion", "/legal/account-deletion/index.html"],
-    ["/account-deletion/auth/social/callback", "/legal/account-deletion/social-callback.html"],
-    ["/community-operations", "/legal/community-operations/index.html"],
+    ["/", "/legal/"],
+    ["/index.html", "/legal/"],
+    ["/privacy", "/legal/privacy/"],
+    ["/privacy/", "/legal/privacy/"],
+    ["/terms", "/legal/terms/"],
+    ["/support", "/legal/support/"],
+    ["/account-deletion", "/legal/account-deletion/"],
+    ["/account-deletion/auth/social/callback", "/legal/account-deletion/social-callback?source=store"],
+    ["/community-operations", "/legal/community-operations/"],
   ]);
 
   for (const [publicPath, assetPath] of routes) {
@@ -102,6 +102,44 @@ test("serves every public policy URL from its static document with security head
     assert.match(response.headers.get("content-security-policy") ?? "", /frame-ancestors 'none'/);
     assert.match(response.headers.get("content-security-policy") ?? "", /connect-src 'self'/);
   }
+});
+
+test("public hosts never expose the prototype app or its unrelated assets", async () => {
+  for (const publicHost of [
+    "dabboba.com",
+    "dabboba.pages.dev",
+    "release-id.dabboba.pages.dev",
+    "dabboba-random.pages.dev",
+  ]) {
+    for (const pathname of ["/flow/step-two", "/unexpected-route", "/assets/dabboba/draw/gacha/arcade-cabinet.png"]) {
+      let assetFetches = 0;
+      const response = await worker.fetch(new Request(`https://${publicHost}${pathname}`, {
+        headers: { accept: "text/html" },
+      }), {
+        ASSETS: {
+          fetch: async () => {
+            assetFetches += 1;
+            return new Response("prototype", { status: 200 });
+          },
+        },
+      });
+
+      assert.equal(response.status, 404);
+      assert.equal(assetFetches, 0);
+      assert.equal(response.headers.get("x-content-type-options"), "nosniff");
+    }
+  }
+});
+
+test("public legal assets retain hardening headers", async () => {
+  const response = await worker.fetch(new Request("https://dabboba.pages.dev/legal/styles.css"), {
+    ASSETS: { fetch: async () => new Response("body{}", { headers: { "content-type": "text/css" } }) },
+  });
+
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("content-type"), "text/css");
+  assert.equal(response.headers.get("x-content-type-options"), "nosniff");
+  assert.equal(response.headers.get("cross-origin-resource-policy"), "same-origin");
 });
 
 test("web account deletion stays fail-closed until all public bindings are safe", async () => {
@@ -556,4 +594,11 @@ test("emits the files required by Sites packaging", async () => {
   await access(new URL("../dist/client/legal/account-deletion/app.js", import.meta.url));
   await access(new URL("../dist/client/legal/account-deletion/social-callback.html", import.meta.url));
   await access(new URL("../dist/client/legal/account-deletion/social-callback.js", import.meta.url));
+  await access(new URL("../dist/public-site/_worker.js", import.meta.url));
+  await access(new URL("../dist/public-site/legal/index.html", import.meta.url));
+  await access(new URL("../dist/public-site/legal/privacy/index.html", import.meta.url));
+  assert.deepEqual(
+    (await readdir(new URL("../dist/public-site/", import.meta.url))).sort(),
+    ["_worker.js", "legal"],
+  );
 });

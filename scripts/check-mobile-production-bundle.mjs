@@ -22,6 +22,31 @@ function walk(directory) {
   });
 }
 
+export function mobileProductionExportInvocation({
+  platform,
+  outputDirectory,
+  rootDir = repositoryRoot,
+}) {
+  if (!new Set(["ios", "android"]).has(platform)) {
+    throw new Error(`Unsupported mobile export platform: ${platform}`);
+  }
+  return {
+    command: "corepack",
+    args: [
+      "pnpm",
+      "exec",
+      "expo",
+      "export",
+      "--platform",
+      platform,
+      "--output-dir",
+      outputDirectory,
+      "--clear",
+    ],
+    cwd: path.join(rootDir, "apps", "mobile"),
+  };
+}
+
 export function scanMobileProductionBundle(directory) {
   const issues = [];
   for (const file of walk(directory)) {
@@ -37,23 +62,12 @@ export function scanMobileProductionBundle(directory) {
 }
 
 function exportPlatform(platform, outputDirectory) {
+  const invocation = mobileProductionExportInvocation({ platform, outputDirectory });
   const result = spawnSync(
-    "corepack",
-    [
-      "pnpm",
-      "--filter",
-      "@dabboba/mobile",
-      "exec",
-      "expo",
-      "export",
-      "--platform",
-      platform,
-      "--output-dir",
-      outputDirectory,
-      "--clear",
-    ],
+    invocation.command,
+    invocation.args,
     {
-      cwd: repositoryRoot,
+      cwd: invocation.cwd,
       env: {
         ...process.env,
         CI: "1",

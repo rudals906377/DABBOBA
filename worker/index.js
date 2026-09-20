@@ -10,27 +10,40 @@ export default {
     if (accountDeletionResponse) return accountDeletionResponse;
 
     const policyRoutes = new Map([
-      ["/", "/legal/index.html"],
-      ["/index.html", "/legal/index.html"],
-      ["/privacy", "/legal/privacy/index.html"],
-      ["/privacy/", "/legal/privacy/index.html"],
-      ["/terms", "/legal/terms/index.html"],
-      ["/terms/", "/legal/terms/index.html"],
-      ["/support", "/legal/support/index.html"],
-      ["/support/", "/legal/support/index.html"],
-      ["/account-deletion", "/legal/account-deletion/index.html"],
-      ["/account-deletion/", "/legal/account-deletion/index.html"],
-      ["/account-deletion/auth/social/callback", "/legal/account-deletion/social-callback.html"],
-      ["/community-operations", "/legal/community-operations/index.html"],
-      ["/community-operations/", "/legal/community-operations/index.html"],
+      ["/", { assetPath: "/legal/" }],
+      ["/index.html", { assetPath: "/legal/" }],
+      ["/privacy", { assetPath: "/legal/privacy/" }],
+      ["/privacy/", { assetPath: "/legal/privacy/" }],
+      ["/terms", { assetPath: "/legal/terms/" }],
+      ["/terms/", { assetPath: "/legal/terms/" }],
+      ["/support", { assetPath: "/legal/support/" }],
+      ["/support/", { assetPath: "/legal/support/" }],
+      ["/account-deletion", { assetPath: "/legal/account-deletion/" }],
+      ["/account-deletion/", { assetPath: "/legal/account-deletion/" }],
+      [
+        "/account-deletion/auth/social/callback",
+        { assetPath: "/legal/account-deletion/social-callback", preserveSearch: true },
+      ],
+      ["/community-operations", { assetPath: "/legal/community-operations/" }],
+      ["/community-operations/", { assetPath: "/legal/community-operations/" }],
     ]);
-    const policyAssetPath = policyRoutes.get(requestUrl.pathname);
-    if (policyAssetPath && ["GET", "HEAD"].includes(request.method)) {
+    const policyAsset = policyRoutes.get(requestUrl.pathname);
+    if (policyAsset && ["GET", "HEAD"].includes(request.method)) {
       const assetUrl = new URL(request.url);
-      assetUrl.pathname = policyAssetPath;
-      assetUrl.search = "";
+      assetUrl.pathname = policyAsset.assetPath;
+      if (!policyAsset.preserveSearch) assetUrl.search = "";
       const assetResponse = await env.ASSETS.fetch(new Request(assetUrl, request));
       return withPublicPageHeaders(assetResponse);
+    }
+
+    if (isPublicSiteHost(requestUrl.hostname)) {
+      if (requestUrl.pathname.startsWith("/legal/") && ["GET", "HEAD"].includes(request.method)) {
+        return withPublicPageHeaders(await env.ASSETS.fetch(request));
+      }
+      return withPublicPageHeaders(new Response("Not found", {
+        status: 404,
+        headers: { "content-type": "text/plain; charset=UTF-8" },
+      }));
     }
 
     const response = await env.ASSETS.fetch(request);
@@ -46,6 +59,11 @@ export default {
     return env.ASSETS.fetch(new Request(indexUrl, request));
   },
 };
+
+function isPublicSiteHost(hostname) {
+  return hostname === "dabboba.com"
+    || hostname.endsWith(".pages.dev");
+}
 
 function withPublicPageHeaders(response) {
   const headers = new Headers(response.headers);

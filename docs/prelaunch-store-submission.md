@@ -14,6 +14,53 @@ It is not proof that the values were entered or approved in either console.
 - Explicitly unavailable: purchase, payment, draw, kuji queue, exchange,
   point return, new shipping request, and shipping-fee payment
 
+## Console-ready Korean metadata
+
+These values are prepared for the first payment-disabled PRELAUNCH binary.
+Do not enter the URLs in either store until each URL returns HTTPS 200 without
+login. App name, subtitle, and descriptions must continue to match the signed
+binary rather than later LIVE commerce plans.
+
+### App Store Connect
+
+- Name: `DABBOBA`
+- Primary language: Korean
+- Bundle ID: `com.dabboba.mobile`
+- SKU: `com.dabboba.mobile`
+- Subtitle: `가챠·쿠지 상품을 한곳에서`
+- Primary category: Shopping
+- Secondary category: Entertainment
+- Promotional text: `좋아하는 작품의 가챠·쿠지 상품을 둘러보고, 새로운 소식과 관심 상품을 한곳에서 확인해 보세요.`
+- Keywords: `가챠,쿠지,피규어,캐릭터,애니메이션,굿즈,컬렉션`
+- Support URL: `https://dabboba.com/support`
+- Privacy policy URL: `https://dabboba.com/privacy`
+- Marketing URL: leave empty for 1.0.0 unless a separate public product page is approved
+- Copyright: `2026 다뽀바`
+- Price: Free
+
+The Account Holder must still answer Content Rights, age rating, Republic of
+Korea availability, DSA trader status, and App Privacy using real contracts and
+deployed data flows. Do not infer those declarations from source code.
+
+### Google Play Console
+
+- App name: `DABBOBA`
+- Default language: Korean
+- App or game: App
+- Free or paid: Free
+- Category: Shopping
+- Short description: `가챠·쿠지 상품을 미리 둘러보고 관심 상품을 저장하는 다뽀바 사전오픈판`
+- Support email: `support@dabboba.com`
+- Support phone: unresolved; enter only the account owner's verified business contact
+- Website: `https://dabboba.com/support`
+- Privacy policy: `https://dabboba.com/privacy`
+- Ads: No, unless an advertising SDK or paid placement is added before signing
+
+The developer must still complete Target audience, Content rating, App access,
+Data safety, Account deletion, and policy declarations against the signed AAB
+and production backend. The store listing is shared across test tracks, so it
+must not advertise payment or draw behavior that is absent from PRELAUNCH.
+
 ## Short description
 
 가챠·쿠지 상품을 미리 둘러보고 관심 상품을 저장하는 다뽀바 사전오픈판
@@ -32,21 +79,29 @@ DABBOBA는 좋아하는 작품의 가챠·쿠지 상품을 한곳에서 찾고 �
 
 ## Review notes
 
-This is a complete payment-disabled PRELAUNCH catalog release. Reviewers can
-browse Home, Gacha Shop, the Kuji coming-soon page, search, product details,
-notices, and public legal/support pages without making a purchase. Authenticated
-customers can save wishlists and manage sessions or request account deletion.
+The following is a submission-note draft. Paste it into a store only after the
+signed PRELAUNCH artifact, deployed API, public policy URLs, reviewer access,
+and account-deletion flow have been verified against the release record.
 
-The binary is compiled with `EXPO_PUBLIC_COMMERCE_CAPABILITY=PRELAUNCH`; the API
-also runs with `DABBOBA_COMMERCE_MODE=PRELAUNCH` and
+This submission is a payment-disabled PRELAUNCH catalog release. Reviewers can
+browse Home, Gacha Shop, the Kuji coming-soon page, search, product details,
+notices, and public legal/support pages without making a purchase. After the
+release test account is supplied, authenticated reviewers can save wishlists,
+manage sessions, and request account deletion.
+
+For the submitted artifact, confirm that the binary is compiled with
+`EXPO_PUBLIC_COMMERCE_CAPABILITY=PRELAUNCH`; the deployed API must run with
+`DABBOBA_COMMERCE_MODE=PRELAUNCH` and
 `PAYMENT_PROVIDER=UNCONFIGURED`. Customer order, payment, draw, kuji-room,
 exchange, point-return, inventory, and shipping mutations return
 `COMMERCE_NOT_AVAILABLE`. Server configuration alone cannot enable commerce in
 this binary.
 
-No reviewer should be asked to enter payment data. No TEST_PG, demo customer,
-fake success state, or hidden purchase route is included in the production
-artifact.
+No reviewer should be asked to enter payment data. The later LIVE checkout,
+payment, and draw code remains in the binary, but PRELAUNCH exposes no CTA to
+it, route guards return users to a safe catalog screen, and server mutations
+fail closed. Before copying this note, verify that no TEST_PG, demo customer, or
+fake success state is included in the signed submission artifact.
 
 ## Screenshot acceptance rules
 
@@ -87,6 +142,12 @@ approved first-release diagnostics boundary.
 - [ ] Legal owner, retention periods, and policy wording were approved.
 - [ ] Image/IP rights evidence is attached to the release record.
 - [ ] Signed IPA/AAB was inspected and tested on physical iOS/Android devices.
+- [ ] App Store review contact and Play contact phone use verified owner details.
+- [ ] Reviewer account, sign-in steps, and OTP handling notes were tested from a
+  fresh install; the account follows ordinary customer authorization rules and
+  contains no hidden admin or demo bypass.
+- [ ] App Store phone screenshots and Google Play screenshots/feature graphic
+  were captured from the signed PRELAUNCH build.
 - [ ] App Store privacy and Google Data Safety answers match the working matrix.
 - [ ] Google policy support supplied written classification before any later
   paid chance-based physical-prize Android release.

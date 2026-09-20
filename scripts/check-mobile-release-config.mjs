@@ -1,4 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -16,6 +17,14 @@ export const REQUIRED_PUBLIC_BUILD_VARIABLES = Object.freeze([
 const LIVE_PUBLIC_BUILD_VARIABLES = Object.freeze([
   "EXPO_PUBLIC_PORTONE_STORE_ID",
   "EXPO_PUBLIC_PORTONE_CHANNEL_KEY",
+]);
+
+export const PG_REVIEW_PUBLIC_BUILD_VARIABLES = Object.freeze([
+  "EXPO_PUBLIC_DABBOBA_API_URL",
+  "EXPO_PUBLIC_SUPABASE_URL",
+  "EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY",
+  "EXPO_PUBLIC_COMMERCE_CAPABILITY",
+  ...LIVE_PUBLIC_BUILD_VARIABLES,
 ]);
 
 const REQUIRED_HTTPS_VARIABLES = Object.freeze([
@@ -61,6 +70,8 @@ const SOURCE_GATES = Object.freeze([
 const PLACEHOLDER_HOST = /(^|\.)(?:localhost|example(?:\.com)?|invalid|test|local)$|127\.0\.0\.1|0\.0\.0\.0|your-|placeholder/i;
 const FORBIDDEN_PRODUCTION_MARKERS = /TEST_PG|INTERNAL_ZERO|ENABLE_DEMO|ENABLE_DEV_SESSION|MOBILE_TEST_FIXTURE/i;
 const PRELAUNCH_LEGAL_MARKERS = /사전오픈판|결제(?:와|·주문·뽑기·배송 신청은).*제공하지 않습니다/;
+const PORTONE_CONFIG_PLUGIN = "@portone/react-native-sdk/plugin";
+const require = createRequire(import.meta.url);
 
 function addIssue(collection, code, message) {
   collection.push({ code, message });
@@ -135,7 +146,7 @@ function validReverseDns(value) {
     && !/(?:example|placeholder|yourapp|your-app)/i.test(value);
 }
 
-function validateAppConfiguration(rootDir, errors, warnings, structureOnly) {
+function validateAppConfiguration(rootDir, environment, errors, warnings, structureOnly) {
   const appDirectory = path.join(rootDir, "apps/mobile");
   const appConfig = readJson(path.join(appDirectory, "app.json"), errors, "APP_CONFIG");
   if (!appConfig?.expo) return;
@@ -146,6 +157,9 @@ function validateAppConfiguration(rootDir, errors, warnings, structureOnly) {
   }
   if (!validReverseDns(expo.ios?.bundleIdentifier)) {
     addIssue(errors, "IOS_BUNDLE_ID_INVALID", "iOS bundleIdentifier가 유효한 운영 식별자가 아닙니다.");
+  }
+  if (expo.ios?.usesAppleSignIn !== true) {
+    addIssue(errors, "IOS_APPLE_SIGN_IN_CAPABILITY_MISSING", "Apple 로그인을 제공하는 iOS 빌드는 usesAppleSignIn capability를 선언해야 합니다.");
   }
   if (!/^\d+$/.test(expo.ios?.buildNumber ?? "") || Number(expo.ios?.buildNumber) < 1) {
     addIssue(errors, "IOS_BUILD_NUMBER_INVALID", "ios.buildNumber는 1 이상의 정수 문자열이어야 합니다.");
@@ -198,6 +212,31 @@ function validateAppConfiguration(rootDir, errors, warnings, structureOnly) {
       warnings,
       "EAS_PROJECT_NOT_LINKED",
       "외부 Expo 계정 작업인 eas init은 실행하지 않았습니다. 첫 서명 빌드 전에 정확한 EAS projectId를 연결해야 합니다.",
+    );
+  }
+
+  const dynamicConfigPath = path.join(appDirectory, "app.config.js");
+  if (!existsSync(dynamicConfigPath)) {
+    addIssue(errors, "MOBILE_DYNAMIC_CONFIG_MISSING", "PRELAUNCH에서 결제용 native 설정을 제외할 app.config.js가 필요합니다.");
+    return;
+  }
+  const dynamicConfig = require(dynamicConfigPath);
+  if (typeof dynamicConfig.pluginsForCommerceCapability !== "function") {
+    addIssue(errors, "MOBILE_COMMERCE_PLUGIN_GATE_MISSING", "app.config.js가 commerce capability별 native plugin 경계를 제공하지 않습니다.");
+    return;
+  }
+  const capability = environment.EXPO_PUBLIC_COMMERCE_CAPABILITY?.trim();
+  const effectivePlugins = dynamicConfig.pluginsForCommerceCapability(expo.plugins, capability);
+  const hasPortOnePlugin = effectivePlugins.some((plugin) => (
+    Array.isArray(plugin) ? plugin[0] : plugin
+  ) === PORTONE_CONFIG_PLUGIN);
+  if (capability === "LIVE" ? !hasPortOnePlugin : hasPortOnePlugin) {
+    addIssue(
+      errors,
+      "MOBILE_COMMERCE_PLUGIN_BOUNDARY_INVALID",
+      capability === "LIVE"
+        ? "LIVE 빌드는 PortOne native config plugin을 포함해야 합니다."
+        : "PRELAUNCH 또는 미설정 빌드는 PortOne native config plugin을 포함하면 안 됩니다.",
     );
   }
 }
@@ -348,18 +387,19 @@ function validateCardReviewBusinessPhone(rootDir, errors, warnings, structureOnl
   }
 }
 
-function validateHttpsEnvironment(environment, errors) {
+function validateHttpsEnvironment(environment, errors, options = {}) {
   const commerceCapability = environment.EXPO_PUBLIC_COMMERCE_CAPABILITY?.trim();
-  const requiredVariables = commerceCapability === "LIVE"
+  const requiredVariables = options.requiredVariables ?? (commerceCapability === "LIVE"
     ? [...REQUIRED_PUBLIC_BUILD_VARIABLES, ...LIVE_PUBLIC_BUILD_VARIABLES]
-    : REQUIRED_PUBLIC_BUILD_VARIABLES;
+    : REQUIRED_PUBLIC_BUILD_VARIABLES);
+  const requiredHttpsVariables = options.requiredHttpsVariables ?? REQUIRED_HTTPS_VARIABLES;
   for (const variable of requiredVariables) {
     if (!environment[variable]?.trim()) {
       addIssue(errors, `ENV_${variable}_MISSING`, `${variable} 운영 값이 필요합니다.`);
     }
   }
 
-  for (const variable of REQUIRED_HTTPS_VARIABLES) {
+  for (const variable of requiredHttpsVariables) {
     const rawValue = environment[variable]?.trim();
     if (!rawValue) continue;
     try {
@@ -395,6 +435,67 @@ function validateHttpsEnvironment(environment, errors) {
       addIssue(errors, `ENV_${variable}_INVALID`, `${variable}에 실제 PortOne 운영 값을 설정해야 합니다.`);
     }
   }
+}
+
+function validateCheckoutPaymentSource(rootDir, errors) {
+  const connectionRoutePath = path.join(rootDir, "apps/mobile/app/checkout/connect/[productId].tsx");
+  const checkoutScreenPath = path.join(
+    rootDir,
+    "apps/mobile/src/features/checkout/CheckoutScreen.tsx",
+  );
+  const paymentScreenPath = path.join(
+    rootDir,
+    "apps/mobile/src/features/checkout/PortOnePaymentScreen.tsx",
+  );
+  const connectionSource = existsSync(connectionRoutePath)
+    ? readFileSync(connectionRoutePath, "utf8")
+    : "";
+  const checkoutSource = existsSync(checkoutScreenPath)
+    ? readFileSync(checkoutScreenPath, "utf8")
+    : "";
+  const paymentSource = existsSync(paymentScreenPath)
+    ? readFileSync(paymentScreenPath, "utf8")
+    : "";
+
+  if (!/Redirect href="\/"/.test(connectionSource) || /CheckoutConnectionScreen/.test(connectionSource)) {
+    addIssue(
+      errors,
+      "PAYMENT_CONNECTION_PLACEHOLDER_PRESENT",
+      "기존 결제 연결 안내 경로가 공개 production에서 비활성화되지 않았습니다.",
+    );
+  }
+  if (
+    !/EXPO_PUBLIC_PORTONE_STORE_ID/.test(checkoutSource)
+    || !/EXPO_PUBLIC_PORTONE_CHANNEL_KEY/.test(checkoutSource)
+    || !/openLivePayment/.test(checkoutSource)
+    || !/@portone\/react-native-sdk/.test(paymentSource)
+    || !/confirmPortOnePayment/.test(paymentSource)
+    || !/await fetchCheckoutOrder/.test(paymentSource)
+  ) {
+    addIssue(
+      errors,
+      "CHECKOUT_PAYMENT_PLACEHOLDER_PRESENT",
+      "구매 화면의 PortOne 결제 왕복 또는 서버 재검증 경로가 누락됐습니다.",
+    );
+  }
+}
+
+function validatePgReviewEnvironment(rootDir, environment, errors) {
+  validateHttpsEnvironment(environment, errors, {
+    requiredVariables: PG_REVIEW_PUBLIC_BUILD_VARIABLES,
+    requiredHttpsVariables: [
+      "EXPO_PUBLIC_DABBOBA_API_URL",
+      "EXPO_PUBLIC_SUPABASE_URL",
+    ],
+  });
+  if (environment.EXPO_PUBLIC_COMMERCE_CAPABILITY?.trim() !== "LIVE") {
+    addIssue(
+      errors,
+      "PG_REVIEW_COMMERCE_LIVE_REQUIRED",
+      "PG 심사용 내부 빌드는 결제창을 열 수 있도록 EXPO_PUBLIC_COMMERCE_CAPABILITY=LIVE여야 합니다.",
+    );
+  }
+  validateCheckoutPaymentSource(rootDir, errors);
 }
 
 function validateProductionPaymentBoundary(rootDir, environment, errors) {
@@ -448,46 +549,7 @@ function validateProductionPaymentBoundary(rootDir, environment, errors) {
     );
   }
 
-  const connectionRoutePath = path.join(rootDir, "apps/mobile/app/checkout/connect/[productId].tsx");
-  const checkoutScreenPath = path.join(
-    rootDir,
-    "apps/mobile/src/features/checkout/CheckoutScreen.tsx",
-  );
-  const paymentScreenPath = path.join(
-    rootDir,
-    "apps/mobile/src/features/checkout/PortOnePaymentScreen.tsx",
-  );
-  const connectionSource = existsSync(connectionRoutePath)
-    ? readFileSync(connectionRoutePath, "utf8")
-    : "";
-  const checkoutSource = existsSync(checkoutScreenPath)
-    ? readFileSync(checkoutScreenPath, "utf8")
-    : "";
-  const paymentSource = existsSync(paymentScreenPath)
-    ? readFileSync(paymentScreenPath, "utf8")
-    : "";
-
-  if (!/Redirect href="\/"/.test(connectionSource) || /CheckoutConnectionScreen/.test(connectionSource)) {
-    addIssue(
-      errors,
-      "PAYMENT_CONNECTION_PLACEHOLDER_PRESENT",
-      "기존 결제 연결 안내 경로가 공개 production에서 비활성화되지 않았습니다.",
-    );
-  }
-  if (
-    !/EXPO_PUBLIC_PORTONE_STORE_ID/.test(checkoutSource)
-    || !/EXPO_PUBLIC_PORTONE_CHANNEL_KEY/.test(checkoutSource)
-    || !/openLivePayment/.test(checkoutSource)
-    || !/@portone\/react-native-sdk/.test(paymentSource)
-    || !/confirmPortOnePayment/.test(paymentSource)
-    || !/await fetchCheckoutOrder/.test(paymentSource)
-  ) {
-    addIssue(
-      errors,
-      "CHECKOUT_PAYMENT_PLACEHOLDER_PRESENT",
-      "구매 화면의 PortOne 결제 왕복 또는 서버 재검증 경로가 누락됐습니다.",
-    );
-  }
+  validateCheckoutPaymentSource(rootDir, errors);
   if (environment.PORTONE_CHANNEL_ENVIRONMENT?.trim() !== "LIVE") {
     addIssue(
       errors,
@@ -501,16 +563,19 @@ export function inspectMobileReleaseConfig({
   rootDir,
   environment = process.env,
   structureOnly = false,
+  pgReview = false,
 } = {}) {
   const resolvedRoot = path.resolve(rootDir ?? path.join(path.dirname(fileURLToPath(import.meta.url)), ".."));
   const errors = [];
   const warnings = [];
-  validateAppConfiguration(resolvedRoot, errors, warnings, structureOnly);
+  validateAppConfiguration(resolvedRoot, environment, errors, warnings, structureOnly);
   validateEasConfiguration(resolvedRoot, errors);
   validateSourceGates(resolvedRoot, errors);
   validateEnvironmentExample(resolvedRoot, errors);
-  validateCardReviewBusinessPhone(resolvedRoot, errors, warnings, structureOnly);
-  if (!structureOnly) {
+  validateCardReviewBusinessPhone(resolvedRoot, errors, warnings, structureOnly && !pgReview);
+  if (pgReview) {
+    validatePgReviewEnvironment(resolvedRoot, environment, errors);
+  } else if (!structureOnly) {
     validateHttpsEnvironment(environment, errors);
     validateLiveLegalDocuments(resolvedRoot, environment, errors);
     validateProductionPaymentBoundary(resolvedRoot, environment, errors);
@@ -518,14 +583,16 @@ export function inspectMobileReleaseConfig({
   return { errors, warnings };
 }
 
-function printReport(report, structureOnly) {
+function printReport(report, { structureOnly, pgReview }) {
   for (const warning of report.warnings) console.warn(`WARN [${warning.code}] ${warning.message}`);
   for (const error of report.errors) console.error(`ERROR [${error.code}] ${error.message}`);
   if (report.errors.length === 0) {
     console.log(
-      structureOnly
-        ? "Mobile release structure check passed. External accounts and signed artifacts were not verified."
-        : "Mobile production release configuration check passed. Signed artifacts and store submission still require external verification.",
+      pgReview
+        ? "Mobile PG-review configuration check passed. Test-channel server state and signed artifact still require external verification."
+        : structureOnly
+          ? "Mobile release structure check passed. External accounts and signed artifacts were not verified."
+          : "Mobile production release configuration check passed. Signed artifacts and store submission still require external verification.",
     );
   }
 }
@@ -534,14 +601,18 @@ const invokedPath = process.argv[1] ? path.resolve(process.argv[1]) : null;
 if (invokedPath === fileURLToPath(import.meta.url)) {
   const unknownArguments = process.argv
     .slice(2)
-    .filter((argument) => argument !== "--" && argument !== "--structure-only");
+    .filter((argument) => argument !== "--" && argument !== "--structure-only" && argument !== "--pg-review");
+  const structureOnly = process.argv.includes("--structure-only");
+  const pgReview = process.argv.includes("--pg-review");
   if (unknownArguments.length > 0) {
     console.error(`Unknown arguments: ${unknownArguments.join(", ")}`);
     process.exitCode = 2;
+  } else if (structureOnly && pgReview) {
+    console.error("--structure-only and --pg-review cannot be used together.");
+    process.exitCode = 2;
   } else {
-    const structureOnly = process.argv.includes("--structure-only");
-    const report = inspectMobileReleaseConfig({ structureOnly });
-    printReport(report, structureOnly);
+    const report = inspectMobileReleaseConfig({ structureOnly, pgReview });
+    printReport(report, { structureOnly, pgReview });
     if (report.errors.length > 0) process.exitCode = 1;
   }
 }

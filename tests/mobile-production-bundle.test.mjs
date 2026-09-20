@@ -3,7 +3,10 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { scanMobileProductionBundle } from "../scripts/check-mobile-production-bundle.mjs";
+import {
+  mobileProductionExportInvocation,
+  scanMobileProductionBundle,
+} from "../scripts/check-mobile-production-bundle.mjs";
 
 async function fixture(files) {
   const directory = await mkdtemp(path.join(tmpdir(), "dabboba-bundle-scan-test-"));
@@ -39,4 +42,26 @@ test("production bundle scan rejects test payment, demo-session, fixture, and lo
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
+});
+
+test("production export runs from the Expo app root rather than the monorepo root", () => {
+  const invocation = mobileProductionExportInvocation({
+    platform: "ios",
+    outputDirectory: "/tmp/dabboba-ios-export",
+    rootDir: "/workspace/dabboba-app",
+  });
+
+  assert.equal(invocation.command, "corepack");
+  assert.equal(invocation.cwd, "/workspace/dabboba-app/apps/mobile");
+  assert.deepEqual(invocation.args, [
+    "pnpm",
+    "exec",
+    "expo",
+    "export",
+    "--platform",
+    "ios",
+    "--output-dir",
+    "/tmp/dabboba-ios-export",
+    "--clear",
+  ]);
 });

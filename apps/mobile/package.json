@@ -13,6 +13,7 @@
     "ios": "node ../../scripts/dabboba-mobile-launch.mjs --ios",
     "auth:ios": "node ../../scripts/dabboba-mobile-launch.mjs --ios --hosted-auth",
     "auth:android": "node ../../scripts/dabboba-mobile-launch.mjs --android --hosted-auth",
+    "eas-build-post-install": "node ../../scripts/eas-mobile-release-gate.mjs",
     "test": "node --test ../../tests/expo-shell-structure.test.mjs",
     "typecheck": "tsc --noEmit"
   },

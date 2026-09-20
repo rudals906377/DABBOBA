@@ -16,6 +16,8 @@ playwright-report/
 **/.env.*.local
 !.env.example
 .turbo/
+.wrangler/
+.dev.vars*
 coverage/
 *.log
 *.dbbenc

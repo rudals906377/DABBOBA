@@ -122,7 +122,9 @@ SUPABASE_URL=https://<운영 project ref>.supabase.co
 SUPABASE_PUBLISHABLE_KEY=<운영 publishable key>
 ```
 
-빌드 명령은 `corepack pnpm run build`, Cloudflare Pages의 정적 출력 디렉터리는 `dist/client`입니다. 빌드가 Pages advanced-mode 진입점인 `dist/client/_worker.js`와 기존 Sites 서버 진입점 `dist/server/index.js`를 함께 생성합니다. Pages 프로젝트에는 위 세 환경변수와 정적 자산 binding만 연결해야 합니다. 저장소에는 Cloudflare 계정 ID, 프로젝트 ID, API 토큰 또는 운영 배포 자격증명을 두지 않으므로 실제 프로젝트 연결과 custom domain 설정은 Cloudflare에서 별도로 완료해야 합니다.
+빌드 명령은 `corepack pnpm run build`, Cloudflare Pages의 운영 정적 출력 디렉터리는 `dist/public-site`입니다. 이 디렉터리에는 공개 정책·지원·탈퇴 문서와 Pages advanced-mode 진입점인 `_worker.js`만 들어갑니다. `dist/client`는 내부 웹 프로토타입까지 포함하므로 운영 정책 도메인에 배포하지 않습니다. Pages 프로젝트에는 위 세 환경변수와 `dist/public-site`만 연결해야 합니다. 저장소에는 Cloudflare 계정 ID, 프로젝트 ID, API 토큰 또는 운영 배포 자격증명을 두지 않으므로 실제 프로젝트 연결과 custom domain 설정은 Cloudflare에서 별도로 완료해야 합니다.
+
+친구 소유 계정으로 이전할 때의 Git 연동, DNS·메일, 검증, 롤백 순서는 `docs/cloudflare-pages-handoff.md`를 따릅니다.
 
 Worker는 `https://dabboba.com`이 아닌 Pages preview/custom host에서 인증 경로를 열지 않습니다. 세 값 중 하나라도 없거나 HTTPS origin이 아니거나 publishable key가 privileged key이면 `503`으로 닫힙니다. 또한 운영 API의 `/v1/auth/providers`가 `EMAIL`을 노출하고 `brokerExchangeConfigured=true`를 반환하며, 해당 정책 버전이 `/v1/public/config`와 일치할 때만 폼을 엽니다. 이메일 OTP 요청은 Supabase에 `create_user=false`로 전달하고, 미가입·가입 여부와 무관하게 같은 `202` 본문을 반환합니다. 접수 상태 토큰만 브라우저 localStorage에 보관하며 Supabase/DABBOBA 로그인 토큰은 저장하지 않습니다.
 
