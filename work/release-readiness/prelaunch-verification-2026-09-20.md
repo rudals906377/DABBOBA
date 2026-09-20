@@ -3,14 +3,14 @@
 - 검증 기준일: 2026-09-20 (Asia/Seoul)
 - 대상: DABBOBA `1.0.0`, iOS build `1`, Android versionCode `1`
 - 출시 형태: `PRELAUNCH` 상품 탐색·검색·찜·공지·계정 중심 사전오픈판
-- 기준 소스: `feat/dabboba-capsule-gacha`, HEAD `7729112`
+- 기준 소스: `feat/dabboba-capsule-gacha`, HEAD `7fa57f9`
 - 최종 판단: **공개 심사 제출 NO-GO**
 
 ## 1. 판단 요약
 
 PRELAUNCH 코드 범위와 자동검증은 대부분 완료됐고, 결제·주문·추첨·재고 소비·쿠지 입장·유료 배송 신청을 사전오픈 빌드에서 차단하는 방어선도 마련됐다. 그러나 현재 결과물은 아직 App Store/Google Play에 제출할 수 없다.
 
-차단 사유는 기능 코드보다 출시 증거와 외부 운영 준비에 있다. 작업 트리가 대규모 미커밋 상태이고 migration `0049`~`0064`가 HEAD에 포함되지 않았으며, 운영 DB 적용 증거·서명된 IPA/AAB·실기기 검증·공개 정책 사이트·실제 고객지원 메일함이 없다. 따라서 이 문서의 통과 항목은 **코드와 로컬 검증 통과**를 의미할 뿐, 배포 또는 스토어 승인 가능성을 의미하지 않는다.
+차단 사유는 기능 코드보다 외부 운영 준비에 있다. 출시 범위는 migration `0064`까지 HEAD에 포함된 깨끗한 기준 커밋으로 고정했고 release source gate도 통과했다. 그러나 운영 DB는 `0051`까지만 적용되어 있으며, 공개 정책 사이트·검증된 로그인 제공자·최신 PRELAUNCH API/worker 배포·서명된 IPA/AAB·실기기 검증·실제 고객지원 메일함이 없다. 따라서 이 문서의 통과 항목은 **코드와 로컬 검증 통과**를 의미할 뿐, 배포 또는 스토어 승인 가능성을 의미하지 않는다.
 
 ## 2. 구현된 PRELAUNCH 범위
 
@@ -109,36 +109,40 @@ PRELAUNCH 코드 범위와 자동검증은 대부분 완료됐고, 결제·주�
 - VoiceOver/TalkBack, 동적 글자 200%, Reduced Motion, 키보드, 소형 화면의 서명 빌드 결과
 - 실제 Kakao·Naver·Google·Apple·이메일 OTP 운영 계정 검증
 - APNs/FCM 권한 허용·거부, 백그라운드·종료 상태 알림 딥링크 검증
-- 운영 DB migration 적용, 백업·복구 연습, 관리자 출고·송장 운영 검증
+- 운영 DB migration 적용, Supabase 관리 영역을 포함한 복구 연습, 관리자 출고·송장 운영 검증
 - 운영 PRELAUNCH 서버에서 상거래 mutation이 실제로 0건임을 보여 주는 배포 로그·감사 기록
 
 ## 4. 공개 제출 차단 항목
 
+### 해결된 출시 기반
+
+- HEAD `7fa57f9`에 migration `0064`까지의 출시 범위를 원자적 PRELAUNCH 기준 커밋으로 고정했다.
+- 전체 자동 검증 35/35 작업과 `db:release-source:check`를 통과했고, 검사 시점의 worktree는 깨끗하다.
+- 원격 Git push는 이 검증 범위에 포함하지 않았다.
+
 ### P0 — 제출 전에 반드시 해결
 
-1. **Git 출시 기준점 부재**
-   - 현재 작업 트리는 대규모 수정·미추적 파일이 있는 dirty 상태다.
-   - HEAD `7729112`에는 migration `0037`까지만 들어 있고 `0049`~`0064` 16개가 커밋되지 않았다.
-   - `db:release-source:check`는 dirty worktree, 낮은 HEAD migration, 16개 미커밋 migration 때문에 총 18개 blocker로 의도대로 실패한다.
-   - 출시 대상 파일을 검토해 기준 커밋을 만들고 깨끗한 checkout에서 동일 검증을 재실행해야 한다.
-
-2. **공개 도메인·정책·고객지원 미개통**
+1. **공개 도메인·정책·고객지원 미개통**
    - `dabboba.com`과 `www.dabboba.com` DNS 조회가 `SERVFAIL`이다.
    - `dabboba.com` MX 조회도 `SERVFAIL`이며 `support@dabboba.com` 송수신 가능 증거가 없다.
    - `/privacy`, `/terms`, `/support`, `/account-deletion`은 현재 외부에서 HTTPS 200으로 열리지 않는다.
    - Cloudflare Pages 배포, 루트/www 리디렉션, TLS, 정책 버전·시행일·해시 일치, 실제 메일 송수신을 확인해야 한다.
 
-3. **서명 빌드·스토어 자격증명·실기기 검증 부재**
+2. **서명 빌드·스토어 자격증명·실기기 검증 부재**
    - EAS project, Apple 배포 인증서·프로비저닝, Android keystore, App Store Connect/Play Console 제출 증거가 없다.
    - 서명 IPA/AAB에서 아이콘·adaptive mask·URL scheme·APNs·권한·Privacy Manifest·export compliance를 확인해야 한다.
    - 보관함 `/storage` 딥링크를 포함해 실기기에서 전 경로를 다시 검증해야 한다.
 
-4. **운영 DB 및 운영 제공자 검증 부재**
-   - migration `0049`~`0064`는 임시 DB에서는 통과했지만 운영 DB에는 적용되지 않았다.
+3. **운영 DB 및 운영 제공자 검증 부재**
+   - 읽기 전용 release check에서 운영 DB는 65개 중 52개가 일치했고 `0052`~`0064` 13개가 대기 중이다. 역할 분리·TLS·RLS·공개 역할 차단은 통과했다.
+   - 변경 전 AES-256-GCM 논리 백업을 생성해 인증 태그와 SHA-256, 파일·디렉터리 권한을 확인했다. 단, Supabase 관리 schema/extension까지 포함한 플랫폼 복원 증거는 아니다.
+   - `0056`·`0057`은 현재 열리지 않는 `dabboba.com` 정책 URL을 유효 문서로 등록하므로 공개 사이트 확인 전 운영 migration을 강행하지 않았다.
+   - 출시 Edge 프로필에 외부에서 검증된 로그인 제공자 목록과 공개 Supabase 키가 없어 배포 gate가 의도대로 차단된다.
+   - 현재 운영 API의 `/healthz`와 `/readyz`는 200이지만 최신 계약인 `/v1/public/config`는 404이므로 구버전이다.
    - 실제 운영 설정이 확인된 로그인 제공자만 첫 빌드에 노출해야 한다.
    - 이메일 OTP 송수신, OAuth 취소·재진입, 세션 복구, Apple 탈퇴 토큰 폐기와 Supabase Auth 사용자 삭제를 실제 계정에서 확인해야 한다.
 
-5. **법률·정책·IP 권리 외부 확인 미완료**
+4. **법률·정책·IP 권리 외부 확인 미완료**
    - 개인정보·약관·거래 기록 보관 기간과 계정삭제 문구는 국내 법률 담당자의 최종 확인이 필요하다.
    - 실제 IP 상품 이미지·판매 사용권 증빙이 필요하다.
    - 확률형 물리 경품 구조는 Google Play 정책지원의 서면 분류와 국내 법률 검토를 LIVE 전 필수 게이트로 둬야 한다.
@@ -161,8 +165,8 @@ PRELAUNCH 코드 범위와 자동검증은 대부분 완료됐고, 결제·주�
 
 다음 조건을 모두 충족한 뒤에만 `GO`로 전환한다.
 
-1. 출시 범위를 선별 커밋하고 Git 상태를 깨끗하게 만든다.
-2. migration `0049`~`0064`를 HEAD와 운영 DB에 반영하고 release source gate를 통과한다.
+1. **완료:** 출시 범위를 선별 커밋하고 Git 상태를 깨끗하게 유지하며 release source gate를 통과한다.
+2. 공개 정책 사이트와 검증된 로그인 제공자를 준비한 뒤 migration `0052`~`0064`를 운영 DB에 반영하고 DB release check 65/65를 통과한다.
 3. `dabboba.com` 네 정책 경로와 `support@dabboba.com`을 외부에서 검증한다.
 4. 대표 유선번호, 실제 로그인 제공자, APNs/FCM, 탈퇴 외부 연동을 운영 계정으로 검증한다.
 5. `production-prelaunch` 서명 IPA/AAB를 생성하고 iOS·Android 실기기 전체 흐름을 통과한다.

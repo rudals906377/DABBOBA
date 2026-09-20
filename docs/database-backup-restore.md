@@ -77,8 +77,11 @@ node ops/database/test-backup.integration.mjs
 | --- | --- | --- |
 | `0037`까지 38개 migration | `/Users/kyoungmin/Desktop/DBB_BACKUPS/DABBOBA/20260908T082006Z/dabboba-remote-20260908T082006Z.dbbenc` | `9066fab79e2001033e9e45ca5191c98112762356ea01fd5173404683d4d60373` |
 | `0038`까지 39개 migration, 수정된 `0039` 적용 직전 | `/Users/kyoungmin/Desktop/DBB_BACKUPS/DABBOBA/20260908T103057Z/dabboba-remote-20260908T103057Z.dbbenc` | `e08c76c1ea83969852defd38d4ac45376ce93864901efd56feadd15438f42153` |
+| `0051`까지 52개 migration, `0052`~`0064` 적용 전 | `/Users/kyoungmin/Desktop/DBB_BACKUPS/DABBOBA/20260920T065110Z/dabboba-production-pre-migration-20260920T065110Z.dbbenc` | `7a505a9cb3f46bcac240a68e88a385898d912f84af3b6fd94752485a7a5a96cc` |
 
 두 번째 archive는 593,250바이트이며 기존 32바이트 키를 회전 없이 재사용했다. 백업마다 새 nonce를 사용하는 형식이며 기존 archive를 덮어쓰지 않았다. archive·키 파일은 `0600`, 각각의 보관 디렉터리는 `0700`이다. 키는 저장소 밖 별도 로컬 디렉터리에 있으나 **같은 컴퓨터이므로 오프사이트 또는 별도 장애 도메인 백업은 아니다**. 최신 백업 인증 검증 후 `0039`를 한 번 적용했으며, 원격은 총 40개 migration과 로컬 checksum 일치까지 확인했다.
+
+2026-09-20 archive는 1,092,787바이트이며 새 32바이트 키를 archive와 다른 저장소 밖 디렉터리에 생성했다. TLS `verify-full`, Supabase Root 2021 CA, PostgreSQL 18.6 client, 읽기 전용 repeatable-read snapshot을 사용했고 인증 태그와 v2 bundle 구조를 확인했다. 운영 DB에는 쓰지 않았다. 일반 PostgreSQL/pgmq 로컬 컨테이너의 빈 전용 DB에 전체 복원을 시도했으나, dump에 포함된 Supabase 관리 schema·역할과 `pg_cron`·`pg_net`·`supabase_vault`가 로컬 환경에 없어 실패했다. 단일 transaction은 완전히 rollback됐고 빈 임시 DB는 확인 후 삭제했다. 따라서 이 archive는 인증된 논리 백업이지만 Supabase 플랫폼 전체 복원 증거로 간주하지 않는다.
 
 ## 아직 완료가 아닌 항목
 
