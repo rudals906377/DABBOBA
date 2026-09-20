@@ -2,7 +2,7 @@
 // Opt-in, clone-only: never loads .env, contacts Supabase or drops a database.
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { chmod, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
@@ -23,6 +23,35 @@ const mapping = ports['5432/tcp']?.find((entry) => entry.HostIp === '127.0.0.1')
 assert.ok(mapping && /^[0-9]+$/.test(mapping.HostPort), 'fixture PostgreSQL needs a known loopback port');
 const pools = new Map();
 const password = 'dabboba-disposable-local-only-20260905';
+const latestMigrations = [
+  '0038_shipping_request_item_snapshots.sql',
+  '0039_retire_prototype_catalog.sql',
+  '0049_shipping_storage_policy.sql',
+  '0050_shipping_fee_policy.sql',
+];
+const latestMigrationSources = Object.fromEntries(await Promise.all(latestMigrations.map(async (version) => [
+  version, await readFile(new URL(`../../packages/db/migrations/${version}`, import.meta.url), 'utf8'),
+])));
+const latestMigrationChecksums = Object.fromEntries(latestMigrations.map((version) => [
+  version, createHash('sha256').update(latestMigrationSources[version]).digest('hex'),
+]));
+const retiredPrototypeProductIds = [
+  'one-piece-tcg', 'dragon-ball-figure', 'demon-slayer-gacha', 'jujutsu-kaisen-gacha',
+  'naruto-figure', 'bleach-figure', 'my-hero-academia-figure', 'hunter-x-hunter-kuji',
+  'chainsaw-man-figure', 'attack-on-titan-figure', 'jojos-bizarre-adventure-kuji',
+  'spy-x-family-gacha', 'haikyu-gacha', 'blue-lock-gacha', 'oshi-no-ko-gacha',
+  'frieren-figure', 'cyberpunk-edgerunners-figure', 'dandadan-gacha', 'kaiju-no-8-kuji',
+  'evangelion-kuji', 'mobile-suit-gundam-kuji', 'pokemon-tcg', 'detective-conan-gacha',
+  'tokyo-revengers-kuji', 'that-time-i-got-reincarnated-as-a-slime-kuji',
+];
+const retiredPrototypeIpIds = [
+  'one-piece', 'dragon-ball', 'demon-slayer', 'jujutsu-kaisen', 'naruto', 'bleach',
+  'my-hero-academia', 'hunter-x-hunter', 'chainsaw-man', 'attack-on-titan',
+  'jojos-bizarre-adventure', 'spy-x-family', 'haikyu', 'blue-lock', 'oshi-no-ko',
+  'frieren', 'cyberpunk-edgerunners', 'dandadan', 'kaiju-no-8', 'evangelion',
+  'mobile-suit-gundam', 'pokemon', 'detective-conan', 'tokyo-revengers',
+  'that-time-i-got-reincarnated-as-a-slime',
+];
 const ident = (name) => `"${name.replaceAll('"','""')}"`;
 function pool(database) {
   if (!pools.has(database)) pools.set(database, new Pool({
@@ -93,9 +122,208 @@ async function compareConstraints(sourceDatabase, targetDatabase) {
   return { constraints: original.length, checksReparsed: checkCount };
 }
 
+async function createLatestMigrationFixture(database) {
+  const suffix = randomBytes(6).toString('hex');
+  const userId = randomUUID();
+  const ipId = `backup-retired-ip-${suffix}`;
+  const productId = `backup-retired-product-${suffix}`;
+  const originalIpName = `복원 전 IP ${suffix}`;
+  const originalProductName = `복원 전 상품 ${suffix}`;
+  const originalImageUrl = `https://example.test/${suffix}/before.webp`;
+  const currentIpName = `변경 후 IP ${suffix}`;
+  const currentProductName = `변경 후 상품 ${suffix}`;
+  const currentImageUrl = `https://example.test/${suffix}/after.webp`;
+  await rows(database, 'INSERT INTO public.users(id,email,nickname) VALUES($1,$2,$3)', [
+    userId, `backup-${suffix}@example.test`, `백업 ${suffix}`,
+  ]);
+  await rows(database, 'INSERT INTO public.catalog_ips(id,slug,name_ko,name_en,is_active) VALUES($1,$2,$3,$4,false)', [
+    ipId, ipId, originalIpName, `Backup retired IP ${suffix}`,
+  ]);
+  await rows(database, `INSERT INTO public.catalog_products(
+    id,sku,ip_id,category,name,price,image_url,is_active,metadata
+  ) VALUES($1,$2,$3,'figure',$4,12000,$5,false,$6::jsonb)`, [
+    productId, `BACKUP-RETIRED-${suffix}`.toUpperCase(), ipId, originalProductName,
+    originalImageUrl, JSON.stringify({ developmentFixture: true, backupRestoreDrill: true }),
+  ]);
+  const inventoryUnitId = await scalar(database, `INSERT INTO public.inventory_units(
+    owner_id,product_id,source_type,status
+  ) VALUES($1,$2,'ADMIN_ADJUSTMENT','OWNED') RETURNING id`, [userId, productId]);
+  const shippingRequestId = await scalar(database, `INSERT INTO public.shipping_requests(
+    user_id,address_snapshot,reference_subtotal,free_shipping_threshold,
+    qualifies_for_free_shipping,contains_kuji
+  ) VALUES($1,'{}'::jsonb,12000,24900,false,false) RETURNING id`, [userId]);
+  const snapshot = {
+    productId,
+    productName: originalProductName,
+    ipId,
+    ipNameKo: originalIpName,
+    category: 'figure',
+    imageUrl: originalImageUrl,
+    productVersion: 1,
+  };
+  await rows(database, `INSERT INTO public.shipping_request_items(
+    shipping_request_id,inventory_unit_id,product_snapshot
+  ) VALUES($1,$2,$3::jsonb)`, [shippingRequestId, inventoryUnitId, JSON.stringify(snapshot)]);
+  await rows(database, 'UPDATE public.catalog_ips SET name_ko=$2 WHERE id=$1', [ipId, currentIpName]);
+  await rows(database, `UPDATE public.catalog_products
+    SET name=$2,image_url=$3,version=version+1 WHERE id=$1`, [productId, currentProductName, currentImageUrl]);
+  return {
+    ipId, productId, inventoryUnitId, shippingRequestId, snapshot,
+    currentIpName, currentProductName, currentImageUrl,
+  };
+}
+
+const hasSqlState = (expected) => (error) => error && typeof error === 'object' && error.code === expected;
+
+async function verifyLatestMigrationResults(database, fixture) {
+  const migrations = await rows(database, `SELECT version,checksum
+    FROM public.schema_migrations WHERE version=ANY($1::text[]) ORDER BY version`, [latestMigrations]);
+  assert.deepEqual(migrations, latestMigrations.map((version) => ({
+    version, checksum: latestMigrationChecksums[version],
+  })),
+    '0038/0039 and 0049/0050 migration identities and checksums must survive restore');
+  assert.deepEqual(await rows(database, `SELECT data_type,is_nullable FROM information_schema.columns
+    WHERE table_schema='public' AND table_name='shipping_request_items' AND column_name='product_snapshot'`),
+  [{ data_type: 'jsonb', is_nullable: 'NO' }]);
+  assert.equal(await scalar(database, `SELECT count(*) FROM pg_constraint
+    WHERE conrelid='public.shipping_request_items'::regclass
+      AND conname='shipping_request_items_product_snapshot_object' AND contype='c' AND convalidated`), '1');
+  assert.equal(await scalar(database, `SELECT count(*) FROM pg_trigger
+    WHERE tgrelid='public.shipping_request_items'::regclass
+      AND tgname='shipping_request_items_snapshot_guard' AND NOT tgisinternal AND tgenabled='O'`), '1');
+  assert.deepEqual(await rows(database, `SELECT column_name,data_type,is_nullable
+    FROM information_schema.columns
+    WHERE table_schema='public' AND table_name='shipping_requests'
+      AND column_name=ANY($1::text[]) ORDER BY column_name`, [[
+    'contains_kuji', 'free_shipping_threshold', 'qualifies_for_free_shipping',
+    'reference_subtotal', 'shipping_fee',
+  ]]), [
+    { column_name: 'contains_kuji', data_type: 'boolean', is_nullable: 'YES' },
+    { column_name: 'free_shipping_threshold', data_type: 'integer', is_nullable: 'YES' },
+    { column_name: 'qualifies_for_free_shipping', data_type: 'boolean', is_nullable: 'YES' },
+    { column_name: 'reference_subtotal', data_type: 'integer', is_nullable: 'YES' },
+    { column_name: 'shipping_fee', data_type: 'integer', is_nullable: 'YES' },
+  ]);
+  assert.deepEqual(await rows(database, `SELECT conname,contype,convalidated
+    FROM pg_constraint
+    WHERE conrelid=ANY($1::regclass[]) AND conname=ANY($2::text[]) ORDER BY conname`, [[
+    'public.inventory_units', 'public.shipping_requests',
+  ], [
+    'inventory_units_storage_minimum_60_days',
+    'shipping_requests_free_shipping_policy_snapshot',
+    'shipping_requests_shipping_fee_policy_snapshot',
+  ]]), [
+    { conname: 'inventory_units_storage_minimum_60_days', contype: 'c', convalidated: true },
+    { conname: 'shipping_requests_free_shipping_policy_snapshot', contype: 'c', convalidated: true },
+    { conname: 'shipping_requests_shipping_fee_policy_snapshot', contype: 'c', convalidated: true },
+  ]);
+  assert.deepEqual(await rows(database, `SELECT tgname,tgenabled
+    FROM pg_trigger
+    WHERE tgrelid='public.shipping_requests'::regclass AND NOT tgisinternal
+      AND tgname=ANY($1::text[]) ORDER BY tgname`, [[
+    'shipping_requests_fill_shipping_fee', 'shipping_requests_guard_policy_snapshot',
+  ]]), [
+    { tgname: 'shipping_requests_fill_shipping_fee', tgenabled: 'O' },
+    { tgname: 'shipping_requests_guard_policy_snapshot', tgenabled: 'O' },
+  ]);
+  assert.match(await scalar(database, `SELECT pg_get_expr(d.adbin,d.adrelid,false)
+    FROM pg_attrdef d
+    JOIN pg_attribute a ON a.attrelid=d.adrelid AND a.attnum=d.adnum
+    WHERE d.adrelid='public.inventory_units'::regclass AND a.attname='storage_expires_at'`), /60 days/);
+  assert.deepEqual(await rows(database, `SELECT
+      storage_expires_at >= acquired_at + interval '60 days' AS storage_minimum_60_days
+    FROM public.inventory_units WHERE id=$1`, [fixture.inventoryUnitId]), [
+    { storage_minimum_60_days: true },
+  ]);
+  assert.deepEqual(await rows(database, `SELECT reference_subtotal,free_shipping_threshold,
+      qualifies_for_free_shipping,contains_kuji,shipping_fee
+    FROM public.shipping_requests WHERE id=$1`, [fixture.shippingRequestId]), [{
+    reference_subtotal: 12000,
+    free_shipping_threshold: 24900,
+    qualifies_for_free_shipping: false,
+    contains_kuji: false,
+    shipping_fee: 3000,
+  }]);
+
+  const restored = await rows(database, `SELECT item.product_snapshot,product.name AS current_product_name,
+    product.image_url AS current_image_url,product.version AS current_product_version,
+    product.is_active AS product_active,product.metadata,ip.name_ko AS current_ip_name,
+    ip.is_active AS ip_active,inventory.owner_id=request.user_id AS history_owner_matches
+    FROM public.shipping_request_items item
+    JOIN public.inventory_units inventory ON inventory.id=item.inventory_unit_id
+    JOIN public.shipping_requests request ON request.id=item.shipping_request_id
+    JOIN public.catalog_products product ON product.id=inventory.product_id
+    JOIN public.catalog_ips ip ON ip.id=product.ip_id
+    WHERE item.shipping_request_id=$1 AND item.inventory_unit_id=$2`, [
+    fixture.shippingRequestId, fixture.inventoryUnitId,
+  ]);
+  assert.equal(restored.length, 1, '0038 shipping history and 0039 retired catalog row must both survive restore');
+  assert.deepEqual(restored[0].product_snapshot, fixture.snapshot);
+  assert.equal(restored[0].current_product_name, fixture.currentProductName);
+  assert.equal(restored[0].current_image_url, fixture.currentImageUrl);
+  assert.equal(restored[0].current_product_version, 2);
+  assert.equal(restored[0].current_ip_name, fixture.currentIpName);
+  assert.equal(restored[0].product_active, false);
+  assert.equal(restored[0].ip_active, false);
+  assert.equal(restored[0].metadata.developmentFixture, true);
+  assert.equal(restored[0].history_owner_matches, true);
+  assert.equal(await scalar(database, `SELECT count(*) FROM public.catalog_products
+    WHERE is_active AND (id=ANY($1::text[]) OR metadata ? 'developmentFixture')`, [retiredPrototypeProductIds]), '0');
+  assert.equal(await scalar(database, `SELECT count(*) FROM public.catalog_ips ip
+    WHERE ip.id=ANY($1::text[]) AND ip.is_active AND NOT EXISTS (
+      SELECT 1 FROM public.catalog_products product WHERE product.ip_id=ip.id AND product.is_active
+    )`, [retiredPrototypeIpIds]), '0');
+
+  const missingPrototypeIpId = await scalar(database, `SELECT candidate FROM unnest($1::text[]) candidate
+    WHERE NOT EXISTS (SELECT 1 FROM public.catalog_ips ip WHERE ip.id=candidate) LIMIT 1`, [retiredPrototypeIpIds]);
+  assert.ok(missingPrototypeIpId, 'restore drill needs one unused prototype IP fixture identity');
+  const client = await pool(database).connect();
+  try {
+    await client.query('BEGIN');
+    await assert.rejects(client.query(`UPDATE public.shipping_request_items
+      SET product_snapshot=jsonb_set(product_snapshot,'{productName}','"tampered"')
+      WHERE shipping_request_id=$1 AND inventory_unit_id=$2`, [
+      fixture.shippingRequestId, fixture.inventoryUnitId,
+    ]), hasSqlState('55000'));
+    await client.query('ROLLBACK');
+
+    await client.query('BEGIN');
+    await assert.rejects(client.query(`UPDATE public.shipping_requests
+      SET shipping_fee=0 WHERE id=$1`, [fixture.shippingRequestId]), hasSqlState('55000'));
+    await client.query('ROLLBACK');
+
+    // Reapply the idempotent retirement migration inside a rollback-only
+    // transaction to prove its data result against the restored schema.
+    const suffix = randomBytes(6).toString('hex');
+    const activeIpId = `backup-retirement-execution-ip-${suffix}`;
+    const activeProductId = `backup-retirement-execution-product-${suffix}`;
+    await client.query('BEGIN');
+    await client.query(`INSERT INTO public.catalog_ips(id,slug,name_ko,name_en,is_active)
+      VALUES($1,$2,$3,$4,true)`, [
+      activeIpId, activeIpId, `퇴역 재실행 IP ${suffix}`, `Retirement execution IP ${suffix}`,
+    ]);
+    await client.query(`INSERT INTO public.catalog_products(
+      id,sku,ip_id,category,name,price,image_url,is_active,metadata
+    ) VALUES($1,$2,$3,'figure',$4,12000,$5,true,'{"developmentFixture":true}'::jsonb)`, [
+      activeProductId, `BACKUP-RETIREMENT-EXECUTION-${suffix}`.toUpperCase(), activeIpId,
+      `퇴역 재실행 상품 ${suffix}`, `https://example.test/${suffix}/retirement.webp`,
+    ]);
+    await client.query(`INSERT INTO public.catalog_ips(id,slug,name_ko,name_en,is_active)
+      VALUES($1,$2,$3,$4,true)`, [
+      missingPrototypeIpId, `backup-prototype-ip-${suffix}`, `프로토타입 IP ${suffix}`, `Prototype IP ${suffix}`,
+    ]);
+    await client.query(latestMigrationSources['0039_retire_prototype_catalog.sql']);
+    assert.deepEqual((await client.query(`SELECT id,is_active FROM public.catalog_products
+      WHERE id=$1`, [activeProductId])).rows, [{ id: activeProductId, is_active: false }]);
+    assert.deepEqual((await client.query(`SELECT id,is_active FROM public.catalog_ips
+      WHERE id=$1`, [missingPrototypeIpId])).rows, [{ id: missingPrototypeIpId, is_active: false }]);
+  } finally { await client.query('ROLLBACK').catch(() => undefined); client.release(); }
+}
+
 const started = Date.now();
 try {
-  assert.equal(await scalar(source, 'SELECT count(*) FROM public.schema_migrations'), '38');
+  assert.equal(await scalar(source, 'SELECT count(*) FROM public.schema_migrations'), '51');
+  const latestMigrationFixture = await createLatestMigrationFixture(source);
   // Fixtures mutate ONLY the explicitly named disposable clone.
   await rows(source, "SELECT pgmq.create('dabboba_worker')");
   await rows(source, 'ALTER TABLE pgmq.q_dabboba_worker ENABLE ROW LEVEL SECURITY; ALTER TABLE pgmq.a_dabboba_worker ENABLE ROW LEVEL SECURITY');
@@ -145,6 +373,7 @@ try {
     "SELECT ns.nspname,c.relname,t.tgname,t.tgenabled,pg_get_triggerdef(t.oid,false),pg_get_functiondef(t.tgfoid) FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid JOIN pg_namespace ns ON ns.oid=c.relnamespace WHERE NOT t.tgisinternal AND ns.nspname IN ('public','pgmq') ORDER BY 1,2,3",
     "SELECT ns.nspname,t.relname,i.relname AS index_name,x.indisunique,x.indisvalid,x.indisready,x.indimmediate,x.indnullsnotdistinct,pg_get_indexdef(i.oid) FROM pg_index x JOIN pg_class i ON i.oid=x.indexrelid JOIN pg_class t ON t.oid=x.indrelid JOIN pg_namespace ns ON ns.oid=t.relnamespace WHERE ns.nspname IN ('public','pgmq') ORDER BY 1,2,3",
   ]) assert.deepEqual(await rows(target, query), await rows(source, query));
+  await verifyLatestMigrationResults(target, latestMigrationFixture);
 
   // A late supplement failure rolls back ordinary tables and extension DDL too.
   const rollbackTarget = `${target}_rollback`;
@@ -198,11 +427,13 @@ try {
   assert.equal(await scalar(source, 'SELECT count(*) FROM public.backup_snapshot_probe WHERE id=$1', [concurrentProbeId]), '1');
   assert.equal(await scalar(source, "SELECT count(*) FROM pgmq.q_dabboba_worker WHERE message->>'fixture'=$1", [concurrentMarker]), '1');
   process.stdout.write(`${JSON.stringify({
-    status: 'local-restore-drill-passed', tablesCompared: Object.keys(before).length, migrations: 38, ...constraints,
+    status: 'local-restore-drill-passed', tablesCompared: Object.keys(before).length, migrations: 51, ...constraints,
     queueRowsAndArchiveAndSequenceRestored: true, payloadSqlInjectionPrevented: true,
     sharedSnapshotConcurrentCommitExcluded: true, lateRestoreErrorRolledBack: true,
     constraintTriggerPolicyIndexSequenceChecksPassed: true, metadataOnlyTargetRejected: true,
     sourceUnchangedDuringQuiescentBackup: true, nonemptyTargetRejected: true,
+    shippingSnapshotMigrationRestored: true, prototypeCatalogRetirementRestoredAndReapplied: true,
+    shippingAndStoragePolicyRestored: true, shippingFeePolicyRestored: true,
     elapsedMs: Date.now() - started, sourceDatabase: source, targetDatabase: target, fixtureArtifacts: directory,
     automaticBackups: false, productionDataUsed: false, roleGrantsRestored: false,
   })}\n`);

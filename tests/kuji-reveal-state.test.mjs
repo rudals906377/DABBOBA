@@ -14,6 +14,7 @@ import {
   resolvePreviewNextTicketAction,
   resolveKujiPeelRelease,
   resolveKujiTravelDuration,
+  resolveKujiTravelSegments,
   selectHighestRankedResultId,
   startPreviewOpenAll,
   transitionKujiOpenMotion,
@@ -33,6 +34,39 @@ test("kuji drag progress stays clamped and travel completion follows the remaini
   assert.equal(resolveKujiTravelDuration(1), DRAW_MOTION.kujiTravelMinMs);
   assert.ok(startDuration > halfwayDuration);
   assert.ok(halfwayDuration > almostFinishedDuration);
+});
+
+test("untouched kuji auto-open follows the reference hold, slow tear, and faster finish", () => {
+  assert.deepEqual(resolveKujiTravelSegments(0), {
+    holdMs: 280,
+    slowTearMs: 540,
+    fastTearMs: 350,
+    splitProgress: 0.55,
+  });
+  assert.deepEqual(resolveKujiTravelSegments(0.55), {
+    holdMs: 0,
+    slowTearMs: 0,
+    fastTearMs: 350,
+    splitProgress: 0.55,
+  });
+  assert.deepEqual(resolveKujiTravelSegments(1), {
+    holdMs: 0,
+    slowTearMs: 0,
+    fastTearMs: 0,
+    splitProgress: 0.55,
+  });
+  assert.equal(
+    DRAW_MOTION.kujiAutoHoldMs
+      + DRAW_MOTION.kujiSlowTearMs
+      + DRAW_MOTION.kujiFastTearMs
+      + DRAW_MOTION.kujiResultHoldMs
+      + DRAW_MOTION.kujiImpactMs,
+    1570,
+  );
+  assert.equal(resolveKujiTravelSegments(0.25).holdMs, 0,
+    "a user's direct drag must not replay the automatic opening pause");
+  assert.equal(resolveKujiTravelSegments(0.25).slowTearMs, 295);
+  assert.equal(resolveKujiTravelSegments(0.25).fastTearMs, 350);
 });
 
 test("kuji peel opens only after a deliberate rightward release", () => {

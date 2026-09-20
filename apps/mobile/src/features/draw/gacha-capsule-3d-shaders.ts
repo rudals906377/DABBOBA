@@ -119,13 +119,14 @@ float intersectMouthLight(vec3 ro, vec3 rd) {
 }
 
 vec3 shadeShell(vec3 localPoint, vec3 worldPoint, vec3 normal, vec3 viewDirection, float material, float side, float opening, float energy, vec3 emitterCenter) {
-  vec3 upper = mix(vec3(0.788, 0.957, 0.353), vec3(1.0, 0.949, 0.816), uIvory);
-  vec3 lower = mix(vec3(0.471, 0.718, 0.153), vec3(0.843, 0.733, 0.514), uIvory);
-  vec3 seam = mix(vec3(0.914, 0.992, 0.690), vec3(1.0, 0.973, 0.906), uIvory);
+  // Shared light capsule palette: translucent-looking dome, satin bowl, fine seam.
+  vec3 upper = mix(vec3(0.878, 0.973, 0.882), vec3(0.988, 0.980, 0.953), uIvory);
+  vec3 lower = mix(vec3(0.569, 0.914, 0.557), vec3(0.957, 0.941, 0.902), uIvory);
+  vec3 seam = mix(vec3(0.467, 0.788, 0.475), vec3(0.812, 0.773, 0.698), uIvory);
   vec3 base = side > 0.0 ? upper : lower;
   float y = abs(localPoint.y);
   float lip = 1.0 - smoothstep(COLLAR_HEIGHT, COLLAR_HEIGHT * 1.85, y);
-  base = mix(base, seam, lip * 0.75);
+  base = mix(base, seam, lip * 0.48);
   if (material > 1.5 && material < 2.5) base *= vec3(0.43, 0.46, 0.37);
   if (material > 2.5 && material < 3.5) base = seam * 0.83;
   if (material > 3.5) {
@@ -159,15 +160,15 @@ vec3 shadeShell(vec3 localPoint, vec3 worldPoint, vec3 normal, vec3 viewDirectio
   float cavity = material > 1.5 && material < 2.5 ? 0.58 : 1.0;
   float seamOcclusion = mix(0.62 + smoothstep(0.02, 0.20, y) * 0.38, 1.0, opening);
   vec3 color = pow(base, vec3(2.2)) * (0.17 + 0.92 * diffuse + 0.24 * fillLight) * cavity * seamOcclusion;
-  color += pow(base, vec3(2.2)) * rimLight * vec3(0.17, 0.30, 0.11);
+  color += pow(base, vec3(2.2)) * rimLight * vec3(0.13, 0.22, 0.12);
 
   // Broad softboxes and restrained Fresnel preserve smooth plastic reflections.
   float keySpec = pow(max(dot(normal, normalize(key + viewDirection)), 0.0), 54.0);
   float broadSpec = pow(max(dot(normal, normalize(key + viewDirection)), 0.0), 13.0);
   float fillSpec = pow(max(dot(normal, normalize(fill + viewDirection)), 0.0), 86.0);
-  color += vec3(1.0, 0.98, 0.89) * (keySpec * 0.38 + broadSpec * 0.24) * cavity * (1.0 - ink * 0.68);
-  color += vec3(0.74, 0.95, 0.82) * fillSpec * 0.10 * (1.0 - ink * 0.68);
-  color += vec3(0.58, 0.81, 0.56) * fresnel * (0.10 + rimLight * 0.32);
+  color += vec3(1.0, 0.99, 0.95) * (keySpec * 0.34 + broadSpec * 0.20) * cavity * (1.0 - ink * 0.68);
+  color += vec3(0.88, 0.97, 0.90) * fillSpec * 0.08 * (1.0 - ink * 0.68);
+  color += vec3(0.68, 0.86, 0.68) * fresnel * (0.08 + rimLight * 0.24);
 
   vec3 toCore = emitterCenter - worldPoint;
   float coreFacing = max(dot(normal, normalize(toCore + vec3(0.0, 0.0, 0.10))), 0.0);

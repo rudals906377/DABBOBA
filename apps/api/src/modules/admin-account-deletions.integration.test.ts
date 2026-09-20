@@ -185,43 +185,48 @@ test(
     assert.equal(missingReason.statusCode, 400, missingReason.body);
 
     await pool.query("UPDATE point_accounts SET balance=0 WHERE user_id=$1", [user.id]);
-    const pendingApprovalSession = await issueSession(pool, config, {
+    const pendingDeletionSession = await issueSession(pool, config, {
       userId: user.id,
       kind: "USER",
       ip: "203.0.113.79",
-      userAgent: "Dabboba Account Deletion Pending Approval Integration/1.0",
+      userAgent: "Dabboba Account Deletion Processing Integration/1.0",
     });
-    const approvalReason = "포인트와 진행 거래가 모두 해소되어 탈퇴 승인 기록";
-    const approvalKey = `account-deletion-approve-${randomUUID()}`;
-    const approved = await app.inject({
+    const reassessed = await app.inject({
       method: "POST",
-      url: `/v1/admin/account-deletions/${requestId}/decision`,
-      headers: mutation(admin.token, approvalReason, approvalKey),
-      payload: { decision: "APPROVED", reason: approvalReason },
+      url: "/v1/account/deletion-request",
+      headers: { ...auth(user.token), "idempotency-key": `customer-deletion-${randomUUID()}` },
+      payload: {},
     });
-    assert.equal(approved.statusCode, 200, approved.body);
-    assert.deepEqual(
-      {
-        status: (approved.json() as { status: string }).status,
-        hardDeletePerformed: (approved.json() as { hardDeletePerformed: boolean }).hardDeletePerformed,
-        completionAvailable: (approved.json() as { completionAvailable: boolean }).completionAvailable,
-      },
-      { status: "APPROVED", hardDeletePerformed: false, completionAvailable: false },
-    );
+    assert.equal(reassessed.statusCode, 202, reassessed.body);
+    const reassessedReceipt = reassessed.json() as { id: string; status: string; statusToken: string };
+    assert.equal(reassessedReceipt.status, "PROCESSING");
 
-    const replayed = await app.inject({
+    const receiptStatus = await app.inject({
+      method: "GET",
+      url: `/v1/account/deletion-requests/${reassessedReceipt.id}/status`,
+      headers: { "x-deletion-status-token": reassessedReceipt.statusToken },
+    });
+    assert.equal(receiptStatus.statusCode, 200, receiptStatus.body);
+    assert.equal((receiptStatus.json() as { status: string }).status, "PROCESSING");
+    const invalidReceiptStatus = await app.inject({
+      method: "GET",
+      url: `/v1/account/deletion-requests/${reassessedReceipt.id}/status`,
+      headers: { "x-deletion-status-token": "x".repeat(43) },
+    });
+    assert.equal(invalidReceiptStatus.statusCode, 404, invalidReceiptStatus.body);
+
+    const adminApproval = await app.inject({
       method: "POST",
       url: `/v1/admin/account-deletions/${requestId}/decision`,
-      headers: mutation(admin.token, approvalReason, approvalKey),
-      payload: { decision: "APPROVED", reason: approvalReason },
+      headers: mutation(admin.token, "자동 삭제 요청에 대한 관리자 승인 우회 시도"),
+      payload: { decision: "APPROVED", reason: "자동 삭제 요청에 대한 관리자 승인 우회 시도" },
     });
-    assert.equal(replayed.statusCode, 200, replayed.body);
-    assert.equal(replayed.headers["x-idempotent-replay"], "true");
+    assert.equal(adminApproval.statusCode, 409, adminApproval.body);
 
     const revokedPendingSession = await app.inject({
       method: "GET",
       url: "/v1/auth/me",
-      headers: auth(pendingApprovalSession.token),
+      headers: auth(pendingDeletionSession.token),
     });
     assert.equal(revokedPendingSession.statusCode, 401, revokedPendingSession.body);
 
@@ -238,13 +243,13 @@ test(
       ip: "203.0.113.78",
       userAgent: "Dabboba Account Deletion Re-request Integration/1.0",
     });
-    const approvedMe = await app.inject({
+    const processingMe = await app.inject({
       method: "GET",
       url: "/v1/auth/me",
       headers: auth(relogin.token),
     });
-    assert.equal(approvedMe.statusCode, 403, approvedMe.body);
-    const approvedRerequest = await app.inject({
+    assert.equal(processingMe.statusCode, 403, processingMe.body);
+    const processingRerequest = await app.inject({
       method: "POST",
       url: "/v1/account/deletion-request",
       headers: {
@@ -253,13 +258,13 @@ test(
       },
       payload: {},
     });
-    assert.equal(approvedRerequest.statusCode, 403, approvedRerequest.body);
+    assert.equal(processingRerequest.statusCode, 403, processingRerequest.body);
 
     await assert.rejects(
       pool.query(
         `INSERT INTO idempotency_keys(actor_id,scope,idempotency_key,request_hash,expires_at)
-         VALUES($1,'APPROVED_ACCOUNT_MUTATION_TEST',$2,$3,now()+interval '1 hour')`,
-        [user.id, `approved-mutation-${randomUUID()}`, "a".repeat(64)],
+         VALUES($1,'PROCESSING_ACCOUNT_MUTATION_TEST',$2,$3,now()+interval '1 hour')`,
+        [user.id, `processing-mutation-${randomUUID()}`, "a".repeat(64)],
       ),
       (error: unknown) => typeof error === "object"
         && error !== null
@@ -273,43 +278,33 @@ test(
       deletion_status: string;
       user_status: string;
       deleted_at: Date | null;
-      decision_reason: string;
+      job_count: string;
       event_count: string;
       audit_count: string;
       outbox_count: string;
     }>(`
-      SELECT d.status AS deletion_status,u.status AS user_status,u.deleted_at,d.decision_reason,
+      SELECT d.status AS deletion_status,u.status AS user_status,u.deleted_at,
+        (SELECT count(*) FROM account_auth_deletion_jobs j WHERE j.deletion_request_id=d.id) AS job_count,
         (SELECT count(*) FROM account_deletion_request_events e WHERE e.deletion_request_id=d.id AND e.event_type='STATUS_CHANGED') AS event_count,
         (SELECT count(*) FROM admin_audit_logs a WHERE a.target_type='ACCOUNT_DELETION_REQUEST' AND a.target_id=d.id::text) AS audit_count,
         (SELECT count(*) FROM outbox_events o WHERE o.aggregate_type='ACCOUNT_DELETION_REQUEST' AND o.aggregate_id=d.id::text) AS outbox_count
       FROM account_deletion_requests d JOIN users u ON u.id=d.user_id WHERE d.id=$1`, [requestId]);
     assert.deepEqual(durableState.rows[0], {
-      deletion_status: "APPROVED",
+      deletion_status: "PROCESSING",
       user_status: "ACTIVE",
       deleted_at: null,
-      decision_reason: approvalReason,
-      event_count: "1",
-      audit_count: "1",
-      outbox_count: "1",
+      job_count: "1",
+      event_count: "0",
+      audit_count: "0",
+      outbox_count: "0",
     });
-
-    const decisionEvent = await pool.query<{ id: string; admin_actor_id: string; reason: string }>(`
-      SELECT id,admin_actor_id,reason FROM account_deletion_request_events
-      WHERE deletion_request_id=$1 AND event_type='STATUS_CHANGED'`, [requestId]);
-    assert.deepEqual(
-      { adminActorId: decisionEvent.rows[0]!.admin_actor_id, reason: decisionEvent.rows[0]!.reason },
-      { adminActorId: admin.id, reason: approvalReason },
-    );
-    await assert.rejects(
-      pool.query("UPDATE account_deletion_request_events SET reason='rewritten' WHERE id=$1", [decisionEvent.rows[0]!.id]),
-      (error: unknown) => typeof error === "object" && error !== null && "code" in error && error.code === "55000",
-    );
     await assert.rejects(
       pool.query("UPDATE account_deletion_requests SET status='REJECTED' WHERE id=$1", [requestId]),
       (error: unknown) => typeof error === "object" && error !== null && "code" in error && error.code === "23514",
     );
 
     const secondUser = await createActor("USER", "deletion-rejected-owner");
+    await pool.query("INSERT INTO point_accounts(user_id,balance) VALUES($1,100)", [secondUser.id]);
     const secondRequested = await app.inject({
       method: "POST",
       url: "/v1/account/deletion-request",

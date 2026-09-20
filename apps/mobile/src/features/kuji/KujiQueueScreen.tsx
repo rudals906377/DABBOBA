@@ -1,4 +1,3 @@
-import { Ionicons } from "@expo/vector-icons";
 import Constants from "expo-constants";
 import { type Href, useLocalSearchParams, useNavigation, useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -13,10 +12,14 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { DecorativeIonicon } from "@/components/DecorativeIonicon";
+import { DetailPageHeader } from "@/components/DetailPageHeader";
 import { ProductInfoDivider } from "@/components/ProductInfoDivider";
 import { KoreanPixelTitle, KoreanPixelTitleAccessory } from "@/components/RootCategoryTitle";
 import { AppText as Text } from "@/components/Typography";
+import { catalogProductCardSurface } from "@/design-system/catalog";
 import { SeedActionButton, SeedInlineGuidance } from "@/design-system/components";
+import { subtleSectionHeaderRule } from "@/design-system/section";
 import { seed } from "@/design-system/seed";
 import {
   buildKujiCheckoutPath,
@@ -51,8 +54,13 @@ const KUJI_ROOM_POLL_INTERVAL_MS = 2_000;
 export function KujiQueueScreen() {
   const router = useRouter();
   const navigation = useNavigation();
-  const params = useLocalSearchParams<{ productId?: string | string[] }>();
+  const params = useLocalSearchParams<{
+    productId?: string | string[];
+    internalQueue?: string | string[];
+  }>();
   const productId = firstParam(params.productId) ?? "";
+  const internalQueueEnabled = __DEV__
+    && firstParam(params.internalQueue) === "enabled";
   const runtime = useMemo(
     () => resolveMobileRuntimeConfig({
       configuredApiUrl: process.env.EXPO_PUBLIC_DABBOBA_API_URL,
@@ -126,7 +134,7 @@ export function KujiQueueScreen() {
         nextRoom = await joinKujiRoom(runtime.apiBaseUrl, tokens.accessToken, productId);
         setUsingFallback(false);
       } catch (error) {
-        if (!__DEV__ || !isKujiRoomApiUnavailable(error)) throw error;
+        if (!internalQueueEnabled || !isKujiRoomApiUnavailable(error)) throw error;
         nextRoom = createKujiRoomFallback(productId, fallbackStartedAtRef.current);
         usedFallback = true;
         setUsingFallback(true);
@@ -140,7 +148,7 @@ export function KujiQueueScreen() {
       loadPendingRef.current = false;
       if (!redirectedRef.current) setLoading(false);
     }
-  }, [continueToCheckout, productId, runtime.apiBaseUrl]);
+  }, [continueToCheckout, internalQueueEnabled, productId, runtime.apiBaseUrl]);
 
   useEffect(() => {
     void load();
@@ -266,19 +274,7 @@ export function KujiQueueScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea} edges={["top", "bottom", "left", "right"]}>
-      <View style={styles.header}>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="상품 상세로 돌아가기"
-          onPress={goBack}
-          hitSlop={10}
-          style={styles.headerAction}
-        >
-          <Ionicons name="chevron-back" size={28} color={colors.ink} />
-        </Pressable>
-        <KoreanPixelTitle variant="header">쿠지 대기실</KoreanPixelTitle>
-        <View style={styles.headerAction} />
-      </View>
+      <DetailPageHeader title="쿠지 대기실" onBack={goBack} backLabel="상품 상세로 돌아가기" />
 
       {loading ? (
         <View style={styles.state}>
@@ -287,7 +283,7 @@ export function KujiQueueScreen() {
         </View>
       ) : message || !room ? (
         <View style={styles.state}>
-          <Ionicons name="alert-circle-outline" size={34} color={colors.muted} />
+          <DecorativeIonicon name="alert-circle-outline" size={34} color={colors.muted} />
           <Text style={styles.stateTitle}>{message || "대기실을 확인할 수 없습니다."}</Text>
           <SeedActionButton label="다시 불러오기" variant="neutralSolid" onPress={() => void load()} />
         </View>
@@ -295,7 +291,7 @@ export function KujiQueueScreen() {
         <ScrollView contentContainerStyle={styles.content}>
           {usingFallback ? (
             <SeedInlineGuidance
-              paragraphs={["서버가 연결되지 않아 개발용 대기 현황을 보여드리고 있어요."]}
+              paragraphs={["INTERNAL QUEUE · 주문과 추첨권은 생성되지 않아요."]}
             />
           ) : null}
 
@@ -305,7 +301,7 @@ export function KujiQueueScreen() {
           {productSnapshot ? (
             <View style={styles.productLine} accessibilityRole="summary">
               <View style={styles.productLineIcon}>
-                <Ionicons name="ticket-outline" size={20} color={colors.greenInk} />
+                <DecorativeIonicon name="ticket-outline" size={20} color={colors.greenInk} />
               </View>
               <ProductInfoDivider orientation="vertical" />
               <View style={styles.productLineCopy}>
@@ -347,7 +343,7 @@ function LiveDrawSection({ room }: { room: KujiRoomSnapshot }) {
     <View style={styles.liveCard}>
       <View style={styles.liveHeader}>
         <KoreanPixelTitle variant="section" style={styles.liveTitle}>실시간 뽑기 현황</KoreanPixelTitle>
-        <View style={styles.liveBadge}><Text style={styles.liveBadgeText}>LIVE</Text></View>
+        <View style={styles.liveBadge}><Text style={styles.liveBadgeText}>실시간</Text></View>
       </View>
 
       <View style={styles.activeLine}>
@@ -372,7 +368,7 @@ function LiveDrawSection({ room }: { room: KujiRoomSnapshot }) {
         </View>
       ) : (
         <View style={styles.activityEmpty}>
-          <Ionicons name="sparkles-outline" size={20} color="#929A91" />
+          <DecorativeIonicon name="sparkles-outline" size={20} color="#929A91" />
           <Text style={styles.activityEmptyText}>아직 공개된 결과가 없어요.</Text>
         </View>
       )}
@@ -454,7 +450,7 @@ function QueueRow({ person }: { person: KujiRoomWaitingPerson }) {
         <Text style={styles.positionBadgeText}>{person.position}</Text>
       </View>
       <Text style={styles.queueName}>{person.displayName}</Text>
-      {person.isViewer ? <View style={styles.meBadge}><Text style={styles.meBadgeText}>ME</Text></View> : null}
+      {person.isViewer ? <View style={styles.meBadge}><Text style={styles.meBadgeText}>나</Text></View> : null}
     </View>
   );
 }
@@ -465,8 +461,6 @@ function firstParam(value: string | string[] | undefined): string | undefined {
 
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: seed.color.layer.basement },
-  header: { minHeight: seed.size.topNavigation, paddingHorizontal: seed.spacing.x3_5, flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: seed.color.stroke.neutral, backgroundColor: seed.color.layer.default },
-  headerAction: { width: seed.size.touchTarget, height: seed.size.touchTarget, alignItems: "center", justifyContent: "center" },
   state: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: seed.spacing.globalGutter, gap: seed.spacing.componentDefault },
   stateTitle: { color: colors.ink, ...seed.typography.subtitle, textAlign: "center" },
   stateBody: { color: colors.muted, ...seed.typography.body },
@@ -475,7 +469,7 @@ const styles = StyleSheet.create({
   liveHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: seed.spacing.x3 },
   liveTitle: { color: colors.white },
   liveBadge: { paddingHorizontal: seed.spacing.x2, paddingVertical: seed.spacing.x1, borderRadius: seed.radius.r1_5, backgroundColor: colors.brand },
-  liveBadgeText: { color: colors.ink, fontSize: 9, lineHeight: 12, fontWeight: "900" },
+  liveBadgeText: { color: colors.ink, fontSize: 11, lineHeight: 16, fontWeight: "900" },
   activeLine: { minHeight: seed.size.touchTarget, marginTop: seed.spacing.x2, flexDirection: "row", alignItems: "center", gap: seed.spacing.x2 },
   activeDot: { width: 7, height: 7, borderRadius: seed.radius.full, backgroundColor: colors.brand },
   activeText: { flex: 1, color: "#D9DDD7", ...seed.typography.caption },
@@ -486,7 +480,7 @@ const styles = StyleSheet.create({
   activityRow: { minHeight: 66, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "#313631", flexDirection: "row", alignItems: "center", gap: seed.spacing.x2_5 },
   activityImage: { width: 42, height: 42, borderRadius: seed.radius.r2_5, backgroundColor: "#2D322D" },
   rarityTile: { width: 42, height: 42, borderRadius: seed.radius.r2_5, borderWidth: 1, borderColor: "#586158", alignItems: "center", justifyContent: "center", backgroundColor: "#202520" },
-  rarityText: { color: colors.brand, fontFamily: "Galmuri11", fontSize: 17, lineHeight: 21, fontWeight: "400" },
+  rarityText: { color: colors.brand, fontSize: 17, lineHeight: 22, fontWeight: "900" },
   activityCopy: { flex: 1, minWidth: 0 },
   activityName: { color: "#AEB6AD", ...seed.typography.caption },
   activityPrize: { marginTop: seed.spacing.x0_5, color: colors.white, ...seed.typography.bodyStrong },
@@ -494,7 +488,7 @@ const styles = StyleSheet.create({
   activityEmpty: { minHeight: 78, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "#3A403A", flexDirection: "row", alignItems: "center", justifyContent: "center", gap: seed.spacing.x2 },
   activityEmptyText: { color: "#AEB6AD", ...seed.typography.caption },
   waitingCard: { borderRadius: seed.radius.r5, borderWidth: 1, borderColor: seed.color.stroke.neutral, backgroundColor: seed.color.layer.default, padding: seed.spacing.x4 },
-  sectionHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: seed.spacing.x3 },
+  sectionHeader: { ...subtleSectionHeaderRule, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: seed.spacing.x3 },
   viewerSummary: { minHeight: 64, marginTop: seed.spacing.x3, paddingHorizontal: seed.spacing.x3, borderRadius: seed.radius.r3, backgroundColor: seed.color.background.brandWeak, flexDirection: "row", alignItems: "center", gap: seed.spacing.x2 },
   viewerSummaryLabel: { color: colors.greenInk, ...seed.typography.caption, fontWeight: "700" },
   viewerSummaryValue: { flex: 1, color: colors.ink, ...seed.typography.subtitle },
@@ -507,9 +501,9 @@ const styles = StyleSheet.create({
   positionBadgeText: { color: colors.ink, ...seed.typography.label, fontWeight: "900" },
   queueName: { flex: 1, color: colors.ink, ...seed.typography.bodyStrong },
   meBadge: { paddingHorizontal: seed.spacing.x2, paddingVertical: seed.spacing.x1, borderRadius: seed.radius.r1_5, backgroundColor: colors.ink },
-  meBadgeText: { color: colors.brand, fontSize: 9, lineHeight: 13, fontWeight: "900" },
+  meBadgeText: { color: colors.brand, fontSize: 11, lineHeight: 16, fontWeight: "900" },
   waitingEmpty: { marginTop: seed.spacing.x4, color: colors.muted, ...seed.typography.body, textAlign: "center" },
-  productLine: { minHeight: 70, paddingHorizontal: seed.spacing.x3, borderRadius: seed.radius.r4, borderWidth: 1, borderColor: seed.color.stroke.neutral, backgroundColor: seed.color.layer.default, flexDirection: "row", alignItems: "center", gap: seed.spacing.x3 },
+  productLine: { minHeight: 70, paddingHorizontal: seed.spacing.x3, ...catalogProductCardSurface, flexDirection: "row", alignItems: "center", gap: seed.spacing.x3 },
   productLineIcon: { width: 40, height: 40, borderRadius: seed.radius.r3, backgroundColor: seed.color.background.brandWeak, alignItems: "center", justifyContent: "center" },
   productLineCopy: { flex: 1, minWidth: 0 },
   productIp: { color: colors.muted, ...seed.typography.caption },

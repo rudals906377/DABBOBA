@@ -3,38 +3,41 @@ import { spawn } from 'node:child_process';
 import { EventEmitter, once } from 'node:events';
 import { test } from 'node:test';
 import {
-  MOBILE_ROOT, METRO_PORT, DABBOBA_SUPABASE_URL, assertLaunchUrl, assertMetroProcessEnvironment, buildExpoCommand, buildMobileEnvironment, ensureAndroidReverse, inspectMetro,
+  HOSTED_AUTH_API_URL, HOSTED_AUTH_PROFILE, MOBILE_ROOT, METRO_PORT, assertLaunchUrl,
+  assertMetroProcessEnvironment, buildExpoCommand, buildMobileEnvironment,
+  buildHostedAuthMobileEnvironment, ensureAndroidReverse, inspectMetro,
   launchMobile, parseLaunchOptions, readMetroProcessEnvironment, selectIosSimulator,
 } from '../scripts/dabboba-mobile-launch.mjs';
+import { LOCAL_BACKEND_ENVIRONMENT_TIER, LOCAL_BACKEND_PROFILE } from '../scripts/local-backend-profile.mjs';
 
 const owner = [{ pid: 321, cwd: MOBILE_ROOT }];
 const own = { state: 'ready', owners: owner };
 const absent = { state: 'absent', owners: [] };
-const publicSettings = { EXPO_PUBLIC_SUPABASE_URL: DABBOBA_SUPABASE_URL, EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_fixture' };
-const expectedEnvironment = buildMobileEnvironment({}, publicSettings);
+const expectedEnvironment = buildMobileEnvironment({});
 const environmentLine = environment => `/installed/node /installed/expo start ${Object.entries(environment).map(([key, value]) => `${key}=${value}`).join(' ')}`;
 const attestation = { expectedEnvironment, environment: async () => environmentLine(expectedEnvironment) };
 
 test('arguments keep the DABBOBA port and Expo Go mode fixed', () => {
-  assert.deepEqual(parseLaunchOptions([]), { platform: null, clear: false, device: null, help: false });
+  assert.deepEqual(parseLaunchOptions([]), { platform: null, clear: false, device: null, hostedAuth: false, help: false });
   assert.equal(parseLaunchOptions(['--ios', '--port', '8084', '--go', '--localhost']).platform, 'ios');
   assert.equal(parseLaunchOptions(['--android']).platform, 'android');
   assert.equal(parseLaunchOptions(['--web', '--clear']).clear, true);
+  assert.equal(parseLaunchOptions(['--ios', '--hosted-auth']).hostedAuth, true);
   for (const args of [['--port', '8081'], ['--port', '0'], ['--lan'], ['--tunnel'], ['--dev-client'], ['--ios', '--android'], ['--device']]) {
     assert.throws(() => parseLaunchOptions(args));
   }
 });
 
 test('new command runs the installed CLI from exactly apps/mobile without automatic native host management', () => {
-  const command = buildExpoCommand('/installed/expo/bin/cli', parseLaunchOptions(['--ios', '--clear']), {}, publicSettings);
+  const command = buildExpoCommand('/installed/expo/bin/cli', parseLaunchOptions(['--ios', '--clear']), {});
   assert.deepEqual(command.args, ['--dns-result-order=ipv4first', '/installed/expo/bin/cli', 'start', '--go', '--localhost', '--port', '8084', '--clear']);
   assert.equal(command.options.cwd, MOBILE_ROOT);
   assert.equal(command.options.env.CI, undefined);
   assert.equal(command.options.env.RCT_METRO_PORT, '8084');
   assert.equal(command.options.stdio[0], 'ignore');
   assert.equal(command.options.stdio[1], 'pipe');
-  const redirected = buildExpoCommand('/cli', parseLaunchOptions([]), { EXPO_PACKAGER_PROXY_URL: 'http://localhost:8081', REACT_NATIVE_PACKAGER_HOSTNAME: 'wrong.test' }, publicSettings);
-  assert.equal(redirected.options.env.EXPO_PACKAGER_PROXY_URL, '');
+  const redirected = buildExpoCommand('/cli', parseLaunchOptions([]), { EXPO_PACKAGER_PROXY_URL: 'http://localhost:8081', REACT_NATIVE_PACKAGER_HOSTNAME: 'wrong.test' });
+  assert.equal(redirected.options.env.EXPO_PACKAGER_PROXY_URL, 'http://127.0.0.1:8084');
   assert.equal(redirected.options.env.REACT_NATIVE_PACKAGER_HOSTNAME, '127.0.0.1');
 });
 
@@ -127,7 +130,6 @@ function fakeLaunch(states, overrides = {}) {
     sleep: async () => {},
     log: () => {},
     env: {},
-    publicSettings,
     ...overrides,
   };
   return { deps, actions };
@@ -155,16 +157,50 @@ test('foreign and unhealthy owners fail without spawning, opening, or killing an
   }
 });
 
-test('mobile environment admits only safe shell values and its own public .env settings', () => {
+test('mobile environment admits only safe shell values and fixed local public settings', () => {
   const environment = buildMobileEnvironment({
     PATH: '/fixture/bin', CI: '1', DATABASE_URL: 'private', DATABASE_MIGRATION_URL: 'private-admin',
     NODE_OPTIONS: '--require=foreign-loader', SESSION_TOKEN_PEPPER: 'private',
     EXPO_PUBLIC_SUPABASE_URL: 'https://foreign.supabase.co',
     EXPO_PUBLIC_DABBOBA_API_URL: 'http://127.0.0.1:8787', EXPO_PUBLIC_TEST_LOGIN: 'true',
-  }, { ...publicSettings, DATABASE_URL: 'private-file', EXPO_PUBLIC_DABBOBA_ASSET_BASE_URL: 'http://127.0.0.1:4173', EXPO_PUBLIC_TEST_LOGIN: 'true' });
+  });
   assert.deepEqual(environment, { PATH: '/fixture/bin', ...expectedEnvironment });
-  assert.throws(() => buildMobileEnvironment({}, { ...publicSettings, EXPO_PUBLIC_SUPABASE_URL: 'https://foreign.supabase.co' }), /public Supabase/);
-  assert.throws(() => buildMobileEnvironment({}, { EXPO_PUBLIC_SUPABASE_URL: DABBOBA_SUPABASE_URL }), /publishable key/);
+  assert.equal(environment.DABBOBA_ENVIRONMENT_TIER, LOCAL_BACKEND_ENVIRONMENT_TIER);
+  assert.equal(environment.DABBOBA_LOCAL_BACKEND_PROFILE, LOCAL_BACKEND_PROFILE);
+  assert.equal(environment.EXPO_PUBLIC_SUPABASE_URL, undefined);
+  assert.equal(environment.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY, undefined);
+  assert.equal(environment.EXPO_NO_DOTENV, '1');
+});
+
+test('hosted auth environment uses only the approved project public values and deployed API', () => {
+  const source = [
+    'EXPO_PUBLIC_SUPABASE_URL=https://yxkmvgfruphgghowzvmo.supabase.co',
+    `EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_${'a'.repeat(40)}`,
+    '',
+  ].join('\n');
+  const environment = buildHostedAuthMobileEnvironment({
+    PATH: '/fixture/bin',
+    DATABASE_URL: 'must-not-leak',
+    SUPABASE_SERVICE_ROLE_KEY: 'must-not-leak',
+    EXPO_PUBLIC_DABBOBA_API_URL: 'https://foreign.invalid',
+  }, source);
+  assert.equal(environment.PATH, '/fixture/bin');
+  assert.equal(environment.DABBOBA_LOCAL_BACKEND_PROFILE, HOSTED_AUTH_PROFILE);
+  assert.equal(environment.DABBOBA_ENVIRONMENT_TIER, 'PRODUCTION');
+  assert.equal(environment.EXPO_PUBLIC_DABBOBA_API_URL, HOSTED_AUTH_API_URL);
+  assert.equal(environment.EXPO_PUBLIC_SUPABASE_URL, 'https://yxkmvgfruphgghowzvmo.supabase.co');
+  assert.match(environment.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY, /^sb_publishable_/);
+  assert.equal(environment.DATABASE_URL, undefined);
+  assert.equal(environment.SUPABASE_SERVICE_ROLE_KEY, undefined);
+  assert.doesNotThrow(() => assertMetroProcessEnvironment(environmentLine(environment), environment));
+
+  for (const invalid of [
+    source.replace('yxkmvgfruphgghowzvmo', 'abcdefghijklmnopqrst'),
+    source.replace('sb_publishable_', 'sb_secret_'),
+    `${source}DATABASE_URL=private\n`,
+  ]) {
+    assert.throws(() => buildHostedAuthMobileEnvironment({}, invalid));
+  }
 });
 
 test('process attestation checks exact complete fields and rejects unknown, duplicate and stale config', () => {
@@ -175,7 +211,9 @@ test('process attestation checks exact complete fields and rejects unknown, dupl
     valid.replace(':8788', ':8787'), valid.replace(':8788', ':8788/foreign'),
     valid.replace('EXPO_NO_DOTENV=1', ''), valid + ' EXPO_NO_DOTENV=1',
     valid + ' EXPO_PUBLIC_TEST_LOGIN=true', valid + ' CI=1', valid + ' DATABASE_URL=private-sentinel',
-    valid.replace('EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_fixture', 'EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY=foreign-fixture'),
+    valid + ' EXPO_PUBLIC_SUPABASE_URL=https://foreign.supabase.co',
+    valid + ' EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY=foreign-fixture',
+    valid.replace('DABBOBA_LOCAL_BACKEND_PROFILE=local-development', 'DABBOBA_LOCAL_BACKEND_PROFILE=release'),
     '',
   ]) {
     assert.throws(() => assertMetroProcessEnvironment(invalid, expectedEnvironment), error => {

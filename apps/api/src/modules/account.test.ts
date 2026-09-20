@@ -5,9 +5,15 @@ import type { FastifyInstance } from "fastify";
 import type { ApiContext } from "../types.js";
 import { AppError } from "../lib/errors.js";
 import {
+  GACHA_ONLY_FREE_SHIPPING_THRESHOLD,
+  KUJI_INCLUDED_FREE_SHIPPING_THRESHOLD,
+  STANDARD_SHIPPING_FEE,
+  accountNotificationDestination,
   accountDeletionStatus,
+  calculateAccountShippingPolicy,
   canonicalPointReturnInventoryIds,
   canonicalShippingInventoryIds,
+  isExpoPushToken,
   isPointReturnEligibleInventory,
   MAX_POINT_BALANCE,
   maskAccountPhone,
@@ -84,6 +90,230 @@ test("shipping inventory ids are UUID-validated, unique, and deterministically o
   );
 });
 
+test("notification destinations are finite, kind-owned, and never accept stored routes", () => {
+  const orderId = "11111111-1111-4111-8111-111111111111";
+  const shippingId = "22222222-2222-4222-8222-222222222222";
+  const listingId = "33333333-3333-4333-8333-333333333333";
+
+  assert.deepEqual(accountNotificationDestination("ORDER_PAID", { orderId }), {
+    route: "profile",
+    detail: { kind: "order", id: orderId },
+  });
+  assert.deepEqual(accountNotificationDestination("SHIPPING_SHIPPED", { shippingRequestId: shippingId }), {
+    route: "profile",
+    detail: { kind: "shipping", id: shippingId },
+  });
+  assert.deepEqual(accountNotificationDestination("EXCHANGE_OFFER_CREATED", { listingId }), {
+    route: "storage",
+    detail: { kind: "exchange", id: listingId },
+  });
+  assert.deepEqual(accountNotificationDestination("STORAGE_EXPIRY_REMINDER", {
+    inventoryUnitId: orderId,
+    route: "/admin",
+  }), {
+    route: "storage",
+    detail: null,
+  });
+  assert.deepEqual(accountNotificationDestination("RESTOCK_AVAILABLE", {
+    productId: "safe-kuji-product",
+    category: "KUJI",
+  }), {
+    route: "kuji",
+    detail: { kind: "product", id: "safe-kuji-product" },
+  });
+  assert.deepEqual(accountNotificationDestination("CATALOG_REQUEST_APPROVED", {
+    aggregateId: shippingId,
+  }), {
+    route: "profile",
+    detail: { kind: "request", id: shippingId },
+  });
+  assert.deepEqual(accountNotificationDestination("ORDER_PAID", {
+    orderId: "../../admin",
+    href: "https://attacker.example/steal",
+    route: "/admin",
+  }), {
+    route: "profile",
+    detail: null,
+  });
+  assert.deepEqual(accountNotificationDestination("UNKNOWN_KIND", {
+    href: "https://attacker.example/steal",
+  }), {
+    route: "home",
+    detail: null,
+  });
+});
+
+test("Expo push tokens accept only bounded canonical Expo token forms", () => {
+  assert.equal(isExpoPushToken("ExpoPushToken[abcdefgh_ABCDEFGH-12345678]"), true);
+  assert.equal(isExpoPushToken("ExponentPushToken[abcdefgh_ABCDEFGH-12345678]"), true);
+  assert.equal(isExpoPushToken("ExpoPushToken[short]"), false);
+  assert.equal(isExpoPushToken("ExpoPushToken[abcdefgh 1234567890]"), false);
+  assert.equal(isExpoPushToken("https://attacker.example/token"), false);
+});
+
+test("push device registration rotates ownership, binds the current session, and never returns the token", async () => {
+  const actorId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  const sessionId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+  const installationId = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+  const expoPushToken = "ExpoPushToken[abcdefgh_ABCDEFGH-12345678]";
+  const registeredAt = new Date("2026-09-20T12:00:00.000Z");
+  const queries: Array<{ sql: string; params?: unknown[] }> = [];
+  const client = {
+    async query(sql: string, params?: unknown[]) {
+      queries.push({ sql, ...(params ? { params } : {}) });
+      if (sql.includes("RETURNING installation_id")) {
+        return {
+          rowCount: 1,
+          rows: [{
+            installation_id: installationId,
+            platform: "IOS",
+            app_version: "1.0.0",
+            last_registered_at: registeredAt,
+          }],
+        };
+      }
+      return { rowCount: 1, rows: [] };
+    },
+    release() {},
+  };
+  const pool = {
+    async connect() { return client; },
+    async query(sql: string, params?: unknown[]) {
+      queries.push({ sql, ...(params ? { params } : {}) });
+      return { rowCount: 1, rows: [] };
+    },
+  };
+  const { app, routes } = routeCapture();
+  await registerAccountRoutes(app, testContext(pool));
+
+  const registered = await routes.get("/v1/account/push-devices")!({
+    actor: { userId: actorId, sessionId },
+    body: { installationId, expoPushToken, platform: "IOS", appVersion: "1.0.0" },
+  }, {}) as Record<string, unknown>;
+  assert.deepEqual(registered, {
+    installationId,
+    platform: "IOS",
+    appVersion: "1.0.0",
+    registeredAt: registeredAt.toISOString(),
+  });
+  assert.equal("expoPushToken" in registered, false);
+  assert.match(queries.find(({ sql }) => sql.includes("pg_advisory_xact_lock"))?.sql ?? "", /ORDER BY lock_key/);
+  assert.match(queries.find(({ sql }) => sql.includes("OWNERSHIP_ROTATED"))?.sql ?? "", /installation_id=\$1 OR expo_push_token=\$2/);
+  assert.deepEqual(
+    queries.find(({ sql }) => sql.includes("INSERT INTO push_device_tokens"))?.params,
+    [actorId, sessionId, installationId, expoPushToken, "IOS", "1.0.0"],
+  );
+
+  let responseStatus = 0;
+  const reply = {
+    code(status: number) { responseStatus = status; return this; },
+    send() { return undefined; },
+  };
+  await routes.get("/v1/account/push-devices/:installationId")!({
+    actor: { userId: actorId, sessionId },
+    params: { installationId },
+  }, reply);
+  assert.equal(responseStatus, 204);
+  assert.deepEqual(queries.at(-1)?.params, [actorId, installationId]);
+});
+
+test("notification APIs are owner-scoped, paged, and expose an authoritative unread summary", async () => {
+  const actorId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  const firstId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+  const secondId = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+  const queryCalls: Array<{ sql: string; params: unknown[] | undefined }> = [];
+  const notificationRows = [
+    {
+      id: firstId,
+      kind: "DRAW_RESULT",
+      title: "첫 알림",
+      body: "첫 알림 본문",
+      data: {},
+      read_at: null,
+      created_at: new Date("2026-09-20T10:00:00.000Z"),
+    },
+    {
+      id: secondId,
+      kind: "USER_WARNING",
+      title: "두 번째 알림",
+      body: "두 번째 알림 본문",
+      data: { href: "https://attacker.example" },
+      read_at: null,
+      created_at: new Date("2026-09-20T09:00:00.000Z"),
+    },
+  ];
+  const pool = {
+    async query(sql: string, params?: unknown[]) {
+      queryCalls.push({ sql, params });
+      if (sql.includes("count(*)::integer AS unread_count")) {
+        return {
+          rowCount: 1,
+          rows: [{ unread_count: 2, newest_unread_created_at: notificationRows[0]!.created_at }],
+        };
+      }
+      if (sql.includes("WHERE id=$1 AND user_id=$2")) {
+        return { rowCount: 1, rows: [notificationRows[0]!] };
+      }
+      if (sql.includes("ORDER BY created_at DESC,id DESC LIMIT $2")) {
+        return { rowCount: 2, rows: notificationRows };
+      }
+      throw new Error(`Unexpected query: ${sql}`);
+    },
+  };
+  const { app, routes } = routeCapture();
+  await registerAccountRoutes(app, testContext(pool));
+
+  const list = await routes.get("/v1/account/notifications")!({
+    actor: { userId: actorId },
+    query: { limit: 1 },
+  }, {}) as { items: Array<{ id: string; destination: { route: string } }>; nextCursor: string | null };
+  assert.equal(list.items.length, 1);
+  assert.equal(list.items[0]!.id, firstId);
+  assert.equal(list.items[0]!.destination.route, "storage");
+  assert.ok(list.nextCursor);
+
+  const summary = await routes.get("/v1/account/notifications/unread-summary")!({
+    actor: { userId: actorId },
+  }, {});
+  assert.deepEqual(summary, {
+    unreadCount: 2,
+    newestUnreadCreatedAt: "2026-09-20T10:00:00.000Z",
+  });
+
+  const detail = await routes.get("/v1/account/notifications/:notificationId")!({
+    actor: { userId: actorId },
+    params: { notificationId: firstId },
+  }, {}) as { id: string; destination: { route: string } };
+  assert.equal(detail.id, firstId);
+  assert.equal(detail.destination.route, "storage");
+
+  assert.equal(queryCalls.every((call) => call.params?.includes(actorId)), true);
+  const detailQuery = queryCalls.find((call) => call.sql.includes("WHERE id=$1 AND user_id=$2"));
+  assert.deepEqual(detailQuery?.params, [firstId, actorId]);
+});
+
+test("server shipping policy uses 24,900 won for Gacha and 54,900 won whenever Kuji is included", () => {
+  const gachaBelow = calculateAccountShippingPolicy([{ sourceType: "GACHA", price: 24_899 }]);
+  const gachaExact = calculateAccountShippingPolicy([{ sourceType: "GACHA", price: 24_900 }]);
+  const kujiBelow = calculateAccountShippingPolicy([
+    { sourceType: "GACHA", price: 30_000 },
+    { sourceType: "KUJI", price: 24_899 },
+  ]);
+  const kujiExact = calculateAccountShippingPolicy([{ sourceType: "KUJI", price: 54_900 }]);
+
+  assert.equal(gachaBelow.threshold, GACHA_ONLY_FREE_SHIPPING_THRESHOLD);
+  assert.equal(gachaBelow.qualifiesForFreeShipping, false);
+  assert.equal(gachaBelow.shippingFee, STANDARD_SHIPPING_FEE);
+  assert.equal(gachaExact.qualifiesForFreeShipping, true);
+  assert.equal(gachaExact.shippingFee, 0);
+  assert.equal(kujiBelow.threshold, KUJI_INCLUDED_FREE_SHIPPING_THRESHOLD);
+  assert.equal(kujiBelow.qualifiesForFreeShipping, false);
+  assert.equal(kujiBelow.shippingFee, STANDARD_SHIPPING_FEE);
+  assert.equal(kujiExact.threshold, KUJI_INCLUDED_FREE_SHIPPING_THRESHOLD);
+  assert.equal(kujiExact.qualifiesForFreeShipping, true);
+  assert.equal(kujiExact.shippingFee, 0);
+});
+
 test("point return ids and amounts are deterministic and use integer floor at 50 percent", () => {
   const high = "ffffffff-ffff-4fff-8fff-ffffffffffff";
   const low = "11111111-1111-4111-8111-111111111111";
@@ -100,7 +330,7 @@ test("point return ids and amounts are deterministic and use integer floor at 50
   assert.throws(() => canonicalPointReturnInventoryIds([low, low]), AppError);
 });
 
-test("point return eligibility requires original GACHA-drawn inventory in the owned state", () => {
+test("point return eligibility requires trusted GACHA inventory in the owned state", () => {
   assert.equal(isPointReturnEligibleInventory("OWNED", "GACHA", true), true);
   assert.equal(isPointReturnEligibleInventory("OWNED", "KUJI", true), false);
   assert.equal(isPointReturnEligibleInventory("OWNED", "PURCHASE", true), false);
@@ -114,6 +344,7 @@ test("point return eligibility requires original GACHA-drawn inventory in the ow
     "TRANSFERRED",
     "REFUNDED",
     "POINT_RETURNED",
+    "EXPIRED_HOLD",
   ] as const) {
     assert.equal(isPointReturnEligibleInventory(status, "GACHA", true), false);
   }
@@ -167,7 +398,7 @@ test("point return endpoint rejects an original OWNED KUJI draw without creditin
     }, {}),
     (error: unknown) => error instanceof AppError
       && error.statusCode === 409
-      && /가챠 상품만/.test(error.message),
+      && /본인이 가챠에서 직접 뽑아/.test(error.message),
   );
 
   const inventoryLock = queries.find((sql) => sql.includes("FROM inventory_units iu") && sql.includes("draw_results"));
@@ -270,7 +501,7 @@ test("account basic info reads the verified phone column and returns only a mask
   assert.doesNotMatch(capturedSql, /auth_identities|provider_subject/);
 });
 
-test("account deletion remains review-only and reports any authoritative blocker", () => {
+test("account deletion starts automatically only when every authoritative blocker is clear", () => {
   const clear = {
     pointBalance: 0,
     activeOrderCount: 0,
@@ -281,7 +512,7 @@ test("account deletion remains review-only and reports any authoritative blocker
     activeExchangeListingCount: 0,
     activeExchangeOfferCount: 0,
   };
-  assert.equal(accountDeletionStatus(clear), "PENDING_REVIEW");
+  assert.equal(accountDeletionStatus(clear), "PROCESSING");
   assert.equal(accountDeletionStatus({ ...clear, pointBalance: 1 }), "BLOCKED");
   assert.equal(accountDeletionStatus({ ...clear, activeExchangeOfferCount: 1 }), "BLOCKED");
 });
@@ -304,7 +535,7 @@ test("wishlist reads hide prize-only catalog items", async () => {
   assert.match(capturedSql, /p\.is_prize_only=false/);
 });
 
-test("account inventory returns only the owner's directly drawn stored GACHA and KUJI prizes", async () => {
+test("account inventory returns the owner's stored, exchanging, or shipping GACHA and KUJI prizes", async () => {
   const actorId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
   const inventoryId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
   const acquiredAt = new Date("2026-09-01T03:00:00.000Z");
@@ -325,8 +556,9 @@ test("account inventory returns only the owner's directly drawn stored GACHA and
           owner_id: actorId,
           product_id: "inactive-kuji-prize",
           source_type: "KUJI",
-          inventory_status: "OWNED",
+          inventory_status: "EXCHANGE_LISTED",
           acquired_at: acquiredAt,
+          point_return_eligible: false,
           sku: "PRIZE-KUJI-001",
           ip_id: "test-ip",
           character_ids: ["cccccccc-cccc-4ccc-8ccc-cccccccccccc"],
@@ -338,6 +570,7 @@ test("account inventory returns only the owner's directly drawn stored GACHA and
           available_quantity: "0",
           metadata: { rarity: "A" },
           image_url: "https://cdn.example.test/inactive-kuji-prize.png",
+          storefront_image_url: "https://cdn.example.test/inactive-kuji-prize-storefront.png",
           product_active: false,
           is_prize_only: true,
           product_version: 3,
@@ -371,8 +604,10 @@ test("account inventory returns only the owner's directly drawn stored GACHA and
         releaseDate: "2026-08-01",
         price: 9_900,
         availableQuantity: 0,
+        totalQuantity: null,
         metadata: { rarity: "A" },
         imageUrl: "https://cdn.example.test/inactive-kuji-prize.png",
+        storefrontImageUrl: "https://cdn.example.test/inactive-kuji-prize-storefront.png",
         isActive: false,
         isPrizeOnly: true,
         version: 3,
@@ -380,19 +615,26 @@ test("account inventory returns only the owner's directly drawn stored GACHA and
         updatedAt: productUpdatedAt.toISOString(),
       },
       sourceType: "KUJI",
-      status: "OWNED",
+      status: "EXCHANGE_LISTED",
       acquiredAt: acquiredAt.toISOString(),
+      pointReturnEligible: false,
     }],
     nextCursor: null,
   });
   assert.deepEqual(capturedParams, [actorId, 3]);
   assert.match(capturedSql, /iu\.owner_id=\$1/);
-  assert.match(capturedSql, /iu\.status='OWNED'/);
+  assert.match(capturedSql, /iu\.status IN \('OWNED','EXCHANGE_LISTED','EXCHANGE_OFFERED','SHIPPING','EXPIRED_HOLD'\)/);
+  assert.match(capturedSql, /\(iu\.status IN \('SHIPPING','EXPIRED_HOLD'\) OR iu\.storage_expires_at>now\(\)\)/);
+  assert.match(capturedSql, /point_return_draw[\s\S]*?iu\.status='OWNED'/);
   assert.match(capturedSql, /iu\.source_type IN \('GACHA','KUJI'\)/);
   assert.match(capturedSql, /draw_result\.prize_inventory_unit_id=iu\.id/);
   assert.match(capturedSql, /draw_result\.user_id=iu\.owner_id/);
   assert.match(capturedSql, /draw_result\.entitlement_id=iu\.source_id/);
   assert.match(capturedSql, /draw_result\.prize_product_id=iu\.product_id/);
+  assert.match(capturedSql, /p\.storefront_image_url/);
+  assert.match(capturedSql, /inventory_ownership_transfers transfer/);
+  assert.match(capturedSql, /completed_exchange\.status='COMPLETED'/);
+  assert.match(capturedSql, /transfer\.to_owner_id=iu\.owner_id/);
   assert.doesNotMatch(capturedSql, /p\.is_active\s*=\s*true/);
 
   const malformedUuidCursor = Buffer.from(JSON.stringify({
@@ -404,6 +646,67 @@ test("account inventory returns only the owner's directly drawn stored GACHA and
     (error: unknown) => error instanceof AppError && error.statusCode === 400,
   );
   assert.equal(queryCount, 1);
+});
+
+test("owned product detail is scoped to the authenticated owner and direct draw provenance", async () => {
+  const actorId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  let capturedSql = "";
+  let capturedParams: unknown[] = [];
+  const timestamp = new Date("2026-09-01T03:00:00.000Z");
+  const pool = {
+    async query(sql: string, params: unknown[] = []) {
+      capturedSql = sql;
+      capturedParams = params;
+      return {
+        rowCount: 1,
+        rows: [{
+          id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          owner_id: actorId,
+          product_id: "inactive-kuji-prize",
+          source_type: "KUJI",
+          inventory_status: "SHIPPING",
+          acquired_at: timestamp,
+          sku: "PRIZE-KUJI-001",
+          ip_id: "test-ip",
+          character_ids: [],
+          category: "figure",
+          product_name: "배송 중인 쿠지 경품",
+          manufacturer: null,
+          release_date: null,
+          price: "9900",
+          available_quantity: "0",
+          metadata: {},
+          image_url: null,
+          product_active: false,
+          is_prize_only: true,
+          product_version: 3,
+          product_created_at: timestamp,
+          product_updated_at: timestamp,
+          created_at: timestamp,
+        }],
+      };
+    },
+  };
+  const { app, routes } = routeCapture();
+  await registerAccountRoutes(app, testContext(pool));
+  const handler = routes.get("/v1/account/owned-products/:productId");
+  assert.ok(handler);
+
+  const body = await handler({
+    actor: { userId: actorId },
+    params: { productId: "inactive-kuji-prize" },
+  }, {}) as { id: string; name: string; isPrizeOnly: boolean };
+
+  assert.deepEqual(capturedParams, [actorId, "inactive-kuji-prize"]);
+  assert.match(capturedSql, /iu\.owner_id=\$1 AND iu\.product_id=\$2/);
+  assert.match(capturedSql, /iu\.source_type IN \('GACHA','KUJI'\)/);
+  assert.match(capturedSql, /draw_result\.prize_inventory_unit_id=iu\.id/);
+  assert.match(capturedSql, /draw_result\.user_id=iu\.owner_id/);
+  const detailWhere = capturedSql.slice(capturedSql.indexOf("WHERE iu.owner_id=$1"));
+  assert.doesNotMatch(detailWhere, /iu\.status='OWNED'/);
+  assert.equal(body.id, "inactive-kuji-prize");
+  assert.equal(body.name, "배송 중인 쿠지 경품");
+  assert.equal(body.isPrizeOnly, true);
 });
 
 test("draw entitlements default to AVAILABLE and are scoped to the authenticated owner", async () => {
@@ -561,10 +864,105 @@ test("account basic info updates reject a stale version before changing private 
   assert.equal(queries.some(({ sql }) => sql === "ROLLBACK"), true);
 });
 
+test("shipping quote snapshots the canonical selection, active address version, ten-minute expiry, and server policy", async () => {
+  const actorId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  const gachaId = "11111111-1111-4111-8111-111111111111";
+  const kujiId = "ffffffff-ffff-4fff-8fff-ffffffffffff";
+  const quoteId = "77777777-7777-4777-8777-777777777777";
+  const addressId = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+  const createdAt = new Date("2026-09-20T01:00:00.000Z");
+  const expiresAt = new Date("2026-09-20T01:10:00.000Z");
+  const queries: Array<{ sql: string; params: unknown[] }> = [];
+  const client = {
+    async query(sql: string, params: unknown[] = []) {
+      queries.push({ sql, params });
+      if (sql === "BEGIN" || sql === "COMMIT" || sql.startsWith("SET TRANSACTION")) {
+        return { rowCount: null, rows: [] };
+      }
+      if (sql.includes("FROM default_shipping_addresses")) {
+        return { rowCount: 1, rows: [{
+          id: addressId,
+          user_id: actorId,
+          recipient: "김영민",
+          phone: "01012345678",
+          postal_code: "06236",
+          address_line1: "서울특별시 강남구 테스트로 1",
+          address_line2: "101호",
+          delivery_note: "문 앞",
+          version: 3,
+          created_at: createdAt,
+          updated_at: createdAt,
+        }] };
+      }
+      if (sql.includes("FROM inventory_units iu") && sql.includes("FOR SHARE OF iu,p")) {
+        assert.deepEqual(params, [[gachaId, kujiId], actorId]);
+        return { rowCount: 2, rows: [
+          { id: gachaId, source_type: "GACHA", price: 24_900 },
+          { id: kujiId, source_type: "KUJI", price: 30_000 },
+        ] };
+      }
+      if (sql.includes("INSERT INTO shipping_quotes")) {
+        assert.deepEqual(params, [actorId, addressId, 3, [gachaId, kujiId], 2, 54_900, true, 54_900, 0]);
+        return { rowCount: 1, rows: [{
+          id: quoteId,
+          user_id: actorId,
+          address_id: addressId,
+          address_version: 3,
+          inventory_unit_ids: [gachaId, kujiId],
+          item_count: 2,
+          reference_subtotal: 54_900,
+          contains_kuji: true,
+          free_shipping_threshold: 54_900,
+          shipping_fee: 0,
+          created_at: createdAt,
+          expires_at: expiresAt,
+          consumed_at: null,
+          shipping_request_id: null,
+        }] };
+      }
+      throw new Error(`Unexpected query: ${sql}`);
+    },
+    release() { /* no-op */ },
+  };
+  const { app, routes } = routeCapture();
+  await registerAccountRoutes(app, testContext({ async connect() { return client; } }));
+  const handler = routes.get("/v1/account/shipping-quotes");
+  assert.ok(handler);
+  const response = await handler({
+    actor: { userId: actorId },
+    body: { inventoryUnitIds: [kujiId, gachaId] },
+  }, {}) as Record<string, unknown>;
+
+  assert.deepEqual(response, {
+    id: quoteId,
+    inventoryUnitIds: [gachaId, kujiId],
+    addressId,
+    addressVersion: 3,
+    destination: {
+      recipientMasked: "김*민",
+      phoneMasked: "*******5678",
+      postalCode: "06236",
+      addressLine1: "서울특별시 강남구 테스트로 1",
+      addressLine2: "101호",
+    },
+    itemCount: 2,
+    referenceSubtotal: 54_900,
+    containsKuji: true,
+    freeShippingThreshold: 54_900,
+    qualifiesForFreeShipping: true,
+    shippingFee: 0,
+    createdAt: createdAt.toISOString(),
+    expiresAt: expiresAt.toISOString(),
+  });
+  assert.match(queries.find(({ sql }) => sql.includes("FROM inventory_units iu"))?.sql ?? "", /ORDER BY iu\.id FOR SHARE OF iu,p/);
+  assert.equal(queries.at(-1)?.sql, "COMMIT");
+});
+
 test("shipping request locks owned inventory in canonical order and commits one atomic transition", async () => {
   const actorId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
   const highId = "ffffffff-ffff-4fff-8fff-ffffffffffff";
   const lowId = "11111111-1111-4111-8111-111111111111";
+  const quoteId = "77777777-7777-4777-8777-777777777777";
   const shippingId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
   const idempotencyId = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
   const requestedAt = new Date("2026-08-24T10:00:00.000Z");
@@ -577,6 +975,25 @@ test("shipping request locks owned inventory in canonical order and commits one 
       if (sql === "BEGIN" || sql === "COMMIT") return { rowCount: null, rows: [] };
       if (sql.startsWith("DELETE FROM idempotency_keys")) return { rowCount: 0, rows: [] };
       if (sql.includes("INSERT INTO idempotency_keys")) return { rowCount: 1, rows: [{ id: idempotencyId }] };
+      if (sql.includes("FROM shipping_quotes quote")) {
+        return { rowCount: 1, rows: [{
+          id: quoteId,
+          user_id: actorId,
+          address_id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+          address_version: 1,
+          inventory_unit_ids: [lowId, highId],
+          item_count: 2,
+          reference_subtotal: 24_900,
+          contains_kuji: false,
+          free_shipping_threshold: 24_900,
+          shipping_fee: 0,
+          created_at: requestedAt,
+          expires_at: new Date("2026-08-24T10:10:00.000Z"),
+          consumed_at: null,
+          shipping_request_id: null,
+          expired: false,
+        }] };
+      }
       if (sql.includes("FROM default_shipping_addresses")) {
         return { rowCount: 1, rows: [{
           id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
@@ -592,11 +1009,21 @@ test("shipping request locks owned inventory in canonical order and commits one 
           updated_at: requestedAt,
         }] };
       }
-      if (sql.includes("SELECT id FROM inventory_units")) {
+      if (sql.includes("FROM inventory_units iu") && sql.includes("JOIN catalog_products p")) {
         observedInventoryParams.push(params);
-        return { rowCount: 2, rows: [{ id: lowId }, { id: highId }] };
+        return {
+          rowCount: 2,
+          rows: [
+            { id: lowId, source_type: "GACHA", price: 12_450 },
+            { id: highId, source_type: "GACHA", price: 12_450 },
+          ],
+        };
       }
-      if (sql.includes("INSERT INTO shipping_requests")) return { rowCount: 1, rows: [{ id: shippingId, requested_at: requestedAt }] };
+      if (sql.includes("INSERT INTO shipping_requests")) {
+        assert.equal(params[1], "REQUESTED");
+        assert.deepEqual(params.slice(3), [24_900, 24_900, true, false, 0]);
+        return { rowCount: 1, rows: [{ id: shippingId, requested_at: requestedAt }] };
+      }
       if (sql.includes("INSERT INTO shipping_request_items")) {
         observedShippingItems = params[1];
         return { rowCount: 2, rows: [] };
@@ -605,6 +1032,7 @@ test("shipping request locks owned inventory in canonical order and commits one 
         observedInventoryParams.push(params);
         return { rowCount: 2, rows: [{ id: lowId }, { id: highId }] };
       }
+      if (sql.includes("UPDATE shipping_quotes")) return { rowCount: 1, rows: [] };
       if (sql.includes("INSERT INTO outbox_events")) return { rowCount: 1, rows: [] };
       if (sql.includes("UPDATE idempotency_keys SET state='COMPLETED'")) return { rowCount: 1, rows: [] };
       throw new Error(`Unexpected query: ${sql}`);
@@ -625,15 +1053,400 @@ test("shipping request locks owned inventory in canonical order and commits one 
   await handler({
     actor: { userId: actorId },
     headers: { "idempotency-key": "shipping-request-0001" },
-    body: { inventoryUnitIds: [highId, lowId] },
+    body: { quoteId, addressVersion: 1 },
     id: "request-shipping-0001",
   }, reply);
 
   assert.equal(responseStatus, 201);
   assert.deepEqual((responseBody as { inventoryUnitIds: string[] }).inventoryUnitIds, [lowId, highId]);
+  assert.equal((responseBody as { quoteId: string }).quoteId, quoteId);
   assert.deepEqual(observedInventoryParams.map((params) => params[0]), [[lowId, highId], [lowId, highId]]);
   assert.deepEqual(observedShippingItems, [lowId, highId]);
-  assert.match(queries.find((sql) => sql.includes("SELECT id FROM inventory_units")) || "", /ORDER BY id FOR UPDATE/);
+  const shippingLock = queries.find((sql) => sql.includes("FROM inventory_units iu") && sql.includes("JOIN catalog_products p"));
+  assert.match(shippingLock || "", /iu\.source_type IN \('GACHA','KUJI'\)/);
+  assert.match(shippingLock || "", /iu\.storage_expires_at>now\(\)/);
+  assert.match(shippingLock || "", /ORDER BY iu\.id FOR UPDATE OF iu,p/);
+  assert.match(queries.find((sql) => sql.includes("UPDATE inventory_units SET status='SHIPPING'")) || "", /storage_expires_at>now\(\)/);
+  assert.equal(queries.includes("COMMIT"), true);
+});
+
+test("shipping quote expiry, address changes, and duplicate consumption fail before any shipping mutation", async () => {
+  const actorId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  const inventoryId = "11111111-1111-4111-8111-111111111111";
+  const quoteId = "77777777-7777-4777-8777-777777777777";
+  const addressId = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+  const scenarios = [
+    { name: "expired", expectedCode: "SHIPPING_QUOTE_EXPIRED", expired: true, consumedAt: null, addressVersion: 1 },
+    { name: "consumed", expectedCode: "SHIPPING_QUOTE_CONSUMED", expired: false, consumedAt: new Date("2026-09-20T01:01:00.000Z"), addressVersion: 1 },
+    { name: "address-changed", expectedCode: "SHIPPING_ADDRESS_CHANGED", expired: false, consumedAt: null, addressVersion: 2 },
+  ] as const;
+
+  for (const scenario of scenarios) {
+    const queries: string[] = [];
+    const client = {
+      async query(sql: string) {
+        queries.push(sql);
+        if (sql === "BEGIN" || sql === "ROLLBACK") return { rowCount: null, rows: [] };
+        if (sql.startsWith("DELETE FROM idempotency_keys")) return { rowCount: 0, rows: [] };
+        if (sql.includes("INSERT INTO idempotency_keys")) {
+          return { rowCount: 1, rows: [{ id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc" }] };
+        }
+        if (sql.includes("FROM shipping_quotes quote")) {
+          return { rowCount: 1, rows: [{
+            id: quoteId,
+            user_id: actorId,
+            address_id: addressId,
+            address_version: 1,
+            inventory_unit_ids: [inventoryId],
+            item_count: 1,
+            reference_subtotal: 24_900,
+            contains_kuji: false,
+            free_shipping_threshold: 24_900,
+            shipping_fee: 0,
+            created_at: new Date("2026-09-20T01:00:00.000Z"),
+            expires_at: new Date("2026-09-20T01:10:00.000Z"),
+            consumed_at: scenario.consumedAt,
+            shipping_request_id: scenario.consumedAt ? "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb" : null,
+            expired: scenario.expired,
+          }] };
+        }
+        if (sql.includes("FROM default_shipping_addresses")) {
+          return { rowCount: 1, rows: [{
+            id: addressId,
+            user_id: actorId,
+            recipient: "김영민",
+            phone: "01012345678",
+            postal_code: "06236",
+            address_line1: "서울특별시 강남구 테스트로 1",
+            address_line2: null,
+            delivery_note: null,
+            version: scenario.addressVersion,
+          }] };
+        }
+        throw new Error(`Unexpected query in ${scenario.name}: ${sql}`);
+      },
+      release() { /* no-op */ },
+    };
+    const { app, routes } = routeCapture();
+    await registerAccountRoutes(app, testContext({ async connect() { return client; } }));
+    const handler = routes.get("/v1/account/shipping-requests");
+    assert.ok(handler);
+    await assert.rejects(
+      handler({
+        actor: { userId: actorId },
+        headers: { "idempotency-key": `shipping-${scenario.name}-0001` },
+        body: { quoteId, addressVersion: 1 },
+        id: `request-${scenario.name}`,
+      }, {}),
+      (error: unknown) => error instanceof AppError
+        && error.statusCode === 409
+        && error.code === scenario.expectedCode,
+    );
+    assert.equal(queries.some((sql) => sql.includes("INSERT INTO shipping_requests")), false);
+    assert.equal(queries.at(-1), "ROLLBACK");
+  }
+});
+
+test("mixed Gacha and Kuji shipping persists the 54,900 won policy at the exact boundary", async () => {
+  const actorId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  const gachaId = "11111111-1111-4111-8111-111111111111";
+  const kujiId = "ffffffff-ffff-4fff-8fff-ffffffffffff";
+  const quoteId = "77777777-7777-4777-8777-777777777777";
+  const shippingId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+  const requestedAt = new Date("2026-09-14T01:00:00.000Z");
+  let insertedPolicy: unknown[] | null = null;
+  const client = {
+    async query(sql: string, params: unknown[] = []) {
+      if (sql === "BEGIN" || sql === "COMMIT") return { rowCount: null, rows: [] };
+      if (sql.startsWith("DELETE FROM idempotency_keys")) return { rowCount: 0, rows: [] };
+      if (sql.includes("INSERT INTO idempotency_keys")) {
+        return { rowCount: 1, rows: [{ id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc" }] };
+      }
+      if (sql.includes("FROM shipping_quotes quote")) {
+        return { rowCount: 1, rows: [{
+          id: quoteId,
+          user_id: actorId,
+          address_id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+          address_version: 1,
+          inventory_unit_ids: [gachaId, kujiId],
+          item_count: 2,
+          reference_subtotal: 54_900,
+          contains_kuji: true,
+          free_shipping_threshold: 54_900,
+          shipping_fee: 0,
+          created_at: requestedAt,
+          expires_at: new Date("2026-09-14T01:10:00.000Z"),
+          consumed_at: null,
+          shipping_request_id: null,
+          expired: false,
+        }] };
+      }
+      if (sql.includes("FROM default_shipping_addresses")) {
+        return { rowCount: 1, rows: [{
+          id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+          user_id: actorId,
+          recipient: "김영민",
+          phone: "01012345678",
+          postal_code: "12345",
+          address_line1: "서울시 테스트로 1",
+          address_line2: null,
+          delivery_note: null,
+          version: 1,
+          created_at: requestedAt,
+          updated_at: requestedAt,
+        }] };
+      }
+      if (sql.includes("FROM inventory_units iu") && sql.includes("JOIN catalog_products p")) {
+        return {
+          rowCount: 2,
+          rows: [
+            { id: gachaId, source_type: "GACHA", price: 24_900 },
+            { id: kujiId, source_type: "KUJI", price: 30_000 },
+          ],
+        };
+      }
+      if (sql.includes("INSERT INTO shipping_requests")) {
+        assert.equal(params[1], "REQUESTED");
+        insertedPolicy = params.slice(3);
+        return { rowCount: 1, rows: [{ id: shippingId, requested_at: requestedAt }] };
+      }
+      if (sql.includes("INSERT INTO shipping_request_items")) return { rowCount: 2, rows: [] };
+      if (sql.includes("UPDATE inventory_units SET status='SHIPPING'")) {
+        return { rowCount: 2, rows: [{ id: gachaId }, { id: kujiId }] };
+      }
+      if (sql.includes("UPDATE shipping_quotes")) return { rowCount: 1, rows: [] };
+      if (sql.includes("INSERT INTO outbox_events")) return { rowCount: 1, rows: [] };
+      if (sql.includes("UPDATE idempotency_keys SET state='COMPLETED'")) {
+        return { rowCount: 1, rows: [] };
+      }
+      throw new Error(`Unexpected query: ${sql}`);
+    },
+    release() { /* no-op */ },
+  };
+  const { app, routes } = routeCapture();
+  await registerAccountRoutes(app, testContext({ async connect() { return client; } }));
+  const handler = routes.get("/v1/account/shipping-requests");
+  assert.ok(handler);
+  let responseStatus = 0;
+  const reply = {
+    code(status: number) { responseStatus = status; return this; },
+    header() { return this; },
+    send(body: unknown) { return body; },
+  };
+
+  await handler({
+    actor: { userId: actorId },
+    headers: { "idempotency-key": "shipping-request-mixed-exact-0001" },
+    body: { quoteId, addressVersion: 1 },
+    id: "request-shipping-mixed-exact-0001",
+  }, reply);
+
+  assert.equal(responseStatus, 201);
+  assert.deepEqual(insertedPolicy, [54_900, 54_900, true, true, 0]);
+});
+
+test("shipping request below the free-shipping threshold creates a 3,000 won payment order", async () => {
+  const actorId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  const inventoryId = "11111111-1111-4111-8111-111111111111";
+  const quoteId = "77777777-7777-4777-8777-777777777777";
+  const shippingId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+  const orderId = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+  const paymentId = "99999999-9999-4999-8999-999999999999";
+  const queries: string[] = [];
+  const client = {
+    async query(sql: string, params: unknown[] = []) {
+      queries.push(sql);
+      if (sql === "BEGIN" || sql === "COMMIT") return { rowCount: null, rows: [] };
+      if (sql.startsWith("DELETE FROM idempotency_keys")) return { rowCount: 0, rows: [] };
+      if (sql.includes("INSERT INTO idempotency_keys")) {
+        return { rowCount: 1, rows: [{ id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc" }] };
+      }
+      if (sql.includes("FROM shipping_quotes quote")) {
+        return { rowCount: 1, rows: [{
+          id: quoteId,
+          user_id: actorId,
+          address_id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+          address_version: 1,
+          inventory_unit_ids: [inventoryId],
+          item_count: 1,
+          reference_subtotal: 24_899,
+          contains_kuji: false,
+          free_shipping_threshold: 24_900,
+          shipping_fee: 3_000,
+          created_at: new Date("2026-09-14T01:00:00.000Z"),
+          expires_at: new Date("2026-09-14T01:10:00.000Z"),
+          consumed_at: null,
+          shipping_request_id: null,
+          expired: false,
+        }] };
+      }
+      if (sql.includes("FROM default_shipping_addresses")) {
+        return { rowCount: 1, rows: [{
+          id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+          user_id: actorId,
+          recipient: "김영민",
+          phone: "01012345678",
+          postal_code: "12345",
+          address_line1: "서울시 테스트로 1",
+          address_line2: null,
+          delivery_note: null,
+          version: 1,
+        }] };
+      }
+      if (sql.includes("FROM inventory_units iu") && sql.includes("JOIN catalog_products p")) {
+        return {
+          rowCount: 1,
+          rows: [{ id: inventoryId, source_type: "GACHA", price: 24_899 }],
+        };
+      }
+      if (sql.includes("INSERT INTO shipping_requests")) {
+        assert.equal(params[1], "PAYMENT_PENDING");
+        assert.deepEqual(params.slice(3), [24_899, 24_900, false, false, 3_000]);
+        return { rowCount: 1, rows: [{ id: shippingId, requested_at: new Date("2026-09-14T01:00:00.000Z") }] };
+      }
+      if (sql.includes("INSERT INTO shipping_request_items")) return { rowCount: 1, rows: [] };
+      if (sql.includes("UPDATE inventory_units SET status='SHIPPING'")) return { rowCount: 1, rows: [{ id: inventoryId }] };
+      if (sql.includes("INSERT INTO orders(")) {
+        assert.deepEqual(params, [actorId, 3_000, shippingId]);
+        return { rowCount: 1, rows: [{ id: orderId }] };
+      }
+      if (sql.includes("INSERT INTO payments")) {
+        assert.deepEqual(params, [orderId, "TEST_PG", 3_000]);
+        return { rowCount: 1, rows: [{ id: paymentId }] };
+      }
+      if (sql.includes("UPDATE shipping_quotes")) return { rowCount: 1, rows: [] };
+      if (sql.includes("INSERT INTO outbox_events")) return { rowCount: 1, rows: [] };
+      if (sql.includes("UPDATE idempotency_keys SET state='COMPLETED'")) return { rowCount: 1, rows: [] };
+      throw new Error(`Unexpected query: ${sql}`);
+    },
+    release() { /* no-op */ },
+  };
+  const { app, routes } = routeCapture();
+  await registerAccountRoutes(app, testContext({ async connect() { return client; } }));
+  const handler = routes.get("/v1/account/shipping-requests");
+  assert.ok(handler);
+
+  let responseBody: unknown;
+  const reply = { code() { return this; }, header() { return this; }, send(body: unknown) { responseBody = body; return body; } };
+  await handler({
+    actor: { userId: actorId },
+    headers: { "idempotency-key": "shipping-request-below-threshold-0001" },
+    body: { quoteId, addressVersion: 1 },
+    id: "request-shipping-below-threshold-0001",
+  }, reply);
+  assert.deepEqual(responseBody, {
+    id: shippingId,
+    quoteId,
+    status: "PAYMENT_PENDING",
+    inventoryUnitIds: [inventoryId],
+    destination: {
+      recipientMasked: "김*민",
+      phoneMasked: "*******5678",
+      postalCode: "12345",
+      addressLine1: "서울시 테스트로 1",
+      addressLine2: null,
+    },
+    requestedAt: "2026-09-14T01:00:00.000Z",
+    shippingFee: 3_000,
+    paymentOrderId: orderId,
+    paymentId,
+  });
+  assert.equal(queries.includes("COMMIT"), true);
+});
+
+test("mixed Gacha and Kuji shipping one won below 54,900 creates the same 3,000 won fee", async () => {
+  const actorId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  const gachaId = "11111111-1111-4111-8111-111111111111";
+  const kujiId = "ffffffff-ffff-4fff-8fff-ffffffffffff";
+  const quoteId = "77777777-7777-4777-8777-777777777777";
+  const shippingId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+  const orderId = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+  const paymentId = "99999999-9999-4999-8999-999999999999";
+  const queries: string[] = [];
+  const client = {
+    async query(sql: string, params: unknown[] = []) {
+      queries.push(sql);
+      if (sql === "BEGIN" || sql === "COMMIT") return { rowCount: null, rows: [] };
+      if (sql.startsWith("DELETE FROM idempotency_keys")) return { rowCount: 0, rows: [] };
+      if (sql.includes("INSERT INTO idempotency_keys")) {
+        return { rowCount: 1, rows: [{ id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc" }] };
+      }
+      if (sql.includes("FROM shipping_quotes quote")) {
+        return { rowCount: 1, rows: [{
+          id: quoteId,
+          user_id: actorId,
+          address_id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+          address_version: 1,
+          inventory_unit_ids: [gachaId, kujiId],
+          item_count: 2,
+          reference_subtotal: 54_899,
+          contains_kuji: true,
+          free_shipping_threshold: 54_900,
+          shipping_fee: 3_000,
+          created_at: new Date("2026-09-14T01:00:00.000Z"),
+          expires_at: new Date("2026-09-14T01:10:00.000Z"),
+          consumed_at: null,
+          shipping_request_id: null,
+          expired: false,
+        }] };
+      }
+      if (sql.includes("FROM default_shipping_addresses")) {
+        return { rowCount: 1, rows: [{
+          id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+          user_id: actorId,
+          recipient: "김영민",
+          phone: "01012345678",
+          postal_code: "12345",
+          address_line1: "서울시 테스트로 1",
+          address_line2: null,
+          delivery_note: null,
+          version: 1,
+        }] };
+      }
+      if (sql.includes("FROM inventory_units iu") && sql.includes("JOIN catalog_products p")) {
+        return {
+          rowCount: 2,
+          rows: [
+            { id: gachaId, source_type: "GACHA", price: 24_900 },
+            { id: kujiId, source_type: "KUJI", price: 29_999 },
+          ],
+        };
+      }
+      if (sql.includes("INSERT INTO shipping_requests")) {
+        assert.equal(params[1], "PAYMENT_PENDING");
+        assert.deepEqual(params.slice(3), [54_899, 54_900, false, true, 3_000]);
+        return { rowCount: 1, rows: [{ id: shippingId, requested_at: new Date("2026-09-14T01:00:00.000Z") }] };
+      }
+      if (sql.includes("INSERT INTO shipping_request_items")) return { rowCount: 2, rows: [] };
+      if (sql.includes("UPDATE inventory_units SET status='SHIPPING'")) return { rowCount: 2, rows: [{ id: gachaId }, { id: kujiId }] };
+      if (sql.includes("INSERT INTO orders(")) return { rowCount: 1, rows: [{ id: orderId }] };
+      if (sql.includes("INSERT INTO payments")) {
+        assert.deepEqual(params, [orderId, "TEST_PG", 3_000]);
+        return { rowCount: 1, rows: [{ id: paymentId }] };
+      }
+      if (sql.includes("UPDATE shipping_quotes")) return { rowCount: 1, rows: [] };
+      if (sql.includes("INSERT INTO outbox_events")) return { rowCount: 1, rows: [] };
+      if (sql.includes("UPDATE idempotency_keys SET state='COMPLETED'")) return { rowCount: 1, rows: [] };
+      throw new Error(`Unexpected query: ${sql}`);
+    },
+    release() { /* no-op */ },
+  };
+  const { app, routes } = routeCapture();
+  await registerAccountRoutes(app, testContext({ async connect() { return client; } }));
+  const handler = routes.get("/v1/account/shipping-requests");
+  assert.ok(handler);
+
+  let responseBody: unknown;
+  const reply = { code() { return this; }, header() { return this; }, send(body: unknown) { responseBody = body; return body; } };
+  await handler({
+    actor: { userId: actorId },
+    headers: { "idempotency-key": "shipping-request-mixed-below-0001" },
+    body: { quoteId, addressVersion: 1 },
+    id: "request-shipping-mixed-below-0001",
+  }, reply);
+  assert.equal((responseBody as { status: string }).status, "PAYMENT_PENDING");
+  assert.equal((responseBody as { shippingFee: number }).shippingFee, 3_000);
+  assert.equal((responseBody as { paymentOrderId: string }).paymentOrderId, orderId);
   assert.equal(queries.includes("COMMIT"), true);
 });
 
@@ -666,6 +1479,7 @@ test("point return atomically locks original draw inventory, records immutable a
               draw_user_id: actorId,
               draw_entitlement_id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
               draw_prize_product_id: "prize-low",
+              never_exchanged: true,
             },
             {
               id: highId,
@@ -678,6 +1492,7 @@ test("point return atomically locks original draw inventory, records immutable a
               draw_user_id: actorId,
               draw_entitlement_id: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
               draw_prize_product_id: "prize-high",
+              never_exchanged: true,
             },
           ],
         };
@@ -729,10 +1544,17 @@ test("point return atomically locks original draw inventory, records immutable a
   const inventoryLock = queries.find(({ sql }) => sql.includes("FROM inventory_units iu") && sql.includes("draw_results"));
   assert.deepEqual(inventoryLock?.params, [[lowId, highId]]);
   assert.match(inventoryLock?.sql || "", /ORDER BY iu\.id FOR UPDATE OF iu,p/);
+  assert.match(inventoryLock?.sql || "", /NOT EXISTS[\s\S]*?inventory_ownership_transfers transfer_history/);
+  assert.match(inventoryLock?.sql || "", /iu\.storage_expires_at>now\(\)/);
+  assert.doesNotMatch(inventoryLock?.sql || "", /completed_exchange|to_owner_id/);
   assert.equal(queries.filter(({ sql }) => sql.includes("INSERT INTO point_ledger_entries")).length, 1);
   const pointBalanceUpdate = queries.find(({ sql }) => sql.includes("UPDATE point_accounts SET balance=balance+"));
   assert.match(pointBalanceUpdate?.sql || "", /balance<=\$3::integer-\$2::integer/);
   assert.deepEqual(pointBalanceUpdate?.params, [actorId, 5_999, MAX_POINT_BALANCE]);
+  assert.match(
+    queries.find(({ sql }) => sql.includes("UPDATE inventory_units SET status='POINT_RETURNED'"))?.sql || "",
+    /storage_expires_at>now\(\)/,
+  );
   assert.equal(queries.some(({ sql }) => sql === "COMMIT"), true);
 });
 

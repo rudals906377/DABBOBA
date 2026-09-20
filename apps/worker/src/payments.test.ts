@@ -74,6 +74,7 @@ test("payment batches select only due versions and persist the next attempt", as
 test("provider errors are durably deferred without blocking the rest of a batch", async () => {
   const now = new Date("2026-09-04T00:00:00.000Z");
   const scheduledOutcomes: unknown[] = [];
+  const scheduledErrors: unknown[] = [];
   const pool = {
     async query(sql: string, values?: unknown[]) {
       if (sql.includes("FROM payments p")) {
@@ -95,6 +96,7 @@ test("provider errors are durably deferred without blocking the rest of a batch"
         };
       }
       scheduledOutcomes.push(values?.[3]);
+      scheduledErrors.push(values?.[5]);
       return { rowCount: 1, rows: [] };
     },
   } as unknown as DatabasePool;
@@ -106,7 +108,7 @@ test("provider errors are durably deferred without blocking the rest of a batch"
     {
       async observe() {
         observations += 1;
-        if (observations === 1) throw new Error("provider unavailable");
+        if (observations === 1) throw new Error("provider token=must-not-persist");
         return { state: "UNKNOWN", observedAt: now.toISOString() };
       },
     },
@@ -117,4 +119,5 @@ test("provider errors are durably deferred without blocking the rest of a batch"
 
   assert.deepEqual(result, { examined: 2, unknown: 1, manualReview: 0, failed: 1 });
   assert.deepEqual(scheduledOutcomes, ["ERROR", "UNKNOWN"]);
+  assert.deepEqual(scheduledErrors, ["Error", null]);
 });

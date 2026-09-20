@@ -31,16 +31,28 @@ export function sortShopProducts<Product extends SortableShopProduct>(
       if (popularityDifference) return popularityDifference;
     }
     if (option === "price-high") {
-      const priceDifference = right.price - left.price;
+      const priceDifference = comparePrice(left.price, right.price, "high");
       if (priceDifference) return priceDifference;
     }
     if (option === "price-low") {
-      const priceDifference = left.price - right.price;
+      const priceDifference = comparePrice(left.price, right.price, "low");
       if (priceDifference) return priceDifference;
     }
     const dateDifference = timestamp(right.createdAt) - timestamp(left.createdAt);
     return dateDifference || left.id.localeCompare(right.id);
   });
+}
+
+function comparePrice(
+  left: number | null,
+  right: number | null,
+  direction: "high" | "low",
+): number {
+  const leftAvailable = typeof left === "number" && Number.isFinite(left) && left > 0;
+  const rightAvailable = typeof right === "number" && Number.isFinite(right) && right > 0;
+  if (leftAvailable !== rightAvailable) return leftAvailable ? -1 : 1;
+  if (!leftAvailable || !rightAvailable) return 0;
+  return direction === "high" ? right - left : left - right;
 }
 
 function popularityScore(product: SortableShopProduct): number {

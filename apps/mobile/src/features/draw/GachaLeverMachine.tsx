@@ -37,7 +37,11 @@ import { GachaCapsuleFrames } from "@/features/draw/GachaCapsuleFrames";
 import { GachaPrizeReveal } from "@/features/draw/GachaPrizeReveal";
 import { GachaCapsuleGlow } from "@/features/draw/GachaCapsuleGlow";
 import { sampleGachaBowlProjection } from "@/features/draw/gacha-bowl-projection";
-import { sampleGachaRevealLighting } from "@/features/draw/gacha-reveal-timeline";
+import {
+  sampleGachaDropImpact,
+  sampleGachaRevealLighting,
+  sampleGachaRevealOptics,
+} from "@/features/draw/gacha-reveal-timeline";
 import type { DrawResult } from "@/features/draw/draw-reveal-api";
 import {
   GACHA_CAPSULE_DISPENSE_DURATION_MS as CAPSULE_DISPENSE_DURATION_MS,
@@ -57,12 +61,14 @@ import {
   type GachaLeverMotionEvent,
   type GachaLeverMotionPhase,
 } from "@/features/draw/gacha-lever-motion";
+import { useGachaRevealAudio } from "@/features/draw/useGachaRevealAudio";
 import { colors } from "@/theme";
 
 type GachaLeverMachineProps = {
   disabled?: boolean;
   settled?: boolean;
   reduceMotion: boolean;
+  soundEnabled: boolean;
   resultReady: boolean;
   requestSignal?: number;
   resetSignal?: number;
@@ -82,16 +88,18 @@ const GESTURE_MIN_RADIUS = 28;
 const GESTURE_MAX_RADIUS = 78;
 const GESTURE_TAP_SLOP = 8;
 const CRANK_PLATE_SIZE = 41;
+const CRANK_HANDLE_WIDTH = 31;
+const CRANK_HANDLE_HEIGHT = 16;
 const LEVER_CUE_ORBIT_SIZE = CRANK_PLATE_SIZE + 14;
-const LEVER_CUE_ARROW_WIDTH = 10;
+const LEVER_CUE_ARROW_WIDTH = 12;
 const LEVER_CUE_ARROW_HEIGHT = 8;
 const LEVER_CUE_ROTATION_DURATION_MS = 2600;
 const smoothEasing = Easing.bezier(0.16, 0.82, 0.28, 1);
 
-const GACHA_MACHINE = require("../../../assets/capsule-machine-front-empty.png");
-const DABBOBA_WORDMARK = require("../../../assets/dabboba-wordmark.png");
-const GACHA_CRANK_PLATE = require("../../../../../public/assets/dabboba/capsule-crank-plate-pixel.png");
-const GACHA_CRANK_HANDLE = require("../../../../../public/assets/dabboba/capsule-crank-pixel.png");
+const GACHA_MACHINE = require("../../../assets/draw/gacha/capsule-machine-front-empty.png");
+const DABBOBA_WORDMARK = require("../../../assets/brand/dabboba-wordmark.png");
+const GACHA_CRANK_PLATE = require("../../../../../public/assets/dabboba/draw/gacha/capsule-crank-plate-clean.png");
+const GACHA_CRANK_HANDLE = require("../../../../../public/assets/dabboba/draw/gacha/capsule-crank-handle-thick-straight.png");
 const DISPENSED_CAPSULE = GACHA_CHAMBER_CAPSULES.find((capsule) => capsule.isDispenseCapsule)
   ?? GACHA_CHAMBER_CAPSULES[GACHA_CHAMBER_CAPSULES.length - 1]!;
 
@@ -99,6 +107,7 @@ export function GachaLeverMachine({
   disabled = false,
   settled = false,
   reduceMotion,
+  soundEnabled,
   resultReady,
   requestSignal = 0,
   resetSignal = 0,
@@ -129,6 +138,12 @@ export function GachaLeverMachine({
   const triggeredPulseCount = useSharedValue(0);
   const clockwiseCueRotation = useSharedValue(0);
   const clockwiseCueOpacity = useSharedValue(1);
+  const leverSoundPlayed = useSharedValue(0);
+  const {
+    cancelScheduled: cancelRevealSounds,
+    playLever: playLeverSound,
+    scheduleDispense: scheduleDispenseSounds,
+  } = useGachaRevealAudio(soundEnabled);
   const motionStateRef = useRef(createGachaLeverMotionState(reduceMotion));
   const dispatchRef = useRef<(event: GachaLeverMotionEvent) => void>(() => undefined);
   const requestOpenRef = useRef(onRequestOpen);
@@ -157,6 +172,7 @@ export function GachaLeverMachine({
 
     if (transition.effect === "start-dispense") {
       const run = animationRun.value;
+      scheduleDispenseSounds();
       cancelAnimation(waitingPulse);
       waitingPulse.value = 0;
       dispenseProgress.value = 0;
@@ -184,6 +200,7 @@ export function GachaLeverMachine({
     }
 
     if (transition.effect === "notify-settled") {
+      cancelRevealSounds();
       cancelAnimation(waitingPulse);
       cancelAnimation(dispenseProgress);
       cancelAnimation(revealProgress);
@@ -196,6 +213,7 @@ export function GachaLeverMachine({
     }
 
     if (transition.effect === "reset") {
+      cancelRevealSounds();
       animationRun.value += 1;
       cancelAnimation(leverRadians);
       cancelAnimation(waitingPulse);
@@ -220,8 +238,9 @@ export function GachaLeverMachine({
       triggeredPulseCount.value = 0;
       clockwiseCueRotation.value = 0;
       clockwiseCueOpacity.value = 1;
+      leverSoundPlayed.value = 0;
     }
-  }, [agitationProgress, animationRun, clockwiseCueOpacity, clockwiseCueRotation, dispenseProgress, gestureAccepted, gestureCompleted, gestureEnded, gestureStartRadians, gestureTravel, handleRevealSettled, interactionRadians, leverRadians, previousAngle, revealActive, revealProgress, triggeredPulseCount, waitingPulse]);
+  }, [agitationProgress, animationRun, cancelRevealSounds, clockwiseCueOpacity, clockwiseCueRotation, dispenseProgress, gestureAccepted, gestureCompleted, gestureEnded, gestureStartRadians, gestureTravel, handleRevealSettled, interactionRadians, leverRadians, leverSoundPlayed, previousAngle, revealActive, revealProgress, scheduleDispenseSounds, triggeredPulseCount, waitingPulse]);
 
   dispatchRef.current = dispatchMotion;
 
@@ -229,9 +248,10 @@ export function GachaLeverMachine({
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
+      cancelRevealSounds();
       animationRun.value += 1;
     };
-  }, [animationRun]);
+  }, [animationRun, cancelRevealSounds]);
 
   useEffect(() => {
     dispatchRef.current({ type: "reduce-motion", enabled: reduceMotion });
@@ -271,6 +291,7 @@ export function GachaLeverMachine({
   // Keep the same preloaded prize view alive through completion and SKIP.
   useEffect(() => {
     if (!settled) return;
+    cancelRevealSounds();
     animationRun.value += 1;
     cancelAnimation(revealProgress);
     cancelAnimation(dispenseProgress);
@@ -281,7 +302,7 @@ export function GachaLeverMachine({
     waitingPulse.value = 0;
     motionStateRef.current = { ...motionStateRef.current, phase: "revealed" };
     setPhase("revealed");
-  }, [animationRun, dispenseProgress, revealActive, revealProgress, settled, waitingPulse]);
+  }, [animationRun, cancelRevealSounds, dispenseProgress, revealActive, revealProgress, settled, waitingPulse]);
 
   useEffect(() => {
     if (resetSignalRef.current === resetSignal) return;
@@ -312,7 +333,9 @@ export function GachaLeverMachine({
     triggeredPulseCount.value = 0;
     clockwiseCueRotation.value = 0;
     clockwiseCueOpacity.value = 1;
-  }, [agitationProgress, animationRun, clockwiseCueOpacity, clockwiseCueRotation, dispenseProgress, gestureAccepted, gestureCompleted, gestureEnded, gestureStartRadians, gestureTravel, interactionRadians, leverRadians, previousAngle, reduceMotion, resetSignal, revealActive, revealProgress, triggeredPulseCount, waitingPulse]);
+    leverSoundPlayed.value = 0;
+    cancelRevealSounds();
+  }, [agitationProgress, animationRun, cancelRevealSounds, clockwiseCueOpacity, clockwiseCueRotation, dispenseProgress, gestureAccepted, gestureCompleted, gestureEnded, gestureStartRadians, gestureTravel, interactionRadians, leverRadians, leverSoundPlayed, previousAngle, reduceMotion, resetSignal, revealActive, revealProgress, triggeredPulseCount, waitingPulse]);
 
   useEffect(() => {
     cancelAnimation(clockwiseCueRotation);
@@ -366,6 +389,8 @@ export function GachaLeverMachine({
     const run = animationRun.value;
     cancelAnimation(clockwiseCueRotation);
     clockwiseCueOpacity.value = 0;
+    leverSoundPlayed.value = 1;
+    playLeverSound();
     gestureCompleted.value = 1;
     interactionRadians.value = GACHA_LEVER_TARGET_RADIANS;
     if (reduceMotion) {
@@ -380,7 +405,7 @@ export function GachaLeverMachine({
         if (finished) scheduleOnRN(beginOpen, run);
       },
     );
-  }, [animationRun, beginOpen, clockwiseCueOpacity, clockwiseCueRotation, disabled, gestureCompleted, interactionRadians, leverRadians, reduceMotion]);
+  }, [animationRun, beginOpen, clockwiseCueOpacity, clockwiseCueRotation, disabled, gestureCompleted, interactionRadians, leverRadians, leverSoundPlayed, playLeverSound, reduceMotion]);
 
   useEffect(() => {
     if (requestSignalRef.current === requestSignal) return;
@@ -422,6 +447,10 @@ export function GachaLeverMachine({
       gestureAccepted.value = 1;
       previousAngle.value = start.angle ?? Number.NaN;
       gestureCompleted.value = 0;
+      if (leverSoundPlayed.value === 0) {
+        leverSoundPlayed.value = 1;
+        scheduleOnRN(playLeverSound);
+      }
       manager.activate();
     })
     .onTouchesUp((_event, manager) => {
@@ -497,7 +526,7 @@ export function GachaLeverMachine({
       leverRadians.value = reduceMotion
         ? gestureStartRadians.value
         : withTiming(gestureStartRadians.value, { duration: 220, easing: smoothEasing });
-    }), [animationRun, beginOpen, clockwiseCueOpacity, clockwiseCueRotation, disabled, gestureAccepted, gestureCompleted, gestureEnded, gestureStartRadians, gestureTravel, interactionRadians, leverRadians, phase, previousAngle, reduceMotion]);
+    }), [animationRun, beginOpen, clockwiseCueOpacity, clockwiseCueRotation, disabled, gestureAccepted, gestureCompleted, gestureEnded, gestureStartRadians, gestureTravel, interactionRadians, leverRadians, leverSoundPlayed, phase, playLeverSound, previousAngle, reduceMotion]);
 
   const clockwiseCueStyle = useAnimatedStyle(() => ({
     opacity: clockwiseCueOpacity.value * 0.9,
@@ -604,6 +633,7 @@ export function GachaLeverMachine({
               />
             </Animated.View>
           </View>
+          <GachaDropImpact progress={dispenseProgress} reduceMotion={reduceMotion} />
 
           <GestureDetector gesture={interactionGesture}>
             <Animated.View
@@ -631,10 +661,10 @@ export function GachaLeverMachine({
                   <Svg
                     width={LEVER_CUE_ARROW_WIDTH}
                     height={LEVER_CUE_ARROW_HEIGHT}
-                    viewBox="0 0 10 8"
+                    viewBox="0 0 12 8"
                     style={styles.leverRotationArrow}
                   >
-                    <Path d="M 0 2.5 H 5 V 0 L 10 4 L 5 8 V 5.5 H 0 Z" fill={colors.brand} />
+                    <Path d="M 0 2.5 H 7 V 0 L 12 4 L 7 8 V 5.5 H 0 Z" fill={colors.brand} />
                   </Svg>
                 </Animated.View>
               ) : null}
@@ -654,6 +684,40 @@ export function GachaLeverMachine({
           settled={settled}
         />
       </View>
+    </View>
+  );
+}
+
+function GachaDropImpact({
+  progress,
+  reduceMotion,
+}: {
+  progress: SharedValue<number>;
+  reduceMotion: boolean;
+}) {
+  const reflectionStyle = useAnimatedStyle(() => {
+    const impact = sampleGachaDropImpact(progress.value, reduceMotion);
+    return {
+      opacity: impact.reflectionOpacity,
+      transform: [{ scaleX: impact.reflectionScaleX }, { scaleY: impact.reflectionScaleY }],
+    };
+  });
+  if (reduceMotion) return null;
+
+  return (
+    <View testID="gacha-drop-impact" pointerEvents="none" style={styles.dropImpactField}>
+      <Animated.View style={[styles.dropImpactReflection, reflectionStyle]}>
+        <Svg width="100%" height="100%" viewBox="0 0 200 200">
+          <Defs>
+            <RadialGradient id="gacha-floor-reflection" cx="50%" cy="50%" r="50%">
+              <Stop offset="0" stopColor="#F7FFF2" stopOpacity="0.82" />
+              <Stop offset="0.42" stopColor="#C9F7C7" stopOpacity="0.34" />
+              <Stop offset="1" stopColor="#8BE38F" stopOpacity="0" />
+            </RadialGradient>
+          </Defs>
+          <Rect width="200" height="200" fill="url(#gacha-floor-reflection)" />
+        </Svg>
+      </Animated.View>
     </View>
   );
 }
@@ -700,8 +764,8 @@ function GachaCapsuleCinematic({
     return () => { capsuleRendererReady.value = 0; };
   }, [capsuleRendererReady, reduceMotion]);
   const stageDimStyle = useAnimatedStyle(() => ({
-    opacity: reduceMotion ? 0 : revealActive.value * interpolate(
-      cameraProgress.value, [0, 0.26, 0.40, 1], [0, 0, 1, 1], Extrapolation.CLAMP,
+    opacity: reduceMotion ? 0 : revealActive.value * 0.84 * interpolate(
+      cameraProgress.value, [0, 0.2, 0.52, 1], [0, 0, 1, 1], Extrapolation.CLAMP,
     ),
   }));
   const pickupForegroundStyle = useAnimatedStyle(() => {
@@ -802,6 +866,12 @@ function GachaCapsuleCinematic({
       style={styles.cinematicLayer}
     >
       <Animated.View style={[styles.cinematicDim, stageDimStyle]} />
+      <GachaRevealOptics
+        progress={revealProgress}
+        active={revealActive}
+        stageSize={stageSize}
+        reduceMotion={reduceMotion}
+      />
       <GachaCapsuleGlow
         progress={revealProgress}
         active={revealActive}
@@ -854,9 +924,9 @@ function GachaCapsuleCinematic({
         <Svg width="100%" height="100%" viewBox="0 0 200 200">
           <Defs>
             <RadialGradient id="capsule-inside-light" cx="50%" cy="50%" r="50%">
-              <Stop offset="0" stopColor="#FCFCF8" />
-              <Stop offset="0.55" stopColor="#FCFCF8" />
-              <Stop offset="0.78" stopColor="#FCFCF8" stopOpacity="0.5" />
+              <Stop offset="0" stopColor="#FCFCF8" stopOpacity="0.96" />
+              <Stop offset="0.18" stopColor="#FCFCF8" stopOpacity="0.88" />
+              <Stop offset="0.52" stopColor="#FCFCF8" stopOpacity="0.48" />
               <Stop offset="1" stopColor="#FCFCF8" stopOpacity="0" />
             </RadialGradient>
           </Defs>
@@ -874,6 +944,95 @@ function GachaCapsuleCinematic({
           previewLabel={prize?.previewLabel}
         />
       </View>
+    </View>
+  );
+}
+
+function GachaRevealOptics({
+  progress,
+  active,
+  stageSize,
+  reduceMotion,
+}: {
+  progress: SharedValue<number>;
+  active: SharedValue<number>;
+  stageSize: { width: number; height: number };
+  reduceMotion: boolean;
+}) {
+  const { width, height } = stageSize;
+  const sourceTransform = (scale: number) => {
+    "worklet";
+    const camera = sampleGachaCameraMotion(progress.value, width, height, false);
+    const source = sampleGachaBowlProjection(progress.value, camera, false);
+    return [
+      { translateX: source.x - width / 2 },
+      { translateY: source.y - height / 2 },
+      { scale: camera.capsuleDiameter / 200 * scale },
+    ];
+  };
+  const innerBloomStyle = useAnimatedStyle(() => {
+    const effect = sampleGachaRevealOptics(progress.value, reduceMotion);
+    return {
+      opacity: active.value * effect.innerBloomOpacity,
+      transform: sourceTransform(effect.innerBloomScale),
+    };
+  });
+  const diffusionStyle = useAnimatedStyle(() => {
+    const effect = sampleGachaRevealOptics(progress.value, reduceMotion);
+    return {
+      opacity: active.value * effect.diffusionOpacity,
+      transform: sourceTransform(effect.diffusionScale),
+    };
+  });
+  const lensHazeStyle = useAnimatedStyle(() => {
+    const effect = sampleGachaRevealOptics(progress.value, reduceMotion);
+    return {
+      opacity: active.value * effect.lensHazeOpacity,
+      transform: sourceTransform(effect.lensHazeScale),
+    };
+  });
+  if (reduceMotion || width <= 0 || height <= 0) return null;
+
+  return (
+    <View testID="gacha-reveal-optics" pointerEvents="none" style={styles.revealOpticsField}>
+      <Animated.View style={[styles.revealOpticalPlane, styles.revealLensHaze, lensHazeStyle]}>
+        <Svg width="100%" height="100%" viewBox="0 0 200 200">
+          <Defs>
+            <RadialGradient id="gacha-lens-haze" cx="50%" cy="50%" r="50%">
+              <Stop offset="0" stopColor="#FFFDF2" stopOpacity="0.46" />
+              <Stop offset="0.46" stopColor="#EEF8E7" stopOpacity="0.18" />
+              <Stop offset="1" stopColor="#DFF2DA" stopOpacity="0" />
+            </RadialGradient>
+          </Defs>
+          <Rect width="200" height="200" fill="url(#gacha-lens-haze)" />
+        </Svg>
+      </Animated.View>
+      <Animated.View style={[styles.revealOpticalPlane, styles.revealDiffusion, diffusionStyle]}>
+        <Svg width="100%" height="100%" viewBox="0 0 200 200">
+          <Defs>
+            <RadialGradient id="gacha-light-diffusion" cx="50%" cy="50%" r="50%">
+              <Stop offset="0" stopColor="#FFFFFF" stopOpacity="0.76" />
+              <Stop offset="0.34" stopColor="#F2FFED" stopOpacity="0.46" />
+              <Stop offset="0.72" stopColor="#B7EBB6" stopOpacity="0.12" />
+              <Stop offset="1" stopColor="#B7EBB6" stopOpacity="0" />
+            </RadialGradient>
+          </Defs>
+          <Rect width="200" height="200" fill="url(#gacha-light-diffusion)" />
+        </Svg>
+      </Animated.View>
+      <Animated.View style={[styles.revealOpticalPlane, styles.revealInnerBloom, innerBloomStyle]}>
+        <Svg width="100%" height="100%" viewBox="0 0 200 200">
+          <Defs>
+            <RadialGradient id="gacha-inner-bloom" cx="50%" cy="50%" r="50%">
+              <Stop offset="0" stopColor="#FFFFFF" stopOpacity="0.98" />
+              <Stop offset="0.24" stopColor="#FBFFF5" stopOpacity="0.72" />
+              <Stop offset="0.58" stopColor="#D4F7D0" stopOpacity="0.2" />
+              <Stop offset="1" stopColor="#B1E8AF" stopOpacity="0" />
+            </RadialGradient>
+          </Defs>
+          <Rect width="200" height="200" fill="url(#gacha-inner-bloom)" />
+        </Svg>
+      </Animated.View>
     </View>
   );
 }
@@ -1256,7 +1415,7 @@ const styles = StyleSheet.create({
     top: -18,
     width: 13,
     height: 132,
-    borderRadius: 8,
+    borderRadius: seed.radius.r2,
     backgroundColor: "rgba(255, 255, 255, 0.045)",
     transform: [{ rotate: "11deg" }],
   },
@@ -1320,10 +1479,10 @@ const styles = StyleSheet.create({
   },
   crankHandle: {
     position: "absolute",
-    left: GESTURE_CENTER - 15.5,
-    top: GESTURE_CENTER - 6,
-    width: 31,
-    height: 12,
+    left: GESTURE_CENTER - CRANK_HANDLE_WIDTH / 2,
+    top: GESTURE_CENTER - CRANK_HANDLE_HEIGHT / 2,
+    width: CRANK_HANDLE_WIDTH,
+    height: CRANK_HANDLE_HEIGHT,
   },
   dispenseTrack: {
     position: "absolute",
@@ -1355,6 +1514,20 @@ const styles = StyleSheet.create({
     borderRadius: seed.radius.full,
     backgroundColor: "rgba(0, 0, 0, 0.78)",
   },
+  dropImpactField: {
+    position: "absolute",
+    zIndex: 3,
+    left: 101,
+    top: 263,
+    width: 42,
+    height: 22,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  dropImpactReflection: {
+    width: 42,
+    height: 18,
+  },
   cinematicLayer: {
     ...StyleSheet.absoluteFill,
     zIndex: 30,
@@ -1385,6 +1558,36 @@ const styles = StyleSheet.create({
     position: "absolute", left: -40, right: -40, top: -390, bottom: -390,
     backgroundColor: "#060906", zIndex: 0,
   },
+  revealOpticsField: {
+    ...StyleSheet.absoluteFill,
+    zIndex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  revealOpticalPlane: {
+    position: "absolute",
+    left: "50%",
+    top: "50%",
+    width: 260,
+    height: 260,
+    marginLeft: -130,
+    marginTop: -130,
+  },
+  revealLensHaze: {
+    zIndex: 1,
+    width: 560,
+    height: 560,
+    marginLeft: -280,
+    marginTop: -280,
+  },
+  revealDiffusion: {
+    zIndex: 2,
+    width: 420,
+    height: 420,
+    marginLeft: -210,
+    marginTop: -210,
+  },
+  revealInnerBloom: { zIndex: 3 },
   cinematicCapsuleLayer: {
     ...StyleSheet.absoluteFill,
   },

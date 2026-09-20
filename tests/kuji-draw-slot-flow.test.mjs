@@ -128,6 +128,8 @@ test("native kuji binds the live board before entering the real committed reveal
   assert.match(drawScreen, /validateKujiSlotBinding/);
   assert.match(drawScreen, /slot\.available/);
   assert.match(drawScreen, /paidKujiRevealPath/);
+  assert.match(drawScreen, /presentDrawOpenModeChoice\(bindings\.length/);
+  assert.match(drawScreen, /totalSlots: board\.totalSlots, mode/);
   assert.doesNotMatch(drawScreen, /\/draw\/preview/);
   assert.match(slotApi, /GET\("\/v1\/catalog\/products\/\{productId\}\/kuji-slots"/);
   assert.match(slotApi, /GET\("\/v1\/orders\/\{orderId\}\/kuji-selection"/);

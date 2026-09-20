@@ -4,6 +4,7 @@ import test from "node:test";
 import type { ApiConfig } from "@dabboba/config";
 import { createDatabasePool } from "@dabboba/db";
 import { buildApp } from "../app.js";
+import { acceptRequiredPoliciesForIntegrationTest } from "../integration-test-fixtures.js";
 
 const databaseUrl = process.env.DABBOBA_TEST_DATABASE_URL;
 
@@ -59,9 +60,15 @@ test("kuji room join, expiry, FIFO promotion, and leave stay server-authoritativ
     [ipId, ipId, `쿠지 대기실 ${suffix}`, `Kuji room ${suffix}`],
   );
   await pool.query(
-    `INSERT INTO catalog_products(id,sku,ip_id,category,name,price,is_prize_only)
-     VALUES($1,$2,$3,'kuji',$4,9900,false)`,
-    [productId, `KUJI-ROOM-${suffix.toUpperCase()}`, ipId, `쿠지 상품 ${suffix}`],
+    `INSERT INTO catalog_products(id,sku,ip_id,category,name,price,image_url,is_prize_only)
+     VALUES($1,$2,$3,'kuji',$4,9900,$5,false)`,
+    [
+      productId,
+      `KUJI-ROOM-${suffix.toUpperCase()}`,
+      ipId,
+      `쿠지 상품 ${suffix}`,
+      `https://cdn.example.test/products/${productId}.png`,
+    ],
   );
   await pool.query("INSERT INTO product_stock(product_id,on_hand,reserved) VALUES($1,50,0)", [productId]);
 
@@ -72,7 +79,9 @@ test("kuji room join, expiry, FIFO promotion, and leave stay server-authoritativ
       payload: { email: `kuji-room-${label}-${suffix}@example.test` },
     });
     assert.equal(response.statusCode, 201, response.body);
-    return response.json() as Session;
+    const created = response.json() as Session;
+    await acceptRequiredPoliciesForIntegrationTest(pool, created.actor.userId);
+    return created;
   };
   const publisher = await createSession("publisher");
   const prizeProductId = `kuji-room-prize-${suffix}`;
@@ -115,6 +124,10 @@ test("kuji room join, expiry, FIFO promotion, and leave stay server-authoritativ
     );
   };
   await publishDraw(productId, 1);
+  await pool.query(
+    "UPDATE catalog_products SET sale_status='ON_SALE' WHERE id=$1",
+    [productId],
+  );
 
   const noDrawProductId = `kuji-no-draw-${suffix}`;
   await pool.query(
@@ -129,7 +142,7 @@ test("kuji room join, expiry, FIFO promotion, and leave stay server-authoritativ
     url: `/v1/kuji/rooms/${noDrawProductId}/entries`,
     headers: { authorization: `Bearer ${noDrawUser.token}` },
   });
-  assert.equal(noDrawJoin.statusCode, 409, noDrawJoin.body);
+  assert.equal(noDrawJoin.statusCode, 404, noDrawJoin.body);
 
   const soldOutProductId = `kuji-sold-out-${suffix}`;
   await pool.query(
@@ -137,8 +150,15 @@ test("kuji room join, expiry, FIFO promotion, and leave stay server-authoritativ
      VALUES($1,$2,$3,'kuji',$4,9900,false)`,
     [soldOutProductId, `KUJI-SOLD-OUT-${suffix.toUpperCase()}`, ipId, `품절 쿠지 ${suffix}`],
   );
-  await pool.query("INSERT INTO product_stock(product_id,on_hand,reserved) VALUES($1,0,0)", [soldOutProductId]);
+  await pool.query("INSERT INTO product_stock(product_id,on_hand,reserved) VALUES($1,1,0)", [soldOutProductId]);
   await publishDraw(soldOutProductId, 1);
+  await pool.query(
+    `UPDATE catalog_products
+        SET image_url=$2,sale_status='ON_SALE'
+      WHERE id=$1`,
+    [soldOutProductId, `https://cdn.example.test/products/${soldOutProductId}.png`],
+  );
+  await pool.query("UPDATE product_stock SET on_hand=0 WHERE product_id=$1", [soldOutProductId]);
   const soldOutUser = await createSession("sold-out");
   const soldOutJoin = await app.inject({
     method: "POST",
@@ -229,12 +249,22 @@ test("kuji room join, expiry, FIFO promotion, and leave stay server-authoritativ
 
   const contentionProductId = `kuji-contention-${suffix}`;
   await pool.query(
-    `INSERT INTO catalog_products(id,sku,ip_id,category,name,price,is_prize_only)
-     VALUES($1,$2,$3,'kuji',$4,9900,false)`,
-    [contentionProductId, `KUJI-CONTENTION-${suffix.toUpperCase()}`, ipId, `쿠지 동시 입장 ${suffix}`],
+    `INSERT INTO catalog_products(id,sku,ip_id,category,name,price,image_url,is_prize_only)
+     VALUES($1,$2,$3,'kuji',$4,9900,$5,false)`,
+    [
+      contentionProductId,
+      `KUJI-CONTENTION-${suffix.toUpperCase()}`,
+      ipId,
+      `쿠지 동시 입장 ${suffix}`,
+      `https://cdn.example.test/products/${contentionProductId}.png`,
+    ],
   );
   await pool.query("INSERT INTO product_stock(product_id,on_hand,reserved) VALUES($1,50,0)", [contentionProductId]);
   await publishDraw(contentionProductId, 1);
+  await pool.query(
+    "UPDATE catalog_products SET sale_status='ON_SALE' WHERE id=$1",
+    [contentionProductId],
+  );
   const otherProductConflict = await joinProduct(third, contentionProductId);
   assert.equal(otherProductConflict.statusCode, 409, otherProductConflict.body);
 

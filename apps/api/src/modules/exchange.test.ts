@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 import type { FastifyInstance } from "fastify";
 import type { ApiContext } from "../types.js";
 import {
   exchangeInventoryBundleInput,
+  expireStaleExchangeListings,
   isDrawExchangeSource,
   isExchangeEligibleInventory,
   isExchangeListingTransitionAllowed,
@@ -12,6 +14,25 @@ import {
   orderedInventoryIds,
   registerExchangeRoutes,
 } from "./exchange.js";
+
+test("stale open exchanges close atomically and release both sides", async () => {
+  let capturedSql = "";
+  const queryable = {
+    async query(sql: string) {
+      capturedSql = sql;
+      return { rowCount: 2, rows: [{ id: "one" }, { id: "two" }] };
+    },
+  } as unknown as Parameters<typeof expireStaleExchangeListings>[0];
+  const expired = await expireStaleExchangeListings(queryable);
+
+  assert.equal(expired, 2);
+  assert.match(capturedSql, /listing\.status='OPEN'[\s\S]*listing\.expires_at<=now\(\)/);
+  assert.match(capturedSql, /inventory\.storage_expires_at<=now\(\)/);
+  assert.match(capturedSql, /cancel_reason='AUTO_EXPIRED'/);
+  assert.match(capturedSql, /status='REJECTED'/);
+  assert.match(capturedSql, /status='EXCHANGE_LISTED'/);
+  assert.match(capturedSql, /status='EXCHANGE_OFFERED'/);
+});
 
 type Handler = (request: Record<string, unknown>, reply?: Record<string, unknown>) => Promise<unknown>;
 
@@ -108,12 +129,13 @@ test("exchange proposals accept only inventory won from gacha draws", () => {
 });
 
 test("exchange inventory must be a directly drawn gacha product that is still stored as owned", () => {
-  assert.equal(isExchangeEligibleInventory("OWNED", "GACHA", true), true);
-  assert.equal(isExchangeEligibleInventory("OWNED", "KUJI", true), false);
-  assert.equal(isExchangeEligibleInventory("OWNED", "GACHA", false), false);
-  assert.equal(isExchangeEligibleInventory("OWNED", "KUJI", false), false);
-  assert.equal(isExchangeEligibleInventory("OWNED", "PURCHASE", true), false);
-  assert.equal(isExchangeEligibleInventory("OWNED", "ADMIN_ADJUSTMENT", true), false);
+  assert.equal(isExchangeEligibleInventory("OWNED", "GACHA", true, true), true);
+  assert.equal(isExchangeEligibleInventory("OWNED", "GACHA", true, false), false);
+  assert.equal(isExchangeEligibleInventory("OWNED", "KUJI", true, true), false);
+  assert.equal(isExchangeEligibleInventory("OWNED", "GACHA", false, true), false);
+  assert.equal(isExchangeEligibleInventory("OWNED", "KUJI", false, true), false);
+  assert.equal(isExchangeEligibleInventory("OWNED", "PURCHASE", true, true), false);
+  assert.equal(isExchangeEligibleInventory("OWNED", "ADMIN_ADJUSTMENT", true, true), false);
 
   for (const status of [
     "EXCHANGE_LISTED",
@@ -123,9 +145,36 @@ test("exchange inventory must be a directly drawn gacha product that is still st
     "TRANSFERRED",
     "REFUNDED",
   ] as const) {
-    assert.equal(isExchangeEligibleInventory(status, "GACHA", true), false);
-    assert.equal(isExchangeEligibleInventory(status, "KUJI", true), false);
+    assert.equal(isExchangeEligibleInventory(status, "GACHA", true, true), false);
+    assert.equal(isExchangeEligibleInventory(status, "KUJI", true, true), false);
   }
+});
+
+test("exchange mutations recheck listing and storage expiry at locked write boundaries", async () => {
+  const source = await readFile(new URL("../../src/modules/exchange.ts", import.meta.url), "utf8");
+
+  assert.match(source, /iu\.storage_expires_at>now\(\) AS storage_active/);
+  assert.match(
+    source,
+    /WHERE id=ANY\(\$1::uuid\[\]\) AND owner_id=\$2 AND status='OWNED'\s+AND storage_expires_at>now\(\)/,
+  );
+  assert.match(source, /expires_at,expires_at<=now\(\) AS is_expired[\s\S]{0,160}FOR UPDATE/);
+  assert.match(
+    source,
+    /INSERT INTO exchange_offers[\s\S]{0,400}listing\.expires_at>now\(\)/,
+  );
+  assert.match(
+    source,
+    /UPDATE exchange_listings[\s\S]{0,220}WHERE id=\$1 AND status='OPEN' AND expires_at>now\(\) RETURNING id/,
+  );
+  assert.match(
+    source,
+    /requireActiveStorageBundle\(locked, listing\.offered_inventory_unit_ids\);[\s\S]{0,900}requireActiveStorageBundle\(locked, offer\.offered_inventory_unit_ids\);/,
+  );
+  const decisionRoute = source.indexOf('"/v1/exchange/listings/:listingId/offers/:offerId/decision"');
+  const decisionSweep = source.indexOf("await expireStaleExchangeListings(context.pool);", decisionRoute);
+  const decisionMutation = source.indexOf("runIdempotentMutation(", decisionRoute);
+  assert.ok(decisionRoute >= 0 && decisionRoute < decisionSweep && decisionSweep < decisionMutation);
 });
 
 test("exchange draw provenance rejects forged owner, entitlement, and prize links", () => {
@@ -169,11 +218,45 @@ test("exchange inventory query exposes only directly drawn gacha inventory", asy
   const { app, routes } = routeHarness();
   let capturedSql = "";
   let capturedValues: unknown[] = [];
+  const userId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  const acquiredAt = new Date("2026-09-13T03:00:00.000Z");
+  const storefrontImageUrl = "https://cdn.example.test/gacha-prize-storefront.webp";
   const context = {
     pool: {
       async query(sql: string, values: unknown[]) {
         capturedSql = sql;
         capturedValues = values;
+        if (sql.includes("FROM inventory_units iu")) {
+          return {
+            rowCount: 1,
+            rows: [{
+              id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+              owner_id: userId,
+              product_id: "gacha-prize",
+              source_type: "GACHA",
+              inventory_status: "OWNED",
+              acquired_at: acquiredAt,
+              sku: "GACHA-PRIZE-001",
+              ip_id: "test-ip",
+              character_ids: [],
+              category: "figure",
+              product_name: "가챠 경품",
+              manufacturer: null,
+              release_date: null,
+              price: "0",
+              available_quantity: "0",
+              metadata: {},
+              image_url: "https://cdn.example.test/gacha-prize.webp",
+              storefront_image_url: storefrontImageUrl,
+              product_active: true,
+              is_prize_only: true,
+              product_version: 2,
+              product_created_at: acquiredAt,
+              product_updated_at: acquiredAt,
+              created_at: acquiredAt,
+            }],
+          };
+        }
         return { rowCount: 0, rows: [] };
       },
     },
@@ -183,14 +266,18 @@ test("exchange inventory query exposes only directly drawn gacha inventory", asy
   await registerExchangeRoutes(app, context);
   const handler = routes.get("GET /v1/exchange/inventory");
   assert.ok(handler);
-  const userId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
-  await handler({ query: {}, actor: { userId } });
+  const body = await handler({ query: {}, actor: { userId } }) as {
+    items: Array<{ product: { storefrontImageUrl: string | null } }>;
+  };
 
   assert.match(capturedSql, /iu\.source_type='GACHA'/);
   assert.doesNotMatch(capturedSql, /'KUJI'/);
   assert.match(capturedSql, /draw_result\.user_id=iu\.owner_id/);
   assert.match(capturedSql, /draw_result\.entitlement_id=iu\.source_id/);
   assert.match(capturedSql, /draw_result\.prize_product_id=iu\.product_id/);
+  assert.match(capturedSql, /iu\.storage_expires_at>now\(\)/);
+  assert.match(capturedSql, /p\.storefront_image_url/);
+  assert.equal(body.items[0]?.product.storefrontImageUrl, storefrontImageUrl);
   assert.deepEqual(capturedValues, [userId, 31]);
 });
 
@@ -229,11 +316,12 @@ test("exchange listing search includes product and IP names", async () => {
   );
   assert.match(capturedSql, /offer_draw_result\.entitlement_id=offer_inventory\.source_id/);
   assert.match(capturedSql, /offer_draw_result\.prize_product_id=offer_inventory\.product_id/);
-  assert.match(capturedSql, /search_product\.name ILIKE \$2/);
-  assert.match(capturedSql, /search_ip\.name_ko ILIKE \$2/);
-  assert.match(capturedSql, /search_ip\.name_en ILIKE \$2/);
-  assert.match(capturedSql, /array_to_string\(search_ip\.aliases, ' '\) ILIKE \$2/);
-  assert.deepEqual(capturedValues, [31, "%포켓몬스터%"]);
+  assert.match(capturedSql, /visibility_block\.blocker_id=\$1/);
+  assert.match(capturedSql, /search_product\.name ILIKE \$3/);
+  assert.match(capturedSql, /search_ip\.name_ko ILIKE \$3/);
+  assert.match(capturedSql, /search_ip\.name_en ILIKE \$3/);
+  assert.match(capturedSql, /array_to_string\(search_ip\.aliases, ' '\) ILIKE \$3/);
+  assert.deepEqual(capturedValues, [null, 31, "%포켓몬스터%"]);
 });
 
 test("exchange listing detail hides non-gacha legacy listings", async () => {

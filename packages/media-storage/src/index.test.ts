@@ -107,6 +107,19 @@ test("SDK PUT signs exact size/type/identity/UNSIGNED-PAYLOAD and verifies again
   assert.equal(url.searchParams.get("X-Amz-Signature"), hmac(signingKey, stringToSign).toString("hex"));
 });
 
+test("S3 read URL is short-lived and bound to the immutable object key and stored version", async () => {
+  const storage = new SupabaseMediaStorage(config("http://127.0.0.1:12345"));
+  const signed = new URL(await storage.signedS3Read(key, version, 300));
+  assert.equal(signed.origin, "http://127.0.0.1:12345");
+  assert.equal(signed.pathname, `/storage/v1/s3/test-media/${key}`);
+  assert.equal(signed.searchParams.get("versionId"), version);
+  assert.equal(signed.searchParams.get("X-Amz-Expires"), "300");
+  assert.ok(signed.searchParams.get("X-Amz-Signature"));
+  await assert.rejects(storage.signedS3Read(key, version, 301), safeFailure);
+  await assert.rejects(storage.signedS3Read("../foreign", version, 300), safeFailure);
+  await assert.rejects(storage.signedS3Read(key, "invalid", 300), safeFailure);
+});
+
 test("invalid paths, sizes, hashes and expired deadlines are rejected before signing", async () => {
   const storage = new SupabaseMediaStorage(config("http://127.0.0.1:1"));
   const input = { key, mediaId, checksumSha256: checksum, byteSize: bytes.length, mimeType: "image/webp", expiresAt: new Date(Date.now() + 60_000) };

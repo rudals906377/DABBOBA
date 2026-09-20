@@ -2,7 +2,9 @@ export type KujiTicketRevealMotion = {
   glowOpacity: number;
   glowScale: number;
   ticketOpacity: number;
+  ticketTranslateY: number;
   resultOpacity: number;
+  resultTranslateY: number;
 };
 
 export function isKujiResultGateOpen(
@@ -40,7 +42,9 @@ export function sampleKujiTicketRevealMotion(
       glowOpacity: 0,
       glowScale: 1,
       ticketOpacity: 1,
+      ticketTranslateY: 0,
       resultOpacity: 0,
+      resultTranslateY: 18,
     };
   }
 
@@ -49,18 +53,19 @@ export function sampleKujiTicketRevealMotion(
       glowOpacity: 0,
       glowScale: 1,
       ticketOpacity: 0,
+      ticketTranslateY: 0,
       resultOpacity: 1,
+      resultTranslateY: 0,
     };
   }
 
   const p = clampProgress(progress);
-  const glowIn = smootherStep(0, 0.18, p);
-  const glowOut = 1 - smootherStep(0.58, 0.88, p);
-
   return {
-    glowOpacity: 0.78 * Math.min(glowIn, glowOut),
-    glowScale: 0.78 + 0.3 * smootherStep(0, 0.72, p),
-    ticketOpacity: 1 - smootherStep(0.2, 0.62, p),
-    resultOpacity: smootherStep(0.48, 0.9, p),
+    glowOpacity: 0,
+    glowScale: 1,
+    ticketOpacity: 1 - smootherStep(0.52, 0.96, p),
+    ticketTranslateY: -34 * smootherStep(0.08, 1, p),
+    resultOpacity: smootherStep(0.24, 0.86, p),
+    resultTranslateY: 18 * (1 - smootherStep(0.18, 1, p)),
   };
 }

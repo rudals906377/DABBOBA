@@ -11,9 +11,14 @@ import {
 } from "../apps/mobile/src/features/checkout/gacha-checkout-intent.ts";
 
 const screen = readFileSync(new URL("../apps/mobile/src/features/draw/DrawRevealScreen.tsx", import.meta.url), "utf8");
+const returnHandlerStart = screen.indexOf("  const returnToSourceProduct = async () => {");
+const returnHandlerEnd = [
+  screen.indexOf("  const openAllProducts = async () => {", returnHandlerStart),
+  screen.indexOf("  const openProduct = async () => {", returnHandlerStart),
+].filter((index) => index > returnHandlerStart).sort((left, right) => left - right)[0];
 const returnBody = screen.slice(
-  screen.indexOf("  const returnToSourceProduct = async () => {"),
-  screen.indexOf("  const openProduct = async () => {"),
+  returnHandlerStart,
+  returnHandlerEnd,
 ).replace("  const returnToSourceProduct = ", "").trim().replace(/;$/, "").replace(/ as Href/g, "");
 assert.ok(returnBody.startsWith("async () => {"), "execute the real screen completion handler");
 const ownerRenderBody = screen.slice(
@@ -38,6 +43,12 @@ function completionProof() {
 
 function harness() {
   const calls = [];
+  const committedResult = {
+    id: "60000000-0000-4000-8000-000000000002",
+    entitlementId: ids[1],
+    productId: "gacha-a",
+    probabilityVersion: 1,
+  };
   const intent = attachOrderToGachaCheckoutIntent(createGachaCheckoutOrderIntent(actorId, {
     productId: "gacha-a", quantity: 2, expectedDrawVersion: 1, pointAmount: 1000,
   }, "gacha-order-40000000-0000-4000-8000-000000000001", "2026-09-06T00:00:00.000Z"),
@@ -53,7 +64,8 @@ function harness() {
     completionFocusRef: { current: true }, completionGenerationRef: { current: 0 },
     requestMountedRef: { current: true }, activeRouteKeyRef: { current: "current-route" },
     preview: false, sourceCategory: "gacha", routeOrderId: orderId,
-    result: { id: "60000000-0000-4000-8000-000000000002", entitlementId: ids[1], productId: "gacha-a", probabilityVersion: 1 }, revealSettled: true,
+    result: committedResult, settledCommittedResult: committedResult,
+    committedBatchComplete: false, revealSettled: true,
     committedSequence: { nextEntitlementId: null, entitlementIds: ids }, completionScope: "order-product-sequence",
     consumedSequenceRef: { current: { scope: "order-product-sequence", ids: new Set(ids) } },
     runtime: { apiBaseUrl: "https://example.invalid" }, db: {}, productId: "gacha-a", sourceProductId: "gacha-a",
@@ -196,7 +208,8 @@ test("a deferred whole-order proof stays stale after an in-place A to B to A rou
 
 test("preview, kuji, unfinished animation, intermediate result and different sequence keep recovery", async () => {
   const cases = [
-    { preview: true }, { sourceCategory: "kuji" }, { result: null }, { revealSettled: false },
+    { preview: true }, { sourceCategory: "kuji" },
+    { result: null, settledCommittedResult: null }, { revealSettled: false },
     { routeOrderId: "" }, { committedSequence: { nextEntitlementId: ids[1] } },
     { consumedSequenceRef: { current: { scope: "other-sequence", ids: new Set(ids) } } },
   ];

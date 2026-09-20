@@ -8,9 +8,9 @@ import Animated, {
   interpolate,
   useAnimatedStyle,
   useSharedValue,
+  withDelay,
   withRepeat,
   withSequence,
-  withSpring,
   withTiming,
 } from "react-native-reanimated";
 import { scheduleOnRN } from "react-native-worklets";
@@ -21,7 +21,7 @@ import {
   createKujiOpenMotionState,
   resolveKujiDragProgress,
   resolveKujiPeelRelease,
-  resolveKujiTravelDuration,
+  resolveKujiTravelSegments,
   transitionKujiOpenMotion,
   type KujiOpenMotionEvent,
   type KujiOpenMotionPhase,
@@ -30,6 +30,7 @@ import {
   isKujiResultGateOpen,
   sampleKujiTicketRevealMotion,
 } from "@/features/draw/kuji-ticket-reveal-motion";
+import { sampleKujiPeelPaperMotion } from "@/features/draw/kuji-peel-paper-motion";
 import { colors } from "@/theme";
 
 type KujiPeelTicketProps = {
@@ -39,26 +40,23 @@ type KujiPeelTicketProps = {
   reduceMotion: boolean;
   resultReady: boolean;
   resultLabel?: string;
+  resultTitle?: string;
   settled?: boolean;
   resultContent?: ReactNode;
   requestSignal?: number;
   resetSignal?: number;
+  onDragActiveChange?: (active: boolean) => void;
   onRequestOpen: () => void;
   onRevealSettled: () => void;
 };
 
-const smoothFinishEasing = Easing.bezier(0.2, 0, 0, 1);
+const slowTearEasing = Easing.in(Easing.quad);
+const fastTearEasing = Easing.bezier(0.42, 0, 0.78, 1);
 const smoothEmphasisEasing = Easing.bezier(0.16, 0.82, 0.28, 1);
-const returnSpring = {
-  damping: 23,
-  stiffness: 230,
-  mass: 0.8,
-  overshootClamping: true,
-} as const;
-const DABBOBA_WORDMARK = require("../../../assets/dabboba-wordmark.png");
-const KUJI_TICKET_OUTER_LAYER = require("../../../assets/kuji-ticket-outer-layer.png");
-const KUJI_TICKET_PEEL_LAYER = require("../../../assets/kuji-ticket-peel-layer.png");
-const KUJI_TICKET_GLOW = require("../../../assets/gacha-capsule-glow-v1.png");
+const returnEasing = Easing.out(Easing.cubic);
+const DABBOBA_WORDMARK = require("../../../assets/brand/dabboba-wordmark.png");
+const KUJI_TICKET_OUTER_LAYER = require("../../../assets/draw/kuji/kuji-ticket-outer-layer.png");
+const KUJI_TICKET_PEEL_LAYER = require("../../../assets/draw/kuji/kuji-ticket-peel-layer.png");
 
 export function KujiPeelTicket({
   ticketNumber,
@@ -66,11 +64,13 @@ export function KujiPeelTicket({
   disabled = false,
   reduceMotion,
   resultReady,
-  resultLabel = "RESULT",
+  resultLabel = "결과",
+  resultTitle = "당첨 상품을 확인해 주세요",
   settled = false,
   resultContent,
   requestSignal = 0,
   resetSignal = 0,
+  onDragActiveChange,
   onRequestOpen,
   onRevealSettled,
 }: KujiPeelTicketProps) {
@@ -80,6 +80,7 @@ export function KujiPeelTicket({
   const impactProgress = useSharedValue(0);
   const entryProgress = useSharedValue(reduceMotion ? 1 : 0);
   const pressed = useSharedValue(0);
+  const dragging = useSharedValue(0);
   const cuePulse = useSharedValue(0);
   const gestureEnded = useSharedValue(0);
   const motionStateRef = useRef(createKujiOpenMotionState(reduceMotion));
@@ -87,11 +88,17 @@ export function KujiPeelTicket({
   const dispatchRef = useRef<(event: KujiOpenMotionEvent) => void>(() => undefined);
   const requestOpenRef = useRef(onRequestOpen);
   const revealSettledRef = useRef(onRevealSettled);
+  const dragActiveChangeRef = useRef(onDragActiveChange);
   const requestSignalRef = useRef(requestSignal);
   const resetSignalRef = useRef(resetSignal);
 
   requestOpenRef.current = onRequestOpen;
   revealSettledRef.current = onRevealSettled;
+  dragActiveChangeRef.current = onDragActiveChange;
+
+  const notifyDragActive = useCallback((active: boolean) => {
+    dragActiveChangeRef.current?.(active);
+  }, []);
 
   const handleTravelSettled = useCallback((generation: number, finished: boolean) => {
     if (generation !== runGenerationRef.current) return;
@@ -111,18 +118,28 @@ export function KujiPeelTicket({
     if (transition.effect === "request-and-animate") {
       const generation = runGenerationRef.current + 1;
       runGenerationRef.current = generation;
+      const travel = resolveKujiTravelSegments(dragProgress.value);
       requestOpenRef.current();
-      dragProgress.value = withTiming(
+      const finishTravel = withTiming(
         1,
-        {
-          duration: resolveKujiTravelDuration(dragProgress.value),
-          easing: smoothFinishEasing,
-        },
+        { duration: travel.fastTearMs, easing: fastTearEasing },
         (finished) => {
           "worklet";
           scheduleOnRN(handleTravelSettled, generation, Boolean(finished));
         },
       );
+      dragProgress.value = travel.slowTearMs > 0
+        ? withSequence(
+            withDelay(
+              travel.holdMs,
+              withTiming(travel.splitProgress, {
+                duration: travel.slowTearMs,
+                easing: slowTearEasing,
+              }),
+            ),
+            finishTravel,
+          )
+        : finishTravel;
       return;
     }
 
@@ -137,13 +154,16 @@ export function KujiPeelTicket({
       const generation = runGenerationRef.current;
       dragProgress.value = 1;
       impactProgress.value = 0;
-      impactProgress.value = withTiming(
-        1,
-        { duration: DRAW_MOTION.kujiImpactMs, easing: Easing.linear },
-        (finished) => {
-          "worklet";
-          scheduleOnRN(handleImpactSettled, generation, Boolean(finished));
-        },
+      impactProgress.value = withDelay(
+        DRAW_MOTION.kujiResultHoldMs,
+        withTiming(
+          1,
+          { duration: DRAW_MOTION.kujiImpactMs, easing: Easing.out(Easing.cubic) },
+          (finished) => {
+            "worklet";
+            scheduleOnRN(handleImpactSettled, generation, Boolean(finished));
+          },
+        ),
       );
       return;
     }
@@ -158,10 +178,11 @@ export function KujiPeelTicket({
       runGenerationRef.current += 1;
       cancelAnimation(dragProgress);
       cancelAnimation(impactProgress);
-      dragProgress.value = withSpring(0, returnSpring);
+      dragging.value = 0;
+      dragProgress.value = withTiming(0, { duration: 180, easing: returnEasing });
       impactProgress.value = 0;
     }
-  }, [dragProgress, handleImpactSettled, handleTravelSettled, impactProgress]);
+  }, [dragProgress, dragging, handleImpactSettled, handleTravelSettled, impactProgress]);
 
   dispatchRef.current = dispatchMotion;
 
@@ -181,9 +202,10 @@ export function KujiPeelTicket({
     setPhase("sealed");
     cancelAnimation(dragProgress);
     cancelAnimation(impactProgress);
+    dragging.value = 0;
     dragProgress.value = 0;
     impactProgress.value = 0;
-  }, [dragProgress, impactProgress, reduceMotion, resetSignal]);
+  }, [dragProgress, dragging, impactProgress, reduceMotion, resetSignal]);
 
   useEffect(() => {
     cancelAnimation(entryProgress);
@@ -205,7 +227,9 @@ export function KujiPeelTicket({
     cancelAnimation(impactProgress);
     cancelAnimation(cuePulse);
     cancelAnimation(entryProgress);
-  }, [cuePulse, dragProgress, entryProgress, impactProgress]);
+    dragging.value = 0;
+    dragActiveChangeRef.current?.(false);
+  }, [cuePulse, dragProgress, dragging, entryProgress, impactProgress]);
 
   useEffect(() => {
     cancelAnimation(cuePulse);
@@ -237,11 +261,15 @@ export function KujiPeelTicket({
   const interactionGesture = useMemo(() => {
     const pan = Gesture.Pan()
       .enabled(!disabled && phase === "sealed")
-      .activeOffsetX(8)
-      .failOffsetY([-14, 14])
+      .activeOffsetX([-4, 4])
+      .failOffsetY([-8, 8])
       .onBegin(() => {
         gestureEnded.value = 0;
         pressed.value = 1;
+      })
+      .onStart(() => {
+        dragging.value = 1;
+        scheduleOnRN(notifyDragActive, true);
       })
       .onUpdate((event) => {
         dragProgress.value = resolveKujiDragProgress(event.translationX, ticketWidth);
@@ -254,11 +282,15 @@ export function KujiPeelTicket({
           event.velocityX / 1000,
         );
         if (decision === "open") scheduleOnRN(beginOpen);
-        else dragProgress.value = withSpring(0, returnSpring);
+        else dragProgress.value = withTiming(0, { duration: 180, easing: returnEasing });
       })
       .onFinalize(() => {
+        dragging.value = 0;
+        scheduleOnRN(notifyDragActive, false);
         pressed.value = 0;
-        if (!gestureEnded.value) dragProgress.value = withSpring(0, returnSpring);
+        if (!gestureEnded.value) {
+          dragProgress.value = withTiming(0, { duration: 180, easing: returnEasing });
+        }
       });
     const tap = Gesture.Tap()
       .enabled(!disabled && phase === "sealed")
@@ -272,7 +304,7 @@ export function KujiPeelTicket({
         pressed.value = 0;
       });
     return Gesture.Race(pan, tap);
-  }, [beginOpen, disabled, dragProgress, gestureEnded, phase, pressed, ticketWidth]);
+  }, [beginOpen, disabled, dragProgress, dragging, gestureEnded, notifyDragActive, phase, pressed, ticketWidth]);
 
   const entryStyle = useAnimatedStyle(() => ({
     opacity: interpolate(entryProgress.value, [0, 0.22, 1], [0.62, 1, 1], Extrapolation.CLAMP),
@@ -282,52 +314,77 @@ export function KujiPeelTicket({
     ],
   }));
 
-  const peelLayerStyle = useAnimatedStyle(() => ({
-    opacity: interpolate(dragProgress.value, [0.82, 1], [1, 0.12], Extrapolation.CLAMP),
-    transform: [
-      { translateX: dragProgress.value * (ticketWidth + 34) },
-      { rotate: `${interpolate(dragProgress.value, [0, 1], [0, 2])}deg` },
-      { scale: interpolate(pressed.value, [0, 1], [1, 0.99]) },
-    ],
-  }));
+  const peelLayerStyle = useAnimatedStyle(() => {
+    const frame = sampleKujiPeelPaperMotion(
+      dragProgress.value,
+      dragging.value >= 0.5,
+      reduceMotion,
+    );
+    return {
+      opacity: frame.coverOpacity,
+      transform: [
+        { translateX: frame.coverTravelRatio * ticketWidth },
+        { rotate: `${frame.coverRotationDeg}deg` },
+        { scale: interpolate(pressed.value, [0, 1], [1, 0.994]) },
+      ],
+    };
+  });
   const resultGateOpen = isKujiResultGateOpen(phase, resultReady, settled);
-  const ticketRevealStyle = useAnimatedStyle(() => ({
-    opacity: sampleKujiTicketRevealMotion(
-      impactProgress.value,
-      resultGateOpen,
-      reduceMotion,
-    ).ticketOpacity,
-  }));
-  const resultRevealStyle = useAnimatedStyle(() => ({
-    opacity: sampleKujiTicketRevealMotion(
-      impactProgress.value,
-      resultGateOpen,
-      reduceMotion,
-    ).resultOpacity,
-  }));
-  const glowStyle = useAnimatedStyle(() => {
+  const ticketRevealStyle = useAnimatedStyle(() => {
     const frame = sampleKujiTicketRevealMotion(
       impactProgress.value,
       resultGateOpen,
       reduceMotion,
     );
     return {
-      opacity: frame.glowOpacity,
-      transform: [{ scale: frame.glowScale }],
+      opacity: frame.ticketOpacity,
+      transform: [{ translateY: frame.ticketTranslateY }],
     };
   });
-  const peelEdgeGlowStyle = useAnimatedStyle(() => ({
-    opacity: reduceMotion
-      ? 0
-      : interpolate(
-          dragProgress.value,
-          [0, 0.04, 0.72, 1],
-          [0, 0.34, 0.46, 0],
-          Extrapolation.CLAMP,
-        ),
-    transform: [{
-      translateX: dragProgress.value * (ticketWidth + 34) - 18,
-    }],
+  const resultRevealStyle = useAnimatedStyle(() => {
+    const frame = sampleKujiTicketRevealMotion(
+      impactProgress.value,
+      resultGateOpen,
+      reduceMotion,
+    );
+    return {
+      opacity: frame.resultOpacity,
+      transform: [{ translateY: frame.resultTranslateY }],
+    };
+  });
+  const peelEdgeGlowStyle = useAnimatedStyle(() => {
+    const frame = sampleKujiPeelPaperMotion(
+      dragProgress.value,
+      dragging.value >= 0.5,
+      reduceMotion,
+    );
+    return {
+      opacity: frame.edgeLightOpacity,
+      transform: [{ translateX: frame.coverTravelRatio * ticketWidth - 10 }],
+    };
+  });
+  const paperFoldWidth = Math.max(50, ticketWidth * 0.2);
+  const paperFoldStyle = useAnimatedStyle(() => {
+    const frame = sampleKujiPeelPaperMotion(
+      dragProgress.value,
+      dragging.value >= 0.5,
+      reduceMotion,
+    );
+    return {
+      opacity: frame.foldOpacity,
+      transform: [
+        { translateX: -((1 - frame.foldScaleX) * paperFoldWidth) / 2 },
+        { scaleX: frame.foldScaleX },
+        { skewY: `${interpolate(dragProgress.value, [0.43, 1], [-1.8, 0.4], Extrapolation.CLAMP)}deg` },
+      ],
+    };
+  });
+  const paperFoldShadowStyle = useAnimatedStyle(() => ({
+    opacity: sampleKujiPeelPaperMotion(
+      dragProgress.value,
+      dragging.value >= 0.5,
+      reduceMotion,
+    ).foldShadowOpacity,
   }));
   const pullArrowStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: interpolate(cuePulse.value, [0, 1], [0, 5]) }],
@@ -381,21 +438,7 @@ export function KujiPeelTicket({
             style={styles.ticketFrame}
           >
             <View collapsable={false} pointerEvents="none" style={styles.ticketGlowClip}>
-              <Animated.Image
-                accessibilityIgnoresInvertColors
-                resizeMode="contain"
-                source={KUJI_TICKET_GLOW}
-                style={[styles.ticketPayoffGlow, {
-                  left: ticketWidth * 0.14,
-                  top: (ticketWidth / 1.46 - ticketWidth * 0.72) / 2,
-                  width: ticketWidth * 0.72,
-                  height: ticketWidth * 0.72,
-                }, glowStyle]}
-              />
-              <Animated.Image
-                accessibilityIgnoresInvertColors
-                resizeMode="stretch"
-                source={KUJI_TICKET_GLOW}
+              <Animated.View
                 style={[styles.ticketPeelEdgeGlow, {
                   top: -ticketWidth / 1.46 * 0.05,
                   height: ticketWidth / 1.46 * 1.1,
@@ -404,6 +447,25 @@ export function KujiPeelTicket({
             </View>
             <Animated.View collapsable={false} pointerEvents="none" style={[styles.ticketSurface, ticketRevealStyle]}>
               <View style={styles.ticketShell}>
+                <View style={styles.resultTicketLayer}>
+                  <View style={styles.resultTicketBand}>
+                    <Text style={styles.resultTicketBrand}>DABBOBA KUJI</Text>
+                  </View>
+                  <View style={styles.resultTicketBody}>
+                    <Text numberOfLines={1} adjustsFontSizeToFit style={styles.resultTicketGrade}>
+                      {resultReady ? resultLabel : "···"}
+                    </Text>
+                    <View style={styles.resultTicketCopy}>
+                      <Text numberOfLines={2} style={styles.resultTicketTitle}>
+                        {resultReady ? resultTitle : "결과를 확인하고 있어요"}
+                      </Text>
+                      <Text style={styles.resultTicketSerial}>{primaryLabel}</Text>
+                    </View>
+                  </View>
+                  <View style={[styles.resultTicketBand, styles.resultTicketFooter]}>
+                    <Text style={styles.resultTicketFooterText}>DABBOBA ONLINE KUJI</Text>
+                  </View>
+                </View>
                 <View pointerEvents="none" style={styles.ticketOuterLayer}>
                   <Image
                     accessibilityIgnoresInvertColors
@@ -443,6 +505,17 @@ export function KujiPeelTicket({
                       <View style={styles.pullArrowHeadFill} />
                     </Animated.View>
                   </View>
+                  <Animated.View
+                    style={[
+                      styles.paperFold,
+                      { width: paperFoldWidth },
+                      paperFoldStyle,
+                    ]}
+                  >
+                    <Animated.View style={[styles.paperFoldShadow, paperFoldShadowStyle]} />
+                    <View style={styles.paperFoldMidtone} />
+                    <View style={styles.paperFoldHighlight} />
+                  </Animated.View>
                 </Animated.View>
               </View>
             </Animated.View>
@@ -453,8 +526,8 @@ export function KujiPeelTicket({
   );
 }
 
-const KUJI_ORANGE = "#F36B2C";
-const KUJI_ORANGE_DARK = "#A83C15";
+const KUJI_ORANGE = colors.kujiOrange;
+const KUJI_ORANGE_DARK = colors.kujiOrangeDark;
 
 const styles = StyleSheet.create({
   revealStage: {
@@ -509,15 +582,15 @@ const styles = StyleSheet.create({
     borderRadius: seed.radius.r3,
     zIndex: 3,
   },
-  ticketPayoffGlow: {
-    position: "absolute",
-    tintColor: "#FFF8E7",
-  },
   ticketPeelEdgeGlow: {
     position: "absolute",
     left: 0,
-    width: 44,
-    tintColor: "#FFF4DA",
+    width: 20,
+    backgroundColor: "#FFF4DA",
+    shadowColor: "#000000",
+    shadowOpacity: 0.2,
+    shadowRadius: 10,
+    shadowOffset: { width: 5, height: 0 },
   },
   ticketSurface: {
     ...StyleSheet.absoluteFill,
@@ -530,12 +603,86 @@ const styles = StyleSheet.create({
     borderRadius: seed.radius.r3,
     borderWidth: 4,
     borderColor: KUJI_ORANGE_DARK,
-    backgroundColor: KUJI_ORANGE,
+    backgroundColor: "transparent",
     shadowColor: "#000000",
     shadowOpacity: 0.3,
     shadowRadius: 12,
     shadowOffset: { width: 0, height: 8 },
     elevation: 8,
+  },
+  resultTicketLayer: {
+    ...StyleSheet.absoluteFill,
+    margin: 4,
+    overflow: "hidden",
+    borderRadius: seed.radius.r2,
+    backgroundColor: "#151A15",
+    zIndex: 2,
+  },
+  resultTicketBand: {
+    height: "22%",
+    paddingHorizontal: seed.spacing.x3,
+    alignItems: "flex-end",
+    justifyContent: "center",
+    backgroundColor: KUJI_ORANGE,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: "#FFF4DF",
+  },
+  resultTicketBrand: {
+    color: colors.white,
+    fontSize: 11,
+    lineHeight: 16,
+    fontWeight: "800",
+    letterSpacing: 1.2,
+  },
+  resultTicketBody: {
+    flex: 1,
+    minHeight: 0,
+    paddingHorizontal: seed.spacing.x4,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: seed.spacing.x3,
+  },
+  resultTicketGrade: {
+    width: "32%",
+    color: colors.white,
+    fontFamily: "Galmuri11",
+    fontSize: 38,
+    lineHeight: 46,
+    fontWeight: "400",
+    textAlign: "center",
+  },
+  resultTicketCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  resultTicketTitle: {
+    color: colors.white,
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: "800",
+  },
+  resultTicketSerial: {
+    marginTop: seed.spacing.x1,
+    color: "#B8C0B7",
+    fontSize: 11,
+    lineHeight: 16,
+    fontWeight: "700",
+    fontVariant: ["tabular-nums"],
+    letterSpacing: 0.5,
+  },
+  resultTicketFooter: {
+    height: "21%",
+    alignItems: "center",
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: "#FFF4DF",
+    borderBottomWidth: 0,
+  },
+  resultTicketFooterText: {
+    color: colors.white,
+    fontSize: 11,
+    lineHeight: 15,
+    fontWeight: "800",
+    letterSpacing: 0.8,
   },
   ticketOuterLayer: {
     ...StyleSheet.absoluteFill,
@@ -554,6 +701,41 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     zIndex: 7,
+  },
+  paperFold: {
+    position: "absolute",
+    left: -2,
+    top: "7%",
+    bottom: "7%",
+    overflow: "hidden",
+    borderTopRightRadius: seed.radius.r2,
+    borderBottomRightRadius: seed.radius.r2,
+    backgroundColor: "#FFFDF7",
+    zIndex: 12,
+  },
+  paperFoldShadow: {
+    position: "absolute",
+    left: 0,
+    top: 0,
+    bottom: 0,
+    width: "32%",
+    backgroundColor: "#BFC4BE",
+  },
+  paperFoldMidtone: {
+    position: "absolute",
+    left: "28%",
+    top: 0,
+    bottom: 0,
+    width: "34%",
+    backgroundColor: "#E8E9E4",
+  },
+  paperFoldHighlight: {
+    position: "absolute",
+    right: 0,
+    top: 0,
+    bottom: 0,
+    width: "42%",
+    backgroundColor: "#FFFDF7",
   },
   ticketLayerImage: {
     ...StyleSheet.absoluteFill,

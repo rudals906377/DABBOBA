@@ -24,12 +24,12 @@ const shopSource = readSource("apps/mobile/src/features/shop/ShopScreen.tsx");
 const dukroomSource = readSource("apps/mobile/src/features/dukroom/DukroomScreen.tsx");
 const exchangeRoomSource = readSource("apps/mobile/src/features/exchange/ExchangeRoomScreen.tsx");
 
-test("native frames align to the unchanged expanded floating chrome gutter", () => {
-  assert.match(seedSource, /globalGutter:\s*12/);
-  assert.match(
-    rootNavigationSource,
-    /expandedWidth = Math\.min\(windowWidth - seed\.spacing\.globalGutter \* 2, 520\)/,
-  );
+test("native content keeps the shared gutter while root navigation uses the full viewport", () => {
+  assert.match(seedSource, /globalGutter:\s*20/);
+  assert.match(rootNavigationSource, /bar:\s*\{[^}]*flex:\s*1[^}]*flexDirection:\s*"row"/);
+  assert.match(rootNavigationSource, /tab:\s*\{[^}]*flex:\s*1/);
+  assert.doesNotMatch(rootNavigationSource, /tabWidth|useWindowDimensions/);
+  assert.match(rootNavigationSource, /right: 0,[\s\S]*?left: 0,[\s\S]*?borderTopWidth: StyleSheet\.hairlineWidth/);
   assert.match(
     floatingBottomActionSource,
     /layer:\s*\{[\s\S]*?position: "absolute"[\s\S]*?paddingHorizontal: seed\.spacing\.globalGutter[\s\S]*?backgroundColor: seed\.color\.background\.transparent/,
@@ -49,11 +49,10 @@ test("every route-owned fixed action uses the shared floating frame", () => {
   assert.match(floatingBottomActionSource, /export function useFloatingBottomActionContentInset/);
   assert.match(
     floatingBottomActionSource,
-    /panel:\s*\{[\s\S]*?maxWidth: 520[\s\S]*?minHeight: 70[\s\S]*?borderRadius: 22[\s\S]*?backgroundColor: "rgba\(252, 252, 248, 0\.94\)"[\s\S]*?shadowOpacity: 0\.12[\s\S]*?elevation: 10/,
+    /panel:\s*\{[\s\S]*?maxWidth: 520[\s\S]*?minHeight: 70[\s\S]*?borderRadius: seed\.radius\.r5_5[\s\S]*?backgroundColor: "rgba\(252, 252, 248, 0\.94\)"[\s\S]*?shadowOpacity: 0\.12[\s\S]*?elevation: 10/,
   );
 
   for (const source of [
-    productDetailSource,
     checkoutSource,
     checkoutConnectionSource,
     kujiDrawSource,
@@ -66,6 +65,14 @@ test("every route-owned fixed action uses the shared floating frame", () => {
     assert.match(source, /edges=\{\["top", "left", "right"\]\}/);
     assert.doesNotMatch(source, /(footer|bottomBar):\s*\{[^}]*borderTopWidth/);
   }
+
+  assert.match(productDetailSource, /<FloatingBottomActionPanel/);
+  assert.match(productDetailSource, /useFloatingBottomActionContentInset\(\)/);
+  assert.match(
+    productDetailSource,
+    /edges=\{readOnlyReference \|\| productComingSoon \? \["top", "bottom", "left", "right"\] : \["top", "left", "right"\]\}/,
+  );
+  assert.doesNotMatch(productDetailSource, /(footer|bottomBar):\s*\{[^}]*borderTopWidth/);
 });
 
 test("loading and error states keep the same global outer frame", () => {
@@ -75,7 +82,14 @@ test("loading and error states keep the same global outer frame", () => {
   for (const source of [dukroomDetailSource, productDetailSource]) {
     assert.match(source, /center:\s*\{[^}]*paddingHorizontal: seed\.spacing\.globalGutter[^}]*paddingVertical: 28/);
   }
-  for (const source of [homeSource, shopSource, dukroomSource, exchangeRoomSource]) {
+  assert.match(homeSource, /<RootPageScaffold header=\{<HomeHeader \/>\}>/);
+  for (const stateStyle of ["connectionNotice", "hero", "recentDrawSummary", "sectionEmpty"]) {
+    assert.match(
+      homeSource,
+      new RegExp(`${stateStyle}:\\s*\\{[^}]*marginHorizontal: seed\\.spacing\\.globalGutter`),
+    );
+  }
+  for (const source of [shopSource, dukroomSource, exchangeRoomSource]) {
     assert.match(source, /loading:\s*\{[^}]*paddingHorizontal: seed\.spacing\.globalGutter/);
   }
 });

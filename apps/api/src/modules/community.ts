@@ -8,6 +8,11 @@ import { beginIdempotency, completeIdempotency, idempotencyKey, requestHash } fr
 import { booleanInput, enumInput, integerInput, nullableStringInput, objectInput, queryString, stringArrayInput, stringInput, uuidInput } from "../lib/input.js";
 import { cursorPage, pagination } from "../lib/pagination.js";
 import { iso, nullableIso, numberValue } from "../lib/rows.js";
+import {
+  assertUgcOperationsPolicyAccepted,
+  recordUgcOperationsPolicyAcceptance,
+  ugcOperationsPolicyAcceptance,
+} from "../lib/ugc-policy.js";
 import { assertReadyOwnedMedia } from "./media.js";
 import type { ApiContext } from "../types.js";
 
@@ -35,7 +40,7 @@ type CommentRow = {
   status: "ACTIVE" | "HIDDEN" | "DELETED"; report_count: number | string; created_at: Date; updated_at: Date;
 };
 type ReportRow = {
-  id: string; reporter_id: string; target_type: "POST" | "COMMENT" | "SNAP" | "USER" | "EXCHANGE_LISTING";
+  id: string; reporter_id: string; target_type: "POST" | "COMMENT" | "SNAP" | "USER" | "EXCHANGE_LISTING" | "WANTED_REQUEST";
   target_id: string; reason: string; details: string | null; status: (typeof REPORT_STATUSES)[number];
   resolution: string | null; resolved_by: string | null; resolved_at: Date | null; target_preview?: string | null; target_status?: string | null; created_at: Date; updated_at: Date;
 };
@@ -87,6 +92,7 @@ async function assertReportTarget(client: DatabaseClient, targetType: ReportRow[
     COMMENT: "SELECT id FROM community_comments WHERE id=$1 AND author_id<>$2 AND status='ACTIVE' FOR SHARE",
     USER: "SELECT id FROM users WHERE id=$1 AND role='USER' AND status<>'DELETED' FOR SHARE",
     EXCHANGE_LISTING: "SELECT id FROM exchange_listings WHERE id=$1 AND author_id<>$2 AND status IN ('OPEN','MATCHED') FOR SHARE",
+    WANTED_REQUEST: "SELECT id FROM wanted_requests WHERE id=$1 AND user_id<>$2 AND status='ACTIVE' FOR SHARE",
   };
   const target = await client.query(queries[targetType], targetType === "USER" ? [targetId] : [targetId, reporterId]);
   if (!target.rowCount) throw notFound("신고할 수 있는 대상을 찾을 수 없습니다.");
@@ -99,10 +105,58 @@ async function reportSubjectUserId(client: DatabaseClient, report: Pick<ReportRo
     SNAP: "SELECT author_id AS user_id FROM community_posts WHERE id=$1",
     COMMENT: "SELECT author_id AS user_id FROM community_comments WHERE id=$1",
     EXCHANGE_LISTING: "SELECT author_id AS user_id FROM exchange_listings WHERE id=$1",
+    WANTED_REQUEST: "SELECT user_id FROM wanted_requests WHERE id=$1",
   };
   const result = await client.query<{ user_id: string }>(queries[report.target_type], [report.target_id]);
   if (!result.rowCount) throw notFound("신고 대상 작성자를 찾을 수 없습니다.");
   return result.rows[0]!.user_id;
+}
+
+async function hideExchangeListingForModeration(
+  client: DatabaseClient,
+  listingId: string,
+  reason: string,
+) {
+  const listing = await client.query<{ status: "OPEN" | "MATCHED" | "COMPLETED" | "CANCELLED" | "HIDDEN" }>(
+    "SELECT status FROM exchange_listings WHERE id=$1 FOR UPDATE",
+    [listingId],
+  );
+  if (!listing.rowCount || !["OPEN", "MATCHED"].includes(listing.rows[0]!.status)) {
+    throw notFound("신고 대상 교환 글을 찾을 수 없습니다.");
+  }
+  await client.query(
+    "UPDATE exchange_offers SET status='REJECTED',decided_at=now() WHERE listing_id=$1 AND status='PENDING'",
+    [listingId],
+  );
+  await client.query(
+    `UPDATE inventory_units inventory
+        SET status='OWNED'
+      WHERE inventory.status='EXCHANGE_LISTED'
+        AND inventory.id IN (
+          SELECT item.inventory_unit_id FROM exchange_listing_items item WHERE item.listing_id=$1
+        )`,
+    [listingId],
+  );
+  await client.query(
+    `UPDATE inventory_units inventory
+        SET status='OWNED'
+      WHERE inventory.status='EXCHANGE_OFFERED'
+        AND inventory.id IN (
+          SELECT item.inventory_unit_id
+            FROM exchange_offer_items item
+            JOIN exchange_offers offer ON offer.id=item.offer_id
+           WHERE offer.listing_id=$1
+        )`,
+    [listingId],
+  );
+  const hidden = await client.query(
+    `UPDATE exchange_listings
+        SET status='HIDDEN',hidden_reason=$2
+      WHERE id=$1 AND status IN ('OPEN','MATCHED')
+      RETURNING id`,
+    [listingId, reason],
+  );
+  if (!hidden.rowCount) throw conflict("교환 글 상태가 변경되었습니다.");
 }
 
 function noticeInput(body: unknown) {
@@ -147,7 +201,7 @@ function blockVisibility(viewerParameter: string, authorExpression: string) {
 }
 
 async function optionalUserId(context: ApiContext, request: FastifyRequest): Promise<string | null> {
-  if (!request.headers.authorization) return null;
+  if (!request.headers?.authorization) return null;
   try {
     const actor = await context.auth.loadActor(request);
     return actor.sessionKind === "USER" && actor.role === "USER" ? actor.userId : null;
@@ -305,7 +359,7 @@ export async function registerCommunityRoutes(app: FastifyInstance, context: Api
   }, async(request,reply)=>{
     const input=objectInput(request.body);const kind=enumInput(input,"kind",["DUKROOM","SNAP","GENERAL"] as const)!;const title=stringInput(input,"title",{max:160})!;const content=stringInput(input,"content",{max:20_000})!;
     const ipId=nullableStringInput(input,"ipId",{max:120});const normalizedMediaIds=(stringArrayInput(input,"mediaIds",10,true)||[]).map((value)=>uuidInput(value,"mediaId"));const key=idempotencyKey(request.headers);const hash=requestHash({kind,title,content,ipId:ipId||null,mediaIds:normalizedMediaIds});
-    const result=await withTransaction(context.pool,async(client)=>{const idem=await beginIdempotency(client,{actorId:request.actor!.userId,scope:"CREATE_COMMUNITY_POST",key,hash});if(!idem.fresh)return{replay:true,statusCode:idem.statusCode,body:idem.body};await assertReadyOwnedMedia(client,request.actor!.userId,normalizedMediaIds,["POST"]);const created=await client.query<{id:string}>("INSERT INTO community_posts(author_id,ip_id,kind,title,content) VALUES($1,$2,$3,$4,$5) RETURNING id",[request.actor!.userId,ipId||null,kind,title,content]);
+    const result=await withTransaction(context.pool,async(client)=>{const idem=await beginIdempotency(client,{actorId:request.actor!.userId,scope:"CREATE_COMMUNITY_POST",key,hash});if(!idem.fresh)return{replay:true,statusCode:idem.statusCode,body:idem.body};await assertUgcOperationsPolicyAccepted(client,request.actor!.userId);await assertReadyOwnedMedia(client,request.actor!.userId,normalizedMediaIds,["POST"]);const created=await client.query<{id:string}>("INSERT INTO community_posts(author_id,ip_id,kind,title,content) VALUES($1,$2,$3,$4,$5) RETURNING id",[request.actor!.userId,ipId||null,kind,title,content]);
       for(const [index,mediaId] of normalizedMediaIds.entries())await client.query("INSERT INTO community_post_media(post_id,media_id,sort_order) VALUES($1,$2,$3)",[created.rows[0]!.id,mediaId,index]);const saved=await client.query<PostRow>(`${postSelect()} WHERE p.id=$1`,[created.rows[0]!.id]);const body=mapPost(saved.rows[0]!);await completeIdempotency(client,idem.id,{statusCode:201,body,resourceType:"COMMUNITY_POST",resourceId:created.rows[0]!.id});return{replay:false,statusCode:201,body};});if(result.replay)reply.header("x-idempotent-replay","true");return reply.code(result.statusCode).send(result.body);
   });
 
@@ -512,6 +566,7 @@ export async function registerCommunityRoutes(app: FastifyInstance, context: Api
       payload: { postId, content },
       resourceType: "COMMUNITY_COMMENT",
       work: async (client) => {
+        await assertUgcOperationsPolicyAccepted(client, request.actor!.userId);
         const post = await client.query(
           `SELECT p.id FROM community_posts p
            WHERE p.id=$2 AND p.status='ACTIVE' AND ${blockVisibility("$1", "p.author_id")}
@@ -569,6 +624,29 @@ export async function registerCommunityRoutes(app: FastifyInstance, context: Api
         });
         return { statusCode: 200, body: response, resourceId: commentId };
       },
+    });
+    return sendMutation(reply, result);
+  });
+
+  app.get("/v1/community/operations-policy", {
+    preHandler: context.auth.requireUser,
+  }, async (request) => ugcOperationsPolicyAcceptance(context.pool, request.actor!.userId));
+
+  app.post("/v1/community/operations-policy/acceptance", {
+    preHandler: context.auth.requireUser,
+    config: { rateLimit: { max: 10, timeWindow: "1 minute" } },
+  }, async (request, reply) => {
+    const input = objectInput(request.body);
+    const policyVersion = stringInput(input, "policyVersion", { max: 10 })!;
+    const result = await idempotentMutation(context, request, {
+      scope: "UGC_OPERATIONS_POLICY_ACCEPTANCE",
+      payload: { policyVersion },
+      resourceType: "USER_POLICY_ACCEPTANCE",
+      work: async (client) => ({
+        statusCode: 200,
+        body: await recordUgcOperationsPolicyAcceptance(client, request, policyVersion),
+        resourceId: request.actor!.userId,
+      }),
     });
     return sendMutation(reply, result);
   });
@@ -638,7 +716,7 @@ export async function registerCommunityRoutes(app: FastifyInstance, context: Api
     return sendMutation(reply, result);
   });
 
-  app.post("/v1/reports",{preHandler:context.auth.requireUser},async(request,reply)=>{const input=objectInput(request.body);const targetType=enumInput(input,"targetType",["POST","COMMENT","SNAP","USER","EXCHANGE_LISTING"] as const)!;const targetId=uuidInput(input.targetId,"targetId");const reason=enumInput(input,"reason",["ABUSE","ADVERTISING","SPAM","INAPPROPRIATE","SUSPECTED_FRAUD","COPYRIGHT","OTHER"] as const)!;const details=nullableStringInput(input,"details",{max:2000});
+  app.post("/v1/reports",{preHandler:context.auth.requireUser,config:{rateLimit:{max:20,timeWindow:"1 minute"}}},async(request,reply)=>{const input=objectInput(request.body);const targetType=enumInput(input,"targetType",["POST","COMMENT","SNAP","USER","EXCHANGE_LISTING","WANTED_REQUEST"] as const)!;const targetId=uuidInput(input.targetId,"targetId");const reason=enumInput(input,"reason",["ABUSE","ADVERTISING","SPAM","INAPPROPRIATE","SUSPECTED_FRAUD","COPYRIGHT","OTHER"] as const)!;const details=nullableStringInput(input,"details",{max:2000});
     const key=idempotencyKey(request.headers);const hash=requestHash({targetType,targetId,reason,details:details||null});const result=await withTransaction(context.pool,async(client)=>{const idem=await beginIdempotency(client,{actorId:request.actor!.userId,scope:"CREATE_REPORT",key,hash});if(!idem.fresh)return{replay:true,statusCode:idem.statusCode,body:idem.body};await assertReportTarget(client,targetType,targetId,request.actor!.userId);const created=await client.query<ReportRow>("INSERT INTO content_reports(reporter_id,target_type,target_id,reason,details) VALUES($1,$2,$3,$4,$5) RETURNING *",[request.actor!.userId,targetType,targetId,reason,details||null]);const body=mapReport(created.rows[0]!);await completeIdempotency(client,idem.id,{statusCode:201,body,resourceType:"REPORT",resourceId:created.rows[0]!.id});return{replay:false,statusCode:201,body};});if(result.replay)reply.header("x-idempotent-replay","true");return reply.code(result.statusCode).send(result.body);});
 
   app.get("/v1/admin/notices",{preHandler:context.auth.requirePermission("notices.read")},async(request)=>{const query=queryOf(request);const {limit,cursor}=pagination(query);const search=queryString(query.q);const values:unknown[]=[limit+1];const filters:string[]=[];if(search){values.push(`%${search}%`);filters.push(`(title ILIKE $${values.length} OR content ILIKE $${values.length})`);}if(cursor){values.push(cursor.createdAt,cursor.id);filters.push(`(created_at,id)<($${values.length-1},$${values.length})`);}const result=await context.pool.query<NoticeRow>(`SELECT * FROM notices ${filters.length?`WHERE ${filters.join(" AND ")}`:""} ORDER BY created_at DESC,id DESC LIMIT $1`,values);return cursorPage(result.rows,limit,mapNotice);});
@@ -668,33 +746,38 @@ export async function registerCommunityRoutes(app: FastifyInstance, context: Api
 
   app.post("/v1/admin/comments/:commentId/status",{preHandler:context.auth.requirePermission("moderation.action")},async(request,reply)=>{const id=uuidInput((request.params as Record<string,unknown>).commentId,"commentId");const body=objectInput(request.body);const status=enumInput(body,"status",CONTENT_STATUSES)!;const reason=stringInput(body,"reason",{max:1000})!;const mutation=await adminIdempotentMutation(context,request,{target:{type:"COMMENT",id},bodyReason:reason,work:async(client)=>{const before=await client.query<CommentRow>(`${commentSelect} WHERE c.id=$1 FOR UPDATE OF c`,[id]);if(!before.rowCount)throw notFound();await client.query("UPDATE community_comments SET status=$2,hidden_reason=$3,deleted_at=CASE WHEN $2='DELETED' THEN now() ELSE NULL END WHERE id=$1",[id,status,reason]);const after=await client.query<CommentRow>(`${commentSelect} WHERE c.id=$1`,[id]);await client.query("INSERT INTO moderation_actions(admin_id,action,target_type,target_id,reason) VALUES($1,$2,'COMMENT',$3,$4)",[request.actor!.userId,status==="ACTIVE"?"RESTORE_COMMENT":"HIDE_COMMENT",id,reason]);await writeAdminAudit(client,request,request.actor!,{action:"COMMENT_STATUS_CHANGED",targetType:"COMMENT",targetId:id,reason,before:before.rows[0],after:after.rows[0]});return{statusCode:200,body:mapComment(after.rows[0]!),resourceType:"COMMENT",resourceId:id};}});return sendAdminMutation(reply,mutation);});
 
-  app.get("/v1/admin/reports",{preHandler:context.auth.requirePermission("reports.read")},async(request)=>{const query=queryOf(request);const {limit,cursor}=pagination(query);const status=query.status===undefined?undefined:enumInput(query,"status",REPORT_STATUSES);const targetType=query.targetType===undefined?undefined:enumInput(query,"targetType",["POST","COMMENT","SNAP","USER","EXCHANGE_LISTING"] as const);const targetId=query.targetId===undefined?undefined:uuidInput(query.targetId,"targetId");const reporterId=query.reporterId===undefined?undefined:uuidInput(query.reporterId,"reporterId");const subjectUserId=query.subjectUserId===undefined?undefined:uuidInput(query.subjectUserId,"subjectUserId");const values:unknown[]=[limit+1];const filters:string[]=[];if(status){values.push(status);filters.push(`r.status=$${values.length}`);}if(targetType){values.push(targetType);filters.push(`r.target_type=$${values.length}`);}if(targetId){values.push(targetId);filters.push(`r.target_id=$${values.length}`);}if(reporterId){values.push(reporterId);filters.push(`r.reporter_id=$${values.length}`);}if(subjectUserId){values.push(subjectUserId);const parameter=`$${values.length}`;filters.push(`(r.target_type,r.target_id) IN (
+  app.get("/v1/admin/reports",{preHandler:context.auth.requirePermission("reports.read")},async(request)=>{const query=queryOf(request);const {limit,cursor}=pagination(query);const status=query.status===undefined?undefined:enumInput(query,"status",REPORT_STATUSES);const targetType=query.targetType===undefined?undefined:enumInput(query,"targetType",["POST","COMMENT","SNAP","USER","EXCHANGE_LISTING","WANTED_REQUEST"] as const);const targetId=query.targetId===undefined?undefined:uuidInput(query.targetId,"targetId");const reporterId=query.reporterId===undefined?undefined:uuidInput(query.reporterId,"reporterId");const subjectUserId=query.subjectUserId===undefined?undefined:uuidInput(query.subjectUserId,"subjectUserId");const values:unknown[]=[limit+1];const filters:string[]=[];if(status){values.push(status);filters.push(`r.status=$${values.length}`);}if(targetType){values.push(targetType);filters.push(`r.target_type=$${values.length}`);}if(targetId){values.push(targetId);filters.push(`r.target_id=$${values.length}`);}if(reporterId){values.push(reporterId);filters.push(`r.reporter_id=$${values.length}`);}if(subjectUserId){values.push(subjectUserId);const parameter=`$${values.length}`;filters.push(`(r.target_type,r.target_id) IN (
       SELECT 'USER'::text,${parameter}::uuid
       UNION ALL SELECT CASE WHEN subject_post.kind='SNAP' THEN 'SNAP' ELSE 'POST' END,subject_post.id FROM community_posts subject_post WHERE subject_post.author_id=${parameter}
       UNION ALL SELECT 'COMMENT',subject_comment.id FROM community_comments subject_comment WHERE subject_comment.author_id=${parameter}
       UNION ALL SELECT 'EXCHANGE_LISTING',subject_listing.id FROM exchange_listings subject_listing WHERE subject_listing.author_id=${parameter}
+      UNION ALL SELECT 'WANTED_REQUEST',subject_wanted.id FROM wanted_requests subject_wanted WHERE subject_wanted.user_id=${parameter}
     )`);}if(cursor){values.push(cursor.createdAt,cursor.id);filters.push(`(r.created_at,r.id)<($${values.length-1},$${values.length})`);}const result=await context.pool.query<ReportRow>(`SELECT r.*,
       CASE
         WHEN r.target_type IN ('POST','SNAP') THEN (SELECT concat(p.title,' — ',left(p.content,500)) FROM community_posts p WHERE p.id=r.target_id)
         WHEN r.target_type='COMMENT' THEN (SELECT left(c.content,500) FROM community_comments c WHERE c.id=r.target_id)
         WHEN r.target_type='USER' THEN (SELECT u.nickname FROM users u WHERE u.id=r.target_id)
         WHEN r.target_type='EXCHANGE_LISTING' THEN (SELECT concat(x.title,' — ',left(x.details,500)) FROM exchange_listings x WHERE x.id=r.target_id)
+        WHEN r.target_type='WANTED_REQUEST' THEN (SELECT concat(w.desired_item,' — ',left(w.details,500)) FROM wanted_requests w WHERE w.id=r.target_id)
       END AS target_preview,
       CASE
         WHEN r.target_type IN ('POST','SNAP') THEN (SELECT p.status FROM community_posts p WHERE p.id=r.target_id)
         WHEN r.target_type='COMMENT' THEN (SELECT c.status FROM community_comments c WHERE c.id=r.target_id)
         WHEN r.target_type='USER' THEN (SELECT u.status FROM users u WHERE u.id=r.target_id)
         WHEN r.target_type='EXCHANGE_LISTING' THEN (SELECT x.status FROM exchange_listings x WHERE x.id=r.target_id)
+        WHEN r.target_type='WANTED_REQUEST' THEN (SELECT w.status FROM wanted_requests w WHERE w.id=r.target_id)
       END AS target_status
     FROM content_reports r ${filters.length?`WHERE ${filters.join(" AND ")}`:""} ORDER BY r.created_at DESC,r.id DESC LIMIT $1`,values);return cursorPage(result.rows,limit,mapReport);});
 
   app.post("/v1/admin/reports/:reportId/review",{preHandler:context.auth.requirePermission("reports.resolve")},async(request,reply)=>{const id=uuidInput((request.params as Record<string,unknown>).reportId,"reportId");const body=objectInput(request.body);const reason=stringInput(body,"reason",{max:1000})!;const mutation=await adminIdempotentMutation(context,request,{target:{type:"REPORT",id},bodyReason:reason,work:async(client)=>{const before=await client.query<ReportRow>("SELECT * FROM content_reports WHERE id=$1 FOR UPDATE",[id]);if(!before.rowCount)throw notFound();if(before.rows[0]!.status!=="PENDING")throw conflict("대기 중인 신고만 검토를 시작할 수 있습니다.");const updated=await client.query<ReportRow>("UPDATE content_reports SET status='REVIEWING' WHERE id=$1 RETURNING *",[id]);await writeAdminAudit(client,request,request.actor!,{action:"REPORT_REVIEW_STARTED",targetType:"REPORT",targetId:id,reason,before:before.rows[0],after:updated.rows[0]});return{statusCode:200,body:mapReport(updated.rows[0]!),resourceType:"REPORT",resourceId:id};}});return sendAdminMutation(reply,mutation);});
 
-  app.post("/v1/admin/reports/:reportId/resolution",{preHandler:context.auth.requirePermission("reports.resolve")},async(request,reply)=>{const id=uuidInput((request.params as Record<string,unknown>).reportId,"reportId");const body=objectInput(request.body);const status=enumInput(body,"status",["RESOLVED","REJECTED"] as const)!;const action=enumInput(body,"action",["NO_ACTION","HIDE_POST","HIDE_COMMENT","WARN_USER","SUSPEND_USER"] as const)!;const reason=stringInput(body,"reason",{max:1000})!;const suspendUntil=nullableStringInput(body,"suspendUntil",{max:40});
+  app.post("/v1/admin/reports/:reportId/resolution",{preHandler:context.auth.requirePermission("reports.resolve")},async(request,reply)=>{const id=uuidInput((request.params as Record<string,unknown>).reportId,"reportId");const body=objectInput(request.body);const status=enumInput(body,"status",["RESOLVED","REJECTED"] as const)!;const action=enumInput(body,"action",["NO_ACTION","HIDE_POST","HIDE_COMMENT","HIDE_EXCHANGE_LISTING","HIDE_WANTED_REQUEST","WARN_USER","SUSPEND_USER"] as const)!;const reason=stringInput(body,"reason",{max:1000})!;const suspendUntil=nullableStringInput(body,"suspendUntil",{max:40});
     if(status==="REJECTED"&&action!=="NO_ACTION")throw badRequest("반려된 신고에는 징계 조치를 적용할 수 없습니다.");if(action!=="SUSPEND_USER"&&suspendUntil)throw badRequest("정지 종료일은 이용정지 조치에서만 설정할 수 있습니다.");
     const mutation=await adminIdempotentMutation(context,request,{target:{type:"REPORT",id},bodyReason:reason,work:async(client)=>{const before=await client.query<ReportRow>("SELECT * FROM content_reports WHERE id=$1 FOR UPDATE",[id]);if(!before.rowCount)throw notFound();const report=before.rows[0]!;if(!canTransitionReport(report.status,status))throw conflict("이미 처리된 신고입니다.");
       if(action==="HIDE_POST"){if(!["POST","SNAP"].includes(report.target_type))throw badRequest("신고 대상과 처리 동작이 맞지 않습니다.");const applied=await client.query("UPDATE community_posts SET status='HIDDEN',hidden_reason=$2,version=version+1 WHERE id=$1 AND status<>'DELETED' RETURNING id",[report.target_id,reason]);if(!applied.rowCount)throw notFound("신고 대상 게시물을 찾을 수 없습니다.");}
       if(action==="HIDE_COMMENT"){if(report.target_type!=="COMMENT")throw badRequest("신고 대상과 처리 동작이 맞지 않습니다.");const applied=await client.query("UPDATE community_comments SET status='HIDDEN',hidden_reason=$2 WHERE id=$1 AND status<>'DELETED' RETURNING id",[report.target_id,reason]);if(!applied.rowCount)throw notFound("신고 대상 댓글을 찾을 수 없습니다.");}
+      if(action==="HIDE_EXCHANGE_LISTING"){if(report.target_type!=="EXCHANGE_LISTING")throw badRequest("신고 대상과 처리 동작이 맞지 않습니다.");await hideExchangeListingForModeration(client,report.target_id,reason);await writeOutbox(client,request.id,{aggregateType:"EXCHANGE_LISTING",aggregateId:report.target_id,eventType:"exchange.listing.hidden",payload:{listingId:report.target_id,reportId:id}});}
+      if(action==="HIDE_WANTED_REQUEST"){if(report.target_type!=="WANTED_REQUEST")throw badRequest("신고 대상과 처리 동작이 맞지 않습니다.");const applied=await client.query("UPDATE wanted_requests SET status='HIDDEN',version=version+1 WHERE id=$1 AND status='ACTIVE' RETURNING id",[report.target_id]);if(!applied.rowCount)throw notFound("신고 대상 신청 글을 찾을 수 없습니다.");await writeOutbox(client,request.id,{aggregateType:"WANTED_REQUEST",aggregateId:report.target_id,eventType:"wanted-request.hidden",payload:{requestId:report.target_id,reportId:id}});}
       if(action==="SUSPEND_USER"){const subjectUserId=await reportSubjectUserId(client,report);const until=suspendUntil?new Date(suspendUntil):null;if(until&&Number.isNaN(until.getTime()))throw badRequest("정지 종료일을 확인해 주세요.");if(until&&until<=new Date())throw badRequest("정지 종료일은 현재보다 이후여야 합니다.");const target=await client.query<{id:string;status:string;role:string}>("SELECT id,status,role FROM users WHERE id=$1 FOR UPDATE",[subjectUserId]);if(!target.rowCount||target.rows[0]!.role!=="USER")throw notFound("신고 대상 사용자를 찾을 수 없습니다.");if(["BANNED","DELETED"].includes(target.rows[0]!.status))throw conflict("차단·탈퇴 계정은 신고 처리에서 이용정지로 변경할 수 없습니다.");await client.query("UPDATE users SET status='SUSPENDED',suspended_until=$2,suspension_reason=$3 WHERE id=$1",[subjectUserId,until,reason]);await client.query("UPDATE user_suspensions SET revoked_at=now(),revoked_by=$2 WHERE user_id=$1 AND revoked_at IS NULL",[subjectUserId,request.actor!.userId]);await client.query("INSERT INTO user_suspensions(user_id,created_by,reason,ends_at) VALUES($1,$2,$3,$4)",[subjectUserId,request.actor!.userId,reason,until]);await client.query("UPDATE sessions SET revoked_at=now(),revoke_reason='ADMIN_REPORT_SUSPENSION' WHERE user_id=$1 AND revoked_at IS NULL",[subjectUserId]);}
       if(action==="WARN_USER"){const subjectUserId=await reportSubjectUserId(client,report);const target=await client.query("SELECT id FROM users WHERE id=$1 AND role='USER' AND status<>'DELETED'",[subjectUserId]);if(!target.rowCount)throw notFound("신고 대상 사용자를 찾을 수 없습니다.");await writeOutbox(client,request.id,{aggregateType:"USER",aggregateId:subjectUserId,eventType:"user.warning_requested",payload:{userId:subjectUserId,reportId:id,reason}});}
       await client.query("INSERT INTO moderation_actions(admin_id,report_id,action,target_type,target_id,reason) VALUES($1,$2,$3,$4,$5,$6)",[request.actor!.userId,id,action,report.target_type,report.target_id,reason]);const updated=await client.query<ReportRow>("UPDATE content_reports SET status=$2,resolution=$3,resolved_by=$4,resolved_at=now() WHERE id=$1 RETURNING *",[id,status,reason,request.actor!.userId]);await writeAdminAudit(client,request,request.actor!,{action:"REPORT_RESOLVED",targetType:"REPORT",targetId:id,reason,before:report,after:updated.rows[0],metadata:{moderationAction:action}});return{statusCode:200,body:mapReport(updated.rows[0]!),resourceType:"REPORT",resourceId:id};}});return sendAdminMutation(reply,mutation);});

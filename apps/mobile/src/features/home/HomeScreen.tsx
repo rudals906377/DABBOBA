@@ -1,57 +1,65 @@
-import { Ionicons } from "@expo/vector-icons";
 import Constants from "expo-constants";
-import { type Href, useRouter } from "expo-router";
+import { type Href, useFocusEffect, useRouter } from "expo-router";
 import { useSQLiteContext } from "expo-sqlite";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  AccessibilityInfo,
-  ActivityIndicator,
-  Animated,
-  Easing,
   Image,
   Platform,
   Pressable,
   RefreshControl,
   ScrollView,
   StyleSheet,
-  View,
   useWindowDimensions,
+  View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
-import type { CatalogProduct } from "@dabboba/contracts";
+import type { CatalogProduct, HomeRecentDrawActivity } from "@dabboba/contracts";
+import { CatalogDiscoveryImage } from "@/components/CatalogDiscoveryImage";
+import { CatalogProductTopIndicator } from "@/components/CatalogProductTopIndicator";
 import { GachaMachineFrame } from "@/components/GachaMachineFrame";
+import { KujiPrizeTierRow } from "@/components/KujiPrizeTierRow";
 import { KujiProductFrame } from "@/components/KujiProductFrame";
+import { RemainingInventoryMeter } from "@/components/RemainingInventoryMeter";
 import {
   ROOT_NAVIGATION_CONTENT_INSET,
   useRootNavigationScroll,
 } from "@/components/RootFloatingTabBar";
-import { RootHeaderActions } from "@/components/RootHeaderActions";
-import { KoreanPixelTitle, KoreanPixelTitleAccessory } from "@/components/RootCategoryTitle";
-import { ProductInfoDivider } from "@/components/ProductInfoDivider";
+import { KoreanPixelTitle, ReadablePageTitle } from "@/components/RootCategoryTitle";
 import { AppText as Text } from "@/components/Typography";
-import { SeedChip } from "@/design-system/components";
+import { RootPageHeader, RootPageScaffold } from "@/components/RootPageHeader";
+import { SeedActionButton } from "@/design-system/components";
 import { seed } from "@/design-system/seed";
-import { fetchHomeCatalog, type HomeCatalogSnapshot } from "@/features/catalog/catalog-api";
 import {
-  isCustomerBrowsableCatalogCategory,
-  PRODUCT_CATEGORY_OPTIONS,
-  productCategoryLabel,
-  type ProductCategoryLabel,
-} from "@/features/catalog/product-categories";
+  CATALOG_CARD_TEXT_MAX_FONT_SIZE_MULTIPLIER,
+  catalogProductCardSurface,
+} from "@/design-system/catalog";
+import {
+  fetchHomeCatalog,
+  fetchHomeRecentDrawActivity,
+  recordHomeProductClick,
+  type HomeCatalogSnapshot,
+} from "@/features/catalog/catalog-api";
+import { useStorefrontCategorySettings } from "@/features/catalog/StorefrontCategorySettingsProvider";
+import { isCustomerProductCategoryEnabledOn, productCategoryLabel } from "@/features/catalog/product-categories";
+import { catalogQuantityLabel, remainingInventoryLabel } from "@/features/catalog/remaining-inventory";
+import { useCommerceCapability } from "@/features/commerce/CommerceCapabilityProvider";
+import { productPriceLabel } from "@/features/commerce/product-commerce-presentation";
 import { AnnouncementTicker } from "@/features/home/AnnouncementTicker";
+import { mergeFreshHomeCatalogWithCachedSections } from "@/features/home/home-catalog-recovery";
+import { remainingKujiTierAccessibilityLabel } from "@/features/kuji/kuji-tier-availability";
 import {
-  DEFAULT_HOME_COLLECTION_IP_IDS,
-  HOME_PRODUCT_CARD_WIDTH,
-  type DrawActivityItem,
-  buildDrawActivityExamples,
-  buildDrawActivityTickerWindow,
   buildConfiguredHomeCollections,
-  buildHomeCollections,
-  getContinuousTickerLoopDistance,
   getHomeProductCardWidth,
+  getHomeProductMediaAspectRatio,
+  getRecentDrawReelWindow,
   homeAnnouncementMessages,
+  resolveHomeProductBadge,
+  shouldExpandHomeHero,
+  shouldExpandHomeRecentDraw,
+  type ConfiguredHomeCollection,
+  type HomeProductBadge,
+  type HomeSectionLayoutKind,
 } from "@/features/home/home-feed";
-import { productSubjectTitle } from "@/features/shop/product-title";
+import { catalogCardTitle, productSubjectTitle } from "@/features/shop/product-title";
 import { readHomeCatalogCache, writeHomeCatalogCache } from "@/lib/local-database";
 import {
   resolveCatalogImageUrl,
@@ -60,23 +68,18 @@ import {
 } from "@/lib/runtime-config";
 import { colors } from "@/theme";
 
-const WORDMARK = require("../../../assets/dabboba-wordmark.png");
-const CATEGORIES: readonly ("전체" | ProductCategoryLabel)[] = [
-  "전체",
-  ...PRODUCT_CATEGORY_OPTIONS.map(({ label }) => label),
-];
-const DRAW_ACTIVITY_ROW_HEIGHT = 40;
-const DRAW_ACTIVITY_VISIBLE_ROWS = 3;
-const DRAW_ACTIVITY_HOLD_MS = 4_000;
-const DRAW_ACTIVITY_RISE_MS = 1_050;
-const DRAW_ACTIVITY_MARQUEE_GAP = 24;
+const WORDMARK = require("../../../assets/brand/dabboba-wordmark.png");
+const HERO_MACHINE = require("../../../assets/draw/gacha/capsule-machine-front-empty.png");
 
 type LoadSource = "live" | "cache" | "empty";
+type HomeSectionsSource = "loading" | "live" | "cache" | "error";
 
 export function HomeScreen() {
   const rootNavigationScroll = useRootNavigationScroll();
   const db = useSQLiteContext();
   const router = useRouter();
+  const { commerceEnabled } = useCommerceCapability();
+  const { revision: categorySettingsRevision, refresh: refreshCategorySettings } = useStorefrontCategorySettings();
   const runtime = useMemo(
     () =>
       resolveMobileRuntimeConfig({
@@ -89,673 +92,780 @@ export function HomeScreen() {
     [],
   );
   const [snapshot, setSnapshot] = useState<HomeCatalogSnapshot | null>(null);
+  const [recentDrawActivity, setRecentDrawActivity] = useState<readonly HomeRecentDrawActivity[] | null | undefined>(undefined);
   const [source, setSource] = useState<LoadSource>("empty");
+  const [homeSectionsSource, setHomeSectionsSource] = useState<HomeSectionsSource>("loading");
   const [message, setMessage] = useState("");
   const [refreshing, setRefreshing] = useState(false);
-  const [selectedCategory, setSelectedCategory] = useState<(typeof CATEGORIES)[number]>("전체");
-  const ipNames = useMemo(
-    () => new Map(snapshot?.ips.map((ip) => [ip.id, ip.nameKo]) ?? []),
-    [snapshot?.ips],
-  );
+  const [imageRequestKey, setImageRequestKey] = useState(0);
+  const initialLoadCompleted = useRef(false);
 
-  const visibleProducts = useMemo(() => {
-    const products = snapshot?.products.filter((product) => product.isActive && !product.isPrizeOnly) ?? [];
-    if (selectedCategory === "전체") return products;
-    return products.filter((product) => productCategoryLabel(product.category) === selectedCategory);
-  }, [selectedCategory, snapshot]);
-  const todayProducts = visibleProducts.slice(0, 4);
+  const bestProductId = snapshot?.homeProductBadges.bestProductId ?? null;
+  const badgeEvaluatedAt = snapshot?.homeProductBadges.evaluatedAt ?? snapshot?.fetchedAt ?? "";
   const announcementMessages = useMemo(
     () => homeAnnouncementMessages(snapshot?.notices ?? []),
     [snapshot?.notices],
   );
-  const drawActivityItems = useMemo(
-    () => (
-      __DEV__
-        ? buildDrawActivityExamples(snapshot?.products ?? [], snapshot?.ips ?? [], productSubjectTitle)
-        : []
-    ),
-    [snapshot?.ips, snapshot?.products],
+  const hasActionableAnnouncement = useMemo(
+    () => (snapshot?.notices ?? []).some((notice) => (
+      notice.isPinned
+      && notice.isPublished
+      && notice.status === "ACTIVE"
+      && Boolean(notice.title.trim())
+    )),
+    [snapshot?.notices],
   );
-  const homeCollections = useMemo(() => {
-    if (!snapshot) return [];
-    if (snapshot.homeSections?.configured) {
-      return buildConfiguredHomeCollections(snapshot.homeSections.items);
-    }
-    const configured = buildHomeCollections(snapshot.ips, snapshot.products, DEFAULT_HOME_COLLECTION_IP_IDS);
-    if (configured.length) return configured;
-    return buildHomeCollections(snapshot.ips, snapshot.products, snapshot.ips.slice(0, 2).map((ip) => ip.id));
-  }, [snapshot]);
+  const homeCollections = useMemo<ConfiguredHomeCollection[]>(() => {
+    if (!snapshot?.homeSections?.configured) return [];
+    return buildConfiguredHomeCollections(snapshot.homeSections.items.map((section) => ({
+      ...section,
+      products: section.products.filter((product) => (
+        isCustomerProductCategoryEnabledOn(product.category, "home")
+        && (commerceEnabled || product.category !== "kuji")
+      )),
+    })));
+  }, [categorySettingsRevision, commerceEnabled, snapshot?.homeSections]);
 
   const load = useCallback(
     async (manual = false) => {
-      if (manual) setRefreshing(true);
+      if (manual) {
+        setRefreshing(true);
+        setImageRequestKey((current) => current + 1);
+      }
       try {
-        const fresh = await fetchHomeCatalog(runtime.apiBaseUrl);
+        const [catalogResult, recentResult] = await Promise.allSettled([
+          fetchHomeCatalog(runtime.apiBaseUrl),
+          fetchHomeRecentDrawActivity(runtime.apiBaseUrl),
+        ]);
+        const cached = await readHomeCatalogCache(db).catch(() => null);
+        const recoveredRecentDrawActivity = recentResult.status === "fulfilled"
+          ? recentResult.value
+          : cached?.recentDrawActivity ?? null;
+        setRecentDrawActivity(recoveredRecentDrawActivity);
+
+        if (catalogResult.status === "rejected") {
+          if (cached) {
+            const recovered = {
+              ...cached,
+              products: cached.products.filter((product) => (
+                isCustomerProductCategoryEnabledOn(product.category, "home")
+              )),
+              recentDrawActivity: recoveredRecentDrawActivity,
+            };
+            setSnapshot(recovered);
+            setSource("cache");
+            setHomeSectionsSource(cached.homeSections ? "cache" : "error");
+            setMessage("연결이 불안정해 마지막으로 저장한 목록을 보여드려요.");
+            if (recentResult.status === "fulfilled") {
+              await writeHomeCatalogCache(db, recovered).catch(() => undefined);
+            }
+          } else {
+            setSource("empty");
+            setHomeSectionsSource("error");
+            setMessage("홈을 불러오지 못했어요. 연결 상태를 확인해 주세요.");
+          }
+          return;
+        }
+
+        const fresh = {
+          ...catalogResult.value,
+          recentDrawActivity: recoveredRecentDrawActivity,
+        };
+        if (fresh.homeSections === null) {
+          if (cached?.homeSections) {
+            const recovered = mergeFreshHomeCatalogWithCachedSections(fresh, cached);
+            setSnapshot(recovered);
+            setSource("cache");
+            setHomeSectionsSource("cache");
+            setMessage("홈 진열 정보를 불러오지 못해 마지막으로 확인한 구성을 보여드려요.");
+            if (recentResult.status === "fulfilled") {
+              await writeHomeCatalogCache(db, recovered).catch(() => undefined);
+            }
+          } else {
+            setSnapshot(fresh);
+            setSource("live");
+            setHomeSectionsSource("error");
+            setMessage("");
+          }
+          return;
+        }
         setSnapshot(fresh);
         setSource("live");
+        setHomeSectionsSource("live");
         setMessage("");
-        await writeHomeCatalogCache(db, fresh);
-      } catch (error) {
-        const cached = await readHomeCatalogCache(db);
-        if (cached) {
-          setSnapshot({
-            ...cached,
-            products: cached.products.filter((product) => (
-              isCustomerBrowsableCatalogCategory(product.category)
-            )),
-          });
-          setSource("cache");
-          setMessage("연결이 불안정해 마지막으로 저장한 목록을 보여드려요.");
-        } else {
-          setSource("empty");
-          setMessage(error instanceof Error ? error.message : "카탈로그를 불러오지 못했습니다.");
-        }
+        await writeHomeCatalogCache(db, fresh).catch(() => undefined);
       } finally {
+        initialLoadCompleted.current = true;
         setRefreshing(false);
       }
     },
-    [db, runtime.apiBaseUrl],
+    [categorySettingsRevision, db, runtime.apiBaseUrl],
   );
 
   useEffect(() => {
     void load();
   }, [load]);
 
+  useFocusEffect(
+    useCallback(() => {
+      if (!initialLoadCompleted.current) return undefined;
+      void load();
+      return undefined;
+    }, [load]),
+  );
+
+  const openHomeProduct = useCallback((productId: string) => {
+    router.push(`/product/${encodeURIComponent(productId)}` as Href);
+    void recordHomeProductClick(runtime.apiBaseUrl, productId)
+      .then((homeProductBadges) => {
+        setSnapshot((current) => current ? { ...current, homeProductBadges } : current);
+      })
+      .catch(() => undefined);
+  }, [router, runtime.apiBaseUrl]);
+
   return (
-    <SafeAreaView style={styles.safeArea} edges={["top", "left", "right"]}>
+    <RootPageScaffold header={<HomeHeader />}>
       <ScrollView
         {...rootNavigationScroll}
         contentContainerStyle={styles.content}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={() => void load(true)} tintColor={colors.ink} />
+          <RefreshControl refreshing={refreshing} onRefresh={() => { void refreshCategorySettings(); void load(true); }} tintColor={colors.ink} />
         }
       >
-        <HomeHeader />
-        <AnnouncementTicker
-          messages={announcementMessages}
-          onPress={(announcement) => {
-            const notice = snapshot?.notices.find((item) => (
-              item.isPinned
-              && item.isPublished
-              && item.status === "ACTIVE"
-              && item.title.trim() === announcement
-            ));
-            if (notice) {
-              router.push(`/profile/notices/${encodeURIComponent(notice.id)}` as Href);
-              return;
-            }
-            router.push("/profile/support" as Href);
-          }}
-        />
+        {announcementMessages.length ? (
+          <HomeAnnouncement
+            messages={announcementMessages}
+            onPress={hasActionableAnnouncement ? (announcement, announcementIndex) => {
+              const notice = snapshot?.notices.filter((item) => (
+                item.isPinned
+                && item.isPublished
+                && item.status === "ACTIVE"
+                && Boolean(item.title.trim())
+              ))[announcementIndex];
+              if (notice?.title.trim() === announcement) {
+                router.push(`/profile/notices/${encodeURIComponent(notice.id)}` as Href);
+              }
+            } : undefined}
+          />
+        ) : null}
 
         {message ? (
-          <View style={[styles.connectionNotice, source === "empty" && styles.connectionNoticeError]}>
-            <Text style={styles.connectionNoticeText}>{message}</Text>
-            {source === "empty" ? (
-              <Pressable accessibilityRole="button" onPress={() => void load(true)} style={styles.retry}>
-                <Text style={styles.retryLabel}>다시 불러오기</Text>
-              </Pressable>
-            ) : null}
+          <View
+            accessibilityLiveRegion="polite"
+            style={[styles.connectionNotice, source === "empty" && styles.connectionNoticeError]}
+          >
+            <Text variant="finePrint" numberOfLines={2} style={styles.connectionNoticeText}>{message}</Text>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={source === "cache" ? "홈 새로고침" : "홈 다시 불러오기"}
+              onPress={() => void load(true)}
+              style={({ pressed }) => [styles.retry, source === "cache" && styles.retryCache, pressed && styles.pressed]}
+            >
+              <Text variant="finePrint" style={[styles.retryLabel, source === "cache" && styles.retryLabelCache]}>
+                {source === "cache" ? "새로고침" : "다시 불러오기"}
+              </Text>
+            </Pressable>
           </View>
         ) : null}
 
-        {!snapshot && !message ? (
-          <View style={styles.loading}>
-            <ActivityIndicator color={colors.ink} />
-            <Text style={styles.loadingText}>홈을 불러오는 중</Text>
-          </View>
-        ) : null}
+        <HomeIntroBanner />
 
-        {snapshot ? (
-          <>
-            <DrawActivityPanel
-              items={drawActivityItems}
-              onProductPress={(productId) => router.push(`/product/${encodeURIComponent(productId)}` as Href)}
-            />
+        <RecentDrawActivityPanel
+          activity={recentDrawActivity}
+          assetBaseUrl={runtime.assetBaseUrl}
+          imageRequestKey={imageRequestKey}
+        />
 
-            <SectionTitle title="오늘의 뽀바" trailing={`${todayProducts.length}개`} />
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.categoryRail}
-            >
-              {CATEGORIES.map((category) => (
-                <SeedChip
-                  key={category}
-                  label={category}
-                  selected={selectedCategory === category}
-                  onPress={() => setSelectedCategory(category)}
-                />
-              ))}
-            </ScrollView>
+        {homeCollections.map((collection) => (
+          <OperatorHomeSection
+            key={collection.id}
+            section={collection}
+            assetBaseUrl={runtime.assetBaseUrl}
+            imageRequestKey={imageRequestKey}
+            bestProductId={bestProductId}
+            badgeEvaluatedAt={badgeEvaluatedAt}
+            commerceEnabled={commerceEnabled}
+            onProductPress={openHomeProduct}
+          />
+        ))}
 
-            <ScrollView
-              horizontal
-              nestedScrollEnabled
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.productRail}
-            >
-              {todayProducts.map((product, index) => (
-                <ProductCard
-                  key={product.id}
-                  product={product}
-                  ipName={ipNames.get(product.ipId) ?? "등록 작품"}
-                  assetBaseUrl={runtime.assetBaseUrl}
-                  divided={index < todayProducts.length - 1}
-                  onPress={() => router.push(`/product/${encodeURIComponent(product.id)}` as Href)}
-                />
-              ))}
-            </ScrollView>
-
-            {homeCollections.map((collection) => (
-              <View key={collection.id}>
-                <SectionTitle
-                  title={collection.title}
-                  trailing="전체보기"
-                  onTrailingPress={() => router.push({ pathname: "/(tabs)/ppoba", params: { ipId: collection.ip.id } } as Href)}
-                />
-                <ScrollView
-                  horizontal
-                  nestedScrollEnabled
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={styles.productRail}
-                >
-                  {collection.products.map((product, index) => (
-                    <CollectionProductCard
-                      key={product.id}
-                      product={product}
-                      ipName={collection.ip.nameKo}
-                      assetBaseUrl={runtime.assetBaseUrl}
-                      divided={index < collection.products.length - 1}
-                      onPress={() => router.push(`/product/${encodeURIComponent(product.id)}` as Href)}
-                    />
-                  ))}
-                </ScrollView>
-              </View>
-            ))}
-
-            <EventNoticeCard onPress={() => router.push("/profile/support" as Href)} />
-          </>
+        {homeSectionsSource === "loading" ? (
+          <HomeCatalogFeedState kind="loading" />
+        ) : homeSectionsSource === "error" ? (
+          <HomeCatalogFeedState kind="error" onAction={() => void load(true)} />
+        ) : snapshot?.homeSections && (
+          !snapshot.homeSections.configured || snapshot.homeSections.items.length === 0
+        ) ? (
+          <HomeCatalogFeedState
+            kind="empty"
+            onAction={() => router.push("/(tabs)/gacha" as Href)}
+          />
         ) : null}
       </ScrollView>
-    </SafeAreaView>
+    </RootPageScaffold>
   );
 }
 
 function HomeHeader() {
   return (
-    <View style={styles.header}>
-      <Image source={WORDMARK} resizeMode="contain" style={styles.wordmark} accessibilityLabel="DABBOBA" />
-      <RootHeaderActions />
-    </View>
-  );
-}
-
-function SectionTitle({
-  title,
-  trailing,
-  onTrailingPress,
-}: {
-  title: string;
-  trailing?: string;
-  onTrailingPress?: () => void;
-}) {
-  return (
-    <View style={styles.sectionHeader}>
-      <KoreanPixelTitle variant="section">{title}</KoreanPixelTitle>
-      {onTrailingPress ? (
-        <Pressable accessibilityRole="button" accessibilityLabel={`${title} ${trailing}`} onPress={onTrailingPress} style={styles.sectionTrailingButton}>
-          <KoreanPixelTitleAccessory>{trailing}</KoreanPixelTitleAccessory>
-          <Ionicons name="chevron-forward" size={14} color={colors.muted} />
-        </Pressable>
-      ) : trailing ? <KoreanPixelTitleAccessory>{trailing}</KoreanPixelTitleAccessory> : null}
-    </View>
-  );
-}
-
-function DrawActivityPanel({
-  items,
-  onProductPress,
-}: {
-  items: ReturnType<typeof buildDrawActivityExamples>;
-  onProductPress: (productId: string) => void;
-}) {
-  const [startIndex, setStartIndex] = useState(0);
-  const [reduceMotion, setReduceMotion] = useState(false);
-  const translateY = useRef(new Animated.Value(0)).current;
-  const itemSignature = useMemo(() => items.map((item) => item.id).join("|"), [items]);
-  const visibleRowCount = Math.min(DRAW_ACTIVITY_VISIBLE_ROWS, items.length);
-  const tickerItems = useMemo(
-    () => buildDrawActivityTickerWindow(items, startIndex, DRAW_ACTIVITY_VISIBLE_ROWS),
-    [items, startIndex],
-  );
-
-  useEffect(() => {
-    let active = true;
-    void AccessibilityInfo.isReduceMotionEnabled().then((enabled) => {
-      if (active) setReduceMotion(enabled);
-    });
-    const subscription = AccessibilityInfo.addEventListener("reduceMotionChanged", setReduceMotion);
-    return () => {
-      active = false;
-      subscription.remove();
-    };
-  }, []);
-
-  useEffect(() => {
-    translateY.stopAnimation();
-    translateY.setValue(0);
-    setStartIndex(0);
-  }, [itemSignature, translateY]);
-
-  useEffect(() => {
-    translateY.stopAnimation();
-    translateY.setValue(0);
-    if (reduceMotion || items.length <= 1) return undefined;
-
-    const animation = Animated.sequence([
-      Animated.delay(DRAW_ACTIVITY_HOLD_MS),
-      Animated.timing(translateY, {
-        toValue: -DRAW_ACTIVITY_ROW_HEIGHT,
-        duration: DRAW_ACTIVITY_RISE_MS,
-        easing: Easing.inOut(Easing.cubic),
-        useNativeDriver: true,
-      }),
-    ]);
-    animation.start(({ finished }) => {
-      if (finished) setStartIndex((current) => (current + 1) % items.length);
-    });
-    return () => animation.stop();
-  }, [itemSignature, items.length, reduceMotion, startIndex, translateY]);
-
-  return (
-    <>
-      <SectionTitle title="방금 뽑았어요" />
-      <View style={styles.activityCard}>
-        {items.length ? (
-          <View style={[styles.activityViewport, { height: visibleRowCount * DRAW_ACTIVITY_ROW_HEIGHT }]}>
-            <Animated.View style={{ transform: [{ translateY }] }}>
-              {tickerItems.map((item, index) => (
-                <Pressable
-                  key={`${item.id}-${tickerItems.slice(0, index).filter((candidate) => candidate.id === item.id).length}`}
-                  accessibilityRole="button"
-                  accessibilityLabel={`${item.message} 상품 보기`}
-                  accessibilityElementsHidden={index >= visibleRowCount}
-                  importantForAccessibility={index >= visibleRowCount ? "no-hide-descendants" : "auto"}
-                  pointerEvents={index >= visibleRowCount ? "none" : "auto"}
-                  onPress={() => onProductPress(item.productId)}
-                  style={({ pressed }) => [styles.activityRow, pressed && styles.pressed]}
-                >
-                  <View style={styles.activityDot} />
-                  <DrawActivityMarquee item={item} />
-                  <Text style={styles.activityTime}>방금</Text>
-                </Pressable>
-              ))}
-            </Animated.View>
-            {Array.from({ length: Math.max(visibleRowCount - 1, 0) }, (_, index) => (
-              <View
-                key={`divider-${index}`}
-                pointerEvents="none"
-                style={[styles.activityRowDivider, { top: (index + 1) * DRAW_ACTIVITY_ROW_HEIGHT }]}
-              />
-            ))}
-          </View>
-        ) : <Text style={styles.activityEmpty}>새로운 뽑기 소식을 준비하고 있어요.</Text>}
+    <RootPageHeader>
+      <View style={styles.brandLockup}>
+        <Image source={WORDMARK} resizeMode="contain" style={styles.wordmark} accessibilityLabel="DABBOBA" />
+        <Text variant="finePrint" maxFontSizeMultiplier={2} style={styles.brandTagline}>원하는 거 다 뽑아</Text>
       </View>
-    </>
+    </RootPageHeader>
   );
 }
 
-function DrawActivityMarquee({ item }: { item: DrawActivityItem }) {
-  const [viewportWidth, setViewportWidth] = useState(0);
-  const [textWidth, setTextWidth] = useState(0);
-  const [reduceMotion, setReduceMotion] = useState(false);
-  const translateX = useRef(new Animated.Value(0)).current;
-  const loopDistance = getContinuousTickerLoopDistance(
-    viewportWidth,
-    textWidth,
-    DRAW_ACTIVITY_MARQUEE_GAP,
-  );
-  const shouldLoop = loopDistance > 0;
+function HomeCatalogFeedState({
+  kind,
+  onAction,
+}: {
+  kind: "loading" | "error" | "empty";
+  onAction?: () => void;
+}) {
+  if (kind === "loading") {
+    return (
+      <View style={styles.homeCatalogFeedState}>
+        <Text variant="caption" style={styles.homeCatalogFeedStateBody}>
+          홈 진열을 확인하고 있어요.
+        </Text>
+      </View>
+    );
+  }
 
-  useEffect(() => {
-    let active = true;
-    void AccessibilityInfo.isReduceMotionEnabled().then((enabled) => {
-      if (active) setReduceMotion(enabled);
-    });
-    const subscription = AccessibilityInfo.addEventListener("reduceMotionChanged", setReduceMotion);
-    return () => {
-      active = false;
-      subscription.remove();
-    };
-  }, []);
-
-  useEffect(() => {
-    translateX.stopAnimation();
-    translateX.setValue(0);
-    if (reduceMotion || !shouldLoop) return undefined;
-
-    const animation = Animated.loop(Animated.timing(translateX, {
-      toValue: -loopDistance,
-      duration: Math.max(4_800, loopDistance * 28),
-      easing: Easing.linear,
-      useNativeDriver: true,
-    }));
-    animation.start();
-    return () => animation.stop();
-  }, [loopDistance, reduceMotion, shouldLoop, translateX]);
-
+  const error = kind === "error";
   return (
     <View
-      style={styles.activityTextViewport}
-      onLayout={(event) => setViewportWidth(event.nativeEvent.layout.width)}
+      accessibilityLiveRegion={error ? "polite" : undefined}
+      style={styles.homeCatalogFeedState}
     >
-      <View
-        pointerEvents="none"
-        accessibilityElementsHidden
-        importantForAccessibility="no-hide-descendants"
-        style={styles.activityMeasureLayer}
-      >
-        <DrawActivityMessage
-          item={item}
-          measure
-          onMeasured={(width) => setTextWidth((current) => current === width ? current : width)}
+      <KoreanPixelTitle variant="header" style={styles.homeCatalogFeedStateTitle}>
+        {error ? "홈 상품을 불러오지 못했어요" : "홈 상품을 준비하고 있어요"}
+      </KoreanPixelTitle>
+      <Text variant="bodyCompact" style={styles.homeCatalogFeedStateBody}>
+        {error ? "잠시 후 다시 시도해 주세요." : "홈에 진열된 상품이 아직 없어요."}
+      </Text>
+      {onAction ? (
+        <SeedActionButton
+          label={error ? "다시 불러오기" : "가챠샵 둘러보기"}
+          size="small"
+          variant={error ? "neutralSolid" : "brandSolid"}
+          onPress={onAction}
+          style={styles.homeCatalogFeedStateAction}
         />
-      </View>
-      <Animated.View
-        style={[
-          styles.activityTextTrack,
-          shouldLoop && styles.activityTextLoopTrack,
-          {
-            width: shouldLoop
-              ? textWidth * 2 + DRAW_ACTIVITY_MARQUEE_GAP
-              : Math.max(textWidth, viewportWidth),
-            transform: [{ translateX }],
-          },
-        ]}
-      >
-        <DrawActivityMessage
-          item={item}
-          width={shouldLoop ? textWidth : Math.max(textWidth, viewportWidth)}
-        />
-        {shouldLoop ? (
-          <>
-            <View style={styles.activityTextLoopGap} />
-            <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
-              <DrawActivityMessage item={item} width={textWidth} />
-            </View>
-          </>
-        ) : null}
-      </Animated.View>
+      ) : null}
     </View>
   );
 }
 
-function DrawActivityMessage({
-  item,
-  measure = false,
-  onMeasured,
-  width,
-}: {
-  item: DrawActivityItem;
-  measure?: boolean;
-  onMeasured?: (width: number) => void;
-  width?: number;
-}) {
+function HomeIntroBanner() {
+  const { fontScale } = useWindowDimensions();
+  const expanded = shouldExpandHomeHero(fontScale);
   return (
-    <Text
-      numberOfLines={1}
-      ellipsizeMode="clip"
-      style={[styles.activityText, measure && styles.activityMeasureText, width ? { width } : null]}
-      onTextLayout={measure ? (event) => onMeasured?.(event.nativeEvent.lines[0]?.width ?? 0) : undefined}
+    <View
+      accessible
+      accessibilityRole="summary"
+      accessibilityLabel="새 소식 준비 중. 새로운 이벤트 소식이 등록되면 알려드릴게요."
+      style={[styles.hero, expanded && styles.heroLargeText]}
     >
-      <Text style={styles.activityPerson}>{item.personName}님</Text>
-      <Text>이 </Text>
-      <Text style={styles.activityProduct}>{item.productName}</Text>
-      <Text>{item.objectParticle} 뽑았어요</Text>
-    </Text>
+      <Image
+        accessible={false}
+        accessibilityIgnoresInvertColors
+        source={HERO_MACHINE}
+        resizeMode="contain"
+        style={styles.heroMachine}
+      />
+      <KoreanPixelTitle variant="hero" numberOfLines={expanded ? 3 : 2} style={styles.heroTitle}>
+        새 소식을{"\n"}준비하고 있어요.
+      </KoreanPixelTitle>
+      <Text variant="bodyCompact" maxFontSizeMultiplier={2} style={styles.heroBody}>새로운 이벤트 소식이 등록되면 이곳에서 알려드릴게요.</Text>
+      <Text variant="label" maxFontSizeMultiplier={2} style={styles.heroAction}>새 소식 준비 중</Text>
+    </View>
   );
 }
 
-function ProductCard({
-  product,
-  ipName,
-  assetBaseUrl,
-  divided,
+export function HomeAnnouncement({
+  messages,
   onPress,
 }: {
-  product: CatalogProduct;
-  ipName: string;
-  assetBaseUrl: string | null;
-  divided: boolean;
-  onPress: () => void;
+  messages: readonly string[];
+  onPress?: (message: string, index: number) => void;
 }) {
-  const uri = resolveCatalogImageUrl(product.imageUrl, assetBaseUrl, product.version);
-  const { width: viewportWidth } = useWindowDimensions();
-  const cardWidth = getHomeProductCardWidth(product.category, viewportWidth, seed.spacing.globalGutter);
+  return <AnnouncementTicker messages={messages} onPress={onPress} />;
+}
+
+function SectionTitle({ title, subtitle }: { title: string; subtitle: string | null }) {
   return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={`${product.name} 상세 보기`}
-      onPress={onPress}
-      style={({ pressed }) => [styles.productCard, { width: cardWidth }, pressed && styles.pressed]}
+    <View style={styles.sectionHeader}>
+      <View style={styles.sectionTitleCluster}>
+        <ReadablePageTitle variant="sectionTitle" numberOfLines={2}>{title}</ReadablePageTitle>
+        {subtitle ? <Text variant="caption" numberOfLines={2} style={styles.sectionSubtitle}>{subtitle}</Text> : null}
+      </View>
+    </View>
+  );
+}
+
+function RecentDrawActivityPanel({
+  activity,
+  assetBaseUrl,
+  imageRequestKey,
+}: {
+  activity: readonly HomeRecentDrawActivity[] | null | undefined;
+  assetBaseUrl: string | null;
+  imageRequestKey: number;
+}) {
+  const { fontScale } = useWindowDimensions();
+  const expanded = shouldExpandHomeRecentDraw(fontScale);
+  const reel = getRecentDrawReelWindow((activity ?? []).slice(0, 2), 0);
+  return (
+    <View style={[
+      styles.recentDrawSummary,
+      reel.current && styles.recentDrawSummaryPopulated,
+      expanded && styles.recentDrawSummaryLargeText,
+    ]}>
+      <KoreanPixelTitle
+        variant="header"
+        style={[styles.recentDrawTitle, expanded && styles.recentDrawTitleLargeText]}
+      >
+        방금 뽑았어요
+      </KoreanPixelTitle>
+      {reel.current ? (
+        <View style={expanded ? styles.recentDrawReelLargeText : styles.recentDrawReel}>
+          <RecentDrawReelRow
+            activity={reel.current}
+            assetBaseUrl={assetBaseUrl}
+            imageRequestKey={imageRequestKey}
+            position="current"
+            expanded={expanded}
+          />
+          {!expanded && reel.next ? (
+            <RecentDrawReelRow
+              activity={reel.next}
+              assetBaseUrl={assetBaseUrl}
+              imageRequestKey={imageRequestKey}
+              position="next"
+            />
+          ) : null}
+        </View>
+      ) : activity === undefined ? (
+        <Text variant="finePrint" numberOfLines={2} style={[styles.recentDrawEmpty, expanded && styles.recentDrawEmptyLargeText]}>당첨 기록을 확인하고 있어요.</Text>
+      ) : activity === null ? (
+        <Text variant="finePrint" numberOfLines={2} style={[styles.recentDrawEmpty, expanded && styles.recentDrawEmptyLargeText]}>당첨 기록을 불러오지 못했어요.</Text>
+      ) : (
+        <Text variant="finePrint" numberOfLines={2} style={[styles.recentDrawEmpty, expanded && styles.recentDrawEmptyLargeText]}>아직 공개된 당첨 기록이 없어요.</Text>
+      )}
+    </View>
+  );
+}
+
+function RecentDrawReelRow({
+  activity,
+  assetBaseUrl,
+  imageRequestKey,
+  position,
+  expanded = false,
+}: {
+  activity: HomeRecentDrawActivity;
+  assetBaseUrl: string | null;
+  imageRequestKey: number;
+  position: "current" | "next";
+  expanded?: boolean;
+}) {
+  const current = position === "current";
+  const uri = resolveCatalogImageUrl(activity.prizeImageUrl, assetBaseUrl);
+  const [imageFailed, setImageFailed] = useState(false);
+  useEffect(() => setImageFailed(false), [uri]);
+  return (
+    <View
+      accessible={current}
+      accessibilityElementsHidden={!current}
+      accessibilityLabel={current ? `${activity.rarity} 등급, ${activity.prizeName} 당첨` : undefined}
+      importantForAccessibility={current ? "yes" : "no-hide-descendants"}
+      pointerEvents="none"
+      style={[
+        expanded ? styles.recentDrawReelRowLargeText : styles.recentDrawReelRow,
+        !expanded && current && styles.recentDrawReelCurrent,
+        !expanded && position === "next" && styles.recentDrawReelNext,
+      ]}
     >
-      <HomeProductMedia uri={uri} category={product.category} variant="today" showBadge />
-      <Text numberOfLines={1} style={styles.productIp}>{ipName}</Text>
-      <Text numberOfLines={2} style={styles.productName}>{productSubjectTitle(product.name, ipName)}</Text>
-      <ProductInfoDivider style={styles.productFieldDivider} />
-      <Text style={styles.productPrice}>{product.price.toLocaleString("ko-KR")}원</Text>
-      {divided ? <ProductInfoDivider orientation="vertical" style={styles.productCardDivider} /> : null}
-    </Pressable>
+      <View style={[styles.recentDrawImageFrame, !current && styles.recentDrawImageFrameGhost]}>
+        {uri && !imageFailed ? (
+          <Image
+            key={`${imageRequestKey}:${activity.id}`}
+            accessible={false}
+            accessibilityIgnoresInvertColors
+            source={{ uri }}
+            resizeMode="cover"
+            style={styles.recentDrawImage}
+            onError={() => setImageFailed(true)}
+          />
+        ) : (
+          <View style={styles.recentDrawImageFallback}>
+            <Text variant="finePrint" maxFontSizeMultiplier={2} numberOfLines={1} style={styles.recentDrawImageFallbackLabel}>{activity.rarity}</Text>
+          </View>
+        )}
+        {current ? null : <View style={styles.recentDrawSilhouetteOverlay} />}
+      </View>
+      <View style={styles.recentDrawCopy}>
+        <Text
+          variant={current ? "label" : "finePrint"}
+          maxFontSizeMultiplier={expanded ? undefined : 2}
+          numberOfLines={1}
+          ellipsizeMode="tail"
+          style={[styles.recentDrawPrize, !current && styles.recentDrawPrizeGhost]}
+        >
+          {activity.prizeName}
+        </Text>
+      </View>
+      <View style={[styles.recentDrawRarity, !current && styles.recentDrawRarityGhost]}>
+        <Text
+          variant="finePrint"
+          maxFontSizeMultiplier={expanded ? undefined : 2}
+          numberOfLines={1}
+          style={styles.recentDrawRarityLabel}
+        >
+          {activity.rarity}
+        </Text>
+      </View>
+    </View>
+  );
+}
+
+function OperatorHomeSection({
+  section,
+  assetBaseUrl,
+  imageRequestKey,
+  bestProductId,
+  badgeEvaluatedAt,
+  commerceEnabled,
+  onProductPress,
+}: {
+  section: ConfiguredHomeCollection;
+  assetBaseUrl: string | null;
+  imageRequestKey: number;
+  bestProductId: string | null;
+  badgeEvaluatedAt: string;
+  commerceEnabled: boolean;
+  onProductPress: (productId: string) => void;
+}) {
+  return (
+    <View>
+      <SectionTitle title={section.title} subtitle={section.subtitle} />
+      {section.products.length ? (
+        <ScrollView
+          horizontal
+          nestedScrollEnabled
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.productRail}
+        >
+          {section.products.map((product) => (
+            <CollectionProductCard
+              key={product.id}
+              product={product}
+              layoutKind={section.layoutKind}
+              ipName={section.ip?.nameKo ?? null}
+              assetBaseUrl={assetBaseUrl}
+              imageRequestKey={imageRequestKey}
+              badge={resolveHomeProductBadge(product, bestProductId, badgeEvaluatedAt)}
+              commerceEnabled={commerceEnabled}
+              onPress={() => onProductPress(product.id)}
+            />
+          ))}
+        </ScrollView>
+      ) : (
+        <Text variant="caption" style={styles.sectionEmpty}>
+          {`등록된 ${productCategoryLabel(section.layoutKind)} 상품이 없어요.`}
+        </Text>
+      )}
+    </View>
   );
 }
 
 function CollectionProductCard({
   product,
+  layoutKind,
   ipName,
   assetBaseUrl,
-  divided,
+  imageRequestKey,
+  badge,
+  commerceEnabled,
   onPress,
 }: {
   product: CatalogProduct;
-  ipName: string;
+  layoutKind: HomeSectionLayoutKind;
+  ipName: string | null;
   assetBaseUrl: string | null;
-  divided: boolean;
+  imageRequestKey: number;
+  badge: HomeProductBadge;
+  commerceEnabled: boolean;
   onPress: () => void;
 }) {
-  const uri = resolveCatalogImageUrl(product.imageUrl, assetBaseUrl, product.version);
-  const { width: viewportWidth } = useWindowDimensions();
-  const cardWidth = getHomeProductCardWidth(product.category, viewportWidth, seed.spacing.globalGutter);
-  const isKuji = product.category === "kuji";
+  const storefrontUri = resolveCatalogImageUrl(product.storefrontImageUrl, assetBaseUrl, product.version);
+  const primaryUri = resolveCatalogImageUrl(product.imageUrl, assetBaseUrl, product.version);
+  const cardWidth = getHomeProductCardWidth(layoutKind);
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`${product.name} 상세 보기`}
+      accessibilityLabel={homeProductAccessibilityLabel(product, ipName, badge, commerceEnabled)}
       onPress={onPress}
       style={({ pressed }) => [styles.collectionCard, { width: cardWidth }, pressed && styles.pressed]}
     >
-      <HomeProductMedia uri={uri} category={product.category} variant="collection" showBadge={isKuji} />
-      <Text numberOfLines={1} style={styles.collectionProductIp}>{ipName}</Text>
-      <Text numberOfLines={2} style={styles.collectionProductName}>{productSubjectTitle(product.name, ipName)}</Text>
-      <ProductInfoDivider style={styles.productFieldDivider} />
-      <Text style={styles.collectionProductMeta}>{productCategoryLabel(product.category)} · {product.price.toLocaleString("ko-KR")}원</Text>
-      {divided ? <ProductInfoDivider orientation="vertical" style={styles.productCardDivider} /> : null}
+      <CatalogProductTopIndicator category={layoutKind} />
+      <HomeProductMedia
+        storefrontUri={storefrontUri}
+        primaryUri={primaryUri}
+        imageRequestKey={imageRequestKey}
+        layoutKind={layoutKind}
+        statusBadge={badge}
+        remainingKujiTiers={product.remainingKujiTiers}
+      />
+      <View style={[styles.productCardBody, layoutKind === "gacha" && styles.productCardBodyGacha]}>
+        {layoutKind === "kuji" && ipName ? (
+          <Text variant="catalogMetadata" maxFontSizeMultiplier={CATALOG_CARD_TEXT_MAX_FONT_SIZE_MULTIPLIER} numberOfLines={1} style={styles.collectionProductIp}>{ipName}</Text>
+        ) : null}
+        <Text
+          variant={layoutKind === "kuji" ? "catalogTitleWide" : "catalogTitle"}
+          maxFontSizeMultiplier={CATALOG_CARD_TEXT_MAX_FONT_SIZE_MULTIPLIER}
+          numberOfLines={2}
+          ellipsizeMode="tail"
+          style={[
+            styles.collectionProductName,
+            layoutKind === "gacha" && styles.collectionProductNameGacha,
+            layoutKind === "kuji" && styles.collectionProductNameKuji,
+          ]}
+        >
+          {layoutKind === "gacha" ? catalogCardTitle(product.name, ipName) : productSubjectTitle(product.name, ipName)}
+        </Text>
+        <Text
+          variant="catalogPrice"
+          maxFontSizeMultiplier={CATALOG_CARD_TEXT_MAX_FONT_SIZE_MULTIPLIER}
+          style={[styles.collectionProductPrice, layoutKind === "gacha" && styles.collectionProductPriceGacha]}
+        >
+          {productPriceLabel(product, commerceEnabled)}
+        </Text>
+        <RemainingInventoryMeter
+          category={product.category}
+          availableQuantity={product.availableQuantity}
+          totalQuantity={product.totalQuantity}
+          compact
+          style={[styles.productInventory, layoutKind === "gacha" && styles.productInventoryGacha]}
+          quantityTextStyle={styles.homeInventoryQuantity}
+        />
+      </View>
     </Pressable>
   );
 }
 
+function homeProductAccessibilityLabel(
+  product: CatalogProduct,
+  ipName: string | null,
+  badge: HomeProductBadge,
+  commerceEnabled: boolean,
+): string {
+  const badgeLabel = badge === "BEST" ? "인기 상품, " : badge === "NEW" ? "신상품, " : "";
+  const tierAccessibilityLabel = product.category === "kuji"
+    ? remainingKujiTierAccessibilityLabel(product.remainingKujiTiers)
+    : null;
+  return [
+    `${badgeLabel}${productCategoryLabel(product.category)} 상품`,
+    ipName,
+    product.name,
+    productPriceLabel(product, commerceEnabled),
+    `${remainingInventoryLabel(product.category)} ${catalogQuantityLabel(product)}`,
+    tierAccessibilityLabel,
+    "상세 보기",
+  ].filter(Boolean).join(", ");
+}
+
 function HomeProductMedia({
-  uri,
-  category,
-  variant,
-  showBadge,
+  storefrontUri,
+  primaryUri,
+  imageRequestKey,
+  layoutKind,
+  statusBadge,
+  remainingKujiTiers,
 }: {
-  uri: string | null;
-  category: CatalogProduct["category"];
-  variant: "today" | "collection";
-  showBadge: boolean;
+  storefrontUri: string | null;
+  primaryUri: string | null;
+  imageRequestKey: number;
+  layoutKind: HomeSectionLayoutKind;
+  statusBadge: HomeProductBadge;
+  remainingKujiTiers: CatalogProduct["remainingKujiTiers"];
 }) {
-  const isKuji = category === "kuji";
-  const fallbackAspectRatio = isKuji ? 16 / 9 : variant === "today" ? 1 : 1.24;
-  const [imageAspectRatio, setImageAspectRatio] = useState(fallbackAspectRatio);
-
-  useEffect(() => {
-    let active = true;
-    setImageAspectRatio(fallbackAspectRatio);
-    if (!isKuji || !uri) return () => { active = false; };
-
-    Image.getSize(
-      uri,
-      (width, height) => {
-        if (active && width > 0 && height > 0) setImageAspectRatio(width / height);
-      },
-      () => undefined,
-    );
-    return () => { active = false; };
-  }, [fallbackAspectRatio, isKuji, uri]);
+  const isKuji = layoutKind === "kuji";
+  const mediaAspectRatio = getHomeProductMediaAspectRatio(layoutKind);
 
   return (
-    <GachaMachineFrame category={category}>
-      <KujiProductFrame category={category}>
+    <GachaMachineFrame category={layoutKind} clean>
+      <KujiProductFrame category={layoutKind} clean>
         <View
           style={[
-            variant === "today" ? styles.productImageFrame : styles.collectionImageFrame,
-            category === "gacha" && styles.gachaMachineMediaWindow,
-            category === "kuji" && styles.kujiProductMediaWindow,
-            { aspectRatio: imageAspectRatio },
+            styles.collectionImageFrame,
+            layoutKind === "gacha" && styles.gachaMachineMediaWindow,
+            isKuji && styles.kujiProductMediaWindow,
+            { aspectRatio: mediaAspectRatio },
           ]}
         >
-          {uri ? (
-            <Image
-              source={{ uri }}
-              resizeMode={isKuji ? "contain" : "cover"}
-              style={styles.productImage}
-              onLoad={({ nativeEvent }) => {
-                if (!isKuji) return;
-                const { width, height } = nativeEvent.source;
-                if (width > 0 && height > 0) setImageAspectRatio(width / height);
-              }}
-            />
-          ) : <MediaPlaceholder />}
-          {showBadge && category !== "gacha" ? (
-            <View style={styles.categoryBadge}>
-              <Text style={styles.categoryBadgeLabel}>{productCategoryLabel(category)}</Text>
+          <CatalogDiscoveryImage
+            storefrontUri={storefrontUri}
+            primaryUri={primaryUri}
+            requestKey={imageRequestKey}
+            targetAspectRatio={mediaAspectRatio}
+          />
+          {statusBadge ? (
+            <View style={[styles.homeStatusBadge, statusBadge === "BEST" ? styles.homeStatusBadgeBest : styles.homeStatusBadgeNew]}>
+              <Text variant="catalogMetadata" maxFontSizeMultiplier={CATALOG_CARD_TEXT_MAX_FONT_SIZE_MULTIPLIER} style={[styles.homeStatusBadgeLabel, statusBadge === "NEW" && styles.homeStatusBadgeLabelNew]}>{statusBadge}</Text>
             </View>
           ) : null}
+          {isKuji ? <KujiPrizeTierRow tiers={remainingKujiTiers} variant="overlay" /> : null}
         </View>
       </KujiProductFrame>
     </GachaMachineFrame>
   );
 }
 
-function EventNoticeCard({ onPress }: { onPress: () => void }) {
-  return (
-    <View style={styles.eventSection}>
-      <SectionTitle title="이벤트" trailing="알림" />
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel="이벤트 알림 보기"
-        onPress={onPress}
-        style={({ pressed }) => [styles.eventCard, pressed && styles.pressed]}
-      >
-        <View style={styles.eventIcon}><Ionicons name="gift-outline" size={22} color={colors.ink} /></View>
-        <View style={styles.eventCopy}>
-          <KoreanPixelTitle variant="compact">새 이벤트 준비 중</KoreanPixelTitle>
-          <Text style={styles.eventBody}>진행 중인 혜택이 생기면 이곳에서 가장 먼저 알려드릴게요.</Text>
-        </View>
-        <Ionicons name="chevron-forward" size={18} color={colors.greenInk} />
-      </Pressable>
-    </View>
-  );
-}
-
-function MediaPlaceholder() {
-  return (
-    <View style={styles.mediaPlaceholder}>
-      <Text style={styles.mediaPlaceholderLabel}>이미지 준비 중</Text>
-    </View>
-  );
-}
-
 const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: seed.color.layer.basement },
   content: { paddingBottom: ROOT_NAVIGATION_CONTENT_INSET },
-  header: {
-    minHeight: 48,
-    paddingHorizontal: seed.spacing.globalGutter,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: seed.color.stroke.neutral,
-  },
+  brandLockup: { justifyContent: "center", gap: seed.spacing.x0_5 },
   wordmark: { width: 116, height: 17 },
+  brandTagline: { color: colors.muted, fontWeight: "700" },
   connectionNotice: {
     marginHorizontal: seed.spacing.globalGutter,
     marginTop: seed.spacing.x2,
-    borderRadius: seed.radius.r3,
+    minHeight: seed.size.touchTarget,
+    borderRadius: seed.radius.r2,
     backgroundColor: seed.color.background.brandWeak,
-    padding: seed.spacing.x3,
+    paddingLeft: seed.spacing.x3,
     flexDirection: "row",
     alignItems: "center",
     gap: seed.spacing.x2,
   },
   connectionNoticeError: { backgroundColor: seed.color.background.criticalWeak },
-  connectionNoticeText: { flex: 1, color: colors.ink, fontSize: 12, lineHeight: 18 },
-  retry: { minHeight: 36, justifyContent: "center", paddingHorizontal: 10, borderRadius: 8, backgroundColor: colors.ink },
-  retryLabel: { color: colors.white, fontSize: 11, fontWeight: "800" },
-  loading: { paddingHorizontal: seed.spacing.globalGutter, paddingVertical: 60, alignItems: "center", gap: seed.spacing.x3 },
-  loadingText: { color: colors.muted, fontSize: 13 },
+  connectionNoticeText: { flex: 1, color: colors.ink },
+  retry: { minHeight: seed.size.touchTarget, justifyContent: "center", paddingHorizontal: 10, borderRadius: seed.radius.r2, backgroundColor: colors.ink },
+  retryLabel: { color: colors.white, fontWeight: "800" },
+  retryCache: { borderLeftWidth: StyleSheet.hairlineWidth, borderLeftColor: seed.color.stroke.brand, backgroundColor: seed.color.background.transparent },
+  retryLabelCache: { color: colors.greenInk },
+  hero: {
+    position: "relative",
+    minHeight: seed.spacing.x16 + seed.spacing.x16 + seed.spacing.x9,
+    overflow: "hidden",
+    marginHorizontal: seed.spacing.globalGutter,
+    marginTop: seed.spacing.x3_5,
+    borderRadius: seed.radius.r4,
+    paddingHorizontal: seed.spacing.x5,
+    paddingVertical: seed.spacing.x6,
+    justifyContent: "center",
+    backgroundColor: colors.black,
+  },
+  heroLargeText: { minHeight: 220 },
+  heroTitle: { width: "66%", color: colors.white },
+  heroBody: { width: "64%", marginTop: seed.spacing.x3, color: "#B9C1B9", ...seed.typography.bodyCompact },
+  heroAction: { width: "64%", marginTop: seed.spacing.x3, color: colors.white, fontWeight: "800" },
+  heroMachine: { position: "absolute", top: -21, right: -10, width: "50%", height: "122%", opacity: 1 },
   sectionHeader: {
-    marginTop: seed.spacing.x7,
-    marginBottom: seed.spacing.x3_5,
+    marginTop: seed.spacing.x8,
+    marginBottom: seed.spacing.x4,
     paddingHorizontal: seed.spacing.globalGutter,
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
+    justifyContent: "flex-start",
   },
-  sectionTrailingButton: { minHeight: 36, flexDirection: "row", alignItems: "center", gap: 2, paddingLeft: seed.spacing.x3 },
-  activityCard: { marginHorizontal: seed.spacing.globalGutter, overflow: "hidden", borderRadius: seed.radius.r4, borderWidth: 1, borderColor: seed.color.stroke.neutral, backgroundColor: seed.color.layer.default },
-  activityViewport: { overflow: "hidden" },
-  activityRow: { height: DRAW_ACTIVITY_ROW_HEIGHT, flexDirection: "row", alignItems: "center", gap: seed.spacing.x2_5, paddingHorizontal: seed.spacing.x3_5 },
-  activityRowDivider: { position: "absolute", left: 0, right: 0, height: StyleSheet.hairlineWidth, backgroundColor: seed.color.stroke.neutral },
-  activityDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.brand },
-  activityTextViewport: { flex: 1, height: 20, justifyContent: "center", overflow: "hidden" },
-  activityTextTrack: { justifyContent: "center" },
-  activityTextLoopTrack: { flexDirection: "row", alignItems: "center", justifyContent: "flex-start" },
-  activityTextLoopGap: { width: DRAW_ACTIVITY_MARQUEE_GAP },
-  activityMeasureLayer: { position: "absolute", width: 10_000, opacity: 0 },
-  activityMeasureText: { width: 10_000 },
-  activityText: { color: colors.ink, fontSize: 12, lineHeight: 18, fontWeight: "600" },
-  activityPerson: { color: colors.ink, fontWeight: "900" },
-  activityProduct: { color: seed.color.foreground.brand, fontWeight: "800" },
-  activityTime: { color: colors.muted, fontSize: 10 },
-  activityEmpty: { color: colors.muted, fontSize: 12, padding: seed.spacing.x4 },
-  categoryRail: { paddingHorizontal: seed.spacing.globalGutter, paddingBottom: seed.spacing.x4, gap: seed.spacing.betweenChips },
-  productRail: { paddingHorizontal: seed.spacing.globalGutter, gap: seed.spacing.componentDefault },
-  productCard: { width: HOME_PRODUCT_CARD_WIDTH },
-  productImageFrame: { borderRadius: seed.radius.r4, overflow: "hidden", borderWidth: 1, borderColor: seed.color.stroke.neutral, backgroundColor: seed.color.layer.default },
-  productImage: { width: "100%", height: "100%" },
-  categoryBadge: { position: "absolute", top: 9, left: 9, borderRadius: seed.radius.r2, paddingHorizontal: 8, paddingVertical: 6, backgroundColor: colors.brand },
-  categoryBadgeLabel: { color: colors.ink, fontSize: 11, fontWeight: "900" },
-  productIp: { color: colors.muted, fontSize: 11, lineHeight: 16, marginTop: 9 },
-  productName: { color: colors.ink, fontSize: 14, lineHeight: 20, fontWeight: "800", marginTop: 3 },
-  productPrice: { color: colors.ink, fontSize: 15, fontWeight: "900", marginTop: 5 },
-  collectionCard: { width: HOME_PRODUCT_CARD_WIDTH },
-  collectionImageFrame: { width: "100%", overflow: "hidden", borderRadius: seed.radius.r4, backgroundColor: seed.color.background.neutralWeak },
-  gachaMachineMediaWindow: { borderWidth: 0, borderRadius: 0 },
-  kujiProductMediaWindow: { borderWidth: 0, borderRadius: 0, backgroundColor: "transparent" },
-  collectionProductIp: { color: colors.muted, fontSize: 10, lineHeight: 15, marginTop: seed.spacing.x2 },
-  collectionProductName: { color: colors.ink, fontSize: 13, lineHeight: 19, fontWeight: "800", marginTop: seed.spacing.x1 },
-  collectionProductMeta: { color: colors.muted, fontSize: 11, fontWeight: "700", marginTop: seed.spacing.x1 },
-  productFieldDivider: { marginTop: seed.spacing.x2 },
-  productCardDivider: { position: "absolute", top: 0, right: -7, bottom: 0 },
-  eventSection: { marginBottom: seed.spacing.x4 },
-  eventCard: { minHeight: 94, marginHorizontal: seed.spacing.globalGutter, paddingHorizontal: seed.spacing.x4, flexDirection: "row", alignItems: "center", gap: seed.spacing.x3, borderRadius: seed.radius.r4, backgroundColor: seed.color.background.brandSolid },
-  eventIcon: { width: 42, height: 42, borderRadius: 21, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(252, 252, 248, 0.72)" },
-  eventCopy: { flex: 1, minWidth: 0 },
-  eventBody: { color: colors.greenInk, fontSize: 11, lineHeight: 17, marginTop: seed.spacing.x1_5 },
-  mediaPlaceholder: { flex: 1, alignItems: "center", justifyContent: "center", padding: seed.spacing.x3_5, backgroundColor: "#EEF0EA" },
-  mediaPlaceholderLabel: { color: colors.muted, fontFamily: "monospace", fontSize: 9, fontWeight: "700", textAlign: "center" },
-  pressed: { opacity: seed.state.pressedOpacity },
+  sectionTitleCluster: { zIndex: 1, minWidth: 0, flexShrink: 1, gap: seed.spacing.x1 },
+  sectionSubtitle: { color: colors.muted },
+  recentDrawSummary: {
+    minHeight: 58,
+    marginHorizontal: seed.spacing.globalGutter,
+    marginTop: seed.spacing.x8,
+    paddingHorizontal: seed.spacing.x3_5,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: seed.color.stroke.neutral,
+    borderRadius: seed.radius.r3,
+    backgroundColor: seed.color.layer.default,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: seed.spacing.x3,
+  },
+  recentDrawSummaryPopulated: { minHeight: 72 },
+  recentDrawSummaryLargeText: {
+    flexDirection: "column",
+    alignItems: "stretch",
+    paddingVertical: seed.spacing.x3,
+    gap: seed.spacing.x2,
+  },
+  recentDrawTitle: { width: 114, flexShrink: 0 },
+  recentDrawTitleLargeText: { width: "auto" },
+  recentDrawReel: { position: "relative", minWidth: 0, height: 64, flex: 1, overflow: "hidden" },
+  recentDrawReelLargeText: { minWidth: 0 },
+  recentDrawReelRow: { position: "absolute", right: 0, left: 0, height: 30, flexDirection: "row", alignItems: "center", gap: seed.spacing.x2 },
+  recentDrawReelRowLargeText: { minHeight: seed.size.touchTarget, flexDirection: "row", alignItems: "center", gap: seed.spacing.x2 },
+  recentDrawReelCurrent: { top: 4, zIndex: 2, backgroundColor: seed.color.layer.default },
+  recentDrawReelNext: { top: 35, opacity: 0.42, transform: [{ scale: 0.92 }] },
+  recentDrawImageFrame: { position: "relative", width: 30, height: 30, flexShrink: 0, overflow: "hidden", borderWidth: StyleSheet.hairlineWidth, borderColor: seed.color.stroke.neutral, borderRadius: seed.radius.r1_5, backgroundColor: seed.color.background.neutralWeak },
+  recentDrawImageFrameGhost: { width: 27, height: 27 },
+  recentDrawImage: { width: "100%", height: "100%" },
+  recentDrawImageFallback: { width: "100%", height: "100%", alignItems: "center", justifyContent: "center", backgroundColor: seed.color.background.brandWeak },
+  recentDrawImageFallbackLabel: { color: colors.greenInk, fontWeight: "800" },
+  recentDrawSilhouetteOverlay: { position: "absolute", top: 0, right: 0, bottom: 0, left: 0, backgroundColor: "rgba(17, 20, 17, 0.16)" },
+  recentDrawCopy: { minWidth: 0, flex: 1 },
+  recentDrawPrize: { color: colors.ink, fontWeight: "800" },
+  recentDrawPrizeGhost: { color: colors.muted, fontWeight: "700" },
+  recentDrawRarity: { minWidth: 26, minHeight: 22, flexShrink: 0, alignItems: "center", justifyContent: "center", borderRadius: seed.radius.r1_5, backgroundColor: seed.color.background.brandWeak, paddingHorizontal: seed.spacing.x1_5 },
+  recentDrawRarityGhost: { opacity: 0.62 },
+  recentDrawRarityLabel: { color: colors.greenInk, fontWeight: "800" },
+  recentDrawEmpty: { minWidth: 0, flex: 1, color: colors.muted, textAlign: "right" },
+  recentDrawEmptyLargeText: { textAlign: "left" },
+  homeCatalogFeedState: {
+    minHeight: 176,
+    marginHorizontal: seed.spacing.globalGutter,
+    paddingVertical: seed.spacing.x8,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  homeCatalogFeedStateTitle: { textAlign: "center" },
+  homeCatalogFeedStateBody: {
+    marginTop: seed.spacing.x2,
+    color: colors.muted,
+    textAlign: "center",
+  },
+  homeCatalogFeedStateAction: { minWidth: 160, marginTop: seed.spacing.x4 },
+  sectionEmpty: { marginHorizontal: seed.spacing.globalGutter, color: colors.muted },
+  productRail: {
+    alignItems: "flex-start",
+    paddingHorizontal: seed.spacing.globalGutter,
+    gap: seed.spacing.componentDefault,
+  },
+  productCardBody: {
+    paddingHorizontal: seed.spacing.x3,
+    paddingTop: seed.spacing.x2_5,
+    paddingBottom: seed.spacing.x2_5,
+    backgroundColor: seed.color.layer.default,
+  },
+  productCardBodyGacha: {
+    paddingTop: seed.spacing.x2,
+    paddingBottom: seed.spacing.x2,
+  },
+  homeStatusBadge: { position: "absolute", top: 8, left: 8, zIndex: 2, minWidth: 42, minHeight: 22, alignItems: "center", justifyContent: "center", borderRadius: seed.radius.r1_5, borderWidth: StyleSheet.hairlineWidth, paddingHorizontal: 7, paddingVertical: 3 },
+  homeStatusBadgeBest: { borderColor: colors.brand, backgroundColor: colors.brand },
+  homeStatusBadgeNew: { borderColor: seed.color.stroke.neutral, backgroundColor: seed.color.layer.default },
+  homeStatusBadgeLabel: { color: colors.ink, fontWeight: "700", letterSpacing: 0.4 },
+  homeStatusBadgeLabelNew: { color: colors.greenInk },
+  productInventory: { marginTop: seed.spacing.x1_5 },
+  productInventoryGacha: { marginTop: seed.spacing.x1 },
+  homeInventoryQuantity: { fontWeight: "700" },
+  collectionCard: { ...catalogProductCardSurface },
+  collectionImageFrame: { width: "100%", overflow: "hidden", backgroundColor: seed.color.background.neutralWeak },
+  gachaMachineMediaWindow: { borderWidth: 0, borderRadius: seed.radius.none },
+  kujiProductMediaWindow: { borderWidth: 0, borderRadius: seed.radius.none, backgroundColor: "transparent" },
+  collectionProductIp: { color: colors.muted, ...seed.typography.catalogMetadata },
+  collectionProductName: { minHeight: 40, flexShrink: 1, color: colors.ink, ...seed.typography.catalogTitle, marginTop: seed.spacing.x1 },
+  collectionProductNameGacha: { marginTop: 0 },
+  collectionProductNameKuji: { minHeight: 0, ...seed.typography.catalogTitleWide },
+  collectionProductPrice: { color: colors.ink, ...seed.typography.catalogPrice, fontWeight: "500", marginTop: seed.spacing.x1 },
+  collectionProductPriceGacha: { marginTop: seed.spacing.x0_5 },
+  pressed: {
+    opacity: seed.state.pressedOpacity,
+    transform: [{ translateY: seed.state.pressedTranslateY }, { scale: seed.state.pressedScale }],
+  },
 });

@@ -1,3 +1,5 @@
+import { safeErrorFields } from "./lib/errors.js";
+
 type ShutdownTimer = {
   unref(): unknown;
 };
@@ -52,7 +54,7 @@ export function createGracefulShutdown(
       .then(() => app.close())
       .then(() => runtime.cancel(forcedExit))
       .catch((error: unknown) => {
-        app.log.error({ err: error, signal }, "graceful shutdown failed");
+        app.log.error({ signal, ...safeErrorFields(error) }, "graceful shutdown failed");
         runtime.setExitCode(1);
         // Keep the unref'ed watchdog active. If close left a pool, socket, or
         // other handle open, it must still force termination before Cloud Run's

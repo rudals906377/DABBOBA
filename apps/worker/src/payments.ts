@@ -1,5 +1,5 @@
 import type { DatabasePool } from "@dabboba/db";
-import { errorFields, type Logger } from "./logger.js";
+import { errorFields, persistedErrorIdentity, type Logger } from "./logger.js";
 
 const MAX_PAYMENT_RECONCILIATION_DELAY_MS = 24 * 60 * 60 * 1_000;
 
@@ -220,7 +220,7 @@ export async function reconcilePaymentBatch(
         attempt,
         outcome: "ERROR",
         observedState: null,
-        errorMessage: (error instanceof Error ? error.message : String(error)).slice(0, 1_000),
+        errorMessage: persistedErrorIdentity(error),
         attemptedAt: now,
         nextAttemptAt,
       });

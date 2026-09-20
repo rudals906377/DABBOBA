@@ -1,27 +1,56 @@
 import type { ReactNode } from "react";
 import { StyleSheet, type StyleProp, type TextStyle } from "react-native";
-import { AppText as Text } from "@/components/Typography";
+import { AppText as Text, type ReadableTextVariant } from "@/components/Typography";
 import { colors } from "@/theme";
 
-type KoreanPixelTitleVariant = "root" | "hero" | "section" | "header" | "compact";
+export type KoreanPixelTitleVariant = "root" | "hero" | "section" | "header" | "compact";
+export type KoreanPixelTitleProps = {
+  children: ReactNode;
+  variant?: KoreanPixelTitleVariant;
+  numberOfLines?: number;
+  maxFontSizeMultiplier?: number;
+  style?: StyleProp<TextStyle>;
+};
 
 export function KoreanPixelTitle({
   children,
   variant = "section",
   numberOfLines = 1,
+  maxFontSizeMultiplier = 2,
   style,
-}: {
-  children: ReactNode;
-  variant?: KoreanPixelTitleVariant;
-  numberOfLines?: number;
-  style?: StyleProp<TextStyle>;
-}) {
+}: KoreanPixelTitleProps) {
   return (
     <Text
       accessibilityRole="header"
-      maxFontSizeMultiplier={1.2}
+      maxFontSizeMultiplier={maxFontSizeMultiplier}
       numberOfLines={numberOfLines}
       style={[styles.base, styles[variant], style, styles.fixedPixelFace]}
+    >
+      {children}
+    </Text>
+  );
+}
+
+export type ReadablePageTitleProps = {
+  children: ReactNode;
+  variant?: Extract<ReadableTextVariant, "subheading" | "subtitle" | "sectionTitle" | "screenTitle">;
+  numberOfLines?: number;
+  style?: StyleProp<TextStyle>;
+};
+
+/** Dynamic titles may wrap to two lines and retain the user's system text size. */
+export function ReadablePageTitle({
+  children,
+  variant = "subtitle",
+  numberOfLines = 2,
+  style,
+}: ReadablePageTitleProps) {
+  return (
+    <Text
+      accessibilityRole="header"
+      variant={variant}
+      numberOfLines={numberOfLines}
+      style={[styles.readablePageTitle, style]}
     >
       {children}
     </Text>
@@ -41,7 +70,7 @@ export function KoreanPixelTitleAccessory({
 }) {
   return (
     <Text
-      maxFontSizeMultiplier={1.2}
+      maxFontSizeMultiplier={2}
       numberOfLines={1}
       style={[styles.accessory, style, styles.fixedPixelFace]}
     >
@@ -59,8 +88,8 @@ const styles = StyleSheet.create({
     fontWeight: "400",
   },
   root: {
-    fontSize: 22,
-    letterSpacing: -0.8,
+    fontSize: 21,
+    letterSpacing: -0.65,
     lineHeight: 29,
   },
   hero: {
@@ -69,9 +98,9 @@ const styles = StyleSheet.create({
     lineHeight: 33,
   },
   section: {
-    fontSize: 20,
+    fontSize: 19,
     letterSpacing: -0.45,
-    lineHeight: 28,
+    lineHeight: 27,
   },
   header: {
     fontSize: 16,
@@ -88,5 +117,10 @@ const styles = StyleSheet.create({
     fontSize: 12,
     letterSpacing: -0.35,
     lineHeight: 18,
+  },
+  readablePageTitle: {
+    minWidth: 0,
+    flexShrink: 1,
+    color: colors.ink,
   },
 });

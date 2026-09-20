@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type { DatabaseClient, DatabasePool, Queryable } from "@dabboba/db";
 import { withTransaction } from "@dabboba/db";
+import { persistedErrorIdentity } from "./logger.js";
 import type { OutboxPublisher } from "./outbox.js";
 import type { WorkerJob } from "./types.js";
 
@@ -274,7 +275,7 @@ export async function deadLetterPgmqMessage(
   message: PgmqMessage,
   error: unknown,
 ): Promise<void> {
-  const errorMessage = (error instanceof Error ? error.message : String(error)).slice(0, 1_000);
+  const errorMessage = persistedErrorIdentity(error);
   const payload = serializePayloadForDeadLetter(message.payload);
   await withTransaction(pool, async (client) => {
     await client.query(

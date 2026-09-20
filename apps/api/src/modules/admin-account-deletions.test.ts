@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
+  accountDeletionCompletionAvailable,
   allowedAccountDeletionDecision,
   hasAccountDeletionBlockers,
 } from "./admin-account-deletions.js";
@@ -17,10 +18,10 @@ const clearBlockers = {
   activeExchangeOfferCount: 0,
 };
 
-test("account deletion decisions are limited to open review states", () => {
-  assert.equal(allowedAccountDeletionDecision("PENDING_REVIEW", "APPROVED"), true);
+test("account deletion decisions allow only rejection fallback from open review states", () => {
+  assert.equal(allowedAccountDeletionDecision("PENDING_REVIEW", "APPROVED"), false);
   assert.equal(allowedAccountDeletionDecision("PENDING_REVIEW", "REJECTED"), true);
-  assert.equal(allowedAccountDeletionDecision("BLOCKED", "APPROVED"), true);
+  assert.equal(allowedAccountDeletionDecision("BLOCKED", "APPROVED"), false);
   assert.equal(allowedAccountDeletionDecision("BLOCKED", "REJECTED"), true);
   assert.equal(allowedAccountDeletionDecision("APPROVED", "REJECTED"), false);
   assert.equal(allowedAccountDeletionDecision("REJECTED", "APPROVED"), false);
@@ -32,6 +33,21 @@ test("approval blocker detection covers every durable asset and workflow count",
   for (const key of Object.keys(clearBlockers) as Array<keyof typeof clearBlockers>) {
     assert.equal(hasAccountDeletionBlockers({ ...clearBlockers, [key]: 1 }), true, key);
   }
+});
+
+test("admin routes cannot enter the personal-data completion step", () => {
+  assert.equal(accountDeletionCompletionAvailable("APPROVED"), false);
+  assert.equal(accountDeletionCompletionAvailable("PENDING_REVIEW"), false);
+  assert.equal(accountDeletionCompletionAvailable("BLOCKED"), false);
+  assert.equal(accountDeletionCompletionAvailable("COMPLETED"), false);
+  assert.equal(accountDeletionCompletionAvailable("REJECTED"), false);
+});
+
+test("admin completion is disabled before the legacy transaction can run", async () => {
+  const source = await readFile(new URL("../../src/modules/admin-account-deletions.ts", import.meta.url), "utf8");
+  const route = source.slice(source.indexOf('"/v1/admin/account-deletions/:requestId/completion"'));
+  assert.match(route, /throw conflict\("회원탈퇴 완료는 서버의 자동 삭제 작업에서 처리됩니다\."\)/);
+  assert.doesNotMatch(route, /withTransaction|DELETE FROM auth_identities|UPDATE users/);
 });
 
 test("admin account deletion migration keeps decisions reviewed, attributed, and non-destructive", async () => {

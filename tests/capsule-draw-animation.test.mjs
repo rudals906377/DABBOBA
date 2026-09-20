@@ -16,10 +16,10 @@ test("gacha alone mounts the capsule draw sequence", () => {
   );
   assert.match(prototypeSource, /product\.categoryId === "gacha"[\s\S]*?reducedMotion \? 420 : 3_350/);
   assert.match(prototypeSource, /:\s*1_250/);
-  assert.match(prototypeSource, /src="\/assets\/dabboba\/capsule-machine-front-pixel\.png"/);
-  assert.match(prototypeSource, /src="\/assets\/dabboba\/capsule-crank-plate-pixel\.png"/);
-  assert.match(prototypeSource, /src="\/assets\/dabboba\/capsule-crank-pixel\.png"/);
-  assert.match(prototypeSource, /src="\/assets\/dabboba\/video\/dabboba-capsule-lower-chute\.mp4"/);
+  assert.match(prototypeSource, /src="\/assets\/dabboba\/draw\/gacha\/capsule-machine-front-pixel\.png"/);
+  assert.match(prototypeSource, /src="\/assets\/dabboba\/draw\/gacha\/capsule-crank-plate-pixel\.png"/);
+  assert.match(prototypeSource, /src="\/assets\/dabboba\/draw\/gacha\/capsule-crank-pixel\.png"/);
+  assert.match(prototypeSource, /src="\/assets\/dabboba\/draw\/gacha\/video\/dabboba-capsule-lower-chute\.mp4"/);
 });
 
 test("capsule choreography is deterministic and finite", () => {

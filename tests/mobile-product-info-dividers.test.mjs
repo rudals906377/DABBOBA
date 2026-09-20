@@ -13,8 +13,6 @@ const readSource = (relativePath) => {
 const dividerSource = readSource("apps/mobile/src/components/ProductInfoDivider.tsx");
 const productSurfaceSources = [
   "apps/mobile/src/components/CatalogProductRow.tsx",
-  "apps/mobile/src/features/home/HomeScreen.tsx",
-  "apps/mobile/src/features/shop/ShopScreen.tsx",
   "apps/mobile/src/features/shop/ProductDetailScreen.tsx",
   "apps/mobile/src/features/checkout/CheckoutScreen.tsx",
   "apps/mobile/src/features/checkout/CheckoutConnectionScreen.tsx",
@@ -25,6 +23,11 @@ const productSurfaceSources = [
   "apps/mobile/src/features/profile/ProfileSectionScreen.tsx",
   "apps/mobile/src/features/kuji/KujiDrawScreen.tsx",
   "apps/mobile/src/features/kuji/KujiQueueScreen.tsx",
+].map((relativePath) => [relativePath, readSource(relativePath)]);
+
+const discoveryProductSurfaceSources = [
+  "apps/mobile/src/features/home/HomeScreen.tsx",
+  "apps/mobile/src/features/shop/ShopScreen.tsx",
 ].map((relativePath) => [relativePath, readSource(relativePath)]);
 
 test("product information dividers use one non-interactive muted physical-pixel rule", () => {
@@ -43,15 +46,22 @@ test("customer product surfaces separate identity from price and metadata throug
   }
 });
 
+test("discovery cards use spacing rather than stacking internal rules", () => {
+  for (const [relativePath, source] of discoveryProductSurfaceSources) {
+    assert.doesNotMatch(source, /import \{ ProductInfoDivider \} from "@\/components\/ProductInfoDivider"/, relativePath);
+    assert.doesNotMatch(source, /<ProductInfoDivider/, relativePath);
+    assert.doesNotMatch(source, /productCardBody:\s*\{[^}]*borderTopWidth/, relativePath);
+  }
+});
+
 test("catalog and home product boundaries stay subtle instead of adding heavy boxes", () => {
   const catalogRowSource = readSource("apps/mobile/src/components/CatalogProductRow.tsx");
   const homeSource = readSource("apps/mobile/src/features/home/HomeScreen.tsx");
   const exchangeRoomSource = readSource("apps/mobile/src/features/exchange/ExchangeRoomScreen.tsx");
 
-  assert.match(catalogRowSource, /row:\s*\{[^}]*borderWidth:\s*StyleSheet\.hairlineWidth[^}]*borderColor:\s*seed\.color\.stroke\.muted/);
-  assert.match(homeSource, /orientation="vertical"/);
-  assert.match(homeSource, /divided=\{index < todayProducts\.length - 1\}/);
-  assert.match(homeSource, /divided=\{index < collection\.products\.length - 1\}/);
-  assert.match(exchangeRoomSource, /<ProductInfoDivider style=\{styles\.priceDivider\} \/>/);
+  assert.match(catalogRowSource, /row:\s*\{[^}]*\.\.\.catalogProductCardSurface/);
+  assert.doesNotMatch(catalogRowSource, /row:\s*\{[^}]*borderWidth:/);
+  assert.match(homeSource, /collectionCard:\s*\{[^}]*\.\.\.catalogProductCardSurface/);
+  assert.match(exchangeRoomSource, /<ProductInfoDivider style=\{styles\.cardHeadingDivider\} \/>/);
   assert.doesNotMatch(exchangeRoomSource, /priceBox:\s*\{[^}]*borderTopWidth:\s*1/);
 });

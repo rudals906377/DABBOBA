@@ -7,6 +7,17 @@ scheduler step creates only its pre-approved trigger.
 
 ## Safety contract
 
+- The current Supabase project was designated production-intended on 2026-09-08.
+  This is not deployment or worker-execution approval. Default local launchers
+  use a separate loopback database and do not source the preserved production
+  connection files. Online staging must use its own database and provider
+  credentials; it has not been provisioned by the environment split.
+- Real process entrypoints require `DABBOBA_ENVIRONMENT_TIER` to match
+  `NODE_ENV`: `LOCAL`/development, `TEST`/test, or
+  `STAGING`/`PRODUCTION` with production. Production worker execution also
+  requires `DABBOBA_ENABLE_PRODUCTION_WORKER=true`. The reviewed production
+  deployment template provides these values only within the existing guarded
+  deployment workflow; setting the flag alone is not operational approval.
 - Run `ops/cloud-run/preflight.sh` first. It performs read-only `describe`,
   `list`, and IAM-policy checks and never requires mutation approval.
 - `build.sh`, `deploy.sh`, `promote-api-candidate.sh`, and
@@ -17,7 +28,7 @@ scheduler step creates only its pre-approved trigger.
 - Raw database URLs and secret values are rejected. Only enabled, numeric Secret
   Manager versions are accepted; `latest` is forbidden.
 - API and worker deployment require an exact release attestation tied to the
-  reviewed `0037` checksum and successful runtime/worker role verification.
+  reviewed `0039` checksum and successful runtime/worker role verification.
   Scheduling additionally requires a successful manual execution attestation
   tied to the same immutable worker image tag. These values are operator gates,
   not substitutes for the underlying database and Job evidence.
@@ -136,17 +147,24 @@ secret payload, IAM grant, or paid resource implicitly.
 
 Every runtime service account needs a secret-level
 `roles/secretmanager.secretAccessor` binding only on its listed secret. Apply
-all migrations through `0037_draw_result_published_version.sql`. For
+all migrations through `0039_retire_prototype_catalog.sql`. For
 a fresh database, or only when deliberately rotating a credential, provision
 both restricted login roles from a controlled operator host by streaming their
 separately generated passwords to:
 
 ```bash
 corepack pnpm --filter @dabboba/db provision:runtime-role -- --password-stdin
-corepack pnpm --filter @dabboba/db provision:worker-role -- --password-stdin
+corepack pnpm --filter @dabboba/db provision:worker-role -- --password-stdin \
+  --expected-target-hash '<independently-approved-target-sha256>'
 ```
 
-Do not rotate an existing credential on every release. Passwords are not
+The remote worker CLI requires an explicit STAGING/PRODUCTION environment tier,
+certificate-verified Supabase Session pooler 5432, and the independently approved
+target hash. It refuses an existing LOGIN unless a separately approved rotation
+explicitly supplies `--authorize-existing-login-rotation`. These switches do not
+authorize production changes. See the [operator runbook](dabboba-operations-runbook.md#worker-최초-login-준비와-비밀번호-회전-구분)
+for the target fingerprint and first-time setup boundary. Runtime provisioning
+behavior is unchanged. Do not rotate an existing credential on every release. Passwords are not
 accepted as command arguments, printed, or stored in migration SQL; store the
 resulting Session-pooler URLs directly in their separate API and worker
 secrets. These provisioning CLIs remain host/operator-only and are not present
@@ -214,9 +232,9 @@ DABBOBA_APPROVE_GCP_MUTATIONS=YES ops/cloud-run/deploy.sh migration
 # gcloud run jobs execute dabboba-migration --wait \
 #   --project="$DABBOBA_GCP_PROJECT_ID" --region=asia-northeast3
 
-# Set this exact, non-secret value only after migration 0037's checksum and the
+# Set this exact, non-secret value only after migration 0039's checksum and the
 # dabboba_runtime/dabboba_worker role suites pass against the target database.
-export DABBOBA_DATABASE_RELEASE_ATTESTATION='0037:b2f4a6eb8f79685c33d4fbd3eb63b1d947182dc78fa2dd5596663319f2c7ffa9:runtime+worker'
+export DABBOBA_DATABASE_RELEASE_ATTESTATION='0039:9bee32390788e2c57c549bfad41d882b2bb626da9b3a175182bfa240e1449502:runtime+worker'
 
 DABBOBA_APPROVE_GCP_MUTATIONS=YES ops/cloud-run/deploy.sh worker
 # Normal releases require an existing public service with a 100% serving
@@ -446,11 +464,13 @@ Before release, record the image digest; confirm `API_SURFACE=customer`; run the
 candidate smoke script at zero production traffic; exercise authenticated
 customer reads and denied writes; inspect Error Reporting and billing alerts;
 and leave migrations, worker execution, and API traffic as distinct approvals.
-The current restricted-role route integration covers catalog and notification
-preferences, while the broad API integration suite still uses the schema owner
-for fixture-heavy coverage. Expanding restricted-role route coverage is a
-production-release evidence gate even though the database ACL suites and the
-focused runtime-route test pass.
+The restricted-role route integration now covers public catalog reads,
+notification preference writes, point-funded order idempotency, gacha and kuji
+entitlement consumption/recovery, inventory ownership, default-address writes,
+and immutable shipping-request creation/readback using `dabboba_runtime`.
+Fixture-heavy breadth still runs with the schema owner, so the zero-traffic
+candidate must repeat authenticated allow/deny and write-path smoke checks with
+the deployed runtime role before production traffic is assigned.
 
 For an API rollback, list revisions and move traffic to the last known-good
 revision. Do not delete the failed revision until evidence is retained:
@@ -467,10 +487,14 @@ Jobs roll back by redeploying a previously verified immutable image. Database
 migrations are forward-only; application rollback does not reverse schema or
 data changes.
 
-The current gcloud audit found no DABBOBA project. The only configured project,
-`findy-staging`, has billing disabled, belongs to another product, and is
-explicitly refused by the scripts. Current blockers until independently
-confirmed by preflight are a dedicated DABBOBA project and exact billing link,
+The 2026-09-09 read-only inventory supersedes the earlier "no DABBOBA project"
+observation: dedicated project `dabboba-app-20260906` (`DABBOBA`) exists and is
+ACTIVE, but its billing is disabled and the Secret Manager API is disabled.
+The CLI default remains the unrelated `findy-staging`, explicitly refused by
+the scripts; do not use it or change the global default. Always pass the exact
+DABBOBA project. No API enablement, billing link, secret or IAM mutation was
+performed during this inventory. Current blockers until independently
+confirmed by preflight are the exact billing link,
 enabled APIs, existing immutable-tag Artifact Registry repository,
 existing Cloud Build and media buckets, least-privilege service accounts and
 IAM, enabled numeric secret versions, budget recipients, and produced image

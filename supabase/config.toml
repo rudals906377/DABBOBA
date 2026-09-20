@@ -1,0 +1,18 @@
+[functions.dabboba-worker]
+verify_jwt = false
+
+[functions.dabboba-api]
+verify_jwt = false
+
+[auth.email]
+otp_length = 6
+otp_expiry = 600
+max_frequency = "60s"
+
+[auth.email.template.confirmation]
+subject = "다뽀바 이메일 인증번호"
+content_path = "./supabase/templates/confirmation.html"
+
+[auth.email.template.magic_link]
+subject = "다뽀바 이메일 인증번호"
+content_path = "./supabase/templates/magic-link.html"

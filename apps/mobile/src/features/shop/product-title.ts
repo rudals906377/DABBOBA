@@ -15,6 +15,16 @@ export function productSubjectTitle(productName: string, ipName?: string | null)
   return subject || normalizedProductName;
 }
 
+export function catalogCardTitle(productName: string, ipName?: string | null): string {
+  const normalizedProductName = compactWhitespace(productName);
+  const normalizedIpName = compactWhitespace(ipName ?? "");
+  if (!normalizedIpName || normalizedProductName.includes(normalizedIpName)) {
+    return normalizedProductName;
+  }
+
+  return `${normalizedIpName} ${normalizedProductName}`;
+}
+
 function compactWhitespace(value: string): string {
   return value.trim().replace(/\s+/g, " ");
 }

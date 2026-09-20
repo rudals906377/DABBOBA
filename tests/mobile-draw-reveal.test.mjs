@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -76,14 +76,12 @@ const decodePngPixels = (asset) => {
   return { width, height, channels, pixels };
 };
 
-test("gacha and kuji share footer-free native product-open routes", () => {
+test("committed gacha and kuji opens use a footer-free native route without a preview route", () => {
   const revealRoute = read("apps/mobile/app/draw/reveal/[entitlementId].tsx");
-  const previewRoute = read("apps/mobile/app/draw/preview/[productId].tsx");
 
   assert.match(revealRoute, /DrawRevealScreen/);
-  assert.match(previewRoute, /DrawRevealScreen preview/);
-  assert.doesNotMatch(`${revealRoute}\n${previewRoute}`, /RootFloatingTabBar/);
-  assert.match(previewRoute, /if \(!__DEV__\) return <Redirect href="\/\(tabs\)\/ppoba" \/>/);
+  assert.doesNotMatch(revealRoute, /RootFloatingTabBar|preview/);
+  assert.equal(existsSync(path.join(root, "apps/mobile/app/draw/preview/[productId].tsx")), false);
 });
 
 test("a real product reveal consumes only the explicitly opened server entitlement", () => {
@@ -105,7 +103,7 @@ test("a real product reveal consumes only the explicitly opened server entitleme
   assert.doesNotMatch(screen, /Math\.random|recordInventoryUnit|INSERT INTO inventory|UPDATE inventory/);
 });
 
-test("a paid multi-kuji route reveals server entitlements one at a time and keeps the active entitlement in the URL", () => {
+test("a paid multi-kuji route supports explicit single and all presentation modes", () => {
   const screen = read("apps/mobile/src/features/draw/DrawRevealScreen.tsx");
   const sequence = read("apps/mobile/src/features/draw/draw-reveal-sequence.ts");
 
@@ -117,8 +115,11 @@ test("a paid multi-kuji route reveals server entitlements one at a time and keep
   assert.match(screen, /prepareNextCommittedResult/);
   assert.match(screen, /router\.setParams\(\{ entitlementId: nextEntitlementId \}\)/);
   assert.match(screen, /setResult\(null\)[\s\S]*?setRevealResetSignal/);
+  assert.match(screen, /resolveDrawOpenMode\(requestedMode, count\)/);
+  assert.match(screen, /verifyCommittedDrawBatch\(order/);
+  assert.match(screen, /consumeDrawsSequentially/);
   assert.match(screen, /accessibilityLabel="다음 가챠 캡슐 준비하기"/);
-  assert.match(screen, />NEXT<\/Text>/);
+  assert.match(screen, />다음 열기<\/Text>/);
   assert.doesNotMatch(screen, /Promise\.all\([\s\S]*?consumeDrawEntitlement/);
   assert.match(sequence, /pathId[\s\S]*?parsedIds\.findIndex/);
   assert.match(sequence, /nextEntitlementId: entitlementIds\[safeActiveIndex \+ 1\] \?\? null/);
@@ -128,7 +129,8 @@ test("preview sequencing stays bounded and never invents a prize", () => {
   const screen = read("apps/mobile/src/features/draw/DrawRevealScreen.tsx");
   const kuji = read("apps/mobile/src/features/kuji/KujiDrawScreen.tsx");
 
-  assert.match(screen, /preview && firstParam\(params\.mode\) === "all"/);
+  assert.match(screen, /const requestedMode = firstParam\(params\.mode\)/);
+  assert.match(screen, /resolveDrawOpenMode\(requestedMode, count\)/);
   assert.match(screen, /previewTickets\.length \|\| boundedCount\(firstParam\(params\.count\)\)/);
   assert.match(screen, /advancePreviewRevealState/);
   assert.match(screen, /completePreviewRevealState/);
@@ -154,7 +156,7 @@ test("multi-gacha summaries keep gacha semantics and hide kuji ticket labels", (
   assert.match(screen, /가챠 \$\{previewState\.openedCount\}번째 결과가 열렸어요/);
 });
 
-test("kuji selection enters reveal without an open-mode picker and reveal owns both actions", () => {
+test("kuji selection explicitly chooses an open mode after the paid slots are bound", () => {
   const kuji = read("apps/mobile/src/features/kuji/KujiDrawScreen.tsx");
   const screen = read("apps/mobile/src/features/draw/DrawRevealScreen.tsx");
 
@@ -162,7 +164,8 @@ test("kuji selection enters reveal without an open-mode picker and reveal owns b
   assert.match(kuji, /selectedTickets\.length !== purchasedCount/);
   assert.match(kuji, /onPress=\{\(\) => void openSelectedTickets\(\)\}/);
   assert.doesNotMatch(kuji, /결제 금액 확인|buildKujiPaymentConfirmation/);
-  assert.doesNotMatch(kuji, /오픈 방식 선택|chooseOpenMode|confirmOpenMode/);
+  assert.match(kuji, /presentDrawOpenModeChoice\(bindings\.length/);
+  assert.match(kuji, /totalSlots: board\.totalSlots, mode/);
   assert.match(screen, /buildPreviewOpenActions\(previewState\)/);
   assert.match(screen, /openAllLabel/);
   assert.match(screen, /onPress=\{handleOpenNextTicket\}/);
@@ -194,10 +197,12 @@ test("kuji retains its ticket surface and pre-mounted committed result through t
     "completion must not unmount the ticket/result surface and replay another entrance");
   assert.match(ticket, /settled=\{completed\}/);
   assert.match(ticket, /disabled=\{opening \|\| completed\}/);
-  assert.match(ticket, /resultReady=\{preview \? previewResultReady : Boolean\(result\)\}/);
+  assert.match(ticket, /resultReady=\{preview \? previewResultReady : Boolean\(result \|\| batchResults\.length\)\}/);
   assert.match(ticket, /onRequestOpen=\{\(\) => void openProduct\(\)\}/);
   assert.match(ticket, /onRevealSettled=\{handleRevealSettled\}/);
   assert.match(ticket, /resultContent=\{result \? \(\s*<CommittedResult[\s\S]*?result=\{result\}[\s\S]*?imageUri=\{resolveCatalogImageUrl\(result.prizeImageUrl, runtime.assetBaseUrl\)\}/);
+  assert.match(ticket, /\) : batchResults\[0\] \? \(\s*<CommittedResult[\s\S]*?result=\{batchResults\[0\]\}/,
+    "a committed Kuji batch keeps its first real server result mounted through the peel handoff");
   assert.match(ticket, /<CommittedResult[\s\S]*?\sreduceMotion\s*\/>/,
     "the ticket's shared progress owns appearance, not a second autonomous result animation");
   assert.match(ticket, /<PreviewResultStage[\s\S]*?\sopened\s[\s\S]*?\sreduceMotion\s*\/>/);
@@ -219,15 +224,19 @@ test("kuji retains its ticket surface and pre-mounted committed result through t
   }
 });
 
-test("premium kuji presentation does not expand preview batch mode into a production consume loop", () => {
+test("committed batch mode verifies the paid order and consumes sequentially without Promise.all", () => {
   const screen = read("apps/mobile/src/features/draw/DrawRevealScreen.tsx");
-  assert.match(screen, /requestedMode: RevealMode = preview && firstParam\(params.mode\) === "all" \? "all" : "single"/);
-  const batch = screen.slice(screen.indexOf("const handleOpenAllRemaining ="), screen.indexOf("const handleAction ="));
-  assert.match(batch, /if \(\s*!preview\s*\|\| sourceCategory !== "kuji"/);
-  assert.match(batch, /startPreviewOpenAll\(current\)/);
-  assert.match(batch, /setRevealResetSignal/);
-  assert.match(batch, /setQueuedPreviewOpen\("all"\)/);
-  assert.doesNotMatch(batch, /consumeDrawEntitlement|Promise\.all|fetch\(/);
+  const helper = read("apps/mobile/src/features/draw/draw-open-mode.ts");
+  const batch = screen.slice(screen.indexOf("const openAllProducts ="), screen.indexOf("const openProduct ="));
+  assert.match(screen, /resolveDrawOpenMode\(requestedMode, count\)/);
+  assert.match(batch, /fetchCheckoutOrder/);
+  assert.match(batch, /committedSequence\.activeIndex !== 0/);
+  assert.match(batch, /verifyCommittedDrawBatch/);
+  assert.match(batch, /consumeDrawsSequentially/);
+  assert.match(batch, /setBatchResults\(outcome\.results\)/);
+  assert.match(batch, /남은 뽑기에서 이어서 확인/);
+  assert.doesNotMatch(batch, /Promise\.all/);
+  assert.match(helper, /for \(const \[index, entitlementId\] of entitlementIds\.entries\(\)\)/);
   assert.match(screen, /total=\{preview && activeMode === "all" \? remainingPreviewCount : undefined\}/);
   const prepare = screen.slice(screen.indexOf("const prepareNextCommittedResult ="), screen.indexOf("const handleGachaSkip ="));
   assert.match(prepare, /if \(preview \|\| !result \|\| !revealSettled \|\| !nextEntitlementId\) return/);
@@ -275,6 +284,7 @@ test("kuji parent settlement keeps a completed preview visible after clearing it
         "a duplicate settlement must not advance another sealed ticket");
       const completed = runInNewContext(completedExpression, {
         committedResultPresented: false,
+        committedBatchSummaryVisible: false,
         previewOpened: previewState.phase === "revealed",
         previewCompleted: previewState.phase === "summary",
       });
@@ -291,6 +301,7 @@ test("kuji parent settlement keeps a completed preview visible after clearing it
         assert.equal(previewState.phase, "sealed");
         const nextCompleted = runInNewContext(completedExpression, {
           committedResultPresented: false,
+          committedBatchSummaryVisible: false,
           previewOpened: false,
           previewCompleted: false,
         });
@@ -301,6 +312,34 @@ test("kuji parent settlement keeps a completed preview visible after clearing it
       }
     }
   }
+});
+
+test("a committed Kuji batch waits for the peel handoff before replacing it with the summary", () => {
+  const screen = read("apps/mobile/src/features/draw/DrawRevealScreen.tsx");
+  const settlement = screen.slice(
+    screen.indexOf("const handleRevealSettled ="),
+    screen.indexOf("const prepareNextCommittedResult ="),
+  );
+
+  assert.match(screen, /const committedBatchReady = !preview && mode === "all" && batchResults\.length > 0/);
+  assert.match(
+    screen,
+    /const committedBatchSummaryVisible = committedBatchReady\s*&& \(sourceCategory !== "kuji" \|\| batchRevealSettled\)/,
+  );
+  assert.match(
+    settlement,
+    /sourceCategory === "kuji" && mode === "all" && batchResults\.length > 0[\s\S]*?setBatchRevealSettled\(true\)[\s\S]*?return/,
+  );
+  assert.match(screen, /resultReady=\{preview \? previewResultReady : Boolean\(result \|\| batchResults\.length\)\}/);
+  assert.match(screen, /previewCompleted \|\| committedBatchSummaryVisible \? \(/);
+
+  const summaryVisible = (category, batchReady, peelSettled) => (
+    batchReady && (category !== "kuji" || peelSettled)
+  );
+  assert.equal(summaryVisible("kuji", true, false), false);
+  assert.equal(summaryVisible("kuji", true, true), true);
+  assert.equal(summaryVisible("gacha", true, false), true,
+    "the Kuji paper handoff must not delay existing gacha summaries");
 });
 
 test("the sequential kuji result footer distinguishes selecting from opening and stays visually flat", () => {
@@ -320,7 +359,7 @@ test("the sequential kuji result footer distinguishes selecting from opening and
 test("a one-item kuji purchase stops on its single product result", () => {
   const screen = read("apps/mobile/src/features/draw/DrawRevealScreen.tsx");
 
-  assert.match(screen, /const mode: RevealMode = count === 1 \? "single" : requestedMode/);
+  assert.match(screen, /const mode: RevealMode = resolveDrawOpenMode\(requestedMode, count\)/);
   assert.match(screen, /const singlePreviewFinished = preview && count === 1/);
   assert.match(screen, /drawSequenceFinished\s*\?\s*"상품으로 돌아가기"/);
   assert.match(screen, /if \(drawSequenceFinished\) \{\s*returnToSourceProduct\(\);\s*return;\s*\}/);
@@ -331,9 +370,9 @@ test("finished gacha and kuji reveals return to their source product detail", ()
   const screen = read("apps/mobile/src/features/draw/DrawRevealScreen.tsx");
   const agentGuide = read("AGENTS.md");
 
-  assert.match(screen, /const sourceProductId = result\?\.productId \?\? snapshot\?\.product\.id \?\? productId/);
+  assert.match(screen, /const sourceProductId = result\?\.productId \?\? batchResults\[0\]\?\.productId \?\? snapshot\?\.product\.id \?\? productId/);
   assert.match(screen, /const returnToSourceProduct = async \(\) => \{[\s\S]*?router\.dismissTo\(\s*`\/product\/\$\{encodeURIComponent\(sourceProductId\)\}` as Href/);
-  assert.match(screen, /const committedSequenceFinished = committedResultPresented[\s\S]*?committedSequence\.nextEntitlementId === null/);
+  assert.match(screen, /const committedSequenceFinished = \(committedBatchSummaryVisible && committedBatchComplete\) \|\| \([\s\S]*?committedSequence\.nextEntitlementId === null/);
   assert.match(screen, /const drawSequenceFinished = committedSequenceFinished \|\| previewCompleted \|\| singlePreviewFinished/);
   assert.match(screen, /onPress=\{drawSequenceFinished \? returnToSourceProduct : goBack\}/);
   assert.doesNotMatch(screen, /router\.replace\("\/\(tabs\)\/dukroom"\)/);
@@ -445,7 +484,7 @@ test("gacha skip is a top-right action that reveals only the server-consumed res
   const screen = read("apps/mobile/src/features/draw/DrawRevealScreen.tsx");
 
   assert.match(screen, /accessibilityLabel="가챠 애니메이션 건너뛰기"/);
-  assert.match(screen, />SKIP<\/Text>/);
+  assert.match(screen, />바로 열기<\/Text>/);
   assert.match(screen, /const handleGachaSkip = \(\) => \{/);
   assert.match(screen, /skipRequestedRef\.current = true/);
   assert.match(screen, /await consumeDrawEntitlement\(/);
@@ -486,7 +525,7 @@ test("gacha and kuji share the same measured thirty-six-ember field and one cloc
   assert.match(screen, /const isDrawCategory = sourceCategory === "kuji" \|\| sourceCategory === "gacha"/);
   assert.match(screen, /const showStageHeader = !isDrawCategory/);
   assert.match(screen, /showStageHeader \? \([\s\S]*?styles\.stageHeader/);
-  assert.match(screen, /previewCompleted \? \([\s\S]*?styles\.summaryContent[\s\S]*?styles\.stageHeader/);
+  assert.match(screen, /previewCompleted \|\| committedBatchSummaryVisible \? \([\s\S]*?styles\.summaryContent[\s\S]*?styles\.stageHeader/);
   assert.match(
     screen,
     /styles\.stage,[\s\S]*?isDrawCategory && styles\.expandedDrawStage,[\s\S]*?sourceCategory === "gacha" && styles\.fullGachaStage/,
@@ -547,9 +586,9 @@ test("the sealed kuji ticket uses ten smaller left-edge perforation marks", () =
 test("the sealed kuji reveal keeps its outer background still while the complete inner ticket layer peels", () => {
   const kujiTicket = read("apps/mobile/src/features/draw/KujiPeelTicket.tsx");
   const agentGuide = read("AGENTS.md");
-  const frontAsset = readFileSync(path.join(root, "apps/mobile/assets/kuji-ticket-front.png"));
-  const outerAsset = readFileSync(path.join(root, "apps/mobile/assets/kuji-ticket-outer-layer.png"));
-  const peelAsset = readFileSync(path.join(root, "apps/mobile/assets/kuji-ticket-peel-layer.png"));
+  const frontAsset = readFileSync(path.join(root, "apps/mobile/assets/draw/kuji/kuji-ticket-front.png"));
+  const outerAsset = readFileSync(path.join(root, "apps/mobile/assets/draw/kuji/kuji-ticket-outer-layer.png"));
+  const peelAsset = readFileSync(path.join(root, "apps/mobile/assets/draw/kuji/kuji-ticket-peel-layer.png"));
   const pngHeader = (asset) => ({
     width: asset.readUInt32BE(16),
     height: asset.readUInt32BE(20),
@@ -558,8 +597,8 @@ test("the sealed kuji reveal keeps its outer background still while the complete
 
   assert.deepEqual(pngHeader(outerAsset), { width: 1517, height: 1037, colorType: 6 });
   assert.deepEqual(pngHeader(peelAsset), { width: 1517, height: 1037, colorType: 6 });
-  assert.match(kujiTicket, /KUJI_TICKET_OUTER_LAYER = require\("\.\.\/\.\.\/\.\.\/assets\/kuji-ticket-outer-layer\.png"\)/);
-  assert.match(kujiTicket, /KUJI_TICKET_PEEL_LAYER = require\("\.\.\/\.\.\/\.\.\/assets\/kuji-ticket-peel-layer\.png"\)/);
+  assert.match(kujiTicket, /KUJI_TICKET_OUTER_LAYER = require\("\.\.\/\.\.\/\.\.\/assets\/draw\/kuji\/kuji-ticket-outer-layer\.png"\)/);
+  assert.match(kujiTicket, /KUJI_TICKET_PEEL_LAYER = require\("\.\.\/\.\.\/\.\.\/assets\/draw\/kuji\/kuji-ticket-peel-layer\.png"\)/);
   assert.match(kujiTicket, /<View pointerEvents="none" style=\{styles\.ticketOuterLayer\}>[\s\S]*?source=\{KUJI_TICKET_OUTER_LAYER\}[\s\S]*?styles\.tearEdge/);
   assert.match(kujiTicket, /<Animated\.View style=\{\[styles\.ticketPeelLayer, peelLayerStyle\]\}>[\s\S]*?source=\{KUJI_TICKET_PEEL_LAYER\}[\s\S]*?styles\.ticketCopy[\s\S]*?styles\.pullArrowWindow/);
   assert.doesNotMatch(kujiTicket, /ticketOuterLayer, peelLayerStyle/);
@@ -635,7 +674,7 @@ test("the sealed kuji ticket centers the canonical DABBOBA wordmark instead of K
   const kujiTicket = read("apps/mobile/src/features/draw/KujiPeelTicket.tsx");
   const agentGuide = read("AGENTS.md");
 
-  assert.match(kujiTicket, /const DABBOBA_WORDMARK = require\("\.\.\/\.\.\/\.\.\/assets\/dabboba-wordmark\.png"\)/);
+  assert.match(kujiTicket, /const DABBOBA_WORDMARK = require\("\.\.\/\.\.\/\.\.\/assets\/brand\/dabboba-wordmark\.png"\)/);
   assert.match(kujiTicket, /source=\{DABBOBA_WORDMARK\}/);
   assert.match(kujiTicket, /styles\.ticketWordmark/);
   assert.doesNotMatch(kujiTicket, /<Text style=\{styles\.kujiLabel\}>KUJI<\/Text>/);

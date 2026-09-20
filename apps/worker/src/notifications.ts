@@ -14,6 +14,7 @@ export type Notification = NotificationTemplate & {
 
 export type NotificationDelivery = {
   deliver(notification: Notification): Promise<void>;
+  reconcile?(): Promise<number>;
 };
 
 type NotificationRow = {
@@ -63,6 +64,21 @@ export function notificationTemplate(event: OutboxEvent): NotificationTemplate |
       return { kind: "SHIPPING_DELIVERED", title: "배송이 완료됐어요", body: "수령한 상품을 확인해 주세요." };
     case "shipping.cancelled":
       return { kind: "SHIPPING_CANCELLED", title: "배송 신청이 취소됐어요", body: "배송 신청 내역에서 처리 결과를 확인해 주세요." };
+    case "inventory.storage_expiry_reminder": {
+      const remainingDays = event.payload.remainingDays;
+      if (typeof remainingDays !== "number" || ![14, 7, 3, 1].includes(remainingDays)) return null;
+      return {
+        kind: "STORAGE_EXPIRY_REMINDER",
+        title: `보관 만료 ${remainingDays}일 전이에요`,
+        body: "보관함에서 만료일과 현재 상품 상태를 확인해 주세요.",
+      };
+    }
+    case "inventory.storage_expired_hold":
+      return {
+        kind: "STORAGE_EXPIRED_HOLD",
+        title: "보관 기간이 만료되어 보류됐어요",
+        body: "상품은 자동 폐기되지 않아요. 보관함에서 확인한 뒤 고객센터로 문의해 주세요.",
+      };
     case "inquiry.answered":
       return { kind: "INQUIRY_ANSWERED", title: "문의 답변이 도착했어요", body: "고객센터에서 운영자 답변을 확인해 주세요." };
     case "user.warning_requested":
@@ -117,10 +133,18 @@ function notificationData(event: OutboxEvent): Record<string, unknown> {
     const reportId = stringPayload(event, "reportId");
     return {
       ...(reportId ? { reportId } : {}),
+      aggregateType: event.aggregateType,
+      aggregateId: event.aggregateId,
       outboxEventId: event.id,
     };
   }
-  return { ...event.payload, outboxEventId: event.id, correlationId: event.correlationId };
+  return {
+    ...event.payload,
+    aggregateType: event.aggregateType,
+    aggregateId: event.aggregateId,
+    outboxEventId: event.id,
+    correlationId: event.correlationId,
+  };
 }
 
 async function resolveUserId(client: DatabaseClient, event: OutboxEvent): Promise<string | null> {
@@ -206,7 +230,13 @@ export class HttpNotificationDelivery implements NotificationDelivery {
         "idempotency-key": notification.id,
         ...(this.token ? { authorization: `Bearer ${this.token}` } : {}),
       },
-      body: JSON.stringify(notification),
+      body: JSON.stringify({
+        ...notification,
+        pushData: {
+          kind: "ACCOUNT_NOTIFICATION",
+          notificationId: notification.id,
+        },
+      }),
       redirect: "error",
       signal: AbortSignal.timeout(5_000),
     });

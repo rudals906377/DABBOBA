@@ -1,7 +1,5 @@
-import { Ionicons } from "@expo/vector-icons";
-import Constants from "expo-constants";
-import { type Href, useRouter } from "expo-router";
-import { useEffect, useMemo, useState } from "react";
+import { type Href, useFocusEffect, useRouter } from "expo-router";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Alert,
   KeyboardAvoidingView,
@@ -12,6 +10,8 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { DecorativeIonicon } from "@/components/DecorativeIonicon";
+import { DetailPageHeader } from "@/components/DetailPageHeader";
 import { KoreanPixelTitle } from "@/components/RootCategoryTitle";
 import { AppText as Text, AppTextInput } from "@/components/Typography";
 import { SeedActionButton, SeedChip, SeedInputShell } from "@/design-system/components";
@@ -20,8 +20,9 @@ import {
   createInquiry,
   type InquiryCategory,
 } from "@/features/profile/inquiry-api";
-import { resolveMobileRuntimeConfig, type MobilePlatform } from "@/lib/runtime-config";
-import { readAuthTokens } from "@/lib/session-store";
+import { ProfileSessionGate, isProfileSessionBlocked } from "@/features/profile/ProfileSessionGate";
+import { ProfileApiError } from "@/features/profile/profile-api";
+import { useProfileSnapshot } from "@/features/profile/use-profile-snapshot";
 import { colors } from "@/theme";
 
 const TITLE_LIMIT = 160;
@@ -38,18 +39,8 @@ const CATEGORY_OPTIONS: ReadonlyArray<{ value: InquiryCategory; label: string }>
 
 export function InquiryCreateScreen() {
   const router = useRouter();
-  const runtime = useMemo(
-    () => resolveMobileRuntimeConfig({
-      configuredApiUrl: process.env.EXPO_PUBLIC_DABBOBA_API_URL,
-      configuredAssetBaseUrl: process.env.EXPO_PUBLIC_DABBOBA_ASSET_BASE_URL,
-      metroHostUri: Constants.expoConfig?.hostUri,
-      platform: Platform.OS as MobilePlatform,
-      development: __DEV__,
-    }),
-    [],
-  );
-  const [accessToken, setAccessToken] = useState<string | null>(null);
-  const [ready, setReady] = useState(false);
+  const profileState = useProfileSnapshot();
+  const hasFocusedOnce = useRef(false);
   const [category, setCategory] = useState<InquiryCategory>("ORDER");
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
@@ -57,23 +48,15 @@ export function InquiryCreateScreen() {
   const [contentFocused, setContentFocused] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const [expired, setExpired] = useState(false);
 
+  useFocusEffect(useCallback(() => {
+    if (hasFocusedOnce.current) void profileState.reload();
+    else hasFocusedOnce.current = true;
+  }, [profileState.reload]));
   useEffect(() => {
-    let active = true;
-    void readAuthTokens()
-      .then((tokens) => {
-        if (active) setAccessToken(tokens?.accessToken ?? null);
-      })
-      .catch(() => {
-        if (active) setAccessToken(null);
-      })
-      .finally(() => {
-        if (active) setReady(true);
-      });
-    return () => {
-      active = false;
-    };
-  }, []);
+    if (profileState.status === "authenticated") setExpired(false);
+  }, [profileState.status]);
 
   const formComplete = Boolean(title.trim() && content.trim());
 
@@ -89,17 +72,16 @@ export function InquiryCreateScreen() {
   const submit = async () => {
     const nextTitle = title.trim();
     const nextContent = content.trim();
-    if (!ready || !nextTitle || !nextContent || submitting) return;
+    if (profileState.status === "loading" || !nextTitle || !nextContent || submitting) return;
 
     setSubmitting(true);
     setError("");
     try {
-      if (!accessToken) {
-        Alert.alert("로그인이 필요해요", "로그인하면 1:1 문의를 접수할 수 있어요.");
+      if (!profileState.accessToken) {
         return;
       }
 
-      const created = await createInquiry(runtime.apiBaseUrl, accessToken, {
+      const created = await createInquiry(profileState.runtime.apiBaseUrl, profileState.accessToken, {
         category,
         title: nextTitle,
         content: nextContent,
@@ -109,6 +91,11 @@ export function InquiryCreateScreen() {
         { text: "확인", onPress: () => openDetail(created.id) },
       ]);
     } catch (cause) {
+      if (cause instanceof ProfileApiError && cause.status === 401) {
+        setExpired(true);
+        setError("");
+        return;
+      }
       setError(cause instanceof Error ? cause.message : "문의를 접수하지 못했습니다.");
     } finally {
       setSubmitting(false);
@@ -117,19 +104,7 @@ export function InquiryCreateScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea} edges={["top", "bottom", "left", "right"]}>
-      <View style={styles.header}>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="고객센터로 돌아가기"
-          hitSlop={10}
-          onPress={goBack}
-          style={({ pressed }) => [styles.headerAction, pressed && styles.pressed]}
-        >
-          <Ionicons name="chevron-back" size={26} color={colors.ink} />
-        </Pressable>
-        <KoreanPixelTitle variant="header">1:1 문의 작성</KoreanPixelTitle>
-        <View style={styles.headerAction} />
-      </View>
+      <DetailPageHeader title="1:1 문의 작성" titleMode="pixel" onBack={goBack} backLabel="고객센터로 돌아가기" />
 
       <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === "ios" ? "padding" : undefined}>
         <ScrollView
@@ -137,6 +112,11 @@ export function InquiryCreateScreen() {
           keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
           keyboardShouldPersistTaps="handled"
         >
+          {expired || isProfileSessionBlocked(profileState.status) ? (
+            <ProfileSessionGate status={expired ? "expired" : profileState.status as "guest" | "expired"} returnTo="/profile/inquiries/new" guestBody="로그인하면 1:1 문의를 접수할 수 있어요." />
+          ) : profileState.status === "error" ? (
+            <View style={styles.errorBox}><Text style={styles.errorText}>{profileState.message}</Text><SeedActionButton label="다시 불러오기" variant="neutralSolid" onPress={profileState.reload} /></View>
+          ) : <>
           <View style={styles.fieldBlock}>
             <Text style={styles.fieldLabel}>문의 유형</Text>
             <View style={styles.categories}>
@@ -196,18 +176,19 @@ export function InquiryCreateScreen() {
 
           {error ? (
             <View accessibilityRole="alert" style={styles.errorBox}>
-              <Ionicons name="alert-circle-outline" size={20} color={colors.danger} />
+              <DecorativeIonicon name="alert-circle-outline" size={20} color={colors.danger} />
               <Text style={styles.errorText}>{error}</Text>
             </View>
           ) : null}
 
           <SeedActionButton
             label="문의 접수하기"
-            loading={submitting || !ready}
+            loading={submitting || profileState.status === "loading"}
             disabled={!formComplete}
             onPress={() => void submit()}
             style={styles.submitButton}
           />
+          </>}
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -219,12 +200,12 @@ const styles = StyleSheet.create({
   flex: { flex: 1 },
   header: { minHeight: seed.size.topNavigation, flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: seed.color.stroke.neutral, backgroundColor: seed.color.layer.default },
   headerAction: { width: 56, height: 56, alignItems: "center", justifyContent: "center" },
-  pressed: { opacity: seed.state.pressedOpacity },
+  pressed: { opacity: seed.state.pressedOpacity, transform: [{ scale: seed.state.pressedScale }] },
   content: { paddingHorizontal: seed.spacing.globalGutter, paddingTop: seed.spacing.x4_5, paddingBottom: seed.spacing.screenBottom },
   fieldBlock: { marginBottom: seed.spacing.x5 },
   fieldHeading: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: seed.spacing.x2 },
   fieldLabel: { color: seed.color.foreground.neutral, ...seed.typography.bodyStrong, marginBottom: seed.spacing.x2 },
-  counter: { color: colors.muted, fontSize: 10 },
+  counter: { color: colors.muted, ...seed.typography.finePrint },
   categories: { flexDirection: "row", flexWrap: "wrap", gap: seed.spacing.betweenChips },
   titleInput: { flex: 1, minHeight: seed.size.input, color: colors.ink, fontSize: 14, paddingVertical: 0 },
   contentShell: { minHeight: 210, alignItems: "flex-start", paddingVertical: seed.spacing.x3_5 },

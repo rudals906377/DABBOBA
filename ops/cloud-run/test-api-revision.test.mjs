@@ -35,7 +35,7 @@ const modes = {
 function expected(mode = "mixed") {
   const settings = { ...base, ...modes[mode] };
   const plain = {
-    NODE_ENV: "production", API_SURFACE: "customer", LOG_LEVEL: "info", SUPABASE_URL: base.DABBOBA_SUPABASE_URL,
+    NODE_ENV: "production", DABBOBA_ENVIRONMENT_TIER: "PRODUCTION", API_SURFACE: "customer", LOG_LEVEL: "info", SUPABASE_URL: base.DABBOBA_SUPABASE_URL,
     SUPABASE_JWT_AUDIENCE: "authenticated", WEB_ORIGINS: base.DABBOBA_WEB_ORIGINS, PAYMENT_PROVIDER: "UNCONFIGURED",
     MEDIA_STORAGE_PROVIDER: settings.DABBOBA_MEDIA_STORAGE_PROVIDER || "gcs",
   };

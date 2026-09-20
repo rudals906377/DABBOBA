@@ -19,16 +19,25 @@ test("account deletion queue is permission-gated and reachable from admin naviga
   assert.match(detailPage, /requireCapability\("accountDeletions\.manage"\)/);
 });
 
-test("review form records only approval or rejection and exposes no destructive completion control", async () => {
-  const [actions, detailPage] = await Promise.all([
+test("account deletion is monitored as an automatic worker flow without manual approval or completion controls", async () => {
+  const [actions, detailPage, listPage] = await Promise.all([
     readFile(join(adminRoot, "lib/actions.ts"), "utf8"),
     readFile(join(adminRoot, "app/(admin)/account-deletions/[requestId]/page.tsx"), "utf8"),
+    readFile(join(adminRoot, "app/(admin)/account-deletions/page.tsx"), "utf8"),
   ]);
   assert.match(actions, /ACCOUNT_DELETION_DECISIONS = \["APPROVED", "REJECTED"\]/);
   assert.match(actions, /\/v1\/admin\/account-deletions\/\$\{id\(form, "requestId"\)\}\/decision/);
-  assert.match(detailPage, /실제 삭제나 익명화는 별도 보존 정책과 수동 절차가 마련되기 전까지 제공되지 않습니다/);
-  assert.doesNotMatch(actions, /hard.?delete|anonym|COMPLETED/i);
-  assert.doesNotMatch(detailPage, /계정 삭제 실행|완료 처리|hard.?delete/i);
+  assert.match(actions, /export async function completeAccountDeletion/);
+  assert.match(actions, /\/v1\/admin\/account-deletions\/\$\{id\(form, "requestId"\)\}\/completion/);
+  assert.match(detailPage, /자동 삭제 worker 처리 중/);
+  assert.match(detailPage, /detail\.deletionJob/);
+  assert.match(detailPage, /name="decision" value="REJECTED"/);
+  assert.doesNotMatch(detailPage, /completeAccountDeletion/);
+  assert.doesNotMatch(detailPage, /개인정보 제거 후 탈퇴 완료/);
+  assert.doesNotMatch(detailPage, /value="APPROVED"/);
+  assert.match(detailPage, /detail\.authDeletionStatus/);
+  assert.match(listPage, /"PROCESSING"/);
+  assert.match(listPage, /관리자 승인 없이 진행되는/);
 });
 
 test("generic user status controls cannot submit account deletion", async () => {

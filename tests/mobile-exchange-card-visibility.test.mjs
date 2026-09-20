@@ -16,22 +16,27 @@ function inventory({ category = "gacha", sourceType = "GACHA", status = "OWNED" 
   };
 }
 
-test("card inventory stays modeled but cannot be newly listed or offered", () => {
-  assert.equal(isCustomerEligibleExchangeInventory(inventory({ category: "tcg" })), false);
-
-  for (const category of ["gacha", "kuji", "figure"]) {
+test("only current customer categories can be newly listed or offered", () => {
+  for (const category of ["gacha", "kuji"]) {
     assert.equal(isCustomerEligibleExchangeInventory(inventory({ category })), true);
+  }
+
+  for (const category of ["figure", "tcg"]) {
+    assert.equal(isCustomerEligibleExchangeInventory(inventory({ category })), false);
   }
 
   assert.equal(isCustomerEligibleExchangeInventory(inventory({ sourceType: "KUJI" })), false);
   assert.equal(isCustomerEligibleExchangeInventory(inventory({ status: "SHIPPING" })), false);
 });
 
-test("live exchange discovery hides any bundle or offer containing a card product", () => {
+test("live exchange discovery hides bundles containing removed categories", () => {
+  assert.equal(isCustomerVisibleExchangeBundle([
+    inventory({ category: "gacha", status: "EXCHANGE_LISTED" }),
+  ]), true);
   assert.equal(isCustomerVisibleExchangeBundle([
     inventory({ category: "gacha", status: "EXCHANGE_LISTED" }),
     inventory({ category: "figure", status: "EXCHANGE_LISTED" }),
-  ]), true);
+  ]), false);
   assert.equal(isCustomerVisibleExchangeBundle([
     inventory({ category: "gacha", status: "EXCHANGE_LISTED" }),
     inventory({ category: "tcg", status: "EXCHANGE_LISTED" }),
@@ -39,11 +44,15 @@ test("live exchange discovery hides any bundle or offer containing a card produc
   assert.equal(isCustomerVisibleExchangeBundle([]), false);
 });
 
-test("cached exchange projections also reject card products", () => {
+test("cached exchange projections also reject removed categories", () => {
   assert.equal(areCustomerVisibleExchangeProducts([
     { category: "gacha" },
     { category: "kuji" },
   ]), true);
+  assert.equal(areCustomerVisibleExchangeProducts([
+    { category: "gacha" },
+    { category: "figure" },
+  ]), false);
   assert.equal(areCustomerVisibleExchangeProducts([
     { category: "gacha" },
     { category: "tcg" },

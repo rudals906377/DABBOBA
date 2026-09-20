@@ -6,6 +6,9 @@ import {
   isCustomerVisibleProductCategory,
 } from "@/features/catalog/product-categories";
 import { createMobileDabbobaClient as createDabbobaClient } from "@/lib/mobile-api-client";
+import { createGuestSnapshot } from "@/features/profile/guest-profile-snapshot";
+
+export { createGuestSnapshot } from "@/features/profile/guest-profile-snapshot";
 
 type Actor = components["schemas"]["UserActor"];
 type AccountProfile = components["schemas"]["AccountProfile"];
@@ -16,6 +19,7 @@ type InventoryUnit = components["schemas"]["InventoryUnit"];
 type AccountOrder = components["schemas"]["AccountOrder"];
 type PointLedgerEntry = components["schemas"]["PointLedgerEntry"];
 type ShippingRequest = components["schemas"]["AccountShippingRequest"];
+export type ShippingQuote = components["schemas"]["ShippingQuote"];
 type WantedRequest = components["schemas"]["WantedRequest"];
 type Notice = components["schemas"]["Notice"];
 type Inquiry = components["schemas"]["Inquiry"];
@@ -41,8 +45,24 @@ export type ProfileSnapshot = {
   notices: Notice[];
   inquiries: Inquiry[];
   notificationPreferences: NotificationPreferences;
+  sectionErrors: Partial<Record<ProfileSnapshotSection, string>>;
   fetchedAt: string;
 };
+
+export type ProfileSnapshotSection =
+  | "catalog"
+  | "wanted"
+  | "notices"
+  | "address"
+  | "wishlist"
+  | "inventory"
+  | "orders"
+  | "points"
+  | "shipping"
+  | "inquiries"
+  | "preferences";
+
+export type ProfileSnapshotScope = "full" | "storage";
 
 export type PointReturnResult = {
   id: string;
@@ -62,26 +82,10 @@ export class ProfileApiError extends Error {
   }
 }
 
-const IDS = {
-  user: "10000000-0000-4000-8000-000000000001",
-  wishlistOne: "10000000-0000-4000-8000-000000000011",
-  wishlistTwo: "10000000-0000-4000-8000-000000000012",
-  inventoryOne: "10000000-0000-4000-8000-000000000021",
-  inventoryTwo: "10000000-0000-4000-8000-000000000022",
-  shippedInventory: "10000000-0000-4000-8000-000000000023",
-  order: "10000000-0000-4000-8000-000000000031",
-  pointOne: "10000000-0000-4000-8000-000000000041",
-  pointTwo: "10000000-0000-4000-8000-000000000042",
-  shipping: "10000000-0000-4000-8000-000000000051",
-  wanted: "10000000-0000-4000-8000-000000000061",
-  notice: "10000000-0000-4000-8000-000000000071",
-  inquiry: "10000000-0000-4000-8000-000000000081",
-  address: "10000000-0000-4000-8000-000000000091",
-} as const;
-
 export async function fetchProfileSnapshot(
   apiBaseUrl: string,
   accessToken?: string,
+  options: { scope?: ProfileSnapshotScope } = {},
 ): Promise<ProfileSnapshot> {
   const client = createDabbobaClient({
     baseUrl: apiBaseUrl,
@@ -89,15 +93,34 @@ export async function fetchProfileSnapshot(
     ...(accessToken ? { token: () => accessToken } : {}),
   });
 
+  if (options.scope === "storage") {
+    return fetchStorageProfileSnapshot(client, accessToken);
+  }
+
   const [productsResult, ipsResult, wantedResult, noticesResult] = await Promise.all([
     client.GET("/v1/catalog/products", { params: { query: { limit: 100 } } }),
     client.GET("/v1/catalog/ips", { params: { query: { limit: 100 } } }),
     client.GET("/v1/wanted-requests", { params: { query: { limit: 20 } } }),
     client.GET("/v1/notices", { params: { query: { limit: 20 } } }),
   ]);
-  const products = productsResult.data?.items ?? [];
+  const sectionErrors: ProfileSnapshot["sectionErrors"] = {};
+  if (!productsResult.data) {
+    throw new ProfileApiError(
+      productsResult.response.status,
+      errorMessage(productsResult.error, "상품 정보를 불러오지 못했습니다."),
+    );
+  }
+  if (!ipsResult.data) {
+    throw new ProfileApiError(
+      ipsResult.response.status,
+      errorMessage(ipsResult.error, "작품 정보를 불러오지 못했습니다."),
+    );
+  }
+  if (!wantedResult.data) sectionErrors.wanted = errorMessage(wantedResult.error, "신청방을 불러오지 못했습니다.");
+  if (!noticesResult.data) sectionErrors.notices = errorMessage(noticesResult.error, "공지사항을 불러오지 못했습니다.");
+  const products = productsResult.data.items;
   const ipNames = Object.fromEntries(
-    (ipsResult.data?.items ?? []).map((ip) => [ip.id, ip.nameKo]),
+    ipsResult.data.items.map((ip) => [ip.id, ip.nameKo]),
   );
   const wantedRequests = await attachWantedMediaUrls(
     client,
@@ -105,17 +128,18 @@ export async function fetchProfileSnapshot(
       isCustomerVisibleProductCategory(request.category)
     )),
   );
+  const notices = noticesResult.data?.items ?? [];
 
   if (!accessToken) {
-    if (!products.length) {
-      throw new Error(errorMessage(productsResult.error, "상품 정보를 불러오지 못했습니다."));
-    }
-    return createExampleSnapshot(
+    return {
+      ...createGuestSnapshot(
       products,
       ipNames,
       wantedRequests,
-      noticesResult.data?.items ?? [],
-    );
+      notices,
+      ),
+      sectionErrors,
+    };
   }
 
   const [
@@ -136,7 +160,7 @@ export async function fetchProfileSnapshot(
     client.GET("/v1/account/basic-info"),
     client.GET("/v1/account/default-address"),
     client.GET("/v1/account/wishlist", { params: { query: { limit: 50 } } }),
-    client.GET("/v1/account/inventory", { params: { query: { limit: 50 } } }),
+    client.GET("/v1/account/inventory", { params: { query: { limit: 100 } } }),
     client.GET("/v1/account/orders", { params: { query: { limit: 50 } } }),
     client.GET("/v1/account/points", { params: { query: { limit: 50 } } }),
     client.GET("/v1/account/shipping-requests", { params: { query: { limit: 50 } } }),
@@ -151,13 +175,38 @@ export async function fetchProfileSnapshot(
       errorMessage(failed.error, "로그인 정보를 확인하지 못했습니다."),
     );
   }
-  if (!pointsResult.data || !preferencesResult.data) {
-    const failed = !pointsResult.data ? pointsResult : preferencesResult;
-    throw new ProfileApiError(
-      failed.response.status,
-      errorMessage(failed.error, "내정보를 모두 불러오지 못했습니다."),
-    );
+  const defaultAddress = addressResult.data ?? null;
+  if (!addressResult.data && addressResult.response.status !== 404) {
+    sectionErrors.address = errorMessage(addressResult.error, "기본 배송지를 불러오지 못했습니다.");
   }
+  if (!wishlistResult.data) sectionErrors.wishlist = errorMessage(wishlistResult.error, "찜 목록을 불러오지 못했습니다.");
+  if (!inventoryResult.data) sectionErrors.inventory = errorMessage(inventoryResult.error, "보관함을 불러오지 못했습니다.");
+  if (!ordersResult.data) sectionErrors.orders = errorMessage(ordersResult.error, "구매 내역을 불러오지 못했습니다.");
+  if (!pointsResult.data) sectionErrors.points = errorMessage(pointsResult.error, "포인트 내역을 불러오지 못했습니다.");
+  if (!shippingResult.data) sectionErrors.shipping = errorMessage(shippingResult.error, "배송 내역을 불러오지 못했습니다.");
+  if (!inquiriesResult.data) sectionErrors.inquiries = errorMessage(inquiriesResult.error, "문의 내역을 불러오지 못했습니다.");
+  if (!preferencesResult.data) sectionErrors.preferences = errorMessage(preferencesResult.error, "알림 설정을 불러오지 못했습니다.");
+
+  const inventoryItems = [...(inventoryResult.data?.items ?? [])];
+  const seenInventoryCursors = new Set<string>();
+  let inventoryCursor = inventoryResult.data?.nextCursor ?? undefined;
+  while (inventoryCursor) {
+    if (seenInventoryCursors.has(inventoryCursor)) {
+      throw new ProfileApiError(502, "보관함 페이지가 반복되어 전체 목록을 확인하지 못했습니다.");
+    }
+    seenInventoryCursors.add(inventoryCursor);
+    const pageResult = await client.GET("/v1/account/inventory", {
+      params: { query: { limit: 100, cursor: inventoryCursor } },
+    });
+    if (!pageResult.data) {
+      sectionErrors.inventory = errorMessage(pageResult.error, "보관함을 모두 불러오지 못했습니다.");
+      break;
+    }
+    const page = pageResult.data;
+    inventoryItems.push(...page.items);
+    inventoryCursor = page.nextCursor ?? undefined;
+  }
+  const guestDefaults = createGuestSnapshot([], {}, [], []);
 
   return {
     isExample: false,
@@ -166,20 +215,117 @@ export async function fetchProfileSnapshot(
     actor: meResult.data.actor,
     profile: profileResult.data,
     basicInfo: basicInfoResult.data,
-    defaultAddress: addressResult.data ?? null,
+    defaultAddress,
     wishlist: (wishlistResult.data?.items ?? []).filter((item) => (
       isCustomerBrowsableCatalogCategory(item.product.category)
     )),
-    inventory: inventoryResult.data?.items ?? [],
+    inventory: inventoryItems,
     orders: ordersResult.data?.items ?? [],
-    pointBalance: pointsResult.data.balance,
-    pointHistory: pointsResult.data.items,
+    pointBalance: pointsResult.data?.balance ?? 0,
+    pointHistory: pointsResult.data?.items ?? [],
     shippingRequests: shippingResult.data?.items ?? [],
     wantedRequests,
-    notices: noticesResult.data?.items ?? [],
+    notices,
     inquiries: inquiriesResult.data?.items ?? [],
-    notificationPreferences: preferencesResult.data,
+    notificationPreferences: preferencesResult.data ?? guestDefaults.notificationPreferences,
+    sectionErrors,
     fetchedAt: new Date().toISOString(),
+  };
+}
+
+async function fetchStorageProfileSnapshot(
+  client: ReturnType<typeof createDabbobaClient>,
+  accessToken?: string,
+): Promise<ProfileSnapshot> {
+  if (!accessToken) return createGuestSnapshot([], {}, [], []);
+
+  const [productsResult, ipsResult, meResult, profileResult, basicInfoResult, addressResult, inventoryResult] = await Promise.all([
+    client.GET("/v1/catalog/products", { params: { query: { limit: 100 } } }),
+    client.GET("/v1/catalog/ips", { params: { query: { limit: 100 } } }),
+    client.GET("/v1/auth/me"),
+    client.GET("/v1/account/profile"),
+    client.GET("/v1/account/basic-info"),
+    client.GET("/v1/account/default-address"),
+    client.GET("/v1/account/inventory", { params: { query: { limit: 100 } } }),
+  ]);
+
+  if (!meResult.data) {
+    throw new ProfileApiError(
+      meResult.response.status,
+      errorMessage(meResult.error, "로그인 정보를 확인하지 못했습니다."),
+    );
+  }
+  if (!inventoryResult.data) {
+    throw new ProfileApiError(
+      inventoryResult.response.status,
+      errorMessage(inventoryResult.error, "보관함을 불러오지 못했습니다."),
+    );
+  }
+
+  const sectionErrors: ProfileSnapshot["sectionErrors"] = {};
+  if (!productsResult.data || !ipsResult.data) {
+    sectionErrors.catalog = "일부 작품 정보를 불러오지 못했습니다. 보관 상품은 계속 확인할 수 있어요.";
+  }
+  if (!profileResult.data || !basicInfoResult.data) {
+    sectionErrors.inventory = "계정 표시 정보 일부를 불러오지 못했습니다.";
+  }
+  const defaultAddress = addressResult.data ?? null;
+  if (!addressResult.data && addressResult.response.status !== 404) {
+    sectionErrors.address = errorMessage(addressResult.error, "기본 배송지를 불러오지 못했습니다.");
+  }
+
+  const inventoryItems = [...inventoryResult.data.items];
+  const seenInventoryCursors = new Set<string>();
+  let inventoryCursor = inventoryResult.data.nextCursor ?? undefined;
+  while (inventoryCursor) {
+    if (seenInventoryCursors.has(inventoryCursor)) {
+      throw new ProfileApiError(502, "보관함 페이지가 반복되어 전체 목록을 확인하지 못했습니다.");
+    }
+    seenInventoryCursors.add(inventoryCursor);
+    const pageResult = await client.GET("/v1/account/inventory", {
+      params: { query: { limit: 100, cursor: inventoryCursor } },
+    });
+    if (!pageResult.data) {
+      throw new ProfileApiError(
+        pageResult.response.status,
+        errorMessage(pageResult.error, "보관함을 모두 불러오지 못했습니다."),
+      );
+    }
+    inventoryItems.push(...pageResult.data.items);
+    inventoryCursor = pageResult.data.nextCursor ?? undefined;
+  }
+
+  const actor = meResult.data.actor;
+  const fetchedAt = new Date().toISOString();
+  const products = productsResult.data?.items ?? [];
+  const ipNames = Object.fromEntries(ipsResult.data?.items.map((ip) => [ip.id, ip.nameKo]) ?? []);
+  const base = createGuestSnapshot(products, ipNames, [], []);
+
+  return {
+    ...base,
+    isExample: false,
+    actor,
+    profile: profileResult.data ?? {
+      id: actor.userId,
+      nickname: actor.nickname,
+      bio: null,
+      favoriteIp: null,
+      version: 0,
+      updatedAt: fetchedAt,
+    },
+    basicInfo: basicInfoResult.data ?? {
+      id: actor.userId,
+      nickname: actor.nickname,
+      email: actor.email,
+      phoneMasked: null,
+      birthDate: null,
+      version: 0,
+      updatedAt: fetchedAt,
+    },
+    defaultAddress,
+    inventory: inventoryItems,
+    sectionErrors,
+    fetchedAt,
   };
 }
 
@@ -226,17 +372,31 @@ export async function removeWishlistItem(
   if (!result.data) throw new Error(errorMessage(result.error, "찜을 해제하지 못했습니다."));
 }
 
-export async function createShippingRequest(
+export async function createShippingQuote(
   apiBaseUrl: string,
   accessToken: string,
   inventoryUnitIds: string[],
-): Promise<void> {
+): Promise<ShippingQuote> {
+  const client = authorizedClient(apiBaseUrl, accessToken);
+  const result = await client.POST("/v1/account/shipping-quotes", {
+    body: { inventoryUnitIds },
+  });
+  if (!result.data) throw new Error(errorMessage(result.error, "배송 금액을 확인하지 못했습니다."));
+  return result.data;
+}
+
+export async function createShippingRequest(
+  apiBaseUrl: string,
+  accessToken: string,
+  input: Pick<ShippingQuote, "id" | "addressVersion">,
+): Promise<components["schemas"]["ShippingRequest"]> {
   const client = authorizedClient(apiBaseUrl, accessToken);
   const result = await client.POST("/v1/account/shipping-requests", {
     params: { header: { "Idempotency-Key": randomUUID() } },
-    body: { inventoryUnitIds },
+    body: { quoteId: input.id, addressVersion: input.addressVersion },
   });
   if (!result.data) throw new Error(errorMessage(result.error, "배송을 신청하지 못했습니다."));
+  return result.data;
 }
 
 export async function createPointReturn(
@@ -291,192 +451,18 @@ export async function logoutAccount(apiBaseUrl: string, accessToken: string): Pr
   if (!result.response.ok) throw new Error(errorMessage(result.error, "로그아웃하지 못했습니다."));
 }
 
+export async function logoutOtherAccountSessions(apiBaseUrl: string, accessToken: string): Promise<void> {
+  const client = authorizedClient(apiBaseUrl, accessToken);
+  const result = await client.POST("/v1/auth/logout-others", {});
+  if (!result.response.ok) throw new Error(errorMessage(result.error, "다른 기기에서 로그아웃하지 못했습니다."));
+}
+
 function authorizedClient(apiBaseUrl: string, accessToken: string) {
   return createDabbobaClient({
     baseUrl: apiBaseUrl,
     token: () => accessToken,
     requestId: randomUUID,
   });
-}
-
-function createExampleSnapshot(
-  products: CatalogProduct[],
-  ipNames: Record<string, string>,
-  publicWanted: ProfileWantedRequest[],
-  publicNotices: Notice[],
-): ProfileSnapshot {
-  const now = new Date();
-  const daysAgo = (days: number) => new Date(now.getTime() - days * 86_400_000).toISOString();
-  const first = products[0]!;
-  const second = products[1] ?? first;
-  const browsableProducts = products.filter((product) => (
-    isCustomerBrowsableCatalogCategory(product.category)
-  ));
-  const wishlist = browsableProducts.slice(0, 2).map((product, index): WishlistItem => ({
-    id: index === 0 ? IDS.wishlistOne : IDS.wishlistTwo,
-    product: {
-      id: product.id,
-      name: product.name,
-      ipId: product.ipId,
-      ipNameKo: ipNames[product.ipId] ?? "등록 작품",
-      category: product.category,
-      price: product.price,
-      imageUrl: product.imageUrl,
-      isActive: product.isActive,
-    },
-    wishedAt: daysAgo(index + 2),
-  }));
-  const inventoryProducts = [first, second];
-  const inventoryIds = [IDS.inventoryOne, IDS.inventoryTwo];
-  const inventory = inventoryProducts.map((product, index): InventoryUnit => ({
-    id: inventoryIds[index]!,
-    ownerId: IDS.user,
-    productId: product.id,
-    product,
-    sourceType: index === 0 ? "GACHA" : "KUJI",
-    status: "OWNED",
-    acquiredAt: daysAgo(index + 3),
-  }));
-  const wantedFallbackProduct = products.find((product) => (
-    isCustomerVisibleProductCategory(product.category)
-  ));
-  const wantedFallback: ProfileWantedRequest | null = wantedFallbackProduct ? {
-    id: IDS.wanted,
-    userId: IDS.user,
-    authorNickname: "모찌수집가",
-    category: wantedFallbackProduct.category,
-    ipId: wantedFallbackProduct.ipId,
-    ipNameKo: ipNames[wantedFallbackProduct.ipId] ?? "등록 작품",
-    desiredItem: `${wantedFallbackProduct.name} 재입고를 기다려요`,
-    details: "같이 기다리는 수집가가 얼마나 있는지 알려주세요.",
-    mediaId: null,
-    mediaUrl: null,
-    status: "ACTIVE",
-    likeCount: 18,
-    likedByViewer: false,
-    version: 1,
-    createdAt: daysAgo(4),
-    updatedAt: daysAgo(4),
-  } : null;
-  const noticeFallback: Notice = {
-    id: IDS.notice,
-    title: "DABBOBA 이용 안내",
-    content: "공지와 운영 안내는 이곳에서 확인할 수 있어요.",
-    isPinned: true,
-    isPublished: true,
-    status: "ACTIVE",
-    createdBy: IDS.user,
-    publishedAt: daysAgo(1),
-    version: 1,
-    createdAt: daysAgo(1),
-    updatedAt: daysAgo(1),
-  };
-
-  return {
-    isExample: true,
-    catalogProducts: products,
-    ipNames,
-    actor: null,
-    profile: {
-      id: IDS.user,
-      nickname: "모찌수집가",
-      bio: "좋아하는 작품을 천천히 모으는 중이에요.",
-      favoriteIp: null,
-      version: 1,
-      updatedAt: daysAgo(1),
-    },
-    basicInfo: {
-      id: IDS.user,
-      nickname: "모찌수집가",
-      email: "mobile-test@dabboba.local",
-      phoneMasked: null,
-      birthDate: null,
-      version: 1,
-      updatedAt: daysAgo(1),
-    },
-    defaultAddress: {
-      id: IDS.address,
-      recipient: "홍*동",
-      phone: "010****1234",
-      postalCode: "*****",
-      addressLine1: "서울특별시 성동구 ****로",
-      addressLine2: "상세주소는 로그인 후 표시",
-      deliveryNote: "문 앞에 놓아주세요",
-      version: 1,
-      updatedAt: daysAgo(7),
-    },
-    wishlist,
-    inventory,
-    orders: [{
-      id: IDS.order,
-      status: "FULFILLED",
-      currency: "KRW",
-      subtotal: first.price,
-      discountTotal: 0,
-      pointTotal: 0,
-      total: first.price,
-      lines: [{
-        productId: first.id,
-        productName: first.name,
-        category: first.category,
-        unitPrice: first.price,
-        quantity: 1,
-        lineTotal: first.price,
-      }],
-      createdAt: daysAgo(5),
-      updatedAt: daysAgo(5),
-    }],
-    pointBalance: 3_200,
-    pointHistory: [
-      { id: IDS.pointOne, entryType: "EARN", amount: 5_000, referenceType: "ORDER", referenceId: IDS.order, reason: "구매 적립", createdAt: daysAgo(5) },
-      { id: IDS.pointTwo, entryType: "SPEND", amount: -1_800, referenceType: "ORDER", referenceId: IDS.order, reason: "주문 사용", createdAt: daysAgo(3) },
-    ],
-    shippingRequests: [{
-      id: IDS.shipping,
-      status: "PROCESSING",
-      version: 1,
-      inventoryUnitIds: [IDS.shippedInventory],
-      destination: {
-        recipientMasked: "홍*동",
-        phoneMasked: "010****1234",
-        postalCode: "*****",
-        addressLine1: "서울특별시 성동구 ****로",
-        addressLine2: null,
-      },
-      requestedAt: daysAgo(2),
-      updatedAt: daysAgo(1),
-      shippedAt: null,
-      trackingCarrier: null,
-      trackingNumber: null,
-    }],
-    wantedRequests: publicWanted.length
-      ? publicWanted.filter((request) => isCustomerVisibleProductCategory(request.category))
-      : wantedFallback ? [wantedFallback] : [],
-    notices: publicNotices.length ? publicNotices : [noticeFallback],
-    inquiries: [{
-      id: IDS.inquiry,
-      userId: IDS.user,
-      category: "ORDER",
-      title: "합배송 가능 여부가 궁금해요",
-      status: "ANSWERED",
-      assignedAdminId: null,
-      createdAt: daysAgo(8),
-      updatedAt: daysAgo(7),
-    }],
-    notificationPreferences: {
-      orderUpdates: true,
-      exchangeUpdates: true,
-      requestUpdates: true,
-      restockUpdates: true,
-      marketingSms: false,
-      marketingEmail: false,
-      marketingPush: false,
-      personalizedRecommendations: false,
-      version: 1,
-      updatedAt: daysAgo(1),
-    },
-    fetchedAt: now.toISOString(),
-  };
 }
 
 async function attachWantedMediaUrls(

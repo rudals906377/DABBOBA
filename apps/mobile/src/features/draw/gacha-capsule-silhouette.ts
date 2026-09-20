@@ -1,11 +1,10 @@
-/** Simple native silhouette: a rounded dome and a gently flattened cup base. */
-export function getGachaCapsuleSilhouette(diameter: number, heroDetail = false) {
-  const upperRadius = diameter * 0.5;
-  const lowerRadius = diameter * (heroDetail ? 0.5 : 0.32);
+/** One light spherical capsule profile shared from the chamber through reveal. */
+export function getGachaCapsuleSilhouette(diameter: number, _heroDetail = false) {
+  const radius = diameter * 0.5;
   return {
-    borderTopLeftRadius: upperRadius,
-    borderTopRightRadius: upperRadius,
-    borderBottomLeftRadius: lowerRadius,
-    borderBottomRightRadius: lowerRadius,
+    borderTopLeftRadius: radius,
+    borderTopRightRadius: radius,
+    borderBottomLeftRadius: radius,
+    borderBottomRightRadius: radius,
   };
 }

@@ -27,14 +27,17 @@ function renderHeader(hasHistory) {
       back: () => calls.push("back"),
       replace: (path) => calls.push(["replace", path]),
     },
+    DetailPageHeader: "DetailPageHeader",
     View: "View", Pressable: "Pressable", Ionicons: "Ionicons", KoreanPixelTitle: "KoreanPixelTitle",
     styles: {}, colors: { ink: "#000000" },
   };
   runInNewContext(code, scope);
   const element = scope.exports.DetailHeader({ title: "구매 내역" });
-  const button = element.props.children.find((child) => child.props.accessibilityLabel === "뒤로 가기");
-  assert.equal(button.props.accessibilityRole, "button");
-  return { press: button.props.onPress, calls };
+  assert.equal(element.type, "DetailPageHeader");
+  assert.equal(element.props.title, "구매 내역");
+  assert.equal(element.props.titleMode, "pixel");
+  assert.equal(typeof element.props.onBack, "function");
+  return { press: element.props.onBack, calls };
 }
 
 test("initial profile deep link returns to the native profile tab without GO_BACK", () => {

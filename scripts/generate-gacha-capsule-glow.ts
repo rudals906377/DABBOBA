@@ -48,6 +48,6 @@ const manifest = {
   textureSha256: hash(png),
   sourceSha256: hash(await readFile(resolve(root, "apps/mobile/src/features/draw/gacha-capsule-glow.ts"))),
 };
-await writeFile(resolve(root, "apps/mobile/assets/gacha-capsule-glow-v1.png"), png);
-await writeFile(resolve(root, "apps/mobile/assets/gacha-capsule-glow-v1.json"), JSON.stringify(manifest, null, 2) + "\n");
+await writeFile(resolve(root, "apps/mobile/assets/draw/gacha/gacha-capsule-glow-v1.png"), png);
+await writeFile(resolve(root, "apps/mobile/assets/draw/gacha/gacha-capsule-glow-v1.json"), JSON.stringify(manifest, null, 2) + "\n");
 console.log(JSON.stringify(manifest, null, 2));

@@ -1,6 +1,6 @@
 import type { CatalogIp, CatalogProduct, Character } from "../lib/admin-types";
-import { createCharacter, createIp, createProduct, updateCharacter, updateIp, updateProduct } from "../lib/actions";
-import { ReasonField, ReturnTo } from "./operations";
+import { clearStorefrontProductImage, createCharacter, createIp, createProduct, updateCharacter, updateIp, updateProduct, uploadProductImage } from "../lib/actions";
+import { ReasonField, ReturnTo, safeExternalUrl } from "./operations";
 
 export function IpForm({ item, returnTo, initialName }: { item?: CatalogIp; returnTo: string; initialName?: string }) {
   const action = item ? updateIp : createIp;
@@ -13,7 +13,10 @@ export function IpForm({ item, returnTo, initialName }: { item?: CatalogIp; retu
       <label>일문 이름<input name="nameJa" defaultValue={item?.nameJa || ""} maxLength={160} /></label>
       <label className="span-2">별칭 (쉼표 또는 줄바꿈)<textarea name="aliases" defaultValue={item?.aliases.join(", ")} maxLength={5000} /></label>
       <label className="span-2">설명<textarea name="description" defaultValue={item?.description} maxLength={5000} /></label>
-      <label className="span-2">이미지 URL<input type="url" name="imageUrl" defaultValue={item?.imageUrl || ""} maxLength={2000} /></label>
+      <label className="span-2">홈 인기 작품용 1:1 대표 이미지 URL
+        <input type="url" name="imageUrl" defaultValue={item?.imageUrl || ""} maxLength={2000} />
+        <small>홈 인기 작품 레일에 사용하는 정사각형 IP 이미지입니다.</small>
+      </label>
       <label className="check-field"><input type="checkbox" name="isActive" defaultChecked={item?.isActive ?? true} /> 활성</label>
     </div>
     <ReasonField label={item ? "수정 사유" : "등록 사유"} /><div className="form-actions"><button className="primary">{item ? "IP 수정" : "IP 등록"}</button></div>
@@ -59,6 +62,18 @@ export function ProductForm({ item, returnTo, initialName, initialIpId, initialP
       <label className="span-2">메타데이터 JSON<textarea name="metadata" defaultValue={JSON.stringify(item?.metadata || {}, null, 2)} required /></label>
       <label className="span-2">이미지 URL<input type="url" name="imageUrl" defaultValue={item?.imageUrl || ""} maxLength={2000} /></label>
       <label className="check-field"><input type="checkbox" name="isActive" defaultChecked={item?.isActive ?? true} /> 활성</label>
+      {item?.isPrizeOnly || (!item && initialPrizeOnly) ? <>
+        <input type="hidden" name="saleStatus" value="DRAFT" />
+        <div className="immutable-field"><span>판매 상태</span><strong>경품 전용</strong></div>
+      </> : <label>판매 상태
+        <select name="saleStatus" defaultValue={item?.saleStatus ?? "DRAFT"}>
+          <option value="DRAFT">작성 중</option>
+          <option value="COMING_SOON">오픈 예정</option>
+          <option value="ON_SALE">판매 중</option>
+          <option value="PAUSED">판매 중지</option>
+        </select>
+        <small>판매 중은 양수 가격·공개 이미지·재고·가챠/쿠지 구성이 모두 준비된 경우만 저장됩니다.</small>
+      </label>}
       {item ? <div className="span-2 immutable-field">
         <input type="hidden" name="isPrizeOnly" value={item.isPrizeOnly ? "on" : "off"} />
         <span>상품 용도</span>
@@ -69,6 +84,121 @@ export function ProductForm({ item, returnTo, initialName, initialIpId, initialP
         <span><strong>경품 전용 SKU</strong><small>체크하면 공개 상품 목록과 일반 주문에서 제외되고, 같은 IP의 가챠·쿠지 경품 후보로만 사용됩니다. 생성 후 변경할 수 없습니다.</small></span>
       </label>}
     </div>
+    {!item ? <p className="muted">쿠지 판매 상품은 등록 후 이어지는 <strong>쿠지 상 구성</strong>에서 상 이름·노출 순서·수량을 설정하고 공개합니다.</p> : null}
     <ReasonField label={item ? "수정 사유" : "등록 사유"} /><div className="form-actions"><button className="primary">{item ? "상품 수정" : "상품 등록"}</button></div>
   </form>;
+}
+
+function ProductImageUploadForm({
+  item,
+  returnTo,
+  role,
+  label,
+  guidance,
+  buttonLabel,
+}: {
+  item: CatalogProduct;
+  returnTo: string;
+  role: "primary" | "storefront";
+  label: string;
+  guidance: string;
+  buttonLabel: string;
+}) {
+  return <form className="stack-form catalog-image-form" action={uploadProductImage}>
+    <input type="hidden" name="productId" value={item.id} />
+    <input type="hidden" name="expectedVersion" value={item.version} />
+    <input type="hidden" name="role" value={role} />
+    <ReturnTo value={returnTo} />
+    <input type="hidden" name="completeIdempotencyKey" value={crypto.randomUUID()} />
+    <input type="hidden" name="attachIdempotencyKey" value={crypto.randomUUID()} />
+    <label>{label}
+      <input type="file" name="image" accept="image/jpeg,image/png,image/webp,image/gif" required />
+      <small>{guidance}</small>
+    </label>
+    <ReasonField label={`${label} 변경 사유`} />
+    <div className="form-actions"><button className="primary">{buttonLabel}</button></div>
+  </form>;
+}
+
+function safeProductImageUrl(value: string | null) {
+  const external = safeExternalUrl(value);
+  if (external) return external;
+  return value && /^\/(?!\/)[^\s\\]*$/.test(value) ? value : null;
+}
+
+function CurrentProductImage({ label, url }: { label: string; url: string | null }) {
+  const safeUrl = safeProductImageUrl(url);
+  return <section className="catalog-image-current" data-image-status={url ? "populated" : "empty"}>
+    <strong>{label}</strong>
+    <p>{url ? "등록됨" : "등록되지 않음"}</p>
+    {url ? <>
+      {safeUrl ? <>
+        <img
+          src={safeUrl}
+          alt={`${label} 미리보기`}
+          loading="lazy"
+          decoding="async"
+          referrerPolicy="no-referrer"
+          style={{ display: "block", width: "100%", maxWidth: 240, height: "auto", borderRadius: 8 }}
+        />
+        <a className="button-link" href={safeUrl} target="_blank" rel="noreferrer noopener">현재 사진 열기</a>
+      </> : <p className="muted">현재 URL은 안전하게 미리 볼 수 없습니다.</p>}
+      <small style={{ overflowWrap: "anywhere" }}>{url}</small>
+    </> : null}
+  </section>;
+}
+
+function StorefrontImageClearForm({ item, returnTo }: { item: CatalogProduct; returnTo: string }) {
+  return <form className="stack-form catalog-image-form" action={clearStorefrontProductImage}>
+    <input type="hidden" name="productId" value={item.id} />
+    <input type="hidden" name="expectedVersion" value={item.version} />
+    <input type="hidden" name="role" value="storefront" />
+    <ReturnTo value={returnTo} />
+    <p><strong>현재 목록 사진 연결 해제</strong></p>
+    <p className="muted">목록 카드와의 연결만 해제합니다. 대표 사진과 업로드된 파일은 삭제되지 않습니다.</p>
+    <label className="check-field">
+      <input type="checkbox" name="confirmStorefrontImageClear" required />
+      목록 사진 연결 해제를 확인했습니다.
+    </label>
+    <ReasonField label="목록 사진 연결 해제 사유" />
+    <div className="form-actions"><button className="danger">목록 사진 연결 해제</button></div>
+  </form>;
+}
+
+export function ProductImageForm({ item, returnTo }: { item: CatalogProduct; returnTo: string }) {
+  const storefront = item.category === "gacha"
+    ? {
+        label: "새 가챠 목록 사진",
+        guidance: "가챠샵 목록 전용 · 정확한 1:1 비율 · 최소 1080×1080px · JPG, PNG, WEBP, GIF · 최대 10MB",
+      }
+    : item.category === "kuji"
+      ? {
+          label: "새 쿠지 목록 사진",
+          guidance: "쿠지샵 목록 전용 · 정확한 16:9 비율 · 최소 1200×675px · JPG, PNG, WEBP, GIF · 최대 10MB",
+        }
+      : null;
+
+  return <>
+    <div className="catalog-image-current-grid">
+      <CurrentProductImage label="현재 대표 사진" url={item.imageUrl} />
+      <CurrentProductImage label="현재 목록 사진" url={item.storefrontImageUrl} />
+    </div>
+    <ProductImageUploadForm
+      item={item}
+      returnTo={returnTo}
+      role="primary"
+      label="새 대표 사진"
+      guidance="상품 상세와 기존 화면에 사용하는 기본 사진 · JPG, PNG, WEBP, GIF · 최대 10MB"
+      buttonLabel="대표 사진 업로드 및 연결"
+    />
+    {storefront ? <ProductImageUploadForm
+      item={item}
+      returnTo={returnTo}
+      role="storefront"
+      label={storefront.label}
+      guidance={storefront.guidance}
+      buttonLabel="목록 사진 업로드 및 연결"
+    /> : <p className="muted">목록 사진은 가챠·쿠지 상품에만 등록할 수 있습니다.</p>}
+    {item.storefrontImageUrl ? <StorefrontImageClearForm item={item} returnTo={returnTo} /> : null}
+  </>;
 }

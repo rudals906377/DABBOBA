@@ -1,6 +1,6 @@
 import type { DatabaseClient, DatabasePool } from "@dabboba/db";
 import { withTransaction } from "@dabboba/db";
-import type { Logger } from "./logger.js";
+import { persistedErrorIdentity, type Logger } from "./logger.js";
 import type { OutboxEvent, WorkerJob } from "./types.js";
 
 type OutboxRow = {
@@ -36,10 +36,6 @@ const MAX_OUTBOX_RETRY_DELAY_MS = 15 * 60 * 1_000;
 export function outboxRetryDelayMs(attempt: number, baseDelayMs: number): number {
   const exponent = Math.max(0, Math.min(attempt - 1, 20));
   return Math.min(baseDelayMs * 2 ** exponent, MAX_OUTBOX_RETRY_DELAY_MS);
-}
-
-function errorMessage(error: unknown): string {
-  return (error instanceof Error ? error.message : String(error)).slice(0, 1_000);
 }
 
 function mapEvent(row: OutboxRow): OutboxEvent {
@@ -92,7 +88,7 @@ export async function publishClaimedOutboxEvent(
     const retryAt = new Date(now.getTime() + outboxRetryDelayMs(attempt, options.jobBackoffMs));
     await client.query(
       "UPDATE outbox_events SET available_at=$2,last_error=$3 WHERE id=$1 AND published_at IS NULL",
-      [row.id, retryAt, errorMessage(error)],
+      [row.id, retryAt, persistedErrorIdentity(error)],
     );
     return "deferred";
   }

@@ -1,7 +1,12 @@
 import { randomUUID } from "expo-crypto";
 import { errorMessage } from "@dabboba/api-client";
 import type { CatalogIp, CatalogProduct, components } from "@dabboba/contracts";
-import { isCustomerBrowsableCatalogCategory } from "@/features/catalog/product-categories";
+import {
+  isCustomerBrowsableCatalogCategory,
+  isCustomerVisibleProductCategory,
+  productCategoryLabel,
+} from "@/features/catalog/product-categories";
+import { catalogQuantityLabel } from "@/features/catalog/remaining-inventory";
 import { createMobileDabbobaClient as createDabbobaClient } from "@/lib/mobile-api-client";
 
 export type ProductCategory = CatalogProduct["category"];
@@ -13,11 +18,39 @@ export type ShopSnapshot = {
   fetchedAt: string;
 };
 
+export type ShopSort = "latest" | "popular" | "price-high" | "price-low";
+
+export type ShopProductPage = {
+  products: CatalogProduct[];
+  nextCursor: string | null;
+  fetchedAt: string;
+};
+
+export type CatalogProductPageInput = {
+  category?: Extract<ProductCategory, "gacha" | "kuji">;
+  query?: string;
+  ipId?: string;
+  sort?: ShopSort;
+  excludeSoldOut?: boolean;
+  cursor?: string;
+  limit?: number;
+};
+
+export type ShopProductPageInput = CatalogProductPageInput & {
+  category: Extract<ProductCategory, "gacha" | "kuji">;
+};
+
 export type ProductDetailSnapshot = {
   product: CatalogProduct;
   ip: CatalogIp | null;
   wishedByViewer: boolean;
   drawOdds: PublicDrawOdds | null;
+  ownedCollectible: boolean;
+  exchangeReference: boolean;
+};
+
+type ProductDetailContext = {
+  exchangeListingId?: string;
 };
 
 export async function fetchShopSnapshot(apiBaseUrl: string): Promise<ShopSnapshot> {
@@ -43,10 +76,55 @@ export async function fetchShopSnapshot(apiBaseUrl: string): Promise<ShopSnapsho
   };
 }
 
+export async function fetchShopIps(apiBaseUrl: string): Promise<CatalogIp[]> {
+  const client = createDabbobaClient({ baseUrl: apiBaseUrl, requestId: randomUUID });
+  const result = await client.GET("/v1/catalog/ips", { params: { query: { limit: 100 } } });
+  if (!result.data) throw new Error(errorMessage(result.error, "작품 정보를 불러오지 못했습니다."));
+  return result.data.items;
+}
+
+export async function fetchShopProductPage(
+  apiBaseUrl: string,
+  input: ShopProductPageInput,
+): Promise<ShopProductPage> {
+  const page = await fetchCatalogProductPage(apiBaseUrl, input);
+  return {
+    ...page,
+    products: page.products.filter((product) => product.category === input.category),
+  };
+}
+
+export async function fetchCatalogProductPage(
+  apiBaseUrl: string,
+  input: CatalogProductPageInput,
+): Promise<ShopProductPage> {
+  const client = createDabbobaClient({ baseUrl: apiBaseUrl, requestId: randomUUID });
+  const result = await client.GET("/v1/catalog/products", {
+    params: {
+      query: {
+        limit: input.limit ?? 20,
+        ...(input.cursor ? { cursor: input.cursor } : {}),
+        ...(input.query?.trim() ? { q: input.query.trim() } : {}),
+        ...(input.category ? { category: input.category } : {}),
+        ...(input.ipId ? { ipId: input.ipId } : {}),
+        sort: input.sort ?? "latest",
+        excludeSoldOut: input.excludeSoldOut ?? false,
+      },
+    },
+  });
+  if (!result.data) throw new Error(errorMessage(result.error, "상품을 불러오지 못했습니다."));
+  return {
+    products: result.data.items.filter((product) => isCustomerBrowsableCatalogCategory(product.category)),
+    nextCursor: result.data.nextCursor ?? null,
+    fetchedAt: new Date().toISOString(),
+  };
+}
+
 export async function fetchProductDetail(
   apiBaseUrl: string,
   productId: string,
   accessToken?: string,
+  context: ProductDetailContext = {},
 ): Promise<ProductDetailSnapshot> {
   const client = createDabbobaClient({
     baseUrl: apiBaseUrl,
@@ -54,23 +132,45 @@ export async function fetchProductDetail(
     ...(accessToken ? { token: () => accessToken } : {}),
   });
   const [productResult, ipResult, wishlistResult] = await Promise.all([
-    client.GET("/v1/catalog/products", { params: { query: { limit: 100 } } }),
+    client.GET("/v1/catalog/products/{productId}", { params: { path: { productId } } }),
     client.GET("/v1/catalog/ips", { params: { query: { limit: 100 } } }),
     accessToken
       ? client.GET("/v1/account/wishlist", { params: { query: { limit: 100 } } })
       : Promise.resolve({ data: undefined }),
   ]);
 
-  if (!productResult.data) {
-    throw new Error(errorMessage(productResult.error, "상품 정보를 불러오지 못했습니다."));
-  }
-  const product = productResult.data.items.find((item) => (
-    item.id === productId && isCustomerBrowsableCatalogCategory(item.category)
-  ));
+  const publicProduct = productResult.data
+    && isCustomerVisibleProductCategory(productResult.data.category)
+    ? productResult.data
+    : undefined;
+  const ownedProductResult = !publicProduct && accessToken
+    ? await client.GET("/v1/account/owned-products/{productId}", {
+      params: { path: { productId } },
+    })
+    : null;
+  const exchangeListingResult = !publicProduct
+    && !ownedProductResult?.data
+    && context.exchangeListingId
+    ? await client.GET("/v1/exchange/listings/{listingId}", {
+      params: { path: { listingId: context.exchangeListingId } },
+    })
+    : null;
+  const exchangeProducts = exchangeListingResult?.data
+    ? [
+      ...exchangeListingResult.data.offeredInventories.map((inventory) => inventory.product),
+      ...(exchangeListingResult.data.offers ?? []).flatMap((offer) => (
+        offer.offeredInventories.map((inventory) => inventory.product)
+      )),
+    ]
+    : [];
+  const exchangeProduct = exchangeProducts.find((candidate) => candidate.id === productId);
+  const product = publicProduct ?? ownedProductResult?.data ?? exchangeProduct;
   if (!product) throw new Error("상품을 찾을 수 없습니다.");
+  const ownedCollectible = !publicProduct && Boolean(ownedProductResult?.data);
+  const exchangeReference = !publicProduct && !ownedCollectible && Boolean(exchangeProduct);
 
   let drawOdds: PublicDrawOdds | null = null;
-  if (isDrawCategory(product.category)) {
+  if (!ownedCollectible && !exchangeReference && isDrawCategory(product.category)) {
     const oddsResult = await client.GET("/v1/catalog/products/{productId}/draw-odds", {
       params: { path: { productId } },
     });
@@ -80,8 +180,12 @@ export async function fetchProductDetail(
   return {
     product,
     ip: ipResult.data?.items.find((item) => item.id === product.ipId) ?? null,
-    wishedByViewer: wishlistResult.data?.items.some((item) => item.product.id === productId) ?? false,
+    wishedByViewer: !ownedCollectible
+      && !exchangeReference
+      && (wishlistResult.data?.items.some((item) => item.product.id === productId) ?? false),
     drawOdds,
+    ownedCollectible,
+    exchangeReference,
   };
 }
 
@@ -111,15 +215,14 @@ export async function setProductWishlist(
 }
 
 export function categoryLabel(category: ProductCategory): string {
-  if (category === "gacha") return "가챠";
-  if (category === "figure") return "피규어";
-  if (category === "kuji") return "쿠지";
-  return "카드";
+  return productCategoryLabel(category);
 }
 
 export function isDrawCategory(category: ProductCategory): boolean {
   return category === "gacha" || category === "kuji";
 }
+
+export { catalogQuantityLabel };
 
 export function productMetadataText(product: CatalogProduct, key: string): string | null {
   const value = product.metadata[key];

@@ -5,6 +5,7 @@ import type { ExchangeCategory, ExchangeRoomSnapshot } from "@/features/exchange
 const DATABASE_VERSION = 4;
 const HOME_CATALOG_KEY = "home.catalog.v1";
 const EXCHANGE_RULES_DISMISSED_KEY = "exchange.rules.dismissed.v2";
+const DRAW_SOUND_ENABLED_KEY = "draw.sound.enabled.v1";
 
 export async function initializeLocalDatabase(db: SQLiteDatabase): Promise<void> {
   await db.execAsync("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;");
@@ -81,6 +82,30 @@ export async function writeExchangeRulesDismissed(
   );
 }
 
+export async function readDrawSoundEnabled(db: SQLiteDatabase): Promise<boolean> {
+  const row = await db.getFirstAsync<{ preference_value: string }>(
+    "SELECT preference_value FROM app_preferences WHERE preference_key = ?",
+    DRAW_SOUND_ENABLED_KEY,
+  );
+  return row?.preference_value !== "disabled";
+}
+
+export async function writeDrawSoundEnabled(
+  db: SQLiteDatabase,
+  enabled: boolean,
+): Promise<void> {
+  await db.runAsync(
+    `INSERT INTO app_preferences (preference_key, preference_value, updated_at)
+     VALUES (?, ?, ?)
+     ON CONFLICT (preference_key) DO UPDATE SET
+       preference_value=excluded.preference_value,
+       updated_at=excluded.updated_at`,
+    DRAW_SOUND_ENABLED_KEY,
+    enabled ? "enabled" : "disabled",
+    new Date().toISOString(),
+  );
+}
+
 function exchangeListingCacheKey(category?: ExchangeCategory): string {
   return `exchange.listings.v3.${category ?? "all"}`;
 }
@@ -133,6 +158,13 @@ export async function readHomeCatalogCache(
       ...parsed,
       notices: Array.isArray(parsed.notices) ? parsed.notices : [],
       homeSections: parsed.homeSections ?? null,
+      homeProductBadges: parsed.homeProductBadges ?? {
+        bestProductId: null,
+        evaluatedAt: parsed.fetchedAt,
+      },
+      recentDrawActivity: Array.isArray(parsed.recentDrawActivity)
+        ? parsed.recentDrawActivity.slice(0, 2)
+        : null,
     };
   } catch {
     return null;
@@ -143,12 +175,17 @@ export async function writeHomeCatalogCache(
   db: SQLiteDatabase,
   snapshot: HomeCatalogSnapshot,
 ): Promise<void> {
+  if (snapshot.homeSections === null) return;
+  const cacheSnapshot: HomeCatalogSnapshot = {
+    ...snapshot,
+    recentDrawActivity: snapshot.recentDrawActivity?.slice(0, 2) ?? null,
+  };
   await db.runAsync(
     `INSERT INTO catalog_cache (cache_key, payload, fetched_at)
      VALUES (?, ?, ?)
      ON CONFLICT (cache_key) DO UPDATE SET payload=excluded.payload, fetched_at=excluded.fetched_at`,
     HOME_CATALOG_KEY,
-    JSON.stringify(snapshot),
+    JSON.stringify(cacheSnapshot),
     snapshot.fetchedAt,
   );
 }
@@ -171,6 +208,16 @@ export async function recordRecentlyViewedProduct(
       SELECT product_id FROM recently_viewed_products
       ORDER BY viewed_at DESC LIMIT 50
     )
+  `);
+}
+
+/** Remove data that can identify or reveal the previous signed-in customer. */
+export async function clearUserScopedLocalData(db: SQLiteDatabase): Promise<void> {
+  await db.execAsync(`
+    DELETE FROM recently_viewed_products;
+    DELETE FROM post_drafts;
+    DELETE FROM upload_queue;
+    DELETE FROM sync_state;
   `);
 }
 

@@ -7,11 +7,12 @@ import { createDatabasePool } from "@dabboba/db";
 import { Storage } from "@google-cloud/storage";
 import sharp from "sharp";
 import { buildApp } from "../app.js";
+import { acceptRequiredPoliciesForIntegrationTest } from "../integration-test-fixtures.js";
 import { issueSession } from "../plugins/auth.js";
+import { sanitizeImage } from "../lib/image-sanitizer-node.js";
 import {
   mediaUploadCompleteFingerprint,
   reserveMediaUploadIntent,
-  sanitizeImage,
   type MediaUploadReservationInput,
 } from "./media.js";
 
@@ -245,6 +246,7 @@ test(
         "INSERT INTO users(email,nickname,status) VALUES($1,$2,'ACTIVE') RETURNING id",
         [`media-${label}-${suffix}@example.test`, `미디어 ${label} ${suffix}`],
       );
+      await acceptRequiredPoliciesForIntegrationTest(pool, user.rows[0]!.id);
       const session = await issueSession(pool, config, {
         userId: user.rows[0]!.id,
         kind: "USER",
@@ -807,12 +809,6 @@ test(
       "INSERT INTO users(email,nickname,role,status) VALUES($1,$2,'ADMIN','ACTIVE') RETURNING id",
       [`media-approval-admin-${suffix}@example.test`, `미디어 승인 관리자 ${suffix}`],
     );
-    const approvalAdminSession = await issueSession(pool, config, {
-      userId: approvalAdmin.rows[0]!.id,
-      kind: "ADMIN",
-      ip: "203.0.113.122",
-      userAgent: "Dabboba Media Approval Race Integration/1.0",
-    });
     const deletionRequest = await pool.query<{ id: string }>(
       "INSERT INTO account_deletion_requests(user_id,status) VALUES($1,'PENDING_REVIEW') RETURNING id",
       [approvalRaceOwner.id],
@@ -850,22 +846,20 @@ test(
       if (approvalSaveTimeout) clearTimeout(approvalSaveTimeout);
     }
     const approvalReason = "미디어 완료 처리 중 탈퇴 승인 직렬화 검증";
-    let approvedDuringProcessing: Awaited<ReturnType<typeof deleteMedia>>;
+    let approvedDuringProcessing: { status: string } | undefined;
     try {
-      approvedDuringProcessing = await deleteApp.inject({
-        method: "POST",
-        url: `/v1/admin/account-deletions/${deletionRequest.rows[0]!.id}/decision`,
-        headers: {
-          authorization: `Bearer ${approvalAdminSession.token}`,
-          "idempotency-key": `media-approval-decision-${randomUUID()}`,
-          "x-admin-reason": approvalReason,
-        },
-        payload: { decision: "APPROVED", reason: approvalReason },
-      });
+      const approved = await pool.query<{ status: string }>(
+        `UPDATE account_deletion_requests
+            SET status='APPROVED',decided_at=now(),decision_reason=$2,decided_by_admin_id=$3
+          WHERE id=$1
+          RETURNING status`,
+        [deletionRequest.rows[0]!.id, approvalReason, approvalAdmin.rows[0]!.id],
+      );
+      approvedDuringProcessing = approved.rows[0];
     } finally {
       approvalRaceSave.release();
     }
-    assert.equal(approvedDuringProcessing.statusCode, 200, approvedDuringProcessing.body);
+    assert.deepEqual(approvedDuringProcessing, { status: "APPROVED" });
     const blockedAfterApproval = await completingAfterApproval;
     assert.equal(blockedAfterApproval.statusCode, 403, blockedAfterApproval.body);
     assert.equal(

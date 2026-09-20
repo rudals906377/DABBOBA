@@ -12,6 +12,7 @@ import { loadDeletionBlockers, type AccountDeletionBlockers } from "./account.js
 const ACCOUNT_DELETION_STATUSES = [
   "PENDING_REVIEW",
   "BLOCKED",
+  "PROCESSING",
   "APPROVED",
   "COMPLETED",
   "REJECTED",
@@ -38,6 +39,16 @@ type AccountDeletionRow = {
   decided_by_admin_id: string | null;
   decided_by_admin_nickname: string | null;
   version: number;
+  auth_deletion_status: "NOT_REQUIRED" | "PENDING" | "COMPLETED";
+  auth_deleted_at: Date | null;
+  processing_started_at: Date | null;
+  completed_at: Date | null;
+  job_status: "PENDING" | "PROCESSING" | null;
+  job_attempts: number | string | null;
+  job_available_at: Date | null;
+  job_lease_expires_at: Date | null;
+  job_last_error: string | null;
+  job_external_deleted_at: Date | null;
   record_created_at: Date;
   updated_at: Date;
   created_at: Date;
@@ -93,7 +104,11 @@ export function hasAccountDeletionBlockers(blockers: AccountDeletionBlockers) {
 
 export function allowedAccountDeletionDecision(from: AccountDeletionStatus, to: AccountDeletionDecision) {
   return (from === "PENDING_REVIEW" || from === "BLOCKED")
-    && (to === "APPROVED" || to === "REJECTED");
+    && to === "REJECTED";
+}
+
+export function accountDeletionCompletionAvailable(_status: AccountDeletionStatus) {
+  return false;
 }
 
 function deletionSummary(row: AccountDeletionRow) {
@@ -115,8 +130,24 @@ function deletionSummary(row: AccountDeletionRow) {
     createdAt: iso(row.record_created_at),
     updatedAt: iso(row.updated_at),
     hardDeletePerformed: false as const,
-    completionAvailable: false as const,
-    completionPolicy: "EXTERNAL_RETENTION_POLICY_REQUIRED" as const,
+    completionAvailable: accountDeletionCompletionAvailable(row.status),
+    completionPolicy: row.status === "COMPLETED"
+      ? "COMPLETED_ANONYMIZATION" as const
+      : row.status === "PROCESSING"
+        ? "AUTOMATED_WORKER" as const
+        : "ADMIN_REVIEW_FALLBACK" as const,
+    authDeletionStatus: row.auth_deletion_status,
+    authDeletedAt: nullableIso(row.auth_deleted_at),
+    processingStartedAt: nullableIso(row.processing_started_at),
+    completedAt: nullableIso(row.completed_at),
+    deletionJob: row.job_status ? {
+      status: row.job_status,
+      attempts: numberValue(row.job_attempts),
+      availableAt: nullableIso(row.job_available_at),
+      leaseExpiresAt: nullableIso(row.job_lease_expires_at),
+      lastError: row.job_last_error,
+      externalDeletedAt: nullableIso(row.job_external_deleted_at),
+    } : null,
   };
 }
 
@@ -150,10 +181,15 @@ const deletionSelect = `
   SELECT d.id,d.user_id,u.email::text AS user_email,u.nickname,d.status,d.blocker_snapshot,
     d.request_count,d.requested_at,d.last_requested_at,d.decided_at,d.decision_reason,
     d.decided_by_admin_id,decider.nickname AS decided_by_admin_nickname,d.version,
+    d.auth_deletion_status,d.auth_deleted_at,d.processing_started_at,d.completed_at,
+    deletion_job.status AS job_status,deletion_job.attempts AS job_attempts,
+    deletion_job.available_at AS job_available_at,deletion_job.lease_expires_at AS job_lease_expires_at,
+    deletion_job.last_error AS job_last_error,deletion_job.external_deleted_at AS job_external_deleted_at,
     d.created_at AS record_created_at,d.updated_at,d.last_requested_at AS created_at
   FROM account_deletion_requests d
   JOIN users u ON u.id=d.user_id
-  LEFT JOIN users decider ON decider.id=d.decided_by_admin_id`;
+  LEFT JOIN users decider ON decider.id=d.decided_by_admin_id
+  LEFT JOIN account_auth_deletion_jobs deletion_job ON deletion_job.deletion_request_id=d.id`;
 
 export async function registerAdminAccountDeletionRoutes(app: FastifyInstance, context: ApiContext) {
   app.get(
@@ -168,7 +204,7 @@ export async function registerAdminAccountDeletionRoutes(app: FastifyInstance, c
       const search = queryString(query.q, 200);
       const values: unknown[] = [limit + 1];
       const filters: string[] = [];
-      if (status === "OPEN") filters.push("d.status IN ('PENDING_REVIEW','BLOCKED')");
+      if (status === "OPEN") filters.push("d.status IN ('PENDING_REVIEW','BLOCKED','PROCESSING')");
       else { values.push(status); filters.push(`d.status=$${values.length}`); }
       if (search) {
         values.push(`%${search}%`);
@@ -206,8 +242,7 @@ export async function registerAdminAccountDeletionRoutes(app: FastifyInstance, c
       return {
         ...deletionSummary(row),
         currentBlockers,
-        approvalEligible: allowedAccountDeletionDecision(row.status, "APPROVED")
-          && !hasAccountDeletionBlockers(currentBlockers),
+        approvalEligible: false,
         rejectionAvailable: allowedAccountDeletionDecision(row.status, "REJECTED"),
         events: events.rows.map(deletionEvent),
       };
@@ -225,6 +260,10 @@ export async function registerAdminAccountDeletionRoutes(app: FastifyInstance, c
       const reason = stringInput(input, "reason", { min: 2, max: 1_000 })!;
       const mutation = adminMutationHeaders(request, reason);
       const actor = request.actor!;
+
+      if (decision === "APPROVED") {
+        throw conflict("회원탈퇴는 고객 요청 직후 서버의 자동 삭제 작업에서 처리됩니다.");
+      }
 
       const result = await withTransaction(context.pool, async (client) => {
         const started = await beginIdempotency(client, {
@@ -256,13 +295,10 @@ export async function registerAdminAccountDeletionRoutes(app: FastifyInstance, c
         if (!before.rowCount) throw notFound("탈퇴 요청을 찾을 수 없습니다.");
         const current = before.rows[0]!;
         if (!allowedAccountDeletionDecision(current.status, decision)) {
-          throw conflict("대기 또는 차단 상태의 탈퇴 요청만 승인하거나 반려할 수 있습니다.");
+          throw conflict("대기 또는 차단 상태의 탈퇴 요청만 반려할 수 있습니다.");
         }
 
         const blockers = await loadDeletionBlockers(client, current.user_id);
-        if (decision === "APPROVED" && hasAccountDeletionBlockers(blockers)) {
-          throw conflict("미해결 주문·결제·자산·포인트·배송·교환 항목이 있어 탈퇴를 승인할 수 없습니다.");
-        }
 
         const updated = await client.query<AccountDeletionRow>(`
           UPDATE account_deletion_requests d
@@ -274,18 +310,13 @@ export async function registerAdminAccountDeletionRoutes(app: FastifyInstance, c
           RETURNING d.id,d.user_id,u.email::text AS user_email,u.nickname,d.status,d.blocker_snapshot,
             d.request_count,d.requested_at,d.last_requested_at,d.decided_at,d.decision_reason,
             d.decided_by_admin_id,decider.nickname AS decided_by_admin_nickname,d.version,
+            d.auth_deletion_status,d.auth_deleted_at,
             d.created_at AS record_created_at,d.updated_at,d.last_requested_at AS created_at`,
           [requestId, decision, JSON.stringify(blockers), reason, actor.userId],
         );
         const after = updated.rows[0]!;
 
-        const revoked = decision === "APPROVED"
-          ? await client.query(
-              `UPDATE sessions SET revoked_at=now(),revoke_reason='ACCOUNT_DELETION_APPROVED'
-               WHERE user_id=$1 AND revoked_at IS NULL`,
-              [current.user_id],
-            )
-          : { rowCount: 0 };
+        const revoked = { rowCount: 0 };
 
         await client.query(
           `INSERT INTO account_deletion_request_events
@@ -348,6 +379,18 @@ export async function registerAdminAccountDeletionRoutes(app: FastifyInstance, c
       });
 
       return sendMutation(reply, result);
+    },
+  );
+
+  app.post(
+    "/v1/admin/account-deletions/:requestId/completion",
+    { preHandler: context.auth.requirePermission("account_deletions.review") },
+    async (request) => {
+      uuidInput((request.params as Record<string, unknown>).requestId, "requestId");
+      const input = objectInput(request.body);
+      assertOnlyKeys(input, ["reason"]);
+      stringInput(input, "reason", { min: 2, max: 1_000 });
+      throw conflict("회원탈퇴 완료는 서버의 자동 삭제 작업에서 처리됩니다.");
     },
   );
 }

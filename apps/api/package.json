@@ -5,10 +5,13 @@
   "type": "module",
   "main": "./dist/index.js",
   "scripts": {
-    "dev": "PORT=8788 tsx watch src/index.ts",
+    "dev": "node ../../scripts/run-local-backend.mjs api",
     "build": "tsc -p tsconfig.json",
+    "build:supabase": "node ../../scripts/build-supabase-api.mjs",
+    "build:supabase:integration": "node ../../scripts/build-supabase-api.mjs --integration-smoke",
     "start": "node dist/index.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "pretest": "node ../../scripts/check-test-backend-env.mjs",
     "test": "node --test 'dist/**/*.test.js'",
     "test:storage": "tsx --test src/modules/media-supabase.conformance.ts",
     "bootstrap:admin": "tsx src/cli/bootstrap-admin.ts"
@@ -23,15 +26,17 @@
     "@fastify/helmet": "^13.1.1",
     "@fastify/rate-limit": "^11.2.0",
     "@google-cloud/storage": "^8.0.1",
+    "@portone/server-sdk": "0.19.0",
     "fastify": "^5.12.1",
     "ioredis": "^6.0.0",
     "jose": "^6.2.10",
     "pg": "^8.23.0",
-    "sharp": "0.35.3"
+    "sharp": "0.35.4"
   },
   "devDependencies": {
     "@types/node": "^26.2.0",
     "@types/pg": "^8.23.1",
+    "esbuild": "0.28.2",
     "tsx": "^4.23.12",
     "typescript": "7.0.2"
   }

@@ -1,7 +1,9 @@
+import { createHash, randomBytes } from "node:crypto";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { withTransaction, type DatabaseClient, type Queryable } from "@dabboba/db";
 import { writeOutbox } from "../lib/audit.js";
-import { badRequest, conflict, notFound } from "../lib/errors.js";
+import { AppError, badRequest, conflict, notFound } from "../lib/errors.js";
+import { requireLiveCommerce } from "../lib/commerce-mode.js";
 import {
   beginIdempotency,
   completeIdempotency,
@@ -19,6 +21,11 @@ import {
 } from "../lib/input.js";
 import { cursorPage, pagination } from "../lib/pagination.js";
 import { iso, nullableIso, numberValue } from "../lib/rows.js";
+import {
+  loadRequiredPolicyDocuments,
+  recordRequiredPolicyAcceptanceEvents,
+} from "../lib/legal-policy.js";
+import { requiredPolicyAcceptance } from "./customer-auth.js";
 import type { ApiContext } from "../types.js";
 
 type ProfileRow = {
@@ -71,13 +78,44 @@ type WishlistRow = {
 
 type AccountInventorySourceType = "GACHA" | "KUJI";
 
+type AccountShippingPolicyItem = {
+  sourceType: AccountInventorySourceType;
+  price: number | string;
+};
+
+type AccountShippingInventoryRow = {
+  id: string;
+  source_type: AccountInventorySourceType;
+  price: number | string;
+};
+
+type ShippingQuoteRow = {
+  id: string;
+  user_id: string;
+  address_id: string;
+  address_version: number;
+  inventory_unit_ids: string[];
+  item_count: number;
+  reference_subtotal: number | string;
+  contains_kuji: boolean;
+  free_shipping_threshold: number | string;
+  shipping_fee: number | string;
+  created_at: Date;
+  expires_at: Date;
+  consumed_at: Date | null;
+  shipping_request_id: string | null;
+  expired?: boolean;
+};
+
 type AccountInventoryRow = {
   id: string;
   owner_id: string;
   product_id: string;
   source_type: AccountInventorySourceType;
-  inventory_status: "OWNED";
+  inventory_status: "OWNED" | "EXCHANGE_LISTED" | "EXCHANGE_OFFERED" | "SHIPPING" | "EXPIRED_HOLD";
   acquired_at: Date;
+  storage_expires_at?: Date;
+  point_return_eligible: boolean;
   sku: string;
   ip_id: string;
   character_ids: string[];
@@ -89,6 +127,7 @@ type AccountInventoryRow = {
   available_quantity: number | string;
   metadata: Record<string, unknown>;
   image_url: string | null;
+  storefront_image_url: string | null;
   product_active: boolean;
   is_prize_only: boolean;
   product_version: number;
@@ -99,6 +138,8 @@ type AccountInventoryRow = {
 
 type OrderRow = {
   id: string;
+  order_kind: "PRODUCT" | "SHIPPING_FEE";
+  shipping_request_id: string | null;
   status: "PENDING_PAYMENT" | "PAID" | "FULFILLED" | "CANCELLED" | "REFUND_REVIEW" | "REFUNDED";
   currency: "KRW";
   subtotal: number | string;
@@ -156,7 +197,8 @@ type PointReturnInventoryStatus =
   | "DELIVERED"
   | "TRANSFERRED"
   | "REFUNDED"
-  | "POINT_RETURNED";
+  | "POINT_RETURNED"
+  | "EXPIRED_HOLD";
 
 type PointReturnInventorySourceType = "PURCHASE" | "GACHA" | "KUJI" | "ADMIN_ADJUSTMENT";
 
@@ -171,6 +213,7 @@ type PointReturnInventoryRow = {
   draw_user_id: string | null;
   draw_entitlement_id: string | null;
   draw_prize_product_id: string | null;
+  never_exchanged: boolean;
 };
 
 type NotificationRow = {
@@ -183,7 +226,22 @@ type NotificationRow = {
   created_at: Date;
 };
 
-const SHIPPING_REQUEST_STATUSES = ["REQUESTED", "PROCESSING", "SHIPPED", "DELIVERED", "CANCELLED"] as const;
+type PushDeviceTokenRow = {
+  installation_id: string;
+  platform: "IOS" | "ANDROID";
+  app_version: string | null;
+  last_registered_at: Date;
+};
+
+export type AccountNotificationDestination = {
+  route: "home" | "gacha" | "kuji" | "storage" | "profile";
+  detail: {
+    kind: "product" | "order" | "shipping" | "inquiry" | "exchange" | "request";
+    id: string;
+  } | null;
+};
+
+const SHIPPING_REQUEST_STATUSES = ["PAYMENT_PENDING", "REQUESTED", "PROCESSING", "SHIPPED", "DELIVERED", "CANCELLED"] as const;
 
 type ShippingRequestStatus = (typeof SHIPPING_REQUEST_STATUSES)[number];
 
@@ -201,7 +259,18 @@ type ShippingRequestRow = {
   created_at: Date;
 };
 
-type AccountDeletionStatus = "PENDING_REVIEW" | "BLOCKED" | "APPROVED" | "COMPLETED" | "REJECTED" | "CANCELLED";
+type ShippingRequestItemRow = {
+  inventory_unit_id: string;
+  product_id: string;
+  product_name: string;
+  ip_id: string;
+  ip_name_ko: string;
+  category: "gacha" | "figure" | "kuji" | "tcg";
+  image_url: string | null;
+  product_version: number;
+};
+
+type AccountDeletionStatus = "PENDING_REVIEW" | "BLOCKED" | "PROCESSING" | "APPROVED" | "COMPLETED" | "REJECTED" | "CANCELLED";
 
 type AccountDeletionBlockerRow = {
   point_balance: number | string;
@@ -221,6 +290,8 @@ type AccountDeletionRequestRow = {
   request_count: number;
   requested_at: Date;
   last_requested_at: Date;
+  completed_at: Date | null;
+  auth_deletion_status: "NOT_REQUIRED" | "PENDING" | "COMPLETED";
 };
 
 export type AccountDeletionBlockers = {
@@ -287,8 +358,8 @@ function assertOnlyKeys(input: Record<string, unknown>, allowed: readonly string
   if (unknown) throw badRequest(`지원하지 않는 입력 항목입니다: ${unknown}`);
 }
 
-export function accountDeletionStatus(blockers: AccountDeletionBlockers): "PENDING_REVIEW" | "BLOCKED" {
-  return Object.values(blockers).some((value) => value > 0) ? "BLOCKED" : "PENDING_REVIEW";
+export function accountDeletionStatus(blockers: AccountDeletionBlockers): "PROCESSING" | "BLOCKED" {
+  return Object.values(blockers).some((value) => value > 0) ? "BLOCKED" : "PROCESSING";
 }
 
 function mapDeletionBlockers(row: AccountDeletionBlockerRow): AccountDeletionBlockers {
@@ -311,10 +382,38 @@ function mapDeletionRequest(row: AccountDeletionRequestRow) {
     blockers: row.blocker_snapshot,
     requestCount: row.request_count,
     hardDeletePerformed: false,
-    policy: "MANUAL_REVIEW_REQUIRED" as const,
+    policy: "AUTOMATED_SERVER_DELETION" as const,
+    authDeletionStatus: row.auth_deletion_status,
     requestedAt: iso(row.requested_at),
     lastRequestedAt: iso(row.last_requested_at),
+    completedAt: nullableIso(row.completed_at),
   };
+}
+
+function deletionStatusTokenDigest(token: string): string {
+  return createHash("sha256").update(token).digest("hex");
+}
+
+function deletionStatusToken(headers: FastifyRequest["headers"]): string | null {
+  const raw = headers["x-deletion-status-token"];
+  const token = Array.isArray(raw) ? raw[0] : raw;
+  return typeof token === "string" && /^[A-Za-z0-9_-]{43}$/.test(token) ? token : null;
+}
+
+function supabaseAuthUserIdForDeletion(
+  providerSubjects: readonly string[],
+  supabaseUrl: string | null | undefined,
+): string | null {
+  if (!supabaseUrl || providerSubjects.length === 0) return null;
+  const prefix = `${supabaseUrl.replace(/\/$/, "")}/auth/v1#`;
+  const ids = [...new Set(providerSubjects
+    .filter((subject) => subject.startsWith(prefix))
+    .map((subject) => subject.slice(prefix.length)))];
+  if (ids.length === 0) return null;
+  if (ids.length !== 1 || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(ids[0]!)) {
+    throw conflict("로그인 연결 정보를 안전하게 삭제할 수 없습니다.");
+  }
+  return ids[0]!;
 }
 
 export async function loadDeletionBlockers(queryable: Queryable, userId: string): Promise<AccountDeletionBlockers> {
@@ -328,9 +427,9 @@ export async function loadDeletionBlockers(queryable: Queryable, userId: string)
        (SELECT count(*) FROM draw_entitlements
          WHERE user_id=$1 AND status='AVAILABLE') AS available_draw_entitlement_count,
        (SELECT count(*) FROM inventory_units
-         WHERE owner_id=$1 AND status IN ('OWNED','EXCHANGE_LISTED','EXCHANGE_OFFERED','SHIPPING')) AS active_inventory_count,
+         WHERE owner_id=$1 AND status IN ('OWNED','EXCHANGE_LISTED','EXCHANGE_OFFERED','SHIPPING','EXPIRED_HOLD')) AS active_inventory_count,
        (SELECT count(*) FROM shipping_requests
-         WHERE user_id=$1 AND status IN ('REQUESTED','PROCESSING','SHIPPED')) AS active_shipping_request_count,
+        WHERE user_id=$1 AND status IN ('PAYMENT_PENDING','REQUESTED','PROCESSING','SHIPPED')) AS active_shipping_request_count,
        (SELECT count(*) FROM exchange_listings
          WHERE author_id=$1 AND status IN ('OPEN','MATCHED')) AS active_exchange_listing_count,
        (SELECT count(*) FROM exchange_offers
@@ -444,8 +543,10 @@ const mapAccountInventory = (row: AccountInventoryRow) => ({
     releaseDate: row.release_date,
     price: numberValue(row.price),
     availableQuantity: numberValue(row.available_quantity),
+    totalQuantity: null,
     metadata: row.metadata,
     imageUrl: row.image_url,
+    storefrontImageUrl: row.storefront_image_url,
     isActive: row.product_active,
     isPrizeOnly: row.is_prize_only,
     version: row.product_version,
@@ -455,6 +556,8 @@ const mapAccountInventory = (row: AccountInventoryRow) => ({
   sourceType: row.source_type,
   status: row.inventory_status,
   acquiredAt: iso(row.acquired_at),
+  pointReturnEligible: row.point_return_eligible,
+  ...(row.storage_expires_at ? { storageExpiresAt: iso(row.storage_expires_at) } : {}),
 });
 
 const mapPointEntry = (row: PointLedgerRow) => ({
@@ -467,14 +570,86 @@ const mapPointEntry = (row: PointLedgerRow) => ({
   createdAt: iso(row.created_at),
 });
 
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const SLUG_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,119}$/;
+const EXPO_PUSH_TOKEN_PATTERN = /^Expo(?:nent)?PushToken\[[^\]\s]{8,240}\]$/;
+
+export function isExpoPushToken(value: string): boolean {
+  return value.length <= 256 && EXPO_PUSH_TOKEN_PATTERN.test(value);
+}
+
+function notificationDataIdentifier(
+  data: Record<string, unknown>,
+  keys: readonly string[],
+  pattern: RegExp,
+): string | null {
+  for (const key of keys) {
+    const value = data[key];
+    if (typeof value === "string" && pattern.test(value)) return value;
+  }
+  return null;
+}
+
+/**
+ * Produces the only navigation contract exposed to customer clients. Stored
+ * notification data is intentionally never interpreted as a URL or route.
+ */
+export function accountNotificationDestination(
+  kind: string,
+  data: Record<string, unknown>,
+): AccountNotificationDestination {
+  if (kind.startsWith("ORDER_") || kind.startsWith("PAYMENT_")) {
+    const id = notificationDataIdentifier(data, ["orderId"], UUID_PATTERN);
+    return { route: "profile", detail: id ? { kind: "order", id } : null };
+  }
+  if (kind.startsWith("SHIPPING_")) {
+    const id = notificationDataIdentifier(data, ["shippingRequestId", "requestId"], UUID_PATTERN);
+    return { route: "profile", detail: id ? { kind: "shipping", id } : null };
+  }
+  if (kind.startsWith("INQUIRY_")) {
+    const id = notificationDataIdentifier(data, ["inquiryId"], UUID_PATTERN);
+    return { route: "profile", detail: id ? { kind: "inquiry", id } : null };
+  }
+  if (kind.startsWith("EXCHANGE_")) {
+    const id = notificationDataIdentifier(data, ["listingId", "exchangeListingId"], UUID_PATTERN);
+    return { route: "storage", detail: id ? { kind: "exchange", id } : null };
+  }
+  if (kind.startsWith("STORAGE_")) return { route: "storage", detail: null };
+  if (kind.startsWith("CATALOG_REQUEST_") || kind.startsWith("WANTED_REQUEST_")) {
+    const id = notificationDataIdentifier(data, ["requestId", "wantedRequestId", "aggregateId"], UUID_PATTERN);
+    return { route: "profile", detail: id ? { kind: "request", id } : null };
+  }
+  if (kind.startsWith("RESTOCK_")) {
+    const id = notificationDataIdentifier(data, ["productId"], SLUG_PATTERN);
+    const route = typeof data.category === "string" && data.category.toUpperCase() === "KUJI"
+      ? "kuji" as const
+      : "gacha" as const;
+    return { route, detail: id ? { kind: "product", id } : null };
+  }
+  if (kind.startsWith("KUJI_")) return { route: "kuji", detail: null };
+  if (kind === "DRAW_RESULT" || kind.startsWith("GACHA_")) {
+    return { route: "storage", detail: null };
+  }
+  if (kind === "USER_WARNING") return { route: "profile", detail: null };
+  return { route: "home", detail: null };
+}
+
 const mapNotification = (row: NotificationRow) => ({
   id: row.id,
   kind: row.kind,
   title: row.title,
   body: row.body,
   data: row.data,
+  destination: accountNotificationDestination(row.kind, row.data),
   readAt: nullableIso(row.read_at),
   createdAt: iso(row.created_at),
+});
+
+const mapPushDeviceRegistration = (row: PushDeviceTokenRow) => ({
+  installationId: row.installation_id,
+  platform: row.platform,
+  appVersion: row.app_version,
+  registeredAt: iso(row.last_registered_at),
 });
 
 const mapDrawEntitlement = (row: AccountDrawEntitlementRow) => ({
@@ -518,6 +693,17 @@ const mapShippingRequest = (row: ShippingRequestRow) => ({
   shippedAt: nullableIso(row.shipped_at),
   trackingCarrier: row.tracking_carrier,
   trackingNumber: row.tracking_number,
+});
+
+const mapShippingRequestItem = (row: ShippingRequestItemRow) => ({
+  inventoryUnitId: row.inventory_unit_id,
+  productId: row.product_id,
+  productName: row.product_name,
+  ipId: row.ip_id,
+  ipNameKo: row.ip_name_ko,
+  category: row.category,
+  imageUrl: row.image_url,
+  productVersion: row.product_version,
 });
 
 function profilePatch(body: unknown) {
@@ -613,6 +799,65 @@ export function canonicalPointReturnInventoryIds(value: unknown): string[] {
   return canonicalInventoryUnitIds(value);
 }
 
+function shippingQuoteInput(body: unknown) {
+  const input = objectInput(body);
+  assertOnlyKeys(input, ["inventoryUnitIds"]);
+  return { inventoryUnitIds: canonicalShippingInventoryIds(input.inventoryUnitIds) };
+}
+
+function shippingRequestInput(body: unknown) {
+  const input = objectInput(body);
+  assertOnlyKeys(input, ["quoteId", "addressVersion"]);
+  return {
+    quoteId: uuidInput(input.quoteId, "quoteId"),
+    addressVersion: integerInput(input, "addressVersion", { min: 1 })!,
+  };
+}
+
+export const GACHA_ONLY_FREE_SHIPPING_THRESHOLD = 24_900;
+export const KUJI_INCLUDED_FREE_SHIPPING_THRESHOLD = 54_900;
+export const STANDARD_SHIPPING_FEE = 3_000;
+
+export function calculateAccountShippingPolicy(items: readonly AccountShippingPolicyItem[]) {
+  const hasSelection = items.length > 0;
+  const containsKuji = items.some((item) => item.sourceType === "KUJI");
+  const referenceSubtotal = items.reduce((sum, item) => {
+    const price = numberValue(item.price);
+    if (!Number.isSafeInteger(price) || price < 0 || !Number.isSafeInteger(sum + price)) {
+      throw conflict("배송 상품 금액을 계산할 수 없습니다.");
+    }
+    return sum + price;
+  }, 0);
+  const freeShippingThreshold = containsKuji
+    ? KUJI_INCLUDED_FREE_SHIPPING_THRESHOLD
+    : GACHA_ONLY_FREE_SHIPPING_THRESHOLD;
+  const qualifiesForFreeShipping = hasSelection && referenceSubtotal >= freeShippingThreshold;
+
+  return {
+    hasSelection,
+    containsKuji,
+    referenceSubtotal,
+    threshold: freeShippingThreshold,
+    freeShippingThreshold,
+    qualifiesForFreeShipping,
+    shippingFee: hasSelection && !qualifiesForFreeShipping ? STANDARD_SHIPPING_FEE : 0,
+  };
+}
+
+function shippingQuoteMatchesCurrentPolicy(
+  quote: ShippingQuoteRow,
+  inventoryUnitIds: readonly string[],
+  policy: ReturnType<typeof calculateAccountShippingPolicy>,
+): boolean {
+  return quote.item_count === inventoryUnitIds.length
+    && quote.inventory_unit_ids.length === inventoryUnitIds.length
+    && quote.inventory_unit_ids.every((id, index) => id === inventoryUnitIds[index])
+    && numberValue(quote.reference_subtotal) === policy.referenceSubtotal
+    && quote.contains_kuji === policy.containsKuji
+    && numberValue(quote.free_shipping_threshold) === policy.freeShippingThreshold
+    && numberValue(quote.shipping_fee) === policy.shippingFee;
+}
+
 export function pointReturnAmount(referenceAmount: number): number {
   if (!Number.isSafeInteger(referenceAmount) || referenceAmount < 0) {
     throw new Error("Point return reference amount must be a non-negative safe integer.");
@@ -633,11 +878,11 @@ export function pointReturnTotalAmount(pointAmounts: number[]): number {
 export function isPointReturnEligibleInventory(
   status: PointReturnInventoryStatus,
   sourceType: PointReturnInventorySourceType,
-  isOriginalDrawOwner: boolean,
+  hasDirectDrawProvenance: boolean,
 ): boolean {
   return status === "OWNED"
     && sourceType === "GACHA"
-    && isOriginalDrawOwner;
+    && hasDirectDrawProvenance;
 }
 
 export function maskShippingRecipient(value: string): string {
@@ -657,12 +902,25 @@ const wishlistSelect = `SELECT w.id,w.product_id,p.name AS product_name,p.ip_id,
   FROM wishlist_items w JOIN catalog_products p ON p.id=w.product_id JOIN catalog_ips i ON i.id=p.ip_id`;
 
 const accountInventorySelect = `SELECT
-  iu.id,iu.owner_id,iu.product_id,iu.source_type,iu.status AS inventory_status,iu.acquired_at,
+  iu.id,iu.owner_id,iu.product_id,iu.source_type,iu.status AS inventory_status,iu.acquired_at,iu.storage_expires_at,
+  EXISTS (
+    SELECT 1 FROM draw_results point_return_draw
+    WHERE point_return_draw.prize_inventory_unit_id=iu.id
+      AND point_return_draw.user_id=iu.owner_id
+      AND point_return_draw.entitlement_id=iu.source_id
+      AND point_return_draw.prize_product_id=iu.product_id
+      AND iu.source_type='GACHA'
+      AND iu.status='OWNED'
+      AND NOT EXISTS (
+        SELECT 1 FROM inventory_ownership_transfers point_return_transfer
+        WHERE point_return_transfer.inventory_unit_id=iu.id
+      )
+  ) AS point_return_eligible,
   p.sku,p.ip_id,
   COALESCE((SELECT array_agg(pc.character_id::text ORDER BY pc.character_id)
     FROM product_characters pc WHERE pc.product_id=p.id),'{}'::text[]) AS character_ids,
   p.category,p.name AS product_name,p.manufacturer,p.release_date,p.price,
-  COALESCE(s.on_hand-s.reserved,0) AS available_quantity,p.metadata,p.image_url,
+  COALESCE(s.on_hand-s.reserved,0) AS available_quantity,p.metadata,p.image_url,p.storefront_image_url,
   p.is_active AS product_active,p.is_prize_only,p.version AS product_version,
   p.created_at AS product_created_at,p.updated_at AS product_updated_at,
   iu.acquired_at AS created_at
@@ -676,9 +934,46 @@ const shippingRequestSelect = `SELECT s.id,s.status,s.version,s.address_snapshot
     WHERE i.shipping_request_id=s.id ORDER BY i.inventory_unit_id) AS inventory_unit_ids
   FROM shipping_requests s`;
 
+async function loadShippingRequestItems(queryable: Queryable, shippingRequestId: string) {
+  const result = await queryable.query<ShippingRequestItemRow>(
+    `SELECT item.inventory_unit_id,
+      item.product_snapshot->>'productId' AS product_id,
+      item.product_snapshot->>'productName' AS product_name,
+      item.product_snapshot->>'ipId' AS ip_id,
+      item.product_snapshot->>'ipNameKo' AS ip_name_ko,
+      item.product_snapshot->>'category' AS category,
+      item.product_snapshot->>'imageUrl' AS image_url,
+      (item.product_snapshot->>'productVersion')::integer AS product_version
+     FROM shipping_request_items item
+     WHERE item.shipping_request_id=$1
+     ORDER BY item.inventory_unit_id`,
+    [shippingRequestId],
+  );
+  return result.rows.map(mapShippingRequestItem);
+}
+
 export async function registerAccountRoutes(app: FastifyInstance, context: ApiContext) {
   app.get("/v1/account/profile", { preHandler: context.auth.requireUser }, async (request) => {
     return mapProfile(await loadProfile(context.pool, request.actor!.userId));
+  });
+
+  app.get("/v1/account/owned-products/:productId", { preHandler: context.auth.requireUser }, async (request) => {
+    const productId = slugIdInput((request.params as Record<string, unknown>).productId, "productId");
+    const result = await context.pool.query<AccountInventoryRow>(
+      `${accountInventorySelect}
+       WHERE iu.owner_id=$1 AND iu.product_id=$2 AND iu.source_type IN ('GACHA','KUJI')
+         AND EXISTS (
+           SELECT 1 FROM draw_results draw_result
+           WHERE draw_result.prize_inventory_unit_id=iu.id
+             AND draw_result.user_id=iu.owner_id
+             AND draw_result.entitlement_id=iu.source_id
+             AND draw_result.prize_product_id=iu.product_id
+         )
+       ORDER BY iu.acquired_at DESC,iu.id DESC LIMIT 1`,
+      [request.actor!.userId, productId],
+    );
+    if (!result.rowCount) throw notFound("보유 상품을 찾을 수 없습니다.");
+    return mapAccountInventory(result.rows[0]!).product;
   });
 
   app.patch("/v1/account/profile", { preHandler: context.auth.requireUser }, async (request, reply) => {
@@ -890,15 +1185,24 @@ export async function registerAccountRoutes(app: FastifyInstance, context: ApiCo
     const values: unknown[] = [request.actor!.userId, limit + 1];
     const filters = [
       "iu.owner_id=$1",
-      "iu.status='OWNED'",
+      "iu.status IN ('OWNED','EXCHANGE_LISTED','EXCHANGE_OFFERED','SHIPPING','EXPIRED_HOLD')",
+      "(iu.status IN ('SHIPPING','EXPIRED_HOLD') OR iu.storage_expires_at>now())",
       "iu.source_type IN ('GACHA','KUJI')",
-      `EXISTS (
-        SELECT 1 FROM draw_results draw_result
-        WHERE draw_result.prize_inventory_unit_id=iu.id
-          AND draw_result.user_id=iu.owner_id
-          AND draw_result.entitlement_id=iu.source_id
-          AND draw_result.prize_product_id=iu.product_id
-      )`,
+      `(EXISTS (
+         SELECT 1 FROM draw_results draw_result
+         WHERE draw_result.prize_inventory_unit_id=iu.id
+           AND draw_result.user_id=iu.owner_id
+           AND draw_result.entitlement_id=iu.source_id
+           AND draw_result.prize_product_id=iu.product_id
+       ) OR EXISTS (
+         SELECT 1
+           FROM inventory_ownership_transfers transfer
+           JOIN exchange_listings completed_exchange
+             ON completed_exchange.id=transfer.exchange_listing_id
+            AND completed_exchange.status='COMPLETED'
+          WHERE transfer.inventory_unit_id=iu.id
+            AND transfer.to_owner_id=iu.owner_id
+       ))`,
     ];
     if (cursor) {
       values.push(cursor.createdAt, uuidInput(cursor.id, "cursor.id"));
@@ -924,7 +1228,7 @@ export async function registerAccountRoutes(app: FastifyInstance, context: ApiCo
         filters.push(`(created_at,id)<($${values.length - 1},$${values.length})`);
       }
       const orders = await client.query<OrderRow>(
-        `SELECT id,status,currency,subtotal,discount_total,point_total,total,created_at,updated_at
+        `SELECT id,order_kind,shipping_request_id,status,currency,subtotal,discount_total,point_total,total,created_at,updated_at
          FROM orders WHERE ${filters.join(" AND ")} ORDER BY created_at DESC,id DESC LIMIT $2`,
         values,
       );
@@ -944,6 +1248,8 @@ export async function registerAccountRoutes(app: FastifyInstance, context: ApiCo
       }
       return cursorPage(orders.rows, limit, (order) => ({
         id: order.id,
+        orderKind: order.order_kind,
+        shippingRequestId: order.shipping_request_id,
         status: order.status,
         currency: order.currency,
         subtotal: numberValue(order.subtotal),
@@ -1021,7 +1327,7 @@ export async function registerAccountRoutes(app: FastifyInstance, context: ApiCo
     });
   });
 
-  app.post("/v1/account/point-returns", { preHandler: context.auth.requireUser }, async (request, reply) => {
+  app.post("/v1/account/point-returns", { preHandler: [requireLiveCommerce(context), context.auth.requireUser] }, async (request, reply) => {
     const body = objectInput(request.body);
     assertOnlyKeys(body, ["inventoryUnitIds"]);
     const inventoryUnitIds = canonicalPointReturnInventoryIds(body.inventoryUnitIds);
@@ -1036,12 +1342,17 @@ export async function registerAccountRoutes(app: FastifyInstance, context: ApiCo
           `SELECT iu.id,iu.owner_id,iu.product_id,iu.source_type,iu.source_id,iu.status,p.price,
              draw_result.user_id AS draw_user_id,
              draw_result.entitlement_id AS draw_entitlement_id,
-             draw_result.prize_product_id AS draw_prize_product_id
+             draw_result.prize_product_id AS draw_prize_product_id,
+             NOT EXISTS (
+               SELECT 1 FROM inventory_ownership_transfers transfer_history
+               WHERE transfer_history.inventory_unit_id=iu.id
+             ) AS never_exchanged
            FROM inventory_units iu
            JOIN catalog_products p ON p.id=iu.product_id
            LEFT JOIN draw_results draw_result ON draw_result.prize_inventory_unit_id=iu.id
            WHERE iu.id=ANY($1::uuid[])
              AND iu.source_type='GACHA'
+             AND iu.storage_expires_at>now()
            ORDER BY iu.id FOR UPDATE OF iu,p`,
           [inventoryUnitIds],
         );
@@ -1058,10 +1369,10 @@ export async function registerAccountRoutes(app: FastifyInstance, context: ApiCo
             || !isPointReturnEligibleInventory(
               inventory.status,
               inventory.source_type,
-              originalDrawLinkMatches,
+              originalDrawLinkMatches && inventory.never_exchanged,
             )
           ) {
-            throw conflict("직접 뽑아 현재 보관함에 보관 중인 가챠 상품만 포인트 환급을 신청할 수 있습니다.");
+            throw conflict("본인이 가챠에서 직접 뽑아 현재 보관 중인 상품만 포인트 환급을 신청할 수 있습니다.");
           }
           const referenceAmount = numberValue(inventory.price);
           const pointAmount = pointReturnAmount(referenceAmount);
@@ -1103,7 +1414,9 @@ export async function registerAccountRoutes(app: FastifyInstance, context: ApiCo
         }
         const transitioned = await client.query<{ id: string }>(
           `UPDATE inventory_units SET status='POINT_RETURNED'
-           WHERE id=ANY($1::uuid[]) AND owner_id=$2 AND status='OWNED' RETURNING id`,
+           WHERE id=ANY($1::uuid[]) AND owner_id=$2 AND status='OWNED'
+             AND storage_expires_at>now()
+           RETURNING id`,
           [inventoryUnitIds, actorId],
         );
         if (transitioned.rowCount !== inventoryUnitIds.length) {
@@ -1167,6 +1480,33 @@ export async function registerAccountRoutes(app: FastifyInstance, context: ApiCo
     return cursorPage(result.rows, limit, mapNotification);
   });
 
+  app.get("/v1/account/notifications/unread-summary", { preHandler: context.auth.requireUser }, async (request) => {
+    const summary = await context.pool.query<{
+      unread_count: number | string;
+      newest_unread_created_at: Date | null;
+    }>(
+      `SELECT count(*)::integer AS unread_count,max(created_at) AS newest_unread_created_at
+       FROM notifications WHERE user_id=$1 AND read_at IS NULL`,
+      [request.actor!.userId],
+    );
+    const row = summary.rows[0];
+    return {
+      unreadCount: row ? numberValue(row.unread_count) : 0,
+      newestUnreadCreatedAt: row ? nullableIso(row.newest_unread_created_at) : null,
+    };
+  });
+
+  app.get("/v1/account/notifications/:notificationId", { preHandler: context.auth.requireUser }, async (request) => {
+    const notificationId = uuidInput((request.params as Record<string, unknown>).notificationId, "notificationId");
+    const result = await context.pool.query<NotificationRow>(
+      `SELECT id,kind,title,body,data,read_at,created_at FROM notifications
+       WHERE id=$1 AND user_id=$2`,
+      [notificationId, request.actor!.userId],
+    );
+    if (!result.rowCount) throw notFound("알림을 찾을 수 없습니다.");
+    return mapNotification(result.rows[0]!);
+  });
+
   app.post("/v1/account/notifications/:notificationId/read", { preHandler: context.auth.requireUser }, async (request, reply) => {
     const notificationId = uuidInput((request.params as Record<string, unknown>).notificationId, "notificationId");
     const actorId = request.actor!.userId;
@@ -1187,6 +1527,66 @@ export async function registerAccountRoutes(app: FastifyInstance, context: ApiCo
       },
     });
     return sendMutation(reply, result);
+  });
+
+  app.post("/v1/account/push-devices", { preHandler: context.auth.requireUser }, async (request) => {
+    const input = objectInput(request.body);
+    assertOnlyKeys(input, ["installationId", "expoPushToken", "platform", "appVersion"]);
+    const installationId = uuidInput(input.installationId, "installationId");
+    const expoPushToken = stringInput(input, "expoPushToken", { min: 24, max: 256, trim: false })!;
+    const platform = enumInput(input, "platform", ["IOS", "ANDROID"] as const)!;
+    const appVersion = nullableStringInput(input, "appVersion", { max: 40 });
+    if (!isExpoPushToken(expoPushToken)) throw badRequest("Expo 푸시 토큰 형식을 확인해 주세요.");
+    const actor = request.actor!;
+
+    const registered = await withTransaction(context.pool, async (client) => {
+      await client.query(
+        `SELECT pg_advisory_xact_lock(hashtextextended(lock_key,0))
+           FROM unnest($1::text[]) AS lock_keys(lock_key)
+          ORDER BY lock_key`,
+        [[`push-installation:${installationId}`, `push-token:${expoPushToken}`].sort()],
+      );
+      await client.query(
+        `UPDATE push_device_tokens
+            SET disabled_at=now(),disabled_reason='OWNERSHIP_ROTATED'
+          WHERE disabled_at IS NULL
+            AND (installation_id=$1 OR expo_push_token=$2)
+            AND NOT (user_id=$3 AND installation_id=$1)`,
+        [installationId, expoPushToken, actor.userId],
+      );
+      const result = await client.query<PushDeviceTokenRow>(
+        `INSERT INTO push_device_tokens(
+           user_id,session_id,installation_id,expo_push_token,platform,app_version
+         ) VALUES($1,$2,$3,$4,$5,$6)
+         ON CONFLICT (user_id,installation_id) DO UPDATE SET
+           session_id=EXCLUDED.session_id,
+           expo_push_token=EXCLUDED.expo_push_token,
+           platform=EXCLUDED.platform,
+           app_version=EXCLUDED.app_version,
+           disabled_at=NULL,
+           disabled_reason=NULL,
+           last_registered_at=now()
+         RETURNING installation_id,platform,app_version,last_registered_at`,
+        [actor.userId, actor.sessionId, installationId, expoPushToken, platform, appVersion],
+      );
+      return result.rows[0]!;
+    });
+    return mapPushDeviceRegistration(registered);
+  });
+
+  app.delete("/v1/account/push-devices/:installationId", { preHandler: context.auth.requireUser }, async (request, reply) => {
+    const installationId = uuidInput(
+      (request.params as Record<string, unknown>).installationId,
+      "installationId",
+    );
+    await context.pool.query(
+      `UPDATE push_device_tokens
+          SET disabled_at=COALESCE(disabled_at,now()),
+              disabled_reason=COALESCE(disabled_reason,'USER_DISABLED')
+        WHERE user_id=$1 AND installation_id=$2`,
+      [request.actor!.userId, installationId],
+    );
+    return reply.code(204).send();
   });
 
   app.get("/v1/account/shipping-requests", { preHandler: context.auth.requireUser }, async (request) => {
@@ -1223,33 +1623,145 @@ export async function registerAccountRoutes(app: FastifyInstance, context: ApiCo
       [shippingRequestId, request.actor!.userId],
     );
     if (!result.rowCount) throw notFound("배송 신청을 찾을 수 없습니다.");
-    return mapShippingRequest(result.rows[0]!);
+    const items = await loadShippingRequestItems(context.pool, shippingRequestId);
+    return { ...mapShippingRequest(result.rows[0]!), items };
   });
 
-  app.post("/v1/account/shipping-requests", { preHandler: context.auth.requireUser }, async (request, reply) => {
-    const body = objectInput(request.body);
-    assertOnlyKeys(body, ["inventoryUnitIds"]);
-    const inventoryUnitIds = canonicalShippingInventoryIds(body.inventoryUnitIds);
+  app.post("/v1/account/shipping-quotes", { preHandler: [requireLiveCommerce(context), context.auth.requireUser] }, async (request) => {
+    const { inventoryUnitIds } = shippingQuoteInput(request.body);
+    const actorId = request.actor!.userId;
+    return withTransaction(context.pool, async (client) => {
+      await client.query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ");
+      const address = await client.query<AddressRow>(
+        "SELECT * FROM default_shipping_addresses WHERE user_id=$1 FOR SHARE",
+        [actorId],
+      );
+      if (!address.rowCount) throw conflict("배송 견적을 만들기 전에 기본 배송지를 등록해 주세요.");
+      const inventory = await client.query<AccountShippingInventoryRow>(
+        `SELECT iu.id,iu.source_type,p.price
+         FROM inventory_units iu
+         JOIN catalog_products p ON p.id=iu.product_id
+         WHERE iu.id=ANY($1::uuid[])
+           AND iu.owner_id=$2
+           AND iu.status='OWNED'
+           AND iu.source_type IN ('GACHA','KUJI')
+           AND iu.storage_expires_at>now()
+         ORDER BY iu.id FOR SHARE OF iu,p`,
+        [inventoryUnitIds, actorId],
+      );
+      if (inventory.rowCount !== inventoryUnitIds.length) {
+        throw conflict("선택한 상품 중 배송 견적을 만들 수 없는 항목이 있습니다.");
+      }
+      const policy = calculateAccountShippingPolicy(inventory.rows.map((item) => ({
+        sourceType: item.source_type,
+        price: item.price,
+      })));
+      const addressRow = address.rows[0]!;
+      const created = await client.query<ShippingQuoteRow>(
+        `INSERT INTO shipping_quotes(
+           user_id,address_id,address_version,inventory_unit_ids,item_count,
+           reference_subtotal,contains_kuji,free_shipping_threshold,shipping_fee
+         ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)
+         RETURNING *`,
+        [
+          actorId,
+          addressRow.id,
+          addressRow.version,
+          inventoryUnitIds,
+          inventoryUnitIds.length,
+          policy.referenceSubtotal,
+          policy.containsKuji,
+          policy.freeShippingThreshold,
+          policy.shippingFee,
+        ],
+      );
+      const quote = created.rows[0]!;
+      return {
+        id: quote.id,
+        inventoryUnitIds: quote.inventory_unit_ids,
+        addressId: quote.address_id,
+        addressVersion: quote.address_version,
+        destination: {
+          recipientMasked: maskShippingRecipient(addressRow.recipient),
+          phoneMasked: maskShippingPhone(addressRow.phone),
+          postalCode: addressRow.postal_code,
+          addressLine1: addressRow.address_line1,
+          addressLine2: addressRow.address_line2,
+        },
+        itemCount: quote.item_count,
+        referenceSubtotal: numberValue(quote.reference_subtotal),
+        containsKuji: quote.contains_kuji,
+        freeShippingThreshold: numberValue(quote.free_shipping_threshold),
+        qualifiesForFreeShipping: numberValue(quote.shipping_fee) === 0,
+        shippingFee: numberValue(quote.shipping_fee),
+        createdAt: iso(quote.created_at),
+        expiresAt: iso(quote.expires_at),
+      };
+    });
+  });
+
+  app.post("/v1/account/shipping-requests", { preHandler: [requireLiveCommerce(context), context.auth.requireUser] }, async (request, reply) => {
+    const input = shippingRequestInput(request.body);
     const actorId = request.actor!.userId;
     const result = await idempotentMutation(context, {
       actorId,
       scope: "ACCOUNT_SHIPPING_REQUEST_CREATE",
       key: idempotencyKey(request.headers),
-      payload: { inventoryUnitIds },
+      payload: input,
       work: async (client) => {
-        const address = await client.query<AddressRow>(
-          "SELECT * FROM default_shipping_addresses WHERE user_id=$1 FOR SHARE",
-          [actorId],
+        const quoteResult = await client.query<ShippingQuoteRow>(
+          `SELECT quote.*,quote.expires_at<=now() AS expired
+           FROM shipping_quotes quote
+           WHERE quote.id=$1 AND quote.user_id=$2
+           FOR UPDATE`,
+          [input.quoteId, actorId],
         );
-        if (!address.rowCount) throw conflict("배송 신청 전에 기본 배송지를 등록해 주세요.");
-        const lockedInventory = await client.query<{ id: string }>(
-          `SELECT id FROM inventory_units
-           WHERE id=ANY($1::uuid[]) AND owner_id=$2 AND status='OWNED'
-           ORDER BY id FOR UPDATE`,
+        if (!quoteResult.rowCount) throw notFound("배송 견적을 찾을 수 없습니다.");
+        const quote = quoteResult.rows[0]!;
+        if (quote.consumed_at || quote.shipping_request_id) {
+          throw new AppError(409, "SHIPPING_QUOTE_CONSUMED", "이미 사용한 배송 견적입니다.");
+        }
+        if (quote.expired) {
+          throw new AppError(409, "SHIPPING_QUOTE_EXPIRED", "배송 견적이 만료되었습니다. 다시 확인해 주세요.");
+        }
+        if (input.addressVersion !== quote.address_version) {
+          throw new AppError(409, "SHIPPING_ADDRESS_CHANGED", "배송지가 변경되었습니다. 새 견적을 확인해 주세요.");
+        }
+        const address = await client.query<AddressRow>(
+          "SELECT * FROM default_shipping_addresses WHERE id=$1 AND user_id=$2 FOR SHARE",
+          [quote.address_id, actorId],
+        );
+        if (!address.rowCount || address.rows[0]!.version !== quote.address_version) {
+          throw new AppError(409, "SHIPPING_ADDRESS_CHANGED", "배송지가 변경되었습니다. 새 견적을 확인해 주세요.");
+        }
+        const inventoryUnitIds = quote.inventory_unit_ids;
+        const lockedInventory = await client.query<AccountShippingInventoryRow>(
+          `SELECT iu.id,iu.source_type,p.price
+           FROM inventory_units iu
+           JOIN catalog_products p ON p.id=iu.product_id
+           WHERE iu.id=ANY($1::uuid[])
+             AND iu.owner_id=$2
+             AND iu.status='OWNED'
+             AND iu.source_type IN ('GACHA','KUJI')
+             AND iu.storage_expires_at>now()
+           ORDER BY iu.id FOR UPDATE OF iu,p`,
           [inventoryUnitIds, actorId],
         );
         if (lockedInventory.rowCount !== inventoryUnitIds.length) {
-          throw conflict("선택한 상품 중 배송 신청할 수 없는 항목이 있습니다.");
+          throw new AppError(409, "SHIPPING_INVENTORY_CHANGED", "선택한 상품 상태가 변경되었습니다. 새 견적을 확인해 주세요.");
+        }
+        const shippingPolicy = calculateAccountShippingPolicy(lockedInventory.rows.map((inventory) => ({
+          sourceType: inventory.source_type,
+          price: inventory.price,
+        })));
+        if (!shippingQuoteMatchesCurrentPolicy(quote, inventoryUnitIds, shippingPolicy)) {
+          throw new AppError(409, "SHIPPING_QUOTE_CHANGED", "배송 금액이 변경되었습니다. 새 견적을 확인해 주세요.");
+        }
+        if (
+          shippingPolicy.shippingFee > 0
+          && (context.config.paymentProvider === "UNCONFIGURED" || context.config.paymentProvider === "INTERNAL_ZERO")
+        ) {
+          throw new AppError(503, "PAYMENT_NOT_CONFIGURED", "배송비 결제 채널이 아직 구성되지 않았습니다.");
         }
         const addressRow = address.rows[0]!;
         const addressSnapshot = {
@@ -1263,33 +1775,102 @@ export async function registerAccountRoutes(app: FastifyInstance, context: ApiCo
           deliveryNote: addressRow.delivery_note,
         };
         const created = await client.query<{ id: string; requested_at: Date }>(
-          `INSERT INTO shipping_requests(user_id,address_snapshot)
-           VALUES($1,$2) RETURNING id,requested_at`,
-          [actorId, JSON.stringify(addressSnapshot)],
+          `INSERT INTO shipping_requests(
+             user_id,status,address_snapshot,reference_subtotal,free_shipping_threshold,
+             qualifies_for_free_shipping,contains_kuji,shipping_fee
+           ) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id,requested_at`,
+          [
+            actorId,
+            shippingPolicy.qualifiesForFreeShipping ? "REQUESTED" : "PAYMENT_PENDING",
+            JSON.stringify(addressSnapshot),
+            shippingPolicy.referenceSubtotal,
+            shippingPolicy.freeShippingThreshold,
+            shippingPolicy.qualifiesForFreeShipping,
+            shippingPolicy.containsKuji,
+            shippingPolicy.shippingFee,
+          ],
         );
         const shippingRequestId = created.rows[0]!.id;
-        await client.query(
-          `INSERT INTO shipping_request_items(shipping_request_id,inventory_unit_id)
-           SELECT $1,item_id FROM unnest($2::uuid[]) AS item_id`,
+        const insertedItems = await client.query(
+          `INSERT INTO shipping_request_items(shipping_request_id,inventory_unit_id,product_snapshot)
+           SELECT $1,inventory.id,jsonb_build_object(
+             'productId',product.id,
+             'productName',product.name,
+             'ipId',product.ip_id,
+             'ipNameKo',ip.name_ko,
+             'category',product.category,
+             'imageUrl',product.image_url,
+             'productVersion',product.version
+           )
+           FROM unnest($2::uuid[]) AS selected(item_id)
+           JOIN inventory_units inventory ON inventory.id=selected.item_id
+           JOIN catalog_products product ON product.id=inventory.product_id
+           JOIN catalog_ips ip ON ip.id=product.ip_id`,
           [shippingRequestId, inventoryUnitIds],
         );
+        if (insertedItems.rowCount !== inventoryUnitIds.length) {
+          throw conflict("상품 정보를 배송 신청에 저장하지 못했습니다.");
+        }
         const transitioned = await client.query<{ id: string }>(
           `UPDATE inventory_units SET status='SHIPPING'
-           WHERE id=ANY($1::uuid[]) AND owner_id=$2 AND status='OWNED' RETURNING id`,
+           WHERE id=ANY($1::uuid[]) AND owner_id=$2 AND status='OWNED'
+             AND storage_expires_at>now()
+           RETURNING id`,
           [inventoryUnitIds, actorId],
         );
         if (transitioned.rowCount !== inventoryUnitIds.length) {
           throw conflict("배송 상태를 변경하지 못했습니다.");
         }
+        let paymentOrderId: string | null = null;
+        let paymentId: string | null = null;
+        if (shippingPolicy.shippingFee > 0) {
+          const paymentOrder = await client.query<{ id: string }>(
+            `INSERT INTO orders(
+               user_id,subtotal,discount_total,point_total,total,order_kind,shipping_request_id
+             ) VALUES($1,$2,0,0,$2,'SHIPPING_FEE',$3)
+             RETURNING id`,
+            [actorId, shippingPolicy.shippingFee, shippingRequestId],
+          );
+          paymentOrderId = paymentOrder.rows[0]!.id;
+          const payment = await client.query<{ id: string }>(
+            "INSERT INTO payments(order_id,provider,amount) VALUES($1,$2,$3) RETURNING id",
+            [paymentOrderId, context.config.paymentProvider, shippingPolicy.shippingFee],
+          );
+          paymentId = payment.rows[0]!.id;
+        }
+        const consumed = await client.query(
+          `UPDATE shipping_quotes
+              SET consumed_at=now(),shipping_request_id=$3
+            WHERE id=$1 AND user_id=$2 AND consumed_at IS NULL AND expires_at>now()`,
+          [quote.id, actorId, shippingRequestId],
+        );
+        if (consumed.rowCount !== 1) {
+          throw new AppError(409, "SHIPPING_QUOTE_EXPIRED", "배송 견적을 사용할 수 없습니다. 다시 확인해 주세요.");
+        }
         await writeOutbox(client, request.id, {
           aggregateType: "SHIPPING_REQUEST",
           aggregateId: shippingRequestId,
-          eventType: "shipping.requested",
-          payload: { shippingRequestId, userId: actorId, inventoryUnitIds },
+          eventType: shippingPolicy.qualifiesForFreeShipping
+            ? "shipping.requested"
+            : "shipping.payment_requested",
+          payload: {
+            shippingRequestId,
+            shippingQuoteId: quote.id,
+            userId: actorId,
+            inventoryUnitIds,
+            referenceSubtotal: shippingPolicy.referenceSubtotal,
+            freeShippingThreshold: shippingPolicy.freeShippingThreshold,
+            qualifiesForFreeShipping: shippingPolicy.qualifiesForFreeShipping,
+            containsKuji: shippingPolicy.containsKuji,
+            shippingFee: shippingPolicy.shippingFee,
+            paymentOrderId,
+            paymentId,
+          },
         });
         const responseBody = {
           id: shippingRequestId,
-          status: "REQUESTED" as const,
+          quoteId: quote.id,
+          status: shippingPolicy.qualifiesForFreeShipping ? "REQUESTED" as const : "PAYMENT_PENDING" as const,
           inventoryUnitIds,
           destination: {
             recipientMasked: maskShippingRecipient(addressRow.recipient),
@@ -1299,6 +1880,9 @@ export async function registerAccountRoutes(app: FastifyInstance, context: ApiCo
             addressLine2: addressRow.address_line2,
           },
           requestedAt: iso(created.rows[0]!.requested_at),
+          shippingFee: shippingPolicy.shippingFee,
+          paymentOrderId,
+          paymentId,
         };
         return {
           statusCode: 201,
@@ -1311,9 +1895,78 @@ export async function registerAccountRoutes(app: FastifyInstance, context: ApiCo
     return sendMutation(reply, result);
   });
 
-  app.get("/v1/account/deletion-request", { preHandler: context.auth.requireUser }, async (request) => {
+  app.get("/v1/account/deletion-preview", { preHandler: context.auth.requireUserWithoutPolicy }, async (request, reply) => {
+    const blockers = await loadDeletionBlockers(context.pool, request.actor!.userId);
+    return reply.header("cache-control", "no-store").send({
+      canDeleteNow: !Object.values(blockers).some((value) => value > 0),
+      blockers,
+    });
+  });
+
+  app.get("/v1/account/policy-acceptances", { preHandler: context.auth.requireUserWithoutPolicy }, async (request, reply) => {
+    const result = await context.pool.query<{
+      policy_key: "TERMS" | "PRIVACY";
+      policy_version: string;
+      content_sha256: string;
+      public_url: string;
+      accepted_at: Date | null;
+    }>(
+      `SELECT document.policy_key,document.policy_version,document.content_sha256,
+              document.public_url,acceptance.accepted_at
+         FROM legal_document_versions document
+         LEFT JOIN LATERAL (
+           SELECT event.accepted_at
+             FROM user_policy_acceptance_events event
+            WHERE event.user_id=$1
+              AND event.policy_key=document.policy_key
+              AND event.policy_version=document.policy_version
+              AND event.content_sha256=document.content_sha256
+            ORDER BY event.accepted_at DESC,event.id DESC
+            LIMIT 1
+         ) acceptance ON true
+        WHERE document.policy_key=ANY($2::text[])
+          AND document.superseded_at IS NULL
+          AND document.effective_at<=now()
+        ORDER BY document.policy_key`,
+      [request.actor!.userId, ["TERMS", "PRIVACY"]],
+    );
+    return reply.header("cache-control", "no-store").send({
+      documents: result.rows.map((row) => ({
+        key: row.policy_key,
+        version: row.policy_version,
+        contentSha256: row.content_sha256,
+        publicUrl: row.public_url,
+        acceptedAt: nullableIso(row.accepted_at),
+        accepted: row.accepted_at !== null,
+      })),
+    });
+  });
+
+  app.post("/v1/account/policy-acceptances", { preHandler: context.auth.requireUserWithoutPolicy }, async (request, reply) => {
+    const input = objectInput(request.body);
+    if (Object.keys(input).some((key) => key !== "acceptedPolicies")) {
+      throw badRequest("지원하지 않는 약관 동의 값이 포함되어 있습니다.");
+    }
+    const policy = await loadRequiredPolicyDocuments(context.pool);
+    requiredPolicyAcceptance(input, policy.versions);
+    const rawUserAgent = request.headers["user-agent"];
+    const requestUserAgent = (Array.isArray(rawUserAgent) ? rawUserAgent.join(" ") : rawUserAgent)
+      ?.replace(/[\u0000-\u001f\u007f]+/g, " ").trim().slice(0, 500) || undefined;
+    await withTransaction(context.pool, (client) => recordRequiredPolicyAcceptanceEvents(client, {
+      userId: request.actor!.userId,
+      documents: policy.documents,
+      correlationId: request.id,
+      source: "MOBILE_RECONSENT",
+      ipAddress: request.ip,
+      ...(requestUserAgent ? { userAgent: requestUserAgent } : {}),
+    }));
+    return reply.header("cache-control", "no-store").code(204).send();
+  });
+
+  app.get("/v1/account/deletion-request", { preHandler: context.auth.requireUserWithoutPolicy }, async (request, reply) => {
     const result = await context.pool.query<AccountDeletionRequestRow>(
-      `SELECT id,status,blocker_snapshot,request_count,requested_at,last_requested_at
+      `SELECT id,status,blocker_snapshot,request_count,requested_at,last_requested_at,
+              completed_at,auth_deletion_status
        FROM account_deletion_requests
        WHERE user_id=$1
        ORDER BY requested_at DESC,id DESC
@@ -1321,10 +1974,32 @@ export async function registerAccountRoutes(app: FastifyInstance, context: ApiCo
       [request.actor!.userId],
     );
     if (!result.rowCount) throw notFound("탈퇴 요청을 찾을 수 없습니다.");
-    return mapDeletionRequest(result.rows[0]!);
+    return reply.header("cache-control", "no-store").send(mapDeletionRequest(result.rows[0]!));
   });
 
-  app.post("/v1/account/deletion-request", { preHandler: context.auth.requireUser }, async (request, reply) => {
+  app.get(
+    "/v1/account/deletion-requests/:requestId/status",
+    {
+      config: { rateLimit: { max: 30, timeWindow: "1 minute" } },
+    },
+    async (request, reply) => {
+      const requestId = uuidInput((request.params as Record<string, unknown>).requestId, "requestId");
+      const token = deletionStatusToken(request.headers);
+      if (!token) throw notFound("탈퇴 요청을 찾을 수 없습니다.");
+      const result = await context.pool.query<AccountDeletionRequestRow>(
+        `SELECT id,status,blocker_snapshot,request_count,requested_at,last_requested_at,
+                completed_at,auth_deletion_status
+           FROM account_deletion_requests
+          WHERE id=$1 AND status_token_digest=$2
+          LIMIT 1`,
+        [requestId, deletionStatusTokenDigest(token)],
+      );
+      if (!result.rowCount) throw notFound("탈퇴 요청을 찾을 수 없습니다.");
+      return reply.header("cache-control", "no-store").send(mapDeletionRequest(result.rows[0]!));
+    },
+  );
+
+  app.post("/v1/account/deletion-request", { preHandler: context.auth.requireUserWithoutPolicy }, async (request, reply) => {
     const input = objectInput(request.body);
     assertOnlyKeys(input, []);
     const actorId = request.actor!.userId;
@@ -1337,14 +2012,7 @@ export async function registerAccountRoutes(app: FastifyInstance, context: ApiCo
         hash: requestHash({ operation: "REQUEST_ACCOUNT_DELETION" }),
       });
 
-      if (!started.fresh) {
-        await client.query(
-          `UPDATE sessions SET revoked_at=now(),revoke_reason='ACCOUNT_DELETION_REQUESTED'
-           WHERE user_id=$1 AND revoked_at IS NULL`,
-          [actorId],
-        );
-        return { replay: true, statusCode: started.statusCode, body: started.body };
-      }
+      if (!started.fresh) return { replay: true, statusCode: started.statusCode, body: started.body };
 
       const user = await client.query(
         "SELECT id FROM users WHERE id=$1 AND role='USER' FOR UPDATE",
@@ -1353,11 +2021,14 @@ export async function registerAccountRoutes(app: FastifyInstance, context: ApiCo
       if (!user.rowCount) throw notFound("사용자 계정을 찾을 수 없습니다.");
 
       const blockers = await loadDeletionBlockers(client, actorId);
-      const assessedStatus = accountDeletionStatus(blockers);
+      const assessedStatus: AccountDeletionStatus = accountDeletionStatus(blockers);
+      const receiptToken = randomBytes(32).toString("base64url");
+      const receiptDigest = deletionStatusTokenDigest(receiptToken);
       const existing = await client.query<AccountDeletionRequestRow>(
-        `SELECT id,status,blocker_snapshot,request_count,requested_at,last_requested_at
+        `SELECT id,status,blocker_snapshot,request_count,requested_at,last_requested_at,
+                completed_at,auth_deletion_status
          FROM account_deletion_requests
-         WHERE user_id=$1 AND status IN ('PENDING_REVIEW','BLOCKED','APPROVED')
+         WHERE user_id=$1 AND status IN ('PENDING_REVIEW','BLOCKED','PROCESSING','APPROVED')
          ORDER BY requested_at DESC,id DESC
          LIMIT 1
          FOR UPDATE`,
@@ -1368,34 +2039,72 @@ export async function registerAccountRoutes(app: FastifyInstance, context: ApiCo
       let eventType: "CREATED" | "REASSESSED";
       if (existing.rowCount) {
         const current = existing.rows[0]!;
+        if (current.status === "PROCESSING") {
+          throw conflict("이미 탈퇴 처리가 진행 중입니다.", { requestId: current.id });
+        }
         if (current.status === "APPROVED") {
-          throw conflict("이미 승인된 탈퇴 요청은 운영 정책에 따른 수동 완료를 기다리고 있습니다.");
+          throw conflict("이미 접수된 탈퇴 요청이 처리 중입니다.", { requestId: current.id });
         }
         const updated = await client.query<AccountDeletionRequestRow>(
           `UPDATE account_deletion_requests
-           SET status=$2,blocker_snapshot=$3,request_count=request_count+1,last_requested_at=now()
+           SET status=$2,blocker_snapshot=$3,request_count=request_count+1,last_requested_at=now(),
+               status_token_digest=$4,processing_started_at=CASE WHEN $2='PROCESSING' THEN now() ELSE NULL END,
+               auth_deletion_status='NOT_REQUIRED'
            WHERE id=$1
-           RETURNING id,status,blocker_snapshot,request_count,requested_at,last_requested_at`,
-          [current.id, assessedStatus, JSON.stringify(blockers)],
+           RETURNING id,status,blocker_snapshot,request_count,requested_at,last_requested_at,
+                     completed_at,auth_deletion_status`,
+          [current.id, assessedStatus, JSON.stringify(blockers), receiptDigest],
         );
         deletionRequest = updated.rows[0]!;
         eventType = "REASSESSED";
       } else {
         const created = await client.query<AccountDeletionRequestRow>(
-          `INSERT INTO account_deletion_requests(user_id,status,blocker_snapshot)
-           VALUES($1,$2,$3)
-           RETURNING id,status,blocker_snapshot,request_count,requested_at,last_requested_at`,
-          [actorId, assessedStatus, JSON.stringify(blockers)],
+          `INSERT INTO account_deletion_requests(
+             user_id,status,blocker_snapshot,status_token_digest,processing_started_at
+           ) VALUES($1,$2,$3,$4,CASE WHEN $2='PROCESSING' THEN now() ELSE NULL END)
+           RETURNING id,status,blocker_snapshot,request_count,requested_at,last_requested_at,
+                     completed_at,auth_deletion_status`,
+          [actorId, assessedStatus, JSON.stringify(blockers), receiptDigest],
         );
         deletionRequest = created.rows[0]!;
         eventType = "CREATED";
       }
 
-      const revoked = await client.query(
-        `UPDATE sessions SET revoked_at=now(),revoke_reason='ACCOUNT_DELETION_REQUESTED'
-         WHERE user_id=$1 AND revoked_at IS NULL`,
-        [actorId],
-      );
+      let revokedSessionCount = 0;
+      let supabaseAuthUserId: string | null = null;
+      if (assessedStatus === "PROCESSING") {
+        const brokerIdentities = await client.query<{ provider_subject: string }>(
+          `SELECT DISTINCT provider_subject
+             FROM auth_identities
+            WHERE user_id=$1
+              AND provider=ANY($2::text[])`,
+          [actorId, ["KAKAO", "NAVER", "GOOGLE", "APPLE", "EMAIL"]],
+        );
+        supabaseAuthUserId = supabaseAuthUserIdForDeletion(
+          brokerIdentities.rows.map((row) => row.provider_subject),
+          context.config.supabaseUrl,
+        );
+        const revoked = await client.query(
+          `UPDATE sessions SET revoked_at=now(),revoke_reason='ACCOUNT_DELETION_REQUESTED'
+           WHERE user_id=$1 AND revoked_at IS NULL`,
+          [actorId],
+        );
+        revokedSessionCount = revoked.rowCount || 0;
+        await client.query(
+          `UPDATE account_deletion_requests
+              SET auth_deletion_status=$2
+            WHERE id=$1`,
+          [deletionRequest.id, supabaseAuthUserId ? "PENDING" : "NOT_REQUIRED"],
+        );
+        deletionRequest.auth_deletion_status = supabaseAuthUserId ? "PENDING" : "NOT_REQUIRED";
+        await client.query(
+          `INSERT INTO account_auth_deletion_jobs
+            (deletion_request_id,user_id,supabase_user_id)
+           VALUES($1,$2,$3)
+           ON CONFLICT (deletion_request_id) DO NOTHING`,
+          [deletionRequest.id, actorId, supabaseAuthUserId],
+        );
+      }
       await client.query(
         `INSERT INTO account_deletion_request_events
           (deletion_request_id,user_id,event_type,status,blocker_snapshot,revoked_session_count,
@@ -1407,14 +2116,18 @@ export async function registerAccountRoutes(app: FastifyInstance, context: ApiCo
           eventType,
           deletionRequest.status,
           JSON.stringify(deletionRequest.blocker_snapshot),
-          revoked.rowCount || 0,
+          revokedSessionCount,
           request.id,
           key,
-          JSON.stringify({ hardDeletePerformed: false, policy: "MANUAL_REVIEW_REQUIRED" }),
+          JSON.stringify({
+            hardDeletePerformed: false,
+            policy: "AUTOMATED_SERVER_DELETION",
+            processingQueued: assessedStatus === "PROCESSING",
+          }),
         ],
       );
 
-      const responseBody = mapDeletionRequest(deletionRequest);
+      const responseBody = { ...mapDeletionRequest(deletionRequest), statusToken: receiptToken };
       await completeIdempotency(client, started.id, {
         statusCode: 202,
         body: responseBody,
@@ -1424,6 +2137,7 @@ export async function registerAccountRoutes(app: FastifyInstance, context: ApiCo
       return { replay: false, statusCode: 202, body: responseBody };
     });
 
+    reply.header("cache-control", "no-store");
     return sendMutation(reply, result);
   });
 }

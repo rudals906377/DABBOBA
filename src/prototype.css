@@ -378,8 +378,8 @@
   width: 23px;
   height: 23px;
   background: currentColor;
-  mask: url("/assets/dabboba/ui/capsule-machine-nav.png") center / 23px 23px no-repeat;
-  -webkit-mask: url("/assets/dabboba/ui/capsule-machine-nav.png") center / 23px 23px no-repeat;
+  mask: url("/assets/dabboba/icons/capsule-machine-nav.png") center / 23px 23px no-repeat;
+  -webkit-mask: url("/assets/dabboba/icons/capsule-machine-nav.png") center / 23px 23px no-repeat;
 }
 
 .app-bottom-navigation > button > span {

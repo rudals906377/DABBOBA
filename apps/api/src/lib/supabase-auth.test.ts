@@ -11,6 +11,7 @@ import { AppError } from "./errors.js";
 import {
   mapSupabaseCustomerClaims,
   verifySupabaseAccessToken,
+  verifySupabaseCustomerAccessToken,
 } from "./supabase-auth.js";
 
 const issuer = "https://project.supabase.co/auth/v1";
@@ -23,7 +24,7 @@ function rejectsUnauthorized(work: () => Promise<unknown> | unknown) {
   });
 }
 
-test("claim mapping accepts one approved provider without inferring other identities", () => {
+test("claim mapping authenticates the broker subject without treating app metadata as the current provider", () => {
   const claims = mapSupabaseCustomerClaims({
     iss: issuer,
     sub: "7aa68a27-b48f-4ad9-bfac-5cf8b1ae8077",
@@ -40,24 +41,18 @@ test("claim mapping accepts one approved provider without inferring other identi
     issuer,
     subject: "7aa68a27-b48f-4ad9-bfac-5cf8b1ae8077",
     canonicalSubject: `${issuer}#7aa68a27-b48f-4ad9-bfac-5cf8b1ae8077`,
-    loginProvider: "KAKAO",
-    providers: ["KAKAO"],
-    email: "customer@example.com",
-    phoneE164: null,
   });
 
-  const socialOnly = mapSupabaseCustomerClaims({
+  const staleMetadata = mapSupabaseCustomerClaims({
     iss: issuer,
     sub: "social-only",
     role: "authenticated",
-    phone: "+821012345678",
-    app_metadata: { provider: "kakao", providers: ["kakao"] },
+    app_metadata: { provider: "phone", providers: ["phone", "unsupported"] },
   });
-  assert.equal(socialOnly.phoneE164, null);
-
+  assert.equal(staleMetadata.subject, "social-only");
 });
 
-test("claim mapping rejects anonymous, unsupported, or malformed phone identities", async () => {
+test("claim mapping rejects anonymous and unauthenticated broker subjects", async () => {
   const base: JWTPayload = {
     iss: issuer,
     sub: "customer-subject",
@@ -70,25 +65,103 @@ test("claim mapping rejects anonymous, unsupported, or malformed phone identitie
   }));
   await rejectsUnauthorized(() => mapSupabaseCustomerClaims({
     ...base,
-    app_metadata: { provider: "google", providers: ["email", "google"] },
+    role: "anon",
   }));
-  await rejectsUnauthorized(() => mapSupabaseCustomerClaims({
-    ...base,
-    app_metadata: { provider: "email", providers: ["email", "kakao"] },
+});
+
+test("live Auth user verification accepts linked approved identities and ignores legacy phone identity", async () => {
+  const signing = await generateKeyPair("ES256");
+  const publicJwk = await exportJWK(signing.publicKey);
+  publicJwk.kid = "live-user-key";
+  publicJwk.alg = "ES256";
+  const keyResolver = createLocalJWKSet({ keys: [publicJwk] });
+  const now = Math.floor(Date.now() / 1_000);
+  const subject = "f7257404-6ce4-4db6-a753-71848e7f6338";
+  const token = await new SignJWT({
+    role: "authenticated",
+    app_metadata: { provider: "kakao", providers: ["kakao"] },
+  })
+    .setProtectedHeader({ alg: "ES256", kid: "live-user-key" })
+    .setIssuer(issuer)
+    .setSubject(subject)
+    .setAudience(audience)
+    .setIssuedAt(now)
+    .setExpirationTime(now + 300)
+    .sign(signing.privateKey);
+  const captured: Array<{ url: string; authorization: string | null; apikey: string | null }> = [];
+  const verified = await verifySupabaseCustomerAccessToken(token, {
+    supabaseUrl,
+    audience,
+    publishableKey: "sb_publishable_fixture_public_key",
+    fetch: async (input, init) => {
+      const headers = new Headers(init?.headers);
+      captured.push({
+        url: String(input),
+        authorization: headers.get("authorization"),
+        apikey: headers.get("apikey"),
+      });
+      return Response.json({
+        id: subject,
+        role: "authenticated",
+        is_anonymous: false,
+        email: " Customer@Example.com ",
+        email_confirmed_at: new Date(Date.now() - 1_000).toISOString(),
+        identities: [
+          { identity_id: "kakao-one", user_id: subject, provider: "kakao" },
+          { identity_id: "google-one", user_id: subject, provider: "google" },
+          { identity_id: "google-two", user_id: subject, provider: "google" },
+          { identity_id: "email-one", user_id: subject, provider: "email" },
+          { identity_id: "legacy-phone", user_id: subject, provider: "phone" },
+        ],
+      });
+    },
+  }, keyResolver);
+  assert.deepEqual(verified.providers, ["KAKAO", "GOOGLE", "EMAIL"]);
+  assert.equal(verified.email, "customer@example.com");
+  assert.deepEqual(captured, [{
+    url: `${supabaseUrl}/auth/v1/user`,
+    authorization: `Bearer ${token}`,
+    apikey: "sb_publishable_fixture_public_key",
+  }]);
+});
+
+test("live Auth user verification rejects a mismatched subject, phone-only user, unconfirmed email, and raw provider errors", async () => {
+  const signing = await generateKeyPair("ES256");
+  const publicJwk = await exportJWK(signing.publicKey);
+  publicJwk.kid = "live-reject-key";
+  publicJwk.alg = "ES256";
+  const keyResolver = createLocalJWKSet({ keys: [publicJwk] });
+  const now = Math.floor(Date.now() / 1_000);
+  const subject = "5a6ed09a-da32-4305-9c60-da106c110b06";
+  const token = await new SignJWT({ role: "authenticated" })
+    .setProtectedHeader({ alg: "ES256", kid: "live-reject-key" })
+    .setIssuer(issuer).setSubject(subject).setAudience(audience).setIssuedAt(now).setExpirationTime(now + 300)
+    .sign(signing.privateKey);
+  const verifyWith = (body: unknown) => verifySupabaseCustomerAccessToken(token, {
+    supabaseUrl,
+    audience,
+    publishableKey: "sb_publishable_fixture_public_key",
+    fetch: async () => Response.json(body),
+  }, keyResolver);
+  await rejectsUnauthorized(() => verifyWith({
+    id: "different-subject", role: "authenticated", is_anonymous: false,
+    identities: [{ identity_id: "google", provider: "google" }],
   }));
-  await rejectsUnauthorized(() => mapSupabaseCustomerClaims({
-    ...base,
-    app_metadata: { provider: "kakao", providers: ["kakao", "custom:naver"] },
+  await rejectsUnauthorized(() => verifyWith({
+    id: subject, role: "authenticated", is_anonymous: false,
+    identities: [{ identity_id: "phone", provider: "phone" }],
   }));
-  await rejectsUnauthorized(() => mapSupabaseCustomerClaims({
-    ...base,
-    app_metadata: { provider: "phone" },
+  await rejectsUnauthorized(() => verifyWith({
+    id: subject, role: "authenticated", is_anonymous: false,
+    email: "customer@example.com", email_confirmed_at: "",
+    identities: [{ identity_id: "email", provider: "email" }],
   }));
-  await rejectsUnauthorized(() => mapSupabaseCustomerClaims({
-    ...base,
-    phone: "010-1234-5678",
-    app_metadata: { provider: "phone" },
-  }));
+  await rejectsUnauthorized(() => verifySupabaseCustomerAccessToken(token, {
+    supabaseUrl,
+    audience,
+    publishableKey: "sb_publishable_fixture_public_key",
+    fetch: async () => { throw new Error("secret provider response"); },
+  }, keyResolver));
 });
 
 test("JWT verification requires the configured issuer, exact audience, expiry, role, and signature", async () => {
@@ -126,7 +199,6 @@ test("JWT verification requires the configured issuer, exact audience, expiry, r
     keyResolver,
   );
   assert.equal(verified.canonicalSubject, `${issuer}#8b31c37d-67e3-41fc-bdcf-bbb4aa957f16`);
-  assert.deepEqual(verified.providers, ["KAKAO"]);
 
   await rejectsUnauthorized(async () => verifySupabaseAccessToken(
     await token({ issuer: "https://other.supabase.co/auth/v1" }),

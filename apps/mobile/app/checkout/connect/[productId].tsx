@@ -1,5 +1,5 @@
-import { CheckoutConnectionScreen } from "@/features/checkout/CheckoutConnectionScreen";
+import { Redirect } from "expo-router";
 
 export default function CheckoutConnectionRoute() {
-  return <CheckoutConnectionScreen />;
+  return <Redirect href="/" />;
 }

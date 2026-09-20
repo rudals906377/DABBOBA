@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { FastifyInstance } from "fastify";
+import { decodeCursor, encodeCursor } from "@dabboba/db";
 import { AppError } from "../lib/errors.js";
 import type { ApiContext } from "../types.js";
 import { registerCatalogRoutes } from "./catalog.js";
@@ -41,10 +42,13 @@ function productRow(overrides: Record<string, unknown> = {}) {
     release_date: null,
     price: 0,
     available_quantity: 0,
+    total_quantity: null,
     metadata: {},
     image_url: "https://cdn.example.test/anya.webp",
+    storefront_image_url: null,
     is_active: true,
     is_prize_only: true,
+    sale_status: "DRAFT",
     character_ids: [],
     version: 1,
     created_at: new Date("2026-08-25T00:00:00.000Z"),
@@ -97,6 +101,8 @@ function replyCapture() {
   };
   return { reply, result: () => ({ statusCode, body }) };
 }
+
+const readReply = { header() { return this; } };
 
 test("public characters expose only active rows for an active IP with cursor pagination", async () => {
   const { app, routes } = routeHarness();
@@ -154,21 +160,165 @@ test("public characters expose only active rows for an active IP with cursor pag
   });
 });
 
-test("public products exclude prize-only rows and expose the catalog role", async () => {
+test("public products exclude prize-only rows and expose storefront media", async () => {
   const { app, routes } = routeHarness();
   let capturedSql = "";
   const context = contextWithPool({
     async query(sql: string) {
       capturedSql = sql;
-      return { rowCount: 1, rows: [productRow({ is_prize_only: false })] };
+      return {
+        rowCount: 1,
+        rows: [productRow({
+          category: "gacha",
+          is_prize_only: false,
+          total_quantity: 120,
+          storefront_image_url: "https://cdn.example.test/anya-storefront.webp",
+        })],
+      };
     },
   });
   await registerCatalogRoutes(app, context);
   const handler = routes.get("GET /v1/catalog/products");
   assert.ok(handler);
-  const result = await handler({ query: {} }, {}) as { items: Array<{ isPrizeOnly: boolean }> };
+  const result = await handler({ query: {} }, readReply) as {
+    items: Array<{ isPrizeOnly: boolean; totalQuantity: number | null; storefrontImageUrl: string | null }>;
+  };
   assert.match(capturedSql, /p\.is_prize_only = false/);
+  assert.match(capturedSql, /deck\.total_slots/);
+  assert.match(capturedSql, /count\(entry\.id\)>0/);
+  assert.match(capturedSql, /count\(entry\.initial_quantity\)=count\(entry\.id\)/);
+  assert.match(capturedSql, /THEN sum\(entry\.initial_quantity\)/);
+  assert.match(capturedSql, /version\.status='ACTIVE'/);
   assert.equal(result.items[0]?.isPrizeOnly, false);
+  assert.equal(result.items[0]?.totalQuantity, 120);
+  assert.equal(result.items[0]?.storefrontImageUrl, "https://cdn.example.test/anya-storefront.webp");
+});
+
+test("public product discovery applies server search, stock filter, stable popularity ordering, and cursor", async () => {
+  const { app, routes } = routeHarness();
+  let capturedSql = "";
+  let capturedValues: unknown[] = [];
+  const first = productRow({
+    id: "popular-a",
+    category: "gacha",
+    is_prize_only: false,
+    sale_status: "COMING_SOON",
+    price: 6900,
+    sort_score: "14",
+  });
+  const second = productRow({
+    id: "popular-b",
+    category: "gacha",
+    is_prize_only: false,
+    sale_status: "COMING_SOON",
+    price: 5900,
+    sort_score: "8",
+    created_at: new Date("2026-08-24T00:00:00.000Z"),
+  });
+  const context = contextWithPool({
+    async query(sql: string, values: unknown[] = []) {
+      capturedSql = sql;
+      capturedValues = values;
+      return { rowCount: 2, rows: [first, second] };
+    },
+  });
+  await registerCatalogRoutes(app, context);
+  const handler = routes.get("GET /v1/catalog/products");
+  assert.ok(handler);
+  const result = await handler({
+    query: {
+      limit: 1,
+      q: "귀멸",
+      category: "gacha",
+      sort: "popular",
+      excludeSoldOut: "true",
+    },
+  }, readReply) as { items: Array<{ id: string }>; nextCursor: string | null };
+
+  assert.match(capturedSql, /i\.name_ko ILIKE/);
+  assert.match(capturedSql, /COALESCE\(s\.on_hand-s\.reserved,0\) > 0/);
+  assert.match(capturedSql, /home_product_click_events click_event/);
+  assert.match(capturedSql, /interval '30 days'/);
+  assert.match(capturedSql, /ORDER BY sort_score DESC,created_at DESC,id DESC/);
+  assert.deepEqual(capturedValues, [2, "%귀멸%", "gacha"]);
+  assert.deepEqual(result.items.map((item) => item.id), ["popular-a"]);
+  assert.equal(decodeCursor(result.nextCursor ?? undefined)?.sort, "popular:14");
+
+  capturedSql = "";
+  capturedValues = [];
+  await handler({
+    query: {
+      limit: 1,
+      sort: "popular",
+      cursor: encodeCursor({
+        createdAt: "2026-08-25T00:00:00.000Z",
+        id: "popular-a",
+        sort: "popular:14",
+      }),
+    },
+  }, readReply);
+  assert.match(capturedSql, /sort_score < \$2::numeric/);
+  assert.deepEqual(capturedValues, [2, 14, "2026-08-25T00:00:00.000Z", "popular-a"]);
+});
+
+test("public product detail resolves one active sellable product by canonical id", async () => {
+  const { app, routes } = routeHarness();
+  let capturedSql = "";
+  let capturedValues: unknown[] = [];
+  const context = contextWithPool({
+    async query(sql: string, values: unknown[] = []) {
+      capturedSql = sql;
+      capturedValues = values;
+      return {
+        rowCount: 1,
+        rows: [productRow({
+          category: "kuji",
+          is_prize_only: false,
+          total_quantity: 80,
+          remaining_kuji_tiers: [{
+            tierCode: "A",
+            tierRank: "0",
+            label: "A상",
+            initialQuantity: "1",
+            remainingQuantity: "1",
+          }, {
+            tierCode: "B",
+            tierRank: "1",
+            label: "B상",
+            initialQuantity: "79",
+            remainingQuantity: "76",
+          }],
+        })],
+      };
+    },
+  });
+  await registerCatalogRoutes(app, context);
+  const handler = routes.get("GET /v1/catalog/products/:productId");
+  assert.ok(handler);
+
+  const result = await handler({ params: { productId: "spy-x-family-anya-prize" } }, readReply) as {
+    id: string;
+    isPrizeOnly: boolean;
+    totalQuantity: number | null;
+    remainingKujiTiers: Array<{ tierCode: string; tierRank: number; label: string; remainingQuantity: number }>;
+  };
+  assert.match(capturedSql, /p\.id=\$1/);
+  assert.match(capturedSql, /p\.is_active=true/);
+  assert.match(capturedSql, /p\.is_prize_only=false/);
+  assert.match(capturedSql, /i\.is_active=true/);
+  assert.match(capturedSql, /deck\.total_slots/);
+  assert.match(capturedSql, /count\(entry\.initial_quantity\)=count\(entry\.id\)/);
+  assert.match(capturedSql, /entry\.remaining_quantity>0/);
+  assert.match(capturedSql, /active_version\.status='ACTIVE'/);
+  assert.deepEqual(capturedValues, ["spy-x-family-anya-prize"]);
+  assert.equal(result.id, "spy-x-family-anya-prize");
+  assert.equal(result.isPrizeOnly, false);
+  assert.equal(result.totalQuantity, 80);
+  assert.deepEqual(result.remainingKujiTiers.map(({ tierCode, tierRank, label, remainingQuantity }) => ({
+    tierCode, tierRank, label, remainingQuantity,
+  })), [{ tierCode: "A", tierRank: 0, label: "A상", remainingQuantity: 1 }, {
+    tierCode: "B", tierRank: 1, label: "B상", remainingQuantity: 76,
+  }]);
 });
 
 test("admin products filter both prize-only states and support a single-product lookup", async () => {
@@ -273,12 +423,17 @@ test("admin product creation defaults omitted isPrizeOnly to false", async () =>
       name: "아냐 포저 봉제 마스코트",
       manufacturer: null,
       releaseDate: null,
-      price: 0,
+      price: null,
       availableQuantity: 0,
+      totalQuantity: null,
       metadata: {},
       imageUrl: null,
+      storefrontImageUrl: null,
       isActive: true,
       isPrizeOnly: false,
+      saleStatus: "DRAFT",
+      purchasable: false,
+      blockedReason: "DRAFT",
       version: 1,
       createdAt: "2026-08-25T00:00:00.000Z",
       updatedAt: "2026-08-25T00:00:00.000Z",
@@ -322,6 +477,64 @@ test("admin product update rejects changing the immutable prize-only role", asyn
       && error.statusCode === 409
       && /경품 전용 여부/.test(error.message),
   );
+});
+
+test("ordinary product updates preserve the independently attached storefront image", async () => {
+  const { app, routes } = routeHarness();
+  const storefrontImageUrl = "https://cdn.example.test/anya-storefront.webp";
+  let updateSql = "";
+  const pool = transactionPool(async (sql, values = []) => {
+    if (sql.includes("INSERT INTO idempotency_keys")) {
+      return { rowCount: 1, rows: [{ id: "44444444-4444-4444-8444-444444444445" }] };
+    }
+    if (sql.includes("FROM catalog_products p JOIN product_stock")) {
+      return { rowCount: 1, rows: [productRow({ storefront_image_url: storefrontImageUrl })] };
+    }
+    if (sql.includes("SELECT on_hand,reserved FROM product_stock")) {
+      return { rowCount: 1, rows: [{ on_hand: 0, reserved: 0 }] };
+    }
+    if (sql.includes("UPDATE catalog_products SET")) {
+      updateSql = sql;
+      return {
+        rowCount: 1,
+        rows: [productRow({
+          name: values[4],
+          storefront_image_url: storefrontImageUrl,
+          version: 2,
+        })],
+      };
+    }
+    if (sql.includes("SELECT host(ip_address)")) {
+      return { rowCount: 1, rows: [{ ip_address: "127.0.0.1", user_agent: "catalog-test" }] };
+    }
+    return { rowCount: 0, rows: [] };
+  });
+  await registerCatalogRoutes(app, contextWithPool(pool));
+  const handler = routes.get("PATCH /v1/admin/products/:productId");
+  assert.ok(handler);
+  const capture = replyCapture();
+  await handler(adminRequest({
+    method: "PATCH",
+    path: "/v1/admin/products/:productId",
+    params: { productId: "spy-x-family-anya-prize" },
+    body: {
+      sku: "SPY-X-FAMILY-ANYA-PRIZE",
+      ipId: "spy-x-family",
+      category: "figure",
+      name: "아냐 포저 봉제 마스코트 수정",
+      price: 0,
+      availableQuantity: 0,
+      metadata: {},
+      imageUrl: null,
+      storefrontImageUrl: "https://untrusted.example.test/overwrite.webp",
+      isActive: true,
+      isPrizeOnly: true,
+      expectedVersion: 1,
+    },
+  }), capture.reply);
+
+  assert.doesNotMatch(updateSql, /storefront_image_url\s*=/i);
+  assert.equal((capture.result().body as { storefrontImageUrl: string }).storefrontImageUrl, storefrontImageUrl);
 });
 
 test("catalog request canonical product targets exclude prize-only SKUs", async () => {

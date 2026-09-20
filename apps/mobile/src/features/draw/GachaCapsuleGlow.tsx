@@ -6,7 +6,7 @@ import { sampleGachaBowlProjection } from "@/features/draw/gacha-bowl-projection
 import { sampleGachaCapsuleGlow } from "@/features/draw/gacha-capsule-glow";
 import { sampleGachaRevealLighting } from "@/features/draw/gacha-reveal-timeline";
 
-const GLOW_TEXTURE = require("../../../assets/gacha-capsule-glow-v1.png");
+const GLOW_TEXTURE = require("../../../assets/draw/gacha/gacha-capsule-glow-v1.png");
 type Props = {
   progress: SharedValue<number>;
   active: SharedValue<number>;

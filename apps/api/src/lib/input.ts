@@ -5,6 +5,13 @@ export function objectInput(value: unknown): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
+export function assertOnlyKeys(input: Record<string, unknown>, allowed: readonly string[]): void {
+  const allowedKeys = new Set(allowed);
+  if (Object.keys(input).some((key) => !allowedKeys.has(key))) {
+    throw badRequest("허용되지 않은 입력값이 포함되어 있습니다.");
+  }
+}
+
 export function stringInput(
   input: Record<string, unknown>,
   key: string,

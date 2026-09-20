@@ -7,6 +7,7 @@ import {
   type TextProps,
   type TextStyle,
 } from "react-native";
+import { seed } from "@/design-system/seed";
 
 export const readableFontFamilies = {
   latin: {
@@ -26,6 +27,54 @@ export const readableFontFamilies = {
 export const HANGUL_PATTERN = /[\u1100-\u11ff\u3130-\u318f\uac00-\ud7af]/;
 
 type ReadableWeight = keyof typeof readableFontFamilies.korean;
+export type ReadableTextVariant =
+  | "micro"
+  | "finePrint"
+  | "catalogMetadata"
+  | "caption"
+  | "label"
+  | "chip"
+  | "bodyCompact"
+  | "body"
+  | "bodyStrong"
+  | "articleBody"
+  | "button"
+  | "catalogTitle"
+  | "catalogTitleWide"
+  | "catalogPrice"
+  | "subheading"
+  | "subtitle"
+  | "sectionTitle"
+  | "amount"
+  | "screenTitle"
+  | "stat"
+  | "input";
+
+export const readableTextMetrics = {
+  micro: seed.typography.micro,
+  finePrint: seed.typography.finePrint,
+  catalogMetadata: seed.typography.catalogMetadata,
+  caption: seed.typography.caption,
+  label: seed.typography.label,
+  chip: seed.typography.chip,
+  bodyCompact: seed.typography.bodyCompact,
+  body: seed.typography.body,
+  bodyStrong: seed.typography.bodyStrong,
+  articleBody: seed.typography.articleBody,
+  button: seed.typography.button,
+  catalogTitle: seed.typography.catalogTitle,
+  catalogTitleWide: seed.typography.catalogTitleWide,
+  catalogPrice: seed.typography.catalogPrice,
+  subheading: seed.typography.subheading,
+  subtitle: seed.typography.subtitle,
+  sectionTitle: seed.typography.sectionTitle,
+  amount: seed.typography.amount,
+  screenTitle: seed.typography.screenTitle,
+  stat: seed.typography.stat,
+  input: seed.typography.input,
+} as const;
+
+export type AppTextProps = TextProps & { variant?: ReadableTextVariant };
 
 function readableWeight(fontWeight: TextStyle["fontWeight"]): ReadableWeight {
   if (fontWeight === "black" || fontWeight === "heavy") return "black";
@@ -47,6 +96,38 @@ function readableText(node: ReactNode): string {
   }).join("");
 }
 
+function canonicalReadableVariant(style: TextProps["style"]): ReadableTextVariant | null {
+  const flattened = StyleSheet.flatten(style) as TextStyle | undefined;
+  if (!flattened?.fontSize || flattened.fontFamily) return null;
+
+  const { fontSize, lineHeight = 0 } = flattened;
+  if (fontSize <= 10) return "micro";
+  if (fontSize === 11) return "finePrint";
+  if (fontSize === 12) return lineHeight > 0 && lineHeight <= 16 ? "catalogMetadata" : "caption";
+  if (fontSize === 13) return lineHeight >= 20 ? "bodyCompact" : "label";
+  if (fontSize === 14) return "body";
+  if (fontSize === 15) return lineHeight === 21 ? "catalogTitle" : lineHeight >= 23 ? "articleBody" : "body";
+  if (fontSize === 16 && lineHeight === 22) return "catalogTitleWide";
+  if (fontSize <= 17) return "articleBody";
+  if (fontSize === 18) return "subtitle";
+  if (fontSize <= 20) return "sectionTitle";
+  if (fontSize <= 23) return "amount";
+  if (fontSize <= 33) return "screenTitle";
+  return "stat";
+}
+
+function readableMetrics(
+  style: TextProps["style"] | TextInputProps["style"],
+  variant?: ReadableTextVariant,
+) {
+  const flattened = StyleSheet.flatten(style) as TextStyle | undefined;
+  if (flattened?.fontFamily) return undefined;
+  const resolvedVariant = variant ?? canonicalReadableVariant(style as TextProps["style"]);
+  if (!resolvedVariant) return undefined;
+  const { fontSize, lineHeight, fontWeight } = readableTextMetrics[resolvedVariant];
+  return { fontSize, lineHeight, fontWeight: flattened?.fontWeight ?? fontWeight };
+}
+
 function fontStyle(
   style: TextProps["style"] | TextInputProps["style"],
   script: "latin" | "korean",
@@ -60,10 +141,16 @@ function fontStyle(
   };
 }
 
-export function AppText({ children, style, ...props }: TextProps) {
+export function AppText({
+  children,
+  style,
+  variant,
+  ...props
+}: AppTextProps) {
   const script = HANGUL_PATTERN.test(readableText(children)) ? "korean" : "latin";
+  const metrics = readableMetrics(style, variant);
   return (
-    <NativeText {...props} style={[style, fontStyle(style, script)]}>
+    <NativeText {...props} style={[style, metrics, fontStyle([style, metrics], script)]}>
       {children}
     </NativeText>
   );
@@ -74,7 +161,7 @@ export function BalancedAppText({
   lineBreakStrategyIOS = "hangul-word",
   textBreakStrategy = "balanced",
   ...props
-}: TextProps) {
+}: AppTextProps) {
   return (
     <AppText
       {...props}
@@ -90,7 +177,7 @@ export function BalancedParagraphText({
   paragraphs,
   accessibilityLabel,
   ...props
-}: Omit<TextProps, "children"> & { paragraphs: readonly string[] }) {
+}: Omit<AppTextProps, "children"> & { paragraphs: readonly string[] }) {
   const normalizedParagraphs = paragraphs.map((paragraph) => paragraph.trim()).filter(Boolean);
 
   return (
@@ -104,5 +191,6 @@ export function BalancedParagraphText({
 }
 
 export function AppTextInput({ style, ...props }: TextInputProps) {
-  return <NativeTextInput {...props} style={[style, fontStyle(style, "korean")]} />;
+  const metrics = readableMetrics(style, "input");
+  return <NativeTextInput {...props} style={[style, metrics, fontStyle([style, metrics], "korean")]} />;
 }

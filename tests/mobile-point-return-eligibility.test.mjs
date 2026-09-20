@@ -16,11 +16,12 @@ const profilePolicySource = readFileSync(
   "utf8",
 );
 
-function inventory({ sourceType, status = "OWNED", category = "gacha" }) {
+function inventory({ sourceType, status = "OWNED", category = "gacha", pointReturnEligible = true }) {
   return {
     id: `${sourceType}-${status}-${category}`,
     sourceType,
     status,
+    pointReturnEligible,
     product: { category },
   };
 }
@@ -34,6 +35,11 @@ test("point return admits only owned inventory whose source is a gacha draw", ()
     assert.equal(isPointReturnEligibleInventory(inventory({ sourceType })), false);
   }
 
+  assert.equal(isPointReturnEligibleInventory(inventory({
+    sourceType: "GACHA",
+    pointReturnEligible: false,
+  })), false);
+
   for (const status of [
     "EXCHANGE_LISTED",
     "EXCHANGE_OFFERED",
@@ -42,6 +48,7 @@ test("point return admits only owned inventory whose source is a gacha draw", ()
     "TRANSFERRED",
     "REFUNDED",
     "POINT_RETURNED",
+    "EXPIRED_HOLD",
   ]) {
     assert.equal(isPointReturnEligibleInventory(inventory({ sourceType: "GACHA", status })), false);
   }
@@ -65,13 +72,14 @@ test("storage keeps kuji for shipping while point return receives only the gacha
     profileSectionSource,
     /<PointReturn[^>]*items=\{pointReturnItems\}/,
   );
+  assert.match(profileSectionSource, /<StorageModeTab label="포인트 환급" count=\{pointReturnItems\.length\}/);
+  assert.match(profileSectionSource, /<ExchangeOrShipping[^>]*items=\{exchangeOrShippingItems\}/);
+  assert.match(profileSectionSource, /<StorageModeTab label="교환 또는 배송 중인 상품" count=\{exchangeOrShippingItems\.length\}/);
+  assert.doesNotMatch(profileSectionSource, /AvailabilityPill|storageAvailabilityRow/);
+  assert.match(profileSectionSource, /<PointReturn[^>]*items=\{pointReturnItems\}/);
   assert.match(
     profileSectionSource,
-    /가챠에서 직접 뽑아 보관 중인 상품만 포인트 환급할 수 있어요/,
-  );
-  assert.match(
-    profileSectionSource,
-    /쿠지 추첨과 피규어 등 일반 구매 상품은 포인트 환급할 수 없어요/,
+    /교환으로 받은 상품은 포인트 환급 대상이 아니며, 본인이 가챠에서 직접 뽑아 보관 중인 상품만 가능해요/,
   );
   assert.match(
     profileSectionSource,
@@ -79,7 +87,7 @@ test("storage keeps kuji for shipping while point return receives only the gacha
   );
   assert.match(
     profilePolicySource,
-    /포인트 환급은 가챠에서 직접 뽑아 현재 보관 중인 상품만 가능하며, 쿠지 추첨 상품과 피규어 등 일반 구매 상품은 대상이 아닙니다/,
+    /교환으로 받은 상품은 포인트 환급 대상이 아니며, 포인트 환급은 본인이 가챠에서 직접 뽑아 현재 보관 중인 상품만 가능합니다\. 쿠지 추첨 상품과 피규어 등 일반 구매 상품도 대상이 아닙니다/,
   );
   assert.match(
     profilePolicySource,

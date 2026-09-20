@@ -1,25 +1,43 @@
 "use server";
 
+import { createHash } from "node:crypto";
+import type { components } from "@dabboba/contracts";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { AdminApiError, adminApi } from "./api";
 import { requireCapability, type AdminSession } from "./auth";
 import type { Capability } from "./capabilities";
+import type { CatalogProduct } from "./admin-types";
+import { catalogImageFile, uploadCatalogImage } from "./catalog-media-upload";
+import { buildDrawVersionDraftPayload, type DrawDraftCategory } from "./draw-version-draft";
 import { safeInternalPath } from "./request-security";
 
 const USER_MANAGEABLE_STATUSES = ["ACTIVE", "SUSPENDED", "BANNED"] as const;
 const CONTENT_STATUSES = ["ACTIVE", "HIDDEN", "DELETED"] as const;
 const INQUIRY_STATUSES = ["PENDING", "IN_PROGRESS", "ANSWERED", "CLOSED"] as const;
 const REPORT_STATUSES = ["RESOLVED", "REJECTED"] as const;
-const REPORT_ACTIONS = ["NO_ACTION", "HIDE_POST", "HIDE_COMMENT", "WARN_USER", "SUSPEND_USER"] as const;
+const REPORT_ACTIONS = ["NO_ACTION", "HIDE_POST", "HIDE_COMMENT", "HIDE_EXCHANGE_LISTING", "HIDE_WANTED_REQUEST", "WARN_USER", "SUSPEND_USER"] as const;
 const REQUEST_DECISIONS = ["APPROVED", "REJECTED", "ON_HOLD", "MERGED"] as const;
 const CATEGORIES = ["gacha", "figure", "kuji", "tcg"] as const;
+const PRODUCT_SALE_STATUSES = ["DRAFT", "COMING_SOON", "ON_SALE", "PAUSED"] as const;
+const HOME_SECTION_LAYOUT_KINDS = ["gacha", "kuji"] as const;
+const HOME_SECTION_SOURCE_KINDS = ["MANUAL", "IP", "NEW", "POPULAR"] as const;
+const CATEGORY_AVAILABILITIES = ["active", "coming-soon", "hidden"] as const;
 const ADMIN_ROLES = ["ADMIN", "SUPER_ADMIN"] as const;
 const ADMIN_STATUSES = ["ACTIVE", "SUSPENDED", "BANNED"] as const;
 const EXCHANGE_ACTIONS = ["COMPLETE", "CANCEL"] as const;
 const REFUND_REVIEW_STATUSES = ["PENDING", "IN_REVIEW", "WAITING_PROVIDER", "ESCALATED", "CLOSED"] as const;
 const SHIPPING_TARGET_STATUSES = ["PROCESSING", "SHIPPED", "DELIVERED", "CANCELLED"] as const;
 const ACCOUNT_DELETION_DECISIONS = ["APPROVED", "REJECTED"] as const;
+const PRODUCT_IMAGE_ROLES = ["primary", "storefront"] as const;
+
+type CreateCatalogMediaUploadInput = components["schemas"]["CreateCatalogMediaUploadInput"];
+type MediaReady = components["schemas"]["MediaReady"];
+type MediaUploadIntent = components["schemas"]["MediaUploadIntent"];
+type ProductImageAttachInput = components["schemas"]["ProductImageAttachInput"];
+type ProductImageAttachment = components["schemas"]["ProductImageAttachment"];
+type ProductImageClearInput = components["schemas"]["ProductImageClearInput"];
+type ProductImageClearResult = components["schemas"]["ProductImageClearResult"];
 
 function text(form: FormData, name: string, max = 10_000) {
   const value = String(form.get(name) || "").trim();
@@ -151,12 +169,16 @@ async function mutate(
   redirect(feedback(destination, "success", success));
 }
 
-function mutationHeaders(form: FormData) {
-  const key = text(form, "idempotencyKey", 200);
+function idempotencyHeaders(form: FormData, name: string) {
+  const key = text(form, name, 200);
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(key)) {
     throw new Error("요청 중복 방지 키가 올바르지 않습니다. 새로고침 후 다시 시도하세요.");
   }
   return { "idempotency-key": key };
+}
+
+function mutationHeaders(form: FormData) {
+  return idempotencyHeaders(form, "idempotencyKey");
 }
 
 function id(form: FormData, name: string) {
@@ -185,7 +207,19 @@ export async function decideAccountDeletion(form: FormData) {
         reason: operationReason,
       },
     });
-  }, "탈퇴 요청의 운영 검토 상태를 기록했습니다. 실제 계정 삭제는 실행되지 않았습니다.");
+  }, "탈퇴 요청의 운영 검토 상태를 기록했습니다.");
+}
+
+export async function completeAccountDeletion(form: FormData) {
+  await mutate("accountDeletions.manage", form, async (session, operationReason) => {
+    await adminApi(`/v1/admin/account-deletions/${id(form, "requestId")}/completion`, {
+      method: "POST",
+      token: session.token,
+      reason: operationReason,
+      headers: mutationHeaders(form),
+      body: { reason: operationReason },
+    });
+  }, "회원의 로그인 연결과 개인정보를 제거해 탈퇴 처리를 완료했습니다.");
 }
 
 export async function createAdministrator(form: FormData) {
@@ -328,6 +362,70 @@ export async function updateIp(form: FormData) {
   }, "IP를 수정했습니다.");
 }
 
+function homeSectionBody(form: FormData) {
+  const visibleLimit = integer(form, "visibleLimit");
+  if (visibleLimit < 1 || visibleLimit > 20) {
+    throw new Error("visibleLimit 값은 1~20 사이여야 합니다.");
+  }
+  return {
+    title: text(form, "title", 120),
+    subtitle: optionalText(form, "subtitle", 240),
+    ipId: optionalText(form, "ipId", 120),
+    layoutKind: enumValue(form, "layoutKind", HOME_SECTION_LAYOUT_KINDS),
+    sourceKind: enumValue(form, "sourceKind", HOME_SECTION_SOURCE_KINDS),
+    visibleLimit,
+    manualProductIds: aliases(form, "manualProductIds"),
+    sortOrder: integer(form, "sortOrder"),
+    isActive: form.get("isActive") === "on",
+  };
+}
+
+export async function createHomeSection(form: FormData) {
+  await mutate("catalog.manage", form, async (session, operationReason) => {
+    if (form.get("confirmCatalogOverride") !== "on") {
+      throw new Error("홈 상품 레일 운영 안내를 확인해 주세요.");
+    }
+    await adminApi("/v1/admin/home-sections", {
+      method: "POST", token: session.token, reason: operationReason, headers: mutationHeaders(form),
+      body: { id: text(form, "sectionId", 120), ...homeSectionBody(form), isActive: false },
+    });
+  }, "홈 섹션을 비노출 상태로 생성했습니다.");
+}
+
+export async function updateHomeSection(form: FormData) {
+  await mutate("catalog.manage", form, async (session, operationReason) => {
+    await adminApi(`/v1/admin/home-sections/${id(form, "sectionId")}`, {
+      method: "PATCH", token: session.token, reason: operationReason, headers: mutationHeaders(form),
+      body: { ...homeSectionBody(form), expectedVersion: version(form) },
+    });
+  }, "홈 섹션을 수정했습니다.");
+}
+
+export async function updateStorefrontCategorySetting(form: FormData) {
+  await mutate("catalog.manage", form, async (session, operationReason) => {
+    const category = enumValue(form, "category", CATEGORIES);
+    await adminApi(`/v1/admin/category-settings/${encodeURIComponent(category)}`, {
+      method: "PATCH",
+      token: session.token,
+      reason: operationReason,
+      headers: mutationHeaders(form),
+      body: {
+        label: text(form, "label", 40),
+        sortOrder: integer(form, "sortOrder"),
+        availability: enumValue(form, "availability", CATEGORY_AVAILABILITIES),
+        showOnHome: form.get("showOnHome") === "on",
+        showOnCatalog: form.get("showOnCatalog") === "on",
+        showOnExchange: form.get("showOnExchange") === "on",
+        showOnWanted: form.get("showOnWanted") === "on",
+        description: textAllowEmpty(form, "description", 240),
+        imageUrl: optionalText(form, "imageUrl", 2_000),
+        iconKey: optionalText(form, "iconKey", 80),
+        expectedVersion: version(form),
+      },
+    });
+  }, "카테고리 표시 설정을 수정했습니다. 앱에 자동으로 반영됩니다.");
+}
+
 function characterBody(form: FormData) {
   return {
     ipId: text(form, "ipId", 120), name: text(form, "name", 160), aliases: aliases(form),
@@ -354,12 +452,35 @@ function productBody(form: FormData) {
     price: integer(form, "price"), availableQuantity: integer(form, "availableQuantity"), metadata: metadata(form),
     imageUrl: optionalText(form, "imageUrl", 2_000), isActive: form.get("isActive") === "on",
     isPrizeOnly: form.get("isPrizeOnly") === "on",
+    saleStatus: enumValue(form, "saleStatus", PRODUCT_SALE_STATUSES),
   };
 }
 export async function createProduct(form: FormData) {
-  await mutate("catalog.manage", form, async (session, operationReason) => {
-    await adminApi("/v1/admin/products", { method: "POST", token: session.token, reason: operationReason, headers: mutationHeaders(form), body: productBody(form) });
-  }, "상품을 생성했습니다.");
+  const session = await requireCapability("catalog.manage");
+  const destination = returnTo(form);
+  let created: CatalogProduct;
+  try {
+    const operationReason = reason(form);
+    created = await adminApi<CatalogProduct>("/v1/admin/products", {
+      method: "POST",
+      token: session.token,
+      reason: operationReason,
+      headers: mutationHeaders(form),
+      body: productBody(form),
+    });
+  } catch (error) {
+    redirect(feedback(destination, "error", actionError(error)));
+  }
+  revalidatePath(destination.split("?")[0] || "/");
+  const needsKujiConfiguration = created.category === "kuji" && !created.isPrizeOnly;
+  const successDestination = needsKujiConfiguration
+    ? `/catalog/products/${encodeURIComponent(created.id)}/draws`
+    : destination;
+  redirect(feedback(
+    successDestination,
+    "success",
+    needsKujiConfiguration ? "상품을 생성했습니다. 쿠지 상 구성을 완료해 주세요." : "상품을 생성했습니다.",
+  ));
 }
 export async function updateProduct(form: FormData) {
   await mutate("catalog.manage", form, async (session, operationReason) => {
@@ -367,46 +488,92 @@ export async function updateProduct(form: FormData) {
   }, "상품을 수정했습니다.");
 }
 
-function drawEntries(form: FormData) {
-  const raw = text(form, "entries", 100_000);
-  const value: unknown = JSON.parse(raw);
-  if (!Array.isArray(value) || value.length < 1 || value.length > 200) throw new Error("경품 구성은 1~200개 배열이어야 합니다.");
-  const prizeProductIds = new Set<string>();
-  return value.map((entry, index) => {
-    if (!entry || Array.isArray(entry) || typeof entry !== "object") {
-      throw new Error(`경품 ${index + 1}의 입력 형식이 올바르지 않습니다.`);
+export async function uploadProductImage(form: FormData) {
+  await mutate("catalog.manage", form, async (session, operationReason) => {
+    const productId = id(form, "productId");
+    const expectedVersion = version(form);
+    const role = enumValue(form, "role", PRODUCT_IMAGE_ROLES);
+    const file = catalogImageFile(form.get("image"));
+    const checksumSha256 = createHash("sha256").update(Buffer.from(await file.arrayBuffer())).digest("hex");
+    let intent: MediaUploadIntent;
+    try {
+      const uploadInput: CreateCatalogMediaUploadInput = {
+        filename: file.name,
+        mimeType: file.type,
+        byteSize: file.size,
+        checksumSha256,
+        acceptedUploadMethods: ["POST", "PUT"],
+      };
+      intent = await adminApi<MediaUploadIntent>("/v1/admin/catalog-media/uploads", {
+        method: "POST",
+        token: session.token,
+        reason: operationReason,
+        headers: mutationHeaders(form),
+        body: uploadInput,
+      });
+      await uploadCatalogImage(intent, file);
+      await adminApi<MediaReady>(`/v1/admin/catalog-media/${encodeURIComponent(intent.mediaId)}/complete`, {
+        method: "POST",
+        token: session.token,
+        reason: operationReason,
+        headers: idempotencyHeaders(form, "completeIdempotencyKey"),
+      });
+      const attachInput: ProductImageAttachInput = { mediaId: intent.mediaId, expectedVersion, role };
+      await adminApi<ProductImageAttachment>(`/v1/admin/products/${productId}/image`, {
+        method: "PATCH",
+        token: session.token,
+        reason: operationReason,
+        headers: idempotencyHeaders(form, "attachIdempotencyKey"),
+        body: attachInput,
+      });
+    } catch (error) {
+      if (error instanceof AdminApiError && error.status === 503) {
+        throw new Error("현재 상품 이미지 저장을 사용할 수 없습니다. 운영 환경의 미디어 구성을 확인한 뒤 다시 시도해 주세요.");
+      }
+      if (error instanceof AdminApiError && error.status === 410) {
+        throw new Error("상품 사진 업로드 시간이 만료되었습니다. 사진을 다시 선택해 시도해 주세요.");
+      }
+      throw error;
     }
-    const record = entry as Record<string, unknown>;
-    const prizeProductId = typeof record.prizeProductId === "string" ? record.prizeProductId.trim() : "";
-    const rarity = typeof record.rarity === "string" ? record.rarity.trim() : "";
-    const weight = record.weight;
-    const quantity = record.quantity;
-    if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/.test(prizeProductId)) {
-      throw new Error(`경품 ${index + 1}의 상품 ID가 올바르지 않습니다.`);
+  }, "상품 사진을 저장했습니다.");
+}
+
+export async function clearStorefrontProductImage(form: FormData) {
+  await mutate("catalog.manage", form, async (session, operationReason) => {
+    if (form.get("confirmStorefrontImageClear") !== "on") {
+      throw new Error("목록 사진 연결 해제 안내를 확인해 주세요.");
     }
-    if (!rarity || rarity.length > 40 || /[\u0000-\u001f\u007f]/.test(rarity)) {
-      throw new Error(`경품 ${index + 1}의 등급은 1~40자로 입력하세요.`);
-    }
-    if (!Number.isSafeInteger(weight) || (weight as number) < 1 || (weight as number) > 1_000_000) {
-      throw new Error(`경품 ${index + 1}의 가중치는 1~1,000,000 정수여야 합니다.`);
-    }
-    if (!Number.isSafeInteger(quantity) || (quantity as number) < 1 || (quantity as number) > 10_000) {
-      throw new Error(`경품 ${index + 1}의 유한 수량은 1~10,000 정수여야 합니다.`);
-    }
-    if (prizeProductIds.has(prizeProductId)) {
-      throw new Error("같은 경품 SKU를 두 번 이상 입력할 수 없습니다.");
-    }
-    prizeProductIds.add(prizeProductId);
-    return { prizeProductId, rarity, weight: weight as number, quantity: quantity as number };
-  });
+    const input: ProductImageClearInput = {
+      expectedVersion: version(form),
+      role: enumValue(form, "role", ["storefront"] as const),
+    };
+    await adminApi<ProductImageClearResult>(`/v1/admin/products/${id(form, "productId")}/image`, {
+      method: "DELETE",
+      token: session.token,
+      reason: operationReason,
+      headers: mutationHeaders(form),
+      body: input,
+    });
+  }, "상품 목록 사진 연결을 해제했습니다.");
+}
+
+function drawVersionBody(form: FormData, category: DrawDraftCategory) {
+  const entries: unknown = JSON.parse(text(form, "entries", 100_000));
+  return buildDrawVersionDraftPayload(category, entries, form.get("totalSlots"));
 }
 
 export async function createDrawVersion(form: FormData) {
   await mutate("catalog.manage", form, async (session, operationReason) => {
-    await adminApi(`/v1/admin/products/${id(form, "productId")}/draw-versions`, {
-      method: "POST", token: session.token, reason: operationReason, headers: mutationHeaders(form), body: { entries: drawEntries(form) },
+    const productId = id(form, "productId");
+    const headers = mutationHeaders(form);
+    const product = await adminApi<CatalogProduct>(`/v1/admin/products/${productId}`, { token: session.token });
+    if (product.category !== "gacha" && product.category !== "kuji") {
+      throw new Error("가챠·쿠지 판매 상품만 확률표를 만들 수 있습니다.");
+    }
+    await adminApi(`/v1/admin/products/${productId}/draw-versions`, {
+      method: "POST", token: session.token, reason: operationReason, headers, body: drawVersionBody(form, product.category),
     });
-  }, "추첨 확률표 초안을 생성했습니다.");
+  }, "추첨 구성 초안을 생성했습니다.");
 }
 
 export async function publishDrawVersion(form: FormData) {
@@ -414,7 +581,7 @@ export async function publishDrawVersion(form: FormData) {
     await adminApi(`/v1/admin/products/${id(form, "productId")}/draw-versions/${id(form, "versionId")}/publish`, {
       method: "POST", token: session.token, reason: operationReason, headers: mutationHeaders(form), body: { reason: operationReason },
     });
-  }, "추첨 확률표를 공개했습니다.");
+  }, "추첨 구성을 공개했습니다.");
 }
 
 export async function decideCatalogRequest(form: FormData) {

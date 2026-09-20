@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { GACHA_CLOSEUP_DURATION_MS, sampleGachaRevealLighting, sampleGachaRevealRattle } from "../apps/mobile/src/features/draw/gacha-reveal-timeline.ts";
+import {
+  GACHA_CLOSEUP_DURATION_MS,
+  sampleGachaDropImpact,
+  sampleGachaRevealLighting,
+  sampleGachaRevealOptics,
+  sampleGachaRevealRattle,
+} from "../apps/mobile/src/features/draw/gacha-reveal-timeline.ts";
 import { sampleGachaCameraMotion } from "../apps/mobile/src/features/draw/gacha-camera-motion.ts";
 import { GACHA_CAPSULE_REVEAL_DURATION_MS } from "../apps/mobile/src/features/draw/gacha-capsule-motion.ts";
 
@@ -28,6 +34,46 @@ test("the premium reveal has no rattle or shake at any progress, including Reduc
     assert.equal(sampleGachaRevealRattle(p, true), 0);
   }
   for (const p of [NaN, Infinity, -Infinity, -1, 2]) assert.equal(sampleGachaRevealRattle(p), 0);
+});
+
+test("the dropped capsule creates one soft floor reflection instead of a graphic ring", () => {
+  assert.equal(sampleGachaDropImpact(0.60).reflectionOpacity, 0);
+  assert.ok(sampleGachaDropImpact(0.65).reflectionOpacity > 0.5);
+  assert.ok(sampleGachaDropImpact(0.72).reflectionScaleX > sampleGachaDropImpact(0.65).reflectionScaleX);
+  assert.equal(sampleGachaDropImpact(0.86).reflectionOpacity, 0);
+
+  let peaks = 0;
+  let previous = sampleGachaDropImpact(0).reflectionOpacity;
+  let wasRising = false;
+  for (let step = 1; step <= 1_000; step += 1) {
+    const frame = sampleGachaDropImpact(step / 1_000);
+    assert.ok(Object.values(frame).every(Number.isFinite));
+    assert.ok(frame.reflectionOpacity >= 0 && frame.reflectionOpacity <= 0.72);
+    assert.ok(frame.reflectionScaleX >= 0.54 && frame.reflectionScaleX <= 1.46);
+    assert.ok(frame.reflectionScaleY >= 0.36 && frame.reflectionScaleY <= 0.58);
+    if (frame.reflectionOpacity > previous + 1e-8) wasRising = true;
+    if (wasRising && frame.reflectionOpacity < previous - 1e-8) {
+      peaks += 1;
+      wasRising = false;
+    }
+    previous = frame.reflectionOpacity;
+  }
+  assert.equal(peaks, 1);
+});
+
+test("the opening builds continuous optical bloom, diffusion, and lens haze", () => {
+  const idle = sampleGachaRevealOptics(0.10);
+  assert.equal(idle.innerBloomOpacity, 0);
+  assert.equal(idle.diffusionOpacity, 0);
+  assert.equal(idle.lensHazeOpacity, 0);
+
+  assert.ok(sampleGachaRevealOptics(0.42).innerBloomOpacity > 0.3);
+  assert.ok(sampleGachaRevealOptics(0.62).diffusionOpacity > 0.25);
+  assert.ok(sampleGachaRevealOptics(0.72).lensHazeOpacity > 0.12);
+  const released = sampleGachaRevealOptics(1);
+  assert.equal(released.innerBloomOpacity, 0);
+  assert.equal(released.diffusionOpacity, 0);
+  assert.equal(released.lensHazeOpacity, 0);
 });
 
 test("light begins in the seam then brightens once without a background blink", () => {
@@ -76,5 +122,13 @@ test("Reduced Motion removes light travel and still presents the final result", 
     assert.equal(frame.whiteout, 0);
     assert.equal(frame.opening, 0);
     assert.equal(frame.prizeOpacity, p === 1 ? 1 : 0);
+    assert.deepEqual(sampleGachaDropImpact(p, true), {
+      reflectionOpacity: 0, reflectionScaleX: 1, reflectionScaleY: 1,
+    });
+    assert.deepEqual(sampleGachaRevealOptics(p, true), {
+      innerBloomOpacity: 0, innerBloomScale: 1,
+      diffusionOpacity: 0, diffusionScale: 1,
+      lensHazeOpacity: 0, lensHazeScale: 1,
+    });
   }
 });

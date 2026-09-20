@@ -8,9 +8,27 @@ function headerValue(request: FastifyRequest, name: string): string | undefined 
   return (Array.isArray(raw) ? raw[0] : raw)?.trim();
 }
 
+function adminReason(request: FastifyRequest): string | undefined {
+  const raw = headerValue(request, "x-admin-reason");
+  if (!raw) return undefined;
+  const encoding = headerValue(request, "x-admin-reason-encoding");
+  if (!encoding) return raw;
+  if (encoding !== "utf-8-percent") {
+    throw badRequest("X-Admin-Reason 인코딩이 올바르지 않습니다.");
+  }
+  if (raw.length > 9_000) {
+    throw badRequest("X-Admin-Reason 헤더가 너무 깁니다.");
+  }
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    throw badRequest("X-Admin-Reason 인코딩이 올바르지 않습니다.");
+  }
+}
+
 export function adminMutationHeaders(request: FastifyRequest, bodyReason?: string | null) {
-  const reason = headerValue(request, "x-admin-reason");
-  if (!reason || reason.length < 2 || reason.length > 1_000) {
+  const reason = adminReason(request);
+  if (!reason || reason.length < 2 || reason.length > 1_000 || /[\u0000-\u001f\u007f]/.test(reason)) {
     throw badRequest("X-Admin-Reason 헤더에 2~1000자의 처리 사유가 필요합니다.");
   }
   if (bodyReason !== undefined && bodyReason !== null && bodyReason.trim() !== reason) {

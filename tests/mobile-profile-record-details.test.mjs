@@ -38,9 +38,43 @@ test("profile record details preserve native framing and list-backed fallback da
 });
 
 test("authenticated shipping detail uses the owned-request endpoint", () => {
-  const source = read("src/features/profile/profile-detail-api.ts");
+  const apiSource = read("src/features/profile/profile-detail-api.ts");
+  const screenSource = read("src/features/profile/ProfileRecordDetailScreen.tsx");
 
-  assert.match(source, /\/v1\/account\/shipping-requests\/\{shippingRequestId\}/);
-  assert.match(source, /token:\s*\(\)\s*=>\s*accessToken/);
-  assert.match(source, /path:\s*\{\s*shippingRequestId\s*\}/);
+  assert.match(apiSource, /\/v1\/account\/shipping-requests\/\{shippingRequestId\}/);
+  assert.match(apiSource, /token:\s*\(\)\s*=>\s*accessToken/);
+  assert.match(apiSource, /path:\s*\{\s*shippingRequestId\s*\}/);
+  assert.match(apiSource, /new ProfileApiError\(/);
+  assert.match(screenSource, /profileState\.status === "authenticated"/);
+  assert.match(screenSource, /currentTokens\?\.accessToken !== requestedAccessToken/);
+  assert.match(screenSource, /generation !== detailGeneration\.current/);
+  assert.match(screenSource, /setDetailExpired\(true\)/);
+  assert.match(screenSource, /profileState\.publicLoading \|\| \(!snapshot && !profileState\.message\)/);
+  assert.match(screenSource, /!profileState\.message && !profileState\.publicLoading/);
+});
+
+test("record product summaries keep category-safe artwork and the shared catalog text scale", () => {
+  const source = read("src/features/profile/ProfileRecordDetailScreen.tsx");
+
+  assert.match(source, /resizeMode=\{item\.category === "kuji" \? "contain" : "cover"\}/);
+  assert.match(source, /eyebrow:\s*\{[^}]*seed\.typography\.catalogMetadata/);
+  assert.match(source, /productName:\s*\{[^}]*seed\.typography\.catalogTitle/);
+  assert.match(source, /shippingProductName:\s*\{[^}]*seed\.typography\.catalogTitle/);
+});
+
+test("order and shipping history expose customer-safe status and address semantics", () => {
+  const sectionSource = read("src/features/profile/ProfileSectionScreen.tsx");
+  const detailSource = read("src/features/profile/ProfileRecordDetailScreen.tsx");
+
+  assert.match(sectionSource, /status === "PAID" \|\| status === "FULFILLED"\) return styles\.statusBadgeSuccess/);
+  assert.match(sectionSource, /status === "CANCELLED"\) return styles\.statusBadgeCritical/);
+  assert.match(sectionSource, /status === "REFUND_REVIEW" \|\| status === "REFUNDED"\) return styles\.statusBadgeRefund/);
+  assert.match(sectionSource, /compactShippingDestination\(request\.destination\.addressLine1\)/);
+  assert.match(sectionSource, /상세주소 숨김/);
+  assert.doesNotMatch(sectionSource, /작품 정보 확인 중/);
+
+  assert.match(detailSource, /fullShippingDestination\(/);
+  assert.match(detailSource, /\[\$\{postalCode\}\] \$\{primary\}/);
+  assert.match(detailSource, /배송지 정보를 확인해 주세요/);
+  assert.doesNotMatch(detailSource, /작품 정보 확인 중/);
 });

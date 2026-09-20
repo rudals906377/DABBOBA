@@ -2,14 +2,15 @@ import { randomUUID } from "expo-crypto";
 import { errorMessage } from "@dabboba/api-client";
 import type { components } from "@dabboba/contracts";
 import { createMobileDabbobaClient as createDabbobaClient } from "@/lib/mobile-api-client";
+import { ProfileApiError } from "@/features/profile/profile-api";
 
-export type AccountShippingRequest = components["schemas"]["AccountShippingRequest"];
+export type AccountShippingRequestDetail = components["schemas"]["AccountShippingRequestDetail"];
 
 export async function fetchAccountShippingRequestDetail(
   apiBaseUrl: string,
   accessToken: string,
   shippingRequestId: string,
-): Promise<AccountShippingRequest> {
+): Promise<AccountShippingRequestDetail> {
   const client = createDabbobaClient({
     baseUrl: apiBaseUrl,
     token: () => accessToken,
@@ -20,7 +21,10 @@ export async function fetchAccountShippingRequestDetail(
   });
 
   if (!result.data) {
-    throw new Error(errorMessage(result.error, "배송 신청 정보를 불러오지 못했습니다."));
+    throw new ProfileApiError(
+      result.response.status,
+      errorMessage(result.error, "배송 신청 정보를 불러오지 못했습니다."),
+    );
   }
   return result.data;
 }

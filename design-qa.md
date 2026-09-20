@@ -1,5 +1,10 @@
 # DABBOBA Design QA
 
+> Repository cleanup note (2026-09-08): historical `work/qa/`,
+> `work/audits/`, and root-level `design-qa-*.png` files referenced below
+> were moved to `/Users/kyoungmin/Desktop/DBB/UI-history-backups/DABBOBA_repository_cleanup_archive_2026-09-08/ui-history/`.
+> They are production-history evidence, not runtime app assets.
+
 ## Source visuals
 
 - Commerce-flow references: four user-provided third-party app screenshots retained outside the repository.
@@ -51,7 +56,7 @@
 - Primary green `#91E98E` is reserved for selection, success, status, and primary actions; it does not flood the interface.
 - The supplied retro-game collage appears only as a 9% texture in the catalog banner. It is not reused as layout, illustration, or draw-screen background.
 - 8-bit styling is limited to the wordmark, short labels, and arcade status copy. Product and payment content use a restrained contemporary Korean UI hierarchy for adult customers.
-- The IP test expansion uses 25 locally frozen official product references with full source-page and source-image provenance. These assets are prototype-only and must be licensed or replaced before commercial release.
+- The former 25-item prototype catalog and its local image references are archived outside the repository. Runtime catalog fixtures are now empty and production product media must come from managed storage.
 - Product photography now uses `object-fit: contain` on quiet light surfaces so packaging, figures, and wide 쿠지 visuals are not cropped. The 4:3 detail hero keeps landscape promotion art readable without pushing all product facts below the first viewport.
 - The draw state uses a compact black cabinet on a matching near-black stage, with no visible blend band or checkerboard boundary.
 - iPhone and Pixel screens preserve the same structure, readable density, and bottom-safe-area treatment without horizontal clipping.
@@ -132,8 +137,8 @@
 ## Latest focused QA — front pixel machine and isolated silver handle (2026-08-24)
 
 - Source visual truth: user-provided screenshot retained outside the repository (`590 × 322` px). The leftmost machine and its compact silver circular crank are the selected target.
-- Implementation evidence: `design-qa-phone.png` and `design-qa-implementation.png`; interaction evidence: `design-qa-drag.png`.
-- Combined focused comparison: `design-qa-comparison-normalized.png` (`336 × 287` px), containing the source and implementation in one image after equal-height subject normalization. Focused comparison was required because the target is a machine asset rather than a complete app screen.
+- Implementation evidence: `/Users/kyoungmin/Desktop/DBB/UI-history-backups/DABBOBA_repository_cleanup_archive_2026-09-08/ui-history/repo-root-qa/design-qa-phone.png` and `/Users/kyoungmin/Desktop/DBB/UI-history-backups/DABBOBA_repository_cleanup_archive_2026-09-08/ui-history/repo-root-qa/design-qa-implementation.png`; interaction evidence: `/Users/kyoungmin/Desktop/DBB/UI-history-backups/DABBOBA_repository_cleanup_archive_2026-09-08/ui-history/repo-root-qa/design-qa-drag.png`.
+- Combined focused comparison: `/Users/kyoungmin/Desktop/DBB/UI-history-backups/DABBOBA_repository_cleanup_archive_2026-09-08/ui-history/repo-root-qa/design-qa-comparison-normalized.png` (`336 × 287` px), containing the source and implementation in one image after equal-height subject normalization. Focused comparison was required because the target is a machine asset rather than a complete app screen.
 - Browser viewport: `1280 × 720` px at DPR 1. The protected iPhone content viewport measured `272.83 × 591.47` CSS px because the template scaled its `393 × 852` screen by `0.6942` to fit the browser height. The machine element measured `161.75 × 287.40` CSS px in that rendered scale. The component crops were normalized to `162 × 287` px for visual comparison; no claim is based on the surrounding scaled device chrome.
 - State: paid gacha ready screen, front-facing machine, slider at rest; a separate real drag capture confirmed the slider and lever update together.
 
@@ -147,7 +152,7 @@
 
 ### Comparison history
 
-- P1 found on the first browser capture: the generic direct-child image selector forced the new lever PNG to the full `233 × 414` machine slot, obscuring the cabinet. Fix: assign the cabinet image its own `capsule-ready-machine-art` class and scope the lever selector separately. Post-fix evidence in `design-qa-phone.png` and `design-qa-comparison-normalized.png` shows the lever at the intended compact scale with the complete cabinet visible.
+- P1 found on the first browser capture: the generic direct-child image selector forced the new lever PNG to the full `233 × 414` machine slot, obscuring the cabinet. Fix: assign the cabinet image its own `capsule-ready-machine-art` class and scope the lever selector separately. Post-fix evidence in `/Users/kyoungmin/Desktop/DBB/UI-history-backups/DABBOBA_repository_cleanup_archive_2026-09-08/ui-history/repo-root-qa/design-qa-phone.png` and `/Users/kyoungmin/Desktop/DBB/UI-history-backups/DABBOBA_repository_cleanup_archive_2026-09-08/ui-history/repo-root-qa/design-qa-comparison-normalized.png` shows the lever at the intended compact scale with the complete cabinet visible.
 - Post-fix focused comparison: the cabinet silhouette, smoked chamber, lime/ivory capsule palette, DABBOBA marquee, lower outlet, fixed circular silver plate, and isolated horizontal handle remain visually balanced. The square backing is absent, so only the circular plate and separate rotating bar remain visible.
 
 ### Interaction and technical evidence
@@ -160,12 +165,289 @@
 
 final result: passed
 
+## 2026-09-14 — PickURI-proportioned compact Gacha card body
+
+### Source and rendered evidence
+
+- Supplied PickURI reference: `/tmp/codex-remote-attachments/01a09bb7-c32b-72d0-8e79-8c550e0eb942/03781993-6F43-484C-BE2C-3B24C4426203/1-사진-1.jpg` (`589 × 1280` px). Its first visible rail card measures approximately `214 × 337` px, for an outer height-to-width ratio of `1.575`; the media itself remains very close to 8:7.
+- Pre-fix native Gacha Shop evidence: `/tmp/dabboba-gacha-current-before-ratio.png` (`1206 × 2622` px). The first two-column card measured approximately `1.70` high-to-wide because its information body occupied almost half of the card.
+- Final native Gacha Shop evidence: `/tmp/dabboba-gacha-after-ratio-confirm.png` (`1206 × 2622` px; `402 × 874` pt at 3×). The first two-column card measures approximately `525 × 829` px (`175 × 276.3` pt), or `1.579` high-to-wide.
+- Focused normalized comparison: `/tmp/dabboba-gacha-card-ratio-comparison.png` (`856 × 690` px), placing the supplied PickURI card and the final native DABBOBA card in one input at the same displayed width.
+
+### Findings and fixes
+
+- Initial P1: DABBOBA's 8:7 media already matched the supplied reference, but a separate IP metadata row plus a second product-title block made the information body about 42% taller after viewport normalization. Shrinking the image or font would have reduced product recognition and readability without addressing the real cause.
+- Fix: compact Gacha cards now fold IP and product name into one two-line catalog title, omit only the duplicated visible IP row, and remove the now-unnecessary 4 pt title offset. The raw IP and product name both remain in the accessibility label.
+- The dedicated Gacha Shop keeps its responsive two-column width instead of copying the reference's narrower 2.5-card Home rail. Home keeps its approved 148 pt Gacha rail width. Both surfaces use the same compact title rule and retain 8:7 media.
+- Kuji cards are intentionally unchanged: their full-width 7:4 layout, separate IP metadata, wider title treatment, orange indicator, prize-tier row, and inventory behavior remain category-specific.
+- Final inspection found no title clipping, card overlap, image distortion, broken border, or inventory collision. Its measured media-to-information split is `55.13:44.87`, versus `55.49:44.51` in the source; no actionable P0, P1, or P2 issue remains in the rendered Gacha Shop state.
+
+### Required fidelity surfaces
+
+- Fonts and typography: unchanged. Gacha titles remain 15/21, prices remain 18/24, and the two-line title reservation remains available for long Korean product names.
+- Spacing and layout rhythm: only the redundant metadata row and its 4 pt title offset were removed. Outer gutters, 12 pt column/row gaps, card padding, price spacing, and inventory spacing remain unchanged.
+- Colors and tokens: unchanged. DABBOBA green, neutral surfaces, border treatment, status badges, and inventory fills were preserved.
+- Image quality and assets: unchanged. Gacha storefront media remains 8:7 with the existing safe crop/fallback behavior; no supplied competitor imagery or product asset was copied into the app.
+- Copy and behavior: the visible title is consolidated rather than deleted. Product routing, price, stock values, BEST/NEW behavior, search/filter behavior, and assistive copy remain intact.
+
+### Verification boundary
+
+- Full repository unit suite passed `719/719`; the focused Home/shop/structure suite passed `79/79`; mobile TypeScript and scoped whitespace validation passed.
+- The final loaded Gacha Shop is verified in the local iOS Simulator/Expo Go. The equivalent Home Gacha branch is source/test verified, but a fresh populated Home-rail capture is currently unavailable because the connected staging database has not yet applied the operator-section schema used by the running API. No external migration was applied for this visual task.
+- Physical-device, Android, tablet, large-text, signed-store-build, and production rendering are not claimed. The blue gear in the native capture is Expo Go development tooling, not shipped DABBOBA chrome.
+
+final result: passed
+
+## 2026-09-14 — Straight bolt-free gacha lever
+
+### Source and rendered evidence
+
+- Supplied physical-machine reference: `/Users/kyoungmin/Downloads/12314123.png` (`1206 × 2622` px). The fidelity target is only the crank geometry: one uninterrupted horizontal grip on a round mount, without copying the photographed machine, logos, labels, or colors.
+- Pre-change native evidence: `/Users/kyoungmin/Desktop/DBB/UI-history-backups/DABBOBA_2026-09-14_straight-lever/native-before.png` (`1206 × 2622` px; `402 × 874` pt at 3×).
+- Final native evidence: `/Users/kyoungmin/Desktop/DBB/UI-history-backups/DABBOBA_2026-09-14_straight-lever/native-after.png` (`1206 × 2622` px; `402 × 874` pt at 3×).
+- Longer rotation-cue follow-up: `/Users/kyoungmin/Desktop/DBB/UI-history-backups/DABBOBA_2026-09-14_straight-lever/native-arrow-12pt.png` and focused crop `/Users/kyoungmin/Desktop/DBB/UI-history-backups/DABBOBA_2026-09-14_straight-lever/native-arrow-12pt-focus.png` (`520 × 520` px).
+- Same-input focused comparison: `/Users/kyoungmin/Desktop/DBB/UI-history-backups/DABBOBA_2026-09-14_straight-lever/comparison.png` (`1080 × 590` px). The reference is on the left and the final native implementation is on the right.
+- State: development-only paid-gacha ready preview for `gacha-sylvanian-adventure`, before any lever input. The preview route does not consume an entitlement. The blue gear in the native capture is the Expo development control, not customer UI.
+
+### Findings and fixes
+
+- Initial P1: the previous fixed plate exposed four fastener heads and the rotating handle had a pronounced center hub, making the control busier and more mechanical than the supplied single-line reference.
+- First asset iteration removed the four outer fasteners but retained a center socket. That remaining socket could still read as a bolt, so it was rejected before implementation.
+- Fix: the fixed transparent plate now keeps only a smooth metal rim and dark recess. It has no screws, bolts, center socket, or decorative fasteners. The independent rotating layer is one thin straight horizontal bar with no center hub or curved fragments.
+- The original 41 pt plate footprint, exact gesture pivot, 160 pt invisible touch target, and green clockwise tangent cue remain unchanged. The cue is an instruction affordance outside the plate, not part of the crank decoration.
+- Follow-up: the rotation cue grew only from `10 × 8` to `12 × 8` pt. Its shaft gained 2 pt while the arrowhead, height, 55 pt orbit, exact pivot, and 2.6-second clockwise speed stayed unchanged; the complete silhouette retains at least 3 pt clearance from the plate throughout the full orbit.
+- Post-fix source comparison and native inspection found no actionable P0, P1, or P2 issue.
+
+### Required fidelity surfaces
+
+- Shape and hierarchy: passed. The lever reads immediately as one straight horizontal action line on one calm circular mount.
+- Spacing and alignment: passed. The bar and plate share the existing gesture center and remain optically centered on the machine front.
+- Color and material: passed. The established monochrome silver/graphite draw-stage treatment remains; no photographed reference color or branding was copied.
+- Motion and accessibility: passed. Six accepted taps and one clockwise drag still share the same one-turn state; early release, result gating, Reduced Motion, sound timing, and the accessible action remain unchanged.
+- Asset quality: passed. Both new PNGs use true RGBA transparency at the expected `108 × 108` and `108 × 40` source sizes, with no rectangular background.
+
+### Verification boundary
+
+- Focused lever, capsule, machine-layout, preview-safety, and payment-state regressions passed `62/62`. Mobile TypeScript and protected-runtime integrity passed, and the scoped whitespace check is clean.
+- The final ready state was verified in the local DABBOBA SDK57 iOS Simulator through the development-only preview route. This is local code and Simulator evidence only; physical-device, Android, signed-store-build, and production behavior are not claimed.
+
+final result: passed
+
+## 2026-09-14 — Symmetric faceted gacha handle follow-up
+
+### Source and rendered evidence
+
+- Approved top-only shape reference: `/Users/kyoungmin/Desktop/DBB/UI-history-backups/DABBOBA_2026-09-14_symmetric-faceted-lever/approved-shape-reference.png`. The requested follow-up mirrors the same central protrusion below the grip rather than changing its width, material, or surrounding plate.
+- Final native ready state: `/Users/kyoungmin/Desktop/DBB/UI-history-backups/DABBOBA_2026-09-14_symmetric-faceted-lever/native-ready.png` (`1206 × 2622` px; `402 × 874` pt at 3×).
+- Focused native crop: `/Users/kyoungmin/Desktop/DBB/UI-history-backups/DABBOBA_2026-09-14_symmetric-faceted-lever/native-lever-focus.png` (`520 × 520` px).
+- Same-input comparison: `/Users/kyoungmin/Desktop/DBB/UI-history-backups/DABBOBA_2026-09-14_symmetric-faceted-lever/comparison.png` places the approved top-only reference on the left and the final upper-and-lower protrusion on the right.
+- Final app asset: `public/assets/dabboba/draw/gacha/capsule-crank-handle-symmetric.png` (`108 × 56` RGBA). The former straight handle remains preserved as a separate source asset.
+
+### Findings and implementation
+
+- The first symmetric export used the existing `31 × 12` pt render box. Its silhouette was mathematically mirrored, but native inspection showed the upper and lower protrusions were too compressed to read clearly and the grip still appeared nearly straight.
+- Fix: keep the 31 pt horizontal width and exact crank pivot, increase only the render height to 16 pt, and expand the transparent source canvas from 40 to 56 px. The visible handle body now extends vertically while remaining fully inside the unchanged 41 pt fixed plate.
+- The approved upper outline is mirrored pixel-for-pixel below the horizontal centerline. Both sides use the same clipped plateau and stepped shoulders; the lower surface is darker only to preserve the established lighting direction.
+- The grip is one continuous component. No center hub, bolt, socket, ring, screw, detached block, or decorative fastener was introduced.
+- The final transparent silhouette uses hard alpha edges and eight grayscale shades, retaining the requested compact 8-bit faceting at native size.
+
+### Unchanged behavior and verification boundary
+
+- The 41 pt fixed plate, 160 pt invisible gesture target, exact rotation axis, six-tap completion, one-turn clockwise drag, result gate, Reduced Motion behavior, and reveal audio timing are unchanged.
+- The existing `12 × 8` pt clockwise cue, 55 pt orbit, and 2.6-second rotation remain unchanged and clear of the thicker handle.
+- Focused lever, capsule, machine-layout, preview-safety, and payment-state regressions passed `62/62`. The added asset regression verifies `108 × 56` RGBA, hard alpha, a restrained grayscale palette, visible vertical thickness, a single connected row span, and exact upper/lower silhouette mirroring. Mobile TypeScript, all 28 protected runtime files, and the scoped whitespace check passed.
+- The final ready state was inspected in the local DABBOBA SDK57 iOS Simulator through the development-only preview route, which does not consume an entitlement. This is local code and Simulator evidence only; physical-device, Android, signed-store-build, and production behavior are not claimed. The blue gear in the full capture is the Expo development control, not customer UI.
+
+final result: passed
+
+## 2026-09-14 — Thick straight gacha handle follow-up
+
+### Source and rendered evidence
+
+- Previous symmetric state: `/Users/kyoungmin/Desktop/DBB/UI-history-backups/DABBOBA_2026-09-14_symmetric-faceted-lever/native-lever-focus.png`.
+- Final native ready state: `/Users/kyoungmin/Desktop/DBB/UI-history-backups/DABBOBA_2026-09-14_thick-straight-lever/native-ready.png` (`1206 × 2622` px; `402 × 874` pt at 3×).
+- Focused native crop: `/Users/kyoungmin/Desktop/DBB/UI-history-backups/DABBOBA_2026-09-14_thick-straight-lever/native-lever-focus.png`.
+- Same-input comparison: `/Users/kyoungmin/Desktop/DBB/UI-history-backups/DABBOBA_2026-09-14_thick-straight-lever/comparison.png` places the previous symmetric handle on the left and the final thick straight handle on the right.
+- Final app asset: `public/assets/dabboba/draw/gacha/capsule-crank-handle-thick-straight.png` (`108 × 56` RGBA). The previous symmetric and thin straight variants remain preserved separately.
+
+### Findings and implementation
+
+- A built-in image-generation edit confirmed the requested single-bar direction, but its generated middle section was thinner than the accepted grip. That candidate was not applied.
+- The final asset preserves the approved symmetric source's complete middle bar pixel-for-pixel and clears only the upper and lower protrusion alpha. The visible body remains 25 source pixels thick, while the former attached shapes above and below are absent.
+- The existing `31 × 16` pt render box, width, grayscale lighting, clipped side ends, and 8-bit faceting remain unchanged. Every occupied row is one continuous 96–102 px-wide span with hard transparent edges and eight grayscale shades.
+- The grip remains one continuous component. No center hub, bolt, socket, ring, screw, detached block, or decorative fastener was introduced.
+
+### Unchanged behavior and verification boundary
+
+- The 41 pt fixed plate, pivot, 160 pt invisible gesture target, six-tap completion, one-turn clockwise drag, 0.95-turn threshold, mixed input, early release, server result gate, Reduced Motion behavior, and reveal audio timing are unchanged.
+- The existing `12 × 8` pt clockwise cue, 55 pt orbit, and 2.6-second rotation remain unchanged.
+- Focused lever, capsule, machine-layout, preview-safety, and payment-state regressions passed `62/62`. Mobile TypeScript, all 28 protected runtime files, and the scoped whitespace check passed.
+- The final ready state was inspected in the local DABBOBA SDK57 iOS Simulator through the development-only preview route, which does not consume an entitlement. This is local code and Simulator evidence only; physical-device, Android, signed-store-build, and production behavior are not claimed. The blue gear in the full capture is the Expo development control, not customer UI.
+
+final result: passed
+
+## 2026-09-14 — Kuji remaining-award card status
+
+### Source and rendered evidence
+
+- Supplied information-hierarchy reference: `/Users/kyoungmin/Downloads/IMG_5174.PNG` (`1320 × 2868` px). Only the customer-facing pattern of listing the still-available Kuji awards was adopted; the third-party palette, chrome, imagery, controls, and navigation were not copied.
+- Final Kuji Shop evidence: `/Users/kyoungmin/Desktop/DBB/UI-history-backups/DABBOBA_2026-09-14_kuji-tier-availability/kuji-shop-remaining-tiers-final.png` (`1206 × 2622` px; `402 × 874` pt at 3×).
+- Final Home evidence: `/Users/kyoungmin/Desktop/DBB/UI-history-backups/DABBOBA_2026-09-14_kuji-tier-availability/home-remaining-tiers-overlay.png` (`1206 × 2622` px; `402 × 874` pt at 3×).
+- Same-input comparison: `/Users/kyoungmin/Desktop/DBB/UI-history-backups/DABBOBA_2026-09-14_kuji-tier-availability/reference-comparison.png` places the supplied reference and final native Kuji Shop render side by side at equal height.
+- The blue gear in the native captures is the Expo developer control, not customer UI. The arcade-cabinet artwork is a local QA fixture and was not assessed as final catalog photography.
+
+### Findings and implementation
+
+- Kuji Shop places the remaining-award row directly between price and the existing ticket meter, matching the reference's information order without introducing a second card or increasing media height.
+- Up to five awards render in administrator-defined order. The verified fixture shows `S상`, `A상`, `B상`, `C상`, `라스트원상`, followed by the clarifying label `남음`; more than five uses four labels plus `+N`.
+- Long administrator-authored award names shrink and tail-truncate inside their chips instead of overflowing the full-width card. The complete names and remaining quantities remain available through the accessibility label.
+- Home keeps the accepted compact rail geometry. Its media overlay shows two recognizable awards plus the remainder count (`S상 · A상 · +3`) and does not participate in the card body's height.
+- Zero-quantity tiers are removed by the server projection only after committed inventory consumption. Reserving a ticket does not hide an award, and the customer response never exposes sealed slot-to-prize assignments.
+- Home and Kuji Shop refetch their catalog snapshot on screen focus. Catalog responses use `Cache-Control: no-store`, preventing a sold-out award label from persisting as a reusable HTTP cache entry.
+
+### Required fidelity surfaces
+
+- Fonts and typography: passed. Award labels reuse the existing small Korean catalog type and remain readable at the native 402 pt viewport; no display-font treatment was added to dynamic administrator content.
+- Spacing and layout rhythm: passed. All five verified chips, `남음`, and the 80/80 meter fit without clipping or wrapping. Home retains the approved 148 pt card width, 8:7 media, and information-body height.
+- Colors and tokens: passed. The row uses DABBOBA's existing restrained Kuji orange family and neutral secondary text rather than copying the source's blue/red status palette.
+- Image quality and asset fidelity: out of scope for this focused feature. The local fixture intentionally uses an existing safe artwork to exercise layout; production card imagery remains administrator-managed storefront media.
+- Copy and content: passed. Customer-visible labels come from the active administrator-published Kuji configuration. The display communicates availability, while exact tier quantities are announced to assistive technology rather than adding dense numeric copy to the card.
+
+### Verification boundary
+
+- The active five-tier local fixture, Kuji Shop row, Home overlay, focus refresh, and no-store response were verified in the DABBOBA SDK57 iOS Simulator against the isolated `dabboba_development` database.
+- Static and unit verification covers zero filtering, administrator ordering, duplicate protection, exact-five and overflow behavior, full accessibility narration, and placement on both surfaces. Database verification covers inactive draft creation with publication blocked until activation.
+- This is local code, local PostgreSQL, and iOS Simulator evidence only. Physical-device, Android, large-text, VoiceOver gesture playback, signed-store-build, production catalog media, and production draw traffic are not claimed.
+
+final result: passed
+
+## 2026-09-14 — Context-aware lightweight capsule system
+
+### Scope and visual source
+
+- User target: `/Users/kyoungmin/Desktop/KakaoTalk_Photo_2026-09-14-01-26-34.jpeg`; approved concept board: `work/concepts/2026-09-14-capsule-light-system-v1.png`. The reusable identity is a light spherical shell with a thin, nearly flush center seam and the green/ivory/orange family. The photographic material is not copied indiscriminately across the application.
+- Native render evidence: local DABBOBA SDK57 iOS Simulator, Expo Go, 368 × 800 logical pixels. The final Gacha Shop navigation state is `/var/folders/ym/kg6qcm917wv2wdk0qby6y6tw0000gn/T/screenshot_optimized_c2bafabc-414c-4744-9aa4-878061669966.jpg`; the final ready-machine state is `/var/folders/ym/kg6qcm917wv2wdk0qby6y6tw0000gn/T/screenshot_optimized_e370c738-645b-4dda-92d3-3b943f88cba7.jpg`.
+- Same-input comparison opened the concept board, final Gacha Shop render, and final machine render together at original detail. The blue gear visible in the two runtime captures is the Expo developer control and is not customer UI.
+
+### Context-specific treatment
+
+- Root navigation: replaced the photographic-looking capsule attempt with dedicated transparent pixel-isometric active/inactive assets. The 15-degree tilted sphere, thin seam, stepped facets and compact shading now match the Home, Storage, Profile and Kuji icon family. Selected state changes only the icon and label; it does not add a filled selection tile.
+- Header product history: kept a separate restrained line illustration at the same optical size as search and notification. It does not inherit the navigation raster material.
+- Machine chamber: retained the existing dark arcade cabinet, deterministic 26-capsule pile and motion model. Capsules use compact opaque pixel planes, block highlights and a one-pixel seam so they remain legible at 17–24 points. Green and ivory remain dominant; five restrained orange capsules add the approved third gacha tone without making Kuji the apparent category.
+- Pickup and reveal: use the same spherical anatomy but a smooth translucent upper dome, satin lower half, thin rim and rebuilt 80-frame hero atlas. The fallback reveal also uses the shared visual instead of an older thick-band capsule.
+- Kuji identity remains the separate orange ticket. No Kuji draw behavior, customer copy, server gate, reduced-motion behavior or commerce authority changed.
+
+### Findings and fixes
+
+- Initial P1: one photoreal capsule asset was being considered for navigation, chamber and reveal, which conflicted with the existing pixel navigation family and made tiny machine capsules visually soft. Fixed by separating material presets while sharing only anatomy and seam.
+- Initial P2: the previous molded capsule had a broad coupling band and flattened lower cup. Fixed with a full spherical silhouette and one-pixel seam at all React Native sizes; the hero shader keeps exact spherical geometry with a near-flush collar.
+- Initial P2: a two-tone green/ivory-only chamber did not carry the newly approved orange gacha colorway. Added five deterministic orange entries to the 26-capsule pile while keeping the dispensed hero path and inventory behavior unchanged.
+- Post-fix visual comparison found no actionable P0, P1 or P2 issue. Machine capsules are intentionally more angular than the concept board; this is the requested context adaptation, not a fidelity defect.
+
+### Verification boundary
+
+- Focused capsule, motion, atlas, frame and native-shell regressions passed 69/69. The first consolidated run correctly exposed two stale chunky-cup/two-tone chamber expectations; those tests were updated to the new full-sphere and three-tone contract. The final full unit suite passed 657/657, the focused chamber/capsule suite passed 27/27, mobile TypeScript passed, and protected runtime integrity passed for all 28 files.
+- Verified as local code plus iOS Simulator/Expo Go evidence only. Physical-device, Android, large-text, signed-store-build, live payment and production behavior are not claimed.
+
+final result: passed
+
+## 2026-09-14 — Unified molded-object root navigation icons
+
+### Source and rendered evidence
+
+- Source visual target: `work/qa/root-navigation-icon-reference.png`. The supplied row established the mismatch to correct: gacha and Kuji already used chunky molded-object artwork, while Home, Storage, and My Info were thin line icons.
+- New project assets: `apps/mobile/assets/icons/home-chunky*.png`, `storage-chunky*.png`, and `profile-chunky*.png`. Each active/inactive pair is a 128×128 transparent PNG and shares an identical alpha silhouette.
+- Same-input comparison: `work/qa/root-navigation-icons-comparison.png`, with the supplied source row and the native Kuji-selected implementation viewed together.
+- Native state evidence: `work/qa/root-navigation-home-object-icons.jpg`, `root-navigation-storage-object-icons.jpg`, `root-navigation-profile-object-icons.jpg`, and `root-navigation-kuji-object-icons.jpg`, captured from the DABBOBA SDK57 iOS Simulator at 368×800 rendered pixels.
+
+### Findings and fixes
+
+- Initial P2: Home, Storage, and My Info used outline-only Ionicons beside filled, faceted gacha and Kuji assets. The mixed rendering language made the final three tabs look lighter and less intentional even though their numeric icon size matched.
+- Fix: replaced only the three root-tab glyphs with dedicated house, lidded-storage-box, and profile-medallion assets using the same broad planes, dark rim, ivory highlights, and grayscale inactive treatment as the existing capsule and ticket.
+- Fix: normalized the new opaque bounds to approximately 110 px on the 128 px canvas. The active/inactive alpha geometry matches exactly, so selecting a tab changes color without a position or silhouette jump.
+- Post-fix native evidence shows five distinct, readable subjects with comparable optical weight. No actionable P0, P1, or P2 issue remains.
+
+### Required fidelity surfaces
+
+- Fonts and typography: unchanged. Root labels remain the shared Noto Sans KR treatment at 11/16; only the active label color changes.
+- Spacing and layout rhythm: unchanged. The five equal columns, 28-point icon slot, 44-point minimum target, flat full-width footer, bottom inset, and persistent labels are preserved.
+- Colors and visual tokens: gacha, Home, Storage, and My Info use canonical green only when active; Kuji alone uses its orange active state. All inactive icons remain grayscale and muted. No filled selection tile, track, underline, or extra bar was introduced.
+- Image quality and asset fidelity: all six new files have true alpha transparency, no rectangular background or halo, and remain legible at the native 25–27 point optical size. The icon subjects stay conventional enough for fast recognition.
+- Copy and behavior: no route name, root order, navigation destination, touch behavior, or customer content changed.
+
+### Verification boundary
+
+- Mobile TypeScript passed. The Expo shell, shared visual system, frame/gutter, and navigation suites passed 50/50. Runtime integrity passed for 28 protected files, and the scoped whitespace check passed.
+- Home, Storage, My Info, and Kuji selected states were visually inspected in the local iOS Simulator. This is Simulator/local proof only; physical-device, Android, large-text, screen-reader, and signed-store-build rendering are not claimed.
+
+final result: passed
+
+## 2026-09-14 — Home Kuji badge removal and remaining-ticket meter
+
+### Source and rendered comparison
+
+- Source visual truth: `/var/folders/ym/kg6qcm917wv2wdk0qby6y6tw0000gn/T/TemporaryItems/NSIRD_screencaptureui_HLgSl3/스크린샷 2026-09-14 오전 1.20.49.png`. The requested changes are limited to removing the orange `쿠지` category badge while preserving `BEST` / `NEW`, then presenting Kuji inventory as `current/total` with an orange progress bar beside it.
+- Native implementation evidence: `work/audits/2026-09-14-home-kuji-inventory/home-kuji-card-inventory-after.png`, captured from the DABBOBA SDK57 iOS Simulator `C3E8BD62-FFAC-4E91-A10C-C7CD416C731E` at 402 × 874 logical points / 1206 × 2622 pixels.
+- The source and rendered implementation were opened together in one visual comparison input. The live Home card removes the orange `쿠지` badge and leaves the `NEW` badge plus thin orange top indicator unobstructed.
+
+### Findings and implementation
+
+- Removed the Home-only category badge prop, rendering branch and styles. Search/history category labels were intentionally left unchanged because the request targets the Home card.
+- Preserved `BEST` / `NEW` priority and the established status-badge geometry. The Kuji product name remains customer content; only the redundant orange overlay badge was removed.
+- The shared inventory component already keeps the label, quantity and progress track in one responsive row, formats a trusted total as `잔여 티켓 80/80`, and uses the canonical Kuji orange for its fill.
+- Added regression coverage for the removed Home badge, retained status badge, combined `잔여 티켓 80/80` label and quantity-before-bar composition. No actionable visual P0, P1 or P2 remains in the badge-removal portion.
+
+### Authoritative-data boundary
+
+- The currently rendered test product `kuji-sylvanian-adventure` returns `availableQuantity: 80` and `totalQuantity: null`. Therefore the truthful native screen shows `잔여 티켓 80` and omits a percentage bar.
+- The total must come from the ACTIVE finite Kuji deck configured by the administrator. Substituting the current 80 as its own total would show `79/79` after the first draw and incorrectly keep the bar at 100%, so no client fallback or hardcoded total was added.
+- The requested final `80/80` orange-meter state is implemented and covered by tests, but it cannot be visually signed off against the current server fixture until an 80-slot deck with prize quantities summing to 80 is published for this exact product.
+
+### Verification boundary
+
+- Full root Node test suite passed, mobile TypeScript passed, runtime integrity passed for 28 protected files, root production build passed, and diff whitespace validation passed. The existing Vite large-chunk warning remains non-blocking.
+- Verified in the local iOS Simulator only. Physical-device, Android, signed-store-build, real draw depletion and remote administrator publication are not claimed.
+
+final result: blocked — Home badge removal passed; the visible `80/80` orange bar awaits authoritative 80-slot Kuji deck data for the displayed test product.
+
+## 2026-09-13 — Inline shop toolbar and icon-label-only root selection
+
+### Source and rendered evidence
+
+- Supplied search/filter reference: `/var/folders/ym/kg6qcm917wv2wdk0qby6y6tw0000gn/T/TemporaryItems/NSIRD_screencaptureui_wxz2th/스크린샷 2026-09-13 오후 7.18.11.png` (`780 × 300` px).
+- Supplied navigation reference: `/var/folders/ym/kg6qcm917wv2wdk0qby6y6tw0000gn/T/TemporaryItems/NSIRD_screencaptureui_a6jBky/스크린샷 2026-09-13 오후 7.18.51.png` (`780 × 142` px).
+- Revised native captures: `work/qa/shop-search-filter-inline-gacha-2026-09-13.png` and `work/qa/shop-search-filter-inline-kuji-2026-09-13.png` (`1206 × 2622` px), captured from the DABBOBA SDK57 iOS Simulator at `402 × 874` logical points / `3×` density.
+- Same-input comparison: `work/qa/shop-toolbar-nav-reference-comparison-2026-09-13.png` (`1592 × 680` px), with both supplied crops and the revised Kuji viewport regions in one board.
+
+### Findings and fixes
+
+- Initial P2: the filter button occupied a second row even though the 402-point viewport had enough horizontal room, adding about 62 points of avoidable vertical whitespace on both fixed-category shops.
+- Fix: the shared Gacha/Kuji `ShopScreen` now places the flexible search shell and fixed 52-point filter target in one row with an 8-point gap. The search shell has `minWidth: 0`, so long text, a visible clear button, or a narrower viewport can shrink it without pushing the filter out of frame.
+- Initial P2: the selected root tab used a wide pale-green tile, so the background competed with the icon and label and made the five equal navigation targets appear uneven.
+- Fix: removed the moving/fill selection track. Selection is now expressed only by the canonical-green icon and label; inactive icons and labels remain muted. The custom gacha capsule uses a separate green-toned image that retains its angular planes and highlight instead of a flat tint.
+- Post-fix evidence shows the same one-row toolbar on both shops and a visually stable five-column navigation with no selected tile. No actionable P0, P1, or P2 mismatch remains.
+
+### Required fidelity surfaces
+
+- Fonts and typography: passed; the existing shared search placeholder and 11/16 navigation label roles are unchanged, with no compressed or one-off type size.
+- Spacing and layout rhythm: passed; the search shell and filter share one 52-point row, use the established 12-point outer gutter and 8-point internal gap, and preserve the product grid below. Each navigation target retains a minimum 44-point interaction area.
+- Colors and tokens: passed; active icon and label use canonical green, inactive states use the muted foreground, and the removed weak-green navigation fill is not replaced by an underline or outline.
+- Images and icons: passed; Ionicons change through their existing selected color. The gacha capsule switches between matched grayscale and green-toned 128-pixel transparent assets while preserving the same silhouette, facet detail, scale, and inactive opacity.
+- Copy and content: unchanged; search wording, filter semantics, shop titles, navigation labels, routes, product data, and filter behavior are preserved. The filter button now exposes whether a non-default filter is applied to assistive technology.
+
+### Verification boundary
+
+- Focused structure and layout regression tests passed (`45/45`), mobile TypeScript checking passed, protected-runtime integrity passed (`28` files), the production web build passed with its existing large-chunk advisory, and `git diff --check` passed.
+- Verified visually in the local iOS Simulator on both Gacha and Kuji roots. Physical-device, Android, large-text, VoiceOver, and signed-store-build rendering are not claimed by this pass.
+
+final result: passed
+
 ## 2026-08-30 — Orange pull-tab kuji selection and peel-open flow
 
 **Source and rendered evidence**
 
 - Source visual truth: `work/audits/kuji-open-reference/frames/frame-01.png` (`440 × 960` px), extracted from the supplied kuji-opening video. The comparison target is the orange landscape ticket, cream inset frame, left pull control, rightward opening affordance, and restrained dark reveal stage; third-party logos, characters, Japanese copy, and prize data are excluded.
-- Generated project asset: `apps/mobile/assets/kuji-ticket-front.png` (`1517 × 1037` px), created with the built-in image-generation tool as an original text-free, brand-free orange ticket face. The app overlays only the stable ticket number and contextual state.
+- Generated project asset: `apps/mobile/assets/draw/kuji/kuji-ticket-front.png` (`1517 × 1037` px), created with the built-in image-generation tool as an original text-free, brand-free orange ticket face. The app overlays only the stable ticket number and contextual state.
 - Native implementation: `work/audits/kuji-ticket-app/selection-v1.png`, `work/audits/kuji-ticket-app/reveal-sealed-v2.png`, and `work/audits/kuji-ticket-app/summary-v1.png` (`1206 × 2622` px each).
 - Full-view comparison input: `work/audits/kuji-ticket-app/compare-sealed-v2.png` (`1206 × 1311` px). Source and implementation were each normalized to `603 × 1311` px and placed together before judgment.
 - Focused comparison input: `work/audits/kuji-ticket-app/compare-ticket-focused-v2.png` (`1400 × 750` px). The source and implementation ticket regions were normalized to a common 700 px width and padded without stretching.
@@ -745,10 +1027,10 @@ final result: passed
 
 **Rendered implementation evidence**
 
-- Home content capture: `design-qa-settings-home.png` (`393 × 852` px).
-- Settings hub capture: `design-qa-settings-main.png` (`393 × 852` px).
-- Full-view comparison: `design-qa-settings-comparison-full.png` (`818 × 852` px). The supplied framed reference was scaled to `425 × 852`; the unframed app viewport remains `393 × 852`. The bezel mismatch is excluded from interface findings.
-- Focused home-header comparison: `design-qa-settings-comparison-header.png` (`785 × 60` px). The source screen region (`694 × 106`) was normalized to `393 × 60` beside the implementation header crop (`393 × 60`).
+- Home content capture: `/Users/kyoungmin/Desktop/DBB/UI-history-backups/DABBOBA_repository_cleanup_archive_2026-09-08/ui-history/repo-root-qa/design-qa-settings-home.png` (`393 × 852` px).
+- Settings hub capture: `/Users/kyoungmin/Desktop/DBB/UI-history-backups/DABBOBA_repository_cleanup_archive_2026-09-08/ui-history/repo-root-qa/design-qa-settings-main.png` (`393 × 852` px).
+- Full-view comparison: `/Users/kyoungmin/Desktop/DBB/UI-history-backups/DABBOBA_repository_cleanup_archive_2026-09-08/ui-history/repo-root-qa/design-qa-settings-comparison-full.png` (`818 × 852` px). The supplied framed reference was scaled to `425 × 852`; the unframed app viewport remains `393 × 852`. The bezel mismatch is excluded from interface findings.
+- Focused home-header comparison: `/Users/kyoungmin/Desktop/DBB/UI-history-backups/DABBOBA_repository_cleanup_archive_2026-09-08/ui-history/repo-root-qa/design-qa-settings-comparison-header.png` (`785 × 60` px). The source screen region (`694 × 106`) was normalized to `393 × 60` beside the implementation header crop (`393 × 60`).
 - CSS viewport: `393 × 852`; device scale factor `1`; state: guest home followed by settings hub.
 
 **Findings**
@@ -799,15 +1081,15 @@ final result: passed
 **Source visual truth**
 
 - User-selected capsule-machine reference retained outside the repository (`225 × 225` px).
-- App asset derived from the supplied source: `public/assets/dabboba/ui/capsule-machine-nav.png` (`175 × 202` px, RGBA). Only blank outer margin and the white background were removed; the supplied machine geometry remains the visible mask.
+- App asset derived from the supplied source: `public/assets/dabboba/icons/capsule-machine-nav.png` (`175 × 202` px, RGBA). Only blank outer margin and the white background were removed; the supplied machine geometry remains the visible mask.
 
 **Rendered implementation evidence**
 
-- Final navigation capture: `design-qa-navigation-focus.png` (`716 × 104` px), enlarged 2× from the browser-side phone preview for inspection.
-- Focused icon crop: `design-qa-machine-focus.png` (`320 × 320` px).
-- Same-input source/implementation comparison: `design-qa-machine-comparison.png` (`640 × 320` px), with the source and final navigation icon placed together.
-- Exchange list evidence: `design-qa-exchange-screen.png` (`609 × 827` px).
-- Exchange detail evidence: `design-qa-exchange-detail.png` (`609 × 827` px).
+- Final navigation capture: `/Users/kyoungmin/Desktop/DBB/UI-history-backups/DABBOBA_repository_cleanup_archive_2026-09-08/ui-history/repo-root-qa/design-qa-navigation-focus.png` (`716 × 104` px), enlarged 2× from the browser-side phone preview for inspection.
+- Focused icon crop: `/Users/kyoungmin/Desktop/DBB/UI-history-backups/DABBOBA_repository_cleanup_archive_2026-09-08/ui-history/repo-root-qa/design-qa-machine-focus.png` (`320 × 320` px).
+- Same-input source/implementation comparison: `/Users/kyoungmin/Desktop/DBB/UI-history-backups/DABBOBA_repository_cleanup_archive_2026-09-08/ui-history/repo-root-qa/design-qa-machine-comparison.png` (`640 × 320` px), with the source and final navigation icon placed together.
+- Exchange list evidence: `/Users/kyoungmin/Desktop/DBB/UI-history-backups/DABBOBA_repository_cleanup_archive_2026-09-08/ui-history/repo-root-qa/design-qa-exchange-screen.png` (`609 × 827` px).
+- Exchange detail evidence: `/Users/kyoungmin/Desktop/DBB/UI-history-backups/DABBOBA_repository_cleanup_archive_2026-09-08/ui-history/repo-root-qa/design-qa-exchange-detail.png` (`609 × 827` px).
 - Browser state: iPhone preview, `뽀바` selected for icon checks; authenticated local test state for exchange detail. The app-owned phone viewport remains `393 × 852` CSS px. The in-app browser scales the surrounding device preview to fit its desktop canvas, so focused captures were enlarged only for inspection; CSS measurements were taken from the live element.
 
 **Required fidelity surfaces**
@@ -850,10 +1132,10 @@ final result: passed
 **Rendered implementation evidence**
 
 - Canonical web asset: `public/assets/dabboba/brand/dabboba-wordmark.png` (`1170 × 172` px, transparent RGBA).
-- Mirrored Expo asset: `apps/mobile/assets/dabboba-wordmark.png` (`1170 × 172` px, byte-identical).
-- Opening capture: `design-qa-logo-ipstyle-splash-full.png` (`1400 × 1200` px).
-- Home capture: `design-qa-logo-ipstyle-home-full.png` (`1400 × 1200` px).
-- Same-input focused comparison: `design-qa-logo-ipstyle-comparison.png` (`2010 × 220` px), with the source lettering and implemented DABBOBA wordmark normalized to the same 172 px height.
+- Mirrored Expo asset: `apps/mobile/assets/brand/dabboba-wordmark.png` (`1170 × 172` px, byte-identical).
+- Opening capture: `/Users/kyoungmin/Desktop/DBB/UI-history-backups/DABBOBA_repository_cleanup_archive_2026-09-08/ui-history/repo-root-qa/design-qa-logo-ipstyle-splash-full.png` (`1400 × 1200` px).
+- Home capture: `/Users/kyoungmin/Desktop/DBB/UI-history-backups/DABBOBA_repository_cleanup_archive_2026-09-08/ui-history/repo-root-qa/design-qa-logo-ipstyle-home-full.png` (`1400 × 1200` px).
+- Same-input focused comparison: `/Users/kyoungmin/Desktop/DBB/UI-history-backups/DABBOBA_repository_cleanup_archive_2026-09-08/ui-history/repo-root-qa/design-qa-logo-ipstyle-comparison.png` (`2010 × 220` px), with the source lettering and implemented DABBOBA wordmark normalized to the same 172 px height.
 - Browser viewport: `1400 × 1200` CSS px at DPR 1; the protected iPhone app screen measured exactly `393 × 852` CSS px.
 - State: opening splash and guest-first home header.
 
@@ -883,11 +1165,11 @@ final result: passed
 
 ## Latest focused QA — canonical wordmark from opening to home (2026-08-24)
 
-- Source visual truth: `public/assets/dabboba/logo-concepts/dabboba-wordmark-dot-preview.png` (`2048 × 512` px), with the uppercase `DABBOBA` dot construction and `DaBboBa` color rhythm.
-- Canonical implementation asset: `public/assets/dabboba/brand/dabboba-wordmark.svg` (`814 × 134` intrinsic px, tight `viewBox="105 60 814 134"`) and the native Expo raster counterpart `apps/mobile/assets/dabboba-wordmark.png` (`814 × 134` px with alpha).
-- Browser-rendered implementation evidence: `design-qa-wordmark-splash.png` and `design-qa-wordmark-home.png`, each lossless PNG at `393 × 852` px.
-- Combined full-view evidence: `design-qa-wordmark-comparison.png`, containing the source target above the stable opening and home states in one image.
-- Focused logo evidence: `design-qa-wordmark-focus.png`, ordered source → opening → home after slot-specific crops and nearest-neighbour enlargement for inspection.
+- Historical source visual is retained in the external DABBOBA UI-history backup; unused logo concepts are no longer bundled with the app.
+- Canonical implementation asset: `public/assets/dabboba/brand/dabboba-wordmark.svg` (`814 × 134` intrinsic px, tight `viewBox="105 60 814 134"`) and the native Expo raster counterpart `apps/mobile/assets/brand/dabboba-wordmark.png` (`814 × 134` px with alpha).
+- Browser-rendered implementation evidence: `/Users/kyoungmin/Desktop/DBB/UI-history-backups/DABBOBA_repository_cleanup_archive_2026-09-08/ui-history/repo-root-qa/design-qa-wordmark-splash.png` and `/Users/kyoungmin/Desktop/DBB/UI-history-backups/DABBOBA_repository_cleanup_archive_2026-09-08/ui-history/repo-root-qa/design-qa-wordmark-home.png`, each lossless PNG at `393 × 852` px.
+- Combined full-view evidence: `/Users/kyoungmin/Desktop/DBB/UI-history-backups/DABBOBA_repository_cleanup_archive_2026-09-08/ui-history/repo-root-qa/design-qa-wordmark-comparison.png`, containing the source target above the stable opening and home states in one image.
+- Focused logo evidence: `/Users/kyoungmin/Desktop/DBB/UI-history-backups/DABBOBA_repository_cleanup_archive_2026-09-08/ui-history/repo-root-qa/design-qa-wordmark-focus.png`, ordered source → opening → home after slot-specific crops and nearest-neighbour enlargement for inspection.
 - Viewport and density: embedded Expo-style web state at `393 × 852` CSS px, DPR 1; the rendered app screen measured exactly `393 × 852` CSS px. No density normalization was required.
 - State: opening wordmark captured at 850 ms, after its 720 ms entrance and before the 1050 ms exit; home captured after the splash fully unmounted.
 
@@ -920,10 +1202,10 @@ final result: passed
 ## Latest focused QA — monochrome wordmark and green opening loader (2026-08-24)
 
 - Source visual truth: `public/assets/dabboba/brand/dabboba-wordmark.svg` (`814 × 134` intrinsic px), retaining the selected uppercase dot geometry with every dot changed to `#111411` by explicit user direction.
-- Native counterpart: `apps/mobile/assets/dabboba-wordmark.png` (`814 × 134` px, transparent), regenerated directly from the canonical SVG.
-- Browser evidence: `design-qa-wordmark-black-splash.png` and `design-qa-wordmark-black-home.png`, each lossless PNG at `393 × 852` px.
-- Combined full-view comparison: `design-qa-wordmark-black-comparison.png`, containing the flattened canonical asset above the opening and home states in one image.
-- Focused comparison: `design-qa-wordmark-black-focus.png`, ordered canonical asset → opening → home with nearest-neighbour inspection enlargement.
+- Native counterpart: `apps/mobile/assets/brand/dabboba-wordmark.png` (`814 × 134` px, transparent), regenerated directly from the canonical SVG.
+- Browser evidence: `/Users/kyoungmin/Desktop/DBB/UI-history-backups/DABBOBA_repository_cleanup_archive_2026-09-08/ui-history/repo-root-qa/design-qa-wordmark-black-splash.png` and `/Users/kyoungmin/Desktop/DBB/UI-history-backups/DABBOBA_repository_cleanup_archive_2026-09-08/ui-history/repo-root-qa/design-qa-wordmark-black-home.png`, each lossless PNG at `393 × 852` px.
+- Combined full-view comparison: `/Users/kyoungmin/Desktop/DBB/UI-history-backups/DABBOBA_repository_cleanup_archive_2026-09-08/ui-history/repo-root-qa/design-qa-wordmark-black-comparison.png`, containing the flattened canonical asset above the opening and home states in one image.
+- Focused comparison: `/Users/kyoungmin/Desktop/DBB/UI-history-backups/DABBOBA_repository_cleanup_archive_2026-09-08/ui-history/repo-root-qa/design-qa-wordmark-black-focus.png`, ordered canonical asset → opening → home with nearest-neighbour inspection enlargement.
 - Viewport and state: embedded app at `393 × 852` CSS px, DPR 1. Opening was captured at 850 ms after the logo entrance stabilized and before exit; home was captured after the splash unmounted.
 
 ### Required fidelity surfaces
@@ -955,16 +1237,15 @@ final result: passed
 
 **Source visual truth**
 
-- Selected ImageGen result: `public/assets/dabboba/logo-concepts/dabboba-wordmark-hybrid-01-source.png` (`1586 × 992` px).
-- Repository source copy: `public/assets/dabboba/logo-concepts/dabboba-wordmark-hybrid-01-source.png`.
-- Canonical transparent implementation asset: `public/assets/dabboba/brand/dabboba-wordmark.png` (`1288 × 172` px, alpha), mirrored at `apps/mobile/assets/dabboba-wordmark.png` for Expo.
+- The selected ImageGen source is retained in the external DABBOBA UI-history backup rather than the runtime repository.
+- Canonical transparent implementation asset: `public/assets/dabboba/brand/dabboba-wordmark.png` (`1288 × 172` px, alpha), mirrored at `apps/mobile/assets/brand/dabboba-wordmark.png` for Expo.
 
 **Rendered implementation evidence**
 
-- Home content screenshot: `design-qa-logo-home-content-2x-final.png` (`393 × 852` px).
-- Splash content screenshot: `design-qa-logo-splash-content-full-final.png` (`393 × 852` px).
-- Focused home-header crop: `design-qa-logo-home-focus-final.png` (`180 × 58` px).
-- Same-input source/implementation comparison: `design-qa-logo-comparison-final.png`.
+- Home content screenshot: `/Users/kyoungmin/Desktop/DBB/UI-history-backups/DABBOBA_repository_cleanup_archive_2026-09-08/ui-history/repo-root-qa/design-qa-logo-home-content-2x-final.png` (`393 × 852` px).
+- Splash content screenshot: `/Users/kyoungmin/Desktop/DBB/UI-history-backups/DABBOBA_repository_cleanup_archive_2026-09-08/ui-history/repo-root-qa/design-qa-logo-splash-content-full-final.png` (`393 × 852` px).
+- Focused home-header crop: `/Users/kyoungmin/Desktop/DBB/UI-history-backups/DABBOBA_repository_cleanup_archive_2026-09-08/ui-history/repo-root-qa/design-qa-logo-home-focus-final.png` (`180 × 58` px).
+- Same-input source/implementation comparison: `/Users/kyoungmin/Desktop/DBB/UI-history-backups/DABBOBA_repository_cleanup_archive_2026-09-08/ui-history/repo-root-qa/design-qa-logo-comparison-final.png`.
 - Browser viewport and CSS app viewport: `393 × 852`; `devicePixelRatio: 1`; no density downsampling required.
 - State: guest-first opening splash followed by the home root screen at `?embed=1`.
 
@@ -1351,5 +1632,329 @@ final result: passed
 - Every slot remains a checkbox with explicit `checked` and `disabled` accessibility state and at least an 80 pt visible height; the source-level regression rejects horizontal strips, carousels, `NO.`, dashed tear lines, and paper stubs.
 - Consolidated verification passed: all 174 unit tests, mobile TypeScript checking, protected-runtime integrity, production build, and `git diff --check`.
 - Evidence is iOS Simulator/local-preview proof only; physical-device and signed-store-build behavior is not claimed.
+
+final result: passed
+
+## 2026-09-06 — Home gacha and kuji vertical media alignment
+
+**Source and rendered evidence**
+
+- Supplied source: `/var/folders/ym/kg6qcm917wv2wdk0qby6y6tw0000gn/T/TemporaryItems/NSIRD_screencaptureui_mT6z1j/스크린샷 2026-09-06 오후 4.50.38.png` (`786 × 504` px).
+- Revised native capture: `/tmp/dabboba-home-card-vertical-aligned.png` (`1206 × 2622` px).
+- Same-input comparison: `/tmp/dabboba-home-card-vertical-comparison.png` (`1572 × 504` px).
+- Viewport and state: DABBOBA SDK57 iOS Simulator, `402` logical points wide at `3×`; Home → 오늘의 뽀바 → 전체 with adjacent gacha and kuji products.
+- Density normalization: the supplied crop is approximately `393` logical points wide at `2×`; the matching implementation region was cropped from the `3×` Simulator capture and scaled to `786 × 504` before horizontal comparison.
+
+**Findings and iteration history**
+
+- Initial P2: the landscape kuji media ended lower than the gacha-machine media, so their IP labels and product text began on different horizontal lines.
+- Superseded first fix: both card widths were temporarily made compact. This corrected alignment but contradicted the requested landscape kuji width and was removed before handoff.
+- Final fix: gacha remains the original compact `164`-point card and kuji retains its full available landscape width (`336` points on the supplied phone geometry, capped at `520`). Only the home kuji media height is fixed to the shared `199`-point visual slot, accounting for its one-point outline, while aspect-preserving contain scaling keeps the complete source visible without stretching.
+- Post-fix evidence: the final comparison shows the original unequal horizontal card widths intact while the two media bottoms and following text start lines align. No actionable P0, P1, or P2 mismatch remains.
+
+**Required fidelity surfaces**
+
+- Fonts and typography: unchanged; existing IP, product-name, and price styles remain intact.
+- Spacing and layout rhythm: passed; gacha and kuji retain their distinct widths while media height and following text rhythm align.
+- Colors and tokens: unchanged; existing DABBOBA green, neutral outlines, and warm background remain intact.
+- Image quality and asset fidelity: passed; original catalog images are used with preserved aspect ratio and no generated or placeholder replacement.
+- Copy and content: unchanged; catalog-sourced badges, IP names, product names, and prices are preserved.
+
+**Technical evidence**
+
+- Mobile TypeScript checking passed.
+- Focused home/frame regression suite passed (`42/42`).
+- Full workspace verification passed (`35/35` package tasks, `523/523` customer-web unit tests, `9/9` runtime tests, and `4/4` Sites tests).
+- Evidence is iOS Simulator/local proof only; physical-device and signed-store-build behavior is not claimed.
+
+final result: passed
+
+## 2026-09-09 — Native checkout reference and notice transcription
+
+### Scope and preserved baseline
+
+The user requested the five supplied checkout screenshots and their notice copy, changing the source brand to 다뽀바. This is a native checkout UI change, not a payment-provider integration or approval of new operating rules. Existing server-authoritative ordering, durable gacha recovery, and the absolute kuji lease remain intact.
+
+Baseline: `/Users/kyoungmin/Desktop/DBB/UI-history-backups/CHECKOUT-REF-baseline-2026-09-09-XBCqnt`. Existing unrelated dirty files and auth work were preserved. Source images and additive native captures are in `/Users/kyoungmin/Desktop/DBB/output/checkout-reference-2026-09-09/`.
+
+### Source and rendered comparison
+
+- Native target: DABBOBA SDK57, iOS Simulator `C3E8BD62-FFAC-4E91-A10C-C7CD416C731E`, 402 × 874 points / 1206 × 2622 pixels. Source: 589 × 1280 pixels, approximately 393 × 853 points. Normalized copies use proportional 1280-pixel height, not stretched artwork. The nine-point logical width difference and preserved quantity controls prevent an exact screenshot clone.
+- Compared source photo 1 with `after-top-normalized.png` in the same visual input; photo 4 with `after-shipping-final-normalized.png`; photo 5 with the final refund-end capture. Body sections were compared at matching expanded states, with different scroll offsets explicitly retained rather than inventing a stitched native view.
+- Final evidence: `after-top-final.png`, `after-points-final.png`, `after-totals-collapsed.png`, `after-consent.png`, `after-payment-notice.png`, `after-shipping-final.png`, `after-refund-start-final.png`, `after-refund-end-final.png`.
+
+### Findings and fixes
+
+- Fixed repeated large quantity/subtotal cards: quantity stays in the purchase section, duplicate footer amount and tutorial paragraphs were removed, and the footer contains one amount CTA.
+- Fixed reference drift in point controls: left-aligned input and balance, outlined all-points button, and compact 64-point product image with a bordered product row.
+- Fixed recovery regression discovered during review: pending gacha order recovery bypasses new-order consent and uses an explicit previous-order label. New orders still require unchecked-by-default consent.
+- Fixed unsafe input normalization: negative/fractional/non-numeric inputs do not silently become a different positive amount; valid whole points are capped by both balance and subtotal.
+- Corrected the first refund sentence to `배송받은 상품에…`, matching the supplied copy. Replaced source brand mentions with 다뽀바; payment labels use 신용/체크카드 and 네이버페이 카드 while retaining provider IDs.
+- A transitional hot-reload capture appeared to omit the final parenthetical line of the expiry-credit paragraph. Full bundle reload followed by single and simultaneous accordion expansion rendered `(쿠지의 경우 15%)` completely. No persistent clipping reproduced; temporary measurement experiments were removed. Use the final/reloaded captures, not the transitional `after-shipping-notice.png`, as final evidence.
+
+### Fidelity surfaces and interactions
+
+- Typography: readable shared Korean body text; DABBOBA pixel headings deliberately retained from the existing design system. This is brand-preserving adaptation, not pixel-identical typography.
+- Spacing/layout: compact product/coupon/point sections, independently expanding notices, nested bullets, and one fixed CTA; long content can scroll fully above the footer. Existing safe-area and floating-footer treatment retained.
+- Colors/tokens: DABBOBA green and warm neutral surfaces retained rather than the source brand's blue. Available, selected, disabled and consent states remain distinguishable.
+- Images/icons: existing real catalog image used in an explicitly synthetic UI fixture; no competitor product or fake inventory was imported. Existing Ionicons retained. The blue Expo developer control is development-only, not customer UI.
+- Copy: all supplied notice groups and nested bullets transcribed; no backend policy values were changed. `뽑기함` remains verbatim even though the actual app tab is `보관함`—requires publication review.
+- Native interaction checks: all-points use changed the UI from 15,000 to 12,000 with 3,000 fixture points; consent toggled the CTA disabled/enabled state without pressing payment; all three accordions opened and two remained open simultaneously; the final nested refund sentence was visible above the footer. Semantics include checkbox/radio states and labeled 44-point controls.
+- Not claimed: physical-device, Android, tablet, large-text/VoiceOver, real PG payment, production policy automation, or signed-store-build verification.
+
+### Code verification and environment restoration
+
+- Supervisor reran the five focused checkout test files: 31/31 passed; the two checkout structure tests also passed. Worker reported a broader checkout-focused run of 47/47.
+- Mobile TypeScript passed after final changes; scoped diff whitespace check passed. Protected runtime check passed (28 files); root build passed earlier in this turn with the existing large-chunk warning.
+- Full Expo structure suite is **not green**: 32/34 passed. Existing out-of-scope expectations fail for `native advisory guidance uses one text-only caption treatment across customer screens` (Storage guidance) and `Home draw-group whole-view actions reset ppoba to the requested visible category`. They were not suppressed or changed by this checkout task.
+- UI fixture had no database connection and rejected commerce mutations. It was stopped at the end. The normal API was restarted through `node scripts/run-local-backend.mjs api`; `/healthz` and `/readyz` returned `ok`, database `ok`, and the original empty local catalog contained no fixture product. Metro was preserved. Simulator was returned to the normal home URL and handed to the existing auth task; its mirror remains available for that task.
+
+### Publication gate
+
+The copied **54,900 KRW mixed-kuji free shipping, 45-day expiry/reminders and 15% kuji expiry credit** are local notice text only. Current mixed-category threshold is 50,000 KRW; the other promises were not implemented here. Do not publish these notices until the operator confirms the intended rules, the implementation agrees with the text, and refund/consumer-policy wording has been reviewed appropriately. Coupon and unconnected payment options remain preparation-only.
+
+final result: local checkout UI verified with documented brand adaptations; production policy publication pending confirmation, and two unrelated existing structure tests remain failing.
+
+## 2026-09-14 — Shipping threshold and storage policy decision
+
+- Approved free-shipping thresholds are 24,900 KRW for a shipment with no Kuji unit and 54,900 KRW whenever at least one Kuji unit is included. The server recalculates the policy from locked inventory acquisition sources and catalog reference prices; the customer screen mirrors the same values.
+- The baseline inventory storage deadline is 60 days from acquisition. The additive migration extends existing shorter deadlines with `GREATEST` and does not shorten any later deadline, including the existing minimum fourteen-day extension after an exchange completes.
+- The approved below-threshold shipping fee is a flat 3,000 KRW. The server and customer screen calculate and show that fee, but until its verified payment path is connected, the API and customer action continue to fail closed below the applicable free-shipping threshold so an unpaid request cannot enter the dispatch queue.
+- Removed from current customer copy because they are not approved or implemented: automatic ownership termination at expiry, Kuji 15% expiry credit, and D-14/D-7/D-1 push or messaging promises. Point return remains limited to Gacha inventory directly drawn by the current owner.
+- This decision changes local code and an additive migration only. It does not apply a remote migration, deploy, activate a worker or notification schedule, buy shipping labels, or enable a real payment provider.
+
+## 2026-09-13 — Chunky grayscale gacha root-tab icon
+
+### Source and rendered evidence
+
+- Source visual truth: `/var/folders/ym/kg6qcm917wv2wdk0qby6y6tw0000gn/T/TemporaryItems/NSIRD_screencaptureui_t1a6W3/스크린샷 2026-09-13 오후 7.04.15.png` (`384 × 330` px). The comparison target is one capsule's angular molded-plastic anatomy, not the pile, chamber, green/beige palette, or background.
+- Generated project asset: `apps/mobile/assets/icons/gacha-capsule-chunky.png` (`128 × 128` transparent PNG), reduced to one original grayscale capsule with a faceted cap, broad cup, raised seam and block highlight.
+- Native implementation: `work/qa/gacha-capsule-chunky-final-active-2026-09-13.png` and `work/qa/gacha-capsule-chunky-final-inactive-2026-09-13.png` (`1206 × 2622` px), captured from the DABBOBA SDK57 iOS Simulator at `402 × 874` logical points / `3×` density.
+- Same-input focused comparison: `work/qa/gacha-capsule-reference-comparison-2026-09-13.png` (`640 × 300` px), containing the full source pile and the final active-tab crop side by side. A focused comparison is appropriate because the source is an asset reference rather than a complete app viewport.
+- State: expanded root navigation on 가챠샵, with the selected background and label visible; the inactive icon was also checked on 쿠지샵.
+
+### Findings and comparison history
+
+- Initial P2: the smooth vector capsule read as a ball; the first angular vector revision became a narrow gem at navigation size. Evidence: `work/qa/tilted-capsule-nav-final-2026-09-13.png` and `work/qa/chunky-capsule-nav-active-2026-09-13.png`.
+- Fix: replaced the handcrafted vector approximation with a transparent raster asset grounded in the supplied capsule photo, widened the cap and lower cup, made the coupling rim visibly thick, added two restrained planar shadows, and enlarged only the rendered artwork to offset transparent padding.
+- Post-fix evidence shows a recognizable chunky toy capsule in both active and inactive states, balanced with the adjacent ticket, home, storage and profile icons. No actionable P0, P1 or P2 issue remains.
+
+### Required fidelity surfaces
+
+- Fonts and typography: no typography changed; the existing 가챠샵 label retains its established family, size, weight, line height and active-state contrast.
+- Spacing and layout rhythm: the 44-point tab target and five-column navigation geometry are unchanged. The 30-point image box contains approximately a 25-point visible capsule, matching the optical footprint of the neighboring 25-point line icons without clipping.
+- Colors and visual tokens: the source's color is intentionally translated to the requested light/medium grayscale planes and charcoal contour. The existing pale-green selection track and green label carry state, so the capsule is not flattened into a saturated green silhouette.
+- Image quality and asset fidelity: the transparent 128-pixel asset remains crisp at navigation size, has no white rectangular background or visible transparency halo, and preserves the source's faceted cap, raised seam, tapered cup and small highlight. It is a dedicated icon asset rather than a crop of the reference pile.
+- Copy and content: no customer copy, route name, navigation order or behavior changed.
+
+### Verification boundary
+
+- Verified in the local iOS Simulator in selected and unselected states. Focused structure tests, mobile TypeScript and whitespace validation passed after the asset replacement.
+- Physical-device, Android, large-text and signed-store-build rendering are not claimed by this visual pass.
+
+final result: passed
+
+## 2026-09-13 — Chunky orange Kuji root-tab icon
+
+### Source and rendered evidence
+
+- Style target: the existing `apps/mobile/assets/icons/gacha-capsule-chunky-active.png` establishes the shared faceted molded-object language; the Kuji subject was generated independently as a text-free ticket rather than copied from another service.
+- Generated source: `/Users/kyoungmin/.codex/generated_images/01a03307-96b0-7562-be08-8081a07e57ee/exec-49ea8598-3609-4f13-b0d6-7c69af00a5e8.png`. The source was transparently trimmed, rotated for a compact diagonal footprint, and reduced without overwriting the generated original.
+- Project assets: `apps/mobile/assets/icons/kuji-ticket-chunky-active.png` and `apps/mobile/assets/icons/kuji-ticket-chunky.png` (`128 × 128` transparent PNG).
+- Native implementation: `work/qa/kuji-ticket-chunky-orange-active-2026-09-13.png` and `work/qa/kuji-ticket-chunky-gray-inactive-2026-09-13.png` (`1206 × 2622` px), captured from the DABBOBA SDK57 iOS Simulator at `402 × 874` logical points / `3×` density.
+- Same-input comparison: `work/qa/kuji-nav-icon-orange-comparison-2026-09-13.png` shows the shared gacha/Kuji asset language and both native navigation states in one frame.
+
+### Findings and fixes
+
+- Initial P2: the previous thin `ticket-outline` icon did not match the chunky raster gacha icon and reused green for both shop categories, weakening fast category recognition.
+- Fix: replaced it with a dedicated notched ticket asset using a raised rim, broad planar shading and one block highlight. Only the active Kuji icon and label now use the Kuji orange family; inactive Kuji remains grayscale and other active tabs remain green.
+- Post-fix evidence shows comparable optical weight between the gacha capsule and Kuji ticket, a clear selected state without a filled selection tile, and no actionable P0, P1 or P2 issue.
+
+### Required fidelity surfaces
+
+- Fonts and typography: the navigation label remains Noto Sans KR Bold at the established `11/16` fine-print scale. The active Kuji label uses dark orange rather than bright orange so the small text remains legible.
+- Spacing and layout rhythm: the five equal columns, 44-point minimum targets, 28-point icon slot, persistent labels, footer height and page bottom inset remain unchanged. The diagonal asset fits the same 30-point optical box as gacha without clipping.
+- Colors and visual tokens: the active asset uses canonical `kujiOrange` planes with `kujiOrangeDark` contour/shadow; the active label uses `kujiOrangeDark`. Every non-Kuji selection stays canonical green and inactive states stay muted gray.
+- Image quality and asset fidelity: both 128-pixel transparent assets stay crisp at navigation size, preserve symmetric ticket notches and readable planar depth, and contain no white rectangle, text, logo, barcode or tiny collapsing decoration.
+- Copy and content: no route label, order, product content or customer behavior changed. `쿠지샵` remains the exact navigation label.
+
+### Verification boundary
+
+- The focused native structure and shared visual-system run passed `45/45`; mobile TypeScript and scoped whitespace validation passed. Active and inactive states were visually inspected in the local iOS Simulator.
+- Physical-device, Android, large-text and signed-store-build rendering are not claimed by this pass.
+
+final result: passed
+
+## 2026-09-14 — Shared proportional product-card top indicator
+
+### Source and rendered evidence
+
+- Supplied source of truth: `work/qa/shop-product-top-indicator-reference.png` (`648 × 628` px). The selected target is the single thin, centered line on the upper edge of each rounded product card; the screenshot's products, status badges, typography, and card dimensions are not copied.
+- Native Gacha Shop capture: `work/qa/shop-product-top-indicator-gacha.jpg` (`368 × 800` px).
+- Native Kuji Shop capture: `work/qa/shop-product-top-indicator-kuji.jpg` (`368 × 800` px).
+- Viewport and state: DABBOBA SDK57 iOS Simulator, `368 × 800` logical pixels in Expo Go; loaded Gacha Shop two-column cards and the loaded Kuji Shop full-width card were inspected after the bundle update.
+- Same-input comparison: the reference, Gacha Shop capture, and Kuji Shop capture were opened together at original detail. This is a focused component comparison because the source is a cropped card reference rather than a complete viewport.
+
+### Findings and fixes
+
+- Initial P1: only Home's two product-card variants rendered the indicator. Gacha Shop and Kuji Shop both used the shared shop card path but skipped the category cue entirely.
+- Fix: moved the Home-only implementation into `CatalogProductTopIndicator` and used that one component in both Home card variants and the common dedicated-shop product card.
+- The line is one untracked 2 px layer centered at `left: 36%` with `width: 28%`. Because its width is proportional, compact/two-column cards keep a restrained short line while the full-width Kuji Shop card receives a visibly longer line without a separate fixed-width exception.
+- Gacha uses canonical brand green and Kuji uses canonical Kuji orange. The line is decorative, ignores pointer events, and is hidden from the accessibility tree. No backing track, second line, category badge, or new card chrome was introduced.
+- Post-fix comparison shows the indicator centered and unobstructed at both widths. The Kuji line scales to the wide landscape card as requested, and no actionable P0, P1, or P2 mismatch remains.
+
+### Required fidelity surfaces
+
+- Fonts and typography: unchanged; shop IP, product-title, price, and inventory type scales remain on the existing readable typography tokens.
+- Spacing and layout rhythm: passed; the indicator occupies the existing card edge and does not change media height, body height, grid gap, or the two-column Gacha / one-column Kuji layouts.
+- Colors and tokens: passed; Gacha uses `colors.brand`, Kuji uses `colors.kujiOrange`, and the established neutral card surface remains unchanged.
+- Image quality and asset fidelity: passed; all catalog imagery remains the existing source media with the approved Gacha and Kuji fit behavior. No generated, copied, or placeholder image was introduced.
+- Copy and content: unchanged; no product, badge, price, stock, search, navigation, or accessibility wording changed.
+
+### Verification boundary
+
+- Focused Home/shop regression suite passed `9/9`; the full native Expo structure suite passed `37/37`; mobile TypeScript and protected-runtime integrity passed.
+- Evidence is local iOS Simulator/Expo Go proof only. Physical-device, Android, large-text, and signed-store-build rendering are not claimed.
+
+final result: passed
+
+## 2026-09-14 — PickURI-proportioned Home product cards
+
+### Source and rendered evidence
+
+- Supplied visual reference: `work/qa/pickuri-home-card-reference-2026-09-14.png` (`1320 × 2868` px; `440 × 956` pt at 3×). The measured target card is approximately `160 × 252` pt with `160 × 140` pt media, a 12 pt gap, and a 16 pt rail inset.
+- Pre-fix native capture: `work/qa/home-card-density-before-2026-09-14.png` (`1206 × 2622` px; `402 × 874` pt at 3×). The Home card was 148 pt wide with square 148 pt media and approximately 277 pt total height.
+- Final native capture: `work/qa/home-card-pickuri-proportion-final-2026-09-14.png` (`1206 × 2622` px; `402 × 874` pt at 3×). The Home card remains 148 pt wide, uses approximately 148 × 130 pt media at 8:7, and measures approximately 240 pt high with the live two-line title, price, and inventory row.
+- Same-input comparison: the supplied Home reference and final DABBOBA Home capture were opened together at original detail. Width was compared after normalizing for the different 440 pt and 402 pt viewports instead of copying the source's absolute point value onto a narrower phone.
+
+### Findings and fixes
+
+- Initial P1: the DABBOBA media was square and the full card was roughly 277 pt high, so it read substantially taller and narrower than the supplied reference even though its relative width was already nearly identical (`148/402 = 36.8%` versus `160/440 = 36.4%`).
+- Rejected literal-width mismatch: setting the narrower 402 pt viewport to a fixed 160 pt card would have made the card proportionally wider than the source and exposed less of the next option. The established 148 pt width and 12 pt rail gap were therefore retained.
+- Fix: changed only Home gacha/Kuji media from 1:1 to 8:7. Reduced the information body's horizontal padding from 12 to 8 pt, vertical padding from 8 to 4 pt, and the divider/price/inventory vertical gaps to 2 pt. The resulting card aspect is within approximately 3% of the normalized source while retaining DABBOBA's extra IP metadata and divider.
+- Dedicated-shop geometry was intentionally left unchanged: Gacha Shop remains a two-column grid and Kuji Shop remains a full-width 16:9 landscape card. The shared proportional top indicator continues to scale automatically on all three widths.
+- Post-fix inspection found no clipped two-line title, price, quantity, badge, progress bar, or card border. Both Home categories align at the top and remain independently sized without row stretching. No actionable P0, P1, or P2 issue remains.
+
+### Required fidelity surfaces
+
+- Fonts and typography: unchanged. Product identity stays at 15/21, price at 18/24, and metadata/inventory at 12/16; density was gained from geometry and spacing rather than shrinking readable type.
+- Spacing and layout rhythm: the existing 12 pt outer gutter and 12 pt card gap remain, preserving the same proportional next-card reveal on the narrower DABBOBA viewport. The body is approximately 110 pt high because DABBOBA retains one more metadata row than the source.
+- Colors and tokens: unchanged. Existing DABBOBA surfaces, green Gacha cues, orange Kuji cues, neutral borders, and BEST/NEW badges were retained.
+- Image behavior: Gacha storefront squares use a restrained center `cover` crop inside the shallower 8:7 frame. Kuji and primary-image fallbacks remain `contain`, so no full Kuji artwork is cut off or stretched.
+- Copy and behavior: unchanged. No reference product, badge wording, price, stock value, heart action, sold-out treatment, shop navigation, or competitor feature was copied.
+
+### Verification boundary
+
+- Focused Home/card regression suite passed `35/35`; the full native Expo structure suite passed `37/37`; an independent combined Home/card and structure run passed `72/72`. Mobile TypeScript, protected-runtime integrity, and scoped whitespace validation passed.
+- Evidence is local iOS Simulator/Expo Go proof only. Physical-device, Android, tablet, large-text, and signed-store-build rendering are not claimed. The fixed 148 pt rail width is intentionally verified for the current 402 pt target and may need a separate responsive-width decision for substantially wider devices.
+
+final result: passed
+
+## 2026-09-14 — Label-free shared inventory meter
+
+### Source and rendered evidence
+
+- Supplied change reference: `work/qa/inventory-label-reference-2026-09-14.png` (`356 × 64` px), showing the former visible `잔여 상품 78/80` inventory row that the user asked to simplify.
+- Pre-fix Home evidence: `work/qa/home-card-pickuri-proportion-final-2026-09-14.png` (`1206 × 2622` px; `402 × 874` pt at 3×), where both `잔여 상품` and `잔여 티켓` prefixes remain visible.
+- Final Home evidence: `work/qa/inventory-label-hidden-home-root-2026-09-14.png` (`1206 × 2622` px; `402 × 874` pt at 3×).
+- Focused final evidence: `work/qa/inventory-label-hidden-home-focus-2026-09-14.png` (`520 × 240` px), showing the live `80/80` quantity and green progress bar without a visible prefix.
+- Full and focused comparisons opened the supplied crop and final native Home result together at original detail. The reference documents the element being removed rather than a full target viewport, so the focused inventory row is the fidelity-critical comparison.
+
+### Findings and fixes
+
+- Initial P2: the category-specific prefix repeated information already communicated by the product card, numeric ratio, and category-colored progress bar. On the newly compact Home card it added visual weight and reduced the width available to the bar.
+- Fix: removed only the visible `잔여 상품`, `잔여 티켓`, and `잔여 수량` text from the shared `RemainingInventoryMeter`. The quantity stays first and the progress bar expands through the remaining row width.
+- Accessibility protection: the shared container still announces the category-specific semantic label plus quantity, exposes `progressbar` semantics when a trustworthy total exists, and provides min/max/current values. The label is hidden visually, not removed from assistive output.
+- The change applies consistently to Home, Gacha Shop, Kuji Shop, compact catalog rows, Product Detail, and the Kuji selection board because those surfaces already share the same meter.
+- The live Kuji fixture currently exposes quantity `80` with no authoritative total, so it truthfully renders `80` without a progress bar. The client does not fabricate `80/80`; a server-supplied total will automatically restore the orange bar in the same layout.
+- Post-fix inspection found no clipping, overlap, unbalanced baseline, or excessive gap. No actionable P0, P1, or P2 issue remains.
+
+### Required fidelity surfaces
+
+- Fonts and typography: unchanged. The visible quantity remains catalog metadata at 12/16 with tabular numerals and strong weight; no smaller one-off type was introduced.
+- Spacing and layout rhythm: the former label slot is removed, leaving a direct 6 pt quantity-to-bar gap and a substantially longer bar inside the same card width and body height.
+- Colors and tokens: unchanged. Gacha remains green, Kuji remains orange, and neutral/dark tracks preserve their established states.
+- Image quality and asset fidelity: no product image, icon, asset fit, compression, or crop changed.
+- Copy and content: only the three visible inventory prefixes were removed. Authoritative quantity values and all accessibility wording remain intact.
+
+### Verification boundary
+
+- Focused inventory, Home-card, shop-media, and visual-system tests passed `26/26`; the full native Expo structure suite passed `37/37`. Mobile TypeScript, protected-runtime integrity, and scoped whitespace checks passed.
+- Evidence is local iOS Simulator/Expo Go proof only. Physical-device, Android, large-text, VoiceOver gesture behavior, and signed-store-build rendering are not claimed.
+
+final result: passed
+
+## 2026-09-14 — Reference-proportioned shop and Home discovery media
+
+### Source and rendered evidence
+
+- Supplied Gacha Shop reference: `work/qa/pickuri-gacha-shop-reference-2026-09-14.png` (`1320 × 2868` px; `440 × 956` pt at 3×). Its measured two-column card is approximately `198 × 285` pt with `196 × 172` pt media, or about 8:7, and a 12 pt row gap.
+- Supplied Kuji Shop reference: `work/qa/pickuri-kuji-shop-reference-2026-09-14.png` (`1320 × 2868` px; `440 × 956` pt at 3×). Its measured full-width card uses approximately `406 × 232` pt media, exactly 7:4, and a 24 pt row gap.
+- Final Gacha Shop evidence: `work/qa/card-ratio-after-gacha-shop-final-2026-09-14.png` (`1206 × 2622` px; `402 × 874` pt at 3×).
+- Final Kuji Shop evidence: `work/qa/card-ratio-after-kuji-shop-final-2026-09-14.png` (`1206 × 2622` px; `402 × 874` pt at 3×).
+- Final Home product-rail evidence: `work/qa/card-ratio-after-home-products-2026-09-14.png` (`1206 × 2622` px; `402 × 874` pt at 3×).
+- The two supplied references and all three final native captures were opened together at original detail. Geometry was normalized for the narrower DABBOBA viewport rather than copying the reference's absolute card width.
+
+### Findings and fixes
+
+- Initial P1: dedicated-shop Gacha media was square, making the card substantially taller than the supplied 8:7 reference. Fix: the two-column frame is now 8:7, its information body reuses the compact Home spacing without removing IP, title, divider, price, or inventory, and its row gap is 12 pt.
+- Initial P2: dedicated Kuji media used the close but not exact 16:9 display ratio. Fix: the full-width media frame is now the measured 7:4 and its row gap is 24 pt. A compliant 16:9 storefront image retains more than 98% of its source when filling this frame.
+- Initial P1: category surfaces had separate fallback behavior, so some primary images stayed letterboxed while others could be cropped without one consistent rule. Fix: Home, Gacha Shop, and Kuji Shop now share `CatalogDiscoveryImage`. It measures the loaded source and uses edge-to-edge `cover` only when at least 80% of the source remains visible; otherwise it preserves the complete image with `contain` over a restrained blurred version of the same artwork.
+- Home retains the approved 148 pt card width and 8:7 media footprint. Safe square and near-landscape artwork fills the frame, while portrait or wide artwork remains complete instead of being aggressively cropped.
+- Post-fix native inspection found no stretched image, clipped card text, broken border, overlapping badge, or mismatched mixed-rail height. No actionable P0, P1, or P2 implementation issue remains.
+
+### Required fidelity surfaces
+
+- Fonts and typography: unchanged. DABBOBA keeps its required IP metadata, two-line product title reservation, readable catalog tokens, and shared hairline divider; the reference's information deletion was not copied merely to force a shorter card.
+- Spacing and layout rhythm: Gacha remains two columns with 8:7 media and 12 pt rows; Kuji remains one full-width column with 7:4 media and 24 pt rows; Home remains a swipeable 148 pt rail with 8:7 media.
+- Colors and tokens: unchanged. Existing neutral surfaces, Gacha green, Kuji orange, status badges, category top indicators, and inventory fills were preserved.
+- Image quality and asset fidelity: safe source ratios fill their frames without distortion. Sources that would lose more than 20% under `cover` use the blurred-backdrop `contain` treatment. No competitor imagery, generated product art, or destructive asset rewrite was introduced.
+- Copy and behavior: unchanged. Search, filters, product routing, price, inventory values, BEST/NEW priority, and accessibility labels retain their existing contracts.
+
+### Verification boundary
+
+- Focused Home/shop/structure suite passed `74/74`; adjacent card, inventory, divider, and visual-regression suite passed `24/24`; mobile TypeScript and scoped whitespace validation passed.
+- Local iOS Simulator proof covers the loaded Gacha Shop, loaded Kuji Shop, and Home rails. The current Kuji fixture has only a square primary image and no dedicated 16:9 storefront asset, so the verified native result correctly uses the safe complete-artwork fallback; exact full-bleed Kuji photography remains dependent on an operator-uploaded landscape storefront image.
+- Physical-device, Android, tablet, large-text, signed-store-build, and production storefront-asset rendering are not claimed.
+
+final result: passed
+
+## 2026-09-14 — Clutter-inspired native cleanliness pass
+
+### Source and rendered evidence
+
+- Supplied Clutter references are preserved at `output/design-audits/2026-09-14-clutter-comparison/clutter-01.jpg` through `clutter-06.jpg`. They were treated as layout and hierarchy references only; their palette and three-tab product model were not copied.
+- Final standard-size native captures are `output/design-audits/2026-09-14-clutter-pass/home-final.png`, `gacha-final.png`, and `kuji-final.png` from the booted `DABBOBA SDK57` iOS Simulator.
+- Large-text evidence is `home-accessibility-extra-large-final.png`, `gacha-accessibility-extra-large-fixed.png`, and `kuji-accessibility-extra-large-final.png` in the same audit folder.
+- `comparison-clutter-home-shop.png` places the supplied Clutter Home reference, final DABBOBA Home, and final DABBOBA Gacha Shop in one normalized board so gutters, card boundaries, title spacing, and navigation density can be inspected together.
+
+### Findings and fixes
+
+- Initial P1: the former 12 pt global gutter made the screen feel denser than the supplied 20 pt reference and left insufficient breathing room around headers, search, and full-width account surfaces. Fix: shared customer roots now use a 20 pt gutter, while the five-tab navigation deliberately remains full viewport width.
+- Initial P1: Home used repeated section bands, hairlines, and fixed title heights. Fix: Home sections now sit on one open canvas with a 16 pt title-to-content gap and a 32 pt section rhythm. The hero is approximately 164 pt at standard text size and expands only when Dynamic Type requires it.
+- Initial P1: discovery cards stacked outer borders, internal dividers, oversized information padding, and inconsistent media rules. Fix: Home and Shop discovery cards use one 1 px outer boundary, no shadow, no internal body divider, a single 2 px category indicator, 10–12 pt information padding, and a tighter metadata → title → price → inventory rhythm.
+- Initial P1: a percentage-based two-column Gacha layout could overflow at 320 pt. Fix: card width is calculated from the actual viewport, safe-area insets, two 20 pt gutters, and one 12 pt gap. At 320 pt with zero horizontal safe inset, each card is exactly 134 pt.
+- Initial P1: Gacha and Kuji were visually forced into a shared media treatment. Fix: Gacha remains a two-column 8:7 grid with 12 pt gaps; Kuji remains a one-column 7:4 list with 18 pt gaps. Unsafe source ratios stay complete on a flat neutral surface instead of using a blurred duplicate backdrop.
+- Initial P2: Home mixed decorative proof, duplicate catalog items, and non-actionable notices. Fix: only published pinned active notices render, duplicate product IDs are removed across the feed, the current real draw record appears after the first purchasable rail, and previous/next records remain recognizable but visually subordinate.
+- Initial P1: Profile split identity, balance, and activity into several competing cards. Fix: identity, wallet, and counts are consolidated into one bordered summary; the request room is a separate task CTA; product history remains discoverable; shopping, account, and support use three quiet groups with one outer boundary and inset dividers.
+- Initial P1: Storage repeated availability pills and placed too much policy copy above the task. Fix: the root exposes exactly `보관 중`, `교환 또는 배송 중인 상품`, and `포인트 환급`; counts are attached to the tabs/list context; the duplicate guidance is removed; selection uses a 2 px state boundary; and shipping detail expands after a selection.
+- Initial P1: fixed-height navigation, hero, inventory, profile, and shipping-dock elements clipped at iOS Accessibility Extra Large. Fix: fixed discovery copy retains complete accessibility labels while visible chrome is capped at 1.2×, the hero and recent-draw panel switch to natural-height large-text layouts, inventory values and bars stack above 1.3×, long Storage tabs can wrap to three lines, narrow list actions stack, Profile captions no longer hard-clip, and the shipping dock joins the scroll flow when necessary.
+- Initial P2: duplicate active notices with the same title routed to the first matching notice. Fix: the ticker now carries its source index so each identical title opens its own notice record.
+- Post-fix standard and Accessibility Extra Large inspection found no actionable P0, P1, or P2 clipping, overlap, duplicated border, unintended shadow, or hierarchy mismatch on the rendered Home and shop roots.
+
+### Intentional product differences
+
+- DABBOBA keeps its established green and Kuji orange; this pass changes layout, spacing, boundaries, and type behavior only.
+- DABBOBA keeps five direct commerce tabs. Copying Clutter's three-option pill navigation would hide primary Gacha/Kuji destinations and weaken orientation.
+- Pixel type remains limited to the DABBOBA wordmark, root/section titles, and a small number of brand labels. Product names, prices, metadata, guidance, and controls remain in the readable Korean sans family.
+- Product cards remain more information-dense than Clutter because price, authoritative inventory, category identity, and BEST/NEW state are required purchase information rather than decorative metadata.
+
+### Verification boundary
+
+- Full repository unit suite passed `719/719`; the native Expo structure suite passed `37/37`; the focused Home/shop/profile/storage/accessibility suite passed `74/74`; mobile and root TypeScript checks passed; the protected mobile runtime check passed all 28 files; scoped whitespace validation passed.
+- Standard and Accessibility Extra Large rendering are local iOS Simulator/Expo Go evidence. The 320 pt result is exact layout-helper and regression-test evidence because the installed iOS 26 runtime does not support the available first-generation iPhone SE device type.
+- VoiceOver labels, roles, values, and 44 pt targets are source/test verified; a physical-device VoiceOver gesture pass, Android rendering, signed build, and production behavior are not claimed.
+- Loaded Profile and Storage data-state captures remain blocked by staging schema drift: the connected database records migrations only through `0045`, while the running API reads the `storefront_image_url` column introduced by pending `0047`. The error states were captured, and the populated layouts passed source/structural tests; no external database migration was applied as part of this visual task.
+- The blue gear visible in Expo Go captures is development tooling, not shipped DABBOBA interface chrome.
 
 final result: passed

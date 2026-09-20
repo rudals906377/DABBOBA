@@ -1,18 +1,19 @@
 import { createHash, randomUUID } from "node:crypto";
-import type { FastifyInstance, FastifyRequest } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { GenerateSignedPostPolicyV4Options } from "@google-cloud/storage";
 import { storedMediaLocation } from "@dabboba/config";
-import sharp from "sharp";
 import { withTransaction, type DatabaseClient, type DatabasePool, type Queryable } from "@dabboba/db";
 import { isAdminRole } from "@dabboba/domain";
-import { writeOutbox } from "../lib/audit.js";
+import { adminMutationHeaders, writeAdminAudit, writeOutbox } from "../lib/audit.js";
 import { AppError, badRequest, conflict, forbidden, notFound } from "../lib/errors.js";
 import { beginIdempotency, completeIdempotency, idempotencyKey, requestHash } from "../lib/idempotency.js";
 import { enumInput, integerInput, objectInput, stringInput, uuidInput } from "../lib/input.js";
 import type { ApiContext } from "../types.js";
-import { configuredMediaStorage, validMediaObjectVersion, type MediaObject, type MediaObjectInfo } from "../lib/media-storage.js";
+import { validMediaObjectVersion, type MediaObject, type MediaObjectInfo } from "../lib/media-object.js";
+import type { SanitizedImage } from "../lib/media-runtime.js";
 
-const MEDIA_PURPOSES = ["PROFILE", "POST", "COMMENT", "INQUIRY", "EXCHANGE", "CATALOG_REQUEST", "WANTED_REQUEST"] as const;
+const USER_MEDIA_PURPOSES = ["PROFILE", "POST", "COMMENT", "INQUIRY", "EXCHANGE", "CATALOG_REQUEST", "WANTED_REQUEST"] as const;
+const MEDIA_PURPOSES = [...USER_MEDIA_PURPOSES, "CATALOG"] as const;
 const SUPPORTED_MIME_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"] as const;
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 const MAX_ACTIVE_UPLOAD_COUNT = 10;
@@ -26,15 +27,13 @@ const MAX_CONCURRENT_PROCESSING_PER_USER = 2;
 const UPLOAD_POLICY_TTL_MS = 2 * 60_000;
 const PENDING_UPLOAD_TTL_MS = 5 * 60_000;
 const PROCESSING_CLAIM_TTL_MS = 5 * 60_000;
-const MAX_INPUT_PIXELS = 16 * 1024 * 1024;
-const MAX_INPUT_DIMENSION = 8_192;
 const MAX_OUTPUT_DIMENSION = 4_096;
 const MEDIA_UPLOAD_ADVISORY_NAMESPACE = 1_296_384_177;
 const MEDIA_UPLOAD_INTENT_SCOPE = "MEDIA_UPLOAD_INTENT_CREATE";
 const MEDIA_UPLOAD_COMPLETE_SCOPE = "MEDIA_UPLOAD_COMPLETE";
 const MEDIA_DELETE_SCOPE = "MEDIA_DELETE";
 
-type MediaRow = {
+export type MediaRow = {
   id: string;
   owner_id: string;
   purpose: (typeof MEDIA_PURPOSES)[number];
@@ -73,15 +72,6 @@ export type MediaUploadReservation = {
   readyBytes: number;
 };
 
-export type SanitizedImage = {
-  data: Buffer;
-  mimeType: "image/webp";
-  checksumSha256: string;
-  byteSize: number;
-  width: number;
-  height: number;
-};
-
 export function mediaUploadIntentFingerprint(input: {
   actorId: string;
   purpose: (typeof MEDIA_PURPOSES)[number];
@@ -90,31 +80,40 @@ export function mediaUploadIntentFingerprint(input: {
   byteSize: number;
   checksumSha256: string;
   acceptedUploadMethods?: readonly ("POST" | "PUT")[];
+  operation?: string;
+  adminReason?: string;
 }): string {
   return requestHash({
     actorId: input.actorId,
-    operation: "POST /v1/media/uploads",
+    operation: input.operation ?? "POST /v1/media/uploads",
     purpose: input.purpose,
     filename: normalizeFilename(input.filename),
     mimeType: input.mimeType,
     byteSize: input.byteSize,
     checksumSha256: input.checksumSha256.toLocaleLowerCase("en-US"),
     ...(input.acceptedUploadMethods?.includes("PUT") ? { acceptedUploadMethods: [...input.acceptedUploadMethods].sort() } : {}),
+    ...(input.adminReason ? { adminReason: input.adminReason } : {}),
   });
 }
 
-export function mediaUploadCompleteFingerprint(actorId: string, mediaIdValue: string): string {
+export function mediaUploadCompleteFingerprint(
+  actorId: string,
+  mediaIdValue: string,
+  operation = "POST /v1/media/:mediaId/complete",
+  adminReason?: string,
+): string {
   return requestHash({
     actorId,
-    operation: "POST /v1/media/:mediaId/complete",
+    operation,
     mediaId: mediaIdValue.toLocaleLowerCase("en-US"),
+    ...(adminReason ? { adminReason } : {}),
   });
 }
 
-export function mediaDeleteFingerprint(actorId: string, mediaIdValue: string): string {
+export function mediaDeleteFingerprint(actorId: string, mediaIdValue: string, operation = "DELETE /v1/media/:mediaId"): string {
   return requestHash({
     actorId,
-    operation: "DELETE /v1/media/:mediaId",
+    operation,
     mediaId: mediaIdValue.toLocaleLowerCase("en-US"),
   });
 }
@@ -327,66 +326,6 @@ async function readAndVerify(
   return { data: Buffer.concat(chunks, size), detectedMimeType };
 }
 
-function expectedSharpFormat(mimeType: (typeof SUPPORTED_MIME_TYPES)[number]): "jpeg" | "png" | "webp" | "gif" {
-  if (mimeType === "image/jpeg") return "jpeg";
-  if (mimeType === "image/png") return "png";
-  if (mimeType === "image/webp") return "webp";
-  return "gif";
-}
-
-export async function sanitizeImage(
-  input: Buffer,
-  detectedMimeType: (typeof SUPPORTED_MIME_TYPES)[number],
-): Promise<SanitizedImage> {
-  try {
-    const pipeline = sharp(input, {
-      animated: false,
-      failOn: "warning",
-      limitInputChannels: 4,
-      limitInputPixels: MAX_INPUT_PIXELS,
-      pages: 1,
-      sequentialRead: true,
-    });
-    const metadata = await pipeline.metadata();
-    if (metadata.format !== expectedSharpFormat(detectedMimeType)) {
-      throw mediaImageInvalid("이미지 디코더가 확인한 형식이 업로드 형식과 일치하지 않습니다.");
-    }
-    if (!metadata.width || !metadata.height) throw mediaImageInvalid("이미지 크기를 확인할 수 없습니다.");
-    if (
-      metadata.width > MAX_INPUT_DIMENSION
-      || metadata.height > MAX_INPUT_DIMENSION
-      || metadata.width * metadata.height > MAX_INPUT_PIXELS
-    ) {
-      throw mediaImageInvalid("이미지 해상도가 허용 범위를 초과합니다.");
-    }
-    const { data, info } = await pipeline
-      .rotate()
-      .resize({
-        width: MAX_OUTPUT_DIMENSION,
-        height: MAX_OUTPUT_DIMENSION,
-        fit: "inside",
-        withoutEnlargement: true,
-      })
-      .webp({ quality: 82, alphaQuality: 90, effort: 4, smartSubsample: true })
-      .toBuffer({ resolveWithObject: true });
-    if (!info.width || !info.height || info.width > MAX_OUTPUT_DIMENSION || info.height > MAX_OUTPUT_DIMENSION) {
-      throw mediaImageInvalid("안전 이미지 변환 결과를 확인할 수 없습니다.");
-    }
-    if (data.length > MAX_UPLOAD_BYTES) throw mediaImageInvalid("변환된 이미지 크기가 허용 범위를 초과합니다.");
-    return {
-      data,
-      mimeType: "image/webp",
-      checksumSha256: createHash("sha256").update(data).digest("hex"),
-      byteSize: data.length,
-      width: info.width,
-      height: info.height,
-    };
-  } catch (error) {
-    if (error instanceof AppError) throw error;
-    throw mediaImageInvalid("이미지를 안전하게 처리할 수 없습니다.");
-  }
-}
-
 function verifiedStagingGeneration(metadata: MediaObjectInfo, asset: MediaRow, provider: "gcs" | "supabase"): string {
   const generation = metadata.version;
   const customMetadata = metadata.metadata ?? {};
@@ -416,7 +355,7 @@ async function deleteMediaObjectKeysBestEffort(context: ApiContext, objectKeys: 
           OR metadata->'processingFailure'->>'finalObjectKey'=$1
           OR metadata->'original'->>'stagingObjectKey'=$1 LIMIT 1`, [objectKey],
       );
-      if (result.rowCount) await configuredMediaStorage(context.config, result.rows[0]!.metadata).file(objectKey).delete();
+      if (result.rowCount) await context.mediaRuntime.configuredMediaStorage(context.config, result.rows[0]!.metadata).file(objectKey).delete();
     } catch { /* Durable Worker cleanup retries against the original provider. */ }
   }
 }
@@ -571,7 +510,7 @@ function accountDeletionApprovedError(): AppError {
 async function accountDeletionIsApproved(queryable: Queryable, actorId: string): Promise<boolean> {
   const result = await queryable.query<{ approved: boolean }>(
     `SELECT EXISTS(
-       SELECT 1 FROM account_deletion_requests WHERE user_id=$1 AND status='APPROVED'
+       SELECT 1 FROM account_deletion_requests WHERE user_id=$1 AND status IN ('PROCESSING','APPROVED')
      ) AS approved`,
     [actorId],
   );
@@ -713,19 +652,43 @@ async function mediaHasReferences(queryable: Queryable, id: string): Promise<boo
     community_post: boolean;
     catalog_request: boolean;
     wanted_request: boolean;
+    catalog_attached: boolean;
+    catalog_product: boolean;
+    draw_snapshot: boolean;
+    shipping_snapshot: boolean;
   }>(
-    `SELECT
+    `WITH media AS (
+       SELECT metadata->>'catalogDeliveryUrl' AS delivery_url
+       FROM media_assets WHERE id=$1
+     ) SELECT
        EXISTS(SELECT 1 FROM inquiry_message_media WHERE media_id=$1) AS inquiry_message,
        EXISTS(SELECT 1 FROM community_post_media WHERE media_id=$1) AS community_post,
        EXISTS(SELECT 1 FROM catalog_requests WHERE media_id=$1) AS catalog_request,
-       EXISTS(SELECT 1 FROM wanted_requests WHERE media_id=$1) AS wanted_request`,
+       EXISTS(SELECT 1 FROM wanted_requests WHERE media_id=$1) AS wanted_request,
+       EXISTS(SELECT 1 FROM media WHERE delivery_url IS NOT NULL) AS catalog_attached,
+       EXISTS(
+         SELECT 1 FROM catalog_products, media
+         WHERE media.delivery_url IS NOT NULL AND image_url=media.delivery_url
+       ) AS catalog_product,
+       EXISTS(
+         SELECT 1 FROM draw_pool_entries, media
+         WHERE media.delivery_url IS NOT NULL AND prize_image_url_snapshot=media.delivery_url
+       ) AS draw_snapshot,
+       EXISTS(
+         SELECT 1 FROM shipping_request_items, media
+         WHERE media.delivery_url IS NOT NULL AND product_snapshot->>'imageUrl'=media.delivery_url
+       ) AS shipping_snapshot`,
     [id],
   );
   const row = references.rows[0];
   return row?.inquiry_message === true
     || row?.community_post === true
     || row?.catalog_request === true
-    || row?.wanted_request === true;
+    || row?.wanted_request === true
+    || row?.catalog_attached === true
+    || row?.catalog_product === true
+    || row?.draw_snapshot === true
+    || row?.shipping_snapshot === true;
 }
 
 export async function assertReadyOwnedMedia(
@@ -752,13 +715,22 @@ function mediaId(request: FastifyRequest): string {
   return uuidInput((request.params as Record<string, unknown>).mediaId, "mediaId");
 }
 
-async function signAsset(context: ApiContext, asset: MediaRow) {
-  const storage = configuredMediaStorage(context.config, asset.metadata);
+export async function signMediaAsset(context: ApiContext, asset: MediaRow) {
+  let storage: ReturnType<ApiContext["mediaRuntime"]["configuredMediaStorage"]>;
+  try {
+    storage = context.mediaRuntime.configuredMediaStorage(context.config, asset.metadata);
+  } catch {
+    throw new AppError(503, "MEDIA_STORAGE_CONFIGURATION_UNAVAILABLE", "상품 이미지를 잠시 불러올 수 없습니다.");
+  }
   const expiresAt = new Date(Date.now() + 5 * 60_000);
   const version = storage.provider === "supabase" ? storedMediaLocation(asset.metadata).version
     : asset.object_generation === null ? null : String(asset.object_generation);
-  const url = await storage.signedRead(asset.object_key, version);
-  return { mediaId: asset.id, url, expiresAt: expiresAt.toISOString(), mimeType: asset.detected_mime_type };
+  try {
+    const url = await storage.signedRead(asset.object_key, version);
+    return { mediaId: asset.id, url, expiresAt: expiresAt.toISOString(), mimeType: asset.detected_mime_type };
+  } catch {
+    throw new AppError(503, "MEDIA_STORAGE_READ_UNAVAILABLE", "상품 이미지를 잠시 불러올 수 없습니다.");
+  }
 }
 
 async function signedReadUrl(context: ApiContext, request: FastifyRequest, adminAccess: boolean) {
@@ -767,18 +739,26 @@ async function signedReadUrl(context: ApiContext, request: FastifyRequest, admin
   if (!row.rowCount) throw notFound("사용 가능한 첨부 파일을 찾을 수 없습니다.");
   const asset = row.rows[0]!;
   if (!adminAccess && asset.owner_id !== request.actor!.userId) throw forbidden();
-  return signAsset(context, asset);
+  return signMediaAsset(context, asset);
 }
 
 export async function registerMediaRoutes(app: FastifyInstance, context: ApiContext) {
   const processingLimiter = createMediaProcessingLimiter();
 
-  app.post("/v1/media/uploads", {
-    preHandler: context.auth.requireUser,
-    config: { rateLimit: { max: 20, timeWindow: "1 minute" } },
-  }, async (request, reply) => {
+  const createUploadIntent = async (request: FastifyRequest, reply: FastifyReply) => {
+    const catalogUpload = request.routeOptions.url === "/v1/admin/catalog-media/uploads";
+    if (catalogUpload && !context.mediaRuntime.completionAvailable) {
+      throw new AppError(503, "MEDIA_PROCESSING_UNAVAILABLE", "현재 상품 이미지 완료 처리를 사용할 수 없습니다.");
+    }
+    if (catalogUpload && !context.config.catalogMediaBaseUrl) {
+      throw new AppError(503, "CATALOG_MEDIA_DELIVERY_UNAVAILABLE", "상품 이미지 제공 주소가 구성되지 않았습니다.");
+    }
+    const adminMutation = catalogUpload ? adminMutationHeaders(request) : null;
     const body = objectInput(request.body);
-    const purpose = enumInput(body, "purpose", MEDIA_PURPOSES)!;
+    if (catalogUpload && body.purpose !== undefined && body.purpose !== "CATALOG") {
+      throw badRequest("상품 이미지 업로드 용도는 CATALOG만 사용할 수 있습니다.");
+    }
+    const purpose = catalogUpload ? "CATALOG" : enumInput(body, "purpose", USER_MEDIA_PURPOSES)!;
     const filename = normalizeFilename(stringInput(body, "filename", { max: 255 })!);
     const mimeType = enumInput(body, "mimeType", SUPPORTED_MIME_TYPES)!;
     const byteSize = integerInput(body, "byteSize", { min: 1, max: MAX_UPLOAD_BYTES })!;
@@ -791,7 +771,7 @@ export async function registerMediaRoutes(app: FastifyInstance, context: ApiCont
     }
     const acceptedUploadMethods = methods as ("POST" | "PUT")[];
     const actorId = request.actor!.userId;
-    const key = idempotencyKey(request.headers);
+    const key = adminMutation?.idempotencyKey ?? idempotencyKey(request.headers);
     const hash = mediaUploadIntentFingerprint({
       actorId,
       purpose,
@@ -800,12 +780,16 @@ export async function registerMediaRoutes(app: FastifyInstance, context: ApiCont
       byteSize,
       checksumSha256,
       acceptedUploadMethods,
+      ...(catalogUpload ? {
+        operation: "POST /v1/admin/catalog-media/uploads",
+        adminReason: adminMutation!.reason,
+      } : {}),
     });
     const needsLegacyPost = context.config.mediaStorageProvider === "supabase" && !acceptedUploadMethods.includes("PUT");
     if (needsLegacyPost && !context.config.gcsBucket) {
       throw new AppError(426, "MEDIA_UPLOAD_CLIENT_UPDATE_REQUIRED", "사진 업로드를 위해 앱을 업데이트해 주세요.");
     }
-    const storage = configuredMediaStorage(needsLegacyPost ? { ...context.config, mediaStorageProvider: "gcs" } : context.config);
+    const storage = context.mediaRuntime.configuredMediaStorage(needsLegacyPost ? { ...context.config, mediaStorageProvider: "gcs" } : context.config);
     if (storage.provider === "gcs" && !acceptedUploadMethods.includes("POST")) throw badRequest("지원하지 않는 업로드 방식입니다.");
     const id = randomUUID();
     const objectKey = `uploads/${actorId}/${id}/${filename}`;
@@ -827,7 +811,7 @@ export async function registerMediaRoutes(app: FastifyInstance, context: ApiCont
     const result = await withTransaction(context.pool, async (client) => {
       const idem = await beginIdempotency(client, {
         actorId,
-        scope: MEDIA_UPLOAD_INTENT_SCOPE,
+        scope: catalogUpload ? "ADMIN_CATALOG_MEDIA_UPLOAD_INTENT_CREATE" : MEDIA_UPLOAD_INTENT_SCOPE,
         key,
         hash,
       });
@@ -847,6 +831,14 @@ export async function registerMediaRoutes(app: FastifyInstance, context: ApiCont
         storageLocation: storage.location,
       }, new Date());
       if (!reservation.reserved) throw mediaUploadQuotaError(reservation, byteSize);
+      if (catalogUpload) {
+        await writeAdminAudit(client, request, request.actor!, {
+          action: "CATALOG_MEDIA_UPLOAD_INTENT_CREATED",
+          targetType: "MEDIA",
+          targetId: id,
+          after: { mediaId: id, purpose, filename, mimeType, byteSize, status: "PENDING_UPLOAD" },
+        });
+      }
       await completeIdempotency(client, idem.id, {
         statusCode: 201,
         body: responseBody,
@@ -858,20 +850,38 @@ export async function registerMediaRoutes(app: FastifyInstance, context: ApiCont
     await deleteMediaObjectKeysBestEffort(context, result.expiredObjectKeys);
     if (result.replay) reply.header("x-idempotent-replay", "true");
     return reply.code(result.statusCode).send(result.body);
-  });
-
-  app.post("/v1/media/:mediaId/complete", {
+  };
+  app.post("/v1/media/uploads", {
     preHandler: context.auth.requireUser,
-    config: { rateLimit: { max: 6, timeWindow: "1 minute" } },
-  }, async (request, reply) => {
+    config: { rateLimit: { max: 20, timeWindow: "1 minute" } },
+  }, createUploadIntent);
+  app.post("/v1/admin/catalog-media/uploads", {
+    preHandler: context.auth.requirePermission("catalog.write"),
+    config: { rateLimit: { max: 20, timeWindow: "1 minute" } },
+  }, createUploadIntent);
+
+  const completeUpload = async (request: FastifyRequest, reply: FastifyReply) => {
+    const catalogUpload = request.routeOptions.url === "/v1/admin/catalog-media/:mediaId/complete";
+    if (!context.mediaRuntime.completionAvailable) {
+      throw new AppError(503, "MEDIA_PROCESSING_UNAVAILABLE", "현재 첨부 파일 완료 처리를 사용할 수 없습니다.");
+    }
     const id = mediaId(request);
     const ownerId = request.actor!.userId;
-    const key = idempotencyKey(request.headers);
-    const hash = mediaUploadCompleteFingerprint(ownerId, id);
-    const stored = await context.pool.query<Pick<MediaRow, "owner_id" | "metadata">>("SELECT owner_id,metadata FROM media_assets WHERE id=$1", [id]);
+    const adminMutation = catalogUpload ? adminMutationHeaders(request) : null;
+    const key = adminMutation?.idempotencyKey ?? idempotencyKey(request.headers);
+    const hash = mediaUploadCompleteFingerprint(
+      ownerId,
+      id,
+      catalogUpload ? "POST /v1/admin/catalog-media/:mediaId/complete" : undefined,
+      adminMutation?.reason,
+    );
+    const stored = await context.pool.query<Pick<MediaRow, "owner_id" | "purpose" | "metadata">>("SELECT owner_id,purpose,metadata FROM media_assets WHERE id=$1", [id]);
     if (!stored.rowCount) throw notFound();
     if (stored.rows[0]!.owner_id !== ownerId) throw forbidden();
-    const storage = configuredMediaStorage(context.config, stored.rows[0]!.metadata);
+    if (catalogUpload ? stored.rows[0]!.purpose !== "CATALOG" : stored.rows[0]!.purpose === "CATALOG") {
+      throw forbidden("이 경로에서 완료할 수 없는 첨부 용도입니다.");
+    }
+    const storage = context.mediaRuntime.configuredMediaStorage(context.config, stored.rows[0]!.metadata);
     const releaseProcessingSlot = processingLimiter.acquire();
     if (!releaseProcessingSlot) {
       throw new AppError(503, "MEDIA_PROCESSING_BUSY", "이미지 처리 요청이 많습니다. 잠시 후 다시 시도해 주세요.");
@@ -884,10 +894,13 @@ export async function registerMediaRoutes(app: FastifyInstance, context: ApiCont
       if (!row.rowCount) throw notFound();
       const asset = row.rows[0]!;
       if (asset.owner_id !== ownerId) throw forbidden();
+      if (catalogUpload ? asset.purpose !== "CATALOG" : asset.purpose === "CATALOG") {
+        throw forbidden("이 경로에서 완료할 수 없는 첨부 용도입니다.");
+      }
       if (asset.status === "READY") {
         const idem = await beginRecoverableMediaIdempotency(client, {
           actorId: ownerId,
-          scope: MEDIA_UPLOAD_COMPLETE_SCOPE,
+          scope: catalogUpload ? "ADMIN_CATALOG_MEDIA_UPLOAD_COMPLETE" : MEDIA_UPLOAD_COMPLETE_SCOPE,
           key,
           hash,
         });
@@ -895,6 +908,15 @@ export async function registerMediaRoutes(app: FastifyInstance, context: ApiCont
           return { kind: "REPLAY" as const, statusCode: idem.statusCode, body: idem.body };
         }
         const body = { mediaId: id, status: "READY" as const, mimeType: asset.detected_mime_type };
+        if (catalogUpload && idem.kind === "FRESH") {
+          await writeAdminAudit(client, request, request.actor!, {
+            action: "CATALOG_MEDIA_UPLOAD_COMPLETED",
+            targetType: "MEDIA",
+            targetId: id,
+            before: { status: "READY", purpose: asset.purpose },
+            after: body,
+          });
+        }
         await completeIdempotency(client, idem.id, {
           statusCode: 200,
           body,
@@ -909,7 +931,7 @@ export async function registerMediaRoutes(app: FastifyInstance, context: ApiCont
       if (asset.status === "PROCESSING") {
         const idem = await beginRecoverableMediaIdempotency(client, {
           actorId: ownerId,
-          scope: MEDIA_UPLOAD_COMPLETE_SCOPE,
+          scope: catalogUpload ? "ADMIN_CATALOG_MEDIA_UPLOAD_COMPLETE" : MEDIA_UPLOAD_COMPLETE_SCOPE,
           key,
           hash,
         });
@@ -955,7 +977,7 @@ export async function registerMediaRoutes(app: FastifyInstance, context: ApiCont
       if (expiresNow || (asset.status === "REJECTED" && mediaUploadIntentWasExpired(asset))) {
         const idem = await beginRecoverableMediaIdempotency(client, {
           actorId: ownerId,
-          scope: MEDIA_UPLOAD_COMPLETE_SCOPE,
+          scope: catalogUpload ? "ADMIN_CATALOG_MEDIA_UPLOAD_COMPLETE" : MEDIA_UPLOAD_COMPLETE_SCOPE,
           key,
           hash,
         });
@@ -988,7 +1010,7 @@ export async function registerMediaRoutes(app: FastifyInstance, context: ApiCont
       }
       const idem = await beginRecoverableMediaIdempotency(client, {
         actorId: ownerId,
-        scope: MEDIA_UPLOAD_COMPLETE_SCOPE,
+        scope: catalogUpload ? "ADMIN_CATALOG_MEDIA_UPLOAD_COMPLETE" : MEDIA_UPLOAD_COMPLETE_SCOPE,
         key,
         hash,
       });
@@ -1051,7 +1073,7 @@ export async function registerMediaRoutes(app: FastifyInstance, context: ApiCont
         claim.asset.checksum_sha256,
         claim.asset.declared_mime_type,
       );
-      const sanitized = await sanitizeImage(verified.data, verified.detectedMimeType);
+      const sanitized = await context.mediaRuntime.sanitizeImage(verified.data, verified.detectedMimeType);
       // Supabase lacks GCS's atomic create-generation precondition. Each
       // processing claim therefore owns a different server-only final key;
       // stale writers can never replace the winning claim's committed object.
@@ -1182,6 +1204,16 @@ export async function registerMediaRoutes(app: FastifyInstance, context: ApiCont
           ],
         );
         if (!updated.rowCount) throw badRequest("첨부 상태가 이미 변경되었습니다.");
+        const body = { mediaId: id, status: "READY" as const, mimeType: sanitized.mimeType };
+        if (catalogUpload) {
+          await writeAdminAudit(client, request, request.actor!, {
+            action: "CATALOG_MEDIA_UPLOAD_COMPLETED",
+            targetType: "MEDIA",
+            targetId: id,
+            before: { status: claim.previousStatus, purpose: claim.asset.purpose },
+            after: body,
+          });
+        }
         await writeOutbox(client, request.id, {
           aggregateType: "MEDIA",
           aggregateId: id,
@@ -1195,7 +1227,6 @@ export async function registerMediaRoutes(app: FastifyInstance, context: ApiCont
             height: sanitized.height,
           },
         });
-        const body = { mediaId: id, status: "READY" as const, mimeType: sanitized.mimeType };
         await completeIdempotency(client, claim.idempotencyId, {
           statusCode: 200,
           body,
@@ -1253,16 +1284,30 @@ export async function registerMediaRoutes(app: FastifyInstance, context: ApiCont
     } finally {
       releaseProcessingSlot();
     }
-  });
-
-  app.delete("/v1/media/:mediaId", {
+  };
+  app.post("/v1/media/:mediaId/complete", {
     preHandler: context.auth.requireUser,
-    config: { rateLimit: { max: 20, timeWindow: "1 minute" } },
-  }, async (request, reply) => {
+    config: { rateLimit: { max: 6, timeWindow: "1 minute" } },
+  }, completeUpload);
+  app.post("/v1/admin/catalog-media/:mediaId/complete", {
+    preHandler: context.auth.requirePermission("catalog.write"),
+    config: { rateLimit: { max: 6, timeWindow: "1 minute" } },
+  }, completeUpload);
+
+  const deleteMedia = async (request: FastifyRequest, reply: FastifyReply) => {
+    const catalogDelete = request.routeOptions.url === "/v1/admin/catalog-media/:mediaId";
     const id = mediaId(request);
     const ownerId = request.actor!.userId;
     const key = idempotencyKey(request.headers);
-    const hash = mediaDeleteFingerprint(ownerId, id);
+    const adminMutation = catalogDelete ? adminMutationHeaders(request) : null;
+    const hash = catalogDelete
+      ? requestHash({
+          actorId: ownerId,
+          operation: "DELETE /v1/admin/catalog-media/:mediaId",
+          mediaId: id.toLocaleLowerCase("en-US"),
+          reason: adminMutation!.reason,
+        })
+      : mediaDeleteFingerprint(ownerId, id);
     const result = await withTransaction(context.pool, async (client) => {
       await lockAccountMutation(client, ownerId);
       await lockMediaUploadOwner(client, ownerId);
@@ -1272,9 +1317,12 @@ export async function registerMediaRoutes(app: FastifyInstance, context: ApiCont
       );
       if (!media.rowCount) throw notFound("첨부 파일을 찾을 수 없습니다.");
       const asset = media.rows[0]!;
+      if (catalogDelete ? asset.purpose !== "CATALOG" : asset.purpose === "CATALOG") {
+        throw notFound("첨부 파일을 찾을 수 없습니다.");
+      }
       const idem = await beginIdempotency(client, {
         actorId: ownerId,
-        scope: MEDIA_DELETE_SCOPE,
+        scope: catalogDelete ? "ADMIN_CATALOG_MEDIA_DELETE" : MEDIA_DELETE_SCOPE,
         key,
         hash,
       });
@@ -1292,7 +1340,7 @@ export async function registerMediaRoutes(app: FastifyInstance, context: ApiCont
         return { replay: false, statusCode: 204, body: responseBody, objectKeys: [] as string[] };
       }
       if (await mediaHasReferences(client, id)) {
-        throw conflict("게시물, 문의, 신청 또는 카탈로그 요청에 사용 중인 첨부 파일은 삭제할 수 없습니다.");
+        throw conflict("현재 상품, 추첨 또는 배송 기록에서 사용하는 첨부 파일은 삭제할 수 없습니다.");
       }
       const previousStatus = asset.status;
       const processingIdempotencyId = mediaProcessingIdempotencyId(asset);
@@ -1316,6 +1364,15 @@ export async function registerMediaRoutes(app: FastifyInstance, context: ApiCont
           [processingIdempotencyId],
         );
       }
+      if (catalogDelete) {
+        await writeAdminAudit(client, request, request.actor!, {
+          action: "CATALOG_MEDIA_DELETED",
+          targetType: "MEDIA",
+          targetId: id,
+          before: { status: previousStatus, purpose: asset.purpose },
+          after: responseBody,
+        });
+      }
       await writeOutbox(client, request.id, {
         aggregateType: "MEDIA",
         aggregateId: id,
@@ -1338,7 +1395,15 @@ export async function registerMediaRoutes(app: FastifyInstance, context: ApiCont
     await deleteMediaObjectKeysBestEffort(context, result.objectKeys);
     if (result.replay) reply.header("x-idempotent-replay", "true");
     return reply.code(204).send();
-  });
+  };
+  app.delete("/v1/media/:mediaId", {
+    preHandler: context.auth.requireUser,
+    config: { rateLimit: { max: 20, timeWindow: "1 minute" } },
+  }, deleteMedia);
+  app.delete("/v1/admin/catalog-media/:mediaId", {
+    preHandler: context.auth.requirePermission("catalog.write"),
+    config: { rateLimit: { max: 20, timeWindow: "1 minute" } },
+  }, deleteMedia);
 
   app.get("/v1/media/:mediaId/url", { preHandler: context.auth.requireUser }, async (request) => signedReadUrl(context, request, false));
   app.get("/v1/media/:mediaId/public-url", async (request) => {
@@ -1361,7 +1426,7 @@ export async function registerMediaRoutes(app: FastifyInstance, context: ApiCont
       [id],
     );
     if (!row.rowCount) throw notFound("공개된 첨부 파일을 찾을 수 없습니다.");
-    return signAsset(context, row.rows[0]!);
+    return signMediaAsset(context, row.rows[0]!);
   });
   app.get("/v1/admin/media/:mediaId/url", { preHandler: context.auth.requireAdmin }, async (request) => {
     if (!isAdminRole(request.actor!.role)) throw forbidden();

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { inflateSync } from "node:zlib";
 
 import {
   GACHA_AGITATION_DURATION_MS,
@@ -109,7 +110,12 @@ test("the chamber contains twenty-six bounded capsules in a dense three-depth pi
   );
   assert.deepEqual(
     new Set(GACHA_CHAMBER_CAPSULES.map((capsule) => capsule.tone)),
-    new Set(["lime", "ivory"]),
+    new Set(["lime", "ivory", "orange"]),
+  );
+  assert.equal(
+    GACHA_CHAMBER_CAPSULES.filter((capsule) => capsule.tone === "orange").length,
+    5,
+    "orange is a restrained third gacha capsule tone, not the dominant category color",
   );
 
   const rowCounts = Object.fromEntries(
@@ -557,6 +563,128 @@ test("the packed chamber keeps simple capsule faces and builds depth through opa
   assert.match(component, /top: capsule.top \+ capsule.size \* 0.78/);
 });
 
+test("the crank uses a smooth bolt-free plate and one thick straight faceted handle on the shared pivot", () => {
+  const plateAsset = readFileSync(
+    new URL(
+      "../public/assets/dabboba/draw/gacha/capsule-crank-plate-clean.png",
+      import.meta.url,
+    ),
+  );
+  const handleAsset = readFileSync(
+    new URL(
+      "../public/assets/dabboba/draw/gacha/capsule-crank-handle-thick-straight.png",
+      import.meta.url,
+    ),
+  );
+  const pngDimensions = (buffer) => ({
+    width: buffer.readUInt32BE(16),
+    height: buffer.readUInt32BE(20),
+    colorType: buffer[25],
+  });
+  const decodeRgbaRows = (buffer) => {
+    const { width, height, colorType } = pngDimensions(buffer);
+    assert.equal(buffer[24], 8, "the handle must remain an 8-bit PNG");
+    assert.equal(colorType, 6, "the handle must preserve RGBA transparency");
+
+    const idat = [];
+    for (let offset = 8; offset < buffer.length;) {
+      const length = buffer.readUInt32BE(offset);
+      const type = buffer.toString("ascii", offset + 4, offset + 8);
+      if (type === "IDAT") idat.push(buffer.subarray(offset + 8, offset + 8 + length));
+      offset += length + 12;
+    }
+
+    const bytes = inflateSync(Buffer.concat(idat));
+    const stride = width * 4;
+    const rows = [];
+    let cursor = 0;
+    let previous = Buffer.alloc(stride);
+    const paeth = (left, up, upperLeft) => {
+      const estimate = left + up - upperLeft;
+      const leftDistance = Math.abs(estimate - left);
+      const upDistance = Math.abs(estimate - up);
+      const upperLeftDistance = Math.abs(estimate - upperLeft);
+      if (leftDistance <= upDistance && leftDistance <= upperLeftDistance) return left;
+      return upDistance <= upperLeftDistance ? up : upperLeft;
+    };
+
+    for (let y = 0; y < height; y += 1) {
+      const filter = bytes[cursor];
+      cursor += 1;
+      const source = bytes.subarray(cursor, cursor + stride);
+      cursor += stride;
+      const row = Buffer.alloc(stride);
+      for (let x = 0; x < stride; x += 1) {
+        const left = x >= 4 ? row[x - 4] : 0;
+        const up = previous[x];
+        const upperLeft = x >= 4 ? previous[x - 4] : 0;
+        const predictor = filter === 0
+          ? 0
+          : filter === 1
+            ? left
+            : filter === 2
+              ? up
+              : filter === 3
+                ? Math.floor((left + up) / 2)
+                : paeth(left, up, upperLeft);
+        row[x] = (source[x] + predictor) & 0xff;
+      }
+      rows.push(row);
+      previous = row;
+    }
+    return { width, height, rows };
+  };
+
+  assert.match(
+    component,
+    /GACHA_CRANK_PLATE = require\("\.\.\/\.\.\/\.\.\/\.\.\/\.\.\/public\/assets\/dabboba\/draw\/gacha\/capsule-crank-plate-clean\.png"\)/,
+  );
+  assert.match(
+    component,
+    /GACHA_CRANK_HANDLE = require\("\.\.\/\.\.\/\.\.\/\.\.\/\.\.\/public\/assets\/dabboba\/draw\/gacha\/capsule-crank-handle-thick-straight\.png"\)/,
+  );
+  assert.doesNotMatch(component, /capsule-crank-handle-symmetric\.png/);
+  assert.doesNotMatch(component, /capsule-crank-plate-pixel\.png|capsule-crank-pixel\.png/);
+  assert.equal((component.match(/source=\{GACHA_CRANK_PLATE\}/g) ?? []).length, 1);
+  assert.equal((component.match(/source=\{GACHA_CRANK_HANDLE\}/g) ?? []).length, 1);
+  assert.deepEqual(pngDimensions(plateAsset), { width: 108, height: 108, colorType: 6 });
+  assert.deepEqual(pngDimensions(handleAsset), { width: 108, height: 56, colorType: 6 });
+  const decodedHandle = decodeRgbaRows(handleAsset);
+  const handlePalette = new Set();
+  const occupiedSpans = decodedHandle.rows.map((row) => {
+    const occupied = [];
+    for (let x = 0; x < decodedHandle.width; x += 1) {
+      const alpha = row[x * 4 + 3];
+      assert.ok(alpha === 0 || alpha === 255, "pixel edges stay hard rather than semi-transparent");
+      if (alpha === 255) {
+        occupied.push(x);
+        handlePalette.add(`${row[x * 4]},${row[x * 4 + 1]},${row[x * 4 + 2]}`);
+      }
+    }
+    return occupied.length === 0
+      ? null
+      : { left: occupied[0], right: occupied.at(-1), width: occupied.length };
+  });
+  const firstOccupiedRow = occupiedSpans.findIndex(Boolean);
+  const lastOccupiedRow = occupiedSpans.findLastIndex(Boolean);
+  assert.ok(handlePalette.size <= 8, "the grip keeps a restrained pixel-art grayscale palette");
+  assert.equal(firstOccupiedRow, 16, "only the former upper attachment area becomes transparent");
+  assert.equal(lastOccupiedRow, 40, "only the former lower attachment area becomes transparent");
+  assert.equal(lastOccupiedRow - firstOccupiedRow + 1, 25, "the approved middle-bar thickness stays unchanged");
+  const maximumRowWidth = Math.max(...occupiedSpans.filter(Boolean).map((span) => span.width));
+  assert.equal(maximumRowWidth, 102, "the approved horizontal width stays unchanged");
+  for (const span of occupiedSpans.filter(Boolean)) {
+    assert.equal(span.width, span.right - span.left + 1, "the handle remains one continuous solid component");
+    assert.ok(span.width >= maximumRowWidth - 6, "no narrow upper or lower protrusion remains attached");
+  }
+  assert.match(component, /const CRANK_HANDLE_WIDTH = 31;/);
+  assert.match(component, /const CRANK_HANDLE_HEIGHT = 16;/);
+  assert.match(
+    component,
+    /crankHandle:\s*\{[\s\S]*?left:\s*GESTURE_CENTER - CRANK_HANDLE_WIDTH \/ 2,[\s\S]*?top:\s*GESTURE_CENTER - CRANK_HANDLE_HEIGHT \/ 2,[\s\S]*?width:\s*CRANK_HANDLE_WIDTH,[\s\S]*?height:\s*CRANK_HANDLE_HEIGHT/,
+  );
+});
+
 test("one small arrow orbits outside the lever plate clockwise until the lever is touched", () => {
   const readPresentationConstant = (name) => {
     const match = component.match(new RegExp(`const ${name} = ([\\d.]+);`));
@@ -569,10 +697,10 @@ test("one small arrow orbits outside the lever plate clockwise until the lever i
   const cueRotationDurationMs = readPresentationConstant("LEVER_CUE_ROTATION_DURATION_MS");
 
   assert.equal(crankPlateSize, 41);
-  assert.equal(arrowWidth, 10);
+  assert.equal(arrowWidth, 12);
   assert.equal(arrowHeight, 8);
   assert.equal(cueRotationDurationMs, 2600);
-  assert.ok(arrowWidth < crankPlateSize / 4, "the orbit carries a small arrow, not another plate-sized icon");
+  assert.ok(arrowWidth < crankPlateSize / 3, "the orbit carries a slightly elongated cue, not another plate-sized icon");
   assert.match(component, /const LEVER_CUE_ORBIT_SIZE = CRANK_PLATE_SIZE \+ 14;/);
   assert.match(component, /<GestureDetector gesture=\{interactionGesture\}>[\s\S]*?styles\.leverTouchTarget/);
   assert.equal((component.match(/testID="gacha-lever-clockwise-cue"/g) ?? []).length, 1);
@@ -611,7 +739,7 @@ test("one small arrow orbits outside the lever plate clockwise until the lever i
   assert.equal((cue.match(/<Svg\b/g) ?? []).length, 1);
   assert.equal((cue.match(/<Path\b/g) ?? []).length, 1);
   assert.doesNotMatch(cue, /<Circle|<Ellipse|<Line|<Polyline|<Ionicons/);
-  assert.match(cue, /width=\{LEVER_CUE_ARROW_WIDTH\}[\s\S]*?height=\{LEVER_CUE_ARROW_HEIGHT\}[\s\S]*?viewBox="0 0 10 8"/);
+  assert.match(cue, /width=\{LEVER_CUE_ARROW_WIDTH\}[\s\S]*?height=\{LEVER_CUE_ARROW_HEIGHT\}[\s\S]*?viewBox="0 0 12 8"/);
   assert.match(cue, /fill=\{colors.brand\}/);
   assert.match(
     component,
@@ -704,7 +832,7 @@ test("the complete arrow stays clear of the plate and points along its clockwise
 test("the machine marquee reuses the canonical DABBOBA wordmark", () => {
   assert.match(
     component,
-    /const DABBOBA_WORDMARK = require\("\.\.\/\.\.\/\.\.\/assets\/dabboba-wordmark\.png"\)/,
+    /const DABBOBA_WORDMARK = require\("\.\.\/\.\.\/\.\.\/assets\/brand\/dabboba-wordmark\.png"\)/,
   );
   assert.match(
     component,

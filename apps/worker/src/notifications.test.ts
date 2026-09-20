@@ -50,6 +50,16 @@ test("user-facing events map to stable in-app notification kinds", () => {
   assert.equal(notificationTemplate(event("inquiry.answered"))?.kind, "INQUIRY_ANSWERED");
   assert.equal(notificationTemplate(event("user.warning_requested"))?.kind, "USER_WARNING");
   assert.equal(notificationTemplate(event("shipping.shipped"))?.kind, "SHIPPING_SHIPPED");
+  assert.deepEqual(
+    notificationTemplate(event("inventory.storage_expiry_reminder", { remainingDays: 7 })),
+    {
+      kind: "STORAGE_EXPIRY_REMINDER",
+      title: "보관 만료 7일 전이에요",
+      body: "보관함에서 만료일과 현재 상품 상태를 확인해 주세요.",
+    },
+  );
+  assert.equal(notificationTemplate(event("inventory.storage_expiry_reminder", { remainingDays: 2 })), null);
+  assert.equal(notificationTemplate(event("inventory.storage_expired_hold"))?.kind, "STORAGE_EXPIRED_HOLD");
 });
 
 test("only optional external deliveries are mapped to mutable user preferences", async () => {
@@ -61,6 +71,8 @@ test("only optional external deliveries are mapped to mutable user preferences",
   assert.equal(externalPreferenceForNotification("SHIPPING_SHIPPED"), null);
   assert.equal(externalPreferenceForNotification("INQUIRY_ANSWERED"), null);
   assert.equal(externalPreferenceForNotification("USER_WARNING"), null);
+  assert.equal(externalPreferenceForNotification("STORAGE_EXPIRY_REMINDER"), null);
+  assert.equal(externalPreferenceForNotification("STORAGE_EXPIRED_HOLD"), null);
 
   let preferenceQueries = 0;
   const optedOutPool = {
@@ -163,7 +175,13 @@ test("HTTP notification delivery preserves direct provider requests and idempote
   await new HttpNotificationDelivery(`${providerUrl}/deliver`, "provider-token").deliver(notification);
 
   assert.deepEqual(received, [{
-    body: notification,
+    body: {
+      ...notification,
+      pushData: {
+        kind: "ACCOUNT_NOTIFICATION",
+        notificationId: notification.id,
+      },
+    },
     idempotencyKey: notification.id,
     authorization: "Bearer provider-token",
   }]);
@@ -208,6 +226,8 @@ test("user warnings persist an in-app notification without exposing the internal
   assert.equal(notification?.kind, "USER_WARNING");
   assert.deepEqual(notification?.data, {
     reportId: "report-1",
+    aggregateType: "USER",
+    aggregateId: "user-1",
     outboxEventId: "event-1",
   });
   assert.equal(insertedPayloads.length, 1);

@@ -119,6 +119,57 @@ export async function fetchCheckoutOrder(
   return result.data;
 }
 
+export async function confirmPortOnePayment(
+  apiBaseUrl: string,
+  accessToken: string,
+  paymentId: string,
+): Promise<{ accepted: boolean; paymentId: string; orderId: string; providerStatus: string; outcome: string }> {
+  const response = await fetch(
+    `${apiBaseUrl.replace(/\/$/, "")}/v1/payments/${encodeURIComponent(paymentId)}/confirm`,
+    {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${accessToken}`,
+        "content-type": "application/json",
+        "x-request-id": randomUUID(),
+      },
+      body: "{}",
+    },
+  );
+  const body = await response.json().catch(() => null) as {
+    accepted?: unknown;
+    paymentId?: unknown;
+    orderId?: unknown;
+    providerStatus?: unknown;
+    outcome?: unknown;
+    error?: { code?: unknown; message?: unknown };
+  } | null;
+  if (!response.ok || !body || body.accepted !== true) {
+    throw new CheckoutOrderApiError(
+      typeof body?.error?.message === "string"
+        ? body.error.message
+        : "결제 승인 상태를 확인하지 못했습니다.",
+      response.status,
+      typeof body?.error?.code === "string" ? body.error.code : null,
+    );
+  }
+  if (
+    typeof body.paymentId !== "string"
+    || typeof body.orderId !== "string"
+    || typeof body.providerStatus !== "string"
+    || typeof body.outcome !== "string"
+  ) {
+    throw new CheckoutOrderApiError("결제 승인 응답 형식을 확인하지 못했습니다.", 502);
+  }
+  return {
+    accepted: true,
+    paymentId: body.paymentId,
+    orderId: body.orderId,
+    providerStatus: body.providerStatus,
+    outcome: body.outcome,
+  };
+}
+
 export async function createKujiCheckoutOrder(
   apiBaseUrl: string,
   accessToken: string,

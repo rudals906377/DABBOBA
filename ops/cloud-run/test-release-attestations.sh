@@ -378,6 +378,8 @@ check_worker_job_run_window_contract() (
                     resources: {limits: {cpu: "1", memory: "512Mi"}},
                     env: [
                       {name: "NODE_ENV", value: "production"},
+                      {name: "DABBOBA_ENVIRONMENT_TIER", value: "PRODUCTION"},
+                      {name: "DABBOBA_ENABLE_PRODUCTION_WORKER", value: "true"},
                       {name: "LOG_LEVEL", value: "info"},
                       {name: "WORKER_QUEUE_NAME", value: "dabboba_worker"},
                       {name: "WORKER_QUEUE_VISIBILITY_SECONDS", value: "900"},
@@ -405,7 +407,7 @@ check_worker_job_run_window_contract() (
   assert_worker_job_matches_scheduler_contract dabboba-worker
 )
 
-record_result success "migration 0037 checksum matches the release gate" \
+record_result success "migration 0039 checksum matches the release gate" \
   assert_database_release_migration_checksum
 record_result failure "missing database release attestation" \
   check_database_attestation ""

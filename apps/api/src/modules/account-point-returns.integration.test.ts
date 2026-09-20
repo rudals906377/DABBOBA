@@ -4,6 +4,7 @@ import test from "node:test";
 import type { ApiConfig } from "@dabboba/config";
 import { createDatabasePool } from "@dabboba/db";
 import { buildApp } from "../app.js";
+import { acceptRequiredPoliciesForIntegrationTest } from "../integration-test-fixtures.js";
 
 const databaseUrl = process.env.DABBOBA_TEST_DATABASE_URL;
 
@@ -42,7 +43,9 @@ test(
         payload: { email },
       });
       assert.equal(response.statusCode, 201, response.body);
-      return response.json() as { token: string; actor: { userId: string } };
+      const created = response.json() as { token: string; actor: { userId: string } };
+      await acceptRequiredPoliciesForIntegrationTest(pool, created.actor.userId);
+      return created;
     };
     const suffix = randomUUID().replaceAll("-", "").slice(0, 12);
     const owner = await session(`point-return-owner-${suffix}@example.test`);

@@ -29,6 +29,8 @@ try {
     PATH: process.env.PATH,
     HOME: process.env.HOME,
     NODE_ENV: 'test',
+    DABBOBA_ENVIRONMENT_TIER: 'TEST',
+    DABBOBA_RELEASE_ENVIRONMENT_TIER: 'TEST',
     DATABASE_URL: '',
     DATABASE_MIGRATION_URL: owner,
     DABBOBA_TEST_DATABASE_URL: owner,

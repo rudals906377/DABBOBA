@@ -3,6 +3,7 @@ import test from "node:test";
 import type { ApiConfig } from "@dabboba/config";
 import type { DatabasePool } from "@dabboba/db";
 import type { FastifyRequest } from "fastify";
+import { AppError } from "../lib/errors.js";
 import { createAuthHooks } from "./auth.js";
 
 const config: ApiConfig = {
@@ -61,4 +62,52 @@ test("actor loading authenticates and touches stale last-seen state in one bound
   assert.equal(calls, 1);
   assert.match(statement, /UPDATE sessions/);
   assert.match(statement, /FOR UPDATE OF s SKIP LOCKED/);
+});
+
+test("active customer sessions fail closed with exact current policy versions", async () => {
+  let calls = 0;
+  const pool = {
+    async query(sql: string) {
+      calls += 1;
+      if (sql.includes("WITH active_session")) return { rows: [actorRow], rowCount: 1 };
+      if (sql.includes("account_deletion_requests")) return { rows: [], rowCount: 0 };
+      if (sql.includes("FROM legal_document_versions")) {
+        return {
+          rowCount: 2,
+          rows: [
+            { policy_key: "PRIVACY", policy_version: "2026-09-20", content_sha256: "b".repeat(64) },
+            { policy_key: "TERMS", policy_version: "2026-09-14", content_sha256: "a".repeat(64) },
+          ],
+        };
+      }
+      if (sql.includes("accepted_count")) return { rows: [{ accepted_count: 1 }], rowCount: 1 };
+      throw new Error(`Unexpected SQL: ${sql}`);
+    },
+  } as unknown as DatabasePool;
+  const hooks = createAuthHooks(pool, config);
+  await assert.rejects(
+    () => (hooks.requireUser as unknown as (request: FastifyRequest) => Promise<void>)(request()),
+    (error: unknown) => error instanceof AppError
+      && error.statusCode === 428
+      && error.code === "LEGAL_ACCEPTANCE_REQUIRED"
+      && JSON.stringify(error.details) === JSON.stringify({
+        requiredPolicyVersions: { terms: "2026-09-14", privacy: "2026-09-20" },
+      }),
+  );
+  assert.equal(calls, 4);
+});
+
+test("safe account recovery hooks authenticate without requiring policy acceptance", async () => {
+  const statements: string[] = [];
+  const pool = {
+    async query(sql: string) {
+      statements.push(sql);
+      if (sql.includes("WITH active_session")) return { rows: [actorRow], rowCount: 1 };
+      if (sql.includes("account_deletion_requests")) return { rows: [], rowCount: 0 };
+      throw new Error(`Unexpected SQL: ${sql}`);
+    },
+  } as unknown as DatabasePool;
+  const hooks = createAuthHooks(pool, config);
+  await (hooks.requireUserWithoutPolicy as unknown as (request: FastifyRequest) => Promise<void>)(request());
+  assert.equal(statements.some((sql) => sql.includes("legal_document_versions")), false);
 });

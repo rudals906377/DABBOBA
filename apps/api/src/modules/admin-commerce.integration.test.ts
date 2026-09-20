@@ -4,6 +4,7 @@ import test from "node:test";
 import type { ApiConfig } from "@dabboba/config";
 import { createDatabasePool } from "@dabboba/db";
 import { buildApp } from "../app.js";
+import { acceptRequiredPoliciesForIntegrationTest } from "../integration-test-fixtures.js";
 import { issueSession } from "../plugins/auth.js";
 
 const databaseUrl = process.env.DABBOBA_TEST_DATABASE_URL;
@@ -42,6 +43,9 @@ test(
         "INSERT INTO users(email,nickname,role,status) VALUES($1,$2,$3,'ACTIVE') RETURNING id",
         [`${label}-${suffix}@example.test`, `${label} ${suffix}`, role],
       );
+      if (role === "USER") {
+        await acceptRequiredPoliciesForIntegrationTest(pool, created.rows[0]!.id);
+      }
       const session = await issueSession(pool, config, {
         userId: created.rows[0]!.id,
         kind: role === "USER" ? "USER" : "ADMIN",
@@ -59,6 +63,25 @@ test(
       "x-admin-reason": reason,
       "idempotency-key": key,
     });
+    const attachShippingItem = async (shippingRequestId: string, inventoryUnitId: string) => {
+      await pool.query(
+        `INSERT INTO shipping_request_items(shipping_request_id,inventory_unit_id,product_snapshot)
+         SELECT $1,inventory.id,jsonb_build_object(
+           'productId',product.id,
+           'productName',product.name,
+           'ipId',product.ip_id,
+           'ipNameKo',ip.name_ko,
+           'category',product.category,
+           'imageUrl',product.image_url,
+           'productVersion',product.version
+         )
+         FROM inventory_units inventory
+         JOIN catalog_products product ON product.id=inventory.product_id
+         JOIN catalog_ips ip ON ip.id=product.ip_id
+         WHERE inventory.id=$2`,
+        [shippingRequestId, inventoryUnitId],
+      );
+    };
 
     const permissions = await pool.query<{ role: string; permission_code: string }>(`
       SELECT role,permission_code FROM admin_role_permissions
@@ -201,7 +224,8 @@ test(
     const prizeProductImageUrl = `https://cdn.example.test/prizes/${suffix}.png`;
     await pool.query(
       `INSERT INTO catalog_products(id,sku,ip_id,category,name,price,image_url,is_prize_only)
-       VALUES($1,$2,$3,'gacha',$4,3000,NULL,false),($5,$6,$3,'figure',$7,0,$8,true)`,
+       VALUES($1,$2,$3,'gacha',$4,3000,'https://cdn.example.test/products/gacha-fixture.png',false),
+             ($5,$6,$3,'figure',$7,0,$8,true)`,
       [drawProductId, `GACHA-${suffix}`.toUpperCase(), ipId, drawProductName, prizeProductId, prizeProductSku, prizeProductName, prizeProductImageUrl],
     );
     await pool.query("INSERT INTO product_stock(product_id,on_hand,reserved) VALUES($1,2,0),($2,100,0)", [drawProductId, prizeProductId]);
@@ -260,6 +284,10 @@ test(
     });
     assert.equal(publishedDraw.statusCode, 200, publishedDraw.body);
     assert.equal((publishedDraw.json() as { status: string }).status, "ACTIVE");
+    await pool.query(
+      "UPDATE catalog_products SET sale_status='ON_SALE' WHERE id=$1",
+      [drawProductId],
+    );
 
     const renamedPrizeName = `변경된 경품 ${suffix}`;
     const renamedPrizeImageUrl = `https://cdn.example.test/prizes/${suffix}-changed.png`;
@@ -390,7 +418,7 @@ test(
         addressLine1: "서울특별시 강남구 테헤란로 1", addressLine2: "101호", deliveryNote: "문 앞",
       })]);
     const shippingRequestId = shipping.rows[0]!.id;
-    await pool.query("INSERT INTO shipping_request_items(shipping_request_id,inventory_unit_id) VALUES($1,$2)", [shippingRequestId, shippingInventory.rows[0]!.id]);
+    await attachShippingItem(shippingRequestId, shippingInventory.rows[0]!.id);
     const shippingList = await app.inject({ method: "GET", url: "/v1/admin/commerce/shipping", headers: auth(admin.token) });
     assert.equal(shippingList.statusCode, 200, shippingList.body);
     const shippingListBody = shippingList.json() as { items: Array<Record<string, unknown>> };
@@ -454,7 +482,7 @@ test(
         recipient: "김취소", phone: "010-9876-5432", postalCode: "06236",
         addressLine1: "서울특별시 강남구 테헤란로 2", addressLine2: "202호", deliveryNote: "",
       })]);
-    await pool.query("INSERT INTO shipping_request_items(shipping_request_id,inventory_unit_id) VALUES($1,$2)", [cancelledRequest.rows[0]!.id, cancelledInventory.rows[0]!.id]);
+    await attachShippingItem(cancelledRequest.rows[0]!.id, cancelledInventory.rows[0]!.id);
     const cancelledReason = "고객 요청에 따른 출고 전 취소";
     const cancelledKey = `shipping-cancelled-${randomUUID()}`;
     const cancelled = await app.inject({
@@ -493,10 +521,7 @@ test(
         recipient: "김불일치", phone: "010-1111-2222", postalCode: "06236",
         addressLine1: "서울특별시 강남구 검증로 3", addressLine2: "303호", deliveryNote: "",
       })]);
-    await pool.query(
-      "INSERT INTO shipping_request_items(shipping_request_id,inventory_unit_id) VALUES($1,$2)",
-      [inconsistentRequest.rows[0]!.id, inconsistentInventory.rows[0]!.id],
-    );
+    await attachShippingItem(inconsistentRequest.rows[0]!.id, inconsistentInventory.rows[0]!.id);
     const inconsistentTransition = await advance(
       { status: "CANCELLED", expectedVersion: 1 },
       "배송 상품 상태 불일치 시 전체 전이 거부",
@@ -527,10 +552,7 @@ test(
         recipient: "김완료", phone: "010-3333-4444", postalCode: "06236",
         addressLine1: "서울특별시 강남구 완료로 4", addressLine2: "404호", deliveryNote: "",
       })]);
-    await pool.query(
-      "INSERT INTO shipping_request_items(shipping_request_id,inventory_unit_id) VALUES($1,$2)",
-      [deliveredRequest.rows[0]!.id, deliveredInventory.rows[0]!.id],
-    );
+    await attachShippingItem(deliveredRequest.rows[0]!.id, deliveredInventory.rows[0]!.id);
     const deliveredCandidateId = deliveredRequest.rows[0]!.id;
     const candidateProcessing = await advance(
       { status: "PROCESSING", expectedVersion: 1 },
@@ -576,7 +598,7 @@ test(
         activeInventoryCount: deletionBody.blockers.activeInventoryCount,
         activeShippingRequestCount: deletionBody.blockers.activeShippingRequestCount,
       },
-      { status: "PENDING_REVIEW", activeInventoryCount: 0, activeShippingRequestCount: 0 },
+      { status: "PROCESSING", activeInventoryCount: 0, activeShippingRequestCount: 0 },
     );
   },
 );

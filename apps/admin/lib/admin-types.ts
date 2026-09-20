@@ -46,6 +46,33 @@ export type CursorPage<T> = {
 
 export type SearchParams = Record<string, string | string[] | undefined>;
 
+// Keep this handwritten until the generated contracts package has been rebuilt in
+// every admin environment. The API intentionally exposes a nullable layout kind
+// only for legacy rows; create and update inputs require a concrete value.
+export type AdminHomeSection = {
+  id: string;
+  title: string;
+  subtitle: string | null;
+  ipId: string | null;
+  layoutKind: "gacha" | "kuji" | null;
+  sourceKind: "MANUAL" | "IP" | "NEW" | "POPULAR";
+  visibleLimit: number;
+  manualProductIds: string[];
+  sortOrder: number;
+  isActive: boolean;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type AdminHomeSectionList = {
+  configured: boolean;
+  items: AdminHomeSection[];
+};
+
+export type StorefrontCategorySetting = components["schemas"]["StorefrontCategorySetting"];
+export type StorefrontCategorySettingList = components["schemas"]["StorefrontCategorySettingList"];
+
 export type CommerceUser = { id: string; emailMasked: string; nickname: string };
 
 export type AdminOrder = {
@@ -199,7 +226,7 @@ export type AccountDeletionBlockers = {
 export type AdminAccountDeletionRequest = {
   id: string;
   user: CommerceUser;
-  status: "PENDING_REVIEW" | "BLOCKED" | "APPROVED" | "COMPLETED" | "REJECTED" | "CANCELLED";
+  status: "PENDING_REVIEW" | "BLOCKED" | "PROCESSING" | "APPROVED" | "COMPLETED" | "REJECTED" | "CANCELLED";
   blockers: AccountDeletionBlockers;
   requestCount: number;
   version: number;
@@ -210,9 +237,21 @@ export type AdminAccountDeletionRequest = {
   decidedBy: { id: string; nickname: string } | null;
   createdAt: string;
   updatedAt: string;
-  hardDeletePerformed: false;
-  completionAvailable: false;
-  completionPolicy: "EXTERNAL_RETENTION_POLICY_REQUIRED";
+  hardDeletePerformed: boolean;
+  completionAvailable: boolean;
+  completionPolicy: "ADMIN_REVIEW_FALLBACK" | "AUTOMATED_WORKER" | "COMPLETED_ANONYMIZATION";
+  authDeletionStatus: "NOT_REQUIRED" | "PENDING" | "COMPLETED";
+  authDeletedAt: string | null;
+  processingStartedAt: string | null;
+  completedAt: string | null;
+  deletionJob: {
+    status: "PENDING" | "PROCESSING";
+    attempts: number;
+    availableAt: string | null;
+    leaseExpiresAt: string | null;
+    lastError: string | null;
+    externalDeletedAt: string | null;
+  } | null;
 };
 
 export type AdminAccountDeletionDetail = AdminAccountDeletionRequest & {

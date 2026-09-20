@@ -4,6 +4,7 @@ import test from "node:test";
 import type { ApiConfig } from "@dabboba/config";
 import { createDatabasePool } from "@dabboba/db";
 import { buildApp } from "../app.js";
+import { acceptRequiredPoliciesForIntegrationTest } from "../integration-test-fixtures.js";
 import { issueSession } from "../plugins/auth.js";
 
 const databaseUrl = process.env.DABBOBA_TEST_DATABASE_URL;
@@ -42,6 +43,9 @@ test(
         "INSERT INTO users(email,nickname,role,status) VALUES($1,$2,$3,'ACTIVE') RETURNING id",
         [`${label}-${suffix}@example.test`, `${label} ${suffix}`, role],
       );
+      if (role === "USER") {
+        await acceptRequiredPoliciesForIntegrationTest(pool, created.rows[0]!.id);
+      }
       const session = await issueSession(pool, config, {
         userId: created.rows[0]!.id,
         kind: role === "USER" ? "USER" : "ADMIN",
@@ -61,14 +65,14 @@ test(
     });
 
     const ipId = `account-shipping-${suffix}`;
-    const productId = `shipping-figure-${suffix}`;
+    const productId = `shipping-gacha-${suffix}`;
     await pool.query(
       "INSERT INTO catalog_ips(id,slug,name_ko,name_en) VALUES($1,$2,$3,$4)",
       [ipId, ipId, `배송 조회 IP ${suffix}`, `Shipping Read ${suffix}`],
     );
     await pool.query(
-      "INSERT INTO catalog_products(id,sku,ip_id,category,name,price) VALUES($1,$2,$3,'figure',$4,15000)",
-      [productId, `SHIP-${suffix}`.toUpperCase(), ipId, `배송 조회 피규어 ${suffix}`],
+      "INSERT INTO catalog_products(id,sku,ip_id,category,name,price) VALUES($1,$2,$3,'gacha',$4,24900)",
+      [productId, `SHIP-${suffix}`.toUpperCase(), ipId, `배송 조회 가챠 ${suffix}`],
     );
     await pool.query(
       `INSERT INTO default_shipping_addresses(
@@ -77,19 +81,43 @@ test(
       [owner.id],
     );
 
+    const createShippingRequest = async (inventoryUnitId: string) => {
+      const quoteResponse = await app.inject({
+        method: "POST",
+        url: "/v1/account/shipping-quotes",
+        headers: auth(owner.token),
+        payload: { inventoryUnitIds: [inventoryUnitId] },
+      });
+      assert.equal(quoteResponse.statusCode, 200, quoteResponse.body);
+      const quote = quoteResponse.json() as {
+        id: string;
+        addressVersion: number;
+        createdAt: string;
+        expiresAt: string;
+        referenceSubtotal: number;
+        freeShippingThreshold: number;
+        shippingFee: number;
+      };
+      assert.equal(Date.parse(quote.expiresAt) - Date.parse(quote.createdAt), 10 * 60_000);
+      assert.equal(quote.referenceSubtotal, 24_900);
+      assert.equal(quote.freeShippingThreshold, 24_900);
+      assert.equal(quote.shippingFee, 0);
+      return app.inject({
+        method: "POST",
+        url: "/v1/account/shipping-requests",
+        headers: {
+          ...auth(owner.token),
+          "idempotency-key": `shipping-create-${randomUUID()}`,
+        },
+        payload: { quoteId: quote.id, addressVersion: quote.addressVersion },
+      });
+    };
+
     const firstInventory = await pool.query<{ id: string }>(
-      "INSERT INTO inventory_units(owner_id,product_id,source_type,status) VALUES($1,$2,'ADMIN_ADJUSTMENT','OWNED') RETURNING id",
+      "INSERT INTO inventory_units(owner_id,product_id,source_type,status) VALUES($1,$2,'GACHA','OWNED') RETURNING id",
       [owner.id, productId],
     );
-    const firstCreated = await app.inject({
-      method: "POST",
-      url: "/v1/account/shipping-requests",
-      headers: {
-        ...auth(owner.token),
-        "idempotency-key": `shipping-create-${randomUUID()}`,
-      },
-      payload: { inventoryUnitIds: [firstInventory.rows[0]!.id] },
-    });
+    const firstCreated = await createShippingRequest(firstInventory.rows[0]!.id);
     assert.equal(firstCreated.statusCode, 201, firstCreated.body);
     const firstRequest = firstCreated.json() as { id: string; requestedAt: string };
 
@@ -103,18 +131,10 @@ test(
     assert.equal((beforeTransition.json() as { status: string; version: number }).version, 1);
 
     const secondInventory = await pool.query<{ id: string }>(
-      "INSERT INTO inventory_units(owner_id,product_id,source_type,status) VALUES($1,$2,'ADMIN_ADJUSTMENT','OWNED') RETURNING id",
+      "INSERT INTO inventory_units(owner_id,product_id,source_type,status) VALUES($1,$2,'GACHA','OWNED') RETURNING id",
       [owner.id, productId],
     );
-    const secondCreated = await app.inject({
-      method: "POST",
-      url: "/v1/account/shipping-requests",
-      headers: {
-        ...auth(owner.token),
-        "idempotency-key": `shipping-create-${randomUUID()}`,
-      },
-      payload: { inventoryUnitIds: [secondInventory.rows[0]!.id] },
-    });
+    const secondCreated = await createShippingRequest(secondInventory.rows[0]!.id);
     assert.equal(secondCreated.statusCode, 201, secondCreated.body);
     const secondRequest = secondCreated.json() as { id: string };
     await pool.query(
@@ -143,6 +163,15 @@ test(
       },
     });
     assert.equal(addressChanged.statusCode, 200, addressChanged.body);
+
+    await pool.query(
+      "UPDATE catalog_ips SET name_ko=$2 WHERE id=$1",
+      [ipId, `변경된 배송 조회 IP ${suffix}`],
+    );
+    await pool.query(
+      "UPDATE catalog_products SET name=$2,image_url=$3,version=version+1 WHERE id=$1",
+      [productId, `변경된 배송 조회 가챠 ${suffix}`, "https://example.test/changed-product.webp"],
+    );
 
     const processingReason = "고객 배송 조회 상태 반영 검증 포장 시작";
     const processing = await app.inject({
@@ -201,8 +230,19 @@ test(
       shippedAt: stored.rows[0]!.shipped_at.toISOString(),
       trackingCarrier: "CJ대한통운",
       trackingNumber: `TRACK-${suffix}`,
+      items: [{
+        inventoryUnitId: firstInventory.rows[0]!.id,
+        productId,
+        productName: `배송 조회 가챠 ${suffix}`,
+        ipId,
+        ipNameKo: `배송 조회 IP ${suffix}`,
+        category: "gacha",
+        imageUrl: null,
+        productVersion: 1,
+      }],
     });
     assert.doesNotMatch(detail.body, /김영민|01012345678|문 앞|이변경|01099990000|변경로 2/);
+    assert.doesNotMatch(detail.body, /변경된 배송 조회|changed-product/);
 
     const firstPage = await app.inject({
       method: "GET",

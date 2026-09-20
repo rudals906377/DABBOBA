@@ -39,7 +39,7 @@ export type MediaRawUpload = {
   maxBytes: number;
 };
 
-export const MAX_MEDIA_BYTES = 10 * 1024 * 1024;
+export const MAX_MEDIA_BYTES = 5 * 1024 * 1024;
 export const STORAGE_REQUEST_TIMEOUT_MS = 15_000;
 export const MAX_UPLOAD_LIFETIME_SECONDS = 120;
 const MAX_JSON_BYTES = 64 * 1024;
@@ -286,6 +286,38 @@ export class SupabaseMediaStorage {
     const params = [...result.searchParams.entries()];
     requireValue(params.length === 1 && params[0]?.[0] === "token" && /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(params[0][1]), "INVALID_RESPONSE");
     return result.toString();
+  }
+
+  /**
+   * Edge runtimes can issue a short-lived, exact-object S3 URL without making
+   * an authenticated Storage REST round trip from inside the same project.
+   */
+  async signedS3Read(key: string, version: string, expiresIn: number): Promise<string> {
+    validKey(key);
+    validVersion(version);
+    requireValue(Number.isInteger(expiresIn) && expiresIn >= 1 && expiresIn <= 300);
+    const target = new URL(this.#endpoint);
+    target.pathname += `/${this.#bucket}/${key.split("/").map(encodeURIComponent).join("/")}`;
+    try {
+      const request = new HttpRequest({
+        protocol: target.protocol,
+        hostname: target.hostname,
+        ...(target.port ? { port: Number(target.port) } : {}),
+        path: target.pathname,
+        method: "GET",
+        headers: { host: target.host },
+        query: { versionId: version },
+      });
+      const signed = await this.#presigner.presign(request, { expiresIn });
+      for (const [name, value] of Object.entries(signed.query ?? {})) {
+        requireValue(typeof value === "string", "INVALID_RESPONSE");
+        target.searchParams.set(name, value);
+      }
+      requireValue(target.searchParams.get("versionId") === version, "INVALID_RESPONSE");
+      requireValue(target.searchParams.get("X-Amz-Expires") === String(expiresIn), "INVALID_RESPONSE");
+      requireValue(Boolean(target.searchParams.get("X-Amz-Signature")), "INVALID_RESPONSE");
+      return target.toString();
+    } catch (error) { throw this.#safeError(error); }
   }
 
   async deleteObject(key: string): Promise<void> {

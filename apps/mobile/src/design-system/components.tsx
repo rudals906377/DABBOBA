@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import {
   ActivityIndicator,
   Pressable,
@@ -6,13 +6,20 @@ import {
   View,
   type PressableProps,
   type StyleProp,
-  type TextProps,
+  type TextInputProps,
+  type TextStyle,
   type ViewStyle,
 } from "react-native";
-import { AppText as Text, BalancedAppText, BalancedParagraphText } from "@/components/Typography";
+import {
+  AppTextInput,
+  AppText as Text,
+  BalancedAppText,
+  BalancedParagraphText,
+  type AppTextProps,
+} from "@/components/Typography";
 import { seed, type SeedActionVariant } from "@/design-system/seed";
 
-type SeedActionButtonProps = Omit<PressableProps, "children" | "style"> & {
+export type SeedActionButtonProps = Omit<PressableProps, "children" | "style"> & {
   label: string;
   variant?: SeedActionVariant;
   size?: keyof typeof seed.size.actionButton;
@@ -41,6 +48,7 @@ export function SeedActionButton({
     <Pressable
       {...props}
       accessibilityRole="button"
+      accessibilityLabel={props.accessibilityLabel ?? label}
       accessibilityState={{ disabled: unavailable, busy: loading }}
       disabled={unavailable}
       style={({ pressed }) => [
@@ -52,41 +60,53 @@ export function SeedActionButton({
         style,
       ]}
     >
-      {loading ? <ActivityIndicator color={labelStyle.color} /> : leading}
-      <Text numberOfLines={1} style={[styles.actionLabel, labelStyle]}>{label}</Text>
-      {loading ? null : trailing}
+      {loading ? <ActivityIndicator accessible={false} color={labelStyle.color} /> : leading ? (
+        <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants">{leading}</View>
+      ) : null}
+      <Text variant="button" numberOfLines={1} style={[styles.actionLabel, labelStyle]}>{label}</Text>
+      {loading || !trailing ? null : (
+        <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants">{trailing}</View>
+      )}
     </Pressable>
   );
 }
 
-type SeedChipProps = Omit<PressableProps, "children" | "style"> & {
+export type SeedChipProps = Omit<PressableProps, "children" | "style"> & {
   label: string;
   selected?: boolean;
   style?: StyleProp<ViewStyle>;
 };
 
-export function SeedChip({ label, selected = false, disabled = false, style, ...props }: SeedChipProps) {
+export function SeedChip({ label, selected = false, disabled = false, hitSlop = 4, style, ...props }: SeedChipProps) {
   const unavailable = Boolean(disabled);
   return (
     <Pressable
       {...props}
+      hitSlop={hitSlop}
       accessibilityRole="button"
+      accessibilityLabel={props.accessibilityLabel ?? label}
       accessibilityState={{ selected, disabled: unavailable }}
       disabled={unavailable}
-      style={({ pressed }) => [
-        styles.chip,
-        selected && styles.chipSelected,
-        pressed && styles.chipPressed,
-        unavailable && styles.disabled,
-        style,
-      ]}
+      style={[styles.chipTouchTarget, unavailable && styles.disabled, style]}
     >
-      <Text style={[styles.chipLabel, selected && styles.chipLabelSelected]}>{label}</Text>
+      {({ pressed }) => (
+        <View
+          pointerEvents="none"
+          style={[
+            styles.chip,
+            selected && styles.chipSelected,
+            pressed && styles.chipPressed,
+            pressed && selected && styles.chipSelectedPressed,
+          ]}
+        >
+          <Text variant="chip" style={[styles.chipLabel, selected && styles.chipLabelSelected]}>{label}</Text>
+        </View>
+      )}
     </Pressable>
   );
 }
 
-type SeedIconButtonProps = Omit<PressableProps, "children" | "style"> & {
+export type SeedIconButtonProps = Omit<PressableProps, "children" | "style"> & {
   label: string;
   children: ReactNode;
   style?: StyleProp<ViewStyle>;
@@ -103,7 +123,9 @@ export function SeedIconButton({ label, children, disabled, style, ...props }: S
       disabled={unavailable}
       style={({ pressed }) => [styles.iconButton, pressed && styles.iconButtonPressed, unavailable && styles.disabled, style]}
     >
-      {children}
+      <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+        {children}
+      </View>
     </Pressable>
   );
 }
@@ -117,7 +139,7 @@ export function SeedInlineGuidance({
   paragraphs,
   children,
   ...props
-}: TextProps & { paragraphs?: readonly string[] }) {
+}: AppTextProps & { paragraphs?: readonly string[] }) {
   if (paragraphs) {
     return (
       <BalancedParagraphText
@@ -151,6 +173,35 @@ export function SeedInputShell({ children, focused = false, error = false, varia
   );
 }
 
+export type SeedTextInputProps = TextInputProps & {
+  focusStyle?: StyleProp<TextStyle>;
+};
+
+export function SeedTextInput({
+  onBlur,
+  onFocus,
+  style,
+  focusStyle,
+  ...props
+}: SeedTextInputProps) {
+  const [focused, setFocused] = useState(false);
+
+  return (
+    <AppTextInput
+      {...props}
+      onBlur={(event) => {
+        setFocused(false);
+        onBlur?.(event);
+      }}
+      onFocus={(event) => {
+        setFocused(true);
+        onFocus?.(event);
+      }}
+      style={[style, focused && styles.textInputFocused, focused && focusStyle]}
+    />
+  );
+}
+
 const actionVariants = StyleSheet.create({
   brandSolid: { backgroundColor: seed.color.background.brandSolid },
   neutralSolid: { backgroundColor: seed.color.background.neutralSolid },
@@ -180,9 +231,16 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     gap: seed.spacing.x2,
   },
-  actionPressed: { opacity: seed.state.pressedOpacity },
+  actionPressed: {
+    opacity: seed.state.pressedOpacity,
+    transform: [{ translateY: seed.state.pressedTranslateY }, { scale: seed.state.pressedScale }],
+  },
   actionLabel: seed.typography.button,
   disabled: { opacity: seed.state.disabledOpacity },
+  chipTouchTarget: {
+    minHeight: seed.size.touchTarget,
+    justifyContent: "center",
+  },
   chip: {
     minHeight: seed.size.chip,
     paddingHorizontal: 14,
@@ -197,7 +255,12 @@ const styles = StyleSheet.create({
     borderColor: seed.color.background.brandSolid,
     backgroundColor: seed.color.background.brandSolid,
   },
-  chipPressed: { backgroundColor: seed.color.background.neutralWeakPressed },
+  chipPressed: {
+    opacity: seed.state.pressedOpacity,
+    backgroundColor: seed.color.background.neutralWeakPressed,
+    transform: [{ translateY: seed.state.pressedTranslateY }, { scale: seed.state.pressedScale }],
+  },
+  chipSelectedPressed: { backgroundColor: seed.color.background.brandSolidPressed },
   chipLabel: { ...seed.typography.chip, color: seed.color.foreground.muted },
   chipLabelSelected: { color: seed.color.foreground.onBrand, fontWeight: "700" },
   iconButton: {
@@ -207,7 +270,11 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  iconButtonPressed: { backgroundColor: seed.color.background.transparentPressed },
+  iconButtonPressed: {
+    opacity: seed.state.pressedOpacity,
+    backgroundColor: seed.color.background.transparentPressed,
+    transform: [{ translateY: seed.state.pressedTranslateY }, { scale: seed.state.pressedScale }],
+  },
   card: {
     borderRadius: seed.radius.r4,
     borderWidth: 1,
@@ -226,7 +293,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: seed.spacing.x2,
   },
-  inputSearch: { borderColor: seed.color.stroke.brand },
-  inputFocused: { borderColor: seed.color.stroke.brand, borderWidth: 2 },
+  inputSearch: { borderColor: seed.color.stroke.neutral },
+  inputFocused: { borderColor: seed.color.stroke.focus, borderWidth: 2 },
   inputError: { borderColor: seed.color.stroke.critical },
+  textInputFocused: { borderColor: seed.color.stroke.focus, borderWidth: 2 },
 });

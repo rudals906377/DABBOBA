@@ -1,5 +1,16 @@
 type Environment = Record<string, string | undefined>;
-import { loadMediaStorageConfig, type MediaStorageConfiguration } from "@dabboba/config";
+import {
+  assertDatabaseUrlForTier,
+  assertLocalTestProviderBoundary,
+  loadBackendEnvironmentTier,
+  loadMediaStorageConfig,
+  type BackendEnvironmentTier,
+  type MediaStorageConfiguration,
+} from "@dabboba/config";
+import {
+  assertInicisInquiryConfig,
+  type InicisInquiryConfig,
+} from "./inicis-inquiry.js";
 
 export type RuntimeEnvironment = "development" | "test" | "production";
 
@@ -18,6 +29,7 @@ export const MAX_WORKER_RUN_SECONDS = 45;
 
 export type WorkerConfig = {
   environment: RuntimeEnvironment;
+  environmentTier?: BackendEnvironmentTier;
   databaseUrl: string;
   queueName: string;
   outboxBatchSize: number;
@@ -35,8 +47,22 @@ export type WorkerConfig = {
   gcsProjectId: string | null;
   mediaStorageProvider?: MediaStorageConfiguration["mediaStorageProvider"];
   supabaseStorage?: MediaStorageConfiguration["supabaseStorage"];
+  supabaseAuthAdmin: { url: string; secretKey: string } | null;
+  /** Optional only for backwards-compatible programmatic fixtures; loaded configs always set it. */
+  appleRevocation?: {
+    clientId: string;
+    clientSecret: string;
+    encryptionKey: string;
+    keyVersion: number;
+  } | null;
   notificationDeliveryUrl: string | null;
   notificationDeliveryToken: string | null;
+  /** Optional only for backwards-compatible programmatic fixtures; loaded configs always set it. */
+  expoPushAccessToken?: string | null;
+  /** Optional only for backwards-compatible programmatic fixtures; loaded configs always set it. */
+  paymentReconciliation?:
+    | { provider: "MANUAL_REVIEW" }
+    | ({ provider: "KG_INICIS" } & InicisInquiryConfig);
   logLevel: "debug" | "info" | "warn" | "error";
 };
 
@@ -69,7 +95,12 @@ function runtimeEnvironment(env: Environment): RuntimeEnvironment {
 }
 
 function validateUrl(value: string, key: string, protocols: readonly string[]): string {
-  const parsed = new URL(value);
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    throw new Error(`${key} must be a valid URL`);
+  }
   if (!protocols.includes(parsed.protocol)) throw new Error(`${key} must use ${protocols.join(" or ")}`);
   return parsed.toString().replace(/\/$/, "");
 }
@@ -82,13 +113,71 @@ function logLevel(env: Environment): WorkerConfig["logLevel"] {
   return value;
 }
 
+function paymentReconciliationConfig(
+  env: Environment,
+  environmentTier: BackendEnvironmentTier,
+): NonNullable<WorkerConfig["paymentReconciliation"]> {
+  const provider = env.PAYMENT_RECONCILIATION_PROVIDER?.trim() || "MANUAL_REVIEW";
+  if (provider !== "MANUAL_REVIEW" && provider !== "KG_INICIS") {
+    throw new Error("PAYMENT_RECONCILIATION_PROVIDER must be MANUAL_REVIEW or KG_INICIS");
+  }
+
+  const environment = optional(env, "KG_INICIS_ENVIRONMENT");
+  const mid = optional(env, "KG_INICIS_MID");
+  const iniApiKey = optional(env, "KG_INICIS_INIAPI_KEY");
+  const clientIp = optional(env, "KG_INICIS_CLIENT_IP");
+  const hasInicisConfig = Boolean(environment || mid || iniApiKey || clientIp);
+  if (provider === "MANUAL_REVIEW") {
+    if (hasInicisConfig) {
+      throw new Error("KG INICIS inquiry settings must be unset when reconciliation uses MANUAL_REVIEW");
+    }
+    return { provider };
+  }
+
+  if (!env.DABBOBA_ENVIRONMENT_TIER?.trim()) {
+    throw new Error("KG INICIS inquiry requires an explicit DABBOBA_ENVIRONMENT_TIER");
+  }
+  if (!environment || !mid || !iniApiKey || !clientIp) {
+    throw new Error("KG INICIS inquiry requires environment, MID, INIAPI key, and client IPv4");
+  }
+  if (
+    (environmentTier === "STAGING" && environment !== "TEST")
+    || (environmentTier === "PRODUCTION" && environment !== "LIVE")
+    || (environmentTier !== "STAGING" && environmentTier !== "PRODUCTION")
+  ) {
+    throw new Error("KG INICIS inquiry is allowed only for STAGING+TEST or PRODUCTION+LIVE");
+  }
+
+  const config: InicisInquiryConfig = {
+    environment: environment as InicisInquiryConfig["environment"],
+    mid,
+    iniApiKey,
+    clientIp,
+  };
+  assertInicisInquiryConfig(config);
+  return {
+    provider,
+    ...config,
+  };
+}
+
 export function loadWorkerConfig(env: Environment = process.env): WorkerConfig {
   const environment = runtimeEnvironment(env);
+  const explicitTier = Boolean(env.DABBOBA_ENVIRONMENT_TIER?.trim());
+  const environmentTier = loadBackendEnvironmentTier(env, environment, env === process.env);
+  if (environmentTier === "PRODUCTION" && (explicitTier || env === process.env)
+    && env.DABBOBA_ENABLE_PRODUCTION_WORKER !== "true") {
+    throw new Error("Production worker execution is disabled unless DABBOBA_ENABLE_PRODUCTION_WORKER=true");
+  }
   const databaseUrl = validateUrl(
     required(env, "WORKER_DATABASE_URL"),
     "WORKER_DATABASE_URL",
     ["postgres:", "postgresql:"],
   );
+  if (explicitTier) {
+    assertDatabaseUrlForTier(databaseUrl, "WORKER_DATABASE_URL", environmentTier);
+    assertLocalTestProviderBoundary(env, environmentTier);
+  }
   const queueName = env.WORKER_QUEUE_NAME?.trim() || "dabboba_worker";
   if (queueName !== "dabboba_worker") {
     throw new Error("WORKER_QUEUE_NAME must be dabboba_worker to match the migrated least-privilege queue ACL");
@@ -100,6 +189,69 @@ export function loadWorkerConfig(env: Environment = process.env): WorkerConfig {
   const notificationDeliveryUrl = notificationDeliveryUrlRaw
     ? validateUrl(notificationDeliveryUrlRaw, "NOTIFICATION_DELIVERY_URL", ["http:", "https:"])
     : null;
+  const expoPushAccessToken = optional(env, "EXPO_PUSH_ACCESS_TOKEN");
+  if (expoPushAccessToken && (
+    expoPushAccessToken.length < 20
+    || expoPushAccessToken.length > 4_096
+    || /[\s\u0000-\u001f\u007f]/.test(expoPushAccessToken)
+  )) {
+    throw new Error("EXPO_PUSH_ACCESS_TOKEN must be a valid server-only Expo access token");
+  }
+  if (notificationDeliveryUrl && expoPushAccessToken) {
+    throw new Error("Configure either EXPO_PUSH_ACCESS_TOKEN or NOTIFICATION_DELIVERY_URL, not both");
+  }
+  const paymentReconciliation = paymentReconciliationConfig(env, environmentTier);
+  const supabaseUrl = optional(env, "SUPABASE_URL");
+  const supabaseAuthAdminSecretKey = optional(env, "SUPABASE_AUTH_ADMIN_SECRET_KEY");
+  if (Boolean(supabaseUrl) !== Boolean(supabaseAuthAdminSecretKey)) {
+    throw new Error("Supabase Auth deletion requires SUPABASE_URL and SUPABASE_AUTH_ADMIN_SECRET_KEY together");
+  }
+  if (supabaseAuthAdminSecretKey && (
+    supabaseAuthAdminSecretKey.length < 20
+    || supabaseAuthAdminSecretKey.length > 4_096
+    || /[\r\n]/.test(supabaseAuthAdminSecretKey)
+    || /^sb_publishable_/i.test(supabaseAuthAdminSecretKey)
+  )) {
+    throw new Error("SUPABASE_AUTH_ADMIN_SECRET_KEY must be a server-only Supabase secret key");
+  }
+  const supabaseAuthAdmin = supabaseUrl && supabaseAuthAdminSecretKey
+    ? {
+        url: validateUrl(supabaseUrl, "SUPABASE_URL", environment === "production" ? ["https:"] : ["http:", "https:"]),
+        secretKey: supabaseAuthAdminSecretKey,
+      }
+    : null;
+
+  const appleClientId = optional(env, "APPLE_CLIENT_ID");
+  const appleClientSecret = optional(env, "APPLE_CLIENT_SECRET");
+  const appleEncryptionKey = optional(env, "APPLE_TOKEN_ENCRYPTION_KEY");
+  const appleEncryptionKeyVersion = optional(env, "APPLE_TOKEN_ENCRYPTION_KEY_VERSION");
+  const appleValues = [appleClientId, appleClientSecret, appleEncryptionKey, appleEncryptionKeyVersion];
+  if (appleValues.some(Boolean) && !appleValues.every(Boolean)) {
+    throw new Error("Apple revocation requires APPLE_CLIENT_ID, APPLE_CLIENT_SECRET, and token encryption key configuration together");
+  }
+  let appleRevocation: WorkerConfig["appleRevocation"] = null;
+  if (appleClientId && appleClientSecret && appleEncryptionKey && appleEncryptionKeyVersion) {
+    if (appleClientId.length > 255 || /[\s\u0000-\u001f\u007f]/.test(appleClientId)) {
+      throw new Error("APPLE_CLIENT_ID is invalid");
+    }
+    if (appleClientSecret.length < 32 || appleClientSecret.length > 16_384 || /[\r\n]/.test(appleClientSecret)) {
+      throw new Error("APPLE_CLIENT_SECRET is invalid");
+    }
+    if (!/^[A-Za-z0-9+/_-]{43}={0,2}$/.test(appleEncryptionKey)
+      || Buffer.from(appleEncryptionKey, appleEncryptionKey.includes("-") || appleEncryptionKey.includes("_") ? "base64url" : "base64").length !== 32) {
+      throw new Error("APPLE_TOKEN_ENCRYPTION_KEY must encode exactly 32 random bytes");
+    }
+    const keyVersion = Number(appleEncryptionKeyVersion);
+    if (!Number.isInteger(keyVersion) || keyVersion < 1 || keyVersion > 2_147_483_647) {
+      throw new Error("APPLE_TOKEN_ENCRYPTION_KEY_VERSION must be a positive integer");
+    }
+    appleRevocation = {
+      clientId: appleClientId,
+      clientSecret: appleClientSecret,
+      encryptionKey: appleEncryptionKey,
+      keyVersion,
+    };
+  }
 
   if (environment === "production") {
     if (!gcsBucket && !mediaStorage.supabaseStorage) throw new Error("GCS_BUCKET or Supabase Storage is required in production");
@@ -128,6 +280,7 @@ export function loadWorkerConfig(env: Environment = process.env): WorkerConfig {
 
   return {
     environment,
+    environmentTier,
     databaseUrl,
     queueName,
     outboxBatchSize: integer(env, "WORKER_OUTBOX_BATCH_SIZE", 50, 1, 500),
@@ -144,8 +297,12 @@ export function loadWorkerConfig(env: Environment = process.env): WorkerConfig {
     gcsBucket,
     gcsProjectId: optional(env, "GCS_PROJECT_ID"),
     ...mediaStorage,
+    supabaseAuthAdmin,
+    appleRevocation,
     notificationDeliveryUrl,
     notificationDeliveryToken: optional(env, "NOTIFICATION_DELIVERY_TOKEN"),
+    expoPushAccessToken,
+    paymentReconciliation,
     logLevel: logLevel(env),
   };
 }

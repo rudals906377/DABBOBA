@@ -2,20 +2,9 @@ import { Storage, type GenerateSignedPostPolicyV4Options } from "@google-cloud/s
 import { storedMediaLocation, type ApiConfig } from "@dabboba/config";
 import { SupabaseMediaStorage } from "@dabboba/media-storage";
 import { AppError } from "./errors.js";
-
-export type MediaObjectInfo = {
-  version: string;
-  size: number;
-  contentType: string;
-  metadata: Record<string, unknown>;
-};
-
-export type MediaObject = {
-  name: string;
-  info(): Promise<MediaObjectInfo>;
-  read(version: string): AsyncIterable<Uint8Array>;
-  delete(): Promise<void>;
-};
+import type { MediaObject } from "./media-object.js";
+export { validMediaObjectVersion } from "./media-object.js";
+export type { MediaObject, MediaObjectInfo } from "./media-object.js";
 
 type UploadInput = {
   key: string; mediaId: string; mimeType: string; byteSize: number; checksumSha256: string;
@@ -95,8 +84,4 @@ export function configuredMediaStorage(config: ApiConfig, metadata?: unknown) {
       return url;
     },
   };
-}
-
-export function validMediaObjectVersion(provider: "gcs" | "supabase", version: string): boolean {
-  return provider === "gcs" ? /^\d+$/.test(version) : /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(version);
 }

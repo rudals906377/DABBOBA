@@ -7,7 +7,9 @@ import type { components, paths } from "./generated.js";
 test("generated contract includes public and privileged seams", () => {
   const requiredPaths: Array<keyof paths> = [
     "/readyz",
+    "/v1/public/config",
     "/v1/auth/me",
+    "/v1/auth/logout-others",
     "/v1/notices",
     "/v1/inquiries",
     "/v1/media/uploads",
@@ -18,11 +20,20 @@ test("generated contract includes public and privileged seams", () => {
     "/v1/account/deletion-request",
     "/v1/account/draw-entitlements",
     "/v1/account/notification-preferences",
+    "/v1/account/notifications",
+    "/v1/account/notifications/unread-summary",
+    "/v1/account/notifications/{notificationId}",
+    "/v1/account/notifications/{notificationId}/read",
+    "/v1/account/push-devices",
+    "/v1/account/push-devices/{installationId}",
     "/v1/account/point-returns",
+    "/v1/account/shipping-quotes",
     "/v1/account/shipping-requests",
     "/v1/account/shipping-requests/{shippingRequestId}",
     "/v1/catalog/characters",
     "/v1/catalog/home-sections",
+    "/v1/catalog/recent-draws",
+    "/v1/catalog/category-settings",
     "/v1/catalog/products/{productId}/draw-odds",
     "/v1/catalog/products/{productId}/kuji-slots",
     "/v1/community/blocks",
@@ -30,6 +41,7 @@ test("generated contract includes public and privileged seams", () => {
     "/v1/wanted-requests",
     "/v1/wanted-requests/{requestId}/like",
     "/v1/exchange/listings",
+    "/v1/exchange/activity",
     "/v1/kuji/rooms/{productId}/entries",
     "/v1/kuji/rooms/{productId}/entries/{entryId}",
     "/v1/kuji/rooms/{productId}/entries/{entryId}/slots",
@@ -46,11 +58,75 @@ test("generated contract includes public and privileged seams", () => {
     "/v1/admin/exchange/listings",
     "/v1/admin/home-sections",
     "/v1/admin/home-sections/{sectionId}",
+    "/v1/admin/category-settings",
+    "/v1/admin/category-settings/{category}",
     "/v1/admin/products/{productId}/draw-versions",
     "/v1/admin/reports/{reportId}/resolution",
     "/v1/admin/audit-logs",
   ];
-  assert.equal(requiredPaths.length, 43);
+  assert.equal(requiredPaths.length, 57);
+});
+
+test("notification contract is owner-scoped, cursor-paged, and uses finite navigation destinations", () => {
+  const notification = {
+    id: "10000000-0000-4000-8000-000000000001",
+    kind: "SHIPPING_SHIPPED",
+    title: "상품이 출고됐어요",
+    body: "배송 신청 내역에서 운송장 정보를 확인해 주세요.",
+    data: { shippingRequestId: "20000000-0000-4000-8000-000000000001" },
+    destination: {
+      route: "profile",
+      detail: {
+        kind: "shipping",
+        id: "20000000-0000-4000-8000-000000000001",
+      },
+    },
+    readAt: null,
+    createdAt: "2026-09-20T10:00:00.000Z",
+  } satisfies components["schemas"]["AccountNotification"];
+  const page = {
+    items: [notification],
+    nextCursor: "opaque-next-cursor",
+  } satisfies components["schemas"]["NotificationPage"];
+  const summary = {
+    unreadCount: 1,
+    newestUnreadCreatedAt: notification.createdAt,
+  } satisfies components["schemas"]["NotificationUnreadSummary"];
+  const detailMethod: keyof paths["/v1/account/notifications/{notificationId}"] = "get";
+
+  assert.equal(page.items[0]?.destination.route, "profile");
+  assert.equal(page.items[0]?.destination.detail?.kind, "shipping");
+  assert.equal(summary.unreadCount, 1);
+  assert.equal(detailMethod, "get");
+});
+
+test("push device contract exposes registration without returning the provider token", () => {
+  const input = {
+    installationId: "10000000-0000-4000-8000-000000000001",
+    expoPushToken: "ExpoPushToken[abcdefgh_ABCDEFGH-12345678]",
+    platform: "IOS",
+    appVersion: "1.0.0",
+  } satisfies components["schemas"]["RegisterPushDeviceInput"];
+  const registration = {
+    installationId: input.installationId,
+    platform: input.platform,
+    appVersion: input.appVersion,
+    registeredAt: "2026-09-20T12:00:00.000Z",
+  } satisfies components["schemas"]["PushDeviceRegistration"];
+  const registerMethod: keyof paths["/v1/account/push-devices"] = "post";
+  const unregisterMethod: keyof paths["/v1/account/push-devices/{installationId}"] = "delete";
+
+  assert.equal(registerMethod, "post");
+  assert.equal(unregisterMethod, "delete");
+  assert.equal("expoPushToken" in registration, false);
+});
+
+test("generated public config exposes the fail-closed commerce mode and legal versions", () => {
+  const config: components["schemas"]["PublicConfig"] = {
+    commerceMode: "PRELAUNCH",
+    requiredPolicyVersions: { terms: "2026-09-14", privacy: "2026-09-20" },
+  };
+  assert.equal(config.commerceMode, "PRELAUNCH");
 });
 
 test("generated gacha completion proof exposes immutable identities without prize or mutation data", () => {
@@ -71,6 +147,10 @@ test("generated home catalog section contract separates render-ready public data
   const publicSection = {
     id: "demon-slayer",
     title: "귀멸의 칼날 컬렉션",
+    subtitle: "이번 주 추천 쿠지",
+    layoutKind: "kuji",
+    sourceKind: "IP",
+    visibleLimit: 8,
     sortOrder: 10,
     isActive: true,
     version: 2,
@@ -101,10 +181,15 @@ test("generated home catalog section contract separates render-ready public data
       releaseDate: null,
       price: 9_900,
       availableQuantity: 36,
+      totalQuantity: 80,
       metadata: {},
       imageUrl: null,
+      storefrontImageUrl: null,
       isActive: true,
       isPrizeOnly: false,
+      saleStatus: "ON_SALE",
+      purchasable: true,
+      blockedReason: null,
       version: 1,
       createdAt: "2026-09-04T00:00:00.000Z",
       updatedAt: "2026-09-04T00:00:00.000Z",
@@ -113,11 +198,30 @@ test("generated home catalog section contract separates render-ready public data
   const publicLayout = {
     configured: true,
     items: [publicSection],
+    bestProductId: "demon-slayer-kuji",
+    evaluatedAt: "2026-09-11T00:00:00.000Z",
   } satisfies components["schemas"]["HomeCatalogSectionList"];
+  const publicRecentDraws = {
+    serverNow: "2026-09-12T07:30:00.000Z",
+    items: [{
+      id: "40000000-0000-4000-8000-000000000001",
+      productId: "demon-slayer-kuji",
+      category: "kuji",
+      prizeName: "리치 피규어",
+      prizeImageUrl: "/assets/prizes/rich-figure.webp",
+      rarity: "A",
+      committedAt: "2026-09-12T07:29:58.000Z",
+    }],
+  } satisfies components["schemas"]["HomeRecentDrawActivityList"];
   const adminSection = {
     id: publicSection.id,
     title: publicSection.title,
+    subtitle: publicSection.subtitle,
     ipId: publicSection.ip.id,
+    layoutKind: publicSection.layoutKind,
+    sourceKind: publicSection.sourceKind,
+    visibleLimit: publicSection.visibleLimit,
+    manualProductIds: [],
     sortOrder: publicSection.sortOrder,
     isActive: publicSection.isActive,
     version: publicSection.version,
@@ -131,13 +235,23 @@ test("generated home catalog section contract separates render-ready public data
   const create = {
     id: "demon-slayer",
     title: "귀멸의 칼날 컬렉션",
+    subtitle: "이번 주 추천 쿠지",
     ipId: "demon-slayer",
+    layoutKind: "kuji",
+    sourceKind: "IP",
+    visibleLimit: 8,
+    manualProductIds: [],
     sortOrder: 10,
     isActive: true,
   } satisfies components["schemas"]["CreateHomeCatalogSectionInput"];
   const update = {
     title: "귀멸의 칼날 추천",
-    ipId: "demon-slayer",
+    subtitle: "최근 인기 기준",
+    ipId: null,
+    layoutKind: "gacha",
+    sourceKind: "POPULAR",
+    visibleLimit: 12,
+    manualProductIds: [],
     sortOrder: 20,
     isActive: false,
     expectedVersion: 2,
@@ -152,7 +266,14 @@ test("generated home catalog section contract separates render-ready public data
   const conflictResponse: keyof paths["/v1/admin/home-sections/{sectionId}"]["patch"]["responses"] = 409;
 
   assert.equal(publicLayout.configured, true);
+  assert.equal(publicLayout.items[0]?.layoutKind, "kuji");
+  assert.equal(publicRecentDraws.items[0]?.prizeName, "리치 피규어");
+  assert.doesNotMatch(JSON.stringify(publicRecentDraws), /nickname|displayName|userId/i);
+  const openApi = readFileSync(fileURLToPath(new URL("../openapi/dabboba.openapi.yaml", import.meta.url)), "utf8");
+  assert.match(openApi, /HomeRecentDrawActivity:[\s\S]*?prizeImageUrl: \{ type: \[string, "null"\], format: uri-reference \}/);
   assert.equal(adminLayout.items[0]?.ipId, publicSection.ip.id);
+  assert.equal(adminLayout.items[0]?.layoutKind, publicSection.layoutKind);
+  assert.equal(adminLayout.items[0]?.sourceKind, "IP");
   assert.equal(publicSection.ip.id, create.ipId);
   assert.equal(publicSection.products[0]?.isPrizeOnly, false);
   assert.equal(update.expectedVersion, 2);
@@ -161,6 +282,117 @@ test("generated home catalog section contract separates render-ready public data
   assert.equal(adminCreateMethod, "post");
   assert.equal(createdResponse, 201);
   assert.equal(conflictResponse, 409);
+});
+
+test("admin Home layout contract keeps legacy rows visible but requires a category for every mutation", () => {
+  const legacy = {
+    id: "legacy-home-section",
+    title: "전환 대기 섹션",
+    subtitle: null,
+    ipId: "demon-slayer",
+    layoutKind: null,
+    sourceKind: "IP",
+    visibleLimit: 20,
+    manualProductIds: [],
+    sortOrder: 0,
+    isActive: false,
+    version: 1,
+    createdAt: "2026-09-05T00:00:00.000Z",
+    updatedAt: "2026-09-05T00:00:00.000Z",
+  } satisfies components["schemas"]["AdminHomeCatalogSection"];
+  const create = {
+    id: "demon-slayer-gacha",
+    title: "귀멸의 칼날 가챠",
+    subtitle: null,
+    ipId: "demon-slayer",
+    layoutKind: "gacha",
+    sourceKind: "IP",
+    visibleLimit: 10,
+    manualProductIds: [],
+    sortOrder: 1,
+    isActive: false,
+  } satisfies components["schemas"]["CreateHomeCatalogSectionInput"];
+  const update = {
+    title: "귀멸의 칼날 쿠지",
+    subtitle: "운영자 추천",
+    ipId: null,
+    layoutKind: "kuji",
+    sourceKind: "MANUAL",
+    visibleLimit: 2,
+    manualProductIds: ["demon-slayer-kuji", "demon-slayer-kuji-last"],
+    sortOrder: 2,
+    isActive: true,
+    expectedVersion: 1,
+  } satisfies components["schemas"]["UpdateHomeCatalogSectionInput"];
+
+  assert.equal(legacy.layoutKind, null);
+  assert.equal(create.layoutKind, "gacha");
+  assert.equal(update.layoutKind, "kuji");
+});
+
+test("generated catalog image contract distinguishes primary and storefront attachments", () => {
+  const primary = {
+    mediaId: "10000000-0000-4000-8000-000000000001",
+    expectedVersion: 1,
+  } satisfies components["schemas"]["ProductImageAttachInput"];
+  const storefront = {
+    ...primary,
+    role: "storefront",
+  } satisfies components["schemas"]["ProductImageAttachInput"];
+  const attachment = {
+    productId: "demon-slayer-kuji",
+    imageUrl: "https://cdn.example.test/storefront.webp",
+    version: 2,
+    mediaId: storefront.mediaId,
+    role: storefront.role,
+  } satisfies components["schemas"]["ProductImageAttachment"];
+  const clearInput = {
+    expectedVersion: 2,
+    role: "storefront",
+  } satisfies components["schemas"]["ProductImageClearInput"];
+  const cleared = {
+    productId: attachment.productId,
+    imageUrl: null,
+    version: 3,
+    role: clearInput.role,
+  } satisfies components["schemas"]["ProductImageClearResult"];
+
+  assert.equal("role" in primary, false);
+  assert.equal(attachment.role, "storefront");
+  assert.equal(cleared.imageUrl, null);
+
+  const document = readFileSync(fileURLToPath(new URL("../openapi/dabboba.openapi.yaml", import.meta.url)), "utf8");
+  const attachInput = document.slice(
+    document.indexOf("    ProductImageAttachInput:\n"),
+    document.indexOf("    ProductImageAttachment:\n"),
+  );
+  assert.match(attachInput, /enum: \[primary, storefront\]/);
+  assert.match(attachInput, /default: primary/);
+  const clearSchema = document.slice(
+    document.indexOf("    ProductImageClearInput:\n"),
+    document.indexOf("    ProductImageClearResult:\n"),
+  );
+  assert.match(clearSchema, /required: \[expectedVersion, role\]/);
+  assert.match(clearSchema, /enum: \[storefront\]/);
+  const imagePath = document.slice(
+    document.indexOf("  \/v1\/admin\/products\/{productId}\/image:\n"),
+    document.indexOf("  \/v1\/admin\/catalog-requests:\n"),
+  );
+  assert.match(imagePath, /\n    delete:\n/);
+  assert.match(imagePath, /operationId: clearAdminProductStorefrontImage/);
+  const product = document.slice(
+    document.indexOf("    CatalogProduct:\n"),
+    document.indexOf("    UpsertProductInput:\n"),
+  );
+  assert.match(product, /required: \[[^\n]*storefrontImageUrl/);
+  assert.match(product, /storefrontImageUrl:[\s\S]*type: \[string, "null"\]/);
+  assert.match(product, /remainingKujiTiers:[\s\S]*PublicKujiTierRemaining/);
+  assert.doesNotMatch(product.match(/required: \[[^\n]*\]/)?.[0] ?? "", /remainingKujiTiers/);
+  const upsertProduct = document.slice(
+    document.indexOf("    UpsertProductInput:\n"),
+    document.indexOf("    ProductList:\n"),
+  );
+  assert.doesNotMatch(upsertProduct, /storefrontImageUrl/);
 });
 
 test("health contracts separate process liveness from database readiness", () => {
@@ -515,9 +747,11 @@ test("generated account shipping contract includes terminal delivery state and e
     trackingNumber: "1234567890",
   } satisfies components["schemas"]["AccountShippingRequest"];
   const deliveredInventoryStatus: components["schemas"]["InventoryUnit"]["status"] = "DELIVERED";
+  const expiredHoldInventoryStatus: components["schemas"]["InventoryUnit"]["status"] = "EXPIRED_HOLD";
 
   assert.equal(shippingRequest.status, "DELIVERED");
   assert.equal(deliveredInventoryStatus, "DELIVERED");
+  assert.equal(expiredHoldInventoryStatus, "EXPIRED_HOLD");
   assert.deepEqual(Object.keys(shippingRequest).sort(), [
     "destination",
     "id",
@@ -530,6 +764,43 @@ test("generated account shipping contract includes terminal delivery state and e
     "updatedAt",
     "version",
   ]);
+});
+
+test("generated shipping mutation contract binds a ten-minute quote to one address version", () => {
+  const inventoryUnitIds = ["22222222-2222-4222-8222-222222222222"];
+  const quote = {
+    id: "11111111-1111-4111-8111-111111111111",
+    inventoryUnitIds,
+    addressId: "33333333-3333-4333-8333-333333333333",
+    addressVersion: 4,
+    destination: {
+      recipientMasked: "홍*동",
+      phoneMasked: "*******5678",
+      postalCode: "01234",
+      addressLine1: "서울특별시 테스트로 1",
+      addressLine2: null,
+    },
+    itemCount: 1,
+    referenceSubtotal: 24_899,
+    containsKuji: false,
+    freeShippingThreshold: 24_900,
+    qualifiesForFreeShipping: false,
+    shippingFee: 3_000,
+    createdAt: "2026-09-20T01:00:00.000Z",
+    expiresAt: "2026-09-20T01:10:00.000Z",
+  } satisfies components["schemas"]["ShippingQuote"];
+  const request = {
+    quoteId: quote.id,
+    addressVersion: quote.addressVersion,
+  } satisfies components["schemas"]["CreateShippingRequestInput"];
+  const createQuoteMethod: keyof paths["/v1/account/shipping-quotes"] = "post";
+
+  assert.equal(createQuoteMethod, "post");
+  assert.deepEqual(quote.inventoryUnitIds, inventoryUnitIds);
+  assert.equal(Date.parse(quote.expiresAt) - Date.parse(quote.createdAt), 10 * 60_000);
+  assert.equal(quote.shippingFee, 3_000);
+  assert.deepEqual(request, { quoteId: quote.id, addressVersion: 4 });
+  assert.equal("inventoryUnitIds" in request, false);
 });
 
 test("generated point return contract is batch-idempotent and exposes the committed balance", () => {
@@ -671,4 +942,70 @@ test("OpenAPI path and method set exactly matches registered Fastify routes", ()
   assert.equal(operationIds.length, contractRoutes.length, "Every OpenAPI operation must have an operationId");
   assert.equal(new Set(operationIds).size, operationIds.length, "OpenAPI operationIds must be unique");
   assert.deepEqual(contractRoutes.sort(), serverRoutes.sort());
+});
+
+function openApiOperation(document: string, path: string, method: typeof routeMethods[number]) {
+  const pathMarker = `\n  ${path}:\n`;
+  const pathStart = document.indexOf(pathMarker);
+  assert.notEqual(pathStart, -1, `OpenAPI path is missing: ${path}`);
+  const pathBodyStart = pathStart + pathMarker.length;
+  const nextPath = document.indexOf("\n  /", pathBodyStart);
+  const components = document.indexOf("\ncomponents:\n", pathBodyStart);
+  const pathEnd = nextPath === -1 ? components : nextPath;
+  assert.ok(pathEnd > pathBodyStart, `OpenAPI path body is malformed: ${path}`);
+  const pathBody = document.slice(pathBodyStart, pathEnd);
+  const methodMarker = `    ${method}:\n`;
+  const methodStart = pathBody.indexOf(methodMarker);
+  assert.notEqual(methodStart, -1, `OpenAPI operation is missing: ${method.toUpperCase()} ${path}`);
+  const operationBodyStart = methodStart + methodMarker.length;
+  const nextMethodMatch = pathBody.slice(operationBodyStart).match(/^    (?:get|post|put|patch|delete):$/m);
+  const operationEnd = nextMethodMatch?.index === undefined
+    ? pathBody.length
+    : operationBodyStart + nextMethodMatch.index;
+  return pathBody.slice(methodStart, operationEnd);
+}
+
+test("current-policy gate advertises a shared 428 response without blocking recovery routes", () => {
+  const document = readFileSync(
+    fileURLToPath(new URL("../openapi/dabboba.openapi.yaml", import.meta.url)),
+    "utf8",
+  );
+  assert.match(
+    document,
+    /LegalAcceptanceRequired:\n[\s\S]*?LegalAcceptanceRequiredErrorEnvelope/,
+  );
+
+  const gatedOperations = [
+    ["/v1/account/profile", "get"],
+    ["/v1/account/push-devices", "post"],
+    ["/v1/orders", "post"],
+    ["/v1/reports", "post"],
+  ] as const;
+  for (const [path, method] of gatedOperations) {
+    assert.match(
+      openApiOperation(document, path, method),
+      /"428": \{ \$ref: "#\/components\/responses\/LegalAcceptanceRequired" \}/,
+      `${method.toUpperCase()} ${path} must document the active-policy gate`,
+    );
+  }
+
+  const recoveryOperations = [
+    ["/v1/auth/logout", "post"],
+    ["/v1/auth/logout-others", "post"],
+    ["/v1/account/deletion-preview", "get"],
+    ["/v1/account/deletion-request", "get"],
+    ["/v1/account/deletion-request", "post"],
+    ["/v1/account/policy-acceptances", "get"],
+  ] as const;
+  for (const [path, method] of recoveryOperations) {
+    assert.doesNotMatch(
+      openApiOperation(document, path, method),
+      /components\/responses\/LegalAcceptanceRequired/,
+      `${method.toUpperCase()} ${path} must remain available during re-consent`,
+    );
+  }
+
+  const acceptance = openApiOperation(document, "/v1/account/policy-acceptances", "post");
+  assert.match(acceptance, /LegalAcceptanceRequiredErrorEnvelope/);
+  assert.doesNotMatch(acceptance, /components\/responses\/LegalAcceptanceRequired/);
 });

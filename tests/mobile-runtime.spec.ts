@@ -287,8 +287,8 @@ test("Expo embed mode fills the native WebView without preview chrome", async ({
 
   const search = ppoba.getByRole("searchbox", { name: "뽀바 상품 검색" });
   await search.fill("JJK");
-  await expect(ppoba.getByRole("button", { name: /주술회전 캡슐 피규어 컬렉션 DX 01/ })).toBeVisible();
-  await expect(ppoba.getByText("1개", { exact: true })).toBeVisible();
+  await expect(ppoba.getByText("찾는 상품이 없어요", { exact: true })).toBeVisible();
+  await expect(ppoba.getByRole("button", { name: /주술회전 캡슐 피규어 컬렉션 DX 01/ })).toHaveCount(0);
 
   await ppoba.getByRole("button", { name: "피규어", exact: true }).click();
   await expect(ppoba.getByText("준비중입니다.", { exact: true })).toBeVisible();

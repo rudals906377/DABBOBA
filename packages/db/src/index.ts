@@ -33,6 +33,67 @@ export type Queryable = Pick<pg.Pool, "query"> | Pick<pg.PoolClient, "query">;
 
 export type DatabaseConnectionConfig = Pick<pg.PoolConfig, "connectionString" | "ssl">;
 
+export type DatabasePoolFault = {
+  errorCode: string | null;
+};
+
+const SAFE_DATABASE_ERROR_CODES = new Set([
+  "ECONNABORTED",
+  "ECONNREFUSED",
+  "ECONNRESET",
+  "EHOSTUNREACH",
+  "ENETUNREACH",
+  "ENOTFOUND",
+  "EPIPE",
+  "ETIMEDOUT",
+  "EAI_AGAIN",
+]);
+const POSTGRES_ERROR_CLASSES = new Set([
+  "00", "01", "02", "03", "08", "09", "0A", "0B", "0F", "0L", "0P", "0Z",
+  "20", "21", "22", "23", "24", "25", "26", "27", "28", "2B", "2D", "2F",
+  "34", "38", "39", "3B", "3D", "3F", "40", "42", "44", "53", "54", "55", "57",
+  "58", "72", "F0", "HV", "P0", "XX",
+]);
+
+function databaseErrorCode(error: Error): string | null {
+  const candidate = (error as Error & { code?: unknown }).code;
+  if (typeof candidate !== "string") return null;
+  if (
+    (/^[0-9A-Z]{5}$/.test(candidate) && POSTGRES_ERROR_CLASSES.has(candidate.slice(0, 2)))
+    || SAFE_DATABASE_ERROR_CODES.has(candidate)
+  ) return candidate;
+  return null;
+}
+
+function reportIdleClientError(fault: DatabasePoolFault): void {
+  process.stderr.write(`${JSON.stringify({
+    level: "error",
+    service: "dabboba-db",
+    message: "Idle database client failed and was removed",
+    errorCode: fault.errorCode,
+  })}\n`);
+}
+
+function observeIdleClientErrors(
+  pool: pg.Pool,
+  observer: ((fault: DatabasePoolFault) => void) | undefined,
+): void {
+  pool.on("error", (error) => {
+    const fault = { errorCode: databaseErrorCode(error) };
+    if (!observer) {
+      reportIdleClientError(fault);
+      return;
+    }
+    try {
+      observer(fault);
+    } catch {
+      // An observability callback must not turn an already-discarded idle
+      // connection into an unhandled EventEmitter error.
+      reportIdleClientError(fault);
+    }
+  });
+}
+
 export function databaseConnectionConfig(databaseUrl: string): DatabaseConnectionConfig {
   try {
     const parsed = new URL(databaseUrl);
@@ -67,15 +128,17 @@ export function createDatabasePool(
   applicationName = "dabboba",
   options: {
     expectedRole?: typeof RUNTIME_DATABASE_ROLE | typeof WORKER_DATABASE_ROLE;
+    runtimeEnvironment?: string;
     connectionTimeoutMs?: number;
     max?: number;
+    onIdleClientError?: (fault: DatabasePoolFault) => void;
     queryTimeoutMs?: number;
     statementTimeoutMs?: number;
   } = {},
 ) {
   assertProductionRuntimeDatabaseRole(
     databaseUrl,
-    process.env.NODE_ENV,
+    options.runtimeEnvironment ?? process.env.NODE_ENV,
     options.expectedRole ?? RUNTIME_DATABASE_ROLE,
   );
   assertDisposableIntegrationDatabaseTarget(
@@ -93,7 +156,7 @@ export function createDatabasePool(
     }
   }
   const connection = databaseConnectionConfig(databaseUrl);
-  return new Pool({
+  const pool = new Pool({
     ...connection,
     application_name: applicationName,
     max: options.max ?? 15,
@@ -103,12 +166,18 @@ export function createDatabasePool(
     statement_timeout: options.statementTimeoutMs,
     allowExitOnIdle: false,
   });
+  observeIdleClientErrors(pool, options.onIdleClientError);
+  return pool;
 }
 
-export function createMigrationDatabasePool(databaseUrl: string, applicationName = "dabboba-migrate") {
+export function createMigrationDatabasePool(
+  databaseUrl: string,
+  applicationName = "dabboba-migrate",
+  options: { onIdleClientError?: (fault: DatabasePoolFault) => void } = {},
+) {
   assertProductionMigrationDatabaseTarget(databaseUrl, process.env.NODE_ENV);
   const connection = databaseConnectionConfig(databaseUrl);
-  return new Pool({
+  const pool = new Pool({
     ...connection,
     application_name: applicationName,
     max: 2,
@@ -116,6 +185,8 @@ export function createMigrationDatabasePool(databaseUrl: string, applicationName
     connectionTimeoutMillis: 5_000,
     allowExitOnIdle: false,
   });
+  observeIdleClientErrors(pool, options.onIdleClientError);
+  return pool;
 }
 
 function productionSupabaseDatabaseUrl(
@@ -205,16 +276,23 @@ function databaseTarget(value: string): string {
 
 export async function withTransaction<T>(pool: DatabasePool, work: (client: DatabaseClient) => Promise<T>): Promise<T> {
   const client = await pool.connect();
+  let destroyClient = false;
   try {
     await client.query("BEGIN");
     const result = await work(client);
     await client.query("COMMIT");
     return result;
   } catch (error) {
-    await client.query("ROLLBACK");
+    try {
+      await client.query("ROLLBACK");
+    } catch {
+      // Preserve the operation error while ensuring a connection whose
+      // transaction state is unknown can never return to the pool.
+      destroyClient = true;
+    }
     throw error;
   } finally {
-    client.release();
+    client.release(destroyClient);
   }
 }
 

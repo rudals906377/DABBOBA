@@ -154,7 +154,8 @@ test("whole web-origin list rejects newlines, delimiter injection and empty entr
 
 function jobFixture(mode = "mixed") {
   const plain = {
-    NODE_ENV: "production", LOG_LEVEL: "info", WORKER_QUEUE_NAME: "dabboba_worker",
+    NODE_ENV: "production", DABBOBA_ENVIRONMENT_TIER: "PRODUCTION", DABBOBA_ENABLE_PRODUCTION_WORKER: "true",
+    LOG_LEVEL: "info", WORKER_QUEUE_NAME: "dabboba_worker",
     WORKER_QUEUE_VISIBILITY_SECONDS: "900", WORKER_MAX_RUN_SECONDS: "45", WORKER_MAX_MESSAGES_PER_RUN: "100",
     WORKER_DATABASE_OPERATION_TIMEOUT_MS: "30000", DATABASE_POOL_MAX: "3",
     MEDIA_STORAGE_PROVIDER: mode === "gcs" || mode === "rollback" ? "gcs" : "supabase",

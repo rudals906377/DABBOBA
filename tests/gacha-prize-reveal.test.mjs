@@ -18,7 +18,22 @@ const componentCode = transpile("../apps/mobile/src/features/draw/GachaPrizeReve
 function loadTokens() {
   const theme = { exports: {} };
   runInNewContext(transpile("../apps/mobile/src/theme.ts"), theme);
-  const tokens = { exports: {}, require: () => theme.exports };
+  const brandAccent = {
+    exports: {},
+    require: (name) => {
+      assert.equal(name, "@/theme");
+      return theme.exports;
+    },
+  };
+  runInNewContext(transpile("../apps/mobile/src/design-system/brand-accent.ts"), brandAccent);
+  const tokens = {
+    exports: {},
+    require: (name) => {
+      if (name === "@/theme") return theme.exports;
+      if (name === "@/design-system/brand-accent") return brandAccent.exports;
+      throw new Error(`Unexpected token dependency: ${name}`);
+    },
+  };
   runInNewContext(transpile("../apps/mobile/src/design-system/seed.ts"), tokens);
   return tokens.exports;
 }
@@ -47,6 +62,7 @@ function createRenderer() {
     },
     "react-native-reanimated": { default: { View: "AnimatedView" }, useAnimatedStyle: (sample) => sample() },
     "@expo/vector-icons": { Ionicons: "Ionicons" },
+    "@/components/DecorativeIonicon": { DecorativeIonicon: "DecorativeIonicon" },
     "@/components/RootCategoryTitle": { KoreanPixelTitle: "KoreanPixelTitle" },
     "@/components/Typography": { AppText: "AppText", BalancedAppText: "BalancedAppText" },
     "@/design-system/seed": tokens,

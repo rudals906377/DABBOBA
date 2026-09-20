@@ -7,6 +7,7 @@ import { RUNTIME_DATABASE_ROLE, WORKER_DATABASE_ROLE } from "./runtime-role.js";
 
 type RoleAttributes = {
   rolbypassrls: boolean;
+  rolcanlogin: boolean;
   rolcreatedb: boolean;
   rolcreaterole: boolean;
   rolinherit: boolean;
@@ -16,7 +17,7 @@ type RoleAttributes = {
 
 async function roleAttributes(pool: Queryable, role: string): Promise<RoleAttributes> {
   const result = await pool.query<RoleAttributes>(
-    `SELECT rolsuper, rolcreatedb, rolcreaterole, rolinherit,
+    `SELECT rolsuper, rolcreatedb, rolcreaterole, rolinherit, rolcanlogin,
             rolreplication, rolbypassrls
      FROM pg_roles
      WHERE rolname = $1`,
@@ -75,12 +76,19 @@ export async function provisionRuntimeDatabaseRole(
 export async function provisionWorkerDatabaseRole(
   pool: DatabasePool,
   password: string,
+  options: { allowExistingLoginRotation?: boolean } = {},
 ): Promise<void> {
   assertWorkerDatabasePassword(password);
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
-    assertRoleAttributes(await roleAttributes(client, WORKER_DATABASE_ROLE), false, "Worker");
+    const attributes = await roleAttributes(client, WORKER_DATABASE_ROLE);
+    assertRoleAttributes(attributes, false, "Worker");
+    if (attributes.rolcanlogin && !options.allowExistingLoginRotation) {
+      throw new Error(
+        "Worker database role already has LOGIN; explicit rotation authorization is required",
+      );
+    }
 
     const membership = await client.query<{ granted_role: string }>(
       `SELECT granted_role.rolname AS granted_role

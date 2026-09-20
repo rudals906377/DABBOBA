@@ -8800,7 +8800,7 @@ function CatalogPage({ flow }: { flow: FlowControls }) {
       <main ref={screenFocusRef} tabIndex={-1} className="catalog-page" aria-label="DABBOBA 상품 목록">
         <section className="texture-banner" aria-labelledby="catalog-title">
           <img
-            src="/assets/dabboba/retro-arcade-texture.png"
+            src="/assets/dabboba/draw/gacha/retro-arcade-texture.png"
             alt=""
             className="retro-texture"
             draggable={false}
@@ -9967,8 +9967,8 @@ function CapsuleDrawAnimation({ state, controlProgress }: { state: DrawState; co
         <video
           ref={cinematicRef}
           className="capsule-cinematic"
-          src="/assets/dabboba/video/dabboba-capsule-lower-chute.mp4"
-          poster="/assets/dabboba/video/dabboba-capsule-machine-poster.jpg"
+          src="/assets/dabboba/draw/gacha/video/dabboba-capsule-lower-chute.mp4"
+          poster="/assets/dabboba/draw/gacha/video/dabboba-capsule-machine-poster.jpg"
           muted
           playsInline
           preload="auto"
@@ -9981,21 +9981,21 @@ function CapsuleDrawAnimation({ state, controlProgress }: { state: DrawState; co
           <div className="capsule-ready-machine">
             <img
               className="capsule-ready-machine-art"
-              src="/assets/dabboba/capsule-machine-front-pixel.png"
+              src="/assets/dabboba/draw/gacha/capsule-machine-front-pixel.png"
               alt=""
               draggable={false}
               decoding="async"
             />
             <img
               className="capsule-ready-crank-plate"
-              src="/assets/dabboba/capsule-crank-plate-pixel.png"
+              src="/assets/dabboba/draw/gacha/capsule-crank-plate-pixel.png"
               alt=""
               draggable={false}
               decoding="async"
             />
             <img
               className="capsule-ready-crank-handle"
-              src="/assets/dabboba/capsule-crank-pixel.png"
+              src="/assets/dabboba/draw/gacha/capsule-crank-pixel.png"
               alt=""
               draggable={false}
               decoding="async"
@@ -10057,7 +10057,7 @@ function DrawPage({ product, quantity }: { product: Product; quantity: number })
               <CapsuleDrawAnimation state={drawState} controlProgress={drawControlProgress} />
             ) : (
               <img
-                src="/assets/dabboba/arcade-cabinet.png"
+                src="/assets/dabboba/draw/gacha/arcade-cabinet.png"
                 className="arcade-cabinet"
                 alt={`${product.line} 추첨을 진행하는 검은색 오락기`}
                 draggable={false}

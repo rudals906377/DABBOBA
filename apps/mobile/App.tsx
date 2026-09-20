@@ -31,7 +31,7 @@ import {
   type ShellPlatform,
 } from "./webShell";
 
-const DABBOBA_WORDMARK = require("./assets/dabboba-wordmark.png");
+const DABBOBA_WORDMARK = require("./assets/brand/dabboba-wordmark.png");
 const SHELL_PLATFORM: ShellPlatform = Platform.OS === "android" ? "android" : "ios";
 
 type ShellResolution =

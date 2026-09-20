@@ -1,5 +1,62 @@
 import type { FastifyInstance } from "fastify";
 
+type ErrorLike = Error & {
+  code?: string;
+  constraint?: unknown;
+  statusCode?: number;
+  validation?: unknown;
+};
+
+type SafeErrorKind = "database" | "framework" | "non_error" | "unexpected";
+
+const HTTP_ERROR_STATUS_MIN = 400;
+const HTTP_ERROR_STATUS_MAX = 599;
+const POSTGRES_SQLSTATE_PATTERN = /^[0-9A-Z]{5}$/;
+const POSTGRES_SQLSTATE_CLASSES = new Set([
+  "00", "01", "02", "03", "08", "09", "0A", "0B", "0F", "0L", "0P", "0U", "0V", "0Z",
+  "20", "21", "22", "23", "24", "25", "26", "27", "28", "2B", "2D", "2F",
+  "34", "38", "39", "3B", "3D", "3F", "40", "42", "44", "53", "54", "55", "57", "58",
+  "F0", "HV", "P0", "XX",
+]);
+
+function errorLike(error: unknown): ErrorLike | null {
+  return error instanceof Error ? error as ErrorLike : null;
+}
+
+function boundedStatusCode(error: unknown): number {
+  const statusCode = errorLike(error)?.statusCode;
+  return typeof statusCode === "number"
+    && Number.isInteger(statusCode)
+    && statusCode >= HTTP_ERROR_STATUS_MIN
+    && statusCode <= HTTP_ERROR_STATUS_MAX
+    ? statusCode
+    : 500;
+}
+
+/**
+ * Keep operational classification without serializing Error fields. In
+ * particular, PostgreSQL errors may contain row values in detail and runtime
+ * errors may carry connection URLs, tokens, stacks, or nested causes.
+ */
+export function safeErrorFields(error: unknown): {
+  errorKind: SafeErrorKind;
+  sqlState?: string;
+} {
+  const typedError = errorLike(error);
+  if (!typedError) return { errorKind: "non_error" };
+
+  const code = typedError.code;
+  if (
+    code
+    && POSTGRES_SQLSTATE_PATTERN.test(code)
+    && POSTGRES_SQLSTATE_CLASSES.has(code.slice(0, 2))
+  ) {
+    return { errorKind: "database", sqlState: code };
+  }
+  if (code?.startsWith("FST_ERR_")) return { errorKind: "framework" };
+  return { errorKind: "unexpected" };
+}
+
 export class AppError extends Error {
   readonly statusCode: number;
   readonly code: string;
@@ -37,7 +94,21 @@ export function conflict(message = "이미 변경된 상태입니다.", details?
 export function registerErrorHandler(app: FastifyInstance) {
   app.setErrorHandler((error, request, reply) => {
     if (error instanceof AppError) {
-      return reply.code(error.statusCode).send({
+      const statusCode = boundedStatusCode(error);
+      if (statusCode === 500 && error.statusCode !== 500) {
+        request.log.error(
+          { requestId: request.id, statusCode, ...safeErrorFields(error) },
+          "request failed",
+        );
+        return reply.code(statusCode).send({
+          error: {
+            code: "INTERNAL_ERROR",
+            message: "요청을 처리하지 못했습니다.",
+            requestId: request.id,
+          },
+        });
+      }
+      return reply.code(statusCode).send({
         error: {
           code: error.code,
           message: error.message,
@@ -46,12 +117,8 @@ export function registerErrorHandler(app: FastifyInstance) {
         },
       });
     }
-    const typedError = error as Error & {
-      statusCode?: number;
-      code?: string;
-      validation?: unknown;
-    };
-    if (typedError.validation) {
+    const typedError = errorLike(error);
+    if (typedError?.validation) {
       return reply.code(400).send({
         error: {
           code: "INVALID_REQUEST",
@@ -60,13 +127,13 @@ export function registerErrorHandler(app: FastifyInstance) {
         },
       });
     }
-    if (typedError.code === "23505") {
+    if (typedError?.code === "23505") {
       return reply.code(409).send({
         error: { code: "CONFLICT", message: "이미 등록된 값입니다.", requestId: request.id },
       });
     }
     if (
-      typedError.code === "23514"
+      typedError?.code === "23514"
       && "constraint" in typedError
       && typedError.constraint === "account_deletion_approved_mutation_guard"
     ) {
@@ -78,11 +145,14 @@ export function registerErrorHandler(app: FastifyInstance) {
         },
       });
     }
-    request.log.error({ err: error }, "request failed");
-    return reply.code(typedError.statusCode && typedError.statusCode >= 400 ? typedError.statusCode : 500).send({
+    const statusCode = boundedStatusCode(error);
+    const logFields = { requestId: request.id, statusCode, ...safeErrorFields(error) };
+    if (statusCode < 500) request.log.warn(logFields, "request rejected");
+    else request.log.error(logFields, "request failed");
+    return reply.code(statusCode).send({
       error: {
-        code: "INTERNAL_ERROR",
-        message: "요청을 처리하지 못했습니다.",
+        code: statusCode < 500 ? "INVALID_REQUEST" : "INTERNAL_ERROR",
+        message: statusCode < 500 ? "요청 값을 확인해 주세요." : "요청을 처리하지 못했습니다.",
         requestId: request.id,
       },
     });

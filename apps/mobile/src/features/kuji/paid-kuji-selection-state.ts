@@ -1,4 +1,5 @@
 import type { PaidKujiSelectionSnapshot, PublicKujiDeckSnapshot } from "@dabboba/contracts";
+import type { DrawOpenMode } from "../draw/draw-open-mode";
 import type { KujiPaidDrawRoute } from "./kuji-slot-state";
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -83,6 +84,7 @@ export function paidKujiRevealPath(input: {
   roomEntryId: string;
   totalSlots: number;
   bindings: ReadonlyArray<{ entitlementId: string; slotNumber: number }>;
+  mode?: DrawOpenMode;
 }): string {
   const firstBinding = input.bindings[0];
   if (!firstBinding) throw new Error("열 수 있는 쿠지 추첨권을 찾을 수 없습니다.");
@@ -96,5 +98,6 @@ export function paidKujiRevealPath(input: {
       String(binding.slotNumber).padStart(Math.max(2, String(input.totalSlots).length), "0")
     )).join(","),
   });
+  if (input.mode) query.set("mode", input.mode);
   return `/draw/reveal/${encodeURIComponent(firstBinding.entitlementId)}?${query.toString()}`;
 }

@@ -4,6 +4,10 @@ import test from "node:test";
 import type { ApiConfig } from "@dabboba/config";
 import { createDatabasePool } from "@dabboba/db";
 import { buildApp } from "../app.js";
+import {
+  acceptRequiredPoliciesForIntegrationTest,
+  acceptUgcOperationsPolicyForIntegrationTest,
+} from "../integration-test-fixtures.js";
 
 const databaseUrl = process.env.DABBOBA_TEST_DATABASE_URL;
 
@@ -54,7 +58,10 @@ test(
         payload: { email: `wanted-${label}-${suffix}@example.test` },
       });
       assert.equal(response.statusCode, 201, response.body);
-      return response.json() as Session;
+      const created = response.json() as Session;
+      await acceptRequiredPoliciesForIntegrationTest(pool, created.actor.userId);
+      await acceptUgcOperationsPolicyForIntegrationTest(pool, created.actor.userId);
+      return created;
     };
     const owner = await session("owner");
     const other = await session("other");

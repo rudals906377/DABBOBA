@@ -20,10 +20,11 @@ function collectTsxSources(directory) {
   });
 }
 
-test("every native search field uses the shared brand-green border", () => {
+test("every native search field uses a neutral resting border and dark-green focus border", () => {
   assert.match(seedComponentsSource, /variant\?: "default" \| "search"/);
   assert.match(seedComponentsSource, /variant === "search" && styles\.inputSearch/);
-  assert.match(seedComponentsSource, /inputSearch:\s*\{\s*borderColor:\s*seed\.color\.stroke\.brand\s*\}/);
+  assert.match(seedComponentsSource, /inputSearch:\s*\{\s*borderColor:\s*seed\.color\.stroke\.neutral\s*\}/);
+  assert.match(seedComponentsSource, /inputFocused:\s*\{\s*borderColor:\s*seed\.color\.stroke\.focus,\s*borderWidth:\s*2\s*\}/);
   assert.match(seedComponentsSource, /inputError:\s*\{\s*borderColor:\s*seed\.color\.stroke\.critical\s*\}/);
   assert.match(
     seedComponentsSource,
@@ -40,7 +41,9 @@ test("every native search field uses the shared brand-green border", () => {
     assert.match(
       source,
       /<SeedInputShell[^>]*variant="search"/,
-      `${relativePath} must use the shared brand search shell`,
+      `${relativePath} must use the shared search shell`,
     );
+    assert.doesNotMatch(source, /placeholderTextColor="#8D948C"/);
+    assert.match(source, /placeholderTextColor=\{colors\.muted\}/);
   }
 });

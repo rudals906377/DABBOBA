@@ -24,6 +24,15 @@ test("wanted request compose accepts a typed work, registered-IP suggestions, an
   assert.match(api, /\/v1\/media\/\{mediaId\}\/complete/);
 });
 
+test("wanted request compose blocks a coming-soon figure category through the shared availability state", () => {
+  const screen = read("apps/mobile/src/features/profile/WantedRequestCreateScreen.tsx");
+
+  assert.match(screen, /isCustomerProductCategoryComingSoon\(category\)/);
+  assert.match(screen, /<CategoryAvailabilityState category=\{category\}/);
+  assert.match(screen, /categoryComingSoon \? \(/);
+  assert.match(screen, /if \(categoryComingSoon\)[\s\S]*?return;/);
+});
+
 test("wanted request persistence supports a custom work name and a public attached photo", () => {
   const contract = read("packages/contracts/openapi/dabboba.openapi.yaml");
   const wantedApi = read("apps/api/src/modules/wanted.ts");

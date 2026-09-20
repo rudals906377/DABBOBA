@@ -1,4 +1,3 @@
-import { Ionicons } from "@expo/vector-icons";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AccessibilityInfo,
@@ -8,22 +7,30 @@ import {
   StyleSheet,
   View,
 } from "react-native";
+import { DecorativeIonicon } from "@/components/DecorativeIonicon";
 import { AppText as Text } from "@/components/Typography";
 import { seed } from "@/design-system/seed";
 import { getTickerOverflowDistance } from "@/features/home/home-feed";
 import { colors } from "@/theme";
 
-const TICKER_ROW_HEIGHT = 36;
+const TICKER_ROW_HEIGHT = 44;
 const SHORT_MESSAGE_HOLD_MS = 3_000;
 
-export function AnnouncementTicker({ messages, onPress }: { messages: readonly string[]; onPress: (message: string) => void }) {
+export type AnnouncementTickerProps = {
+  messages: readonly string[];
+  onPress?: (message: string, index: number) => void;
+};
+
+export function AnnouncementTicker({ messages, onPress }: AnnouncementTickerProps) {
   const safeMessages = useMemo(() => messages.map((message) => message.trim()).filter(Boolean), [messages]);
   const [index, setIndex] = useState(0);
   const [viewportWidth, setViewportWidth] = useState(0);
   const [textWidths, setTextWidths] = useState<Record<string, number>>({});
   const [reduceMotion, setReduceMotion] = useState(false);
+  const [paused, setPaused] = useState(false);
   const translateX = useRef(new Animated.Value(0)).current;
   const translateY = useRef(new Animated.Value(0)).current;
+  const ledOpacity = useRef(new Animated.Value(1)).current;
   const currentMessage = safeMessages[index % Math.max(safeMessages.length, 1)] ?? "DABBOBA 안내를 준비하고 있어요.";
   const nextMessage = safeMessages[(index + 1) % Math.max(safeMessages.length, 1)] ?? currentMessage;
   const currentTextWidth = textWidths[currentMessage] ?? 0;
@@ -48,13 +55,12 @@ export function AnnouncementTicker({ messages, onPress }: { messages: readonly s
 
   useEffect(() => {
     if (!safeMessages.length || !viewportWidth || !currentTextWidth) return undefined;
+    translateX.stopAnimation();
+    translateY.stopAnimation();
     translateX.setValue(0);
     translateY.setValue(0);
 
-    if (reduceMotion) {
-      const timer = setTimeout(() => setIndex((current) => (current + 1) % safeMessages.length), 5_000);
-      return () => clearTimeout(timer);
-    }
+    if (reduceMotion || paused) return undefined;
 
     const overflow = getTickerOverflowDistance(viewportWidth, currentTextWidth);
     const horizontalAnimation = overflow > 0
@@ -69,29 +75,61 @@ export function AnnouncementTicker({ messages, onPress }: { messages: readonly s
         Animated.delay(650),
       ])
       : Animated.delay(SHORT_MESSAGE_HOLD_MS);
-    const animation = Animated.sequence([
-      horizontalAnimation,
-      Animated.timing(translateY, {
-        toValue: -TICKER_ROW_HEIGHT,
-        duration: 260,
-        easing: Easing.out(Easing.cubic),
-        useNativeDriver: true,
-      }),
-    ]);
+    if (safeMessages.length === 1) {
+      if (overflow <= 0) return undefined;
+      const singleMessageAnimation = Animated.loop(Animated.sequence([
+        horizontalAnimation,
+        Animated.timing(translateX, {
+          toValue: 0,
+          duration: 0,
+          useNativeDriver: true,
+        }),
+      ]));
+      singleMessageAnimation.start();
+      return () => singleMessageAnimation.stop();
+    }
+
+    const animation = Animated.sequence([horizontalAnimation, Animated.timing(translateY, {
+      toValue: -TICKER_ROW_HEIGHT,
+      duration: 260,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    })]);
     animation.start(({ finished }) => {
       if (finished) setIndex((current) => (current + 1) % safeMessages.length);
     });
     return () => animation.stop();
-  }, [currentMessage, currentTextWidth, reduceMotion, safeMessages.length, translateX, translateY, viewportWidth]);
+  }, [currentMessage, currentTextWidth, paused, reduceMotion, safeMessages.length, translateX, translateY, viewportWidth]);
 
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={`공지사항: ${currentMessage}`}
-      onPress={() => onPress(currentMessage)}
-      style={({ pressed }) => [styles.container, pressed && styles.pressed]}
-    >
-      <View style={styles.label}><Text style={styles.labelText}>공지</Text></View>
+  useEffect(() => {
+    ledOpacity.stopAnimation();
+    ledOpacity.setValue(1);
+    if (reduceMotion || paused) return undefined;
+
+    const animation = Animated.loop(Animated.sequence([
+      Animated.timing(ledOpacity, {
+        toValue: 0.38,
+        duration: 640,
+        easing: Easing.inOut(Easing.quad),
+        useNativeDriver: true,
+      }),
+      Animated.timing(ledOpacity, {
+        toValue: 1,
+        duration: 640,
+        easing: Easing.inOut(Easing.quad),
+        useNativeDriver: true,
+      }),
+    ]));
+    animation.start();
+    return () => animation.stop();
+  }, [ledOpacity, paused, reduceMotion]);
+
+  const messageContent = (
+    <>
+      <View style={styles.signal}>
+        <Animated.View style={[styles.led, { opacity: ledOpacity }]} />
+        <Text style={styles.labelText}>공지</Text>
+      </View>
       <View
         pointerEvents="none"
         accessibilityElementsHidden
@@ -110,14 +148,54 @@ export function AnnouncementTicker({ messages, onPress }: { messages: readonly s
           <TickerRow message={nextMessage} width={Math.max(nextTextWidth, viewportWidth)} />
         </Animated.View>
       </View>
-      <Ionicons name="chevron-forward" size={14} color={colors.muted} />
-    </Pressable>
+      {onPress ? <DecorativeIonicon name="chevron-forward" size={14} color={colors.muted} /> : null}
+    </>
+  );
+  const hasAutomaticMotion = !reduceMotion && (
+    safeMessages.length > 1 || getTickerOverflowDistance(viewportWidth, currentTextWidth) > 0
+  );
+  const accessibilityLabel = `공지사항: ${currentMessage}`;
+
+  return (
+    <View style={styles.container}>
+      {onPress ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={accessibilityLabel}
+          onPress={() => onPress(currentMessage, index % safeMessages.length)}
+          style={({ pressed }) => [styles.messageTarget, pressed && styles.pressed]}
+        >
+          {messageContent}
+        </Pressable>
+      ) : (
+        <View
+          accessible
+          accessibilityRole="text"
+          accessibilityLabel={accessibilityLabel}
+          style={styles.messageTarget}
+        >
+          {messageContent}
+        </View>
+      )}
+      {hasAutomaticMotion ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={paused ? "공지 자동 전환 재생" : "공지 자동 전환 일시 정지"}
+          accessibilityState={{ selected: paused }}
+          onPress={() => setPaused((current) => !current)}
+          style={({ pressed }) => [styles.playbackButton, pressed && styles.pressed]}
+        >
+          <DecorativeIonicon name={paused ? "play" : "pause"} size={16} color={colors.muted} />
+        </Pressable>
+      ) : null}
+    </View>
   );
 }
 
 function TickerMeasure({ message, onMeasured }: { message: string; onMeasured: (message: string, width: number) => void }) {
   return (
     <Text
+      variant="caption"
       numberOfLines={1}
       style={[styles.message, styles.measureMessage]}
       onTextLayout={(event) => onMeasured(message, event.nativeEvent.lines[0]?.width ?? 0)}
@@ -131,7 +209,7 @@ function TickerRow({ message, width, translateX }: { message: string; width: num
   return (
     <View style={styles.row}>
       <Animated.View style={translateX ? { transform: [{ translateX }] } : undefined}>
-        <Text numberOfLines={1} style={[styles.message, { width }]}>{message}</Text>
+        <Text variant="caption" numberOfLines={1} style={[styles.message, { width }]}>{message}</Text>
       </Animated.View>
     </View>
   );
@@ -140,21 +218,39 @@ function TickerRow({ message, width, translateX }: { message: string; width: num
 const styles = StyleSheet.create({
   container: {
     height: TICKER_ROW_HEIGHT,
-    paddingHorizontal: seed.spacing.globalGutter,
+    flexDirection: "row",
+    alignItems: "center",
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: seed.color.stroke.neutral,
+    backgroundColor: seed.color.layer.default,
+  },
+  messageTarget: {
+    minWidth: 0,
+    flex: 1,
+    height: TICKER_ROW_HEIGHT,
+    paddingLeft: seed.spacing.globalGutter,
+    paddingRight: seed.spacing.x2,
     flexDirection: "row",
     alignItems: "center",
     gap: seed.spacing.x2,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: seed.color.stroke.neutral,
-    backgroundColor: seed.color.background.brandWeak,
   },
-  label: { borderRadius: seed.radius.r2, paddingHorizontal: seed.spacing.x2, paddingVertical: 3, backgroundColor: colors.ink },
-  labelText: { color: colors.white, fontSize: 9, fontWeight: "900" },
+  signal: { flexDirection: "row", alignItems: "center", gap: seed.spacing.x1_5 },
+  led: { width: 6, height: 6, borderRadius: seed.radius.full, backgroundColor: colors.brand, shadowColor: colors.brand, shadowOpacity: 0.55, shadowRadius: 4, shadowOffset: { width: 0, height: 0 } },
+  labelText: { color: colors.greenInk, fontFamily: "Galmuri11", fontSize: 11, lineHeight: 16, fontWeight: "400" },
   viewport: { flex: 1, height: TICKER_ROW_HEIGHT, overflow: "hidden" },
   measureLayer: { position: "absolute", width: 10_000, opacity: 0 },
   measureMessage: { width: 10_000 },
   messageStack: { height: TICKER_ROW_HEIGHT * 2 },
   row: { height: TICKER_ROW_HEIGHT, justifyContent: "center", overflow: "hidden" },
-  message: { color: colors.ink, fontSize: 12, lineHeight: 18, fontWeight: "700" },
-  pressed: { opacity: seed.state.pressedOpacity },
+  message: { color: colors.ink, fontWeight: "700" },
+  playbackButton: {
+    width: seed.size.touchTarget,
+    height: seed.size.touchTarget,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  pressed: {
+    opacity: seed.state.pressedOpacity,
+    transform: [{ translateY: seed.state.pressedTranslateY }, { scale: seed.state.pressedScale }],
+  },
 });

@@ -39,7 +39,11 @@ test("successful graceful shutdown cancels its forced-exit watchdog", async () =
 });
 
 test("failed graceful shutdown keeps its watchdog active", async () => {
-  const failure = new Error("pool close failed");
+  const failure = Object.assign(new Error("pool close failed with postgres://user:secret@database.example.test/db"), {
+    code: "57P01",
+    detail: "private row contents",
+  });
+  const errorLogs: Array<{ bindings: Record<string, unknown>; message: string }> = [];
   const scheduledCallback: { current: (() => void) | null } = { current: null };
   let cancelled = 0;
   let forcedExitCode: number | null = null;
@@ -52,7 +56,12 @@ test("failed graceful shutdown keeps its watchdog active", async () => {
         closeCalls += 1;
         throw failure;
       },
-      log: logger(),
+      log: {
+        info() {},
+        error(bindings, message) {
+          errorLogs.push({ bindings, message });
+        },
+      },
     },
     {
       cancel() {
@@ -80,6 +89,11 @@ test("failed graceful shutdown keeps its watchdog active", async () => {
   assert.equal(closeCalls, 1);
   assert.equal(cancelled, 0);
   assert.equal(processExitCode, 1);
+  assert.deepEqual(errorLogs, [{
+    bindings: { signal: "SIGTERM", errorKind: "database", sqlState: "57P01" },
+    message: "graceful shutdown failed",
+  }]);
+  assert.doesNotMatch(JSON.stringify(errorLogs), /secret|private|database\.example\.test/);
   assert.ok(scheduledCallback.current);
   scheduledCallback.current();
   assert.equal(forcedExitCode, 1);

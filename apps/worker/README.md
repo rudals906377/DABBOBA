@@ -1,7 +1,35 @@
 # DABBOBA finite worker
 
-The worker is a bounded Supabase Queues (`pgmq`) consumer for Cloud Run Jobs.
+The worker is a bounded Supabase Queues (`pgmq`) consumer.
 PostgreSQL remains authoritative; no Redis or always-on process is required.
+
+The user's 2026-09-09 target is Supabase Edge Functions plus Supabase Cron,
+not a separately hosted Cloud Run/Railway/Render worker. Follow the
+[transition plan](../../docs/supabase-only-transition.md). Existing Cloud Run
+instructions below describe the previous implementation and are not an active
+deployment instruction. Local implementation does not activate a hosted function
+or schedule; both require separate operational approval and runtime evidence.
+
+## Supabase Edge local artifact
+
+Run `corepack pnpm --filter @dabboba/worker build:edge` from the repository root.
+This generates the ignored `supabase/functions/dabboba-worker/worker.generated.js`
+with pinned esbuild 0.28.2. The bundle retains the existing finite transaction/queue
+core but includes only the Supabase media provider; the Node wrapper preserves
+mixed-provider compatibility. Rebuild before deploying; never deploy a stale artifact.
+
+The function uses dedicated internal authentication (`verify_jwt=false` is not public
+job access). Missing auth configuration returns 503, invalid credentials return 401,
+and non-POST methods return 405 before worker configuration or database work.
+Use the `DABBOBA_*` Edge secret names listed in the transition plan, not the
+reserved custom `SUPABASE_STORAGE_*` names used by the Node configuration.
+No scheduler or hosted deployment is enabled by this build.
+
+Local verification: worker typecheck/build and 86 tests passed, including disposable
+PostgreSQL integration; the artifact test and Deno 2.9.6 smoke passed. Hosted
+CPU/wall time, authenticated HTTP-to-Session-pooler execution, Storage access and
+Cron behavior remain separate release gates. See the transition plan for the full
+evidence and outstanding API/media migration scope.
 
 Each invocation:
 
@@ -71,6 +99,18 @@ Use the variables in `apps/worker/.env.example`. The production media cleanup
 path still requires `GCS_BUCKET`; this preserves the current private GCS adapter
 until a separately reviewed Supabase Storage migration exists.
 
+## KG INICIS transaction inquiry
+
+`PAYMENT_RECONCILIATION_PROVIDER` defaults to `MANUAL_REVIEW`. Explicit
+`KG_INICIS` configuration selects the read-only INIAPI V1 inquiry adapter; it
+does not approve, cancel or refund payments. An observed difference goes to
+the existing manual-review path, never directly to the commerce ledger.
+Only explicit STAGING/TEST-provider or PRODUCTION/LIVE-provider combinations
+are allowed. Local tests must not inherit KG credentials.
+
+See [KG INICIS setup and boundaries](../../docs/kg-inicis-integration.md).
+No Google Cloud resources or remote worker execution are part of this step.
+
 ## Failure semantics
 
 - Queue payloads are authenticated against the canonical outbox row.
@@ -79,6 +119,11 @@ until a separately reviewed Supabase Storage migration exists.
   UUID as its idempotency key. Production rejects that adapter until the
   receiver durably enforces same-key/same-payload replay and exposes an
   auditable delivery receipt.
+- `EXPO_PUSH_ACCESS_TOKEN` enables the production Expo gateway adapter. When it
+  is unset, account notifications remain available in-app and remote push is
+  intentionally disabled. The adapter sends at most 100 messages per request,
+  checks Expo receipts, invalidates unregistered device tokens, and retries only
+  bounded transient failures without logging device tokens or credentials.
 - A nonzero process exit marks infrastructure or periodic-work failure for Cloud
   Run. Individual message failures stay in pgmq for retry and do not spin a
   second whole-job retry loop.

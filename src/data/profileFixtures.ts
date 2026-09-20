@@ -1,11 +1,4 @@
-export const PROFILE_FAVORITE_PRODUCT_IDS = [
-  "one-piece-tcg",
-  "dragon-ball-figure",
-  "demon-slayer-gacha",
-  "jujutsu-kaisen-gacha",
-  "naruto-figure",
-  "hunter-x-hunter-kuji",
-] as const;
+export const PROFILE_FAVORITE_PRODUCT_IDS: readonly string[] = [];
 
 export type ProfileStorageItem = {
   id: string;
@@ -15,29 +8,7 @@ export type ProfileStorageItem = {
   shippingDeadline: string;
 };
 
-export const PROFILE_STORAGE_ITEMS: readonly ProfileStorageItem[] = [
-  {
-    id: "storage-demon-slayer",
-    productId: "demon-slayer-gacha",
-    prizeLabel: "B상 · 탄지로 미니 피규어",
-    acquiredAt: "2026.08.23",
-    shippingDeadline: "2026.09.22",
-  },
-  {
-    id: "storage-jujutsu-kaisen",
-    productId: "jujutsu-kaisen-gacha",
-    prizeLabel: "A상 · 고죠 사토루 컬렉션",
-    acquiredAt: "2026.08.21",
-    shippingDeadline: "2026.09.20",
-  },
-  {
-    id: "storage-hunter-x-hunter",
-    productId: "hunter-x-hunter-kuji",
-    prizeLabel: "C상 · 키메라 앤트 굿즈",
-    acquiredAt: "2026.08.19",
-    shippingDeadline: "2026.09.18",
-  },
-] as const;
+export const PROFILE_STORAGE_ITEMS: readonly ProfileStorageItem[] = [];
 
 export type ProfilePurchaseHistoryItem = {
   id: string;
@@ -48,32 +19,7 @@ export type ProfilePurchaseHistoryItem = {
   status: "결제 완료" | "뽑기 완료" | "배송 신청 전";
 };
 
-export const PROFILE_PURCHASE_HISTORY: readonly ProfilePurchaseHistoryItem[] = [
-  {
-    id: "DBB-20260824-001",
-    productId: "one-piece-tcg",
-    orderedAt: "2026.08.24",
-    quantity: 2,
-    paidTotal: 4_000,
-    status: "결제 완료",
-  },
-  {
-    id: "DBB-20260823-014",
-    productId: "demon-slayer-gacha",
-    orderedAt: "2026.08.23",
-    quantity: 1,
-    paidTotal: 6_000,
-    status: "뽑기 완료",
-  },
-  {
-    id: "DBB-20260818-008",
-    productId: "dragon-ball-figure",
-    orderedAt: "2026.08.18",
-    quantity: 1,
-    paidTotal: 59_900,
-    status: "배송 신청 전",
-  },
-] as const;
+export const PROFILE_PURCHASE_HISTORY: readonly ProfilePurchaseHistoryItem[] = [];
 
 export type ProfilePointHistoryItem = {
   id: string;
@@ -83,36 +29,7 @@ export type ProfilePointHistoryItem = {
   amount: number;
 };
 
-export const PROFILE_POINT_HISTORY: readonly ProfilePointHistoryItem[] = [
-  {
-    id: "point-welcome",
-    label: "가입 축하 포인트",
-    detail: "DABBOBA 첫 가입 혜택",
-    occurredAt: "2026.08.10",
-    amount: 10_000,
-  },
-  {
-    id: "point-first-order",
-    label: "첫 구매 적립",
-    detail: "첫 상품 구매 완료",
-    occurredAt: "2026.08.18",
-    amount: 3_000,
-  },
-  {
-    id: "point-order-use",
-    label: "상품 결제 사용",
-    detail: "원피스 카드게임 OP-13",
-    occurredAt: "2026.08.24",
-    amount: -1_000,
-  },
-  {
-    id: "point-event",
-    label: "오픈 이벤트 적립",
-    detail: "앱 오픈 이벤트 참여",
-    occurredAt: "2026.08.24",
-    amount: 500,
-  },
-] as const;
+export const PROFILE_POINT_HISTORY: readonly ProfilePointHistoryItem[] = [];
 
 export const PROFILE_CUSTOMER_FAQS = [
   {

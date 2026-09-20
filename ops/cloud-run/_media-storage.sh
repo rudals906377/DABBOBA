@@ -156,7 +156,7 @@ api_plain_env() {
   assert_https_origin_list "$DABBOBA_WEB_ORIGINS" DABBOBA_WEB_ORIGINS
   storage="$(media_storage_plain_env)" || return 1
   printf '%s\n' "$storage" | jq -c --arg url "$DABBOBA_SUPABASE_URL" --arg origins "$DABBOBA_WEB_ORIGINS" '
-    . + {NODE_ENV:"production", API_SURFACE:"customer", LOG_LEVEL:"info", SUPABASE_URL:$url,
+    . + {NODE_ENV:"production", DABBOBA_ENVIRONMENT_TIER:"PRODUCTION", API_SURFACE:"customer", LOG_LEVEL:"info", SUPABASE_URL:$url,
       SUPABASE_JWT_AUDIENCE:"authenticated", WEB_ORIGINS:$origins, PAYMENT_PROVIDER:"UNCONFIGURED"}'
 }
 
@@ -179,7 +179,8 @@ worker_plain_env() {
   [[ "$queue" == dabboba_worker ]] || die "DABBOBA_WORKER_QUEUE_NAME must be dabboba_worker"
   storage="$(media_storage_plain_env)" || return 1
   printf '%s\n' "$storage" | jq -c --arg queue "$queue" '. + {
-    NODE_ENV:"production", LOG_LEVEL:"info", WORKER_QUEUE_NAME:$queue,
+    NODE_ENV:"production", DABBOBA_ENVIRONMENT_TIER:"PRODUCTION", DABBOBA_ENABLE_PRODUCTION_WORKER:"true",
+    LOG_LEVEL:"info", WORKER_QUEUE_NAME:$queue,
     WORKER_QUEUE_VISIBILITY_SECONDS:"900", WORKER_MAX_RUN_SECONDS:"45",
     WORKER_MAX_MESSAGES_PER_RUN:"100", WORKER_DATABASE_OPERATION_TIMEOUT_MS:"30000", DATABASE_POOL_MAX:"3"}'
 }

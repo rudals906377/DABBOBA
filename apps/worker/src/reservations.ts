@@ -13,6 +13,9 @@ type OrderPaymentRow = {
   point_total: number;
   payment_id: string;
   payment_status: string;
+  order_kind: "PRODUCT" | "SHIPPING_FEE";
+  shipping_request_id: string | null;
+  created_at: Date;
 };
 
 type ReservationRow = {
@@ -91,6 +94,50 @@ async function expireLockedOrder(
   now: Date,
   shouldContinue: () => boolean,
 ): Promise<ExpiryOutcome> {
+  if (order.order_kind === "SHIPPING_FEE") {
+    const due = order.created_at.getTime() + 15 * 60_000 <= now.getTime();
+    const action = reservationExpiryAction(order.status, order.payment_status, due);
+    if (action === "wait") return { status: "not_due", released: 0 };
+    if (action === "reconcile") return { status: "requires_reconciliation", released: 0 };
+    if (!order.shipping_request_id) throw new Error(`Shipping payment order ${order.id} has no shipping request`);
+    const shipping = await client.query<{ status: string }>(
+      "SELECT status FROM shipping_requests WHERE id=$1 AND user_id=$2 FOR UPDATE",
+      [order.shipping_request_id, order.user_id],
+    );
+    if (shipping.rows[0]?.status !== "PAYMENT_PENDING") {
+      return { status: "already_resolved", released: 0 };
+    }
+    const expected = await client.query<{ count: string }>(
+      "SELECT count(*)::text AS count FROM shipping_request_items WHERE shipping_request_id=$1",
+      [order.shipping_request_id],
+    );
+    const released = await client.query(
+      `UPDATE inventory_units inventory SET status='OWNED'
+        FROM shipping_request_items item
+        WHERE item.shipping_request_id=$1 AND item.inventory_unit_id=inventory.id
+          AND inventory.owner_id=$2 AND inventory.status='SHIPPING'
+        RETURNING inventory.id`,
+      [order.shipping_request_id, order.user_id],
+    );
+    if (released.rowCount !== Number(expected.rows[0]?.count ?? 0)) {
+      throw new Error(`Shipping inventory release invariant failed for ${order.shipping_request_id}`);
+    }
+    await client.query(
+      "UPDATE shipping_requests SET status='CANCELLED',version=version+1 WHERE id=$1 AND status='PAYMENT_PENDING'",
+      [order.shipping_request_id],
+    );
+    await client.query(
+      "UPDATE payments SET status='CANCELLED',version=version+1 WHERE id=$1 AND status='PENDING'",
+      [order.payment_id],
+    );
+    const transitioned = await client.query<{ id: string }>(
+      "UPDATE orders SET status='CANCELLED',cancelled_at=$2,version=version+1 WHERE id=$1 AND status='PENDING_PAYMENT' RETURNING id",
+      [order.id, now],
+    );
+    if (transitioned.rowCount) await writeCancellationOutbox(client, order);
+    return { status: "expired", released: released.rowCount ?? 0 };
+  }
+
   if (!shouldContinue()) throw new Error("Worker run deadline reached before reservation lock");
   const reservations = await client.query<ReservationRow>(
     `SELECT id,product_id,quantity,expires_at
@@ -168,8 +215,8 @@ export async function expireOrderReservations(
       [orderId],
     );
     if (!payment.rowCount) return { status: "missing", released: 0 };
-    const order = await client.query<{ id: string; user_id: string; status: string; point_total: number }>(
-      "SELECT id,user_id,status,point_total FROM orders WHERE id=$1 FOR UPDATE",
+    const order = await client.query<{ id: string; user_id: string; status: string; point_total: number; order_kind: "PRODUCT" | "SHIPPING_FEE"; shipping_request_id: string | null; created_at: Date }>(
+      "SELECT id,user_id,status,point_total,order_kind,shipping_request_id,created_at FROM orders WHERE id=$1 FOR UPDATE",
       [orderId],
     );
     if (!order.rowCount) return { status: "missing", released: 0 };
@@ -204,9 +251,13 @@ export async function expireReservationBatch(
        FROM orders o
        JOIN payments p ON p.order_id=o.id
       WHERE o.status IN ('PENDING_PAYMENT','CANCELLED')
-        AND EXISTS (
-          SELECT 1 FROM stock_reservations sr
-           WHERE sr.order_id=o.id AND sr.status='ACTIVE' AND sr.expires_at <= $1
+        AND (
+          (o.order_kind='PRODUCT' AND EXISTS (
+            SELECT 1 FROM stock_reservations sr
+             WHERE sr.order_id=o.id AND sr.status='ACTIVE' AND sr.expires_at <= $1
+          ))
+          OR
+          (o.order_kind='SHIPPING_FEE' AND o.created_at <= $1 - interval '15 minutes')
         )
         AND (
           p.status IN ('PENDING','FAILED','CANCELLED')

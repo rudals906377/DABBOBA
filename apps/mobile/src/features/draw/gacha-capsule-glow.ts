@@ -9,7 +9,7 @@ export function getGachaCapsuleGlowAlpha(radius: number) {
   return Math.exp(-6 * r * r) * edge;
 }
 
-/** A thin seam softly becomes a halo; no rays, pulse, rotation or random field. */
+/** The seam opens into one strong finite halo; no pulse, rotation or random field. */
 export function sampleGachaCapsuleGlow(progress: number, light: RevealLight, reduceMotion = false) {
   "worklet";
   if (reduceMotion || !Number.isFinite(progress) || progress <= 0 || progress >= 1) {
@@ -17,8 +17,8 @@ export function sampleGachaCapsuleGlow(progress: number, light: RevealLight, red
   }
   const opening = Math.max(0, Math.min(1, light.opening));
   return {
-    opacity: Math.max(0, Math.min(1, light.innerLight)) * (1 - Math.max(0, Math.min(1, light.whiteout))) * 0.68,
-    scale: 0.5 + opening * 0.65,
+    opacity: Math.max(0, Math.min(1, light.innerLight)) * (1 - Math.max(0, Math.min(1, light.whiteout))) * 0.74,
+    scale: 0.5 + opening * 0.82,
     verticalScale: 0.14 + opening * 0.86,
   };
 }

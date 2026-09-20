@@ -1,0 +1,50 @@
+name: Mobile production release readiness
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  production-configuration:
+    name: Fail-closed production configuration gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: mobile-production
+    env:
+      PAYMENT_PROVIDER: ${{ vars.PAYMENT_PROVIDER }}
+      DABBOBA_COMMERCE_MODE: ${{ vars.DABBOBA_COMMERCE_MODE }}
+      PORTONE_CHANNEL_ENVIRONMENT: ${{ vars.PORTONE_CHANNEL_ENVIRONMENT }}
+      EXPO_PUBLIC_COMMERCE_CAPABILITY: ${{ vars.EXPO_PUBLIC_COMMERCE_CAPABILITY }}
+      EXPO_PUBLIC_DABBOBA_API_URL: ${{ vars.EXPO_PUBLIC_DABBOBA_API_URL }}
+      EXPO_PUBLIC_SUPABASE_URL: ${{ vars.EXPO_PUBLIC_SUPABASE_URL }}
+      EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${{ vars.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY }}
+      EXPO_PUBLIC_DABBOBA_PRIVACY_POLICY_URL: ${{ vars.EXPO_PUBLIC_DABBOBA_PRIVACY_POLICY_URL }}
+      EXPO_PUBLIC_DABBOBA_TERMS_URL: ${{ vars.EXPO_PUBLIC_DABBOBA_TERMS_URL }}
+      EXPO_PUBLIC_DABBOBA_SUPPORT_URL: ${{ vars.EXPO_PUBLIC_DABBOBA_SUPPORT_URL }}
+      EXPO_PUBLIC_DABBOBA_ACCOUNT_DELETION_URL: ${{ vars.EXPO_PUBLIC_DABBOBA_ACCOUNT_DELETION_URL }}
+      EXPO_PUBLIC_PORTONE_STORE_ID: ${{ vars.EXPO_PUBLIC_PORTONE_STORE_ID }}
+      EXPO_PUBLIC_PORTONE_CHANNEL_KEY: ${{ vars.EXPO_PUBLIC_PORTONE_CHANNEL_KEY }}
+    steps:
+      - name: Check out exact release candidate
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Enable pinned pnpm
+        run: |
+          corepack enable
+          pnpm --version
+
+      - name: Install dependencies from lockfile
+        run: pnpm install --frozen-lockfile
+
+      - name: Validate production mobile configuration
+        run: pnpm run release:mobile:check
+
+      - name: Export and inspect iOS and Android production JavaScript bundles
+        run: pnpm run release:mobile:bundle:check

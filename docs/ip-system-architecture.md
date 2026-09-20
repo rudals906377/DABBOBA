@@ -88,34 +88,25 @@ type IpRecord = {
 
 `src/fixtures/ip-seed.json`은 로컬 테스트 데이터다. 운영 DB seed나 외부 API의 진실 공급원으로 간주하지 않는다. UI에서는 배열 순서나 표시명을 ID처럼 사용하지 않고 `id` 또는 `slug`를 사용한다.
 
-상품은 `src/fixtures/product-seed.json`의 `ProductRecord`로 분리하고 `ipId`와 `categoryId`로 연결한다. `src/data/productCatalog.ts`가 화면용 카테고리 라벨을 붙이며, IP 상세와 홈 목록은 같은 fixture를 조회한다.
-
-현재 테스트 상품 배치는 다음과 같다.
-
-- 가챠 8개, 피규어 8개, 쿠지 7개, 카드 2개
-- 카드 IP는 원피스와 포켓몬스터만 허용
-- 나머지 23개 IP는 가챠·피규어·쿠지에 8/8/7로 분산
-- 각 IP는 Phase 1에서 정확히 한 개의 테스트 상품을 가진다.
-- 가챠·쿠지 상품만 결제 후 오락기 추첨 화면으로 이동한다.
-- 피규어·카드 상품은 결제 후 일반 구매 완료 화면으로 이동하며 클라이언트 S/A/B 추첨을 실행하지 않는다.
+번들 fixture에는 상품과 IP를 넣지 않는다. `src/fixtures/product-seed.json`과
+`src/fixtures/ip-seed.json`은 빈 배열을 유지하며, 실제 상품·IP·재고·이미지는
+관리자/API와 관리형 저장소를 통해 등록한다. 과거 프로토타입 상품은 참조 무결성을
+위해 DB에서 삭제하지 않고 비활성화한다.
 
 ### 3.3 IP 수량 결정
 
-사용자 입력에는 번호가 없는 `원피스`와 번호 1~24의 작품이 함께 있어 실제 명시 작품 수는 25개다. 현재 fixture와 이미지 출처 목록은 명시된 작품을 누락하지 않기 위해 25개를 포함한다.
-
-- 정확히 24개가 제품 요구라면 제외할 작품을 사용자에게 확인한 뒤 fixture에서 한 항목을 제거한다.
-- UI의 작품 수는 `25` 같은 별도 상수로 적지 않고 항상 fixture 길이에서 계산한다.
-- 운영 seed를 만들기 전에는 이 수량 결정을 다시 확인한다.
+IP 수량은 관리자/API에 등록된 활성 레코드에서 계산한다. 앱이나 fixture에 고정 수량을
+두지 않으며, 운영자가 비활성화한 IP는 고객 화면에서 제외한다.
 
 ### 3.4 이미지 정책
 
-Phase 1 이미지는 IP 포스터는 `public/assets/dabboba/ips`, 상품 이미지는 `public/assets/dabboba/products/ip`에 로컬 파일로 보관한다. 각 폴더의 `sources.json`에는 원본 페이지, 원본 이미지 URL, 공급자, 사용 제한을 기록한다.
+브랜드·아이콘·뽑기 연출 자산만 앱 번들에 둔다. 실제 상품과 IP 이미지는 관리형
+저장소에 업로드하고 DB에는 검증된 객체 경로와 메타데이터만 저장한다.
 
 - 외부 사이트 이미지를 런타임에서 직접 hotlink하지 않는다.
-- 현재 이미지는 로컬 프로토타입 확인용이다.
-- 운영·광고·앱스토어 배포 전에는 각 IP 권리자가 허용한 공식 또는 라이선스 자산으로 교체한다.
-- DB에는 이미지 바이너리를 저장하지 않는다.
-- 프런트에서는 고정 종횡비, `loading="lazy"`, `decoding="async"`, 실패 fallback을 사용한다.
+- 상품 업로드 시 MIME, 크기, 소유권과 이미지 처리 상태를 검증한다.
+- 운영·광고·앱스토어 배포에는 권리자가 허용한 공식 또는 라이선스 자산만 사용한다.
+- 프런트에서는 원본 종횡비, 지연 로딩, 실패 fallback을 유지한다.
 
 ### 3.5 Phase 1 화면 구조
 
@@ -589,9 +580,9 @@ CREATE INDEX wishlists_user_created_idx
 | 파일 | 상태/계획 | 책임 |
 |---|---|---|
 | `src/domain/catalog.ts` | 추가됨 | 카테고리 code, `commerceMode` 분기, IP 타입, 검색 정규화 |
-| `src/fixtures/ip-seed.json` | 추가됨 | 프런트 테스트용 IP seed |
-| `public/assets/dabboba/ips/*.jpg` | 추가됨 | 임시 로컬 포스터 이미지 |
-| `public/assets/dabboba/ips/sources.json` | 추가됨 | 이미지 출처와 테스트용 사용 제한 |
+| `src/fixtures/ip-seed.json` | 빈 구조 유지 | 번들 IP 데이터가 재유입되지 않게 하는 경계 |
+| `src/fixtures/product-seed.json` | 빈 구조 유지 | 번들 상품 데이터가 재유입되지 않게 하는 경계 |
+| 관리형 Storage | 운영 등록 대상 | 실제 IP·상품 이미지와 검증된 미디어 메타데이터 |
 | `src/Prototype.tsx` | UI 통합 대상 | IP 목록·검색·상세, 추첨, 일반 구매 완료 FlowScreen |
 | `src/prototype.css` | UI 통합 대상 | IP 카드·검색·상세 반응형 스타일 |
 | `tests/dabboba-ip-catalog.spec.ts` | 추가 권장 | 카드 수, 검색, 이미지, 이동, 기존 흐름 회귀 |

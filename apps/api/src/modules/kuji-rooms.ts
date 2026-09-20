@@ -10,6 +10,7 @@ import {
   type KujiRoomEntryState,
 } from "@dabboba/db";
 import { conflict, notFound } from "../lib/errors.js";
+import { requireLiveCommerce } from "../lib/commerce-mode.js";
 import { writeOutbox } from "../lib/audit.js";
 import { slugIdInput, uuidInput } from "../lib/input.js";
 import { releasePendingOrder } from "../lib/pending-order-release.js";
@@ -53,7 +54,7 @@ async function lockActorAndRoom(
 ): Promise<void> {
   await lockKujiRoomAdvisories(client, { userId: input.userId, productId: input.productId });
   const exists = await client.query(
-    "SELECT 1 FROM catalog_products WHERE id=$1 AND category='kuji'",
+    "SELECT 1 FROM catalog_products WHERE id=$1 AND category='kuji' AND sale_status='ON_SALE'",
     [input.productId],
   );
   if (!exists.rowCount) throw notFound("쿠지 상품을 찾을 수 없습니다.");
@@ -78,10 +79,11 @@ async function lockKujiProductState(
   const product = await client.query<{
     is_active: boolean;
     is_prize_only: boolean;
+    sale_status: string;
     has_stock: boolean;
     has_drawable_pool: boolean;
   }>(
-    `SELECT p.is_active,p.is_prize_only,
+    `SELECT p.is_active,p.is_prize_only,p.sale_status,
             COALESCE(s.on_hand-s.reserved>0,false) AS has_stock,
             EXISTS (
               SELECT 1
@@ -100,7 +102,11 @@ async function lockKujiProductState(
   );
   if (!product.rowCount) throw notFound("쿠지 상품을 찾을 수 없습니다.");
   const row = product.rows[0]!;
-  return row.is_active && !row.is_prize_only && row.has_stock && row.has_drawable_pool;
+  return row.is_active
+    && !row.is_prize_only
+    && row.sale_status === "ON_SALE"
+    && row.has_stock
+    && row.has_drawable_pool;
 }
 
 export async function expireAndPromoteKujiRoomLocked(
@@ -349,7 +355,7 @@ function noStore(reply: FastifyReply) {
 export async function registerKujiRoomRoutes(app: FastifyInstance, context: ApiContext) {
   app.post(
     "/v1/kuji/rooms/:productId/entries",
-    { preHandler: context.auth.requireUser },
+    { preHandler: [requireLiveCommerce(context), context.auth.requireUser] },
     async (request, reply) => {
       noStore(reply);
       const productId = slugIdInput((request.params as Record<string, unknown>).productId, "productId");
@@ -428,7 +434,7 @@ export async function registerKujiRoomRoutes(app: FastifyInstance, context: ApiC
 
   app.get(
     "/v1/kuji/rooms/:productId/entries/:entryId",
-    { preHandler: context.auth.requireUser },
+    { preHandler: [requireLiveCommerce(context), context.auth.requireUser] },
     async (request, reply) => {
       noStore(reply);
       const params = request.params as Record<string, unknown>;
@@ -459,7 +465,7 @@ export async function registerKujiRoomRoutes(app: FastifyInstance, context: ApiC
 
   app.delete(
     "/v1/kuji/rooms/:productId/entries/:entryId",
-    { preHandler: context.auth.requireUser },
+    { preHandler: [requireLiveCommerce(context), context.auth.requireUser] },
     async (request, reply) => {
       noStore(reply);
       const params = request.params as Record<string, unknown>;

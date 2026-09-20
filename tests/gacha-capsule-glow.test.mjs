@@ -8,8 +8,8 @@ import { sampleGachaRevealLighting } from "../apps/mobile/src/features/draw/gach
 
 const read = (path) => readFileSync(new URL("../" + path, import.meta.url));
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
-const manifest = JSON.parse(read("apps/mobile/assets/gacha-capsule-glow-v1.json"));
-const png = read("apps/mobile/assets/gacha-capsule-glow-v1.png");
+const manifest = JSON.parse(read("apps/mobile/assets/draw/gacha/gacha-capsule-glow-v1.json"));
+const png = read("apps/mobile/assets/draw/gacha/gacha-capsule-glow-v1.png");
 const generator = read("scripts/generate-gacha-capsule-glow.ts").toString("utf8");
 const component = read("apps/mobile/src/features/draw/GachaCapsuleGlow.tsx").toString("utf8");
 const machine = read("apps/mobile/src/features/draw/GachaLeverMachine.tsx").toString("utf8");
@@ -123,7 +123,7 @@ test("optical density decays continuously from the center with no hard texture e
   for (const radius of [1.2, Infinity, -Infinity, NaN]) assert.equal(getGachaCapsuleGlowAlpha(radius), 0);
 });
 
-test("the seam grows into one soft halo without flashing, rotation or repeated expansion", () => {
+test("the seam grows into one stronger halo without flashing, rotation or repeated expansion", () => {
   for (const p of [0, 0.16, 0.18, 0.96, 1]) assert.equal(sample(p).opacity, 0);
   assert.ok(sample(0.3).opacity > 0);
   assert.ok(sample(0.6).opacity > sample(0.3).opacity);
@@ -132,9 +132,9 @@ test("the seam grows into one soft halo without flashing, rotation or repeated e
   for (let step = 1; step < 1000; step += 1) {
     const frame = sample(step / 1000);
     assert.ok(Object.values(frame).every(Number.isFinite));
-    assert.ok(frame.opacity >= 0 && frame.opacity <= 0.68);
+    assert.ok(frame.opacity >= 0 && frame.opacity <= 0.74);
     assert.ok(Math.abs(frame.opacity - previous.opacity) < 0.02);
-    assert.ok(frame.scale >= previous.scale && frame.scale <= 1.15);
+    assert.ok(frame.scale >= previous.scale && frame.scale <= 1.32);
     assert.ok(frame.verticalScale >= previous.verticalScale && frame.verticalScale <= 1);
     if (frame.opacity < previous.opacity - 1e-8) falling = true;
     if (falling) assert.ok(frame.opacity <= previous.opacity + 1e-8);

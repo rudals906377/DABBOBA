@@ -2,11 +2,13 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { DatabasePool } from "@dabboba/db";
 import { loadWorkerConfig } from "./config.js";
+import { InicisInquiryPaymentProvider } from "./inicis-inquiry.js";
 import type { JobDependencies } from "./jobs.js";
 import type { Logger } from "./logger.js";
 import type { PgmqMessage } from "./pgmq.js";
 import {
   consumeQueue,
+  createPaymentReconciliationProvider,
   queueRetryDelaySeconds,
   runWorkerOnce,
   type WorkerRunOperations,
@@ -17,6 +19,52 @@ test("pgmq retry delay is exponential, rounded up to seconds, and bounded", () =
   assert.equal(queueRetryDelaySeconds(1, 100), 1);
   assert.equal(queueRetryDelaySeconds(5, 1_000), 16);
   assert.equal(queueRetryDelaySeconds(50, 1_000), 900);
+});
+
+test("configured KG INICIS reconciliation is wired into actual worker job dependencies", async () => {
+  const config = loadWorkerConfig({
+    NODE_ENV: "production",
+    DABBOBA_ENVIRONMENT_TIER: "STAGING",
+    WORKER_DATABASE_URL: "postgresql://worker:secret@127.0.0.1:5432/dabboba",
+    GCS_BUCKET: "staging-media",
+    PAYMENT_RECONCILIATION_PROVIDER: "KG_INICIS",
+    KG_INICIS_ENVIRONMENT: "TEST",
+    KG_INICIS_MID: "INIpayTest",
+    KG_INICIS_INIAPI_KEY: "fixture-inicis-api-key",
+    KG_INICIS_CLIENT_IP: "203.0.113.7",
+  });
+  const observedProviders: unknown[] = [];
+  const pool = {
+    async connect() {
+      return {
+        async query(sql: string) {
+          return sql.includes("pg_try_advisory_lock")
+            ? { rowCount: 1, rows: [{ locked: true }] }
+            : { rowCount: 1, rows: [{ pg_advisory_unlock: true }] };
+        },
+        release() {},
+      };
+    },
+    async end() {},
+  } as unknown as DatabasePool;
+  const logger = { debug() {}, info() {}, warn() {}, error() {} } as Logger;
+  const operations: WorkerRunOperations = {
+    async assertPgmqRuntime() { return "1.5.1"; },
+    createPgmqOutboxPublisher() { return {} as never; },
+    async dispatchOutboxBatch() { return { published: 0, deferred: 0, skipped: 0 }; },
+    async consumeQueue() {},
+    async processJob(dependencies) { observedProviders.push(dependencies.paymentProvider); },
+  };
+
+  await runWorkerOnce(config, logger, () => false, () => pool, operations);
+
+  assert.equal(observedProviders.length, 5);
+  assert.equal(observedProviders.every((provider) => provider instanceof InicisInquiryPaymentProvider), true);
+  assert.ok(createPaymentReconciliationProvider(config) instanceof InicisInquiryPaymentProvider);
+  assert.throws(
+    () => createPaymentReconciliationProvider({ ...config, environmentTier: "TEST" }),
+    /matching STAGING or PRODUCTION worker tier/,
+  );
 });
 
 test("an overlapping scheduled execution exits successfully without doing worker work", async () => {
@@ -58,6 +106,26 @@ test("an overlapping scheduled execution exits successfully without doing worker
   assert.equal(released, true);
   assert.equal(poolEnded, true);
   assert.match(infoMessages.at(-1) || "", /exiting cleanly/);
+});
+
+test("a startup connection failure still closes the finite worker pool", async () => {
+  const config = loadWorkerConfig({
+    NODE_ENV: "test",
+    WORKER_DATABASE_URL: "postgresql://worker:secret@127.0.0.1:5432/dabboba",
+  });
+  const connectionError = new Error("connection failed");
+  let poolEnded = false;
+  const pool = {
+    async connect() { throw connectionError; },
+    async end() { poolEnded = true; },
+  } as unknown as DatabasePool;
+  const logger = { debug() {}, info() {}, warn() {}, error() {} } as Logger;
+
+  await assert.rejects(
+    () => runWorkerOnce(config, logger, () => false, () => pool),
+    (error) => error === connectionError,
+  );
+  assert.equal(poolEnded, true);
 });
 
 test("a productive run prioritizes lease-sensitive periodic work before queue consumption", async () => {
@@ -102,12 +170,14 @@ test("a productive run prioritizes lease-sensitive periodic work before queue co
 
   const summary = await runWorkerOnce(config, logger, () => false, () => pool, operations);
 
-  assert.equal(summary.periodicCompleted, 3);
+  assert.equal(summary.periodicCompleted, 5);
   assert.equal(summary.periodicFailed, 0);
-  assert.deepEqual(trace.slice(0, 6), [
+  assert.deepEqual(trace.slice(0, 8), [
     "acl",
     "periodic:reservation.sweep",
     "periodic:payment.reconcile",
+    "periodic:inventory.storage-expiry",
+    "periodic:account-auth.cleanup",
     "periodic:media.cleanup",
     "dispatch",
     "queue",
@@ -166,9 +236,11 @@ test("a failed periodic class does not starve later maintenance or one bounded q
     /reservation\.sweep/,
   );
 
-  assert.deepEqual(trace.slice(1, 7), [
+  assert.deepEqual(trace.slice(1, 9), [
     "periodic:reservation.sweep",
     "periodic:payment.reconcile",
+    "periodic:inventory.storage-expiry",
+    "periodic:account-auth.cleanup",
     "periodic:media.cleanup",
     "dispatch",
     "queue",

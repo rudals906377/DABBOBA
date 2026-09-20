@@ -4,6 +4,7 @@ import test from "node:test";
 import { Storage } from "@google-cloud/storage";
 import sharp from "sharp";
 import { AppError } from "../lib/errors.js";
+import { sanitizeImage } from "../lib/image-sanitizer-node.js";
 import {
   buildUploadPostPolicyOptions,
   createMediaProcessingLimiter,
@@ -15,7 +16,6 @@ import {
   mediaUploadIntentFingerprint,
   mediaUploadQuotaAllows,
   normalizeFilename,
-  sanitizeImage,
 } from "./media.js";
 
 test("media idempotency fingerprints normalize upload metadata and bind actor, payload, and media id", () => {

@@ -25,7 +25,7 @@ function sourceBetween(source, start, end) {
 test("shipping history moves from the storage task into a dedicated My Info entry", () => {
   assert.match(
     profileHomeSource,
-    /section: "shipping", label: "배송 신청 내역", caption: "신청 상태와 배송 진행 확인"/,
+    /section: "shipping", label: "배송 신청 내역"/,
   );
   assert.match(profileSectionSource, /shipping: \{ title: "배송 신청 내역" \}/);
   assert.match(profileSectionSource, /if \(section === "storage"\)[\s\S]*?<StorageHubContent/);

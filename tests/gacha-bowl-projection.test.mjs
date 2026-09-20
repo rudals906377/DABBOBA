@@ -9,7 +9,7 @@ import { sampleGachaRevealLighting, sampleGachaRevealRattle } from "../apps/mobi
 const root = new URL("../", import.meta.url);
 const require = createRequire(new URL("apps/mobile/package.json", root));
 const ts = require("typescript");
-const atlas = JSON.parse(readFileSync(new URL("apps/mobile/assets/gacha-capsule-reveal-atlas-v1.json", root), "utf8"));
+const atlas = JSON.parse(readFileSync(new URL("apps/mobile/assets/draw/gacha/gacha-capsule-reveal-atlas-v1.json", root), "utf8"));
 const source = readFileSync(new URL("apps/mobile/src/features/draw/gacha-bowl-projection.ts", root), "utf8");
 const module = { exports: {} };
 runInNewContext(ts.transpileModule(source, {

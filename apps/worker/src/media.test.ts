@@ -6,9 +6,11 @@ import {
   GCS_DELETE_OPTIONS,
   GCS_REQUEST_TIMEOUT_MS,
   GCS_RETRY_OPTIONS,
+  gcsStorageOptions,
+} from "./media-providers.js";
+import {
   MEDIA_STAGING_OBJECT_KEY_PATTERN,
   cleanupMediaBatch,
-  gcsStorageOptions,
   isMediaCleanupCandidate,
   isMediaOrphanCleanupDue,
   mediaCleanupObjectKeys,

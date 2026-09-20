@@ -18,12 +18,29 @@ Desktop is shared infrastructure, not a shared app database.
 "/Users/kyoungmin/Desktop/DBB/DABBOBA 열기.command"
 ```
 
-This is the user-facing full-stack entry point. It validates the DABBOBA Supabase
-project and existing Redis volume, builds shared packages, starts or reuses API
-8788, assets 4174 and Metro 8084, then opens only the dedicated Simulator. It does
-not seed, migrate, deploy, or create a replacement database. The terminal can close
+This is the user-facing full-stack entry point. The approved 2026-09-08 environment
+split replaces its former production-Supabase development connection with the
+`local-development` profile. Production `.env` and mobile public settings remain
+preserved but must not enter the development API, worker or Metro process. Local
+setup uses a separate `dabboba_development` database in the PostgreSQL-only
+`dabboba-development` Compose project and its own data volume; online provider staging is
+not yet provisioned. Existing Redis volume, API 8788, assets 4174, Metro 8084 and
+the dedicated Simulator identities remain fixed. The terminal can close
 after the success message. Implementation and tests are in `../.dabboba-launch/`;
 keep that folder and the `.command` alongside this repository on this Mac.
+
+The environment split was verified on 2026-09-08. Preparation and repeated
+preparation passed without replacing the profile or rotating credentials. The
+old PostgreSQL volume and LOGIN roles were preserved; its newly started legacy
+container was stopped before bringing up the separate development cluster on
+55433. Existing assets and Redis were reused. The stale Metro profile was rejected
+before its DABBOBA-owned process was deliberately stopped and reopened in LOCAL.
+Read-only launcher checks, local API session/inventory round trips, two finite
+worker executions, and an iOS Metro bundle passed. The bundle did not embed the
+preserved production Supabase public configuration. No Simulator UI session,
+signed native build, real device or production-provider transaction was tested
+for this environment change. Older Supabase-connected launcher results below
+remain historical rather than proof of the new profile.
 
 `corepack pnpm ios:local` / `mobile:ios` remain **developer-only Metro aliases**;
 they do not start the API or asset server, and their terminal owns a newly started
@@ -90,6 +107,46 @@ Still outside this verification: physical iPhone/Android interaction, Android
 edge-to-edge appearance, signed splash screen, actual SMS/social provider flows,
 real multipart network upload, paid-draw recovery against a payment provider,
 and production rollout. Automated regressions are not proof of those operations.
+
+## Native catalog UX check on 2026-09-08
+
+- The Home and 뽀바 catalog cards now distinguish image loading, missing media,
+  and load failure without adding a nested retry target inside the product link.
+  Pull-to-refresh retries the same registered URL. Home keeps compact gacha crop
+  behavior and wide original-ratio kuji `contain`; 뽀바 retains its measured
+  source ratio and existing `cover` behavior.
+- Simulator review confirmed the canonical Home wordmark after a reload, the
+  non-blank image-error state for retired example URLs, the filtered-result reset,
+  removal of generated recent-draw activity, and the selected-kuji empty state
+  (`상품을 준비 중이에요.` / `곧 새로운 상품을 보여드릴게요.`). The wordmark issue was a stale
+  running bundle after the asset move; no alternate logo or local catalog photo
+  was added.
+- `tests/expo-shell-structure.test.mjs` passed 34 tests and the Expo TypeScript
+  check passed. The root production build and protected-runtime check were run
+  separately by the supervising task.
+- No catalog or database records were changed. The local API listener stopped
+  independently during one later check and was not restarted by this implementation
+  work; the supervising task subsequently observed it listening again as PID 7394
+  without having restarted it. 뽀바 currently
+  loads at most the existing 100-item API page, so `전체보기` means the complete
+  requested category within that loaded snapshot; cursor pagination remains a
+  production follow-up and was not added in this UX slice.
+
+## Native root sizing check on 2026-09-08
+
+- Home and 뽀바 product summaries now share 14/20 titles, 16/22 prices, and
+  12/16 metadata. Home collection prices are separate from category metadata;
+  the existing compact gacha and wide source-ratio kuji media remain unchanged.
+- 뽀바 category chips keep their 36 px visual height inside an unclipped 44 px
+  touch envelope. Root storage uses the same product hierarchy and 44 px action
+  tabs; profile summary values use 18 px with 12/16 supporting labels and menu
+  captions. Existing 52 px primary actions and 72 px profile menu rows remain.
+- The catalog API was empty during this slice, so source checks and TypeScript
+  verification do not claim a populated Home or 뽀바 runtime review. Existing
+  storage/profile data was preserved; no fixture, catalog, service, or database
+  state was added or changed. Before screenshots are under
+  `../UI-history-backups/UX-sizing-2026-09-08-fceGOw`; the supervising task owns
+  final Simulator screenshots and the root build/runtime checks.
 
 ## Docker preservation
 

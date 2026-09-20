@@ -30,12 +30,20 @@ function assertAdminPath(path: string) {
 export async function adminApi<T>(path: string, options: ApiRequestOptions = {}): Promise<T> {
   assertAdminPath(path);
   const config = getAdminConfig();
-  const url = new URL(path, `${config.apiBaseUrl}/`);
+  const url = new URL(path.slice(1), `${config.apiBaseUrl.replace(/\/+$/, "")}/`);
   const headers = new Headers(options.headers);
   headers.set("accept", "application/json");
   headers.set("x-request-id", crypto.randomUUID());
   if (options.token) headers.set("authorization", `Bearer ${options.token}`);
-  if (options.reason) headers.set("x-admin-reason", options.reason);
+  if (options.reason) {
+    headers.delete("x-admin-reason-encoding");
+    if (/^[\x20-\x7e]+$/.test(options.reason)) {
+      headers.set("x-admin-reason", options.reason);
+    } else {
+      headers.set("x-admin-reason", encodeURIComponent(options.reason));
+      headers.set("x-admin-reason-encoding", "utf-8-percent");
+    }
+  }
   if (options.body !== undefined) headers.set("content-type", "application/json");
 
   const response = await fetch(url, {

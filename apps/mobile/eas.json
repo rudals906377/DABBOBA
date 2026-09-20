@@ -1,0 +1,34 @@
+{
+  "cli": {
+    "appVersionSource": "local",
+    "requireCommit": true
+  },
+  "build": {
+    "preview": {
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_COMMERCE_CAPABILITY": "PRELAUNCH"
+      }
+    },
+    "pg-review": {
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_COMMERCE_CAPABILITY": "LIVE"
+      }
+    },
+    "production-prelaunch": {
+      "env": {
+        "EXPO_PUBLIC_COMMERCE_CAPABILITY": "PRELAUNCH"
+      }
+    },
+    "production-live": {
+      "env": {
+        "EXPO_PUBLIC_COMMERCE_CAPABILITY": "LIVE"
+      }
+    }
+  },
+  "submit": {
+    "production-prelaunch": {},
+    "production-live": {}
+  }
+}

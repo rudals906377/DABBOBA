@@ -14,9 +14,9 @@ import { getGachaCapsuleSilhouette } from "../apps/mobile/src/features/draw/gach
 const size = 17;
 const epsilon = 1e-8;
 
-// Exact support of the native asymmetric rounded rectangle, not the retired
-// ellipse and not the transparent corners of its enclosing square. Arc ends
-// also bound the two short sides and the flat bottom between the arcs.
+// Exact support of the shared spherical shell. Keeping this outline oracle
+// independent from the production placement catches chamber-wall leaks while
+// allowing each rendering context to use its own material treatment.
 const corners = getGachaCapsuleSilhouette(size);
 const topRadius = corners.borderTopLeftRadius;
 const bottomRadius = corners.borderBottomLeftRadius;
@@ -165,14 +165,13 @@ test("poured resting poses break repeated seam angles and uniformly stepped rows
   assert.equal(oldRegularSteps.filter((step) => step < -1).length, 0);
 });
 
-test("the containment oracle includes the rotated cup shoulder instead of assuming a circle", () => {
-  const cup = pose({ ...capsules[0], restRotation: 45, visualScale: 1 });
-  assert.ok(cup.bottomExtent > cup.radius * 1.1);
-  assert.ok(cup.leftExtent > cup.radius * 1.1);
-  assert.ok(cup.rightExtent < size * Math.SQRT2 / 2, "transparent square corners are not physical shell");
-  const atCircularFloor = pose({ ...capsules[0], top: height - size, restRotation: 45, visualScale: 1 });
-  assert.ok(atCircularFloor.y + atCircularFloor.radius <= height);
-  assert.ok(atCircularFloor.y + atCircularFloor.bottomExtent > height, "the old circle test would miss this real floor leak");
+test("the containment oracle keeps the lightweight sphere rotation invariant", () => {
+  const sphere = pose({ ...capsules[0], restRotation: 45, visualScale: 1 });
+  for (const extent of [sphere.bottomExtent, sphere.leftExtent, sphere.rightExtent, sphere.topExtent]) {
+    assert.ok(Math.abs(extent - sphere.radius) <= epsilon);
+  }
+  const atFloor = pose({ ...capsules[0], top: height - size, restRotation: 45, visualScale: 1 });
+  assert.ok(Math.abs(atFloor.y + atFloor.bottomExtent - height) <= epsilon);
 });
 
 test("the profile regression rejects the original centered pyramid", () => {
@@ -214,7 +213,9 @@ test("the denser profile has twenty-six distinct capsules with the same size and
     [12, 9, 5],
   );
   assert.deepEqual(new Set(capsules.map((capsule) => capsule.depth)), new Set([0, 1, 2]));
-  assert.deepEqual(new Set(capsules.map((capsule) => capsule.tone)), new Set(["lime", "ivory"]));
+  assert.deepEqual(new Set(capsules.map((capsule) => capsule.tone)), new Set(["lime", "ivory", "orange"]));
+  assert.equal(capsules.filter((capsule) => capsule.tone === "orange").length, 5);
+  assert.ok(capsules.filter((capsule) => capsule.tone !== "orange").length > 5);
 });
 
 test("rolling and neighbor settlement keep every retained capsule inside the chamber", () => {

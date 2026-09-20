@@ -70,6 +70,22 @@ test("API and worker database identities are isolated around pgmq", {
     );
     assert.deepEqual(membership.rows, []);
 
+    const pushSessionColumns = await migrationPool.query<{ column_name: string }>(
+      `SELECT column_name
+         FROM information_schema.column_privileges
+        WHERE grantee=$1 AND table_schema='public' AND table_name='sessions'
+          AND privilege_type='SELECT'
+        ORDER BY column_name`,
+      [WORKER_DATABASE_ROLE],
+    );
+    assert.deepEqual(pushSessionColumns.rows.map((row) => row.column_name), [
+      "expires_at",
+      "id",
+      "revoked_at",
+      "session_kind",
+      "user_id",
+    ]);
+
     const reverseMembership = await migrationPool.query(
       `SELECT 1
        FROM pg_auth_members AS membership
@@ -88,9 +104,15 @@ test("API and worker database identities are isolated around pgmq", {
     assert.equal(identities[1].rows[0]?.current_user, WORKER_DATABASE_ROLE);
 
     const expectedTablePrivileges = new Map<string, Set<string>>([
+      ["account_deletion_request_events", new Set(["insert"])],
+      ["account_deletion_requests", new Set(["select"])],
+      ["apple_auth_credentials", new Set(["select", "delete"])],
+      ["auth_identities", new Set(["select", "delete"])],
       ["outbox_events", new Set(["select", "insert", "update"])],
-      ["notifications", new Set(["select", "insert"])],
-      ["notification_preferences", new Set(["select"])],
+      ["notifications", new Set(["select", "insert", "delete"])],
+      ["notification_preferences", new Set(["select", "delete"])],
+      ["push_device_tokens", new Set(["select", "update", "delete"])],
+      ["push_notification_deliveries", new Set(["select", "insert", "update", "delete"])],
       ["orders", new Set(["select", "update"])],
       ["inquiries", new Set(["select"])],
       ["shipping_requests", new Set(["select"])],
@@ -110,6 +132,29 @@ test("API and worker database identities are isolated around pgmq", {
       ["media_assets", new Set(["select", "update"])],
       ["worker_dead_letters", new Set(["insert"])],
       ["worker_payment_reconciliations", new Set(["select", "insert", "update"])],
+      ["account_auth_deletion_jobs", new Set(["select", "update", "delete"])],
+      ["community_comments", new Set(["select"])],
+      ["community_post_likes", new Set(["select", "delete"])],
+      ["community_post_media", new Set(["select", "delete"])],
+      ["community_posts", new Set(["select"])],
+      ["content_reports", new Set(["select"])],
+      ["default_shipping_addresses", new Set(["select", "delete"])],
+      ["draw_entitlements", new Set(["select"])],
+      ["exchange_listings", new Set(["select"])],
+      ["exchange_offers", new Set(["select"])],
+      ["exchange_listing_items", new Set(["select"])],
+      ["exchange_offer_items", new Set(["select"])],
+      ["inquiry_message_media", new Set(["select", "delete"])],
+      ["inquiry_messages", new Set(["select"])],
+      ["inventory_units", new Set(["select"])],
+      ["inventory_storage_expiry_events", new Set(["select", "insert"])],
+      ["user_blocks", new Set(["select", "delete"])],
+      ["user_policy_acceptances", new Set(["select"])],
+      ["user_profiles", new Set(["select"])],
+      ["users", new Set(["select"])],
+      ["wanted_request_likes", new Set(["select", "delete"])],
+      ["wanted_requests", new Set(["select"])],
+      ["wishlist_items", new Set(["select", "delete"])],
     ]);
     const publicAcl = await migrationPool.query<{
       relation_name: string;
@@ -155,6 +200,90 @@ test("API and worker database identities are isolated around pgmq", {
       expectedTablePrivileges.delete(relation.relation_name);
     }
     assert.deepEqual([...expectedTablePrivileges.keys()], []);
+
+    const accountDeletionColumnAcl = await migrationPool.query<{
+      can_update_auth_deleted_at: boolean;
+      can_update_auth_deletion_status: boolean;
+      can_update_request_status: boolean;
+    }>(
+      `SELECT
+         has_column_privilege($1, 'public.account_deletion_requests', 'auth_deletion_status', 'UPDATE')
+           AS can_update_auth_deletion_status,
+         has_column_privilege($1, 'public.account_deletion_requests', 'auth_deleted_at', 'UPDATE')
+           AS can_update_auth_deleted_at,
+         has_column_privilege($1, 'public.account_deletion_requests', 'status', 'UPDATE')
+           AS can_update_request_status`,
+      [WORKER_DATABASE_ROLE],
+    );
+    assert.deepEqual(accountDeletionColumnAcl.rows, [{
+      can_update_auth_deletion_status: true,
+      can_update_auth_deleted_at: true,
+      can_update_request_status: true,
+    }]);
+
+    const storageExpiryColumnAcl = await migrationPool.query<{
+      can_select_catalog_user_id: boolean;
+      can_select_catalog_status: boolean;
+      can_update_catalog_description: boolean;
+      can_update_catalog_media_id: boolean;
+      can_update_catalog_name: boolean;
+      can_update_catalog_reference_url: boolean;
+      can_update_catalog_status: boolean;
+      can_update_inventory_owner: boolean;
+      can_update_inventory_status: boolean;
+      can_update_listing_details: boolean;
+      can_update_listing_status: boolean;
+      can_update_listing_title: boolean;
+      can_update_offer_status: boolean;
+      can_update_offer_message: boolean;
+    }>(
+      `SELECT
+         has_column_privilege($1, 'public.catalog_requests', 'user_id', 'SELECT')
+           AS can_select_catalog_user_id,
+         has_column_privilege($1, 'public.catalog_requests', 'status', 'SELECT')
+           AS can_select_catalog_status,
+         has_column_privilege($1, 'public.catalog_requests', 'name', 'UPDATE')
+           AS can_update_catalog_name,
+         has_column_privilege($1, 'public.catalog_requests', 'reference_url', 'UPDATE')
+           AS can_update_catalog_reference_url,
+         has_column_privilege($1, 'public.catalog_requests', 'description', 'UPDATE')
+           AS can_update_catalog_description,
+         has_column_privilege($1, 'public.catalog_requests', 'media_id', 'UPDATE')
+           AS can_update_catalog_media_id,
+         has_column_privilege($1, 'public.catalog_requests', 'status', 'UPDATE')
+           AS can_update_catalog_status,
+         has_column_privilege($1, 'public.inventory_units', 'status', 'UPDATE')
+           AS can_update_inventory_status,
+         has_column_privilege($1, 'public.inventory_units', 'owner_id', 'UPDATE')
+           AS can_update_inventory_owner,
+         has_column_privilege($1, 'public.exchange_listings', 'status', 'UPDATE')
+           AS can_update_listing_status,
+         has_column_privilege($1, 'public.exchange_listings', 'title', 'UPDATE')
+           AS can_update_listing_title,
+         has_column_privilege($1, 'public.exchange_listings', 'details', 'UPDATE')
+           AS can_update_listing_details,
+         has_column_privilege($1, 'public.exchange_offers', 'status', 'UPDATE')
+           AS can_update_offer_status,
+         has_column_privilege($1, 'public.exchange_offers', 'message', 'UPDATE')
+           AS can_update_offer_message`,
+      [WORKER_DATABASE_ROLE],
+    );
+    assert.deepEqual(storageExpiryColumnAcl.rows, [{
+      can_select_catalog_user_id: true,
+      can_select_catalog_status: false,
+      can_update_catalog_description: true,
+      can_update_catalog_media_id: true,
+      can_update_catalog_name: true,
+      can_update_catalog_reference_url: true,
+      can_update_catalog_status: false,
+      can_update_inventory_status: true,
+      can_update_inventory_owner: false,
+      can_update_listing_status: true,
+      can_update_listing_title: true,
+      can_update_listing_details: true,
+      can_update_offer_status: true,
+      can_update_offer_message: true,
+    }]);
 
     const publicSequenceAccess = await migrationPool.query<{ count: string }>(
       `SELECT count(*) AS count
@@ -230,9 +359,6 @@ test("API and worker database identities are isolated around pgmq", {
       );
       for (const deniedTable of [
         "admin_credentials",
-        "sessions",
-        "auth_identities",
-        "users",
         "schema_migrations",
       ]) {
         await assert.rejects(
@@ -240,6 +366,29 @@ test("API and worker database identities are isolated around pgmq", {
           isPrivilegeDenied,
         );
       }
+      await assert.rejects(
+        workerClient.query("SELECT token_digest FROM public.sessions LIMIT 0"),
+        isPrivilegeDenied,
+      );
+      await workerClient.query(
+        `EXPLAIN UPDATE public.catalog_requests
+            SET name='삭제된 카탈로그 요청',reference_url=NULL,description=NULL,media_id=NULL
+          WHERE user_id='00000000-0000-0000-0000-000000000000'::uuid`,
+      );
+      await workerClient.query(
+        `EXPLAIN UPDATE public.exchange_listings
+            SET title='삭제된 교환 게시물',details='삭제된 내용'
+          WHERE author_id='00000000-0000-0000-0000-000000000000'::uuid`,
+      );
+      await workerClient.query(
+        `EXPLAIN UPDATE public.exchange_offers
+            SET message='삭제된 교환 제안'
+          WHERE proposer_id='00000000-0000-0000-0000-000000000000'::uuid`,
+      );
+      await assert.rejects(
+        workerClient.query("EXPLAIN UPDATE public.catalog_requests SET status='REJECTED'"),
+        isPrivilegeDenied,
+      );
       await workerClient.query("BEGIN");
 
       const sent = await workerClient.query<{ message_id: string }>(

@@ -25,6 +25,7 @@ export type DukroomSnapshot = {
 export type DukroomDetailSnapshot = {
   item: DukroomItem;
   comments: CommunityComment[];
+  viewerUserId: string | null;
 };
 
 type DukroomCatalog = {
@@ -100,14 +101,15 @@ export async function fetchDukroomDetail(
     const item = createExampleItems(productResult.data.items, ipResult.data.items)
       .find((candidate) => candidate.post.id === postId);
     if (!item) throw new Error("덕룸 예시 글을 찾을 수 없습니다.");
-    return { item, comments: createExampleComments(item.post.id) };
+    return { item, comments: createExampleComments(item.post.id), viewerUserId: null };
   }
 
-  const [postResult, commentResult] = await Promise.all([
+  const [postResult, commentResult, meResult] = await Promise.all([
     client.GET("/v1/community/posts/{postId}", { params: { path: { postId } } }),
     client.GET("/v1/community/posts/{postId}/comments", {
       params: { path: { postId }, query: { limit: 100 } },
     }),
+    accessToken ? client.GET("/v1/auth/me") : Promise.resolve({ data: undefined }),
   ]);
   if (!postResult.data) throw new Error(errorMessage(postResult.error, "덕룸 글을 불러오지 못했습니다."));
   if (!commentResult.data) throw new Error(errorMessage(commentResult.error, "댓글을 불러오지 못했습니다."));
@@ -129,6 +131,7 @@ export async function fetchDukroomDetail(
       linkedProductId: fallbackProduct?.id ?? null,
     },
     comments: commentResult.data.items,
+    viewerUserId: meResult.data?.actor.userId ?? null,
   };
 }
 

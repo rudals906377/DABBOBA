@@ -1,16 +1,17 @@
-import { Ionicons } from "@expo/vector-icons";
-import { type Href, useRouter } from "expo-router";
+import { type Href, useFocusEffect, useRouter } from "expo-router";
 import { useSQLiteContext } from "expo-sqlite";
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, View } from "react-native";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import type { CatalogProduct } from "@dabboba/contracts";
 import { CatalogProductRow } from "@/components/CatalogProductRow";
-import { KoreanPixelTitle } from "@/components/RootCategoryTitle";
+import { DecorativeIonicon, type DecorativeIoniconName } from "@/components/DecorativeIonicon";
+import { DetailPageHeader } from "@/components/DetailPageHeader";
 import { AppText as Text } from "@/components/Typography";
-import { SeedChip, SeedInlineGuidance } from "@/design-system/components";
+import { SeedActionButton, SeedChip, SeedInlineGuidance } from "@/design-system/components";
 import { seed } from "@/design-system/seed";
 import { useProfileSnapshot } from "@/features/profile/use-profile-snapshot";
+import { ProfileSessionGate, isProfileSessionBlocked } from "@/features/profile/ProfileSessionGate";
 import { fetchShopSnapshot, type ShopSnapshot } from "@/features/shop/shop-api";
 import { readRecentlyViewedProductIds } from "@/lib/local-database";
 import { colors } from "@/theme";
@@ -27,6 +28,7 @@ export function ProductHistoryScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [message, setMessage] = useState("");
+  const hasFocusedOnce = useRef(false);
 
   const load = useCallback(async (manual = false) => {
     if (manual) setRefreshing(true);
@@ -51,6 +53,15 @@ export function ProductHistoryScreen() {
     void load();
   }, [load]);
 
+  useFocusEffect(useCallback(() => {
+    if (hasFocusedOnce.current) {
+      void load(true);
+      void profileState.reload();
+    } else {
+      hasFocusedOnce.current = true;
+    }
+  }, [load, profileState.reload]));
+
   const ipNames = useMemo(
     () => new Map(catalog?.ips.map((ip) => [ip.id, ip.nameKo]) ?? []),
     [catalog?.ips],
@@ -67,6 +78,13 @@ export function ProductHistoryScreen() {
   ) ?? [];
   const wishlistItems = profileState.snapshot?.wishlist ?? [];
   const needsProfile = mode === "drawn" || mode === "wishlist";
+  const blockedStatus = needsProfile && isProfileSessionBlocked(profileState.status)
+    ? profileState.status
+    : null;
+  const retry = () => {
+    void load(true);
+    if (needsProfile) void profileState.reload();
+  };
 
   const goBack = () => {
     if (router.canGoBack()) router.back();
@@ -76,13 +94,7 @@ export function ProductHistoryScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea} edges={["top", "bottom", "left", "right"]}>
-      <View style={styles.header}>
-        <Pressable accessibilityRole="button" accessibilityLabel="뒤로 가기" onPress={goBack} style={styles.headerAction}>
-          <Ionicons name="chevron-back" size={27} color={colors.ink} />
-        </Pressable>
-        <KoreanPixelTitle variant="header">상품 기록</KoreanPixelTitle>
-        <View style={styles.headerAction} />
-      </View>
+      <DetailPageHeader title="상품 기록" titleMode="pixel" onBack={goBack} />
 
       <ScrollView
         contentContainerStyle={styles.content}
@@ -94,22 +106,20 @@ export function ProductHistoryScreen() {
           <SegmentButton active={mode === "wishlist"} label="찜한 상품" onPress={() => setMode("wishlist")} />
         </View>
 
-        <Text style={styles.description}>
+        <SeedInlineGuidance style={styles.description}>
           {mode === "viewed"
             ? "최근 열어본 상품은 이 기기에만 저장되며 언제든 지울 수 있는 기록이에요."
             : mode === "drawn"
               ? "가챠·쿠지 결과로 내 보관함에 확정된 상품만 보여드려요."
               : "관심 표시한 상품을 모아보고 바로 상세 화면으로 이동할 수 있어요."}
-        </Text>
+        </SeedInlineGuidance>
 
-        {needsProfile && profileState.snapshot?.isExample ? (
-          <SeedInlineGuidance style={styles.exampleGuidance}>로그인하면 내가 뽑은 상품과 찜한 상품을 확인할 수 있어요.</SeedInlineGuidance>
-        ) : null}
-
-        {loading || (needsProfile && !profileState.snapshot && !profileState.message) ? (
+        {blockedStatus ? (
+          <ProfileSessionGate status={blockedStatus} returnTo="/product-history" guestBody="로그인하면 내가 뽑은 상품과 찜한 상품을 확인할 수 있어요." />
+        ) : loading || (needsProfile && profileState.status === "loading") ? (
           <View style={styles.state}><ActivityIndicator color={colors.ink} /><Text style={styles.stateBody}>상품 기록을 불러오는 중</Text></View>
-        ) : message || (needsProfile && profileState.message) ? (
-          <View style={styles.state}><Ionicons name="alert-circle-outline" size={32} color={colors.muted} /><Text style={styles.stateTitle}>{message || profileState.message}</Text><Pressable accessibilityRole="button" onPress={() => void load(true)} style={styles.retryButton}><Text style={styles.retryLabel}>다시 불러오기</Text></Pressable></View>
+        ) : message || (needsProfile && profileState.status === "error") ? (
+          <View style={styles.state}><DecorativeIonicon name="alert-circle-outline" size={32} color={colors.muted} /><Text style={styles.stateTitle}>{message || profileState.message}</Text><SeedActionButton label="다시 불러오기" size="small" variant="neutralSolid" onPress={retry} style={styles.retryButton} /></View>
         ) : mode === "viewed" ? (
           viewedProducts.length ? (
             <View style={styles.list}>
@@ -158,8 +168,8 @@ function SegmentButton({ active, label, onPress }: { active: boolean; label: str
   return <SeedChip label={label} selected={active} onPress={onPress} style={styles.segmentButton} />;
 }
 
-function EmptyState({ icon, title, body }: { icon: keyof typeof Ionicons.glyphMap; title: string; body: string }) {
-  return <View style={styles.state}><Ionicons name={icon} size={34} color={colors.muted} /><Text style={styles.stateTitle}>{title}</Text><Text style={styles.stateBody}>{body}</Text></View>;
+function EmptyState({ icon, title, body }: { icon: DecorativeIoniconName; title: string; body: string }) {
+  return <View style={styles.state}><DecorativeIonicon name={icon} size={34} color={colors.muted} /><Text style={styles.stateTitle}>{title}</Text><Text style={styles.stateBody}>{body}</Text></View>;
 }
 
 function formatDate(value: string): string {
@@ -168,17 +178,13 @@ function formatDate(value: string): string {
 
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: seed.color.layer.basement },
-  header: { minHeight: seed.size.topNavigation, paddingHorizontal: seed.spacing.x2_5, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: seed.color.stroke.neutral, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  headerAction: { width: seed.size.touchTarget, height: seed.size.touchTarget, alignItems: "center", justifyContent: "center" },
   content: { paddingHorizontal: seed.spacing.globalGutter, paddingTop: seed.spacing.x4, paddingBottom: seed.spacing.screenBottom },
   segment: { flexDirection: "row", gap: seed.spacing.betweenChips },
   segmentButton: { flex: 1 },
-  description: { color: colors.muted, fontSize: 12, lineHeight: 18, marginTop: 14 },
-  exampleGuidance: { marginTop: seed.spacing.x3_5 },
+  description: { marginTop: 14 },
   list: { marginTop: 18, gap: 12 },
   state: { minHeight: 330, paddingHorizontal: 26, alignItems: "center", justifyContent: "center" },
   stateTitle: { color: colors.ink, fontSize: 16, lineHeight: 23, fontWeight: "900", textAlign: "center", marginTop: 12 },
   stateBody: { color: colors.muted, fontSize: 13, lineHeight: 20, textAlign: "center", marginTop: 6 },
-  retryButton: { minHeight: 42, justifyContent: "center", paddingHorizontal: 16, marginTop: 15, borderRadius: 10, backgroundColor: colors.ink },
-  retryLabel: { color: colors.white, fontSize: 13, fontWeight: "800" },
+  retryButton: { marginTop: seed.spacing.x4 },
 });

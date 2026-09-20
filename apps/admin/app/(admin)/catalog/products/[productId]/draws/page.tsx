@@ -44,17 +44,22 @@ export default async function DrawVersionsPage({ params, searchParams }: {
     && candidate.ipId === product.ipId
   ));
   const returnTo = `/catalog/products/${encodeURIComponent(productId)}/draws`;
+  // The API returns versions newest-first. An older draft must not expose a
+  // publish action after a newer version has already been activated.
+  const latestDraftId = result.items[0]?.status === "DRAFT" ? result.items[0].id : null;
 
   return <>
     <PageHeader
       eyebrow="IMMUTABLE DRAW CONFIG"
-      title="가챠·쿠지 확률표"
-      description={`${product.name} · 공개 후 구성은 변경할 수 없고 새 버전으로만 교체합니다. 판매 가용 수량 ${product.availableQuantity.toLocaleString("ko-KR")}개`}
+      title={product.category === "kuji" ? "쿠지 상 구성" : "가챠 확률표"}
+      description={`${product.name} · ${product.category === "kuji" ? "봉인 덱" : "가중치"} 구성은 공개 후 변경할 수 없고 새 버전으로만 교체합니다. 판매 가용 수량 ${product.availableQuantity.toLocaleString("ko-KR")}개`}
       actions={<Link className="button-link" href="/catalog/products">상품 목록</Link>}
     />
     <Feedback searchParams={query} />
     <section className="panel">
-      <div className="panel-heading"><div><h2>새 초안</h2><p>동일 IP의 활성 경품 전용 SKU만 선택할 수 있습니다. 기본 가중치 × 남은 수량이 현재 유효 가중치입니다.</p></div></div>
+      <div className="panel-heading"><div><h2>{product.category === "kuji" ? "새 상 구성 초안" : "새 확률표 초안"}</h2><p>{product.category === "kuji"
+        ? "동일 IP의 활성 경품 전용 SKU만 선택할 수 있습니다. 전체 장수와 등급별 수량 합계가 정확히 같아야 합니다."
+        : "동일 IP의 활성 경품 전용 SKU만 선택할 수 있습니다. 기본 가중치 × 남은 수량이 현재 유효 가중치입니다."}</p></div></div>
       <DrawVersionForm
         product={product}
         prizeProducts={prizeProducts}
@@ -62,12 +67,16 @@ export default async function DrawVersionsPage({ params, searchParams }: {
         idempotencyKey={randomUUID()}
       />
     </section>
-    {result.items.length === 0 ? <section className="data-panel"><EmptyState title="아직 확률표 버전이 없습니다." description="경품 SKU와 실제 검수 재고를 확인한 뒤 첫 초안을 만드세요." /></section> : null}
+    {result.items.length === 0 ? <section className="data-panel"><EmptyState title={product.category === "kuji" ? "아직 공개할 상 구성이 없습니다." : "아직 확률표 버전이 없습니다."} description="경품 SKU와 실제 검수 재고를 확인한 뒤 첫 초안을 만드세요." /></section> : null}
     {result.items.map((version) => <section className="panel" key={version.id}>
-      <div className="panel-heading"><div><h2>버전 {version.version} <StatusBadge value={version.status} /></h2><p>생성 {formatDate(version.createdAt)}{version.publishedAt ? ` · 공개 ${formatDate(version.publishedAt)}` : ""} · 유효 가중치 {version.totalEffectiveWeight.toLocaleString("ko-KR")}</p></div></div>
+      <div className="panel-heading"><div><h2>버전 {version.version} <StatusBadge value={version.status} /></h2><p>생성 {formatDate(version.createdAt)}{version.publishedAt ? ` · 공개 ${formatDate(version.publishedAt)}` : ""} · {product.category === "kuji"
+        ? `전체 장수 ${(version.totalSlots ?? 0).toLocaleString("ko-KR")}`
+        : `유효 가중치 ${version.totalEffectiveWeight.toLocaleString("ko-KR")}`}</p></div></div>
       <div className="data-panel"><table className="data-table">
-        <thead><tr><th>경품 상품</th><th>등급</th><th>기본 가중치</th><th>초기/남은 수량</th><th>현재 비율</th></tr></thead>
-        <tbody>{version.entries.map((entry) => {
+        <thead><tr><th>경품 상품</th><th>{product.category === "kuji" ? "상 이름" : "등급"}</th>{product.category === "kuji" ? <><th>관리 코드</th><th>노출 순서</th></> : <th>기본 가중치</th>}<th>초기/남은 수량</th><th>{product.category === "kuji" ? "전체 구성 비율" : "현재 비율"}</th></tr></thead>
+        <tbody>{[...version.entries].sort((left, right) => product.category === "kuji"
+          ? (left.tierRank ?? Number.MAX_SAFE_INTEGER) - (right.tierRank ?? Number.MAX_SAFE_INTEGER)
+          : 0).map((entry) => {
           const effective = entry.weight * (entry.remainingQuantity ?? 1);
           const percentage = version.totalEffectiveWeight ? effective / version.totalEffectiveWeight * 100 : 0;
           return <tr key={entry.id}>
@@ -76,19 +85,21 @@ export default async function DrawVersionsPage({ params, searchParams }: {
               <span><strong>{entry.prizeName}</strong><small>SKU {entry.prizeSku} · IP {entry.prizeIpId}</small></span>
             </span></td>
             <td>{entry.rarity}</td>
-            <td>{entry.weight.toLocaleString("ko-KR")}</td>
+            {product.category === "kuji" ? <><td>{entry.tierCode ?? "-"}</td><td>{entry.tierRank?.toLocaleString("ko-KR") ?? "-"}</td></> : <td>{entry.weight.toLocaleString("ko-KR")}</td>}
             <td>{entry.initialQuantity === null ? "무제한" : `${entry.initialQuantity.toLocaleString("ko-KR")} / ${entry.remainingQuantity?.toLocaleString("ko-KR") ?? 0}`}</td>
-            <td>{percentage.toLocaleString("ko-KR", { maximumFractionDigits: 6 })}%</td>
+            <td>{(product.category === "kuji"
+              ? version.totalSlots ? (entry.initialQuantity ?? 0) / version.totalSlots * 100 : 0
+              : percentage).toLocaleString("ko-KR", { maximumFractionDigits: 6 })}%</td>
           </tr>;
         })}</tbody>
       </table></div>
-      {version.status === "DRAFT" ? <form className="stack-form" action={publishDrawVersion}>
+      {version.status === "DRAFT" && version.id === latestDraftId ? <form className="stack-form" action={publishDrawVersion}>
         <input type="hidden" name="productId" value={productId} />
         <input type="hidden" name="versionId" value={version.id} />
         <ReturnTo value={returnTo} />
         <ReasonField label="공개 사유" />
         <div className="form-actions"><button className="danger">이 버전 공개</button></div>
-      </form> : null}
+      </form> : version.status === "DRAFT" ? <p className="muted">이전 초안 · 최신 초안만 공개할 수 있습니다.</p> : null}
     </section>)}
   </>;
 }

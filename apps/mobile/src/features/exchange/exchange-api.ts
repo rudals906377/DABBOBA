@@ -1,25 +1,30 @@
 import { randomUUID } from "expo-crypto";
 import { errorMessage } from "@dabboba/api-client";
 import type { CatalogProduct, ExchangeListing, ExchangeOffer, InventoryUnit } from "@dabboba/contracts";
-import { PRODUCT_CATEGORY_VALUES } from "@/features/catalog/product-categories";
+import { customerProductCategoryValues, productCategoryLabel } from "@/features/catalog/product-categories";
 import {
   areCustomerVisibleExchangeProducts,
   isCustomerEligibleExchangeInventory,
   isCustomerVisibleExchangeBundle,
 } from "@/features/exchange/exchange-visibility";
 import { createMobileDabbobaClient as createDabbobaClient } from "@/lib/mobile-api-client";
+import { ProfileApiError } from "@/features/profile/profile-api";
 
 export type ExchangeCategory = CatalogProduct["category"];
 
 export type ExchangeCardItem = {
   id: string;
   isExample: boolean;
+  authorId: string;
   title: string;
   details: string;
   product: CatalogProduct;
   products: CatalogProduct[];
   authorNickname: string;
   offerCount: number;
+  status: ExchangeListing["status"];
+  expiresAt: string;
+  storageExpiresAt: string | null;
 };
 
 export type ExchangeRoomSnapshot = {
@@ -27,6 +32,12 @@ export type ExchangeRoomSnapshot = {
   ipNames: Record<string, string>;
   ipSearchTerms: Record<string, string>;
   fetchedAt: string;
+};
+
+export type ExchangeActivitySnapshot = {
+  authored: ExchangeCardItem[];
+  applied: ExchangeCardItem[];
+  ipNames: Record<string, string>;
 };
 
 export type ExchangeProposalItem = {
@@ -64,9 +75,14 @@ export async function fetchExchangeRoom(
   category?: ExchangeCategory,
   query?: string,
   includePreview = false,
+  accessToken?: string,
 ): Promise<ExchangeRoomSnapshot> {
   const search = query?.trim() || undefined;
-  const client = createDabbobaClient({ baseUrl: apiBaseUrl, requestId: randomUUID });
+  const client = createDabbobaClient({
+    baseUrl: apiBaseUrl,
+    requestId: randomUUID,
+    ...(accessToken ? { token: () => accessToken } : {}),
+  });
   const [listingResult, ipResult] = await Promise.all([
     client.GET("/v1/exchange/listings", {
       params: { query: { limit: 30, category, q: search } },
@@ -178,6 +194,42 @@ export async function fetchExchangeDetail(
   };
 }
 
+export async function fetchMyExchangeActivity(
+  apiBaseUrl: string,
+  accessToken: string,
+): Promise<ExchangeActivitySnapshot> {
+  const client = createDabbobaClient({
+    baseUrl: apiBaseUrl,
+    token: () => accessToken,
+    requestId: randomUUID,
+  });
+  const [activityResult, ipResult] = await Promise.all([
+    client.GET("/v1/exchange/activity", {}),
+    client.GET("/v1/catalog/ips", { params: { query: { limit: 100 } } }),
+  ]);
+  if (!activityResult.data) {
+    throw new ProfileApiError(
+      activityResult.response.status,
+      errorMessage(activityResult.error, "내 교환 현황을 불러오지 못했습니다."),
+    );
+  }
+  if (!ipResult.data) {
+    throw new ProfileApiError(
+      ipResult.response.status,
+      errorMessage(ipResult.error, "작품 정보를 불러오지 못했습니다."),
+    );
+  }
+  return {
+    authored: activityResult.data.authored
+      .filter((listing) => isCustomerVisibleExchangeBundle(exchangeListingInventories(listing)))
+      .map(toCardItem),
+    applied: activityResult.data.applied
+      .filter((listing) => isCustomerVisibleExchangeBundle(exchangeListingInventories(listing)))
+      .map(toCardItem),
+    ipNames: Object.fromEntries(ipResult.data.items.map((ip) => [ip.id, ip.nameKo])),
+  };
+}
+
 export async function decideExchangeOffer(
   apiBaseUrl: string,
   accessToken: string,
@@ -239,10 +291,10 @@ async function fetchExchangeInventory(
     client.GET("/v1/catalog/ips", { params: { query: { limit: 100 } } }),
   ]);
   if (!inventoryResult.data) {
-    throw new Error(errorMessage(inventoryResult.error, "보관함 상품을 불러오지 못했습니다."));
+    throw new ProfileApiError(inventoryResult.response.status, errorMessage(inventoryResult.error, "보관함 상품을 불러오지 못했습니다."));
   }
   if (!ipResult.data) {
-    throw new Error(errorMessage(ipResult.error, "작품 정보를 불러오지 못했습니다."));
+    throw new ProfileApiError(ipResult.response.status, errorMessage(ipResult.error, "작품 정보를 불러오지 못했습니다."));
   }
   return {
     items: inventoryResult.data.items,
@@ -307,12 +359,16 @@ function toCardItem(listing: ExchangeListing): ExchangeCardItem {
   return {
     id: listing.id,
     isExample: false,
+    authorId: listing.authorId,
     title: listing.title,
     details: listing.details,
     product: products[0] ?? listing.offeredInventory.product,
     products,
     authorNickname: listing.authorNickname,
     offerCount: listing.offerCount,
+    status: listing.status,
+    expiresAt: listing.expiresAt,
+    storageExpiresAt: listing.offeredInventory.storageExpiresAt ?? null,
   };
 }
 
@@ -347,7 +403,7 @@ function createExampleItems(
     ? []
     : selectedCategory
       ? [selectedCategory]
-      : [...PRODUCT_CATEGORY_VALUES];
+      : customerProductCategoryValues("exchange");
 
   return categories.flatMap((category, categoryIndex) => {
     const categoryItems = products
@@ -355,12 +411,16 @@ function createExampleItems(
       .map((product, index) => ({
         id: `${EXAMPLE_PREFIX}${product.id}`,
         isExample: true,
+        authorId: `40000000-0000-4000-8000-${String(categoryIndex * 10 + index + 1).padStart(12, "0")}`,
         title: exampleTitle(category, index),
         details: "",
         product,
         products: [product],
         authorNickname: EXAMPLE_AUTHORS[(categoryIndex + index) % EXAMPLE_AUTHORS.length] ?? "다뽑아회원",
         offerCount: 4,
+        status: "OPEN" as const,
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+        storageExpiresAt: null,
       }));
     return (search ? filterExchangeItems(categoryItems, ipNames, search) : categoryItems).slice(0, 2);
   });
@@ -423,8 +483,5 @@ function exampleTitle(category: ExchangeCategory, index: number): string {
 }
 
 export function categoryLabel(category: ExchangeCategory): string {
-  if (category === "gacha") return "가챠";
-  if (category === "figure") return "피규어";
-  if (category === "kuji") return "쿠지";
-  return "카드";
+  return productCategoryLabel(category);
 }

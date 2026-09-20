@@ -4,6 +4,10 @@ import test from "node:test";
 import type { ApiConfig } from "@dabboba/config";
 import { createDatabasePool } from "@dabboba/db";
 import { buildApp } from "../app.js";
+import {
+  acceptRequiredPoliciesForIntegrationTest,
+  acceptUgcOperationsPolicyForIntegrationTest,
+} from "../integration-test-fixtures.js";
 import { tokenDigest } from "../plugins/auth.js";
 
 const databaseUrl = process.env.DABBOBA_TEST_DATABASE_URL;
@@ -43,7 +47,10 @@ test(
         payload: { email },
       });
       assert.equal(response.statusCode, 201, response.body);
-      return response.json() as { token: string; actor: { userId: string; nickname: string } };
+      const created = response.json() as { token: string; actor: { userId: string; nickname: string } };
+      await acceptRequiredPoliciesForIntegrationTest(pool, created.actor.userId);
+      await acceptUgcOperationsPolicyForIntegrationTest(pool, created.actor.userId);
+      return created;
     };
     const suffix = randomUUID().replaceAll("-", "").slice(0, 12);
     const ipId = `exchange-test-ip-${suffix}`;
@@ -298,6 +305,75 @@ test(
     const offerOneInventoryTwo = await addDrawInventory(proposerOne.actor.userId, "GACHA");
     const offerTwoInventory = await addDrawInventory(proposerTwo.actor.userId, "GACHA");
     const offerTwoInventoryTwo = await addDrawInventory(proposerTwo.actor.userId, "GACHA");
+    const expiredStorageInventory = await addDrawInventory(author.actor.userId, "GACHA");
+    await pool.query(
+      `UPDATE inventory_units
+       SET acquired_at=now()-interval '61 days',storage_expires_at=now()-interval '1 second'
+       WHERE id=$1`,
+      [expiredStorageInventory],
+    );
+    const expiredStorageListing = await mutate(author.token, "POST", "/v1/exchange/listings", {
+      title: "보관 만료 상품 테스트",
+      details: "보관 기간이 끝난 상품은 교환에 예약되면 안 됩니다.",
+      offeredInventoryUnitId: expiredStorageInventory,
+    });
+    assert.equal(expiredStorageListing.statusCode, 409, expiredStorageListing.body);
+    assert.match(expiredStorageListing.body, /보관 기간이 만료/);
+    const expiredStorageState = await pool.query<{ status: string }>(
+      "SELECT status FROM inventory_units WHERE id=$1",
+      [expiredStorageInventory],
+    );
+    assert.equal(expiredStorageState.rows[0]!.status, "OWNED");
+
+    const staleListingInventory = await addDrawInventory(author.actor.userId, "GACHA");
+    const staleOfferInventory = await addDrawInventory(proposerOne.actor.userId, "GACHA");
+    const staleListingResponse = await mutate(author.token, "POST", "/v1/exchange/listings", {
+      title: "교환글 만료 테스트",
+      details: "만료 뒤에는 제안을 수락할 수 없어야 합니다.",
+      offeredInventoryUnitId: staleListingInventory,
+    });
+    assert.equal(staleListingResponse.statusCode, 201, staleListingResponse.body);
+    const staleListingId = (staleListingResponse.json() as { id: string }).id;
+    const staleOfferResponse = await mutate(
+      proposerOne.token,
+      "POST",
+      `/v1/exchange/listings/${staleListingId}/offers`,
+      { offeredInventoryUnitId: staleOfferInventory },
+    );
+    assert.equal(staleOfferResponse.statusCode, 201, staleOfferResponse.body);
+    const staleOfferId = (staleOfferResponse.json() as { id: string }).id;
+    await pool.query(
+      `UPDATE exchange_listings
+       SET created_at=now()-interval '8 days',expires_at=now()-interval '1 day'
+       WHERE id=$1`,
+      [staleListingId],
+    );
+    const staleDecision = await mutate(
+      author.token,
+      "POST",
+      `/v1/exchange/listings/${staleListingId}/offers/${staleOfferId}/decision`,
+      { decision: "ACCEPTED" },
+    );
+    assert.equal(staleDecision.statusCode, 409, staleDecision.body);
+    const staleListingState = await pool.query<{ status: string; cancel_reason: string | null }>(
+      "SELECT status,cancel_reason FROM exchange_listings WHERE id=$1",
+      [staleListingId],
+    );
+    assert.deepEqual(staleListingState.rows[0], {
+      status: "CANCELLED",
+      cancel_reason: "AUTO_EXPIRED",
+    });
+    const staleOfferState = await pool.query<{ status: string }>(
+      "SELECT status FROM exchange_offers WHERE id=$1",
+      [staleOfferId],
+    );
+    assert.equal(staleOfferState.rows[0]!.status, "REJECTED");
+    const staleInventoryStates = await pool.query<{ status: string }>(
+      "SELECT status FROM inventory_units WHERE id=ANY($1::uuid[]) ORDER BY id",
+      [[staleListingInventory, staleOfferInventory]],
+    );
+    assert.equal(staleInventoryStates.rows.length, 2);
+    assert.ok(staleInventoryStates.rows.every((row) => row.status === "OWNED"));
     const mismatchedSourceInventory = await addDrawInventory(
       author.actor.userId,
       "GACHA",
@@ -348,8 +424,129 @@ test(
       (eligibleInventory.json() as { items: Array<{ id: string }> }).items
         .map((item) => item.id)
         .sort(),
-      [listingInventory, listingInventoryTwo].sort(),
+      [listingInventory, listingInventoryTwo, staleListingInventory].sort(),
     );
+
+    const storageBoundaryListingInventory = await addDrawInventory(
+      author.actor.userId,
+      "GACHA",
+    );
+    const storageBoundaryOfferInventory = await addDrawInventory(
+      proposerOne.actor.userId,
+      "GACHA",
+    );
+    const storageBoundaryListingResponse = await mutate(
+      author.token,
+      "POST",
+      "/v1/exchange/listings",
+      {
+        title: "교환 수락 보관 기한 테스트",
+        details: "수락 순간 양쪽 상품의 보관 기한을 다시 확인해야 합니다.",
+        offeredInventoryUnitId: storageBoundaryListingInventory,
+      },
+    );
+    assert.equal(
+      storageBoundaryListingResponse.statusCode,
+      201,
+      storageBoundaryListingResponse.body,
+    );
+    const storageBoundaryListingId = (
+      storageBoundaryListingResponse.json() as { id: string }
+    ).id;
+    const storageBoundaryOfferResponse = await mutate(
+      proposerOne.token,
+      "POST",
+      `/v1/exchange/listings/${storageBoundaryListingId}/offers`,
+      { offeredInventoryUnitId: storageBoundaryOfferInventory },
+    );
+    assert.equal(
+      storageBoundaryOfferResponse.statusCode,
+      201,
+      storageBoundaryOfferResponse.body,
+    );
+    const storageBoundaryOfferId = (
+      storageBoundaryOfferResponse.json() as { id: string }
+    ).id;
+
+    await pool.query(
+      `UPDATE inventory_units
+       SET acquired_at=now()-interval '61 days',storage_expires_at=now()-interval '1 second'
+       WHERE id=$1`,
+      [storageBoundaryOfferInventory],
+    );
+    const expiredOfferDecision = await mutate(
+      author.token,
+      "POST",
+      `/v1/exchange/listings/${storageBoundaryListingId}/offers/${storageBoundaryOfferId}/decision`,
+      { decision: "ACCEPTED" },
+    );
+    assert.equal(expiredOfferDecision.statusCode, 409, expiredOfferDecision.body);
+    assert.match(expiredOfferDecision.body, /보관 기간이 만료/);
+
+    const listingExpiryInventory = await addDrawInventory(author.actor.userId, "GACHA");
+    const listingExpiryOfferInventory = await addDrawInventory(proposerOne.actor.userId, "GACHA");
+    const listingExpiryResponse = await mutate(author.token, "POST", "/v1/exchange/listings", {
+      title: "교환 등록 상품 보관 기한 테스트",
+      details: "수락 순간 등록 상품의 보관 기한도 다시 확인해야 합니다.",
+      offeredInventoryUnitId: listingExpiryInventory,
+    });
+    assert.equal(listingExpiryResponse.statusCode, 201, listingExpiryResponse.body);
+    const listingExpiryId = (listingExpiryResponse.json() as { id: string }).id;
+    const listingExpiryOfferResponse = await mutate(
+      proposerOne.token,
+      "POST",
+      `/v1/exchange/listings/${listingExpiryId}/offers`,
+      { offeredInventoryUnitId: listingExpiryOfferInventory },
+    );
+    assert.equal(listingExpiryOfferResponse.statusCode, 201, listingExpiryOfferResponse.body);
+    const listingExpiryOfferId = (listingExpiryOfferResponse.json() as { id: string }).id;
+    await pool.query(
+      `UPDATE inventory_units
+       SET acquired_at=now()-interval '61 days',storage_expires_at=now()-interval '1 second'
+       WHERE id=$1`,
+      [listingExpiryInventory],
+    );
+    const expiredListingInventoryDecision = await mutate(
+      author.token,
+      "POST",
+      `/v1/exchange/listings/${listingExpiryId}/offers/${listingExpiryOfferId}/decision`,
+      { decision: "ACCEPTED" },
+    );
+    assert.equal(
+      expiredListingInventoryDecision.statusCode,
+      409,
+      expiredListingInventoryDecision.body,
+    );
+    assert.match(expiredListingInventoryDecision.body, /이미 결정된 교환 글/);
+
+    const storageBoundaryState = await pool.query<{
+      listing_status: string;
+      offer_status: string;
+      listing_inventory_status: string;
+      offer_inventory_status: string;
+    }>(
+      `SELECT listing.status AS listing_status,
+              offer.status AS offer_status,
+              listing_inventory.status AS listing_inventory_status,
+              offer_inventory.status AS offer_inventory_status
+         FROM exchange_listings listing
+         JOIN exchange_offers offer ON offer.listing_id=listing.id AND offer.id=$2
+         JOIN inventory_units listing_inventory ON listing_inventory.id=$3
+         JOIN inventory_units offer_inventory ON offer_inventory.id=$4
+        WHERE listing.id=$1`,
+      [
+        listingExpiryId,
+        listingExpiryOfferId,
+        listingExpiryInventory,
+        listingExpiryOfferInventory,
+      ],
+    );
+    assert.deepEqual(storageBoundaryState.rows[0], {
+      listing_status: "CANCELLED",
+      offer_status: "REJECTED",
+      listing_inventory_status: "OWNED",
+      offer_inventory_status: "OWNED",
+    });
 
     const forgedListing = await pool.query<{ id: string }>(
       `INSERT INTO exchange_listings(author_id,offered_inventory_unit_id,title,details)

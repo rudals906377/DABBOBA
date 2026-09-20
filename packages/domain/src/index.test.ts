@@ -4,7 +4,9 @@ import {
   canTransitionInquiry,
   canTransitionReport,
   commerceModeForCategory,
+  customerCategoryAvailability,
   isAdminRole,
+  isCustomerPurchasableCategory,
   isSuperAdminRole,
 } from "./index.js";
 
@@ -13,6 +15,17 @@ test("commerce categories preserve the approved purchase and draw split", () => 
   assert.equal(commerceModeForCategory("kuji"), "draw");
   assert.equal(commerceModeForCategory("figure"), "purchase");
   assert.equal(commerceModeForCategory("tcg"), "purchase");
+});
+
+test("launch category policy is enforced independently of client visibility", () => {
+  assert.equal(customerCategoryAvailability("gacha"), "active");
+  assert.equal(customerCategoryAvailability("kuji"), "active");
+  assert.equal(customerCategoryAvailability("figure"), "coming-soon");
+  assert.equal(customerCategoryAvailability("tcg"), "hidden");
+  assert.equal(isCustomerPurchasableCategory("gacha"), true);
+  assert.equal(isCustomerPurchasableCategory("kuji"), true);
+  assert.equal(isCustomerPurchasableCategory("figure"), false);
+  assert.equal(isCustomerPurchasableCategory("tcg"), false);
 });
 
 test("admin role helpers keep USER out and reserve super-admin actions", () => {

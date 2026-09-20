@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { productSubjectTitle } from "../apps/mobile/src/features/shop/product-title.ts";
+import { catalogCardTitle, productSubjectTitle } from "../apps/mobile/src/features/shop/product-title.ts";
 
 test("product detail removes the repeated IP name and keeps the remaining subject", () => {
   assert.equal(
@@ -23,4 +23,13 @@ test("product detail removes the repeated IP name and keeps the remaining subjec
 test("product detail keeps the original title when the IP is absent or the whole title", () => {
   assert.equal(productSubjectTitle("포켓몬 카드게임 확장팩 스톰 에메랄다", "포켓몬스터"), "포켓몬 카드게임 확장팩 스톰 에메랄다");
   assert.equal(productSubjectTitle("원피스", "원피스"), "원피스");
+});
+
+test("catalog cards fold the IP and product name into one compact title", () => {
+  assert.equal(catalogCardTitle("무규토", "약사의 혼잣말"), "약사의 혼잣말 무규토");
+  assert.equal(
+    catalogCardTitle("체인소맨 레제편 어깨쿵 2탄", "체인소맨"),
+    "체인소맨 레제편 어깨쿵 2탄",
+  );
+  assert.equal(catalogCardTitle("  무규토  ", null), "무규토");
 });

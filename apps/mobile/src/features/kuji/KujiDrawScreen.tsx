@@ -1,4 +1,3 @@
-import { Ionicons } from "@expo/vector-icons";
 import Constants from "expo-constants";
 import { type Href, useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -12,15 +11,21 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { DecorativeIonicon } from "@/components/DecorativeIonicon";
 import {
   FloatingBottomActionPanel,
   useFloatingBottomActionContentInset,
 } from "@/components/FloatingBottomActionPanel";
+import { DetailPageHeader } from "@/components/DetailPageHeader";
 import { ProductInfoDivider } from "@/components/ProductInfoDivider";
+import { RemainingInventoryMeter } from "@/components/RemainingInventoryMeter";
 import { KoreanPixelTitle, KoreanPixelTitleAccessory } from "@/components/RootCategoryTitle";
 import { AppText as Text, BalancedAppText } from "@/components/Typography";
+import { catalogProductCardSurface, catalogProductImageSurface } from "@/design-system/catalog";
 import { SeedActionButton } from "@/design-system/components";
 import { seed } from "@/design-system/seed";
+import { presentDrawOpenModeChoice } from "@/features/draw/draw-open-mode-prompt";
+import { withDrawOpenMode } from "@/features/draw/draw-open-mode";
 import {
   createKujiDrawLeaseClock,
   formatKujiDrawLeaseRemainingTime,
@@ -139,8 +144,11 @@ export function KujiDrawScreen() {
       const prepared = preparePaidKujiSelection(next, { ...paidDrawRoute, productId });
       if (prepared.kind === "DONE") throw new Error("이미 모두 연 쿠지 주문입니다. 구매 내역을 확인해 주세요.");
       if (prepared.kind === "REVEAL") {
-        requestScope.invalidate();
-        router.replace(prepared.path as Href);
+        presentDrawOpenModeChoice(next.recovery.entitlementIds.length, (mode) => {
+          if (!current()) return;
+          requestScope.invalidate();
+          router.replace(withDrawOpenMode(prepared.path, mode) as Href);
+        });
         return;
       }
       const nextBoard = prepared.board;
@@ -191,7 +199,7 @@ export function KujiDrawScreen() {
   const goBack = () => {
     requestScope.invalidate();
     if (router.canGoBack()) router.back();
-    else router.replace("/(tabs)/ppoba");
+    else router.replace("/(tabs)/kuji");
   };
 
   const openSelectedTickets = async () => {
@@ -237,12 +245,15 @@ export function KujiDrawScreen() {
         entitlementIds: paidDrawRoute.entitlementIds,
         slotNumbers: selectedSlotNumbers,
       });
-      const revealPath = paidKujiRevealPath({
-        productId, orderId: paidDrawRoute.orderId, roomEntryId: paidDrawRoute.roomEntryId,
-        bindings, totalSlots: board.totalSlots,
+      presentDrawOpenModeChoice(bindings.length, (mode) => {
+        if (!current()) return;
+        const revealPath = paidKujiRevealPath({
+          productId, orderId: paidDrawRoute.orderId, roomEntryId: paidDrawRoute.roomEntryId,
+          bindings, totalSlots: board.totalSlots, mode,
+        });
+        requestScope.invalidate();
+        router.replace(revealPath as Href);
       });
-      requestScope.invalidate();
-      router.replace(revealPath as Href);
     } catch (error) {
       if (!current()) return;
       const status = (error as KujiSlotApiError | undefined)?.status;
@@ -265,19 +276,13 @@ export function KujiDrawScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea} edges={["top", "left", "right"]}>
-      <View style={styles.header}>
-        <Pressable accessibilityRole="button" accessibilityLabel="상품 상세로 돌아가기" onPress={goBack} hitSlop={10} style={styles.headerAction}>
-          <Ionicons name="chevron-back" size={28} color={colors.ink} />
-        </Pressable>
-        <KoreanPixelTitle variant="header">쿠지 뽑기</KoreanPixelTitle>
-        <View style={styles.headerAction} />
-      </View>
+      <DetailPageHeader title="쿠지 뽑기" onBack={goBack} backLabel="상품 상세로 돌아가기" />
 
       {loading ? (
         <View style={styles.state}><ActivityIndicator color={colors.ink} /><Text style={styles.stateBody}>쿠지 뽑기방을 준비하는 중</Text></View>
       ) : message || !snapshot || !board ? (
         <View style={styles.state}>
-          <Ionicons name="alert-circle-outline" size={34} color={colors.muted} />
+          <DecorativeIonicon name="alert-circle-outline" size={34} color={colors.muted} />
           <Text style={styles.stateTitle}>{message || "쿠지 뽑기방을 확인할 수 없습니다."}</Text>
           <SeedActionButton label="다시 불러오기" variant="neutralSolid" onPress={() => void load()} />
         </View>
@@ -296,7 +301,14 @@ export function KujiDrawScreen() {
                 <KoreanPixelTitle variant="section" style={styles.boardTitle}>쿠지 선택</KoreanPixelTitle>
                 <View style={styles.boardCountBlock}>
                   <KoreanPixelTitleAccessory style={styles.boardCount}>선택 {selectedTickets.length} / {purchasedCount}장</KoreanPixelTitleAccessory>
-                  <Text style={styles.boardTotal}>{availableTicketCount}장 남음 · 총 {board.totalSlots}장</Text>
+                  <RemainingInventoryMeter
+                    category="kuji"
+                    availableQuantity={availableTicketCount}
+                    totalQuantity={board.totalSlots}
+                    compact
+                    dark
+                    style={styles.boardInventory}
+                  />
                 </View>
               </View>
               <View style={styles.ticketGrid}>
@@ -327,14 +339,14 @@ export function KujiDrawScreen() {
                       <Image
                         accessibilityIgnoresInvertColors
                         resizeMode="stretch"
-                        source={require("../../../assets/kuji-ticket-front.png")}
+                        source={require("../../../assets/draw/kuji/kuji-ticket-front.png")}
                         style={[styles.ticketArtwork, sold && styles.ticketArtworkSold]}
                       />
                       {sold ? <View style={styles.ticketSoldOverlay} /> : null}
                       <View style={[styles.ticketFace, sold && styles.ticketFaceSold, selected && styles.ticketFaceSelected]}>
                         <Text style={[styles.ticketNumber, sold && styles.ticketNumberSold]}>{ticket}</Text>
                         <View style={[styles.ticketState, selected && styles.ticketStateSelected]}>
-                          {selected ? <Ionicons name="checkmark" size={9} color={colors.ink} /> : null}
+                          {selected ? <DecorativeIonicon name="checkmark" size={9} color={colors.ink} /> : null}
                           <Text style={[styles.ticketLabel, sold && styles.ticketLabelSold, selected && styles.ticketLabelSelected]}>{sold ? "완료" : selected ? "선택" : "쿠지"}</Text>
                         </View>
                       </View>
@@ -379,7 +391,7 @@ function ProductStrip({ snapshot, assetBaseUrl }: { snapshot: PaidKujiSelectionS
   const imageUri = resolveCatalogImageUrl(snapshot.product.currentImageUrl, assetBaseUrl);
   return (
     <View style={styles.productStrip}>
-      {imageUri ? <Image source={{ uri: imageUri }} resizeMode="contain" style={styles.productImage} /> : <View style={[styles.productImage, styles.productPlaceholder]}><Ionicons name="image-outline" size={22} color={colors.muted} /></View>}
+      {imageUri ? <Image source={{ uri: imageUri }} resizeMode="contain" style={styles.productImage} /> : <View style={[styles.productImage, styles.productPlaceholder]}><DecorativeIonicon name="image-outline" size={22} color={colors.muted} /></View>}
       <View style={styles.productCopy}>
         <Text style={styles.ipName}>{snapshot.product.currentIpName ?? "등록 작품"}</Text>
         <Text numberOfLines={2} style={styles.productName}>{productSubjectTitle(snapshot.product.name, snapshot.product.currentIpName)}</Text>
@@ -430,8 +442,6 @@ function firstParam(value: string | string[] | undefined): string | undefined {
 
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: seed.color.layer.basement },
-  header: { minHeight: seed.size.topNavigation, paddingHorizontal: seed.spacing.x3_5, flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: seed.color.stroke.neutral, backgroundColor: seed.color.layer.default },
-  headerAction: { width: seed.size.touchTarget, height: seed.size.touchTarget, alignItems: "center", justifyContent: "center" },
   state: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: seed.spacing.globalGutter, gap: seed.spacing.componentDefault },
   stateTitle: { color: colors.ink, ...seed.typography.subtitle, textAlign: "center" },
   stateBody: { color: colors.muted, ...seed.typography.body },
@@ -439,8 +449,8 @@ const styles = StyleSheet.create({
   expiredBody: { maxWidth: 330, color: colors.muted, ...seed.typography.body, textAlign: "center" },
   expiredAction: { width: "100%", marginTop: seed.spacing.x2 },
   content: { paddingHorizontal: seed.spacing.globalGutter, paddingTop: seed.spacing.x4, paddingBottom: seed.spacing.x7, gap: seed.spacing.componentDefault },
-  productStrip: { padding: seed.spacing.x3, borderRadius: seed.radius.r4, borderWidth: 1, borderColor: seed.color.stroke.neutral, backgroundColor: seed.color.layer.default, flexDirection: "row", alignItems: "center", gap: seed.spacing.componentDefault },
-  productImage: { width: 68, height: 68, borderRadius: seed.radius.r3, backgroundColor: seed.color.background.neutralWeak },
+  productStrip: { padding: seed.spacing.x3, ...catalogProductCardSurface, flexDirection: "row", alignItems: "center", gap: seed.spacing.componentDefault },
+  productImage: { width: 68, height: 68, ...catalogProductImageSurface },
   productPlaceholder: { alignItems: "center", justifyContent: "center" },
   productCopy: { flex: 1, minWidth: 0 },
   ipName: { color: colors.muted, ...seed.typography.caption },
@@ -449,18 +459,18 @@ const styles = StyleSheet.create({
   productMeta: { marginTop: seed.spacing.x1_5, color: colors.greenInk, ...seed.typography.label, fontWeight: "700" },
   timerCard: { minHeight: 76, paddingHorizontal: seed.spacing.x4, paddingVertical: seed.spacing.x3, borderRadius: seed.radius.r4, backgroundColor: colors.ink, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: seed.spacing.x3 },
   timerTitle: { color: colors.brand },
-  timerValue: { color: colors.brand, fontFamily: "Galmuri11", fontSize: 34, lineHeight: 41, fontWeight: "400", fontVariant: ["tabular-nums"] },
+  timerValue: { color: colors.brand, fontSize: 34, lineHeight: 41, fontWeight: "900", fontVariant: ["tabular-nums"] },
   timerDanger: { color: "#FF9B86" },
   drawBoard: { padding: seed.spacing.x3, borderRadius: seed.radius.r5, backgroundColor: colors.ink },
   boardHeader: { flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: seed.spacing.x3 },
   boardTitle: { color: colors.white },
   boardCountBlock: { alignItems: "flex-end" },
   boardCount: { color: colors.brand, fontSize: 13, lineHeight: 18 },
-  boardTotal: { marginTop: 2, color: "#8E978D", fontSize: 10, lineHeight: 14, fontWeight: "700" },
+  boardInventory: { width: 164, marginTop: seed.spacing.x0_5 },
   ticketGrid: { marginTop: seed.spacing.x3, flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between", rowGap: seed.spacing.x2 },
-  ticket: { width: "18.4%", minHeight: seed.size.touchTarget, aspectRatio: 1.36, overflow: "hidden", borderRadius: seed.radius.r1_5, borderWidth: 1, borderColor: "#A83C15", backgroundColor: "#F36B2C" },
+  ticket: { width: "18.4%", minHeight: seed.size.touchTarget, aspectRatio: 1.36, overflow: "hidden", borderRadius: seed.radius.r1_5, borderWidth: 2, borderColor: colors.kujiOrangeDark, backgroundColor: colors.kujiOrange },
   ticketSold: { borderColor: "#555D55", backgroundColor: "#303630" },
-  ticketSelected: { borderWidth: 2, borderColor: colors.brand, backgroundColor: "#F36B2C" },
+  ticketSelected: { borderColor: colors.brand, backgroundColor: colors.kujiOrange },
   ticketPressed: { opacity: seed.state.pressedOpacity },
   ticketArtwork: { ...StyleSheet.absoluteFill, width: "100%", height: "100%" },
   ticketArtworkSold: { opacity: 0.22 },
@@ -472,7 +482,7 @@ const styles = StyleSheet.create({
   ticketNumberSold: { color: "#A7ADA6" },
   ticketState: { minHeight: 11, paddingHorizontal: 3, borderRadius: seed.radius.full, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 1 },
   ticketStateSelected: { backgroundColor: colors.brand },
-  ticketLabel: { color: "#FFF2E8", fontFamily: "Galmuri11", fontSize: 7, lineHeight: 10, fontWeight: "400" },
+  ticketLabel: { color: "#FFF2E8", fontSize: 11, lineHeight: 15, fontWeight: "800" },
   ticketLabelSold: { color: "#D0D5CF" },
   ticketLabelSelected: { color: colors.ink },
   prizeRemainingPanel: { minHeight: 60, paddingHorizontal: seed.spacing.x3, paddingVertical: seed.spacing.x2_5, borderRadius: seed.radius.r4, borderWidth: 1, borderColor: seed.color.stroke.neutral, backgroundColor: seed.color.layer.default, justifyContent: "center" },
@@ -480,8 +490,8 @@ const styles = StyleSheet.create({
   prizeRemainingTitle: { flexShrink: 0, color: colors.ink },
   prizeRemainingItems: { flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", gap: seed.spacing.x1 },
   prizeRemainingItem: { flex: 1, minWidth: 0, minHeight: 34, paddingHorizontal: 2, borderRadius: seed.radius.r2, backgroundColor: seed.color.background.brandWeak, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 2 },
-  prizeRarity: { flexShrink: 1, color: colors.greenInk, fontFamily: "Galmuri11", fontSize: 10, lineHeight: 14, fontWeight: "400" },
-  prizeRemainingValue: { flexShrink: 1, color: colors.ink, fontSize: 10, lineHeight: 14, fontWeight: "900", fontVariant: ["tabular-nums"] },
+  prizeRarity: { flexShrink: 1, color: colors.greenInk, fontSize: 11, lineHeight: 16, fontWeight: "800" },
+  prizeRemainingValue: { flexShrink: 1, color: colors.ink, fontSize: 11, lineHeight: 16, fontWeight: "900", fontVariant: ["tabular-nums"] },
   prizeRemainingEmptyText: { flex: 1, color: colors.muted, ...seed.typography.caption },
   bindingMessage: { color: seed.color.foreground.critical, ...seed.typography.caption, textAlign: "center" },
   footer: { flexDirection: "row", alignItems: "center", gap: seed.spacing.x2 },

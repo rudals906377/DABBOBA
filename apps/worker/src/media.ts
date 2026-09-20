@@ -1,16 +1,7 @@
 import type { DatabasePool } from "@dabboba/db";
 import { withTransaction } from "@dabboba/db";
-import {
-  IdempotencyStrategy,
-  Storage,
-  type StorageOptions,
-} from "@google-cloud/storage";
 import type { Logger } from "./logger.js";
-import { storedMediaLocation } from "@dabboba/config";
-import { SupabaseMediaStorage } from "@dabboba/media-storage";
-import type { WorkerConfig } from "./config.js";
 
-export const GCS_REQUEST_TIMEOUT_MS = 10_000;
 export const MEDIA_STAGING_OBJECT_KEY_PATTERN = String.raw`^uploads/[0-9a-f-]{36}/[0-9a-f-]{36}/[A-Za-z0-9._-]{1,120}$`;
 const MEDIA_STAGING_OBJECT_KEY_REGEX = new RegExp(MEDIA_STAGING_OBJECT_KEY_PATTERN);
 const UUID_PATTERN = String.raw`[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}`;
@@ -19,25 +10,6 @@ const MEDIA_FINAL_OBJECT_KEY_REGEX = new RegExp(MEDIA_FINAL_OBJECT_KEY_PATTERN);
 const CLEANUP_CHECK_TIME_PATTERN = String.raw`^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3}Z$`;
 const CLEANUP_CHECK_TIME_REGEX = new RegExp(CLEANUP_CHECK_TIME_PATTERN);
 export const MEDIA_ORPHAN_RECHECK_MS = 5 * 60_000;
-export const GCS_RETRY_OPTIONS: Readonly<NonNullable<StorageOptions["retryOptions"]>> = Object.freeze({
-  autoRetry: true,
-  maxRetries: 2,
-  retryDelayMultiplier: 2,
-  maxRetryDelay: 5,
-  totalTimeout: 20,
-  // Cleanup deletion is state-idempotent because a retry treats an already
-  // removed object as success through ignoreNotFound below.
-  idempotencyStrategy: IdempotencyStrategy.RetryAlways,
-});
-export const GCS_DELETE_OPTIONS = Object.freeze({ ignoreNotFound: true });
-
-export function gcsStorageOptions(projectId: string | null): StorageOptions {
-  return {
-    ...(projectId ? { projectId } : {}),
-    timeout: GCS_REQUEST_TIMEOUT_MS,
-    retryOptions: GCS_RETRY_OPTIONS,
-  };
-}
 
 export type MediaStore = {
   deleteObject(objectKey: string, metadata?: unknown): Promise<"deleted" | "skipped">;
@@ -148,49 +120,12 @@ export function isMediaCleanupCandidate(
   return false;
 }
 
-export class GcsMediaStore implements MediaStore {
-  private readonly storage: Storage;
-
-  constructor(private readonly bucketName: string, projectId: string | null) {
-    this.storage = new Storage(gcsStorageOptions(projectId));
-  }
-
-  async deleteObject(objectKey: string): Promise<"deleted"> {
-    await this.storage.bucket(this.bucketName).file(objectKey).delete(GCS_DELETE_OPTIONS);
-    return "deleted";
-  }
-}
-
 export class DisabledMediaStore implements MediaStore {
   constructor(private readonly logger: Logger) {}
 
   async deleteObject(objectKey: string): Promise<"skipped"> {
     this.logger.warn({ objectKey, mediaCleanup: "not_configured" }, "Media cleanup skipped because its storage is not configured");
     return "skipped";
-  }
-}
-
-/** Mixed-provider rows must remain deletable during rollout and rollback. */
-export class RoutedMediaStore implements MediaStore {
-  private readonly gcs: GcsMediaStore | null;
-  private readonly supabase: SupabaseMediaStorage | null;
-  private readonly disabled: DisabledMediaStore;
-
-  constructor(private readonly config: WorkerConfig, logger: Logger) {
-    this.gcs = config.gcsBucket ? new GcsMediaStore(config.gcsBucket, config.gcsProjectId) : null;
-    this.supabase = config.supabaseStorage ? new SupabaseMediaStorage(config.supabaseStorage) : null;
-    this.disabled = new DisabledMediaStore(logger);
-  }
-
-  async deleteObject(objectKey: string, metadata: unknown = {}): Promise<"deleted" | "skipped"> {
-    const location = storedMediaLocation(metadata);
-    if (location.provider === "supabase") {
-      if (!this.supabase || location.bucket !== this.config.supabaseStorage?.bucket) return this.disabled.deleteObject(objectKey);
-      await this.supabase.deleteObject(objectKey);
-      return "deleted";
-    }
-    if (!this.gcs || (location.bucket !== null && location.bucket !== this.config.gcsBucket)) return this.disabled.deleteObject(objectKey);
-    return this.gcs.deleteObject(objectKey);
   }
 }
 

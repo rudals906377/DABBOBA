@@ -53,7 +53,7 @@ const styles = StyleSheet.create({
     padding: seed.spacing.x2,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: "rgba(17, 20, 17, 0.13)",
-    borderRadius: 22,
+    borderRadius: seed.radius.r5_5,
     backgroundColor: "rgba(252, 252, 248, 0.94)",
     shadowColor: "#111411",
     shadowOffset: { width: 0, height: 8 },

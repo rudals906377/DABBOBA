@@ -8,6 +8,7 @@ import {
 } from "@dabboba/db";
 import { writeOutbox } from "../lib/audit.js";
 import { badRequest, conflict, forbidden, notFound } from "../lib/errors.js";
+import { requireLiveCommerce } from "../lib/commerce-mode.js";
 import { beginIdempotency, completeIdempotency, idempotencyKey, requestHash } from "../lib/idempotency.js";
 import { integerInput, objectInput, slugIdInput, uuidInput } from "../lib/input.js";
 import { iso, numberValue } from "../lib/rows.js";
@@ -225,7 +226,8 @@ export async function registerKujiSlotRoutes(app: FastifyInstance, context: ApiC
           AND version.status='ACTIVE'
           AND product.category='kuji'
           AND product.is_active=true
-          AND product.is_prize_only=false`,
+          AND product.is_prize_only=false
+          AND product.sale_status='ON_SALE'`,
       [productId],
     );
     if (!deck.rowCount) throw notFound("공개 중인 봉인 쿠지 번호판을 찾을 수 없습니다.");
@@ -261,7 +263,7 @@ export async function registerKujiSlotRoutes(app: FastifyInstance, context: ApiC
 
   app.post(
     "/v1/kuji/rooms/:productId/entries/:entryId/slots",
-    { preHandler: context.auth.requireUser },
+    { preHandler: [requireLiveCommerce(context), context.auth.requireUser] },
     async (request, reply) => {
       noStore(reply);
       const params = request.params as Record<string, unknown>;

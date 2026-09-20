@@ -58,15 +58,27 @@ export type KujiOpenMotionTransition = {
 };
 
 export const DRAW_MOTION = {
-  kujiTravelMinMs: 120,
-  kujiTravelMaxMs: 320,
-  kujiImpactMs: 1000,
+  kujiTravelMinMs: 0,
+  kujiTravelMaxMs: 890,
+  kujiAutoHoldMs: 280,
+  kujiSlowTearMs: 540,
+  kujiFastTearMs: 350,
+  kujiTearSplitProgress: 0.55,
+  kujiResultHoldMs: 70,
+  kujiImpactMs: 330,
   kujiCueHalfCycleMs: 720,
-  kujiEntryMs: 280,
+  kujiEntryMs: 240,
   resultEnterMs: 520,
   resultImageFadeMs: 360,
   resultAuraMs: 560,
 } as const;
+
+export type KujiTravelSegments = {
+  holdMs: number;
+  slowTearMs: number;
+  fastTearMs: number;
+  splitProgress: number;
+};
 
 export function resolveKujiDragProgress(distanceX: number, ticketWidth: number): number {
   "worklet";
@@ -79,8 +91,37 @@ export function resolveKujiDragProgress(distanceX: number, ticketWidth: number):
 export function resolveKujiTravelDuration(progress: number): number {
   "worklet";
   const boundedProgress = resolveKujiDragProgress(progress, 1);
-  const travelRange = DRAW_MOTION.kujiTravelMaxMs - DRAW_MOTION.kujiTravelMinMs;
-  return Math.round(DRAW_MOTION.kujiTravelMaxMs - travelRange * boundedProgress);
+  const split = DRAW_MOTION.kujiTearSplitProgress;
+  if (boundedProgress < split) {
+    const slowRemaining = (split - boundedProgress) / split;
+    return Math.round(
+      DRAW_MOTION.kujiSlowTearMs * slowRemaining + DRAW_MOTION.kujiFastTearMs,
+    );
+  }
+  const fastRemaining = (1 - boundedProgress) / (1 - split);
+  return Math.round(DRAW_MOTION.kujiFastTearMs * fastRemaining);
+}
+
+export function resolveKujiTravelSegments(progress: number): KujiTravelSegments {
+  "worklet";
+  const boundedProgress = resolveKujiDragProgress(progress, 1);
+  const splitProgress = DRAW_MOTION.kujiTearSplitProgress;
+  return {
+    holdMs: boundedProgress <= 0.02 ? DRAW_MOTION.kujiAutoHoldMs : 0,
+    slowTearMs: boundedProgress < splitProgress
+      ? Math.round(
+          DRAW_MOTION.kujiSlowTearMs
+          * ((splitProgress - boundedProgress) / splitProgress),
+        )
+      : 0,
+    fastTearMs: boundedProgress < 1
+      ? Math.round(
+          DRAW_MOTION.kujiFastTearMs
+          * ((1 - Math.max(boundedProgress, splitProgress)) / (1 - splitProgress)),
+        )
+      : 0,
+    splitProgress,
+  };
 }
 
 export function resolveKujiPeelRelease(

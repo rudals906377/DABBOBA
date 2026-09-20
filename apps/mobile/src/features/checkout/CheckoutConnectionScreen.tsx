@@ -1,12 +1,9 @@
-import { Ionicons } from "@expo/vector-icons";
 import Constants from "expo-constants";
-import { type Href, useLocalSearchParams, useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
-  Image,
   Platform,
-  Pressable,
   ScrollView,
   StyleSheet,
   View,
@@ -16,18 +13,23 @@ import {
   FloatingBottomActionPanel,
   useFloatingBottomActionContentInset,
 } from "@/components/FloatingBottomActionPanel";
+import { CatalogProductImage } from "@/components/CatalogProductImage";
+import { DecorativeIonicon } from "@/components/DecorativeIonicon";
+import { DetailPageHeader } from "@/components/DetailPageHeader";
 import { ProductInfoDivider } from "@/components/ProductInfoDivider";
-import { KoreanPixelTitle } from "@/components/RootCategoryTitle";
 import { AppText as Text } from "@/components/Typography";
 import { SeedActionButton, SeedInlineGuidance } from "@/design-system/components";
 import { seed } from "@/design-system/seed";
+import { CategoryAvailabilityState } from "@/features/catalog/CategoryAvailabilityState";
+import { useStorefrontCategorySettings } from "@/features/catalog/StorefrontCategorySettingsProvider";
+import { isCustomerProductCategoryComingSoon } from "@/features/catalog/product-categories";
 import {
   categoryLabel,
   fetchProductDetail,
-  isDrawCategory,
   type ProductDetailSnapshot,
 } from "@/features/shop/shop-api";
 import { productSubjectTitle } from "@/features/shop/product-title";
+import { shopTabPathForCategory } from "@/features/shop/shop-navigation";
 import {
   resolveCatalogImageUrl,
   resolveMobileRuntimeConfig,
@@ -45,6 +47,7 @@ const PAYMENT_LABELS: Record<PaymentMethodId, string> = {
 };
 
 export function CheckoutConnectionScreen() {
+  useStorefrontCategorySettings();
   const router = useRouter();
   const floatingBottomInset = useFloatingBottomActionContentInset();
   const params = useLocalSearchParams<{
@@ -94,6 +97,7 @@ export function CheckoutConnectionScreen() {
   }, [load]);
 
   const product = snapshot?.product ?? null;
+  const productComingSoon = isCustomerProductCategoryComingSoon(product?.category);
   const quantity = Math.max(
     1,
     Math.min(requestedQuantity, product?.availableQuantity ?? requestedQuantity, 10),
@@ -109,39 +113,12 @@ export function CheckoutConnectionScreen() {
 
   const goBack = () => {
     if (router.canGoBack()) router.back();
-    else router.replace("/(tabs)/ppoba");
-  };
-
-  const openNextScreen = () => {
-    if (!product || !isDrawCategory(product.category)) {
-      router.replace("/(tabs)/ppoba");
-      return;
-    }
-    const query = new URLSearchParams({
-      category: product.category,
-      count: String(quantity),
-      mode: quantity > 1 ? "all" : "single",
-    });
-    router.replace(
-      `/draw/preview/${encodeURIComponent(product.id)}?${query.toString()}` as Href,
-    );
+    else router.replace(shopTabPathForCategory(product?.category));
   };
 
   return (
     <SafeAreaView style={styles.safeArea} edges={["top", "left", "right"]}>
-      <View style={styles.header}>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="결제 준비로 돌아가기"
-          hitSlop={10}
-          onPress={goBack}
-          style={({ pressed }) => [styles.headerAction, pressed && styles.pressed]}
-        >
-          <Ionicons name="chevron-back" size={28} color={colors.ink} />
-        </Pressable>
-        <KoreanPixelTitle variant="header">결제 연결 안내</KoreanPixelTitle>
-        <View style={styles.headerAction} />
-      </View>
+      <DetailPageHeader title="결제 연결 안내" onBack={goBack} backLabel="결제 준비로 돌아가기" />
 
       {loading ? (
         <View style={styles.state}>
@@ -150,29 +127,30 @@ export function CheckoutConnectionScreen() {
         </View>
       ) : message || !snapshot || !product ? (
         <View style={styles.state}>
-          <Ionicons name="alert-circle-outline" size={34} color={colors.muted} />
+          <DecorativeIonicon name="alert-circle-outline" size={34} color={colors.muted} />
           <Text style={styles.stateTitle}>{message || "상품을 찾을 수 없습니다."}</Text>
           <SeedActionButton label="다시 불러오기" variant="neutralSolid" onPress={() => void load()} />
         </View>
+      ) : productComingSoon ? (
+        <CategoryAvailabilityState category={product.category} />
       ) : (
         <>
-          <ScrollView contentContainerStyle={[styles.content, { paddingBottom: floatingBottomInset }]}>
+          <ScrollView contentContainerStyle={[styles.content, { paddingBottom: floatingBottomInset + seed.spacing.x6 }]}>
             <SeedInlineGuidance>
-              {isDrawCategory(product.category)
-                ? "결제가 완료되면 바로 상품 뽑기 화면으로 이동해요."
-                : "결제가 완료되면 구매 내역에서 주문을 확인할 수 있어요."}
+              카드·간편결제 제공 화면은 아직 연결 준비 중이에요. 이 화면에서는 결제·주문·추첨권 발급을 진행하지 않아요.
             </SeedInlineGuidance>
 
             <View style={styles.section}>
-              <KoreanPixelTitle variant="section" style={styles.sectionTitle}>주문 예정 상품</KoreanPixelTitle>
+              <Text style={styles.sectionTitle}>주문 예정 상품</Text>
               <View style={styles.productRow}>
-                {imageUri ? (
-                  <Image source={{ uri: imageUri }} resizeMode="cover" style={styles.productImage} />
-                ) : (
-                  <View style={[styles.productImage, styles.productPlaceholder]}>
-                    <Ionicons name="image-outline" size={24} color={colors.muted} />
-                  </View>
-                )}
+                <View style={styles.productImage}>
+                  <CatalogProductImage
+                    uri={imageUri}
+                    requestKey={product.version}
+                    resizeMode="contain"
+                    style={styles.productImageAsset}
+                  />
+                </View>
                 <View style={styles.productCopy}>
                   <Text style={styles.ipName}>{snapshot.ip?.nameKo ?? "등록 작품"}</Text>
                   <Text numberOfLines={2} style={styles.productName}>
@@ -188,8 +166,8 @@ export function CheckoutConnectionScreen() {
             </View>
 
             <View style={styles.section}>
-              <KoreanPixelTitle variant="section" style={styles.sectionTitle}>선택 내용</KoreanPixelTitle>
-              <SummaryRow label="결제 수단" value={PAYMENT_LABELS[paymentMethod]} />
+              <Text style={styles.sectionTitle}>선택 내용</Text>
+              <SummaryRow label="요청된 결제 수단" value={`${PAYMENT_LABELS[paymentMethod]} · 준비 중`} />
               <SummaryRow label="포인트 사용 예정" value={`${pointUsed.toLocaleString("ko-KR")}P`} />
               <View style={styles.totalRow}>
                 <Text style={styles.totalLabel}>결제 예정 금액</Text>
@@ -205,8 +183,8 @@ export function CheckoutConnectionScreen() {
               <Text style={styles.footerValue}>{paymentTotal.toLocaleString("ko-KR")}원</Text>
             </View>
             <SeedActionButton
-              label={isDrawCategory(product.category) ? "상품 뽑기" : "뽀바로 돌아가기"}
-              onPress={openNextScreen}
+              label="결제 준비로 돌아가기"
+              onPress={goBack}
               style={styles.footerAction}
             />
           </FloatingBottomActionPanel>
@@ -245,17 +223,15 @@ function paymentMethodFromParam(value: string | undefined): PaymentMethodId {
 
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: seed.color.layer.basement },
-  header: { minHeight: seed.size.topNavigation, paddingHorizontal: seed.spacing.x3_5, flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: seed.color.stroke.neutral, backgroundColor: seed.color.layer.default },
-  headerAction: { width: seed.size.touchTarget, height: seed.size.touchTarget, alignItems: "center", justifyContent: "center" },
   state: { flex: 1, minHeight: 420, paddingHorizontal: seed.spacing.globalGutter, alignItems: "center", justifyContent: "center", gap: seed.spacing.componentDefault },
   stateTitle: { color: colors.ink, ...seed.typography.subtitle, textAlign: "center" },
   stateBody: { color: colors.muted, ...seed.typography.body },
   content: { paddingHorizontal: seed.spacing.globalGutter, paddingTop: seed.spacing.x3_5, paddingBottom: seed.spacing.x7, gap: seed.spacing.componentDefault },
   section: { padding: seed.spacing.x3_5, borderRadius: seed.radius.r4, borderWidth: 1, borderColor: seed.color.stroke.neutral, backgroundColor: seed.color.layer.default },
-  sectionTitle: { marginBottom: seed.spacing.x3 },
+  sectionTitle: { marginBottom: seed.spacing.x3, color: colors.ink, ...seed.typography.subtitle },
   productRow: { flexDirection: "row", alignItems: "center", gap: seed.spacing.componentDefault },
-  productImage: { width: 84, height: 84, borderRadius: seed.radius.r3, backgroundColor: seed.color.background.neutralWeak },
-  productPlaceholder: { alignItems: "center", justifyContent: "center" },
+  productImage: { width: 84, height: 84, overflow: "hidden", borderRadius: seed.radius.r3, backgroundColor: seed.color.background.neutralWeak },
+  productImageAsset: { width: "100%", height: "100%" },
   productCopy: { flex: 1, minWidth: 0 },
   ipName: { color: colors.muted, ...seed.typography.caption },
   productName: { marginTop: seed.spacing.x1, color: colors.ink, ...seed.typography.bodyStrong },
@@ -274,5 +250,4 @@ const styles = StyleSheet.create({
   footerCaption: { color: colors.muted, ...seed.typography.caption },
   footerValue: { marginTop: seed.spacing.x0_5, color: colors.ink, fontSize: 18, lineHeight: 24, fontWeight: "900" },
   footerAction: { flex: 1 },
-  pressed: { opacity: seed.state.pressedOpacity },
 });

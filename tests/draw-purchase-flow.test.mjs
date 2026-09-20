@@ -47,21 +47,23 @@ test("gacha opens checkout while kuji claims its one-person room before checkout
   assert.match(productDetail, /isDrawCategory\(product\.category\) \? "뽑으러 가기" : "구매 준비"/);
   assert.match(productDetail, /const drawUnavailable = Boolean/);
   assert.match(productDetail, /!__DEV__ && \(snapshot\?\.drawOdds\?\.entries\.length \?\? 0\) === 0/);
-  assert.match(productDetail, /disabled=\{drawUnavailable\}/);
+  assert.match(productDetail, /disabled=\{commerceEnabled \? drawUnavailable : wishlistPending\}/);
+  assert.match(productDetail, /if \(!commerceEnabled\) \{[\s\S]*?void toggleWishlist\(\);[\s\S]*?return;/);
   assert.match(productDetail, /buildKujiRoomGatePath/);
   assert.doesNotMatch(productDetail, /buildGachaPreviewParams|resolveKujiEntryPath|결제 금액 확인/);
 
-  for (const copy of ["수량 선택", "구매 수량", "구매하기"]) {
+  for (const copy of ["구매 상품", "구매 수량", "결제 수단 준비 중", "포인트로 구매하기"]) {
     assert.match(checkout, new RegExp(copy));
   }
-  assert.match(checkout, /buildGachaPreviewParams\(quantity\)/);
-  assert.match(checkout, /!__DEV__[\s\S]*?product\.category !== "gacha"[\s\S]*?pathname: `\/draw\/preview/);
+  assert.doesNotMatch(checkout, /buildGachaPreviewParams|openGachaPreview|\/draw\/preview|체험하기/);
   assert.match(checkout, /createGachaCheckoutOrder/);
   assert.match(checkout, /fetchCheckoutActorId/);
   assert.match(checkout, /readPendingGachaCheckoutOrderIntent/);
   assert.match(checkout, /claimPendingGachaCheckoutOrderIntent/);
   assert.match(checkout, /recordPendingGachaCheckoutOrder\(db, intent, order\)/);
   assert.match(checkout, /paidGachaOrderEntitlementIds\(order, recordedIntent\)/);
+  assert.match(checkout, /presentDrawOpenModeChoice\(entitlementIds\.length/);
+  assert.match(checkout, /entitlementIds: entitlementIds\.join\(","\),[\s\S]*?mode,/);
   assert.match(checkout, /`\/draw\/reveal\/\$\{encodeURIComponent\(entitlementIds\[0\]!\)\}\?\$\{query\.toString\(\)\}`/);
   assert.match(checkout, /intentCreatedThisAttempt: claim\.kind === "created"/);
   assert.match(checkout, /24시간이 지난 미확정 주문 요청은 중복 결제를 막기 위해 자동으로 다시 보내지 않아요/);

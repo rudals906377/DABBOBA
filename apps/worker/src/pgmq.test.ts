@@ -189,10 +189,11 @@ test("oversized poison payloads use a bounded forensic envelope before atomic de
     enqueuedAt: new Date("2026-09-04T00:00:00.000Z"),
     visibleAt: new Date("2026-09-04T00:10:00.000Z"),
     payload,
-  }, new Error("invalid oversized job"));
+  }, new Error("invalid oversized job token=must-not-persist"));
 
   const insert = calls.find((call) => call.sql.includes("INSERT INTO worker_dead_letters"));
   assert.ok(insert?.values);
+  assert.equal(insert.values[4], "Error");
   const storedPayload = JSON.parse(insert.values[3] as string) as Record<string, unknown>;
   assert.deepEqual(storedPayload, {
     schema: "dabboba.dead-letter-payload/v1",

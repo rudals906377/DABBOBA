@@ -156,6 +156,9 @@ test("wanted request creation is one authenticated idempotent transaction", asyn
       if (sql === "BEGIN" || sql === "COMMIT") return { rowCount: null, rows: [] };
       if (sql.startsWith("DELETE FROM idempotency_keys")) return { rowCount: 0, rows: [] };
       if (sql.includes("INSERT INTO idempotency_keys")) return { rowCount: 1, rows: [{ id: idempotencyId }] };
+      if (sql.includes("FROM user_policy_acceptance_events event")) {
+        return { rowCount: 1, rows: [{ accepted_at: createdAt }] };
+      }
       if (sql.includes("SELECT name_ko FROM catalog_ips")) return { rowCount: 1, rows: [{ name_ko: "스파이 패밀리" }] };
       if (sql.includes("INSERT INTO wanted_requests")) return { rowCount: 1, rows: [{ id: requestId }] };
       if (sql.includes("INSERT INTO outbox_events")) return { rowCount: 1, rows: [] };
@@ -188,6 +191,10 @@ test("wanted request creation is one authenticated idempotent transaction", asyn
   const result = capture.result();
   assert.equal(result.statusCode, 201);
   assert.equal((result.body as { id: string }).id, requestId);
+  assert.deepEqual(
+    queries.find(({ sql }) => sql.includes("FROM user_policy_acceptance_events event"))?.params,
+    [authorId, "2026-09-20"],
+  );
   assert.deepEqual(queries.find(({ sql }) => sql.includes("SELECT name_ko FROM catalog_ips"))?.params, ["spy-family"]);
   assert.deepEqual(queries.find(({ sql }) => sql.includes("INSERT INTO wanted_requests"))?.params, [
     authorId,
@@ -210,6 +217,9 @@ test("wanted request creation stores a custom work name and one ready owned phot
       if (sql === "BEGIN" || sql === "COMMIT") return { rowCount: null, rows: [] };
       if (sql.startsWith("DELETE FROM idempotency_keys")) return { rowCount: 0, rows: [] };
       if (sql.includes("INSERT INTO idempotency_keys")) return { rowCount: 1, rows: [{ id: idempotencyId }] };
+      if (sql.includes("FROM user_policy_acceptance_events event")) {
+        return { rowCount: 1, rows: [{ accepted_at: createdAt }] };
+      }
       if (sql.includes("SELECT id FROM media_assets")) return { rowCount: 1, rows: [{ id: mediaId }] };
       if (sql.includes("INSERT INTO wanted_requests")) return { rowCount: 1, rows: [{ id: requestId }] };
       if (sql.includes("INSERT INTO outbox_events")) return { rowCount: 1, rows: [] };
@@ -267,7 +277,7 @@ test("wanted like commits the explicit state and rejects self-like attempts", as
       if (sql === "BEGIN" || sql === "COMMIT") return { rowCount: null, rows: [] };
       if (sql.startsWith("DELETE FROM idempotency_keys")) return { rowCount: 0, rows: [] };
       if (sql.includes("INSERT INTO idempotency_keys")) return { rowCount: 1, rows: [{ id: idempotencyId }] };
-      if (sql.includes("SELECT user_id FROM wanted_requests")) return { rowCount: 1, rows: [{ user_id: authorId }] };
+      if (sql.includes("SELECT w.user_id FROM wanted_requests")) return { rowCount: 1, rows: [{ user_id: authorId }] };
       if (sql.includes("INSERT INTO wanted_request_likes")) return { rowCount: 1, rows: [] };
       if (sql.includes("SELECT count(*) FROM wanted_request_likes")) return { rowCount: 1, rows: [{ count: "3" }] };
       if (sql.includes("INSERT INTO outbox_events")) return { rowCount: 1, rows: [] };
@@ -290,6 +300,7 @@ test("wanted like commits the explicit state and rejects self-like attempts", as
   }, capture.reply);
   assert.equal(capture.result().statusCode, 200);
   assert.deepEqual(capture.result().body, { requestId, liked: true, likeCount: 3 });
+  assert.equal(successfulQueries.some((sql) => sql.includes("FROM user_blocks visibility_block")), true);
   assert.equal(successfulQueries.some((sql) => sql.includes("INSERT INTO wanted_request_likes")), true);
   assert.equal(successfulQueries.some((sql) => sql === "COMMIT"), true);
 
@@ -298,7 +309,7 @@ test("wanted like commits the explicit state and rejects self-like attempts", as
       if (sql === "BEGIN" || sql === "ROLLBACK") return { rowCount: null, rows: [] };
       if (sql.startsWith("DELETE FROM idempotency_keys")) return { rowCount: 0, rows: [] };
       if (sql.includes("INSERT INTO idempotency_keys")) return { rowCount: 1, rows: [{ id: idempotencyId }] };
-      if (sql.includes("SELECT user_id FROM wanted_requests")) return { rowCount: 1, rows: [{ user_id: authorId }] };
+      if (sql.includes("SELECT w.user_id FROM wanted_requests")) return { rowCount: 1, rows: [{ user_id: authorId }] };
       throw new Error(`Unexpected query: ${sql}`);
     },
     release() { /* no-op */ },

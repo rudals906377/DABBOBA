@@ -10,6 +10,7 @@ import {
   withTransaction,
 } from "@dabboba/db";
 import { buildApp } from "./app.js";
+import { acceptRequiredPoliciesForIntegrationTest } from "./integration-test-fixtures.js";
 import { beginIdempotency, completeIdempotency, requestHash } from "./lib/idempotency.js";
 import { issueSession } from "./plugins/auth.js";
 
@@ -101,6 +102,7 @@ test(
          VALUES($1,$2,'USER','ACTIVE') RETURNING id`,
         [`runtime-route-${label}-${suffix}-${userSequence++}@example.test`, `${label} ${suffix}`],
       );
+      await acceptRequiredPoliciesForIntegrationTest(runtimePool, user.rows[0]!.id);
       const session = await issueSession(runtimePool, config, {
         userId: user.rows[0]!.id,
         kind: "USER",
@@ -246,12 +248,12 @@ test(
       [ipId, ipId, `제한 역할 커머스 ${suffix}`, `Runtime commerce ${suffix}`],
     );
     await ownerPool.query(
-      `INSERT INTO catalog_products(id,sku,ip_id,category,name,price,is_prize_only)
+      `INSERT INTO catalog_products(id,sku,ip_id,category,name,price,image_url,is_prize_only)
        VALUES
-         ($1,$2,$3,'gacha',$4,1000,false),
-         ($5,$6,$3,'figure',$7,0,true),
-         ($8,$9,$3,'kuji',$10,1000,false),
-         ($11,$12,$3,'figure',$13,0,true)`,
+         ($1,$2,$3,'gacha',$4,1000,$14,false),
+         ($5,$6,$3,'figure',$7,24900,NULL,true),
+         ($8,$9,$3,'kuji',$10,1000,$15,false),
+         ($11,$12,$3,'figure',$13,0,NULL,true)`,
       [
         gachaProductId,
         `RUNTIME-GACHA-${suffix}`.toUpperCase(),
@@ -266,6 +268,8 @@ test(
         kujiPrizeProductId,
         `RUNTIME-KUJI-PRIZE-${suffix}`.toUpperCase(),
         `제한 역할 쿠지 경품 ${suffix}`,
+        `https://cdn.example.test/products/${gachaProductId}.png`,
+        `https://cdn.example.test/products/${kujiProductId}.png`,
       ],
     );
     await ownerPool.query(
@@ -330,6 +334,10 @@ test(
       prizeProductId: kujiPrizeProductId,
       category: "kuji",
     });
+    await ownerPool.query(
+      "UPDATE catalog_products SET sale_status='ON_SALE' WHERE id=ANY($1::text[])",
+      [[gachaProductId, kujiProductId]],
+    );
 
     const creditPoints = async (targetUserId: string, referenceId: string) => {
       await ownerPool.query(
@@ -558,20 +566,164 @@ test(
       consume_idempotency_count: "1",
     });
 
+    const addressKey = `runtime-address-${randomUUID()}`;
+    const addressResponse = await app.inject({
+      method: "PUT",
+      url: "/v1/account/default-address",
+      headers: { authorization, "idempotency-key": addressKey },
+      payload: {
+        recipient: "김영민",
+        phone: "010-1234-5678",
+        postalCode: "06236",
+        addressLine1: "서울특별시 강남구 테스트로 1",
+        addressLine2: "101호",
+        deliveryNote: "문 앞",
+      },
+    });
+    assert.equal(addressResponse.statusCode, 201, addressResponse.body);
+
+    const shippingQuoteResponse = await app.inject({
+      method: "POST",
+      url: "/v1/account/shipping-quotes",
+      headers: { authorization },
+      payload: { inventoryUnitIds: [gachaResult.prizeInventoryUnitId] },
+    });
+    assert.equal(shippingQuoteResponse.statusCode, 200, shippingQuoteResponse.body);
+    const shippingQuote = shippingQuoteResponse.json() as { id: string; addressVersion: number };
+
+    const shippingKey = `runtime-shipping-${randomUUID()}`;
+    const createShippingRequest = () => app.inject({
+      method: "POST",
+      url: "/v1/account/shipping-requests",
+      headers: { authorization, "idempotency-key": shippingKey },
+      payload: { quoteId: shippingQuote.id, addressVersion: shippingQuote.addressVersion },
+    });
+    const shippingResponse = await createShippingRequest();
+    assert.equal(shippingResponse.statusCode, 201, shippingResponse.body);
+    const shipping = shippingResponse.json() as { id: string; inventoryUnitIds: string[] };
+    assert.deepEqual(shipping.inventoryUnitIds, [gachaResult.prizeInventoryUnitId]);
+    const shippingReplay = await createShippingRequest();
+    assert.equal(shippingReplay.statusCode, 201, shippingReplay.body);
+    assert.equal(shippingReplay.headers["x-idempotent-replay"], "true");
+    assert.deepEqual(shippingReplay.json(), shipping);
+
+    const shippingDetailResponse = await app.inject({
+      method: "GET",
+      url: `/v1/account/shipping-requests/${shipping.id}`,
+      headers: { authorization },
+    });
+    assert.equal(shippingDetailResponse.statusCode, 200, shippingDetailResponse.body);
+    const shippingDetail = shippingDetailResponse.json() as {
+      destination: { recipientMasked: string; phoneMasked: string };
+      items: Array<{
+        inventoryUnitId: string;
+        productId: string;
+        productName: string;
+        ipId: string;
+        ipNameKo: string;
+        category: string;
+        imageUrl: string | null;
+        productVersion: number;
+      }>;
+      status: string;
+    };
+    assert.equal(shippingDetail.status, "REQUESTED");
+    assert.equal(shippingDetail.destination.recipientMasked, "김*민");
+    assert.equal(shippingDetail.destination.phoneMasked, "*******5678");
+    assert.deepEqual(shippingDetail.items, [{
+      inventoryUnitId: gachaResult.prizeInventoryUnitId,
+      productId: gachaPrizeProductId,
+      productName: `제한 역할 가챠 경품 ${suffix}`,
+      ipId,
+      ipNameKo: `제한 역할 커머스 ${suffix}`,
+      category: "figure",
+      imageUrl: null,
+      productVersion: 1,
+    }]);
+    const foreignShippingDetail = await app.inject({
+      method: "GET",
+      url: `/v1/account/shipping-requests/${shipping.id}`,
+      headers: { authorization: `Bearer ${otherUser.token}` },
+    });
+    assert.equal(foreignShippingDetail.statusCode, 404, foreignShippingDetail.body);
+
+    const shippingPersisted = await ownerPool.query<{
+      address_idempotency_count: string;
+      inventory_status: string;
+      product_snapshot: Record<string, unknown>;
+      quote_consumed: boolean;
+      shipping_idempotency_count: string;
+    }>(
+      `SELECT inventory.status AS inventory_status,item.product_snapshot,
+              (quote.consumed_at IS NOT NULL AND quote.shipping_request_id=request.id) AS quote_consumed,
+              (SELECT count(*) FROM idempotency_keys
+                WHERE actor_id=$2 AND scope='ACCOUNT_DEFAULT_ADDRESS_UPSERT'
+                  AND idempotency_key=$4 AND state='COMPLETED') AS address_idempotency_count,
+              (SELECT count(*) FROM idempotency_keys
+                WHERE actor_id=$2 AND scope='ACCOUNT_SHIPPING_REQUEST_CREATE'
+                  AND idempotency_key=$5 AND state='COMPLETED') AS shipping_idempotency_count
+         FROM shipping_requests AS request
+         JOIN shipping_request_items AS item ON item.shipping_request_id=request.id
+         JOIN inventory_units AS inventory ON inventory.id=item.inventory_unit_id
+         JOIN shipping_quotes AS quote ON quote.id=$6
+        WHERE request.id=$1 AND request.user_id=$2 AND inventory.id=$3`,
+      [
+        shipping.id,
+        primaryUser.userId,
+        gachaResult.prizeInventoryUnitId,
+        addressKey,
+        shippingKey,
+        shippingQuote.id,
+      ],
+    );
+    assert.deepEqual(shippingPersisted.rows[0], {
+      address_idempotency_count: "1",
+      inventory_status: "SHIPPING",
+      product_snapshot: {
+        productId: gachaPrizeProductId,
+        productName: `제한 역할 가챠 경품 ${suffix}`,
+        ipId,
+        ipNameKo: `제한 역할 커머스 ${suffix}`,
+        category: "figure",
+        imageUrl: null,
+        productVersion: 1,
+      },
+      quote_consumed: true,
+      shipping_idempotency_count: "1",
+    });
+
     // Reinstall/remaining-only recovery must prove every original committed
     // result through the restricted runtime role, without replaying consume.
     const completionProductId = `runtime-completion-${suffix}`;
     await ownerPool.query(
-      `INSERT INTO catalog_products(id,sku,ip_id,category,name,price,is_prize_only)
-       VALUES($1,$2,$3,'gacha','완료 증명 가챠',0,false)`,
-      [completionProductId, `RUNTIME-COMPLETION-${suffix}`.toUpperCase(), ipId],
+      `INSERT INTO catalog_products(id,sku,ip_id,category,name,price,image_url,is_prize_only)
+       VALUES($1,$2,$3,'gacha','완료 증명 가챠',1000,$4,false)`,
+      [
+        completionProductId,
+        `RUNTIME-COMPLETION-${suffix}`.toUpperCase(),
+        ipId,
+        `https://cdn.example.test/products/${completionProductId}.png`,
+      ],
     );
     await ownerPool.query("INSERT INTO product_stock(product_id,on_hand,reserved) VALUES($1,2,0)", [completionProductId]);
     await publishDrawFixture({ productId: completionProductId, prizeProductId: gachaPrizeProductId, category: "gacha", quantity: 2 });
+    await ownerPool.query(
+      "UPDATE catalog_products SET sale_status='ON_SALE' WHERE id=$1",
+      [completionProductId],
+    );
+    await ownerPool.query(
+      "UPDATE point_accounts SET balance=balance+2000 WHERE user_id=$1",
+      [primaryUser.userId],
+    );
+    await ownerPool.query(
+      `INSERT INTO point_ledger_entries(user_id,entry_type,amount,reference_type,reference_id,reason)
+       VALUES($1,'EARN',2000,'TEST',$2,'Runtime completion integration setup')`,
+      [primaryUser.userId, `runtime-completion-${suffix}`],
+    );
     const completionOrderResponse = await app.inject({
       method: "POST", url: "/v1/orders",
       headers: { authorization, "idempotency-key": `runtime-completion-${randomUUID()}` },
-      payload: { items: [{ productId: completionProductId, quantity: 2, expectedDrawVersion: 1 }], pointAmount: 0 },
+      payload: { items: [{ productId: completionProductId, quantity: 2, expectedDrawVersion: 1 }], pointAmount: 2000 },
     });
     assert.equal(completionOrderResponse.statusCode, 201, completionOrderResponse.body);
     const completionOrder = completionOrderResponse.json() as RuntimeOrderResponse;
@@ -590,7 +742,10 @@ test(
       completionResults.push(consume.json() as RuntimeDrawResult);
       if (index === 0) assert.equal((await readCompletion()).statusCode, 409);
     }
-    await ownerPool.query("UPDATE catalog_products SET is_active=false WHERE id=$1", [completionProductId]);
+    await ownerPool.query(
+      "UPDATE catalog_products SET sale_status='PAUSED',is_active=false WHERE id=$1",
+      [completionProductId],
+    );
     const completionState = () => runtimePool.query(
       `SELECT orders.status,orders.total,payment.status AS payment_status,
               (SELECT count(*) FROM draw_results WHERE product_id=$2) AS result_count,

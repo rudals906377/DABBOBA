@@ -41,6 +41,62 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Readiness" }
+  /v1/public/config:
+    get:
+      tags: [Catalog, Auth, Commerce]
+      operationId: getPublicConfig
+      description: Public launch capability and exact legal versions required by customer clients. Clients must intersect commerceMode with their compile-time capability and may never upgrade a PRELAUNCH build to LIVE locally.
+      responses:
+        "200":
+          description: Server-authoritative public application configuration.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PublicConfig" }
+  /v1/demo/capabilities:
+    get:
+      tags: [Commerce]
+      operationId: getLocalDemoCapabilities
+      description: Loopback-only discovery for the isolated internal commerce test profile. This route is unavailable in production.
+      responses:
+        "200":
+          description: Local single-customer session and payment transition capabilities.
+  /v1/demo/session:
+    post:
+      tags: [Commerce]
+      operationId: createLocalDemoSession
+      description: Creates a session for the one isolated internal customer account. No account selector is accepted. This route is unavailable in production.
+      responses:
+        "201":
+          description: Local internal customer session created.
+  /v1/demo/payments/{orderId}/transition:
+    post:
+      tags: [Commerce]
+      operationId: transitionLocalDemoPayment
+      description: Drives a loopback-only TEST_PG payment through the same verified webhook path used by the internal commerce test profile. This route is unavailable in production.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [action]
+              properties:
+                action: { type: string, enum: [approve, cancel, fail, refund] }
+      responses:
+        "200":
+          description: Updated local demo order.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Order" }
+        "428": { $ref: "#/components/responses/LegalAcceptanceRequired" }
   /v1/auth/providers:
     get:
       tags: [Auth]
@@ -59,7 +115,7 @@ paths:
     post:
       tags: [Auth]
       operationId: exchangeCustomerAccessToken
-      description: Verifies an asymmetric Supabase access token for exactly one Kakao, Naver, or phone identity and returns an opaque DABBOBA session. Accounts are keyed only by the broker issuer and subject, never email or phone; multi-provider broker identities require a separate explicit linking flow and are rejected here.
+      description: Verifies an asymmetric Supabase access token and the live Auth user for Kakao, Naver, Google, Apple, or email OTP identities, then returns an opaque DABBOBA session. Multiple allowed identities automatically linked by Supabase reuse one DABBOBA account only when they share the exact broker issuer and subject. Matching email strings never merge different broker subjects.
       requestBody:
         required: true
         content:
@@ -78,9 +134,44 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "409": { $ref: "#/components/responses/Conflict" }
+        "428":
+          description: Exact currently published policy versions must be explicitly accepted before a session is issued.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LegalAcceptanceRequiredErrorEnvelope" }
         "429": { $ref: "#/components/responses/RateLimited" }
         "503":
           description: Supabase customer token exchange is not configured.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+  /v1/auth/account-deletion-exchange:
+    post:
+      tags: [Auth]
+      operationId: exchangeExistingCustomerForAccountDeletion
+      description: Verifies a live Supabase social-provider session for an already linked DABBOBA customer and issues an ephemeral customer session used by the public account-deletion flow. This endpoint never creates a user or links an unknown provider subject.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AccountDeletionAccessTokenExchangeInput" }
+      responses:
+        "201":
+          description: Existing customer verified for the account-deletion flow.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SessionCreated" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "428": { $ref: "#/components/responses/LegalAcceptanceRequired" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "503":
+          description: Supabase customer token exchange or Apple revocation credential protection is unavailable.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ErrorEnvelope" }
@@ -118,6 +209,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/UserSessionState" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "428": { $ref: "#/components/responses/LegalAcceptanceRequired" }
   /v1/auth/refresh:
     post:
       tags: [Auth]
@@ -130,6 +222,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/UserSessionIssued" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "428": { $ref: "#/components/responses/LegalAcceptanceRequired" }
   /v1/auth/logout:
     post:
       tags: [Auth]
@@ -137,6 +230,15 @@ paths:
       security: [{ bearerAuth: [] }]
       responses:
         "204": { description: Current user session revoked. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /v1/auth/logout-others:
+    post:
+      tags: [Auth]
+      operationId: logoutOtherUserSessions
+      description: Revokes every other user session for this account while preserving the authenticated current session. Repeating the request is safe.
+      security: [{ bearerAuth: [] }]
+      responses:
+        "204": { description: All other user sessions are revoked or were already revoked. }
         "401": { $ref: "#/components/responses/Unauthorized" }
   /v1/admin/auth/login:
     post:
@@ -217,6 +319,7 @@ paths:
         "409": { $ref: "#/components/responses/Conflict" }
         "429": { description: Per-user active, daily, or retained media count/byte quota exceeded. }
         "503": { description: Media storage is not configured. }
+        "428": { $ref: "#/components/responses/LegalAcceptanceRequired" }
   /v1/media/{mediaId}/complete:
     post:
       tags: [Media]
@@ -242,6 +345,7 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/MediaUploadIntentExpiredErrorEnvelope" }
+        "428": { $ref: "#/components/responses/LegalAcceptanceRequired" }
   /v1/media/{mediaId}:
     delete:
       tags: [Media]
@@ -270,6 +374,7 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+        "428": { $ref: "#/components/responses/LegalAcceptanceRequired" }
   /v1/media/{mediaId}/url:
     get:
       tags: [Media]
@@ -284,6 +389,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/MediaReadUrl" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "428": { $ref: "#/components/responses/LegalAcceptanceRequired" }
   /v1/media/{mediaId}/public-url:
     get:
       tags: [Media]
@@ -311,6 +417,106 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/MediaReadUrl" }
         "403": { $ref: "#/components/responses/Forbidden" }
+  /v1/admin/catalog-media/uploads:
+    post:
+      tags: [Admin, Media]
+      operationId: createAdminCatalogMediaUploadIntent
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/AdminReason"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateCatalogMediaUploadInput" }
+      responses:
+        "201":
+          description: Short-lived private staging upload capability for an administrator-owned CATALOG image. The server refuses to create the intent unless both image processing and the trusted catalog delivery base are configured.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MediaUploadIntent" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "429": { description: Per-administrator active, daily, or retained media quota exceeded. }
+        "503": { description: Image processing, private storage, or stable catalog delivery is unavailable. }
+  /v1/admin/catalog-media/{mediaId}/complete:
+    post:
+      tags: [Admin, Media]
+      operationId: completeAdminCatalogMediaUpload
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/MediaId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/AdminReason"
+      responses:
+        "200":
+          description: The owned CATALOG image is verified, decoded, metadata-stripped, and committed as immutable WebP media.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MediaReady" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "410":
+          description: The durable upload intent expired and a new upload intent is required.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MediaUploadIntentExpiredErrorEnvelope" }
+        "429": { description: Per-administrator image processing concurrency exceeded. }
+        "503": { description: API image processing is unavailable or busy. }
+  /v1/admin/catalog-media/{mediaId}:
+    delete:
+      tags: [Admin, Media]
+      operationId: deleteAdminCatalogMedia
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/MediaId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/AdminReason"
+      responses:
+        "204": { description: Unattached administrator-owned CATALOG media was marked deleted. }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { description: Once attached, catalog media is retained permanently to protect current and historical snapshot references. }
+  /v1/admin/catalog-media/{mediaId}/url:
+    get:
+      tags: [Admin, Media]
+      operationId: getAdminCatalogMediaUrl
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/MediaId"
+      responses:
+        "200":
+          description: Short-lived preview URL for owned READY CATALOG media.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MediaReadUrl" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/catalog/media/{mediaId}/image:
+    get:
+      tags: [Catalog, Media]
+      operationId: getPublishedCatalogMediaImage
+      parameters:
+        - $ref: "#/components/parameters/MediaId"
+      responses:
+        "302":
+          description: Redirects only referenced READY CATALOG media to a fresh short-lived private-storage signed read URL.
+          headers:
+            Location:
+              schema: { type: string, format: uri }
+            Cache-Control:
+              schema: { type: string, const: "private, no-store" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "503": { description: Stable catalog delivery is not configured. }
   /v1/inquiries:
     get:
       tags: [Community]
@@ -326,6 +532,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/InquiryPage" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "428": { $ref: "#/components/responses/LegalAcceptanceRequired" }
     post:
       tags: [Community]
       operationId: createInquiry
@@ -345,6 +552,7 @@ paths:
               schema: { $ref: "#/components/schemas/Inquiry" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "409": { $ref: "#/components/responses/Conflict" }
+        "428": { $ref: "#/components/responses/LegalAcceptanceRequired" }
   /v1/inquiries/{inquiryId}:
     get:
       tags: [Community]
@@ -359,6 +567,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/InquiryDetail" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "428": { $ref: "#/components/responses/LegalAcceptanceRequired" }
   /v1/inquiries/{inquiryId}/messages:
     post:
       tags: [Community]
@@ -378,6 +587,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/InquiryMessage" }
         "409": { $ref: "#/components/responses/Conflict" }
+        "428": { $ref: "#/components/responses/LegalAcceptanceRequired" }
   /v1/community/posts:
     get:
       tags: [Community]
@@ -413,6 +623,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/CommunityPost" }
         "409": { $ref: "#/components/responses/Conflict" }
+        "428": { $ref: "#/components/responses/LegalAcceptanceRequired" }
   /v1/community/posts/{postId}:
     get:
       tags: [Community]
@@ -447,6 +658,7 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
+        "428": { $ref: "#/components/responses/LegalAcceptanceRequired" }
     delete:
       tags: [Community]
       operationId: deleteCommunityPost
@@ -468,6 +680,7 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
+        "428": { $ref: "#/components/responses/LegalAcceptanceRequired" }
   /v1/community/posts/{postId}/like:
     post:
       tags: [Community]
@@ -490,6 +703,7 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
+        "428": { $ref: "#/components/responses/LegalAcceptanceRequired" }
   /v1/community/posts/{postId}/comments:
     get:
       tags: [Community]
@@ -527,6 +741,7 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Comment" }
+        "428": { $ref: "#/components/responses/LegalAcceptanceRequired" }
   /v1/community/comments/{commentId}:
     delete:
       tags: [Community]
@@ -544,6 +759,7 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
+        "428": { $ref: "#/components/responses/LegalAcceptanceRequired" }
   /v1/community/blocks:
     get:
       tags: [Community]
@@ -559,6 +775,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/BlockedUserPage" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "428": { $ref: "#/components/responses/LegalAcceptanceRequired" }
   /v1/community/blocks/{userId}:
     post:
       tags: [Community]
@@ -575,6 +792,7 @@ paths:
               schema: { $ref: "#/components/schemas/UserBlockResult" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
+        "428": { $ref: "#/components/responses/LegalAcceptanceRequired" }
     delete:
       tags: [Community]
       operationId: unblockCommunityUser
@@ -588,6 +806,42 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/UserBlockResult" }
+        "428": { $ref: "#/components/responses/LegalAcceptanceRequired" }
+  /v1/community/operations-policy:
+    get:
+      tags: [Community]
+      operationId: getUgcOperationsPolicyAcceptance
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Exact operations-policy version required before creating community, exchange, or wanted-room content and whether the current user accepted it.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UgcOperationsPolicyAcceptance" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "428": { $ref: "#/components/responses/LegalAcceptanceRequired" }
+  /v1/community/operations-policy/acceptance:
+    post:
+      tags: [Community]
+      operationId: acceptUgcOperationsPolicy
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AcceptUgcOperationsPolicyInput" }
+      responses:
+        "200":
+          description: The exact operations-policy version was accepted or had already been accepted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UgcOperationsPolicyAcceptance" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "428": { $ref: "#/components/responses/LegalAcceptanceRequired" }
   /v1/reports:
     post:
       tags: [Community]
@@ -607,6 +861,8 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Report" }
         "409": { $ref: "#/components/responses/Conflict" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "428": { $ref: "#/components/responses/LegalAcceptanceRequired" }
   /v1/catalog/ips:
     get:
       tags: [Catalog]
@@ -625,13 +881,64 @@ paths:
     get:
       tags: [Catalog]
       operationId: getHomeCatalogSections
-      description: Render-ready Home catalog sections. When configured is false, clients may use their legacy preview layout. Once configured is true, items is authoritative even when empty.
+      description: Render-ready category-specific Home catalog sections. When configured is false, no administrator-defined Home section is registered and clients must show a truthful empty state without synthesizing a legacy preview. Once configured is true, items is authoritative even when empty. Legacy operator rows without a layout kind remain admin-visible but are not returned here.
       responses:
         "200":
-          description: Active Home sections with their active IP and visible customer-sellable gacha or kuji products.
+          description: Active Home sections with their active IP and visible customer-sellable products matching the section Gacha or Kuji layout.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/HomeCatalogSectionList" }
+  /v1/catalog/recent-draws:
+    get:
+      tags: [Catalog]
+      operationId: getHomeRecentDraws
+      description: Returns only server-committed draw results for active Home products. Customer identity is intentionally omitted.
+      responses:
+        "200":
+          description: Up to three newest immutable prize snapshots, newest first.
+          headers:
+            Cache-Control:
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/HomeRecentDrawActivityList" }
+  /v1/catalog/home-product-clicks/{productId}:
+    post:
+      tags: [Catalog]
+      operationId: recordHomeProductClick
+      description: Records one anonymous, idempotent click originating from a Home product card and returns the current Home BEST product.
+      parameters:
+        - $ref: "#/components/parameters/ProductId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [eventId]
+              properties:
+                eventId: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Current Home product badge state after the click is recorded.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/HomeProductBadgeState" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /v1/catalog/category-settings:
+    get:
+      tags: [Catalog]
+      operationId: getStorefrontCategorySettings
+      description: Customer-visible presentation settings for the fixed commerce category IDs.
+      responses:
+        "200":
+          description: Ordered storefront category presentation settings.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StorefrontCategorySettingList" }
   /v1/catalog/characters:
     get:
       tags: [Catalog]
@@ -669,12 +976,37 @@ paths:
         - name: characterId
           in: query
           schema: { type: string, format: uuid }
+        - name: sort
+          in: query
+          schema:
+            type: string
+            enum: [latest, popular, price-high, price-low]
+            default: latest
+        - name: excludeSoldOut
+          in: query
+          schema: { type: boolean, default: false }
       responses:
         "200":
           description: Active, customer-sellable products with server-owned price and availability. Prize-only records are excluded.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/CatalogProductPage" }
+  /v1/catalog/products/{productId}:
+    get:
+      tags: [Catalog]
+      operationId: getCatalogProduct
+      parameters:
+        - name: productId
+          in: path
+          required: true
+          schema: { type: string, maxLength: 120 }
+      responses:
+        "200":
+          description: One active customer-browsable catalog product.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CatalogProduct" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /v1/catalog/requests:
     post:
       tags: [Catalog]
@@ -693,6 +1025,7 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/CatalogRequest" }
+        "428": { $ref: "#/components/responses/LegalAcceptanceRequired" }
   /v1/wanted-requests:
     get:
       tags: [Community, Catalog]
@@ -742,6 +1075,7 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "409": { $ref: "#/components/responses/Conflict" }
+        "428": { $ref: "#/components/responses/LegalAcceptanceRequired" }
   /v1/wanted-requests/{requestId}:
     patch:
       tags: [Community, Catalog]
@@ -764,6 +1098,7 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
+        "428": { $ref: "#/components/responses/LegalAcceptanceRequired" }
     delete:
       tags: [Community, Catalog]
       operationId: deleteWantedRequest
@@ -785,6 +1120,7 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
+        "428": { $ref: "#/components/responses/LegalAcceptanceRequired" }
   /v1/wanted-requests/{requestId}/like:
     post:
       tags: [Community]
@@ -809,6 +1145,7 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
+        "428": { $ref: "#/components/responses/LegalAcceptanceRequired" }
   /v1/exchange/inventory:
     get:
       tags: [Exchange]
@@ -824,6 +1161,8 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/InventoryUnitPage" }
+        "503": { $ref: "#/components/responses/CommerceUnavailable" }
+        "428": { $ref: "#/components/responses/LegalAcceptanceRequired" }
   /v1/exchange/listings:
     get:
       tags: [Exchange]
@@ -841,6 +1180,7 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ExchangeListingPage" }
+        "503": { $ref: "#/components/responses/CommerceUnavailable" }
     post:
       tags: [Exchange]
       operationId: createExchangeListing
@@ -859,6 +1199,22 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/ExchangeListing" }
         "409": { $ref: "#/components/responses/Conflict" }
+        "503": { $ref: "#/components/responses/CommerceUnavailable" }
+        "428": { $ref: "#/components/responses/LegalAcceptanceRequired" }
+  /v1/exchange/activity:
+    get:
+      tags: [Exchange]
+      operationId: getMyExchangeActivity
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Current user's exchange listings and listings where the user submitted an offer, including terminal states.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ExchangeActivity" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "503": { $ref: "#/components/responses/CommerceUnavailable" }
+        "428": { $ref: "#/components/responses/LegalAcceptanceRequired" }
   /v1/exchange/listings/{listingId}:
     get:
       tags: [Exchange]
@@ -872,6 +1228,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/ExchangeListing" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "503": { $ref: "#/components/responses/CommerceUnavailable" }
   /v1/exchange/listings/{listingId}/offers:
     post:
       tags: [Exchange]
@@ -892,6 +1249,8 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/ExchangeOffer" }
         "409": { $ref: "#/components/responses/Conflict" }
+        "503": { $ref: "#/components/responses/CommerceUnavailable" }
+        "428": { $ref: "#/components/responses/LegalAcceptanceRequired" }
   /v1/exchange/listings/{listingId}/offers/{offerId}/decision:
     post:
       tags: [Exchange]
@@ -922,6 +1281,8 @@ paths:
               schema: { $ref: "#/components/schemas/ExchangeOffer" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "409": { $ref: "#/components/responses/Conflict" }
+        "503": { $ref: "#/components/responses/CommerceUnavailable" }
+        "428": { $ref: "#/components/responses/LegalAcceptanceRequired" }
   /v1/exchange/listings/{listingId}/cancel:
     post:
       tags: [Exchange]
@@ -938,6 +1299,8 @@ paths:
               schema: { $ref: "#/components/schemas/ExchangeListing" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "409": { $ref: "#/components/responses/Conflict" }
+        "503": { $ref: "#/components/responses/CommerceUnavailable" }
+        "428": { $ref: "#/components/responses/LegalAcceptanceRequired" }
   /v1/exchange/listings/{listingId}/offers/{offerId}/withdraw:
     post:
       tags: [Exchange]
@@ -958,6 +1321,8 @@ paths:
               schema: { $ref: "#/components/schemas/ExchangeOffer" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "409": { $ref: "#/components/responses/Conflict" }
+        "503": { $ref: "#/components/responses/CommerceUnavailable" }
+        "428": { $ref: "#/components/responses/LegalAcceptanceRequired" }
   /v1/exchange/listings/{listingId}/completion-confirmation:
     post:
       tags: [Exchange]
@@ -974,6 +1339,8 @@ paths:
               schema: { $ref: "#/components/schemas/ExchangeListing" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "409": { $ref: "#/components/responses/Conflict" }
+        "503": { $ref: "#/components/responses/CommerceUnavailable" }
+        "428": { $ref: "#/components/responses/LegalAcceptanceRequired" }
   /v1/admin/exchange/listings:
     get:
       tags: [Admin, Exchange]
@@ -1086,6 +1453,8 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
+        "503": { $ref: "#/components/responses/CommerceUnavailable" }
+        "428": { $ref: "#/components/responses/LegalAcceptanceRequired" }
   /v1/kuji/rooms/{productId}/entries/{entryId}:
     get:
       tags: [Kuji, Commerce]
@@ -1109,6 +1478,8 @@ paths:
               schema: { $ref: "#/components/schemas/KujiRoomSnapshot" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "503": { $ref: "#/components/responses/CommerceUnavailable" }
+        "428": { $ref: "#/components/responses/LegalAcceptanceRequired" }
     delete:
       tags: [Kuji, Commerce]
       operationId: leaveOwnKujiRoomEntry
@@ -1132,6 +1503,8 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
+        "503": { $ref: "#/components/responses/CommerceUnavailable" }
+        "428": { $ref: "#/components/responses/LegalAcceptanceRequired" }
   /v1/kuji/rooms/{productId}/entries/{entryId}/slots:
     post:
       tags: [Kuji, Commerce]
@@ -1174,6 +1547,8 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
+        "503": { $ref: "#/components/responses/CommerceUnavailable" }
+        "428": { $ref: "#/components/responses/LegalAcceptanceRequired" }
   /v1/orders:
     post:
       tags: [Commerce]
@@ -1193,7 +1568,8 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Order" }
         "409": { $ref: "#/components/responses/Conflict" }
-        "503": { description: Payment provider is not configured; no order or reservation is created. }
+        "503": { $ref: "#/components/responses/CommerceUnavailable" }
+        "428": { $ref: "#/components/responses/LegalAcceptanceRequired" }
   /v1/orders/{orderId}:
     get:
       tags: [Commerce]
@@ -1211,6 +1587,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Order" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "428": { $ref: "#/components/responses/LegalAcceptanceRequired" }
   /v1/orders/{orderId}/draw-completion:
     get:
       tags: [Commerce]
@@ -1234,6 +1611,7 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
+        "428": { $ref: "#/components/responses/LegalAcceptanceRequired" }
   /v1/orders/{orderId}/draw-recovery:
     get:
       tags: [Commerce, Kuji]
@@ -1257,6 +1635,7 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
+        "428": { $ref: "#/components/responses/LegalAcceptanceRequired" }
   /v1/orders/{orderId}/kuji-selection:
     get:
       tags: [Commerce, Kuji]
@@ -1280,6 +1659,75 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
+        "428": { $ref: "#/components/responses/LegalAcceptanceRequired" }
+  /v1/payments/{paymentId}/confirm:
+    post:
+      tags: [Commerce]
+      operationId: confirmOwnPortOnePayment
+      description: Re-queries PortOne with the authenticated owner's payment ID and applies only the provider-authoritative state to the order. A client redirect or callback is never accepted as proof of payment.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PaymentId"
+      responses:
+        "200":
+          description: Fresh provider state was reconciled, or the payment is still pending.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PortOnePaymentConfirmation" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "502":
+          description: PortOne could not be queried or its response failed contract validation.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+        "503":
+          description: Commerce is unavailable in PRELAUNCH, or the PortOne production channel is not configured.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+        "428": { $ref: "#/components/responses/LegalAcceptanceRequired" }
+  /v1/payments/webhooks/portone:
+    post:
+      tags: [Commerce]
+      operationId: receivePortOnePaymentWebhook
+      description: Verifies the official PortOne webhook signature, then performs a fresh provider lookup before reconciling payment state. Webhook body status is never trusted directly.
+      parameters:
+        - name: webhook-id
+          in: header
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 200 }
+        - name: webhook-signature
+          in: header
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 4096 }
+        - name: webhook-timestamp
+          in: header
+          required: true
+          schema: { type: string, pattern: "^[0-9]{1,16}$" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Official PortOne webhook envelope. The raw bytes are required for signature verification.
+              additionalProperties: true
+      responses:
+        "202":
+          description: Verified notification accepted and provider state reconciled or still pending.
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "413":
+          description: Webhook body exceeds the bounded verification size.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+        "503": { $ref: "#/components/responses/CommerceUnavailable" }
   /v1/payments/webhooks/{provider}:
     post:
       tags: [Commerce]
@@ -1301,6 +1749,7 @@ paths:
       responses:
         "202": { description: Verified event accepted or previously processed. }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "503": { $ref: "#/components/responses/CommerceUnavailable" }
   /v1/draws/{entitlementId}/consume:
     post:
       tags: [Commerce]
@@ -1319,6 +1768,8 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/DrawResult" }
         "409": { $ref: "#/components/responses/Conflict" }
+        "503": { $ref: "#/components/responses/CommerceUnavailable" }
+        "428": { $ref: "#/components/responses/LegalAcceptanceRequired" }
   /v1/account/profile:
     get:
       tags: [Account]
@@ -1331,6 +1782,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/AccountProfile" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "428": { $ref: "#/components/responses/LegalAcceptanceRequired" }
     patch:
       tags: [Account]
       operationId: updateAccountProfile
@@ -1349,6 +1801,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/AccountProfile" }
         "409": { $ref: "#/components/responses/Conflict" }
+        "428": { $ref: "#/components/responses/LegalAcceptanceRequired" }
   /v1/account/basic-info:
     get:
       tags: [Account]
@@ -1361,6 +1814,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/AccountBasicInfo" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "428": { $ref: "#/components/responses/LegalAcceptanceRequired" }
     patch:
       tags: [Account]
       operationId: updateAccountBasicInfo
@@ -1381,6 +1835,8 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "409": { $ref: "#/components/responses/Conflict" }
+        "503": { $ref: "#/components/responses/CommerceUnavailable" }
+        "428": { $ref: "#/components/responses/LegalAcceptanceRequired" }
   /v1/account/default-address:
     get:
       tags: [Account]
@@ -1393,6 +1849,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/DefaultShippingAddress" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "428": { $ref: "#/components/responses/LegalAcceptanceRequired" }
     put:
       tags: [Account]
       operationId: upsertDefaultShippingAddress
@@ -1416,6 +1873,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/DefaultShippingAddress" }
         "409": { $ref: "#/components/responses/Conflict" }
+        "428": { $ref: "#/components/responses/LegalAcceptanceRequired" }
   /v1/account/inventory:
     get:
       tags: [Account]
@@ -1432,6 +1890,26 @@ paths:
               schema: { $ref: "#/components/schemas/InventoryUnitPage" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "428": { $ref: "#/components/responses/LegalAcceptanceRequired" }
+  /v1/account/owned-products/{productId}:
+    get:
+      tags: [Account]
+      operationId: getAccountOwnedProduct
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: productId
+          in: path
+          required: true
+          schema: { type: string, maxLength: 120 }
+      responses:
+        "200":
+          description: Canonical product detail for a prize currently or historically owned by the authenticated user.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CatalogProduct" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "428": { $ref: "#/components/responses/LegalAcceptanceRequired" }
   /v1/account/wishlist:
     get:
       tags: [Account]
@@ -1446,6 +1924,7 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/WishlistPage" }
+        "428": { $ref: "#/components/responses/LegalAcceptanceRequired" }
   /v1/account/wishlist/{productId}:
     post:
       tags: [Account]
@@ -1464,6 +1943,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/WishlistItem" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "428": { $ref: "#/components/responses/LegalAcceptanceRequired" }
     delete:
       tags: [Account]
       operationId: removeWishlistItem
@@ -1480,6 +1960,7 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/WishlistMutationResult" }
+        "428": { $ref: "#/components/responses/LegalAcceptanceRequired" }
   /v1/account/orders:
     get:
       tags: [Account]
@@ -1494,6 +1975,7 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/AccountOrderPage" }
+        "428": { $ref: "#/components/responses/LegalAcceptanceRequired" }
   /v1/account/draw-entitlements:
     get:
       tags: [Account]
@@ -1517,6 +1999,7 @@ paths:
               schema: { $ref: "#/components/schemas/AccountDrawEntitlementPage" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "428": { $ref: "#/components/responses/LegalAcceptanceRequired" }
   /v1/account/points:
     get:
       tags: [Account]
@@ -1531,6 +2014,7 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/AccountPointPage" }
+        "428": { $ref: "#/components/responses/LegalAcceptanceRequired" }
   /v1/account/point-returns:
     post:
       tags: [Account]
@@ -1552,6 +2036,8 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "409": { $ref: "#/components/responses/Conflict" }
+        "503": { $ref: "#/components/responses/CommerceUnavailable" }
+        "428": { $ref: "#/components/responses/LegalAcceptanceRequired" }
   /v1/account/notification-preferences:
     get:
       tags: [Account]
@@ -1564,6 +2050,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/NotificationPreferences" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "428": { $ref: "#/components/responses/LegalAcceptanceRequired" }
     put:
       tags: [Account]
       operationId: updateAccountNotificationPreferences
@@ -1584,6 +2071,7 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "409": { $ref: "#/components/responses/Conflict" }
+        "428": { $ref: "#/components/responses/LegalAcceptanceRequired" }
   /v1/account/notifications:
     get:
       tags: [Account]
@@ -1598,6 +2086,40 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/NotificationPage" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "428": { $ref: "#/components/responses/LegalAcceptanceRequired" }
+  /v1/account/notifications/unread-summary:
+    get:
+      tags: [Account]
+      operationId: getAccountNotificationUnreadSummary
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Authoritative unread notification count for the current user.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/NotificationUnreadSummary" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "428": { $ref: "#/components/responses/LegalAcceptanceRequired" }
+  /v1/account/notifications/{notificationId}:
+    get:
+      tags: [Account]
+      operationId: getAccountNotification
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: notificationId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: One notification owned by the current user.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccountNotification" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "428": { $ref: "#/components/responses/LegalAcceptanceRequired" }
   /v1/account/notifications/{notificationId}/read:
     post:
       tags: [Account]
@@ -1615,7 +2137,64 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/AccountNotification" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "428": { $ref: "#/components/responses/LegalAcceptanceRequired" }
+  /v1/account/push-devices:
+    post:
+      tags: [Account]
+      operationId: registerAccountPushDevice
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RegisterPushDeviceInput" }
+      responses:
+        "200":
+          description: The current installation is bound to the authenticated user session; prior ownership is disabled.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PushDeviceRegistration" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "428": { $ref: "#/components/responses/LegalAcceptanceRequired" }
+  /v1/account/push-devices/{installationId}:
+    delete:
+      tags: [Account]
+      operationId: unregisterAccountPushDevice
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: installationId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "204": { description: Push delivery is disabled for this installation if it belongs to the current user. }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "428": { $ref: "#/components/responses/LegalAcceptanceRequired" }
+  /v1/account/shipping-quotes:
+    post:
+      tags: [Account]
+      operationId: createAccountShippingQuote
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateShippingQuoteInput" }
+      responses:
+        "200":
+          description: Ten-minute server-priced quote bound to the current default-address version and selected inventory.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ShippingQuote" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "428": { $ref: "#/components/responses/LegalAcceptanceRequired" }
+        "503": { $ref: "#/components/responses/CommerceUnavailable" }
   /v1/account/shipping-requests:
     get:
       tags: [Account]
@@ -1635,6 +2214,7 @@ paths:
               schema: { $ref: "#/components/schemas/AccountShippingRequestPage" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "428": { $ref: "#/components/responses/LegalAcceptanceRequired" }
     post:
       tags: [Account]
       operationId: createAccountShippingRequest
@@ -1648,11 +2228,15 @@ paths:
             schema: { $ref: "#/components/schemas/CreateShippingRequestInput" }
       responses:
         "201":
-          description: Owned inventory is atomically moved to shipping with an immutable address snapshot.
+          description: The unexpired quote is consumed and owned inventory is atomically moved to shipping with an immutable address snapshot.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ShippingRequest" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "409": { $ref: "#/components/responses/Conflict" }
+        "503": { $ref: "#/components/responses/CommerceUnavailable" }
+        "428": { $ref: "#/components/responses/LegalAcceptanceRequired" }
   /v1/account/shipping-requests/{shippingRequestId}:
     get:
       tags: [Account]
@@ -1665,9 +2249,58 @@ paths:
           description: One shipping request owned by the current user.
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/AccountShippingRequest" }
+              schema: { $ref: "#/components/schemas/AccountShippingRequestDetail" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "428": { $ref: "#/components/responses/LegalAcceptanceRequired" }
+  /v1/account/policy-acceptances:
+    get:
+      tags: [Account]
+      operationId: getAccountPolicyAcceptances
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Current published policy versions and this user's latest explicit acceptance time.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccountPolicyAcceptanceStatus" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      tags: [Account]
+      operationId: acceptCurrentAccountPolicies
+      description: Records append-only acceptance evidence for the exact currently published terms and privacy versions. This route remains available while other customer APIs return 428.
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CurrentPolicyAcceptanceInput" }
+      responses:
+        "204": { description: Current policies accepted. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "428":
+          description: Submitted versions are not the exact currently published versions.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LegalAcceptanceRequiredErrorEnvelope" }
+  /v1/account/deletion-preview:
+    get:
+      tags: [Account]
+      operationId: previewAccountDeletion
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Current deletion blockers checked without mutating the account.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccountDeletionPreview" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
   /v1/account/deletion-request:
     get:
       tags: [Account]
@@ -1676,6 +2309,9 @@ paths:
       responses:
         "200":
           description: Most recent account deletion request owned by the current user.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
           content:
             application/json:
               schema: { $ref: "#/components/schemas/AccountDeletionRequest" }
@@ -1694,12 +2330,37 @@ paths:
             schema: { $ref: "#/components/schemas/EmptyObject" }
       responses:
         "202":
-          description: Manual-review deletion request recorded or reassessed and all user sessions revoked.
+          description: Deletion is blocked for the customer to resolve, or safely queued with all sessions revoked.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccountDeletionReceipt" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /v1/account/deletion-requests/{requestId}/status:
+    get:
+      tags: [Account]
+      operationId: getAccountDeletionStatusByReceipt
+      description: Reads only the deletion receipt state after sessions have been revoked. Invalid request/token pairs return the same not-found response.
+      parameters:
+        - $ref: "#/components/parameters/AccountDeletionRequestId"
+        - name: X-Deletion-Status-Token
+          in: header
+          required: true
+          schema: { type: string, minLength: 43, maxLength: 43, pattern: "^[A-Za-z0-9_-]{43}$" }
+      responses:
+        "200":
+          description: Current deletion state.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
           content:
             application/json:
               schema: { $ref: "#/components/schemas/AccountDeletionRequest" }
-        "401": { $ref: "#/components/responses/Unauthorized" }
-        "409": { $ref: "#/components/responses/Conflict" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/RateLimited" }
   /v1/admin/products/{productId}/draw-versions:
     get:
       tags: [Admin, Commerce]
@@ -2184,7 +2845,7 @@ paths:
           schema: { $ref: "#/components/schemas/ReportStatus" }
         - name: targetType
           in: query
-          schema: { type: string, enum: [POST, COMMENT, SNAP, USER, EXCHANGE_LISTING] }
+          schema: { type: string, enum: [POST, COMMENT, SNAP, USER, EXCHANGE_LISTING, WANTED_REQUEST] }
         - name: targetId
           in: query
           schema: { type: string, format: uuid }
@@ -2193,7 +2854,7 @@ paths:
           schema: { type: string, format: uuid }
         - name: subjectUserId
           in: query
-          description: 회원 본인과 그 회원이 작성한 게시글, Snap, 댓글, 교환 글을 대상으로 한 신고만 조회합니다.
+          description: 회원 본인과 그 회원이 작성한 게시글, Snap, 댓글, 교환 글, 신청 글을 대상으로 한 신고만 조회합니다.
           schema: { type: string, format: uuid }
       responses:
         "200":
@@ -2308,6 +2969,45 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/AdminHomeCatalogSection" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /v1/admin/category-settings:
+    get:
+      tags: [Admin]
+      operationId: listAdminStorefrontCategorySettings
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Full storefront category presentation configuration.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StorefrontCategorySettingList" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /v1/admin/category-settings/{category}:
+    patch:
+      tags: [Admin]
+      operationId: updateAdminStorefrontCategorySetting
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: category
+          in: path
+          required: true
+          schema: { $ref: "#/components/schemas/ProductCategory" }
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/AdminReason"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateStorefrontCategorySettingInput" }
+      responses:
+        "200":
+          description: Storefront category setting updated and audited.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StorefrontCategorySetting" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
@@ -2449,6 +3149,10 @@ paths:
           in: query
           description: Filter by immutable prize-only catalog role.
           schema: { type: boolean }
+        - name: saleStatus
+          in: query
+          description: Filter by explicit storefront lifecycle.
+          schema: { $ref: "#/components/schemas/ProductSaleStatus" }
       responses:
         "200":
           description: Full product catalog including inactive rows.
@@ -2512,6 +3216,56 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/CatalogProduct" }
+  /v1/admin/products/{productId}/image:
+    patch:
+      tags: [Admin, Media]
+      operationId: attachAdminProductImage
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/ProductId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/AdminReason"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ProductImageAttachInput" }
+      responses:
+        "200":
+          description: Atomically attaches owned READY CATALOG media through its stable server-controlled delivery URL and increments only the product version.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProductImageAttachment" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "503": { description: Stable catalog media delivery is not configured. }
+    delete:
+      tags: [Admin, Media]
+      operationId: clearAdminProductStorefrontImage
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/ProductId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/AdminReason"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ProductImageClearInput" }
+      responses:
+        "200":
+          description: Clears only the product storefront/list image, preserves the primary image, and increments the product version.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProductImageClearResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
   /v1/admin/catalog-requests:
     get:
       tags: [Admin]
@@ -2572,7 +3326,7 @@ paths:
           schema:
             type: string
             default: OPEN
-            enum: [OPEN, PENDING_REVIEW, BLOCKED, APPROVED, COMPLETED, REJECTED, CANCELLED]
+            enum: [OPEN, PENDING_REVIEW, BLOCKED, PROCESSING, APPROVED, COMPLETED, REJECTED, CANCELLED]
       responses:
         "200":
           description: Account deletion review queue.
@@ -2589,7 +3343,7 @@ paths:
         - $ref: "#/components/parameters/AccountDeletionRequestId"
       responses:
         "200":
-          description: Account deletion request, current blockers, and immutable review events.
+          description: Account deletion request, current blockers, automatic worker state, and immutable review events.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/AdminAccountDeletionDetail" }
@@ -2611,13 +3365,35 @@ paths:
             schema: { $ref: "#/components/schemas/DecideAccountDeletionInput" }
       responses:
         "200":
-          description: Account deletion review decision committed and audited without performing a hard delete.
+          description: Exceptional administrator rejection committed and audited. Customer-requested deletion never requires administrator approval.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/AdminAccountDeletionDecisionResult" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
+  /v1/admin/account-deletions/{requestId}/completion:
+    post:
+      tags: [Admin, Account]
+      operationId: completeAdminAccountDeletion
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/AccountDeletionRequestId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/AdminReason"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CompleteAccountDeletionInput" }
+      responses:
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: This legacy endpoint is disabled because the server worker completes deletion automatically.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
   /v1/admin/commerce/orders:
     get:
       tags: [Admin, Commerce]
@@ -2917,6 +3693,7 @@ components:
       name: X-Admin-Reason
       in: header
       required: true
+      description: ASCII reasons remain compatible. For non-ASCII text, percent-encode UTF-8 and also send X-Admin-Reason-Encoding as utf-8-percent.
       schema: { type: string, minLength: 2, maxLength: 1000 }
     UserId:
       name: userId
@@ -2992,6 +3769,11 @@ components:
       content:
         application/json:
           schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+    LegalAcceptanceRequired:
+      description: The authenticated user must explicitly accept the exact currently published terms and privacy versions before this operation can continue.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/LegalAcceptanceRequiredErrorEnvelope" }
     Forbidden:
       description: The authenticated actor lacks the required role or ownership.
       content:
@@ -3012,6 +3794,11 @@ components:
       content:
         application/json:
           schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+    CommerceUnavailable:
+      description: Commerce is disabled for the PRELAUNCH release. Customer-facing endpoints perform no new order, payment, draw, kuji-room, point-return, exchange, inventory, or shipping mutation.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorEnvelope" }
   schemas:
     Liveness:
       type: object
@@ -3028,27 +3815,91 @@ components:
         status: { type: string, enum: [ok, unavailable] }
         database: { type: string, enum: [ok, unavailable] }
         timestamp: { type: string, format: date-time }
+    CommerceLaunchMode:
+      type: string
+      enum: [PRELAUNCH, LIVE]
+    RequiredPolicyVersions:
+      type: object
+      additionalProperties: false
+      required: [terms, privacy]
+      properties:
+        terms: { type: string, pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" }
+        privacy: { type: string, pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" }
+    PublicConfig:
+      type: object
+      additionalProperties: false
+      required: [commerceMode, requiredPolicyVersions]
+      properties:
+        commerceMode: { $ref: "#/components/schemas/CommerceLaunchMode" }
+        requiredPolicyVersions: { $ref: "#/components/schemas/RequiredPolicyVersions" }
     CustomerAuthProvider:
       type: string
-      enum: [KAKAO, NAVER, PHONE]
+      enum: [KAKAO, NAVER, GOOGLE, APPLE, EMAIL]
     CustomerLoginProviders:
       type: object
       additionalProperties: false
-      required: [methods, brokerExchangeConfigured]
+      required: [methods, brokerExchangeConfigured, requiredPolicyVersions]
       properties:
         methods:
           type: array
-          minItems: 3
-          maxItems: 3
+          minItems: 0
+          maxItems: 5
           uniqueItems: true
           items: { $ref: "#/components/schemas/CustomerAuthProvider" }
         brokerExchangeConfigured: { type: boolean }
+        requiredPolicyVersions:
+          type: object
+          additionalProperties: false
+          required: [terms, privacy]
+          properties:
+            terms: { type: string, pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" }
+            privacy: { type: string, pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" }
     CustomerAccessTokenExchangeInput:
       type: object
       additionalProperties: false
-      required: [accessToken]
+      required: [accessToken, acceptedPolicies, loginProvider]
       properties:
         accessToken: { type: string, minLength: 64, maxLength: 16384, writeOnly: true }
+        loginProvider: { $ref: "#/components/schemas/CustomerAuthProvider" }
+        appleRefreshToken:
+          type: string
+          minLength: 32
+          maxLength: 16384
+          writeOnly: true
+          description: Required only for Apple login. Supabase provider refresh token sent once to the trusted API for encrypted deletion-revocation storage.
+        acceptedPolicies:
+          type: object
+          additionalProperties: false
+          required: [terms, privacy]
+          properties:
+            terms: { type: string, pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" }
+            privacy: { type: string, pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" }
+    AccountDeletionAccessTokenExchangeInput:
+      type: object
+      additionalProperties: false
+      required: [accessToken, acceptedPolicies, loginProvider]
+      properties:
+        accessToken: { type: string, minLength: 64, maxLength: 16384, writeOnly: true }
+        loginProvider: { type: string, enum: [KAKAO, NAVER, GOOGLE, APPLE] }
+        appleRefreshToken:
+          type: string
+          minLength: 32
+          maxLength: 16384
+          writeOnly: true
+          description: Optional fresh Apple provider refresh token. When absent, an existing encrypted revocation credential is required.
+        acceptedPolicies: { $ref: "#/components/schemas/RequiredPolicyVersions" }
+    CurrentPolicyAcceptanceInput:
+      type: object
+      additionalProperties: false
+      required: [acceptedPolicies]
+      properties:
+        acceptedPolicies:
+          type: object
+          additionalProperties: false
+          required: [terms, privacy]
+          properties:
+            terms: { type: string, pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" }
+            privacy: { type: string, pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" }
     ErrorEnvelope:
       type: object
       additionalProperties: false
@@ -3063,6 +3914,25 @@ components:
             message: { type: string }
             requestId: { type: string }
             details: { type: object, additionalProperties: true }
+    LegalAcceptanceRequiredErrorEnvelope:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          type: object
+          additionalProperties: false
+          required: [code, message, requestId, details]
+          properties:
+            code: { type: string, const: LEGAL_ACCEPTANCE_REQUIRED }
+            message: { type: string }
+            requestId: { type: string }
+            details:
+              type: object
+              additionalProperties: false
+              required: [requiredPolicyVersions]
+              properties:
+                requiredPolicyVersions: { $ref: "#/components/schemas/RequiredPolicyVersions" }
     MediaUploadIntentExpiredErrorEnvelope:
       type: object
       additionalProperties: false
@@ -3083,6 +3953,11 @@ components:
     ReportStatus: { type: string, enum: [PENDING, REVIEWING, RESOLVED, REJECTED] }
     RequestStatus: { type: string, enum: [PENDING, APPROVED, REJECTED, ON_HOLD, MERGED] }
     ProductCategory: { type: string, enum: [gacha, figure, kuji, tcg] }
+    ProductSaleStatus: { type: string, enum: [DRAFT, COMING_SOON, ON_SALE, PAUSED] }
+    ProductPurchaseBlockedReason:
+      type: [string, "null"]
+      enum: [DRAFT, COMING_SOON, PAUSED, COMMERCE_PRELAUNCH, OUT_OF_STOCK, null]
+    StorefrontCategoryAvailability: { type: string, enum: [active, coming-soon, hidden] }
     MediaPurpose: { type: string, enum: [PROFILE, POST, COMMENT, INQUIRY, EXCHANGE, CATALOG_REQUEST, WANTED_REQUEST] }
     MediaMimeType: { type: string, enum: [image/jpeg, image/png, image/webp, image/gif] }
     CreateMediaUploadInput:
@@ -3102,6 +3977,22 @@ components:
           uniqueItems: true
           items: { type: string, enum: [POST, PUT] }
           description: Supported upload transports. Defaults to [POST] when omitted, preserving legacy multipart POST behavior; PUT means an exact raw file body, never multipart. The property remains optional in generated clients.
+    CreateCatalogMediaUploadInput:
+      type: object
+      additionalProperties: false
+      required: [filename, mimeType, byteSize, checksumSha256, acceptedUploadMethods]
+      properties:
+        filename: { type: string, minLength: 1, maxLength: 255 }
+        mimeType: { $ref: "#/components/schemas/MediaMimeType" }
+        byteSize: { type: integer, minimum: 1, maximum: 10485760 }
+        checksumSha256: { type: string, pattern: "^[0-9A-Fa-f]{64}$" }
+        acceptedUploadMethods:
+          type: array
+          minItems: 2
+          maxItems: 2
+          uniqueItems: true
+          items: { type: string, enum: [POST, PUT] }
+          description: Admin clients negotiate both transports. CATALOG is fixed server-side and is never accepted from caller input.
     MediaUploadIntent:
       oneOf:
         - $ref: "#/components/schemas/MediaMultipartPostUploadIntent"
@@ -3161,6 +4052,51 @@ components:
         url: { type: string, format: uri }
         expiresAt: { type: string, format: date-time }
         mimeType: { $ref: "#/components/schemas/MediaMimeType" }
+    ProductImageAttachInput:
+      type: object
+      additionalProperties: false
+      required: [mediaId, expectedVersion]
+      properties:
+        mediaId: { type: string, format: uuid }
+        expectedVersion: { type: integer, minimum: 1 }
+        role:
+          description: primary는 기존 상세·기본 대표 사진이고 storefront는 상품 목록 전용 사진입니다.
+          allOf:
+            - type: string
+              enum: [primary, storefront]
+              default: primary
+    ProductImageAttachment:
+      type: object
+      additionalProperties: false
+      required: [productId, imageUrl, version, mediaId, role]
+      properties:
+        productId:
+          type: string
+          maxLength: 120
+          pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+        imageUrl: { type: string, format: uri }
+        version: { type: integer, minimum: 2 }
+        mediaId: { type: string, format: uuid }
+        role: { type: string, enum: [primary, storefront] }
+    ProductImageClearInput:
+      type: object
+      additionalProperties: false
+      required: [expectedVersion, role]
+      properties:
+        expectedVersion: { type: integer, minimum: 1 }
+        role: { type: string, enum: [storefront] }
+    ProductImageClearResult:
+      type: object
+      additionalProperties: false
+      required: [productId, imageUrl, version, role]
+      properties:
+        productId:
+          type: string
+          maxLength: 120
+          pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+        imageUrl: { type: "null" }
+        version: { type: integer, minimum: 2 }
+        role: { type: string, enum: [storefront] }
     Actor:
       type: object
       additionalProperties: false
@@ -3299,9 +4235,11 @@ components:
     AccountOrder:
       type: object
       additionalProperties: false
-      required: [id, status, currency, subtotal, discountTotal, pointTotal, total, lines, createdAt, updatedAt]
+      required: [id, orderKind, shippingRequestId, status, currency, subtotal, discountTotal, pointTotal, total, lines, createdAt, updatedAt]
       properties:
         id: { type: string, format: uuid }
+        orderKind: { type: string, enum: [PRODUCT, SHIPPING_FEE] }
+        shippingRequestId: { type: [string, "null"], format: uuid }
         status: { type: string, enum: [PENDING_PAYMENT, PAID, FULFILLED, CANCELLED, REFUND_REVIEW, REFUNDED] }
         currency: { type: string, const: KRW }
         subtotal: { type: integer, minimum: 0 }
@@ -3430,15 +4368,65 @@ components:
     AccountNotification:
       type: object
       additionalProperties: false
-      required: [id, kind, title, body, data, readAt, createdAt]
+      required: [id, kind, title, body, data, destination, readAt, createdAt]
       properties:
         id: { type: string, format: uuid }
         kind: { type: string, maxLength: 100 }
         title: { type: string, maxLength: 160 }
         body: { type: string }
         data: { type: object, additionalProperties: true }
+        destination: { $ref: "#/components/schemas/NotificationDestination" }
         readAt: { type: [string, "null"], format: date-time }
         createdAt: { type: string, format: date-time }
+    NotificationDestination:
+      type: object
+      additionalProperties: false
+      required: [route, detail]
+      properties:
+        route:
+          type: string
+          enum: [home, gacha, kuji, storage, profile]
+        detail:
+          anyOf:
+            - $ref: "#/components/schemas/NotificationDetailDestination"
+            - type: "null"
+    NotificationDetailDestination:
+      type: object
+      additionalProperties: false
+      required: [kind, id]
+      properties:
+        kind:
+          type: string
+          enum: [product, order, shipping, inquiry, exchange, request]
+        id:
+          type: string
+          minLength: 1
+          maxLength: 120
+    NotificationUnreadSummary:
+      type: object
+      additionalProperties: false
+      required: [unreadCount, newestUnreadCreatedAt]
+      properties:
+        unreadCount: { type: integer, minimum: 0 }
+        newestUnreadCreatedAt: { type: [string, "null"], format: date-time }
+    RegisterPushDeviceInput:
+      type: object
+      additionalProperties: false
+      required: [installationId, expoPushToken, platform]
+      properties:
+        installationId: { type: string, format: uuid }
+        expoPushToken: { type: string, minLength: 24, maxLength: 256 }
+        platform: { type: string, enum: [IOS, ANDROID] }
+        appVersion: { type: [string, "null"], maxLength: 40 }
+    PushDeviceRegistration:
+      type: object
+      additionalProperties: false
+      required: [installationId, platform, appVersion, registeredAt]
+      properties:
+        installationId: { type: string, format: uuid }
+        platform: { type: string, enum: [IOS, ANDROID] }
+        appVersion: { type: [string, "null"] }
+        registeredAt: { type: string, format: date-time }
     NotificationPage:
       allOf:
         - $ref: "#/components/schemas/PageMeta"
@@ -3446,7 +4434,7 @@ components:
           required: [items]
           properties:
             items: { type: array, items: { $ref: "#/components/schemas/AccountNotification" } }
-    CreateShippingRequestInput:
+    CreateShippingQuoteInput:
       type: object
       additionalProperties: false
       required: [inventoryUnitIds]
@@ -3457,6 +4445,49 @@ components:
           maxItems: 20
           uniqueItems: true
           items: { type: string, format: uuid }
+    ShippingQuote:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - inventoryUnitIds
+        - addressId
+        - addressVersion
+        - destination
+        - itemCount
+        - referenceSubtotal
+        - containsKuji
+        - freeShippingThreshold
+        - qualifiesForFreeShipping
+        - shippingFee
+        - createdAt
+        - expiresAt
+      properties:
+        id: { type: string, format: uuid }
+        inventoryUnitIds:
+          type: array
+          minItems: 1
+          maxItems: 20
+          uniqueItems: true
+          items: { type: string, format: uuid }
+        addressId: { type: string, format: uuid }
+        addressVersion: { type: integer, minimum: 1 }
+        destination: { $ref: "#/components/schemas/ShippingDestination" }
+        itemCount: { type: integer, minimum: 1, maximum: 20 }
+        referenceSubtotal: { type: integer, minimum: 0 }
+        containsKuji: { type: boolean }
+        freeShippingThreshold: { type: integer, enum: [24900, 54900] }
+        qualifiesForFreeShipping: { type: boolean }
+        shippingFee: { type: integer, enum: [0, 3000] }
+        createdAt: { type: string, format: date-time }
+        expiresAt: { type: string, format: date-time }
+    CreateShippingRequestInput:
+      type: object
+      additionalProperties: false
+      required: [quoteId, addressVersion]
+      properties:
+        quoteId: { type: string, format: uuid }
+        addressVersion: { type: integer, minimum: 1 }
     ShippingDestination:
       type: object
       additionalProperties: false
@@ -3470,16 +4501,20 @@ components:
     ShippingRequest:
       type: object
       additionalProperties: false
-      required: [id, status, inventoryUnitIds, destination, requestedAt]
+      required: [id, quoteId, status, inventoryUnitIds, destination, requestedAt, shippingFee, paymentOrderId, paymentId]
       properties:
         id: { type: string, format: uuid }
-        status: { type: string, const: REQUESTED }
+        quoteId: { type: string, format: uuid }
+        status: { type: string, enum: [PAYMENT_PENDING, REQUESTED] }
         inventoryUnitIds: { type: array, items: { type: string, format: uuid } }
         destination: { $ref: "#/components/schemas/ShippingDestination" }
         requestedAt: { type: string, format: date-time }
+        shippingFee: { type: integer, minimum: 0 }
+        paymentOrderId: { type: [string, "null"], format: uuid }
+        paymentId: { type: [string, "null"], format: uuid }
     AccountShippingRequestStatus:
       type: string
-      enum: [REQUESTED, PROCESSING, SHIPPED, DELIVERED, CANCELLED]
+      enum: [PAYMENT_PENDING, REQUESTED, PROCESSING, SHIPPED, DELIVERED, CANCELLED]
     AccountShippingRequest:
       type: object
       additionalProperties: false
@@ -3498,6 +4533,26 @@ components:
         shippedAt: { type: [string, "null"], format: date-time }
         trackingCarrier: { type: [string, "null"] }
         trackingNumber: { type: [string, "null"] }
+    AccountShippingItem:
+      type: object
+      additionalProperties: false
+      required: [inventoryUnitId, productId, productName, ipId, ipNameKo, category, imageUrl, productVersion]
+      properties:
+        inventoryUnitId: { type: string, format: uuid }
+        productId: { type: string, maxLength: 120 }
+        productName: { type: string, maxLength: 240 }
+        ipId: { type: string, maxLength: 120 }
+        ipNameKo: { type: string, maxLength: 160 }
+        category: { $ref: "#/components/schemas/ProductCategory" }
+        imageUrl: { type: [string, "null"], format: uri }
+        productVersion: { type: integer, minimum: 1 }
+    AccountShippingRequestDetail:
+      allOf:
+        - $ref: "#/components/schemas/AccountShippingRequest"
+        - type: object
+          required: [items]
+          properties:
+            items: { type: array, items: { $ref: "#/components/schemas/AccountShippingItem" } }
     AccountShippingRequestPage:
       allOf:
         - $ref: "#/components/schemas/PageMeta"
@@ -3682,7 +4737,7 @@ components:
       properties:
         id: { type: string, format: uuid }
         reporterId: { type: string, format: uuid }
-        targetType: { type: string, enum: [POST, COMMENT, SNAP, USER, EXCHANGE_LISTING] }
+        targetType: { type: string, enum: [POST, COMMENT, SNAP, USER, EXCHANGE_LISTING, WANTED_REQUEST] }
         targetId: { type: string, format: uuid }
         reason: { type: string, enum: [ABUSE, ADVERTISING, SPAM, INAPPROPRIATE, SUSPECTED_FRAUD, COPYRIGHT, OTHER] }
         details: { type: [string, "null"] }
@@ -3698,7 +4753,7 @@ components:
       additionalProperties: false
       required: [targetType, targetId, reason]
       properties:
-        targetType: { type: string, enum: [POST, COMMENT, SNAP, USER, EXCHANGE_LISTING] }
+        targetType: { type: string, enum: [POST, COMMENT, SNAP, USER, EXCHANGE_LISTING, WANTED_REQUEST] }
         targetId: { type: string, format: uuid }
         reason: { type: string, enum: [ABUSE, ADVERTISING, SPAM, INAPPROPRIATE, SUSPECTED_FRAUD, COPYRIGHT, OTHER] }
         details: { type: string, maxLength: 2000 }
@@ -3709,7 +4764,7 @@ components:
       required: [status, action, reason]
       properties:
         status: { type: string, enum: [RESOLVED, REJECTED] }
-        action: { type: string, enum: [NO_ACTION, HIDE_POST, HIDE_COMMENT, WARN_USER, SUSPEND_USER] }
+        action: { type: string, enum: [NO_ACTION, HIDE_POST, HIDE_COMMENT, HIDE_EXCHANGE_LISTING, HIDE_WANTED_REQUEST, WARN_USER, SUSPEND_USER] }
         reason: { type: string, minLength: 1, maxLength: 1000 }
         suspendUntil: { type: [string, "null"], format: date-time }
     StartReportReviewInput:
@@ -3798,7 +4853,7 @@ components:
     CatalogProduct:
       type: object
       additionalProperties: false
-      required: [id, sku, ipId, characterIds, category, name, manufacturer, price, availableQuantity, metadata, imageUrl, isActive, isPrizeOnly, version, createdAt, updatedAt]
+      required: [id, sku, ipId, characterIds, category, name, manufacturer, price, availableQuantity, totalQuantity, metadata, imageUrl, storefrontImageUrl, isActive, isPrizeOnly, saleStatus, purchasable, blockedReason, version, createdAt, updatedAt]
       properties:
         id: { type: string, pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$" }
         sku: { type: string }
@@ -3808,12 +4863,33 @@ components:
         name: { type: string }
         manufacturer: { type: [string, "null"] }
         releaseDate: { type: [string, "null"], format: date }
-        price: { type: integer, minimum: 0 }
+        price:
+          type: [integer, "null"]
+          minimum: 1
+          description: Positive public price or null while the price is not published. Customer APIs never expose a zero-price sellable product.
         availableQuantity: { type: integer, minimum: 0 }
+        totalQuantity:
+          type: [integer, "null"]
+          minimum: 0
+          description: ACTIVE 쿠지 덱의 전체 슬롯 수 또는 모든 항목에 초기 수량이 있는 ACTIVE 유한 가챠 풀의 초기 수량 합계입니다. 신뢰할 총수량이 없으면 null입니다.
+        remainingKujiTiers:
+          type: array
+          maxItems: 200
+          description: ACTIVE 쿠지 덱에서 아직 결과 확정으로 소진되지 않은 상만 순서대로 제공합니다. 가챠이거나 공개 덱이 없으면 빈 배열이며, 봉인된 번호별 결과는 포함하지 않습니다.
+          items: { $ref: "#/components/schemas/PublicKujiTierRemaining" }
         metadata: { type: object, additionalProperties: true }
         imageUrl: { type: [string, "null"], format: uri }
+        storefrontImageUrl:
+          type: [string, "null"]
+          format: uri
+          description: 가챠·쿠지 목록 카드용 이미지입니다. 등록되지 않으면 null입니다.
         isActive: { type: boolean }
         isPrizeOnly: { type: boolean }
+        saleStatus: { $ref: "#/components/schemas/ProductSaleStatus" }
+        purchasable:
+          type: boolean
+          description: Server-authoritative convenience value. Checkout still revalidates launch mode, state, price, stock, and draw configuration.
+        blockedReason: { $ref: "#/components/schemas/ProductPurchaseBlockedReason" }
         version: { type: integer, minimum: 1 }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
@@ -3839,6 +4915,9 @@ components:
         isPrizeOnly:
           type: boolean
           description: 경품 전용 카탈로그 레코드입니다. 생략 시 false이며 생성 후 변경할 수 없습니다.
+        saleStatus:
+          allOf: [{ $ref: "#/components/schemas/ProductSaleStatus" }]
+          description: 생략한 신규 상품은 DRAFT로 생성되며, ON_SALE은 양수 가격·공개 이미지·재고·추첨 구성이 모두 준비된 경우만 허용됩니다.
         expectedVersion: { type: integer, minimum: 1 }
     CatalogProductPage:
       allOf:
@@ -3850,47 +4929,119 @@ components:
     HomeCatalogSection:
       type: object
       additionalProperties: false
-      description: Render-ready active Home section. Products are active, customer-sellable, non-prize gacha or kuji records linked to the section IP.
-      required: [id, title, sortOrder, isActive, version, createdAt, updatedAt, ip, products]
+      description: Render-ready active Home section. Every product matches layoutKind and the selected MANUAL, IP, NEW, or POPULAR source. ip is null for an unscoped section.
+      required: [id, title, subtitle, layoutKind, sourceKind, visibleLimit, sortOrder, isActive, version, createdAt, updatedAt, ip, products]
       properties:
         id:
           type: string
           pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$"
           maxLength: 120
         title: { type: string, minLength: 1, maxLength: 120 }
+        subtitle: { type: [string, "null"], maxLength: 240 }
+        layoutKind: { $ref: "#/components/schemas/HomeCatalogSectionLayout" }
+        sourceKind: { $ref: "#/components/schemas/HomeCatalogSectionSourceKind" }
+        visibleLimit: { type: integer, minimum: 1, maximum: 20 }
         sortOrder: { type: integer, minimum: 0, maximum: 2147483647 }
         isActive: { type: boolean }
         version: { type: integer, minimum: 1, maximum: 2147483647 }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
-        ip: { $ref: "#/components/schemas/CatalogIp" }
+        ip:
+          oneOf:
+            - $ref: "#/components/schemas/CatalogIp"
+            - type: "null"
         products:
           type: array
+          maxItems: 20
           items: { $ref: "#/components/schemas/CatalogProduct" }
     HomeCatalogSectionList:
       type: object
       additionalProperties: false
       description: configured is true after any Home section record has been created, including when every record is inactive and items is empty.
-      required: [configured, items]
+      required: [configured, items, bestProductId, evaluatedAt]
       properties:
         configured: { type: boolean }
         items:
           type: array
           items: { $ref: "#/components/schemas/HomeCatalogSection" }
+        bestProductId:
+          type: [string, "null"]
+          pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+        evaluatedAt: { type: string, format: date-time }
+    HomeCatalogSectionLayout:
+      type: string
+      enum: [gacha, kuji]
+      description: Selects the category-specific Home card layout and limits every product in the section to the same category.
+    HomeCatalogSectionSourceKind:
+      type: string
+      enum: [MANUAL, IP, NEW, POPULAR]
+      description: MANUAL preserves operator order, IP uses newest products within one IP, NEW uses products created in the last 30 days, and POPULAR uses click totals from the last 30 days. NEW and POPULAR may optionally be scoped to one IP.
+    HomeProductBadgeState:
+      type: object
+      additionalProperties: false
+      required: [bestProductId, evaluatedAt]
+      properties:
+        bestProductId:
+          type: [string, "null"]
+          pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+        evaluatedAt: { type: string, format: date-time }
+    HomeRecentDrawActivity:
+      type: object
+      additionalProperties: false
+      description: Privacy-minimized immutable Home activity. It contains no customer identifier or nickname.
+      required: [id, productId, category, prizeName, prizeImageUrl, rarity, committedAt]
+      properties:
+        id: { type: string, format: uuid }
+        productId:
+          type: string
+          pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+          maxLength: 120
+        category:
+          type: string
+          enum: [gacha, kuji]
+        prizeName: { type: string, minLength: 1, maxLength: 240 }
+        prizeImageUrl: { type: [string, "null"], format: uri-reference }
+        rarity: { type: string, minLength: 1, maxLength: 40 }
+        committedAt: { type: string, format: date-time }
+    HomeRecentDrawActivityList:
+      type: object
+      additionalProperties: false
+      required: [serverNow, items]
+      properties:
+        serverNow: { type: string, format: date-time }
+        items:
+          type: array
+          maxItems: 2
+          items: { $ref: "#/components/schemas/HomeRecentDrawActivity" }
     AdminHomeCatalogSection:
       type: object
       additionalProperties: false
-      required: [id, title, ipId, sortOrder, isActive, version, createdAt, updatedAt]
+      description: Full operator view. layoutKind is null only for a legacy row created before category-specific Home layouts were introduced.
+      required: [id, title, subtitle, ipId, layoutKind, sourceKind, visibleLimit, manualProductIds, sortOrder, isActive, version, createdAt, updatedAt]
       properties:
         id:
           type: string
           pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$"
           maxLength: 120
         title: { type: string, minLength: 1, maxLength: 120 }
+        subtitle: { type: [string, "null"], maxLength: 240 }
         ipId:
-          type: string
+          type: [string, "null"]
           pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$"
           maxLength: 120
+        layoutKind:
+          type: [string, "null"]
+          enum: [gacha, kuji, null]
+        sourceKind: { $ref: "#/components/schemas/HomeCatalogSectionSourceKind" }
+        visibleLimit: { type: integer, minimum: 1, maximum: 20 }
+        manualProductIds:
+          type: array
+          maxItems: 20
+          uniqueItems: true
+          items:
+            type: string
+            pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+            maxLength: 120
         sortOrder: { type: integer, minimum: 0, maximum: 2147483647 }
         isActive: { type: boolean }
         version: { type: integer, minimum: 1, maximum: 2147483647 }
@@ -3908,31 +5059,131 @@ components:
     CreateHomeCatalogSectionInput:
       type: object
       additionalProperties: false
-      required: [id, title, ipId, sortOrder, isActive]
+      required: [id, title, subtitle, ipId, layoutKind, sourceKind, visibleLimit, manualProductIds, sortOrder, isActive]
       properties:
         id:
           type: string
           pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$"
           maxLength: 120
         title: { type: string, minLength: 1, maxLength: 120 }
+        subtitle: { type: [string, "null"], maxLength: 240 }
         ipId:
-          type: string
+          type: [string, "null"]
           pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$"
           maxLength: 120
+        layoutKind: { $ref: "#/components/schemas/HomeCatalogSectionLayout" }
+        sourceKind: { $ref: "#/components/schemas/HomeCatalogSectionSourceKind" }
+        visibleLimit: { type: integer, minimum: 1, maximum: 20 }
+        manualProductIds:
+          type: array
+          maxItems: 20
+          uniqueItems: true
+          items:
+            type: string
+            pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+            maxLength: 120
         sortOrder: { type: integer, minimum: 0, maximum: 2147483647 }
         isActive: { type: boolean }
     UpdateHomeCatalogSectionInput:
       type: object
       additionalProperties: false
-      required: [title, ipId, sortOrder, isActive, expectedVersion]
+      required: [title, subtitle, ipId, layoutKind, sourceKind, visibleLimit, manualProductIds, sortOrder, isActive, expectedVersion]
       properties:
         title: { type: string, minLength: 1, maxLength: 120 }
+        subtitle: { type: [string, "null"], maxLength: 240 }
         ipId:
-          type: string
+          type: [string, "null"]
           pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$"
           maxLength: 120
+        layoutKind: { $ref: "#/components/schemas/HomeCatalogSectionLayout" }
+        sourceKind: { $ref: "#/components/schemas/HomeCatalogSectionSourceKind" }
+        visibleLimit: { type: integer, minimum: 1, maximum: 20 }
+        manualProductIds:
+          type: array
+          maxItems: 20
+          uniqueItems: true
+          items:
+            type: string
+            pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+            maxLength: 120
         sortOrder: { type: integer, minimum: 0, maximum: 2147483647 }
         isActive: { type: boolean }
+        expectedVersion: { type: integer, minimum: 1, maximum: 2147483647 }
+    StorefrontCategorySetting:
+      type: object
+      additionalProperties: false
+      required:
+        - category
+        - label
+        - sortOrder
+        - availability
+        - showOnHome
+        - showOnCatalog
+        - showOnExchange
+        - showOnWanted
+        - description
+        - imageUrl
+        - iconKey
+        - version
+        - createdAt
+        - updatedAt
+      properties:
+        category: { $ref: "#/components/schemas/ProductCategory" }
+        label: { type: string, minLength: 1, maxLength: 40 }
+        sortOrder: { type: integer, minimum: 0, maximum: 2147483647 }
+        availability: { $ref: "#/components/schemas/StorefrontCategoryAvailability" }
+        showOnHome: { type: boolean }
+        showOnCatalog: { type: boolean }
+        showOnExchange: { type: boolean }
+        showOnWanted: { type: boolean }
+        description: { type: string, maxLength: 240 }
+        imageUrl: { type: [string, "null"], format: uri }
+        iconKey:
+          type: [string, "null"]
+          maxLength: 80
+          pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+        version: { type: integer, minimum: 1, maximum: 2147483647 }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    StorefrontCategorySettingList:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          minItems: 4
+          maxItems: 4
+          items: { $ref: "#/components/schemas/StorefrontCategorySetting" }
+    UpdateStorefrontCategorySettingInput:
+      type: object
+      additionalProperties: false
+      required:
+        - label
+        - sortOrder
+        - availability
+        - showOnHome
+        - showOnCatalog
+        - showOnExchange
+        - showOnWanted
+        - description
+        - imageUrl
+        - iconKey
+        - expectedVersion
+      properties:
+        label: { type: string, minLength: 1, maxLength: 40 }
+        sortOrder: { type: integer, minimum: 0, maximum: 2147483647 }
+        availability: { $ref: "#/components/schemas/StorefrontCategoryAvailability" }
+        showOnHome: { type: boolean }
+        showOnCatalog: { type: boolean }
+        showOnExchange: { type: boolean }
+        showOnWanted: { type: boolean }
+        description: { type: string, maxLength: 240 }
+        imageUrl: { type: [string, "null"], format: uri }
+        iconKey:
+          type: [string, "null"]
+          maxLength: 80
+          pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$"
         expectedVersion: { type: integer, minimum: 1, maximum: 2147483647 }
     CatalogRequest:
       type: object
@@ -4051,8 +5302,10 @@ components:
         productId: { type: string, maxLength: 120 }
         product: { $ref: "#/components/schemas/CatalogProduct" }
         sourceType: { type: string, enum: [PURCHASE, GACHA, KUJI, ADMIN_ADJUSTMENT] }
-        status: { type: string, enum: [OWNED, EXCHANGE_LISTED, EXCHANGE_OFFERED, SHIPPING, DELIVERED, TRANSFERRED, REFUNDED, POINT_RETURNED] }
+        status: { type: string, enum: [OWNED, EXCHANGE_LISTED, EXCHANGE_OFFERED, SHIPPING, DELIVERED, TRANSFERRED, REFUNDED, POINT_RETURNED, EXPIRED_HOLD] }
         acquiredAt: { type: string, format: date-time }
+        storageExpiresAt: { type: string, format: date-time }
+        pointReturnEligible: { type: boolean }
     InventoryUnitPage:
       allOf:
         - $ref: "#/components/schemas/PageMeta"
@@ -4063,7 +5316,7 @@ components:
     ExchangeListing:
       type: object
       additionalProperties: false
-      required: [id, authorId, authorNickname, title, details, status, offeredInventory, offeredInventories, offerCount, acceptedOfferId, matchedAt, authorConfirmedAt, proposerConfirmedAt, completedAt, completionMode, cancelledAt, cancelledBy, cancelReason, resolvedByAdminId, createdAt, updatedAt]
+      required: [id, authorId, authorNickname, title, details, status, offeredInventory, offeredInventories, offerCount, acceptedOfferId, matchedAt, authorConfirmedAt, proposerConfirmedAt, completedAt, completionMode, cancelledAt, cancelledBy, cancelReason, resolvedByAdminId, expiresAt, createdAt, updatedAt]
       properties:
         id: { type: string, format: uuid }
         authorId: { type: string, format: uuid }
@@ -4088,6 +5341,7 @@ components:
         cancelledBy: { type: [string, "null"], format: uuid }
         cancelReason: { type: [string, "null"] }
         resolvedByAdminId: { type: [string, "null"], format: uuid }
+        expiresAt: { type: string, format: date-time }
         offers: { type: array, items: { $ref: "#/components/schemas/ExchangeOffer" } }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
@@ -4116,6 +5370,17 @@ components:
           required: [items]
           properties:
             items: { type: array, items: { $ref: "#/components/schemas/ExchangeListing" } }
+    ExchangeActivity:
+      type: object
+      additionalProperties: false
+      required: [authored, applied]
+      properties:
+        authored:
+          type: array
+          items: { $ref: "#/components/schemas/ExchangeListing" }
+        applied:
+          type: array
+          items: { $ref: "#/components/schemas/ExchangeListing" }
     ExchangeOffer:
       type: object
       additionalProperties: false
@@ -4153,10 +5418,12 @@ components:
     Order:
       type: object
       additionalProperties: false
-      required: [id, userId, paymentId, status, currency, subtotal, discountTotal, pointTotal, total, lines, createdAt, updatedAt]
+      required: [id, userId, paymentId, orderKind, shippingRequestId, status, currency, subtotal, discountTotal, pointTotal, total, lines, createdAt, updatedAt]
       properties:
         id: { type: string, format: uuid }
         userId: { type: string, format: uuid }
+        orderKind: { type: string, enum: [PRODUCT, SHIPPING_FEE] }
+        shippingRequestId: { type: [string, "null"], format: uuid }
         status: { type: string, enum: [PENDING_PAYMENT, PAID, FULFILLED, CANCELLED, REFUND_REVIEW, REFUNDED] }
         paymentId: { type: string, format: uuid }
         currency: { type: string, enum: [KRW] }
@@ -4217,6 +5484,20 @@ components:
         providerPaymentId: { type: [string, "null"], maxLength: 200 }
         occurredAt: { type: string, format: date-time }
         amount: { type: integer, minimum: 0 }
+    PortOnePaymentConfirmation:
+      type: object
+      additionalProperties: false
+      required: [accepted, paymentId, orderId, providerStatus, outcome]
+      properties:
+        accepted: { type: boolean, const: true }
+        paymentId: { type: string, format: uuid }
+        orderId: { type: string, format: uuid }
+        providerStatus:
+          type: string
+          enum: [READY, PAY_PENDING, VIRTUAL_ACCOUNT_ISSUED, PAID, FAILED, CANCELLED, PARTIAL_CANCELLED]
+        outcome:
+          type: string
+          description: Canonical reconciliation outcome. pending means no order transition was applied.
     DrawResult:
       type: object
       additionalProperties: false
@@ -4498,6 +5779,20 @@ components:
       properties:
         userId: { type: string, format: uuid }
         blocked: { type: boolean }
+    UgcOperationsPolicyAcceptance:
+      type: object
+      additionalProperties: false
+      required: [policyVersion, accepted, acceptedAt]
+      properties:
+        policyVersion: { type: string, pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" }
+        accepted: { type: boolean }
+        acceptedAt: { type: [string, "null"], format: date-time }
+    AcceptUgcOperationsPolicyInput:
+      type: object
+      additionalProperties: false
+      required: [policyVersion]
+      properties:
+        policyVersion: { type: string, pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" }
     UpdateWantedRequestInput:
       type: object
       additionalProperties: false
@@ -4791,7 +6086,7 @@ components:
         entries: { type: array, items: { $ref: "#/components/schemas/PublicDrawOddsEntry" } }
     AccountDeletionStatus:
       type: string
-      enum: [PENDING_REVIEW, BLOCKED, APPROVED, COMPLETED, REJECTED, CANCELLED]
+      enum: [PENDING_REVIEW, BLOCKED, PROCESSING, APPROVED, COMPLETED, REJECTED, CANCELLED]
     AccountDeletionBlockers:
       type: object
       additionalProperties: false
@@ -4808,16 +6103,61 @@ components:
     AccountDeletionRequest:
       type: object
       additionalProperties: false
-      required: [id, status, blockers, requestCount, hardDeletePerformed, policy, requestedAt, lastRequestedAt]
+      required: [id, status, blockers, requestCount, hardDeletePerformed, policy, authDeletionStatus, requestedAt, lastRequestedAt, completedAt]
       properties:
         id: { type: string, format: uuid }
         status: { $ref: "#/components/schemas/AccountDeletionStatus" }
         blockers: { $ref: "#/components/schemas/AccountDeletionBlockers" }
         requestCount: { type: integer, minimum: 1 }
         hardDeletePerformed: { type: boolean, const: false }
-        policy: { type: string, const: MANUAL_REVIEW_REQUIRED }
+        policy: { type: string, const: AUTOMATED_SERVER_DELETION }
+        authDeletionStatus: { type: string, enum: [NOT_REQUIRED, PENDING, COMPLETED] }
         requestedAt: { type: string, format: date-time }
         lastRequestedAt: { type: string, format: date-time }
+        completedAt: { type: [string, "null"], format: date-time }
+    AccountDeletionReceipt:
+      type: object
+      additionalProperties: false
+      required: [id, status, blockers, requestCount, hardDeletePerformed, policy, authDeletionStatus, requestedAt, lastRequestedAt, completedAt, statusToken]
+      properties:
+        id: { type: string, format: uuid }
+        status: { $ref: "#/components/schemas/AccountDeletionStatus" }
+        blockers: { $ref: "#/components/schemas/AccountDeletionBlockers" }
+        requestCount: { type: integer, minimum: 1 }
+        hardDeletePerformed: { type: boolean, const: false }
+        policy: { type: string, const: AUTOMATED_SERVER_DELETION }
+        authDeletionStatus: { type: string, enum: [NOT_REQUIRED, PENDING, COMPLETED] }
+        requestedAt: { type: string, format: date-time }
+        lastRequestedAt: { type: string, format: date-time }
+        completedAt: { type: [string, "null"], format: date-time }
+        statusToken: { type: string, minLength: 43, maxLength: 43, pattern: "^[A-Za-z0-9_-]{43}$" }
+    AccountDeletionPreview:
+      type: object
+      additionalProperties: false
+      required: [canDeleteNow, blockers]
+      properties:
+        canDeleteNow: { type: boolean }
+        blockers: { $ref: "#/components/schemas/AccountDeletionBlockers" }
+    AccountPolicyAcceptanceStatus:
+      type: object
+      additionalProperties: false
+      required: [documents]
+      properties:
+        documents:
+          type: array
+          minItems: 2
+          maxItems: 2
+          items:
+            type: object
+            additionalProperties: false
+            required: [key, version, contentSha256, publicUrl, acceptedAt, accepted]
+            properties:
+              key: { type: string, enum: [TERMS, PRIVACY] }
+              version: { type: string, pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" }
+              contentSha256: { type: string, pattern: "^[0-9a-f]{64}$" }
+              publicUrl: { type: string, format: uri }
+              acceptedAt: { type: [string, "null"], format: date-time }
+              accepted: { type: boolean }
     CommerceUser:
       type: object
       additionalProperties: false
@@ -4836,7 +6176,7 @@ components:
     AdminAccountDeletionSummary:
       type: object
       additionalProperties: false
-      required: [id, user, status, blockers, requestCount, version, requestedAt, lastRequestedAt, decidedAt, decisionReason, decidedBy, createdAt, updatedAt, hardDeletePerformed, completionAvailable, completionPolicy]
+      required: [id, user, status, blockers, requestCount, version, requestedAt, lastRequestedAt, decidedAt, decisionReason, decidedBy, createdAt, updatedAt, hardDeletePerformed, completionAvailable, completionPolicy, authDeletionStatus, authDeletedAt, processingStartedAt, completedAt, deletionJob]
       properties:
         id: { type: string, format: uuid }
         user: { $ref: "#/components/schemas/CommerceUser" }
@@ -4855,8 +6195,27 @@ components:
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
         hardDeletePerformed: { type: boolean, const: false }
-        completionAvailable: { type: boolean, const: false }
-        completionPolicy: { type: string, const: EXTERNAL_RETENTION_POLICY_REQUIRED }
+        completionAvailable: { type: boolean }
+        completionPolicy: { type: string, enum: [ADMIN_REVIEW_FALLBACK, AUTOMATED_WORKER, COMPLETED_ANONYMIZATION] }
+        authDeletionStatus: { type: string, enum: [NOT_REQUIRED, PENDING, COMPLETED] }
+        authDeletedAt: { type: [string, "null"], format: date-time }
+        processingStartedAt: { type: [string, "null"], format: date-time }
+        completedAt: { type: [string, "null"], format: date-time }
+        deletionJob:
+          oneOf:
+            - $ref: "#/components/schemas/AdminAccountDeletionJob"
+            - type: "null"
+    AdminAccountDeletionJob:
+      type: object
+      additionalProperties: false
+      required: [status, attempts, availableAt, leaseExpiresAt, lastError, externalDeletedAt]
+      properties:
+        status: { type: string, enum: [PENDING, PROCESSING] }
+        attempts: { type: integer, minimum: 0 }
+        availableAt: { type: [string, "null"], format: date-time }
+        leaseExpiresAt: { type: [string, "null"], format: date-time }
+        lastError: { type: [string, "null"] }
+        externalDeletedAt: { type: [string, "null"], format: date-time }
     AdminAccountDeletionPage:
       allOf:
         - $ref: "#/components/schemas/PageMeta"
@@ -4897,7 +6256,13 @@ components:
       additionalProperties: false
       required: [decision, reason]
       properties:
-        decision: { type: string, enum: [APPROVED, REJECTED] }
+        decision: { type: string, enum: [REJECTED] }
+        reason: { type: string, minLength: 2, maxLength: 1000 }
+    CompleteAccountDeletionInput:
+      type: object
+      additionalProperties: false
+      required: [reason]
+      properties:
         reason: { type: string, minLength: 2, maxLength: 1000 }
     AdminAccountDeletionDecisionResult:
       allOf:
@@ -5230,7 +6595,7 @@ components:
         createdAt: { type: string, format: date-time }
     AdminShippingStatus:
       type: string
-      enum: [REQUESTED, PROCESSING, SHIPPED, DELIVERED, CANCELLED]
+      enum: [PAYMENT_PENDING, REQUESTED, PROCESSING, SHIPPED, DELIVERED, CANCELLED]
     AdminShippingRequest:
       type: object
       additionalProperties: false

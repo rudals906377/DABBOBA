@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <title>다뽀바 본인 확인</title>
+  <link rel="stylesheet" href="/legal/styles.css">
+  <script src="/legal/account-deletion/social-callback.js" defer></script>
+</head>
+<body>
+<main>
+  <header>
+    <div class="brand">DABBOBA</div>
+    <h1>본인 확인 중</h1>
+    <p class="updated">기존 로그인 계정을 안전하게 확인하고 있습니다.</p>
+  </header>
+  <section aria-live="polite">
+    <div id="social-callback-status" class="flow-status" role="status">잠시만 기다려 주세요.</div>
+    <div id="social-callback-error" class="error-panel" role="alert" hidden>
+      <strong>본인 확인을 완료하지 못했습니다.</strong>
+      <span>계정 삭제 화면으로 돌아가 다시 시도해 주세요.</span>
+      <p><a class="button" href="/account-deletion?social=error">계정 삭제 화면으로 돌아가기</a></p>
+    </div>
+  </section>
+</main>
+</body>
+</html>

@@ -1,7 +1,7 @@
-import { Ionicons } from "@expo/vector-icons";
 import { useRef, useState } from "react";
 import { Image, StyleSheet, View } from "react-native";
 import Animated, { type SharedValue, useAnimatedStyle } from "react-native-reanimated";
+import { DecorativeIonicon } from "@/components/DecorativeIonicon";
 import { KoreanPixelTitle } from "@/components/RootCategoryTitle";
 import { AppText, BalancedAppText } from "@/components/Typography";
 import { seed } from "@/design-system/seed";
@@ -74,19 +74,19 @@ export function GachaPrizeReveal({
             />
             {!imageLoaded ? (
               <View style={[styles.placeholder, styles.loadingPlaceholder]}>
-                <Ionicons name="image-outline" size={44} color={seed.color.foreground.muted} />
+                <DecorativeIonicon name="image-outline" size={44} color={seed.color.foreground.muted} />
                 <AppText style={styles.imageError}>상품 이미지를 불러오는 중이에요</AppText>
               </View>
             ) : null}
           </>
         ) : result ? (
           <View style={styles.placeholder}>
-            <Ionicons name="image-outline" size={44} color={seed.color.foreground.muted} />
+            <DecorativeIonicon name="image-outline" size={44} color={seed.color.foreground.muted} />
             <AppText style={styles.imageError}>상품 이미지를 불러오지 못했어요</AppText>
           </View>
         ) : (
           <View style={styles.placeholder}>
-            <Ionicons name="gift-outline" size={64} color={seed.color.foreground.muted} />
+            <DecorativeIonicon name="gift-outline" size={64} color={seed.color.foreground.muted} />
           </View>
         )}
       </View>

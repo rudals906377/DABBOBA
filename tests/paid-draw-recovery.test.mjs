@@ -183,6 +183,9 @@ test("purchase history mounts authenticated recovery with explicit navigation an
   assert.match(component, /useFocusEffect/);
   assert.match(component, /controller\.abort\(\)/);
   assert.match(component, /currentTokens\?\.accessToken !== accessToken/);
+  assert.match(component, /route\.startsWith\("\/draw\/reveal\/"\)/);
+  assert.match(component, /presentDrawOpenModeChoice\(drawEntitlementCountFromPath\(route\)/);
+  assert.match(component, /withDrawOpenMode\(route, mode\)/);
   assert.match(api, /status: "AVAILABLE"/);
   assert.match(api, /\/v1\/orders\/\{orderId\}\/draw-recovery/);
   assert.doesNotMatch(api, /\.POST\(|\.DELETE\(|\.PATCH\(|SQLite|consume/);

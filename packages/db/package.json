@@ -13,11 +13,13 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "check:release": "tsx src/check-release.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "migrate": "tsx src/migrate.ts",
     "provision:runtime-role": "tsx src/provision-runtime-role.ts",
     "provision:worker-role": "tsx src/provision-worker-role.ts",
     "seed": "tsx src/seed.ts",
+    "pretest": "node ../../scripts/check-test-backend-env.mjs",
     "test": "tsx --test 'src/*.test.ts'"
   },
   "dependencies": {

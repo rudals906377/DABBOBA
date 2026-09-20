@@ -42,17 +42,17 @@ test("gacha catalog media reuses the frame across discovery surfaces", () => {
     assert.match(source, /import \{ GachaMachineFrame \} from "@\/components\/GachaMachineFrame"/, relativePath);
     assert.match(source, /<GachaMachineFrame/, relativePath);
   }
-  assert.match(homeSource, /<GachaMachineFrame category=\{category\}/);
+  assert.match(homeSource, /<GachaMachineFrame category=\{layoutKind\} clean>/);
   assert.match(shopSource, /<GachaMachineFrame category=\{category\}/);
-  assert.match(catalogRowSource, /<GachaMachineFrame category=\{product\.category\} compact/);
+  assert.match(catalogRowSource, /<GachaMachineFrame category=\{product\.category\} clean/);
   assert.match(profileSource, /catalogFrameCategory=\{product\.category\}/);
-  assert.match(profileSource, /<GachaMachineFrame category=\{catalogFrameCategory\} compact/);
-  assert.match(homeSource, /showBadge && category !== "gacha"/);
-  assert.match(shopSource, /category !== "gacha" \?/);
+  assert.match(profileSource, /<GachaMachineFrame category=\{catalogFrameCategory\} clean/);
+  assert.doesNotMatch(homeSource, /showBadge|styles\.categoryBadge|categoryBadge:/);
+  assert.match(shopSource, /category === "kuji" \? styles\.kujiProductImageFrame : styles\.gachaProductImageFrame/);
 });
 
-test("the durable product rule keeps the machine frame minimal and out of transaction summaries", () => {
-  assert.match(agentGuideSource, /shared `GachaMachineFrame`/);
-  assert.match(agentGuideSource, /Home, 뽀바, search, product history, and wishlist catalog media/);
-  assert.match(agentGuideSource, /product detail, checkout, exchange, storage, kuji, or reveal summaries/);
+test("the durable product rule retires decorative catalog machinery while preserving clean composition gates", () => {
+  assert.match(agentGuideSource, /former decorative `GachaMachineFrame` catalog cabinet is retired/);
+  assert.match(agentGuideSource, /clean, non-visual wrapper/);
+  assert.match(agentGuideSource, /do not add a canopy, chute, crank, extra padding, or crop/);
 });

@@ -36,6 +36,74 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/public/config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Public launch capability and exact legal versions required by customer clients. Clients must intersect commerceMode with their compile-time capability and may never upgrade a PRELAUNCH build to LIVE locally. */
+        get: operations["getPublicConfig"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/demo/capabilities": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Loopback-only discovery for the isolated internal commerce test profile. This route is unavailable in production. */
+        get: operations["getLocalDemoCapabilities"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/demo/session": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description Creates a session for the one isolated internal customer account. No account selector is accepted. This route is unavailable in production. */
+        post: operations["createLocalDemoSession"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/demo/payments/{orderId}/transition": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description Drives a loopback-only TEST_PG payment through the same verified webhook path used by the internal commerce test profile. This route is unavailable in production. */
+        post: operations["transitionLocalDemoPayment"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/auth/providers": {
         parameters: {
             query?: never;
@@ -62,8 +130,25 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** @description Verifies an asymmetric Supabase access token for exactly one Kakao, Naver, or phone identity and returns an opaque DABBOBA session. Accounts are keyed only by the broker issuer and subject, never email or phone; multi-provider broker identities require a separate explicit linking flow and are rejected here. */
+        /** @description Verifies an asymmetric Supabase access token and the live Auth user for Kakao, Naver, Google, Apple, or email OTP identities, then returns an opaque DABBOBA session. Multiple allowed identities automatically linked by Supabase reuse one DABBOBA account only when they share the exact broker issuer and subject. Matching email strings never merge different broker subjects. */
         post: operations["exchangeCustomerAccessToken"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/account-deletion-exchange": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description Verifies a live Supabase social-provider session for an already linked DABBOBA customer and issues an ephemeral customer session used by the public account-deletion flow. This endpoint never creates a user or links an unknown provider subject. */
+        post: operations["exchangeExistingCustomerForAccountDeletion"];
         delete?: never;
         options?: never;
         head?: never;
@@ -129,6 +214,23 @@ export interface paths {
         get?: never;
         put?: never;
         post: operations["logoutUser"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/logout-others": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description Revokes every other user session for this account while preserving the authenticated current session. Repeating the request is safe. */
+        post: operations["logoutOtherUserSessions"];
         delete?: never;
         options?: never;
         head?: never;
@@ -287,6 +389,86 @@ export interface paths {
             cookie?: never;
         };
         get: operations["getAdminMediaUrl"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/catalog-media/uploads": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["createAdminCatalogMediaUploadIntent"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/catalog-media/{mediaId}/complete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["completeAdminCatalogMediaUpload"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/catalog-media/{mediaId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete: operations["deleteAdminCatalogMedia"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/catalog-media/{mediaId}/url": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getAdminCatalogMediaUrl"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/catalog/media/{mediaId}/image": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getPublishedCatalogMediaImage"];
         put?: never;
         post?: never;
         delete?: never;
@@ -455,6 +637,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/community/operations-policy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getUgcOperationsPolicyAcceptance"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/community/operations-policy/acceptance": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["acceptUgcOperationsPolicy"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/reports": {
         parameters: {
             query?: never;
@@ -494,8 +708,59 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description Render-ready Home catalog sections. When configured is false, clients may use their legacy preview layout. Once configured is true, items is authoritative even when empty. */
+        /** @description Render-ready category-specific Home catalog sections. When configured is false, no administrator-defined Home section is registered and clients must show a truthful empty state without synthesizing a legacy preview. Once configured is true, items is authoritative even when empty. Legacy operator rows without a layout kind remain admin-visible but are not returned here. */
         get: operations["getHomeCatalogSections"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/catalog/recent-draws": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Returns only server-committed draw results for active Home products. Customer identity is intentionally omitted. */
+        get: operations["getHomeRecentDraws"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/catalog/home-product-clicks/{productId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description Records one anonymous, idempotent click originating from a Home product card and returns the current Home BEST product. */
+        post: operations["recordHomeProductClick"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/catalog/category-settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Customer-visible presentation settings for the fixed commerce category IDs. */
+        get: operations["getStorefrontCategorySettings"];
         put?: never;
         post?: never;
         delete?: never;
@@ -528,6 +793,22 @@ export interface paths {
             cookie?: never;
         };
         get: operations["listCatalogProducts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/catalog/products/{productId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getCatalogProduct"];
         put?: never;
         post?: never;
         delete?: never;
@@ -627,6 +908,22 @@ export interface paths {
         get: operations["listExchangeListings"];
         put?: never;
         post: operations["createExchangeListing"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/exchange/activity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getMyExchangeActivity"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -926,6 +1223,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/payments/{paymentId}/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description Re-queries PortOne with the authenticated owner's payment ID and applies only the provider-authoritative state to the order. A client redirect or callback is never accepted as proof of payment. */
+        post: operations["confirmOwnPortOnePayment"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/payments/webhooks/portone": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description Verifies the official PortOne webhook signature, then performs a fresh provider lookup before reconciling payment state. Webhook body status is never trusted directly. */
+        post: operations["receivePortOnePaymentWebhook"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/payments/webhooks/{provider}": {
         parameters: {
             query?: never;
@@ -1014,6 +1345,22 @@ export interface paths {
             cookie?: never;
         };
         get: operations["listAccountInventory"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/account/owned-products/{productId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getAccountOwnedProduct"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1150,6 +1497,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/account/notifications/unread-summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getAccountNotificationUnreadSummary"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/account/notifications/{notificationId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getAccountNotification"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/account/notifications/{notificationId}/read": {
         parameters: {
             query?: never;
@@ -1160,6 +1539,54 @@ export interface paths {
         get?: never;
         put?: never;
         post: operations["markAccountNotificationRead"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/account/push-devices": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["registerAccountPushDevice"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/account/push-devices/{installationId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete: operations["unregisterAccountPushDevice"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/account/shipping-quotes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["createAccountShippingQuote"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1198,6 +1625,39 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/account/policy-acceptances": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getAccountPolicyAcceptances"];
+        put?: never;
+        /** @description Records append-only acceptance evidence for the exact currently published terms and privacy versions. This route remains available while other customer APIs return 428. */
+        post: operations["acceptCurrentAccountPolicies"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/account/deletion-preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["previewAccountDeletion"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/account/deletion-request": {
         parameters: {
             query?: never;
@@ -1208,6 +1668,23 @@ export interface paths {
         get: operations["getAccountDeletionRequest"];
         put?: never;
         post: operations["requestAccountDeletion"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/account/deletion-requests/{requestId}/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Reads only the deletion receipt state after sessions have been revoked. Invalid request/token pairs return the same not-found response. */
+        get: operations["getAccountDeletionStatusByReceipt"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1599,6 +2076,38 @@ export interface paths {
         patch: operations["updateAdminHomeCatalogSection"];
         trace?: never;
     };
+    "/v1/admin/category-settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listAdminStorefrontCategorySettings"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/category-settings/{category}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch: operations["updateAdminStorefrontCategorySetting"];
+        trace?: never;
+    };
     "/v1/admin/ips": {
         parameters: {
             query?: never;
@@ -1695,6 +2204,22 @@ export interface paths {
         patch: operations["updateAdminProduct"];
         trace?: never;
     };
+    "/v1/admin/products/{productId}/image": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete: operations["clearAdminProductStorefrontImage"];
+        options?: never;
+        head?: never;
+        patch: operations["attachAdminProductImage"];
+        trace?: never;
+    };
     "/v1/admin/catalog-requests": {
         parameters: {
             query?: never;
@@ -1769,6 +2294,22 @@ export interface paths {
         get?: never;
         put?: never;
         post: operations["decideAdminAccountDeletion"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/account-deletions/{requestId}/completion": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["completeAdminAccountDeletion"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2002,13 +2543,48 @@ export interface components {
             timestamp: string;
         };
         /** @enum {string} */
-        CustomerAuthProvider: "KAKAO" | "NAVER" | "PHONE";
+        CommerceLaunchMode: "PRELAUNCH" | "LIVE";
+        RequiredPolicyVersions: {
+            terms: string;
+            privacy: string;
+        };
+        PublicConfig: {
+            commerceMode: components["schemas"]["CommerceLaunchMode"];
+            requiredPolicyVersions: components["schemas"]["RequiredPolicyVersions"];
+        };
+        /** @enum {string} */
+        CustomerAuthProvider: "KAKAO" | "NAVER" | "GOOGLE" | "APPLE" | "EMAIL";
         CustomerLoginProviders: {
             methods: components["schemas"]["CustomerAuthProvider"][];
             brokerExchangeConfigured: boolean;
+            requiredPolicyVersions: {
+                terms: string;
+                privacy: string;
+            };
         };
         CustomerAccessTokenExchangeInput: {
             accessToken: string;
+            loginProvider: components["schemas"]["CustomerAuthProvider"];
+            /** @description Required only for Apple login. Supabase provider refresh token sent once to the trusted API for encrypted deletion-revocation storage. */
+            appleRefreshToken?: string;
+            acceptedPolicies: {
+                terms: string;
+                privacy: string;
+            };
+        };
+        AccountDeletionAccessTokenExchangeInput: {
+            accessToken: string;
+            /** @enum {string} */
+            loginProvider: "KAKAO" | "NAVER" | "GOOGLE" | "APPLE";
+            /** @description Optional fresh Apple provider refresh token. When absent, an existing encrypted revocation credential is required. */
+            appleRefreshToken?: string;
+            acceptedPolicies: components["schemas"]["RequiredPolicyVersions"];
+        };
+        CurrentPolicyAcceptanceInput: {
+            acceptedPolicies: {
+                terms: string;
+                privacy: string;
+            };
         };
         ErrorEnvelope: {
             error: {
@@ -2017,6 +2593,17 @@ export interface components {
                 requestId: string;
                 details?: {
                     [key: string]: unknown;
+                };
+            };
+        };
+        LegalAcceptanceRequiredErrorEnvelope: {
+            error: {
+                /** @constant */
+                code: "LEGAL_ACCEPTANCE_REQUIRED";
+                message: string;
+                requestId: string;
+                details: {
+                    requiredPolicyVersions: components["schemas"]["RequiredPolicyVersions"];
                 };
             };
         };
@@ -2043,6 +2630,12 @@ export interface components {
         /** @enum {string} */
         ProductCategory: "gacha" | "figure" | "kuji" | "tcg";
         /** @enum {string} */
+        ProductSaleStatus: "DRAFT" | "COMING_SOON" | "ON_SALE" | "PAUSED";
+        /** @enum {string|null} */
+        ProductPurchaseBlockedReason: "DRAFT" | "COMING_SOON" | "PAUSED" | "COMMERCE_PRELAUNCH" | "OUT_OF_STOCK" | null;
+        /** @enum {string} */
+        StorefrontCategoryAvailability: "active" | "coming-soon" | "hidden";
+        /** @enum {string} */
         MediaPurpose: "PROFILE" | "POST" | "COMMENT" | "INQUIRY" | "EXCHANGE" | "CATALOG_REQUEST" | "WANTED_REQUEST";
         /** @enum {string} */
         MediaMimeType: "image/jpeg" | "image/png" | "image/webp" | "image/gif";
@@ -2054,6 +2647,14 @@ export interface components {
             checksumSha256: string;
             /** @description Supported upload transports. Defaults to [POST] when omitted, preserving legacy multipart POST behavior; PUT means an exact raw file body, never multipart. The property remains optional in generated clients. */
             acceptedUploadMethods?: ("POST" | "PUT")[];
+        };
+        CreateCatalogMediaUploadInput: {
+            filename: string;
+            mimeType: components["schemas"]["MediaMimeType"];
+            byteSize: number;
+            checksumSha256: string;
+            /** @description Admin clients negotiate both transports. CATALOG is fixed server-side and is never accepted from caller input. */
+            acceptedUploadMethods: ("POST" | "PUT")[];
         };
         MediaUploadIntent: components["schemas"]["MediaMultipartPostUploadIntent"] | components["schemas"]["MediaRawPutUploadIntent"];
         MediaMultipartPostUploadIntent: {
@@ -2114,6 +2715,35 @@ export interface components {
             /** Format: date-time */
             expiresAt: string;
             mimeType: components["schemas"]["MediaMimeType"];
+        };
+        ProductImageAttachInput: {
+            /** Format: uuid */
+            mediaId: string;
+            expectedVersion: number;
+            /** @description primary는 기존 상세·기본 대표 사진이고 storefront는 상품 목록 전용 사진입니다. */
+            role?: "primary" | "storefront";
+        };
+        ProductImageAttachment: {
+            productId: string;
+            /** Format: uri */
+            imageUrl: string;
+            version: number;
+            /** Format: uuid */
+            mediaId: string;
+            /** @enum {string} */
+            role: "primary" | "storefront";
+        };
+        ProductImageClearInput: {
+            expectedVersion: number;
+            /** @enum {string} */
+            role: "storefront";
+        };
+        ProductImageClearResult: {
+            productId: string;
+            imageUrl: null;
+            version: number;
+            /** @enum {string} */
+            role: "storefront";
         };
         Actor: {
             /** Format: uuid */
@@ -2227,6 +2857,10 @@ export interface components {
             /** Format: uuid */
             id: string;
             /** @enum {string} */
+            orderKind: "PRODUCT" | "SHIPPING_FEE";
+            /** Format: uuid */
+            shippingRequestId: string | null;
+            /** @enum {string} */
             status: "PENDING_PAYMENT" | "PAID" | "FULFILLED" | "CANCELLED" | "REFUND_REVIEW" | "REFUNDED";
             /** @constant */
             currency: "KRW";
@@ -2334,16 +2968,75 @@ export interface components {
             data: {
                 [key: string]: unknown;
             };
+            destination: components["schemas"]["NotificationDestination"];
             /** Format: date-time */
             readAt: string | null;
             /** Format: date-time */
             createdAt: string;
         };
+        NotificationDestination: {
+            /** @enum {string} */
+            route: "home" | "gacha" | "kuji" | "storage" | "profile";
+            detail: components["schemas"]["NotificationDetailDestination"] | null;
+        };
+        NotificationDetailDestination: {
+            /** @enum {string} */
+            kind: "product" | "order" | "shipping" | "inquiry" | "exchange" | "request";
+            id: string;
+        };
+        NotificationUnreadSummary: {
+            unreadCount: number;
+            /** Format: date-time */
+            newestUnreadCreatedAt: string | null;
+        };
+        RegisterPushDeviceInput: {
+            /** Format: uuid */
+            installationId: string;
+            expoPushToken: string;
+            /** @enum {string} */
+            platform: "IOS" | "ANDROID";
+            appVersion?: string | null;
+        };
+        PushDeviceRegistration: {
+            /** Format: uuid */
+            installationId: string;
+            /** @enum {string} */
+            platform: "IOS" | "ANDROID";
+            appVersion: string | null;
+            /** Format: date-time */
+            registeredAt: string;
+        };
         NotificationPage: components["schemas"]["PageMeta"] & {
             items: components["schemas"]["AccountNotification"][];
         };
-        CreateShippingRequestInput: {
+        CreateShippingQuoteInput: {
             inventoryUnitIds: string[];
+        };
+        ShippingQuote: {
+            /** Format: uuid */
+            id: string;
+            inventoryUnitIds: string[];
+            /** Format: uuid */
+            addressId: string;
+            addressVersion: number;
+            destination: components["schemas"]["ShippingDestination"];
+            itemCount: number;
+            referenceSubtotal: number;
+            containsKuji: boolean;
+            /** @enum {integer} */
+            freeShippingThreshold: 24900 | 54900;
+            qualifiesForFreeShipping: boolean;
+            /** @enum {integer} */
+            shippingFee: 0 | 3000;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            expiresAt: string;
+        };
+        CreateShippingRequestInput: {
+            /** Format: uuid */
+            quoteId: string;
+            addressVersion: number;
         };
         ShippingDestination: {
             recipientMasked: string;
@@ -2355,15 +3048,22 @@ export interface components {
         ShippingRequest: {
             /** Format: uuid */
             id: string;
-            /** @constant */
-            status: "REQUESTED";
+            /** Format: uuid */
+            quoteId: string;
+            /** @enum {string} */
+            status: "PAYMENT_PENDING" | "REQUESTED";
             inventoryUnitIds: string[];
             destination: components["schemas"]["ShippingDestination"];
             /** Format: date-time */
             requestedAt: string;
+            shippingFee: number;
+            /** Format: uuid */
+            paymentOrderId: string | null;
+            /** Format: uuid */
+            paymentId: string | null;
         };
         /** @enum {string} */
-        AccountShippingRequestStatus: "REQUESTED" | "PROCESSING" | "SHIPPED" | "DELIVERED" | "CANCELLED";
+        AccountShippingRequestStatus: "PAYMENT_PENDING" | "REQUESTED" | "PROCESSING" | "SHIPPED" | "DELIVERED" | "CANCELLED";
         AccountShippingRequest: {
             /** Format: uuid */
             id: string;
@@ -2379,6 +3079,21 @@ export interface components {
             shippedAt: string | null;
             trackingCarrier: string | null;
             trackingNumber: string | null;
+        };
+        AccountShippingItem: {
+            /** Format: uuid */
+            inventoryUnitId: string;
+            productId: string;
+            productName: string;
+            ipId: string;
+            ipNameKo: string;
+            category: components["schemas"]["ProductCategory"];
+            /** Format: uri */
+            imageUrl: string | null;
+            productVersion: number;
+        };
+        AccountShippingRequestDetail: components["schemas"]["AccountShippingRequest"] & {
+            items: components["schemas"]["AccountShippingItem"][];
         };
         AccountShippingRequestPage: components["schemas"]["PageMeta"] & {
             items: components["schemas"]["AccountShippingRequest"][];
@@ -2530,7 +3245,7 @@ export interface components {
             /** Format: uuid */
             reporterId: string;
             /** @enum {string} */
-            targetType: "POST" | "COMMENT" | "SNAP" | "USER" | "EXCHANGE_LISTING";
+            targetType: "POST" | "COMMENT" | "SNAP" | "USER" | "EXCHANGE_LISTING" | "WANTED_REQUEST";
             /** Format: uuid */
             targetId: string;
             /** @enum {string} */
@@ -2549,7 +3264,7 @@ export interface components {
         };
         CreateReportInput: {
             /** @enum {string} */
-            targetType: "POST" | "COMMENT" | "SNAP" | "USER" | "EXCHANGE_LISTING";
+            targetType: "POST" | "COMMENT" | "SNAP" | "USER" | "EXCHANGE_LISTING" | "WANTED_REQUEST";
             /** Format: uuid */
             targetId: string;
             /** @enum {string} */
@@ -2561,7 +3276,7 @@ export interface components {
             /** @enum {string} */
             status: "RESOLVED" | "REJECTED";
             /** @enum {string} */
-            action: "NO_ACTION" | "HIDE_POST" | "HIDE_COMMENT" | "WARN_USER" | "SUSPEND_USER";
+            action: "NO_ACTION" | "HIDE_POST" | "HIDE_COMMENT" | "HIDE_EXCHANGE_LISTING" | "HIDE_WANTED_REQUEST" | "WARN_USER" | "SUSPEND_USER";
             reason: string;
             /** Format: date-time */
             suspendUntil?: string | null;
@@ -2641,15 +3356,29 @@ export interface components {
             manufacturer: string | null;
             /** Format: date */
             releaseDate?: string | null;
-            price: number;
+            /** @description Positive public price or null while the price is not published. Customer APIs never expose a zero-price sellable product. */
+            price: number | null;
             availableQuantity: number;
+            /** @description ACTIVE 쿠지 덱의 전체 슬롯 수 또는 모든 항목에 초기 수량이 있는 ACTIVE 유한 가챠 풀의 초기 수량 합계입니다. 신뢰할 총수량이 없으면 null입니다. */
+            totalQuantity: number | null;
+            /** @description ACTIVE 쿠지 덱에서 아직 결과 확정으로 소진되지 않은 상만 순서대로 제공합니다. 가챠이거나 공개 덱이 없으면 빈 배열이며, 봉인된 번호별 결과는 포함하지 않습니다. */
+            remainingKujiTiers?: components["schemas"]["PublicKujiTierRemaining"][];
             metadata: {
                 [key: string]: unknown;
             };
             /** Format: uri */
             imageUrl: string | null;
+            /**
+             * Format: uri
+             * @description 가챠·쿠지 목록 카드용 이미지입니다. 등록되지 않으면 null입니다.
+             */
+            storefrontImageUrl: string | null;
             isActive: boolean;
             isPrizeOnly: boolean;
+            saleStatus: components["schemas"]["ProductSaleStatus"];
+            /** @description Server-authoritative convenience value. Checkout still revalidates launch mode, state, price, stock, and draw configuration. */
+            purchasable: boolean;
+            blockedReason: components["schemas"]["ProductPurchaseBlockedReason"];
             version: number;
             /** Format: date-time */
             createdAt: string;
@@ -2676,15 +3405,21 @@ export interface components {
             isActive: boolean;
             /** @description 경품 전용 카탈로그 레코드입니다. 생략 시 false이며 생성 후 변경할 수 없습니다. */
             isPrizeOnly?: boolean;
+            /** @description 생략한 신규 상품은 DRAFT로 생성되며, ON_SALE은 양수 가격·공개 이미지·재고·추첨 구성이 모두 준비된 경우만 허용됩니다. */
+            saleStatus?: components["schemas"]["ProductSaleStatus"];
             expectedVersion?: number;
         };
         CatalogProductPage: components["schemas"]["PageMeta"] & {
             items: components["schemas"]["CatalogProduct"][];
         };
-        /** @description Render-ready active Home section. Products are active, customer-sellable, non-prize gacha or kuji records linked to the section IP. */
+        /** @description Render-ready active Home section. Every product matches layoutKind and the selected MANUAL, IP, NEW, or POPULAR source. ip is null for an unscoped section. */
         HomeCatalogSection: {
             id: string;
             title: string;
+            subtitle: string | null;
+            layoutKind: components["schemas"]["HomeCatalogSectionLayout"];
+            sourceKind: components["schemas"]["HomeCatalogSectionSourceKind"];
+            visibleLimit: number;
             sortOrder: number;
             isActive: boolean;
             version: number;
@@ -2692,18 +3427,62 @@ export interface components {
             createdAt: string;
             /** Format: date-time */
             updatedAt: string;
-            ip: components["schemas"]["CatalogIp"];
+            ip: components["schemas"]["CatalogIp"] | null;
             products: components["schemas"]["CatalogProduct"][];
         };
         /** @description configured is true after any Home section record has been created, including when every record is inactive and items is empty. */
         HomeCatalogSectionList: {
             configured: boolean;
             items: components["schemas"]["HomeCatalogSection"][];
+            bestProductId: string | null;
+            /** Format: date-time */
+            evaluatedAt: string;
         };
+        /**
+         * @description Selects the category-specific Home card layout and limits every product in the section to the same category.
+         * @enum {string}
+         */
+        HomeCatalogSectionLayout: "gacha" | "kuji";
+        /**
+         * @description MANUAL preserves operator order, IP uses newest products within one IP, NEW uses products created in the last 30 days, and POPULAR uses click totals from the last 30 days. NEW and POPULAR may optionally be scoped to one IP.
+         * @enum {string}
+         */
+        HomeCatalogSectionSourceKind: "MANUAL" | "IP" | "NEW" | "POPULAR";
+        HomeProductBadgeState: {
+            bestProductId: string | null;
+            /** Format: date-time */
+            evaluatedAt: string;
+        };
+        /** @description Privacy-minimized immutable Home activity. It contains no customer identifier or nickname. */
+        HomeRecentDrawActivity: {
+            /** Format: uuid */
+            id: string;
+            productId: string;
+            /** @enum {string} */
+            category: "gacha" | "kuji";
+            prizeName: string;
+            /** Format: uri-reference */
+            prizeImageUrl: string | null;
+            rarity: string;
+            /** Format: date-time */
+            committedAt: string;
+        };
+        HomeRecentDrawActivityList: {
+            /** Format: date-time */
+            serverNow: string;
+            items: components["schemas"]["HomeRecentDrawActivity"][];
+        };
+        /** @description Full operator view. layoutKind is null only for a legacy row created before category-specific Home layouts were introduced. */
         AdminHomeCatalogSection: {
             id: string;
             title: string;
-            ipId: string;
+            subtitle: string | null;
+            ipId: string | null;
+            /** @enum {string|null} */
+            layoutKind: "gacha" | "kuji" | null;
+            sourceKind: components["schemas"]["HomeCatalogSectionSourceKind"];
+            visibleLimit: number;
+            manualProductIds: string[];
             sortOrder: number;
             isActive: boolean;
             version: number;
@@ -2719,15 +3498,61 @@ export interface components {
         CreateHomeCatalogSectionInput: {
             id: string;
             title: string;
-            ipId: string;
+            subtitle: string | null;
+            ipId: string | null;
+            layoutKind: components["schemas"]["HomeCatalogSectionLayout"];
+            sourceKind: components["schemas"]["HomeCatalogSectionSourceKind"];
+            visibleLimit: number;
+            manualProductIds: string[];
             sortOrder: number;
             isActive: boolean;
         };
         UpdateHomeCatalogSectionInput: {
             title: string;
-            ipId: string;
+            subtitle: string | null;
+            ipId: string | null;
+            layoutKind: components["schemas"]["HomeCatalogSectionLayout"];
+            sourceKind: components["schemas"]["HomeCatalogSectionSourceKind"];
+            visibleLimit: number;
+            manualProductIds: string[];
             sortOrder: number;
             isActive: boolean;
+            expectedVersion: number;
+        };
+        StorefrontCategorySetting: {
+            category: components["schemas"]["ProductCategory"];
+            label: string;
+            sortOrder: number;
+            availability: components["schemas"]["StorefrontCategoryAvailability"];
+            showOnHome: boolean;
+            showOnCatalog: boolean;
+            showOnExchange: boolean;
+            showOnWanted: boolean;
+            description: string;
+            /** Format: uri */
+            imageUrl: string | null;
+            iconKey: string | null;
+            version: number;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        StorefrontCategorySettingList: {
+            items: components["schemas"]["StorefrontCategorySetting"][];
+        };
+        UpdateStorefrontCategorySettingInput: {
+            label: string;
+            sortOrder: number;
+            availability: components["schemas"]["StorefrontCategoryAvailability"];
+            showOnHome: boolean;
+            showOnCatalog: boolean;
+            showOnExchange: boolean;
+            showOnWanted: boolean;
+            description: string;
+            /** Format: uri */
+            imageUrl: string | null;
+            iconKey: string | null;
             expectedVersion: number;
         };
         CatalogRequest: {
@@ -2827,9 +3652,12 @@ export interface components {
             /** @enum {string} */
             sourceType: "PURCHASE" | "GACHA" | "KUJI" | "ADMIN_ADJUSTMENT";
             /** @enum {string} */
-            status: "OWNED" | "EXCHANGE_LISTED" | "EXCHANGE_OFFERED" | "SHIPPING" | "DELIVERED" | "TRANSFERRED" | "REFUNDED" | "POINT_RETURNED";
+            status: "OWNED" | "EXCHANGE_LISTED" | "EXCHANGE_OFFERED" | "SHIPPING" | "DELIVERED" | "TRANSFERRED" | "REFUNDED" | "POINT_RETURNED" | "EXPIRED_HOLD";
             /** Format: date-time */
             acquiredAt: string;
+            /** Format: date-time */
+            storageExpiresAt?: string;
+            pointReturnEligible?: boolean;
         };
         InventoryUnitPage: components["schemas"]["PageMeta"] & {
             items: components["schemas"]["InventoryUnit"][];
@@ -2866,6 +3694,8 @@ export interface components {
             cancelReason: string | null;
             /** Format: uuid */
             resolvedByAdminId: string | null;
+            /** Format: date-time */
+            expiresAt: string;
             offers?: components["schemas"]["ExchangeOffer"][];
             /** Format: date-time */
             createdAt: string;
@@ -2885,6 +3715,10 @@ export interface components {
         };
         ExchangeListingPage: components["schemas"]["PageMeta"] & {
             items: components["schemas"]["ExchangeListing"][];
+        };
+        ExchangeActivity: {
+            authored: components["schemas"]["ExchangeListing"][];
+            applied: components["schemas"]["ExchangeListing"][];
         };
         ExchangeOffer: {
             /** Format: uuid */
@@ -2917,6 +3751,10 @@ export interface components {
             id: string;
             /** Format: uuid */
             userId: string;
+            /** @enum {string} */
+            orderKind: "PRODUCT" | "SHIPPING_FEE";
+            /** Format: uuid */
+            shippingRequestId: string | null;
             /** @enum {string} */
             status: "PENDING_PAYMENT" | "PAID" | "FULFILLED" | "CANCELLED" | "REFUND_REVIEW" | "REFUNDED";
             /** Format: uuid */
@@ -2967,6 +3805,18 @@ export interface components {
             /** Format: date-time */
             occurredAt: string;
             amount: number;
+        };
+        PortOnePaymentConfirmation: {
+            /** @constant */
+            accepted: true;
+            /** Format: uuid */
+            paymentId: string;
+            /** Format: uuid */
+            orderId: string;
+            /** @enum {string} */
+            providerStatus: "READY" | "PAY_PENDING" | "VIRTUAL_ACCOUNT_ISSUED" | "PAID" | "FAILED" | "CANCELLED" | "PARTIAL_CANCELLED";
+            /** @description Canonical reconciliation outcome. pending means no order transition was applied. */
+            outcome: string;
         };
         DrawResult: {
             /** Format: uuid */
@@ -3177,6 +4027,15 @@ export interface components {
             /** Format: uuid */
             userId: string;
             blocked: boolean;
+        };
+        UgcOperationsPolicyAcceptance: {
+            policyVersion: string;
+            accepted: boolean;
+            /** Format: date-time */
+            acceptedAt: string | null;
+        };
+        AcceptUgcOperationsPolicyInput: {
+            policyVersion: string;
         };
         /** @description At least one mutable property in addition to expectedVersion is required. */
         UpdateWantedRequestInput: {
@@ -3391,7 +4250,7 @@ export interface components {
             entries: components["schemas"]["PublicDrawOddsEntry"][];
         };
         /** @enum {string} */
-        AccountDeletionStatus: "PENDING_REVIEW" | "BLOCKED" | "APPROVED" | "COMPLETED" | "REJECTED" | "CANCELLED";
+        AccountDeletionStatus: "PENDING_REVIEW" | "BLOCKED" | "PROCESSING" | "APPROVED" | "COMPLETED" | "REJECTED" | "CANCELLED";
         AccountDeletionBlockers: {
             pointBalance: number;
             activeOrderCount: number;
@@ -3411,11 +4270,52 @@ export interface components {
             /** @constant */
             hardDeletePerformed: false;
             /** @constant */
-            policy: "MANUAL_REVIEW_REQUIRED";
+            policy: "AUTOMATED_SERVER_DELETION";
+            /** @enum {string} */
+            authDeletionStatus: "NOT_REQUIRED" | "PENDING" | "COMPLETED";
             /** Format: date-time */
             requestedAt: string;
             /** Format: date-time */
             lastRequestedAt: string;
+            /** Format: date-time */
+            completedAt: string | null;
+        };
+        AccountDeletionReceipt: {
+            /** Format: uuid */
+            id: string;
+            status: components["schemas"]["AccountDeletionStatus"];
+            blockers: components["schemas"]["AccountDeletionBlockers"];
+            requestCount: number;
+            /** @constant */
+            hardDeletePerformed: false;
+            /** @constant */
+            policy: "AUTOMATED_SERVER_DELETION";
+            /** @enum {string} */
+            authDeletionStatus: "NOT_REQUIRED" | "PENDING" | "COMPLETED";
+            /** Format: date-time */
+            requestedAt: string;
+            /** Format: date-time */
+            lastRequestedAt: string;
+            /** Format: date-time */
+            completedAt: string | null;
+            statusToken: string;
+        };
+        AccountDeletionPreview: {
+            canDeleteNow: boolean;
+            blockers: components["schemas"]["AccountDeletionBlockers"];
+        };
+        AccountPolicyAcceptanceStatus: {
+            documents: {
+                /** @enum {string} */
+                key: "TERMS" | "PRIVACY";
+                version: string;
+                contentSha256: string;
+                /** Format: uri */
+                publicUrl: string;
+                /** Format: date-time */
+                acceptedAt: string | null;
+                accepted: boolean;
+            }[];
         };
         CommerceUser: {
             /** Format: uuid */
@@ -3450,10 +4350,30 @@ export interface components {
             updatedAt: string;
             /** @constant */
             hardDeletePerformed: false;
-            /** @constant */
-            completionAvailable: false;
-            /** @constant */
-            completionPolicy: "EXTERNAL_RETENTION_POLICY_REQUIRED";
+            completionAvailable: boolean;
+            /** @enum {string} */
+            completionPolicy: "ADMIN_REVIEW_FALLBACK" | "AUTOMATED_WORKER" | "COMPLETED_ANONYMIZATION";
+            /** @enum {string} */
+            authDeletionStatus: "NOT_REQUIRED" | "PENDING" | "COMPLETED";
+            /** Format: date-time */
+            authDeletedAt: string | null;
+            /** Format: date-time */
+            processingStartedAt: string | null;
+            /** Format: date-time */
+            completedAt: string | null;
+            deletionJob: components["schemas"]["AdminAccountDeletionJob"] | null;
+        };
+        AdminAccountDeletionJob: {
+            /** @enum {string} */
+            status: "PENDING" | "PROCESSING";
+            attempts: number;
+            /** Format: date-time */
+            availableAt: string | null;
+            /** Format: date-time */
+            leaseExpiresAt: string | null;
+            lastError: string | null;
+            /** Format: date-time */
+            externalDeletedAt: string | null;
         };
         AdminAccountDeletionPage: components["schemas"]["PageMeta"] & {
             items: components["schemas"]["AdminAccountDeletionSummary"][];
@@ -3483,7 +4403,10 @@ export interface components {
         };
         DecideAccountDeletionInput: {
             /** @enum {string} */
-            decision: "APPROVED" | "REJECTED";
+            decision: "REJECTED";
+            reason: string;
+        };
+        CompleteAccountDeletionInput: {
             reason: string;
         };
         AdminAccountDeletionDecisionResult: components["schemas"]["AdminAccountDeletionSummary"] & {
@@ -3767,7 +4690,7 @@ export interface components {
             createdAt: string;
         };
         /** @enum {string} */
-        AdminShippingStatus: "REQUESTED" | "PROCESSING" | "SHIPPED" | "DELIVERED" | "CANCELLED";
+        AdminShippingStatus: "PAYMENT_PENDING" | "REQUESTED" | "PROCESSING" | "SHIPPED" | "DELIVERED" | "CANCELLED";
         AdminShippingRequest: {
             /** Format: uuid */
             id: string;
@@ -3899,6 +4822,15 @@ export interface components {
                 "application/json": components["schemas"]["ErrorEnvelope"];
             };
         };
+        /** @description The authenticated user must explicitly accept the exact currently published terms and privacy versions before this operation can continue. */
+        LegalAcceptanceRequired: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["LegalAcceptanceRequiredErrorEnvelope"];
+            };
+        };
         /** @description The authenticated actor lacks the required role or ownership. */
         Forbidden: {
             headers: {
@@ -3935,12 +4867,22 @@ export interface components {
                 "application/json": components["schemas"]["ErrorEnvelope"];
             };
         };
+        /** @description Commerce is disabled for the PRELAUNCH release. Customer-facing endpoints perform no new order, payment, draw, kuji-room, point-return, exchange, inventory, or shipping mutation. */
+        CommerceUnavailable: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorEnvelope"];
+            };
+        };
     };
     parameters: {
         Cursor: string;
         Limit: number;
         Search: string;
         IdempotencyKey: string;
+        /** @description ASCII reasons remain compatible. For non-ASCII text, percent-encode UTF-8 and also send X-Admin-Reason-Encoding as utf-8-percent. */
         AdminReason: string;
         UserId: string;
         InquiryId: string;
@@ -4010,6 +4952,94 @@ export interface operations {
             };
         };
     };
+    getPublicConfig: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Server-authoritative public application configuration. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicConfig"];
+                };
+            };
+        };
+    };
+    getLocalDemoCapabilities: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Local single-customer session and payment transition capabilities. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    createLocalDemoSession: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Local internal customer session created. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    transitionLocalDemoPayment: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                orderId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    action: "approve" | "cancel" | "fail" | "refund";
+                };
+            };
+        };
+        responses: {
+            /** @description Updated local demo order. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Order"];
+                };
+            };
+            428: components["responses"]["LegalAcceptanceRequired"];
+        };
+    };
     getCustomerLoginProviders: {
         parameters: {
             query?: never;
@@ -4058,8 +5088,57 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
+            /** @description Exact currently published policy versions must be explicitly accepted before a session is issued. */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LegalAcceptanceRequiredErrorEnvelope"];
+                };
+            };
             429: components["responses"]["RateLimited"];
             /** @description Supabase customer token exchange is not configured. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    exchangeExistingCustomerForAccountDeletion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AccountDeletionAccessTokenExchangeInput"];
+            };
+        };
+        responses: {
+            /** @description Existing customer verified for the account-deletion flow. */
+            201: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionCreated"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            428: components["responses"]["LegalAcceptanceRequired"];
+            429: components["responses"]["RateLimited"];
+            /** @description Supabase customer token exchange or Apple revocation credential protection is unavailable. */
             503: {
                 headers: {
                     [name: string]: unknown;
@@ -4117,6 +5196,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            428: components["responses"]["LegalAcceptanceRequired"];
         };
     };
     refreshUserSession: {
@@ -4138,6 +5218,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            428: components["responses"]["LegalAcceptanceRequired"];
         };
     };
     logoutUser: {
@@ -4150,6 +5231,25 @@ export interface operations {
         requestBody?: never;
         responses: {
             /** @description Current user session revoked. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    logoutOtherUserSessions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description All other user sessions are revoked or were already revoked. */
             204: {
                 headers: {
                     [name: string]: unknown;
@@ -4279,6 +5379,7 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             409: components["responses"]["Conflict"];
+            428: components["responses"]["LegalAcceptanceRequired"];
             /** @description Per-user active */
             429: {
                 headers: {
@@ -4330,6 +5431,7 @@ export interface operations {
                     "application/json": components["schemas"]["MediaUploadIntentExpiredErrorEnvelope"];
                 };
             };
+            428: components["responses"]["LegalAcceptanceRequired"];
             /** @description Per-user image processing concurrency exceeded. */
             429: {
                 headers: {
@@ -4395,6 +5497,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
+            428: components["responses"]["LegalAcceptanceRequired"];
         };
     };
     getOwnMediaUrl: {
@@ -4418,6 +5521,7 @@ export interface operations {
                 };
             };
             404: components["responses"]["NotFound"];
+            428: components["responses"]["LegalAcceptanceRequired"];
         };
     };
     getPublicPostMediaUrl: {
@@ -4466,6 +5570,196 @@ export interface operations {
             403: components["responses"]["Forbidden"];
         };
     };
+    createAdminCatalogMediaUploadIntent: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description ASCII reasons remain compatible. For non-ASCII text, percent-encode UTF-8 and also send X-Admin-Reason-Encoding as utf-8-percent. */
+                "X-Admin-Reason": components["parameters"]["AdminReason"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateCatalogMediaUploadInput"];
+            };
+        };
+        responses: {
+            /** @description Short-lived private staging upload capability for an administrator-owned CATALOG image. The server refuses to create the intent unless both image processing and the trusted catalog delivery base are configured. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MediaUploadIntent"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            /** @description Per-administrator active */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Image processing */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    completeAdminCatalogMediaUpload: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description ASCII reasons remain compatible. For non-ASCII text, percent-encode UTF-8 and also send X-Admin-Reason-Encoding as utf-8-percent. */
+                "X-Admin-Reason": components["parameters"]["AdminReason"];
+            };
+            path: {
+                mediaId: components["parameters"]["MediaId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The owned CATALOG image is verified, decoded, metadata-stripped, and committed as immutable WebP media. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MediaReady"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            /** @description The durable upload intent expired and a new upload intent is required. */
+            410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MediaUploadIntentExpiredErrorEnvelope"];
+                };
+            };
+            /** @description Per-administrator image processing concurrency exceeded. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description API image processing is unavailable or busy. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    deleteAdminCatalogMedia: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description ASCII reasons remain compatible. For non-ASCII text, percent-encode UTF-8 and also send X-Admin-Reason-Encoding as utf-8-percent. */
+                "X-Admin-Reason": components["parameters"]["AdminReason"];
+            };
+            path: {
+                mediaId: components["parameters"]["MediaId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Unattached administrator-owned CATALOG media was marked deleted. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description Once attached */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    getAdminCatalogMediaUrl: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                mediaId: components["parameters"]["MediaId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Short-lived preview URL for owned READY CATALOG media. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MediaReadUrl"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    getPublishedCatalogMediaImage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                mediaId: components["parameters"]["MediaId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Redirects only referenced READY CATALOG media to a fresh short-lived private-storage signed read URL. */
+            302: {
+                headers: {
+                    Location?: string;
+                    "Cache-Control"?: "private, no-store";
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["NotFound"];
+            /** @description Stable catalog delivery is not configured. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     listOwnInquiries: {
         parameters: {
             query?: {
@@ -4488,6 +5782,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            428: components["responses"]["LegalAcceptanceRequired"];
         };
     };
     createInquiry: {
@@ -4516,6 +5811,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             409: components["responses"]["Conflict"];
+            428: components["responses"]["LegalAcceptanceRequired"];
         };
     };
     getOwnInquiry: {
@@ -4539,6 +5835,7 @@ export interface operations {
                 };
             };
             404: components["responses"]["NotFound"];
+            428: components["responses"]["LegalAcceptanceRequired"];
         };
     };
     addInquiryMessage: {
@@ -4566,6 +5863,7 @@ export interface operations {
                 };
             };
             409: components["responses"]["Conflict"];
+            428: components["responses"]["LegalAcceptanceRequired"];
         };
     };
     listCommunityPosts: {
@@ -4618,6 +5916,7 @@ export interface operations {
                 };
             };
             409: components["responses"]["Conflict"];
+            428: components["responses"]["LegalAcceptanceRequired"];
         };
     };
     getCommunityPost: {
@@ -4672,6 +5971,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            428: components["responses"]["LegalAcceptanceRequired"];
         };
     };
     updateCommunityPost: {
@@ -4703,6 +6003,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            428: components["responses"]["LegalAcceptanceRequired"];
         };
     };
     setCommunityPostLike: {
@@ -4734,6 +6035,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            428: components["responses"]["LegalAcceptanceRequired"];
         };
     };
     listCommunityComments: {
@@ -4788,6 +6090,7 @@ export interface operations {
                     "application/json": components["schemas"]["Comment"];
                 };
             };
+            428: components["responses"]["LegalAcceptanceRequired"];
         };
     };
     deleteCommunityComment: {
@@ -4815,6 +6118,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            428: components["responses"]["LegalAcceptanceRequired"];
         };
     };
     listCommunityBlocks: {
@@ -4839,6 +6143,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            428: components["responses"]["LegalAcceptanceRequired"];
         };
     };
     blockCommunityUser: {
@@ -4865,6 +6170,7 @@ export interface operations {
             };
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            428: components["responses"]["LegalAcceptanceRequired"];
         };
     };
     unblockCommunityUser: {
@@ -4889,6 +6195,59 @@ export interface operations {
                     "application/json": components["schemas"]["UserBlockResult"];
                 };
             };
+            428: components["responses"]["LegalAcceptanceRequired"];
+        };
+    };
+    getUgcOperationsPolicyAcceptance: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Exact operations-policy version required before creating community, exchange, or wanted-room content and whether the current user accepted it. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UgcOperationsPolicyAcceptance"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            428: components["responses"]["LegalAcceptanceRequired"];
+        };
+    };
+    acceptUgcOperationsPolicy: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AcceptUgcOperationsPolicyInput"];
+            };
+        };
+        responses: {
+            /** @description The exact operations-policy version was accepted or had already been accepted. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UgcOperationsPolicyAcceptance"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            428: components["responses"]["LegalAcceptanceRequired"];
+            429: components["responses"]["RateLimited"];
         };
     };
     createReport: {
@@ -4916,6 +6275,8 @@ export interface operations {
                 };
             };
             409: components["responses"]["Conflict"];
+            428: components["responses"]["LegalAcceptanceRequired"];
+            429: components["responses"]["RateLimited"];
         };
     };
     listCatalogIps: {
@@ -4951,13 +6312,86 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Active Home sections with their active IP and visible customer-sellable gacha or kuji products. */
+            /** @description Active Home sections with their active IP and visible customer-sellable products matching the section Gacha or Kuji layout. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["HomeCatalogSectionList"];
+                };
+            };
+        };
+    };
+    getHomeRecentDraws: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Up to three newest immutable prize snapshots, newest first. */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HomeRecentDrawActivityList"];
+                };
+            };
+        };
+    };
+    recordHomeProductClick: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                productId: components["parameters"]["ProductId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Format: uuid */
+                    eventId: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Current Home product badge state after the click is recorded. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HomeProductBadgeState"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    getStorefrontCategorySettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Ordered storefront category presentation settings. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StorefrontCategorySettingList"];
                 };
             };
         };
@@ -4996,6 +6430,8 @@ export interface operations {
                 category?: components["schemas"]["ProductCategory"];
                 ipId?: string;
                 characterId?: string;
+                sort?: "latest" | "popular" | "price-high" | "price-low";
+                excludeSoldOut?: boolean;
             };
             header?: never;
             path?: never;
@@ -5012,6 +6448,29 @@ export interface operations {
                     "application/json": components["schemas"]["CatalogProductPage"];
                 };
             };
+        };
+    };
+    getCatalogProduct: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                productId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description One active customer-browsable catalog product. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CatalogProduct"];
+                };
+            };
+            404: components["responses"]["NotFound"];
         };
     };
     createCatalogRequest: {
@@ -5038,6 +6497,7 @@ export interface operations {
                     "application/json": components["schemas"]["CatalogRequest"];
                 };
             };
+            428: components["responses"]["LegalAcceptanceRequired"];
         };
     };
     listWantedRequests: {
@@ -5095,6 +6555,7 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             409: components["responses"]["Conflict"];
+            428: components["responses"]["LegalAcceptanceRequired"];
         };
     };
     deleteWantedRequest: {
@@ -5126,6 +6587,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            428: components["responses"]["LegalAcceptanceRequired"];
         };
     };
     updateWantedRequest: {
@@ -5157,6 +6619,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            428: components["responses"]["LegalAcceptanceRequired"];
         };
     };
     setWantedRequestLike: {
@@ -5190,6 +6653,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            428: components["responses"]["LegalAcceptanceRequired"];
         };
     };
     listExchangeEligibleInventory: {
@@ -5214,6 +6678,8 @@ export interface operations {
                     "application/json": components["schemas"]["InventoryUnitPage"];
                 };
             };
+            428: components["responses"]["LegalAcceptanceRequired"];
+            503: components["responses"]["CommerceUnavailable"];
         };
     };
     listExchangeListings: {
@@ -5239,6 +6705,7 @@ export interface operations {
                     "application/json": components["schemas"]["ExchangeListingPage"];
                 };
             };
+            503: components["responses"]["CommerceUnavailable"];
         };
     };
     createExchangeListing: {
@@ -5266,6 +6733,31 @@ export interface operations {
                 };
             };
             409: components["responses"]["Conflict"];
+            428: components["responses"]["LegalAcceptanceRequired"];
+            503: components["responses"]["CommerceUnavailable"];
+        };
+    };
+    getMyExchangeActivity: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current user's exchange listings and listings where the user submitted an offer, including terminal states. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExchangeActivity"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            428: components["responses"]["LegalAcceptanceRequired"];
+            503: components["responses"]["CommerceUnavailable"];
         };
     };
     getExchangeListing: {
@@ -5289,6 +6781,7 @@ export interface operations {
                 };
             };
             404: components["responses"]["NotFound"];
+            503: components["responses"]["CommerceUnavailable"];
         };
     };
     createExchangeOffer: {
@@ -5318,6 +6811,8 @@ export interface operations {
                 };
             };
             409: components["responses"]["Conflict"];
+            428: components["responses"]["LegalAcceptanceRequired"];
+            503: components["responses"]["CommerceUnavailable"];
         };
     };
     decideExchangeOffer: {
@@ -5352,6 +6847,8 @@ export interface operations {
             };
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
+            428: components["responses"]["LegalAcceptanceRequired"];
+            503: components["responses"]["CommerceUnavailable"];
         };
     };
     cancelOwnExchangeListing: {
@@ -5378,6 +6875,8 @@ export interface operations {
             };
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
+            428: components["responses"]["LegalAcceptanceRequired"];
+            503: components["responses"]["CommerceUnavailable"];
         };
     };
     withdrawOwnExchangeOffer: {
@@ -5405,6 +6904,8 @@ export interface operations {
             };
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
+            428: components["responses"]["LegalAcceptanceRequired"];
+            503: components["responses"]["CommerceUnavailable"];
         };
     };
     confirmExchangeCompletion: {
@@ -5431,6 +6932,8 @@ export interface operations {
             };
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
+            428: components["responses"]["LegalAcceptanceRequired"];
+            503: components["responses"]["CommerceUnavailable"];
         };
     };
     listAdminExchangeListings: {
@@ -5464,6 +6967,7 @@ export interface operations {
             query?: never;
             header: {
                 "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description ASCII reasons remain compatible. For non-ASCII text, percent-encode UTF-8 and also send X-Admin-Reason-Encoding as utf-8-percent. */
                 "X-Admin-Reason": components["parameters"]["AdminReason"];
             };
             path: {
@@ -5579,6 +7083,8 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            428: components["responses"]["LegalAcceptanceRequired"];
+            503: components["responses"]["CommerceUnavailable"];
         };
     };
     getOwnKujiRoomEntry: {
@@ -5605,6 +7111,8 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
+            428: components["responses"]["LegalAcceptanceRequired"];
+            503: components["responses"]["CommerceUnavailable"];
         };
     };
     leaveOwnKujiRoomEntry: {
@@ -5632,6 +7140,8 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            428: components["responses"]["LegalAcceptanceRequired"];
+            503: components["responses"]["CommerceUnavailable"];
         };
     };
     bindOwnPaidKujiSlots: {
@@ -5678,6 +7188,8 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            428: components["responses"]["LegalAcceptanceRequired"];
+            503: components["responses"]["CommerceUnavailable"];
         };
     };
     createOrder: {
@@ -5705,13 +7217,8 @@ export interface operations {
                 };
             };
             409: components["responses"]["Conflict"];
-            /** @description Payment provider is not configured; no order or reservation is created. */
-            503: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
+            428: components["responses"]["LegalAcceptanceRequired"];
+            503: components["responses"]["CommerceUnavailable"];
         };
     };
     getOrder: {
@@ -5735,6 +7242,7 @@ export interface operations {
                 };
             };
             404: components["responses"]["NotFound"];
+            428: components["responses"]["LegalAcceptanceRequired"];
         };
     };
     getOwnPaidGachaDrawCompletion: {
@@ -5762,6 +7270,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            428: components["responses"]["LegalAcceptanceRequired"];
         };
     };
     getOwnPaidKujiDrawRecovery: {
@@ -5789,6 +7298,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            428: components["responses"]["LegalAcceptanceRequired"];
         };
     };
     getOwnPaidKujiSelection: {
@@ -5816,6 +7326,92 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            428: components["responses"]["LegalAcceptanceRequired"];
+        };
+    };
+    confirmOwnPortOnePayment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                paymentId: components["parameters"]["PaymentId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Fresh provider state was reconciled, or the payment is still pending. */
+            200: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortOnePaymentConfirmation"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            428: components["responses"]["LegalAcceptanceRequired"];
+            /** @description PortOne could not be queried or its response failed contract validation. */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Commerce is unavailable in PRELAUNCH, or the PortOne production channel is not configured. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    receivePortOnePaymentWebhook: {
+        parameters: {
+            query?: never;
+            header: {
+                "webhook-id": string;
+                "webhook-signature": string;
+                "webhook-timestamp": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                };
+            };
+        };
+        responses: {
+            /** @description Verified notification accepted and provider state reconciled or still pending. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            /** @description Webhook body exceeds the bounded verification size. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            503: components["responses"]["CommerceUnavailable"];
         };
     };
     receivePaymentWebhook: {
@@ -5843,6 +7439,7 @@ export interface operations {
                 content?: never;
             };
             401: components["responses"]["Unauthorized"];
+            503: components["responses"]["CommerceUnavailable"];
         };
     };
     consumeDrawEntitlement: {
@@ -5868,6 +7465,8 @@ export interface operations {
                 };
             };
             409: components["responses"]["Conflict"];
+            428: components["responses"]["LegalAcceptanceRequired"];
+            503: components["responses"]["CommerceUnavailable"];
         };
     };
     getAccountProfile: {
@@ -5889,6 +7488,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            428: components["responses"]["LegalAcceptanceRequired"];
         };
     };
     updateAccountProfile: {
@@ -5916,6 +7516,7 @@ export interface operations {
                 };
             };
             409: components["responses"]["Conflict"];
+            428: components["responses"]["LegalAcceptanceRequired"];
         };
     };
     getAccountBasicInfo: {
@@ -5937,6 +7538,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            428: components["responses"]["LegalAcceptanceRequired"];
         };
     };
     updateAccountBasicInfo: {
@@ -5966,6 +7568,8 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             409: components["responses"]["Conflict"];
+            428: components["responses"]["LegalAcceptanceRequired"];
+            503: components["responses"]["CommerceUnavailable"];
         };
     };
     getDefaultShippingAddress: {
@@ -5987,6 +7591,7 @@ export interface operations {
                 };
             };
             404: components["responses"]["NotFound"];
+            428: components["responses"]["LegalAcceptanceRequired"];
         };
     };
     upsertDefaultShippingAddress: {
@@ -6023,6 +7628,7 @@ export interface operations {
                 };
             };
             409: components["responses"]["Conflict"];
+            428: components["responses"]["LegalAcceptanceRequired"];
         };
     };
     listAccountInventory: {
@@ -6048,6 +7654,32 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
+            428: components["responses"]["LegalAcceptanceRequired"];
+        };
+    };
+    getAccountOwnedProduct: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                productId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Canonical product detail for a prize currently or historically owned by the authenticated user. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CatalogProduct"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            428: components["responses"]["LegalAcceptanceRequired"];
         };
     };
     listWishlist: {
@@ -6071,6 +7703,7 @@ export interface operations {
                     "application/json": components["schemas"]["WishlistPage"];
                 };
             };
+            428: components["responses"]["LegalAcceptanceRequired"];
         };
     };
     addWishlistItem: {
@@ -6096,6 +7729,7 @@ export interface operations {
                 };
             };
             404: components["responses"]["NotFound"];
+            428: components["responses"]["LegalAcceptanceRequired"];
         };
     };
     removeWishlistItem: {
@@ -6120,6 +7754,7 @@ export interface operations {
                     "application/json": components["schemas"]["WishlistMutationResult"];
                 };
             };
+            428: components["responses"]["LegalAcceptanceRequired"];
         };
     };
     listAccountOrders: {
@@ -6143,6 +7778,7 @@ export interface operations {
                     "application/json": components["schemas"]["AccountOrderPage"];
                 };
             };
+            428: components["responses"]["LegalAcceptanceRequired"];
         };
     };
     listAccountDrawEntitlements: {
@@ -6170,6 +7806,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
+            428: components["responses"]["LegalAcceptanceRequired"];
         };
     };
     listAccountPointLedger: {
@@ -6193,6 +7830,7 @@ export interface operations {
                     "application/json": components["schemas"]["AccountPointPage"];
                 };
             };
+            428: components["responses"]["LegalAcceptanceRequired"];
         };
     };
     createAccountPointReturn: {
@@ -6222,6 +7860,8 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             409: components["responses"]["Conflict"];
+            428: components["responses"]["LegalAcceptanceRequired"];
+            503: components["responses"]["CommerceUnavailable"];
         };
     };
     getAccountNotificationPreferences: {
@@ -6243,6 +7883,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            428: components["responses"]["LegalAcceptanceRequired"];
         };
     };
     updateAccountNotificationPreferences: {
@@ -6272,6 +7913,7 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             409: components["responses"]["Conflict"];
+            428: components["responses"]["LegalAcceptanceRequired"];
         };
     };
     listAccountNotifications: {
@@ -6295,6 +7937,55 @@ export interface operations {
                     "application/json": components["schemas"]["NotificationPage"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
+            428: components["responses"]["LegalAcceptanceRequired"];
+        };
+    };
+    getAccountNotificationUnreadSummary: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Authoritative unread notification count for the current user. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationUnreadSummary"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            428: components["responses"]["LegalAcceptanceRequired"];
+        };
+    };
+    getAccountNotification: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                notificationId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description One notification owned by the current user. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountNotification"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            428: components["responses"]["LegalAcceptanceRequired"];
         };
     };
     markAccountNotificationRead: {
@@ -6319,7 +8010,88 @@ export interface operations {
                     "application/json": components["schemas"]["AccountNotification"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
+            428: components["responses"]["LegalAcceptanceRequired"];
+        };
+    };
+    registerAccountPushDevice: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RegisterPushDeviceInput"];
+            };
+        };
+        responses: {
+            /** @description The current installation is bound to the authenticated user session; prior ownership is disabled. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PushDeviceRegistration"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            428: components["responses"]["LegalAcceptanceRequired"];
+        };
+    };
+    unregisterAccountPushDevice: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                installationId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Push delivery is disabled for this installation if it belongs to the current user. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            428: components["responses"]["LegalAcceptanceRequired"];
+        };
+    };
+    createAccountShippingQuote: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateShippingQuoteInput"];
+            };
+        };
+        responses: {
+            /** @description Ten-minute server-priced quote bound to the current default-address version and selected inventory. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShippingQuote"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            409: components["responses"]["Conflict"];
+            428: components["responses"]["LegalAcceptanceRequired"];
+            503: components["responses"]["CommerceUnavailable"];
         };
     };
     listAccountShippingRequests: {
@@ -6346,6 +8118,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
+            428: components["responses"]["LegalAcceptanceRequired"];
         };
     };
     createAccountShippingRequest: {
@@ -6363,7 +8136,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Owned inventory is atomically moved to shipping with an immutable address snapshot. */
+            /** @description The unexpired quote is consumed and owned inventory is atomically moved to shipping with an immutable address snapshot. */
             201: {
                 headers: {
                     [name: string]: unknown;
@@ -6372,7 +8145,11 @@ export interface operations {
                     "application/json": components["schemas"]["ShippingRequest"];
                 };
             };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
             409: components["responses"]["Conflict"];
+            428: components["responses"]["LegalAcceptanceRequired"];
+            503: components["responses"]["CommerceUnavailable"];
         };
     };
     getAccountShippingRequest: {
@@ -6392,11 +8169,88 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["AccountShippingRequest"];
+                    "application/json": components["schemas"]["AccountShippingRequestDetail"];
                 };
             };
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
+            428: components["responses"]["LegalAcceptanceRequired"];
+        };
+    };
+    getAccountPolicyAcceptances: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current published policy versions and this user's latest explicit acceptance time. */
+            200: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountPolicyAcceptanceStatus"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    acceptCurrentAccountPolicies: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CurrentPolicyAcceptanceInput"];
+            };
+        };
+        responses: {
+            /** @description Current policies accepted. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Submitted versions are not the exact currently published versions. */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LegalAcceptanceRequiredErrorEnvelope"];
+                };
+            };
+        };
+    };
+    previewAccountDeletion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current deletion blockers checked without mutating the account. */
+            200: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountDeletionPreview"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
         };
     };
     getAccountDeletionRequest: {
@@ -6411,6 +8265,7 @@ export interface operations {
             /** @description Most recent account deletion request owned by the current user. */
             200: {
                 headers: {
+                    "Cache-Control"?: "no-store";
                     [name: string]: unknown;
                 };
                 content: {
@@ -6436,17 +8291,45 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Manual-review deletion request recorded or reassessed and all user sessions revoked. */
+            /** @description Deletion is blocked for the customer to resolve, or safely queued with all sessions revoked. */
             202: {
                 headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountDeletionReceipt"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    getAccountDeletionStatusByReceipt: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-Deletion-Status-Token": string;
+            };
+            path: {
+                requestId: components["parameters"]["AccountDeletionRequestId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current deletion state. */
+            200: {
+                headers: {
+                    "Cache-Control"?: "no-store";
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["AccountDeletionRequest"];
                 };
             };
-            401: components["responses"]["Unauthorized"];
-            409: components["responses"]["Conflict"];
+            404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
         };
     };
     listAdminDrawVersions: {
@@ -6477,6 +8360,7 @@ export interface operations {
             query?: never;
             header: {
                 "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description ASCII reasons remain compatible. For non-ASCII text, percent-encode UTF-8 and also send X-Admin-Reason-Encoding as utf-8-percent. */
                 "X-Admin-Reason": components["parameters"]["AdminReason"];
             };
             path: {
@@ -6506,6 +8390,7 @@ export interface operations {
             query?: never;
             header: {
                 "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description ASCII reasons remain compatible. For non-ASCII text, percent-encode UTF-8 and also send X-Admin-Reason-Encoding as utf-8-percent. */
                 "X-Admin-Reason": components["parameters"]["AdminReason"];
             };
             path: {
@@ -6616,6 +8501,7 @@ export interface operations {
             query?: never;
             header: {
                 "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description ASCII reasons remain compatible. For non-ASCII text, percent-encode UTF-8 and also send X-Admin-Reason-Encoding as utf-8-percent. */
                 "X-Admin-Reason": components["parameters"]["AdminReason"];
             };
             path: {
@@ -6668,6 +8554,7 @@ export interface operations {
             query?: never;
             header: {
                 "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description ASCII reasons remain compatible. For non-ASCII text, percent-encode UTF-8 and also send X-Admin-Reason-Encoding as utf-8-percent. */
                 "X-Admin-Reason": components["parameters"]["AdminReason"];
             };
             path?: never;
@@ -6696,6 +8583,7 @@ export interface operations {
             query?: never;
             header: {
                 "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description ASCII reasons remain compatible. For non-ASCII text, percent-encode UTF-8 and also send X-Admin-Reason-Encoding as utf-8-percent. */
                 "X-Admin-Reason": components["parameters"]["AdminReason"];
             };
             path: {
@@ -6751,6 +8639,7 @@ export interface operations {
             query?: never;
             header: {
                 "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description ASCII reasons remain compatible. For non-ASCII text, percent-encode UTF-8 and also send X-Admin-Reason-Encoding as utf-8-percent. */
                 "X-Admin-Reason": components["parameters"]["AdminReason"];
             };
             path?: never;
@@ -6778,6 +8667,7 @@ export interface operations {
             query?: never;
             header: {
                 "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description ASCII reasons remain compatible. For non-ASCII text, percent-encode UTF-8 and also send X-Admin-Reason-Encoding as utf-8-percent. */
                 "X-Admin-Reason": components["parameters"]["AdminReason"];
             };
             path: {
@@ -6805,6 +8695,7 @@ export interface operations {
             query?: never;
             header: {
                 "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description ASCII reasons remain compatible. For non-ASCII text, percent-encode UTF-8 and also send X-Admin-Reason-Encoding as utf-8-percent. */
                 "X-Admin-Reason": components["parameters"]["AdminReason"];
             };
             path: {
@@ -6834,6 +8725,7 @@ export interface operations {
             query?: never;
             header: {
                 "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description ASCII reasons remain compatible. For non-ASCII text, percent-encode UTF-8 and also send X-Admin-Reason-Encoding as utf-8-percent. */
                 "X-Admin-Reason": components["parameters"]["AdminReason"];
             };
             path: {
@@ -6864,6 +8756,7 @@ export interface operations {
             query?: never;
             header: {
                 "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description ASCII reasons remain compatible. For non-ASCII text, percent-encode UTF-8 and also send X-Admin-Reason-Encoding as utf-8-percent. */
                 "X-Admin-Reason": components["parameters"]["AdminReason"];
             };
             path: {
@@ -6946,6 +8839,7 @@ export interface operations {
             query?: never;
             header: {
                 "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description ASCII reasons remain compatible. For non-ASCII text, percent-encode UTF-8 and also send X-Admin-Reason-Encoding as utf-8-percent. */
                 "X-Admin-Reason": components["parameters"]["AdminReason"];
             };
             path: {
@@ -7003,6 +8897,7 @@ export interface operations {
             query?: never;
             header: {
                 "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description ASCII reasons remain compatible. For non-ASCII text, percent-encode UTF-8 and also send X-Admin-Reason-Encoding as utf-8-percent. */
                 "X-Admin-Reason": components["parameters"]["AdminReason"];
             };
             path: {
@@ -7057,6 +8952,7 @@ export interface operations {
             query?: never;
             header: {
                 "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description ASCII reasons remain compatible. For non-ASCII text, percent-encode UTF-8 and also send X-Admin-Reason-Encoding as utf-8-percent. */
                 "X-Admin-Reason": components["parameters"]["AdminReason"];
             };
             path: {
@@ -7087,10 +8983,10 @@ export interface operations {
                 cursor?: components["parameters"]["Cursor"];
                 limit?: components["parameters"]["Limit"];
                 status?: components["schemas"]["ReportStatus"];
-                targetType?: "POST" | "COMMENT" | "SNAP" | "USER" | "EXCHANGE_LISTING";
+                targetType?: "POST" | "COMMENT" | "SNAP" | "USER" | "EXCHANGE_LISTING" | "WANTED_REQUEST";
                 targetId?: string;
                 reporterId?: string;
-                /** @description 회원 본인과 그 회원이 작성한 게시글, Snap, 댓글, 교환 글을 대상으로 한 신고만 조회합니다. */
+                /** @description 회원 본인과 그 회원이 작성한 게시글, Snap, 댓글, 교환 글, 신청 글을 대상으로 한 신고만 조회합니다. */
                 subjectUserId?: string;
             };
             header?: never;
@@ -7115,6 +9011,7 @@ export interface operations {
             query?: never;
             header: {
                 "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description ASCII reasons remain compatible. For non-ASCII text, percent-encode UTF-8 and also send X-Admin-Reason-Encoding as utf-8-percent. */
                 "X-Admin-Reason": components["parameters"]["AdminReason"];
             };
             path: {
@@ -7145,6 +9042,7 @@ export interface operations {
             query?: never;
             header: {
                 "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description ASCII reasons remain compatible. For non-ASCII text, percent-encode UTF-8 and also send X-Admin-Reason-Encoding as utf-8-percent. */
                 "X-Admin-Reason": components["parameters"]["AdminReason"];
             };
             path: {
@@ -7196,6 +9094,7 @@ export interface operations {
             query?: never;
             header: {
                 "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description ASCII reasons remain compatible. For non-ASCII text, percent-encode UTF-8 and also send X-Admin-Reason-Encoding as utf-8-percent. */
                 "X-Admin-Reason": components["parameters"]["AdminReason"];
             };
             path?: never;
@@ -7226,6 +9125,7 @@ export interface operations {
             query?: never;
             header: {
                 "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description ASCII reasons remain compatible. For non-ASCII text, percent-encode UTF-8 and also send X-Admin-Reason-Encoding as utf-8-percent. */
                 "X-Admin-Reason": components["parameters"]["AdminReason"];
             };
             path: {
@@ -7246,6 +9146,61 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AdminHomeCatalogSection"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    listAdminStorefrontCategorySettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Full storefront category presentation configuration. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StorefrontCategorySettingList"];
+                };
+            };
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    updateAdminStorefrontCategorySetting: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description ASCII reasons remain compatible. For non-ASCII text, percent-encode UTF-8 and also send X-Admin-Reason-Encoding as utf-8-percent. */
+                "X-Admin-Reason": components["parameters"]["AdminReason"];
+            };
+            path: {
+                category: components["schemas"]["ProductCategory"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateStorefrontCategorySettingInput"];
+            };
+        };
+        responses: {
+            /** @description Storefront category setting updated and audited. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StorefrontCategorySetting"];
                 };
             };
             400: components["responses"]["BadRequest"];
@@ -7283,6 +9238,7 @@ export interface operations {
             query?: never;
             header: {
                 "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description ASCII reasons remain compatible. For non-ASCII text, percent-encode UTF-8 and also send X-Admin-Reason-Encoding as utf-8-percent. */
                 "X-Admin-Reason": components["parameters"]["AdminReason"];
             };
             path?: never;
@@ -7310,6 +9266,7 @@ export interface operations {
             query?: never;
             header: {
                 "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description ASCII reasons remain compatible. For non-ASCII text, percent-encode UTF-8 and also send X-Admin-Reason-Encoding as utf-8-percent. */
                 "X-Admin-Reason": components["parameters"]["AdminReason"];
             };
             path: {
@@ -7364,6 +9321,7 @@ export interface operations {
             query?: never;
             header: {
                 "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description ASCII reasons remain compatible. For non-ASCII text, percent-encode UTF-8 and also send X-Admin-Reason-Encoding as utf-8-percent. */
                 "X-Admin-Reason": components["parameters"]["AdminReason"];
             };
             path?: never;
@@ -7391,6 +9349,7 @@ export interface operations {
             query?: never;
             header: {
                 "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description ASCII reasons remain compatible. For non-ASCII text, percent-encode UTF-8 and also send X-Admin-Reason-Encoding as utf-8-percent. */
                 "X-Admin-Reason": components["parameters"]["AdminReason"];
             };
             path: {
@@ -7426,6 +9385,8 @@ export interface operations {
                 characterId?: string;
                 /** @description Filter by immutable prize-only catalog role. */
                 prizeOnly?: boolean;
+                /** @description Filter by explicit storefront lifecycle. */
+                saleStatus?: components["schemas"]["ProductSaleStatus"];
             };
             header?: never;
             path?: never;
@@ -7449,6 +9410,7 @@ export interface operations {
             query?: never;
             header: {
                 "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description ASCII reasons remain compatible. For non-ASCII text, percent-encode UTF-8 and also send X-Admin-Reason-Encoding as utf-8-percent. */
                 "X-Admin-Reason": components["parameters"]["AdminReason"];
             };
             path?: never;
@@ -7499,6 +9461,7 @@ export interface operations {
             query?: never;
             header: {
                 "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description ASCII reasons remain compatible. For non-ASCII text, percent-encode UTF-8 and also send X-Admin-Reason-Encoding as utf-8-percent. */
                 "X-Admin-Reason": components["parameters"]["AdminReason"];
             };
             path: {
@@ -7520,6 +9483,83 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["CatalogProduct"];
                 };
+            };
+        };
+    };
+    clearAdminProductStorefrontImage: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description ASCII reasons remain compatible. For non-ASCII text, percent-encode UTF-8 and also send X-Admin-Reason-Encoding as utf-8-percent. */
+                "X-Admin-Reason": components["parameters"]["AdminReason"];
+            };
+            path: {
+                productId: components["parameters"]["ProductId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProductImageClearInput"];
+            };
+        };
+        responses: {
+            /** @description Clears only the product storefront/list image, preserves the primary image, and increments the product version. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProductImageClearResult"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    attachAdminProductImage: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description ASCII reasons remain compatible. For non-ASCII text, percent-encode UTF-8 and also send X-Admin-Reason-Encoding as utf-8-percent. */
+                "X-Admin-Reason": components["parameters"]["AdminReason"];
+            };
+            path: {
+                productId: components["parameters"]["ProductId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProductImageAttachInput"];
+            };
+        };
+        responses: {
+            /** @description Atomically attaches owned READY CATALOG media through its stable server-controlled delivery URL and increments only the product version. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProductImageAttachment"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            /** @description Stable catalog media delivery is not configured. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
@@ -7554,6 +9594,7 @@ export interface operations {
             query?: never;
             header: {
                 "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description ASCII reasons remain compatible. For non-ASCII text, percent-encode UTF-8 and also send X-Admin-Reason-Encoding as utf-8-percent. */
                 "X-Admin-Reason": components["parameters"]["AdminReason"];
             };
             path: {
@@ -7584,7 +9625,7 @@ export interface operations {
                 cursor?: components["parameters"]["Cursor"];
                 limit?: components["parameters"]["Limit"];
                 q?: string;
-                status?: "OPEN" | "PENDING_REVIEW" | "BLOCKED" | "APPROVED" | "COMPLETED" | "REJECTED" | "CANCELLED";
+                status?: "OPEN" | "PENDING_REVIEW" | "BLOCKED" | "PROCESSING" | "APPROVED" | "COMPLETED" | "REJECTED" | "CANCELLED";
             };
             header?: never;
             path?: never;
@@ -7615,7 +9656,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Account deletion request, current blockers, and immutable review events. */
+            /** @description Account deletion request, current blockers, automatic worker state, and immutable review events. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -7633,6 +9674,7 @@ export interface operations {
             query?: never;
             header: {
                 "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description ASCII reasons remain compatible. For non-ASCII text, percent-encode UTF-8 and also send X-Admin-Reason-Encoding as utf-8-percent. */
                 "X-Admin-Reason": components["parameters"]["AdminReason"];
             };
             path: {
@@ -7646,7 +9688,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Account deletion review decision committed and audited without performing a hard delete. */
+            /** @description Exceptional administrator rejection committed and audited. Customer-requested deletion never requires administrator approval. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -7658,6 +9700,38 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+        };
+    };
+    completeAdminAccountDeletion: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description ASCII reasons remain compatible. For non-ASCII text, percent-encode UTF-8 and also send X-Admin-Reason-Encoding as utf-8-percent. */
+                "X-Admin-Reason": components["parameters"]["AdminReason"];
+            };
+            path: {
+                requestId: components["parameters"]["AccountDeletionRequestId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CompleteAccountDeletionInput"];
+            };
+        };
+        responses: {
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description This legacy endpoint is disabled because the server worker completes deletion automatically. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
         };
     };
     listAdminCommerceOrders: {
@@ -7817,6 +9891,7 @@ export interface operations {
             query?: never;
             header: {
                 "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description ASCII reasons remain compatible. For non-ASCII text, percent-encode UTF-8 and also send X-Admin-Reason-Encoding as utf-8-percent. */
                 "X-Admin-Reason": components["parameters"]["AdminReason"];
             };
             path: {
@@ -7899,6 +9974,7 @@ export interface operations {
             query?: never;
             header: {
                 "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description ASCII reasons remain compatible. For non-ASCII text, percent-encode UTF-8 and also send X-Admin-Reason-Encoding as utf-8-percent. */
                 "X-Admin-Reason": components["parameters"]["AdminReason"];
             };
             path: {
@@ -7981,6 +10057,7 @@ export interface operations {
             query?: never;
             header: {
                 "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description ASCII reasons remain compatible. For non-ASCII text, percent-encode UTF-8 and also send X-Admin-Reason-Encoding as utf-8-percent. */
                 "X-Admin-Reason": components["parameters"]["AdminReason"];
             };
             path: {

@@ -6,6 +6,8 @@ export const colors = {
   line: "#D9DDD5",
   brand: "#91E98E",
   greenInk: "#176F2A",
+  kujiOrange: "#F36B2C",
+  kujiOrangeDark: "#A83C15",
   black: "#07100B",
   white: "#FFFFFF",
   danger: "#A3362B",

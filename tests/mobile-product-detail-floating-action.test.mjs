@@ -17,12 +17,12 @@ const floatingPanelSource = readFileSync(
 test("native Product Detail keeps its commerce action in a floating content overlay", () => {
   assert.match(floatingPanelSource, /useSafeAreaInsets/);
   assert.match(floatingPanelSource, /const insets = useSafeAreaInsets\(\)/);
-  assert.match(source, /edges=\{\["top", "left", "right"\]\}/);
+  assert.match(source, /edges=\{readOnlyReference \|\| productComingSoon \? \["top", "bottom", "left", "right"\] : \["top", "left", "right"\]\}/);
   assert.match(
     source,
-    /contentContainerStyle=\{\[styles\.content, \{ paddingBottom: floatingBottomInset \}\]\}/,
+    /paddingBottom: readOnlyReference \? seed\.spacing\.screenBottom : floatingBottomInset/,
   );
-  assert.match(source, /<FloatingBottomActionPanel panelStyle=\{styles\.footer\}>/);
+  assert.match(source, /!readOnlyReference \? <FloatingBottomActionPanel panelStyle=\{styles\.footer\}>/);
   assert.match(floatingPanelSource, /pointerEvents="box-none"/);
   assert.match(
     floatingPanelSource,
@@ -30,7 +30,7 @@ test("native Product Detail keeps its commerce action in a floating content over
   );
   assert.match(
     floatingPanelSource,
-    /panel:\s*\{[\s\S]*?borderRadius: 22[\s\S]*?backgroundColor: "rgba\(252, 252, 248, 0\.94\)"[\s\S]*?shadowOpacity: 0\.12[\s\S]*?elevation: 10/,
+    /panel:\s*\{[\s\S]*?borderRadius: seed\.radius\.r5_5[\s\S]*?backgroundColor: "rgba\(252, 252, 248, 0\.94\)"[\s\S]*?shadowOpacity: 0\.12[\s\S]*?elevation: 10/,
   );
   assert.doesNotMatch(source, /footerLayer|footer:\s*\{[^}]*borderTopWidth/);
   assert.match(source, /quantityButton:\s*\{ width: seed\.size\.touchTarget/);
@@ -41,4 +41,22 @@ test("native Product Detail keeps its commerce action in a floating content over
   assert.match(source, /isDrawCategory\(product\.category\) \? null : <Text style=\{styles\.primaryButtonMeta\}>/);
   assert.match(source, /isDrawCategory\(product\.category\) \? "뽑으러 가기" : "구매 준비"/);
   assert.match(source, /primaryButtonCentered:\s*\{ justifyContent: "center" \}/);
+  assert.match(source, /style=\{\(\{ pressed \}\) => \[styles\.quantityButton, pressed && styles\.pressed\]\}/);
+  assert.match(source, /pressedTranslateY/);
+  assert.match(source, /pressedScale/);
+});
+
+test("native Product Detail bounds category artwork and leads with prize information", () => {
+  assert.match(source, /import \{ CatalogProductImage \} from "@\/components\/CatalogProductImage"/);
+  assert.match(source, /product\.category === "kuji" \? styles\.heroKuji : styles\.heroGacha/);
+  assert.match(source, /heroGacha:\s*\{[^}]*aspectRatio:\s*4\s*\/\s*3/);
+  assert.match(source, /heroKuji:\s*\{[^}]*aspectRatio:\s*16\s*\/\s*9/);
+  assert.match(source, /<CatalogProductImage[\s\S]*?resizeMode="contain"/);
+  assert.doesNotMatch(source, /Image\.getSize|setImageAspectRatio/);
+
+  const detailIndex = source.indexOf("<View style={styles.detailCopy}>");
+  const oddsIndex = source.indexOf("<OddsSection snapshot={snapshot} />");
+  const guidanceIndex = source.indexOf("<CommerceGuidance");
+  assert.ok(detailIndex >= 0 && oddsIndex > detailIndex && guidanceIndex > oddsIndex);
+  assert.match(source, /accessibilityState=\{\{ expanded \}\}/);
 });

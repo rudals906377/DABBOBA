@@ -11,9 +11,9 @@ import { GACHA_CLOSEUP_DURATION_MS } from "../apps/mobile/src/features/draw/gach
 
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url));
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
-const manifest = JSON.parse(read("apps/mobile/assets/gacha-capsule-reveal-atlas-v1.json"));
-const atlasPng = read("apps/mobile/assets/gacha-capsule-reveal-atlas-v1.png");
-const wordmarkPng = read("apps/mobile/assets/dabboba-wordmark.png");
+const manifest = JSON.parse(read("apps/mobile/assets/draw/gacha/gacha-capsule-reveal-atlas-v1.json"));
+const atlasPng = read("apps/mobile/assets/draw/gacha/gacha-capsule-reveal-atlas-v1.png");
+const wordmarkPng = read("apps/mobile/assets/brand/dabboba-wordmark.png");
 const revealTimeline = read("apps/mobile/src/features/draw/gacha-reveal-timeline.ts");
 const generator = read("scripts/generate-gacha-capsule-reveal-atlas.ts").toString("utf8");
 
@@ -153,7 +153,7 @@ test("atlas records the exact analytical shader, reveal timeline, and canonical 
   );
   assert.match(generator, /CAPSULE_3D_FRAGMENT_SHADER/);
   assert.match(generator, /sampleGachaRevealLighting/);
-  assert.match(generator, /apps\/mobile\/assets\/dabboba-wordmark\.png/);
+  assert.match(generator, /apps\/mobile\/assets\/brand\/dabboba-wordmark\.png/);
   assert.doesNotMatch(generator, /fillText|strokeText|Math\.random/);
 });
 

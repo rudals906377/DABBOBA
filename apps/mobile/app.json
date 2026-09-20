@@ -2,29 +2,50 @@
   "expo": {
     "name": "DABBOBA",
     "slug": "dabboba-mobile",
-    "version": "0.1.0",
+    "version": "1.0.0",
+    "icon": "./assets/icons/app-icon.png",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
     "scheme": "dabboba",
     "ios": {
-      "supportsTablet": true,
-      "bundleIdentifier": "com.dabboba.mobile"
+      "supportsTablet": false,
+      "bundleIdentifier": "com.dabboba.mobile",
+      "buildNumber": "1",
+      "config": {
+        "usesNonExemptEncryption": false
+      }
     },
     "android": {
-      "package": "com.dabboba.mobile"
+      "package": "com.dabboba.mobile",
+      "versionCode": 1,
+      "allowBackup": false,
+      "blockedPermissions": [
+        "android.permission.SYSTEM_ALERT_WINDOW",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE"
+      ],
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/icons/adaptive-icon-foreground.png",
+        "backgroundColor": "#91E98E"
+      }
     },
     "plugins": [
       [
         "expo-splash-screen",
         {
-          "image": "./assets/dabboba-wordmark.png",
+          "image": "./assets/brand/dabboba-wordmark.png",
           "imageWidth": 200,
           "resizeMode": "contain",
           "backgroundColor": "#F5F5F1"
         }
       ],
       "expo-router",
-      "expo-secure-store",
+      [
+        "expo-secure-store",
+        {
+          "faceIDPermission": false
+        }
+      ],
       "expo-sqlite",
       "expo-font",
       [
@@ -36,10 +57,19 @@
         }
       ],
       "expo-notifications",
-      "expo-web-browser"
+      "expo-web-browser",
+      "expo-asset",
+      "@portone/react-native-sdk/plugin"
     ],
     "experiments": {
       "typedRoutes": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "fa48d52e-3b3c-4e2b-82d5-ae0726382587"
+      }
+    },
+    "owner": "dabboba-team"
   }
 }

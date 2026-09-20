@@ -1,13 +1,17 @@
 export type MobilePlatform = "ios" | "android";
 
+export type CommerceCapability = "PRELAUNCH" | "LIVE";
+
 export type MobileRuntimeConfig = {
   apiBaseUrl: string;
   assetBaseUrl: string | null;
+  commerceCapability: CommerceCapability;
 };
 
 type RuntimeConfigInput = {
   configuredApiUrl?: string;
   configuredAssetBaseUrl?: string;
+  configuredCommerceCapability?: string;
   metroHostUri?: string;
   platform: MobilePlatform;
   development: boolean;
@@ -15,7 +19,12 @@ type RuntimeConfigInput = {
 
 export function resolveMobileRuntimeConfig(input: RuntimeConfigInput): MobileRuntimeConfig {
   const apiUrl = input.configuredApiUrl?.trim()
-    ? parseRuntimeUrl(input.configuredApiUrl, input.development, "EXPO_PUBLIC_DABBOBA_API_URL")
+    ? parseRuntimeUrl(
+        input.configuredApiUrl,
+        input.development,
+        "EXPO_PUBLIC_DABBOBA_API_URL",
+        true,
+      )
     : developmentApiUrl(input);
   const assetUrl = input.configuredAssetBaseUrl?.trim()
     ? parseRuntimeUrl(
@@ -30,7 +39,23 @@ export function resolveMobileRuntimeConfig(input: RuntimeConfigInput): MobileRun
   return {
     apiBaseUrl: stripTrailingSlash(apiUrl.toString()),
     assetBaseUrl: assetUrl ? stripTrailingSlash(assetUrl.toString()) : null,
+    commerceCapability: resolveCommerceCapability(input.configuredCommerceCapability),
   };
+}
+
+/**
+ * Commerce is deliberately fail-closed. A build with no explicit capability is
+ * a PRELAUNCH catalog build and cannot be turned into a payment build remotely.
+ */
+export function resolveCommerceCapability(value: string | undefined): CommerceCapability {
+  return value?.trim().toUpperCase() === "LIVE" ? "LIVE" : "PRELAUNCH";
+}
+
+export function mostRestrictiveCommerceCapability(
+  buildCapability: CommerceCapability,
+  serverCapability: CommerceCapability | null | undefined,
+): CommerceCapability {
+  return buildCapability === "LIVE" && serverCapability === "LIVE" ? "LIVE" : "PRELAUNCH";
 }
 
 export function resolveCatalogImageUrl(
@@ -77,15 +102,30 @@ function metroHost(hostUri: string | undefined): string | null {
   }
 }
 
-function parseRuntimeUrl(raw: string, development: boolean, label: string): URL {
+function parseRuntimeUrl(
+  raw: string,
+  development: boolean,
+  label: string,
+  allowBasePath = false,
+): URL {
   let url: URL;
   try {
     url = new URL(raw.trim());
   } catch {
     throw new Error(`${label} 주소 형식을 확인해 주세요.`);
   }
-  if (url.username || url.password || url.search || url.hash || url.pathname !== "/") {
-    throw new Error(`${label}에는 origin만 입력해 주세요.`);
+  const encodedPathSeparator = /%2f|%5c/i.test(raw);
+  if (
+    url.username
+    || url.password
+    || url.search
+    || url.hash
+    || encodedPathSeparator
+    || (!allowBasePath && url.pathname !== "/")
+  ) {
+    throw new Error(allowBasePath
+      ? `${label}에는 안전한 API 기본 주소만 입력해 주세요.`
+      : `${label}에는 origin만 입력해 주세요.`);
   }
   if (url.protocol === "https:") return url;
   if (url.protocol !== "http:" || !development || !isLocalDevelopmentHost(url.hostname)) {

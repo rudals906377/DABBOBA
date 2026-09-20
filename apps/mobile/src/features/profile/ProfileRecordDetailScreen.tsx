@@ -1,8 +1,8 @@
-import { Ionicons } from "@expo/vector-icons";
-import { type Href, useLocalSearchParams, useRouter } from "expo-router";
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { type Href, useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import {
   ActivityIndicator,
+  Image,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -11,20 +11,27 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import type { components } from "@dabboba/contracts";
+import { DecorativeIonicon, type DecorativeIoniconName } from "@/components/DecorativeIonicon";
+import { DetailPageHeader } from "@/components/DetailPageHeader";
 import { KoreanPixelTitle } from "@/components/RootCategoryTitle";
 import { AppText as Text } from "@/components/Typography";
 import { SeedInlineGuidance } from "@/design-system/components";
 import { seed } from "@/design-system/seed";
+import { DemoPaymentControls } from "@/features/demo/DemoPaymentControls";
 import {
   fetchAccountShippingRequestDetail,
-  type AccountShippingRequest,
+  type AccountShippingRequestDetail,
 } from "@/features/profile/profile-detail-api";
-import { categoryLabel, formatDate } from "@/features/profile/profile-api";
+import { categoryLabel, formatDate, ProfileApiError } from "@/features/profile/profile-api";
 import { useProfileSnapshot } from "@/features/profile/use-profile-snapshot";
+import { ProfileSessionGate, isProfileSessionBlocked } from "@/features/profile/ProfileSessionGate";
 import { productSubjectTitle } from "@/features/shop/product-title";
+import { resolveCatalogImageUrl } from "@/lib/runtime-config";
+import { readAuthTokens } from "@/lib/session-store";
 import { colors } from "@/theme";
 
 type AccountOrder = components["schemas"]["AccountOrder"];
+type AccountShippingRequest = components["schemas"]["AccountShippingRequest"];
 type Notice = components["schemas"]["Notice"];
 
 const ORDER_STATUS: Record<AccountOrder["status"], string> = {
@@ -37,6 +44,7 @@ const ORDER_STATUS: Record<AccountOrder["status"], string> = {
 };
 
 const SHIPPING_STATUS: Record<AccountShippingRequest["status"], string> = {
+  PAYMENT_PENDING: "배송비 결제 대기",
   REQUESTED: "신청 완료",
   PROCESSING: "배송 준비",
   SHIPPED: "배송 중",
@@ -45,11 +53,14 @@ const SHIPPING_STATUS: Record<AccountShippingRequest["status"], string> = {
 };
 
 export function ProfileOrderDetailScreen() {
-  const { orderId: rawOrderId } = useLocalSearchParams<{ orderId?: string | string[] }>();
+  const { orderId: rawOrderId } = useLocalSearchParams<{
+    orderId?: string | string[];
+  }>();
   const orderId = singleParam(rawOrderId);
   const profileState = useProfileSnapshot();
   const snapshot = profileState.snapshot;
   const order = snapshot?.orders.find((item) => item.id === orderId) ?? null;
+  const blockedStatus = isProfileSessionBlocked(profileState.status) ? profileState.status : null;
 
   return (
     <RecordFrame
@@ -58,6 +69,7 @@ export function ProfileOrderDetailScreen() {
       refreshing={profileState.refreshing}
       onRefresh={profileState.reload}
     >
+      {blockedStatus ? <ProfileSessionGate status={blockedStatus} returnTo={`/profile/orders/${encodeURIComponent(orderId)}`} guestBody="로그인하면 내 주문 상세를 확인할 수 있어요." /> : <>
       {!snapshot && !profileState.message ? <LoadingState label="주문을 불러오는 중" /> : null}
       {!order && profileState.message ? (
         <ErrorState message={profileState.message} onRetry={profileState.reload} />
@@ -69,9 +81,13 @@ export function ProfileOrderDetailScreen() {
         <>
           {profileState.message ? <InlineMessage message={profileState.message} /> : null}
           {snapshot?.isExample ? <GuestPreview label="로그인 후 내 주문 내역을 확인할 수 있어요." /> : null}
-          <OrderDetail order={order} profileState={profileState} />
+          <OrderDetail
+            order={order}
+            profileState={profileState}
+          />
         </>
       ) : null}
+      </>}
     </RecordFrame>
   );
 }
@@ -82,21 +98,49 @@ export function ProfileShippingDetailScreen() {
   }>();
   const shippingRequestId = singleParam(rawShippingRequestId);
   const profileState = useProfileSnapshot();
-  const [detail, setDetail] = useState<AccountShippingRequest | null>(null);
+  const [detail, setDetail] = useState<AccountShippingRequestDetail | null>(null);
   const [detailMessage, setDetailMessage] = useState("");
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailRefreshing, setDetailRefreshing] = useState(false);
-  const snapshotFallback = profileState.snapshot?.shippingRequests.find(
-    (item) => item.id === shippingRequestId,
-  ) ?? null;
-  const shippingRequest = detail?.id === shippingRequestId ? detail : snapshotFallback;
+  const [detailExpired, setDetailExpired] = useState(false);
+  const detailGeneration = useRef(0);
+  const hasFocusedOnce = useRef(false);
+  const snapshotFallback = profileState.status === "authenticated"
+    ? profileState.snapshot?.shippingRequests.find((item) => item.id === shippingRequestId) ?? null
+    : null;
+  const shippingRequest = profileState.status === "authenticated"
+    ? (detail?.id === shippingRequestId ? detail : snapshotFallback)
+    : null;
+  const assetBaseUrl = profileState.runtime.assetBaseUrl
+    ?? (__DEV__ ? profileState.runtime.apiBaseUrl.replace(/:8788$/, ":4174") : null);
+  const blockedStatus = detailExpired
+    ? "expired"
+    : isProfileSessionBlocked(profileState.status) ? profileState.status : null;
 
   useEffect(() => {
+    detailGeneration.current += 1;
+    setDetail(null);
     setDetailMessage("");
-  }, [shippingRequestId]);
+    setDetailExpired(false);
+  }, [profileState.accessToken, profileState.status, shippingRequestId]);
+
+  useFocusEffect(useCallback(() => {
+    if (hasFocusedOnce.current) void profileState.reload();
+    else hasFocusedOnce.current = true;
+    return () => {
+      detailGeneration.current += 1;
+    };
+  }, [profileState.reload]));
 
   const loadDetail = useCallback(async (manual = false) => {
-    if (!profileState.accessToken || profileState.snapshot?.isExample || !shippingRequestId) {
+    const generation = ++detailGeneration.current;
+    const requestedAccessToken = profileState.accessToken;
+    if (
+      profileState.status !== "authenticated"
+      || !requestedAccessToken
+      || !shippingRequestId
+    ) {
+      setDetail(null);
       setDetailLoading(false);
       setDetailRefreshing(false);
       return;
@@ -107,21 +151,39 @@ export function ProfileShippingDetailScreen() {
     try {
       const next = await fetchAccountShippingRequestDetail(
         profileState.runtime.apiBaseUrl,
-        profileState.accessToken,
+        requestedAccessToken,
         shippingRequestId,
       );
+      const currentTokens = await readAuthTokens();
+      if (generation !== detailGeneration.current) return;
+      if (currentTokens?.accessToken !== requestedAccessToken) {
+        setDetail(null);
+        void profileState.reload();
+        return;
+      }
       setDetail(next);
       setDetailMessage("");
+      setDetailExpired(false);
     } catch (error) {
+      if (generation !== detailGeneration.current) return;
+      setDetail(null);
+      if (error instanceof ProfileApiError && error.status === 401) {
+        setDetailExpired(true);
+        setDetailMessage("");
+        return;
+      }
       setDetailMessage(error instanceof Error ? error.message : "배송 신청 정보를 불러오지 못했습니다.");
     } finally {
-      setDetailLoading(false);
-      setDetailRefreshing(false);
+      if (generation === detailGeneration.current) {
+        setDetailLoading(false);
+        setDetailRefreshing(false);
+      }
     }
   }, [
     profileState.accessToken,
+    profileState.reload,
     profileState.runtime.apiBaseUrl,
-    profileState.snapshot?.isExample,
+    profileState.status,
     shippingRequestId,
     snapshotFallback,
   ]);
@@ -152,6 +214,7 @@ export function ProfileShippingDetailScreen() {
       refreshing={profileState.refreshing || detailRefreshing}
       onRefresh={refresh}
     >
+      {blockedStatus ? <ProfileSessionGate status={blockedStatus} returnTo={`/profile/shipping/${encodeURIComponent(shippingRequestId)}`} guestBody="로그인하면 내 배송 신청 상세를 확인할 수 있어요." /> : <>
       {initialLoading ? <LoadingState label="배송 신청을 불러오는 중" /> : null}
       {!shippingRequest && combinedMessage ? (
         <ErrorState message={combinedMessage} onRetry={retry} />
@@ -165,9 +228,10 @@ export function ProfileShippingDetailScreen() {
           {profileState.snapshot?.isExample ? (
             <GuestPreview label="로그인 후 내 배송 진행 상황을 확인할 수 있어요." />
           ) : null}
-          <ShippingDetail shippingRequest={shippingRequest} />
+          <ShippingDetail shippingRequest={shippingRequest} assetBaseUrl={assetBaseUrl} />
         </>
       ) : null}
+      </>}
     </RecordFrame>
   );
 }
@@ -186,11 +250,13 @@ export function ProfileNoticeDetailScreen() {
       refreshing={profileState.refreshing}
       onRefresh={profileState.reload}
     >
-      {!snapshot && !profileState.message ? <LoadingState label="공지사항을 불러오는 중" /> : null}
+      {profileState.publicLoading || (!snapshot && !profileState.message) ? (
+        <LoadingState label="공지사항을 불러오는 중" />
+      ) : null}
       {!notice && profileState.message ? (
         <ErrorState message={profileState.message} onRetry={profileState.reload} />
       ) : null}
-      {snapshot && !notice ? (
+      {snapshot && !notice && !profileState.message && !profileState.publicLoading ? (
         <MissingState icon="megaphone-outline" title="공지사항을 찾을 수 없어요" />
       ) : null}
       {notice ? (
@@ -224,21 +290,7 @@ function RecordFrame({
 
   return (
     <SafeAreaView style={styles.safeArea} edges={["top", "bottom", "left", "right"]}>
-      <View style={styles.header}>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="뒤로 가기"
-          hitSlop={10}
-          onPress={goBack}
-          style={({ pressed }) => [styles.headerAction, pressed && styles.pressed]}
-        >
-          <Ionicons name="chevron-back" size={26} color={colors.ink} />
-        </Pressable>
-        <View style={styles.headerTitle}>
-          <KoreanPixelTitle variant="header">{title}</KoreanPixelTitle>
-        </View>
-        <View style={styles.headerAction} />
-      </View>
+      <DetailPageHeader title={title} titleMode="pixel" onBack={goBack} />
       <ScrollView
         contentContainerStyle={styles.content}
         refreshControl={(
@@ -258,28 +310,36 @@ function OrderDetail({
   order: AccountOrder;
   profileState: ReturnType<typeof useProfileSnapshot>;
 }) {
+  const router = useRouter();
   const snapshot = profileState.snapshot!;
   return (
     <>
       <StatusCard
-        icon="receipt-outline"
+        icon={order.orderKind === "SHIPPING_FEE" ? "car-outline" : "receipt-outline"}
         status={ORDER_STATUS[order.status]}
-        title={`${order.lines.length.toLocaleString("ko-KR")}개 상품`}
-        body={`${formatDate(order.createdAt)} 주문`}
-        critical={order.status === "CANCELLED" || order.status === "REFUNDED"}
+        title={order.orderKind === "SHIPPING_FEE" ? "보관함 배송비" : `${order.lines.length.toLocaleString("ko-KR")}개 상품`}
+        body={`${formatDate(order.createdAt)} ${order.orderKind === "SHIPPING_FEE" ? "배송 신청" : "주문"}`}
+        tone={orderStatusTone(order.status)}
       />
 
-      <Section title="주문 상품">
+      {!snapshot.isExample && order.orderKind === "PRODUCT" ? (
+        <DemoPaymentControls
+          surface="internal-commerce"
+          apiBaseUrl={profileState.runtime.apiBaseUrl}
+          orderId={order.id}
+          orderStatus={order.status}
+          onOrderChanged={() => profileState.reload()}
+        />
+      ) : null}
+
+      {order.orderKind === "PRODUCT" ? <Section title="주문 상품">
         {order.lines.map((line, index) => {
           const catalogProduct = snapshot.catalogProducts.find((product) => product.id === line.productId);
           const ipName = catalogProduct
-            ? snapshot.ipNames[catalogProduct.ipId] ?? "등록 작품"
-            : "등록 작품";
-          return (
-            <View
-              key={`${line.productId}-${index}`}
-              style={[styles.orderLineCard, index > 0 && styles.dividerTop]}
-            >
+            ? snapshot.ipNames[catalogProduct.ipId] ?? "작품 정보 없음"
+            : "작품 정보 없음";
+          const content = (
+            <>
               <Text style={styles.eyebrow}>{ipName}</Text>
               <Text style={styles.productName}>{productSubjectTitle(line.productName, ipName)}</Text>
               <View style={styles.productMetaRow}>
@@ -288,23 +348,44 @@ function OrderDetail({
                 </Text>
                 <Text style={styles.lineTotal}>{formatWon(line.lineTotal)}</Text>
               </View>
+              {catalogProduct ? (
+                <View style={styles.productDetailHint}>
+                  <Text style={styles.productDetailHintLabel}>상품 상세</Text>
+                  <DecorativeIonicon name="chevron-forward" size={14} color={colors.muted} />
+                </View>
+              ) : null}
+            </>
+          );
+          return catalogProduct ? (
+            <Pressable
+              key={`${line.productId}-${index}`}
+              accessibilityRole="button"
+              accessibilityLabel={`${line.productName} 상품 상세 보기`}
+              onPress={() => router.push(`/product/${encodeURIComponent(line.productId)}` as Href)}
+              style={({ pressed }) => [styles.orderLineCard, index > 0 && styles.dividerTop, pressed && styles.pressed]}
+            >
+              {content}
+            </Pressable>
+          ) : (
+            <View key={`${line.productId}-${index}`} style={[styles.orderLineCard, index > 0 && styles.dividerTop]}>
+              {content}
             </View>
           );
         })}
-      </Section>
+      </Section> : null}
 
       <Section title="결제 금액">
-        <InfoRow label="상품 금액" value={formatWon(order.subtotal)} />
-        <InfoRow label="할인" value={formatDeduction(order.discountTotal)} />
-        <InfoRow label="포인트 사용" value={formatDeduction(order.pointTotal)} />
+        <InfoRow label={order.orderKind === "SHIPPING_FEE" ? "배송비" : "상품 금액"} value={formatWon(order.subtotal)} />
+        {order.orderKind === "PRODUCT" ? <InfoRow label="할인" value={formatDeduction(order.discountTotal)} /> : null}
+        {order.orderKind === "PRODUCT" ? <InfoRow label="포인트 사용" value={formatDeduction(order.pointTotal)} /> : null}
         <View style={styles.totalRow}>
           <Text style={styles.totalLabel}>총 결제 금액</Text>
           <Text style={styles.totalValue}>{formatWon(order.total)}</Text>
         </View>
       </Section>
 
-      <Section title="주문 정보">
-        <InfoRow label="주문일" value={formatDate(order.createdAt)} />
+      <Section title={order.orderKind === "SHIPPING_FEE" ? "배송비 결제 정보" : "주문 정보"}>
+        <InfoRow label={order.orderKind === "SHIPPING_FEE" ? "결제 요청일" : "주문일"} value={formatDate(order.createdAt)} />
         <InfoRow label="최근 처리일" value={formatDate(order.updatedAt)} />
         <InfoRow label="주문 번호" value={order.id} selectable />
       </Section>
@@ -312,9 +393,20 @@ function OrderDetail({
   );
 }
 
-function ShippingDetail({ shippingRequest }: { shippingRequest: AccountShippingRequest }) {
+function ShippingDetail({
+  shippingRequest,
+  assetBaseUrl,
+}: {
+  shippingRequest: AccountShippingRequest | AccountShippingRequestDetail;
+  assetBaseUrl: string | null;
+}) {
+  const router = useRouter();
   const destination = shippingRequest.destination;
-  const critical = shippingRequest.status === "CANCELLED";
+  const destinationAddress = fullShippingDestination(
+    destination.postalCode,
+    destination.addressLine1,
+    destination.addressLine2,
+  );
   return (
     <>
       <StatusCard
@@ -322,18 +414,52 @@ function ShippingDetail({ shippingRequest }: { shippingRequest: AccountShippingR
         status={SHIPPING_STATUS[shippingRequest.status]}
         title={`보관 상품 ${shippingRequest.inventoryUnitIds.length.toLocaleString("ko-KR")}개`}
         body={`${formatDate(shippingRequest.requestedAt)} 신청`}
-        critical={critical}
+        tone={shippingRequest.status === "CANCELLED"
+          ? "critical"
+          : shippingRequest.status === "DELIVERED"
+            ? "success"
+            : "neutral"}
       />
+
+      {"items" in shippingRequest ? (
+        <Section title="배송 상품">
+          {shippingRequest.items.map((item, index) => {
+            const imageUri = resolveCatalogImageUrl(item.imageUrl, assetBaseUrl, item.productVersion);
+            const media = (
+              <View style={styles.shippingProductImageFrame}>
+                {imageUri ? (
+                  <Image source={{ uri: imageUri }} resizeMode={item.category === "kuji" ? "contain" : "cover"} style={styles.shippingProductImage} />
+                ) : (
+                  <DecorativeIonicon name="image-outline" size={24} color={colors.muted} />
+                )}
+              </View>
+            );
+            return (
+              <Pressable
+                key={item.inventoryUnitId}
+                accessibilityRole="button"
+                accessibilityLabel={`${item.productName} 상품 상세 보기`}
+                onPress={() => router.push(`/product/${encodeURIComponent(item.productId)}` as Href)}
+                style={({ pressed }) => [styles.shippingProductRow, index > 0 && styles.dividerTop, pressed && styles.pressed]}
+              >
+                {media}
+                <View style={styles.shippingProductCopy}>
+                  <Text numberOfLines={1} style={styles.eyebrow}>{item.ipNameKo} · {categoryLabel(item.category)}</Text>
+                  <Text numberOfLines={2} style={styles.shippingProductName}>{productSubjectTitle(item.productName, item.ipNameKo)}</Text>
+                </View>
+                <DecorativeIonicon name="chevron-forward" size={18} color={colors.muted} />
+              </Pressable>
+            );
+          })}
+        </Section>
+      ) : null}
 
       <Section title="받는 곳">
         <InfoRow label="받는 분" value={destination.recipientMasked} />
         <InfoRow label="연락처" value={destination.phoneMasked} />
         <View style={styles.addressBlock}>
           <Text style={styles.infoLabel}>주소</Text>
-          <Text style={styles.addressText}>
-            [{destination.postalCode}] {destination.addressLine1}
-            {destination.addressLine2 ? `\n${destination.addressLine2}` : ""}
-          </Text>
+          <Text style={styles.addressText}>{destinationAddress}</Text>
         </View>
       </Section>
 
@@ -378,26 +504,36 @@ function StatusCard({
   status,
   title,
   body,
-  critical = false,
+  tone = "neutral",
 }: {
-  icon: keyof typeof Ionicons.glyphMap;
+  icon: DecorativeIoniconName;
   status: string;
   title: string;
   body: string;
-  critical?: boolean;
+  tone?: "success" | "critical" | "refund" | "neutral";
 }) {
+  const critical = tone === "critical";
+  const refund = tone === "refund";
+  const success = tone === "success";
   return (
     <View style={styles.statusCard}>
-      <View style={[styles.statusIcon, critical && styles.statusIconCritical]}>
-        <Ionicons name={icon} size={24} color={critical ? colors.danger : colors.greenInk} />
+      <View style={[styles.statusIcon, success && styles.statusIconSuccess, critical && styles.statusIconCritical, refund && styles.statusIconRefund]}>
+        <DecorativeIonicon name={icon} size={24} color={critical ? colors.danger : refund ? "#4C5FA8" : success ? colors.greenInk : colors.muted} />
       </View>
       <View style={styles.statusText}>
-        <Text style={[styles.statusBadge, critical && styles.statusBadgeCritical]}>{status}</Text>
+        <Text style={[styles.statusBadge, success && styles.statusBadgeSuccess, critical && styles.statusBadgeCritical, refund && styles.statusBadgeRefund]}>{status}</Text>
         <Text style={styles.statusTitle}>{title}</Text>
         <Text style={styles.statusBody}>{body}</Text>
       </View>
     </View>
   );
+}
+
+function orderStatusTone(status: AccountOrder["status"]): "success" | "critical" | "refund" | "neutral" {
+  if (status === "PAID" || status === "FULFILLED") return "success";
+  if (status === "CANCELLED") return "critical";
+  if (status === "REFUND_REVIEW" || status === "REFUNDED") return "refund";
+  return "neutral";
 }
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
@@ -433,7 +569,7 @@ function GuestPreview({ label }: { label: string }) {
 function InlineMessage({ message }: { message: string }) {
   return (
     <View style={styles.inlineMessage}>
-      <Ionicons name="cloud-offline-outline" size={17} color={colors.muted} />
+      <DecorativeIonicon name="cloud-offline-outline" size={17} color={colors.muted} />
       <Text style={styles.inlineMessageText}>{message}</Text>
     </View>
   );
@@ -451,11 +587,12 @@ function LoadingState({ label }: { label: string }) {
 function ErrorState({ message, onRetry }: { message: string; onRetry: () => void }) {
   return (
     <View style={styles.state}>
-      <Ionicons name="alert-circle-outline" size={34} color={colors.muted} />
+      <DecorativeIonicon name="alert-circle-outline" size={34} color={colors.muted} />
       <Text style={styles.stateTitle}>정보를 불러오지 못했어요</Text>
       <Text style={styles.stateBody}>{message}</Text>
       <Pressable
         accessibilityRole="button"
+        accessibilityLabel="정보 다시 불러오기"
         onPress={onRetry}
         style={({ pressed }) => [styles.retryButton, pressed && styles.pressed]}
       >
@@ -469,13 +606,13 @@ function MissingState({
   icon,
   title,
 }: {
-  icon: keyof typeof Ionicons.glyphMap;
+  icon: DecorativeIoniconName;
   title: string;
 }) {
   return (
     <View style={styles.state}>
       <View style={styles.missingIcon}>
-        <Ionicons name={icon} size={29} color={colors.muted} />
+        <DecorativeIonicon name={icon} size={29} color={colors.muted} />
       </View>
       <Text style={styles.stateTitle}>{title}</Text>
     </View>
@@ -492,6 +629,19 @@ function formatWon(value: number): string {
 
 function formatDeduction(value: number): string {
   return value > 0 ? `-${formatWon(value)}` : "0원";
+}
+
+function fullShippingDestination(
+  postalCode: string,
+  addressLine1: string,
+  addressLine2?: string | null,
+): string {
+  const primary = addressLine1.trim().replace(/\s+/g, " ");
+  if (!primary || /(?:테스트(?:\s*전용)?\s*주소|배송\s*금지|demo)/i.test(primary)) {
+    return "배송지 정보를 확인해 주세요.";
+  }
+  const secondary = addressLine2?.trim().replace(/\s+/g, " ");
+  return `[${postalCode}] ${primary}${secondary ? `\n${secondary}` : ""}`;
 }
 
 const styles = StyleSheet.create({
@@ -525,7 +675,7 @@ const styles = StyleSheet.create({
     paddingTop: seed.spacing.x4_5,
     paddingBottom: seed.spacing.screenBottom,
   },
-  pressed: { opacity: seed.state.pressedOpacity },
+  pressed: { opacity: seed.state.pressedOpacity, transform: [{ scale: seed.state.pressedScale }] },
   guestGuidance: { marginBottom: seed.spacing.x3 },
   inlineMessage: {
     minHeight: seed.size.actionButton.medium,
@@ -560,9 +710,11 @@ const styles = StyleSheet.create({
     borderRadius: seed.radius.r4,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: seed.color.background.brandWeak,
+    backgroundColor: seed.color.background.neutralWeak,
   },
+  statusIconSuccess: { backgroundColor: seed.color.background.brandWeak },
   statusIconCritical: { backgroundColor: seed.color.background.criticalWeak },
+  statusIconRefund: { backgroundColor: "#EEF0FA" },
   statusText: { flex: 1, minWidth: 0 },
   statusBadge: {
     alignSelf: "flex-start",
@@ -570,15 +722,17 @@ const styles = StyleSheet.create({
     borderRadius: seed.radius.r2,
     paddingHorizontal: seed.spacing.x2,
     paddingVertical: seed.spacing.x1,
-    color: colors.greenInk,
-    backgroundColor: seed.color.background.brandWeak,
-    fontSize: 10,
+    color: colors.muted,
+    backgroundColor: seed.color.background.neutralWeak,
+    ...seed.typography.finePrint,
     fontWeight: "800",
   },
+  statusBadgeSuccess: { color: colors.greenInk, backgroundColor: seed.color.background.brandWeak },
   statusBadgeCritical: {
     color: colors.danger,
     backgroundColor: seed.color.background.criticalWeak,
   },
+  statusBadgeRefund: { color: "#4C5FA8", backgroundColor: "#EEF0FA" },
   statusTitle: {
     color: colors.ink,
     fontSize: 17,
@@ -613,13 +767,11 @@ const styles = StyleSheet.create({
   },
   eyebrow: {
     color: colors.muted,
-    fontSize: 11,
-    lineHeight: 17,
+    ...seed.typography.catalogMetadata,
   },
   productName: {
     color: colors.ink,
-    fontSize: 16,
-    lineHeight: 23,
+    ...seed.typography.catalogTitle,
     fontWeight: "900",
     marginTop: seed.spacing.x1,
   },
@@ -630,17 +782,19 @@ const styles = StyleSheet.create({
     gap: seed.spacing.x3,
     marginTop: seed.spacing.x3,
   },
-  productMeta: {
-    flex: 1,
-    color: colors.muted,
-    fontSize: 10,
-    lineHeight: 16,
-  },
+  productMeta: { flex: 1, color: colors.muted, ...seed.typography.finePrint },
   lineTotal: {
     color: colors.ink,
     fontSize: 13,
     fontWeight: "900",
   },
+  productDetailHint: { flexDirection: "row", alignItems: "center", gap: seed.spacing.x1, marginTop: seed.spacing.x2 },
+  productDetailHintLabel: { color: colors.muted, ...seed.typography.finePrint, fontWeight: "800" },
+  shippingProductRow: { minHeight: 96, flexDirection: "row", alignItems: "center", gap: seed.spacing.x3, padding: seed.spacing.x3 },
+  shippingProductImageFrame: { width: 72, height: 72, overflow: "hidden", alignItems: "center", justifyContent: "center", backgroundColor: seed.color.layer.basement },
+  shippingProductImage: { width: "100%", height: "100%" },
+  shippingProductCopy: { flex: 1, minWidth: 0 },
+  shippingProductName: { color: colors.ink, ...seed.typography.catalogTitle, fontWeight: "900", marginTop: seed.spacing.x1 },
   infoRow: {
     minHeight: 56,
     flexDirection: "row",
@@ -714,13 +868,10 @@ const styles = StyleSheet.create({
     paddingVertical: seed.spacing.x1,
     color: colors.greenInk,
     backgroundColor: seed.color.background.brandWeak,
-    fontSize: 10,
+    ...seed.typography.finePrint,
     fontWeight: "800",
   },
-  noticeDate: {
-    color: colors.muted,
-    fontSize: 10,
-  },
+  noticeDate: { color: colors.muted, ...seed.typography.finePrint },
   noticeTitle: {
     color: colors.ink,
     fontSize: 22,
@@ -744,10 +895,7 @@ const styles = StyleSheet.create({
     marginTop: seed.spacing.x6,
     paddingTop: seed.spacing.x3,
   },
-  noticeUpdated: {
-    color: colors.muted,
-    fontSize: 10,
-  },
+  noticeUpdated: { color: colors.muted, ...seed.typography.finePrint },
   state: {
     minHeight: 420,
     alignItems: "center",

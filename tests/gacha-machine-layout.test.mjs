@@ -34,11 +34,9 @@ test("machine, outlet occlusion and capsule renderers consume the same responsiv
   const base = new URL("../apps/mobile/src/features/draw/", import.meta.url);
   const machine = readFileSync(new URL("GachaLeverMachine.tsx", base), "utf8");
   const atlas = readFileSync(new URL("GachaCapsuleFrames.tsx", base), "utf8");
-  const reference = readFileSync(new URL("GachaCapsule3D.tsx", base), "utf8");
   assert.equal((machine.match(/scale: camera\.presentationScale \* camera\.scale/g) ?? []).length, 2);
   assert.equal((atlas.match(/worldScale = camera\.presentationScale \* camera\.scale/g) ?? []).length, 2);
-  assert.match(reference, /pickupScale = camera\.presentationScale \* camera\.scale/);
-  for (const source of [machine, atlas, reference]) {
+  for (const source of [machine, atlas]) {
     assert.doesNotMatch(source, /MACHINE_PRESENTATION_SCALE|box\.presentationScale|GACHA_PICKUP_GEOMETRY\.presentationScale/);
   }
 });

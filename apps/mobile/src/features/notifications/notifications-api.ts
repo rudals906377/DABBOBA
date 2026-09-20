@@ -4,29 +4,45 @@ import type { components } from "@dabboba/contracts";
 import { createMobileDabbobaClient as createDabbobaClient } from "@/lib/mobile-api-client";
 
 export type AccountNotification = components["schemas"]["AccountNotification"];
+export type AccountNotificationPage = components["schemas"]["NotificationPage"];
+export type AccountNotificationUnreadSummary = components["schemas"]["NotificationUnreadSummary"];
+export type PushDeviceRegistration = components["schemas"]["PushDeviceRegistration"];
 
-export async function fetchAccountNotifications(
+export async function fetchAccountNotificationPage(
   apiBaseUrl: string,
   accessToken: string,
-): Promise<AccountNotification[]> {
+  cursor?: string,
+  limit = 20,
+): Promise<AccountNotificationPage> {
   const client = authorizedClient(apiBaseUrl, accessToken);
-  const items: AccountNotification[] = [];
-  const seenCursors = new Set<string>();
-  let cursor: string | undefined;
+  const result = await client.GET("/v1/account/notifications", {
+    params: { query: { limit, ...(cursor ? { cursor } : {}) } },
+  });
+  if (!result.data) throw new Error(errorMessage(result.error, "알림을 불러오지 못했습니다."));
+  return result.data;
+}
 
-  while (true) {
-    const result = await client.GET("/v1/account/notifications", {
-      params: { query: { limit: 50, ...(cursor ? { cursor } : {}) } },
-    });
-    if (!result.data) throw new Error(errorMessage(result.error, "알림을 불러오지 못했습니다."));
-    items.push(...result.data.items);
-    const nextCursor = result.data.nextCursor ?? undefined;
-    if (!nextCursor || seenCursors.has(nextCursor)) break;
-    seenCursors.add(nextCursor);
-    cursor = nextCursor;
-  }
+export async function fetchAccountNotification(
+  apiBaseUrl: string,
+  accessToken: string,
+  notificationId: string,
+): Promise<AccountNotification> {
+  const client = authorizedClient(apiBaseUrl, accessToken);
+  const result = await client.GET("/v1/account/notifications/{notificationId}", {
+    params: { path: { notificationId } },
+  });
+  if (!result.data) throw new Error(errorMessage(result.error, "알림 상세를 불러오지 못했습니다."));
+  return result.data;
+}
 
-  return items;
+export async function fetchAccountNotificationUnreadSummary(
+  apiBaseUrl: string,
+  accessToken: string,
+): Promise<AccountNotificationUnreadSummary> {
+  const client = authorizedClient(apiBaseUrl, accessToken);
+  const result = await client.GET("/v1/account/notifications/unread-summary");
+  if (!result.data) throw new Error(errorMessage(result.error, "읽지 않은 알림 수를 불러오지 못했습니다."));
+  return result.data;
 }
 
 export async function markAccountNotificationRead(
@@ -43,6 +59,31 @@ export async function markAccountNotificationRead(
   });
   if (!result.data) throw new Error(errorMessage(result.error, "알림을 읽음 처리하지 못했습니다."));
   return result.data;
+}
+
+export async function registerAccountPushDevice(
+  apiBaseUrl: string,
+  accessToken: string,
+  input: components["schemas"]["RegisterPushDeviceInput"],
+): Promise<PushDeviceRegistration> {
+  const client = authorizedClient(apiBaseUrl, accessToken);
+  const result = await client.POST("/v1/account/push-devices", { body: input });
+  if (!result.data) throw new Error(errorMessage(result.error, "이 기기의 푸시 알림을 등록하지 못했습니다."));
+  return result.data;
+}
+
+export async function unregisterAccountPushDevice(
+  apiBaseUrl: string,
+  accessToken: string,
+  installationId: string,
+): Promise<void> {
+  const client = authorizedClient(apiBaseUrl, accessToken);
+  const result = await client.DELETE("/v1/account/push-devices/{installationId}", {
+    params: { path: { installationId } },
+  });
+  if (!result.response.ok) {
+    throw new Error(errorMessage(result.error, "이 기기의 푸시 알림을 해제하지 못했습니다."));
+  }
 }
 
 function authorizedClient(apiBaseUrl: string, accessToken: string) {

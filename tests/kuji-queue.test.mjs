@@ -86,13 +86,12 @@ test("a promoted waiter notification re-enters through the authoritative room ga
 });
 
 test("native kuji products expose a footer-free room gate with live results before the queue", async () => {
-  const [checkoutScreen, queueRoute, queueScreen, drawRoute, drawScreen, previewRoute, notificationSource, rootLayout] = await Promise.all([
+  const [checkoutScreen, queueRoute, queueScreen, drawRoute, drawScreen, notificationSource, rootLayout] = await Promise.all([
     readFile(new URL("../apps/mobile/src/features/checkout/CheckoutScreen.tsx", import.meta.url), "utf8"),
     readFile(new URL("../apps/mobile/app/kuji/queue/[productId].tsx", import.meta.url), "utf8"),
     readFile(new URL("../apps/mobile/src/features/kuji/KujiQueueScreen.tsx", import.meta.url), "utf8"),
     readFile(new URL("../apps/mobile/app/kuji/draw/[productId].tsx", import.meta.url), "utf8"),
     readFile(new URL("../apps/mobile/src/features/kuji/KujiDrawScreen.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../apps/mobile/app/draw/preview/[productId].tsx", import.meta.url), "utf8"),
     readFile(new URL("../apps/mobile/src/features/kuji/kuji-notifications.ts", import.meta.url), "utf8"),
     readFile(new URL("../apps/mobile/app/_layout.tsx", import.meta.url), "utf8"),
   ]);
@@ -103,7 +102,9 @@ test("native kuji products expose a footer-free room gate with live results befo
   assert.match(checkoutScreen, /createKujiCheckoutOrder/);
   assert.match(checkoutScreen, /paidKujiOrderEntitlementIds\(order, quantity\)/);
   assert.match(checkoutScreen, /`\/kuji\/draw\/\$\{encodeURIComponent\(product\.id\)\}\?\$\{query\.toString\(\)\}`/);
-  assert.match(checkoutScreen, /drawMode \? "구매하기" : "결제 준비 완료"/);
+  assert.match(checkoutScreen, /checkoutNeedsAgreement/);
+  assert.match(checkoutScreen, /결제 수단 준비 중/);
+  assert.match(checkoutScreen, /포인트로 구매하기/);
   assert.match(queueRoute, /KujiQueueScreen/);
   assert.doesNotMatch(queueRoute, /Redirect|__DEV__/);
   for (const copy of ["쿠지 대기실", "실시간 뽑기 현황", "최근 결과", "내 순서", "앞에", "대기 중", "다른 상품 둘러보기", "대기 취소"]){
@@ -119,8 +120,7 @@ test("native kuji products expose a footer-free room gate with live results befo
   assert.doesNotMatch(queueScreen, /Math\.random|결제 완료|추첨권 발급 완료/);
   assert.match(drawRoute, /KujiDrawScreen/);
   assert.doesNotMatch(drawRoute, /Redirect|__DEV__/);
-  assert.match(previewRoute, /import \{ Redirect \} from "expo-router"/);
-  assert.match(previewRoute, /if \(!__DEV__\) return <Redirect href="\/\(tabs\)\/ppoba" \/>/);
+  assert.doesNotMatch(checkoutScreen, /openGachaPreview|\/draw\/preview|체험하기/);
   for (const copy of ["쿠지 뽑기", "남은 시간", "쿠지 선택", "남은 상", "board.totalSlots"]){
     assert.match(drawScreen, new RegExp(copy));
   }
@@ -138,8 +138,10 @@ test("native kuji products expose a footer-free room gate with live results befo
   assert.match(drawScreen, /validateKujiSlotBinding/);
   assert.match(drawScreen, /paidKujiRevealPath/);
   assert.doesNotMatch(drawScreen, /결제 금액 확인|buildKujiPaymentConfirmation/);
-  assert.doesNotMatch(drawScreen, /오픈 방식 선택|chooseOpenMode|confirmOpenMode/);
-  assert.match(drawScreen, /timerValue:\s*\{[^}]*fontFamily:\s*"Galmuri11"/);
+  assert.match(drawScreen, /presentDrawOpenModeChoice\(bindings\.length/);
+  assert.match(drawScreen, /totalSlots: board\.totalSlots, mode/);
+  assert.match(drawScreen, /timerValue:\s*\{[^}]*fontWeight:\s*"900"/);
+  assert.doesNotMatch(drawScreen, /timerValue:\s*\{[^}]*fontFamily:\s*"Galmuri11"/);
   assert.match(drawScreen, /prizeRemainingRow:\s*\{[^}]*flexDirection:\s*"row"/);
   assert.doesNotMatch(drawScreen, /화면 예시|50 TICKETS|입장 후 제한시간은 5분이에요|5분이 지나면 현재 입장은 종료되고|대기 중 받은 차례 알림/);
   assert.doesNotMatch(drawScreen, /previewModeBar|timerCaption|ruleCard|turnRuleCard/);
@@ -158,12 +160,14 @@ test("native kuji keeps the five-column spread while each slot uses the orange p
     new URL("../apps/mobile/src/features/kuji/KujiDrawScreen.tsx", import.meta.url),
     "utf8",
   );
+  const theme = await readFile(new URL("../apps/mobile/src/theme.ts", import.meta.url), "utf8");
 
   assert.match(drawScreen, /styles\.ticketGrid/);
   assert.match(drawScreen, /ticketGrid:\s*\{[^}]*flexWrap:\s*"wrap"/);
   assert.match(drawScreen, /ticket:\s*\{[^}]*width:\s*"18\.4%"[^}]*minHeight:\s*seed\.size\.touchTarget/);
-  assert.match(drawScreen, /backgroundColor:\s*"#F36B2C"/);
-  assert.match(drawScreen, /require\("\.\.\/\.\.\/\.\.\/assets\/kuji-ticket-front\.png"\)/);
+  assert.match(theme, /kujiOrange:\s*"#F36B2C"/);
+  assert.match(drawScreen, /backgroundColor:\s*colors\.kujiOrange/);
+  assert.match(drawScreen, /require\("\.\.\/\.\.\/\.\.\/assets\/draw\/kuji\/kuji-ticket-front\.png"\)/);
   assert.match(drawScreen, /styles\.ticketArtwork/);
   assert.match(drawScreen, /styles\.ticketFace/);
   assert.match(drawScreen, /styles\.ticketArtworkSold/);

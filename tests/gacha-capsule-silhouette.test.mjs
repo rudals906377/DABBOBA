@@ -6,17 +6,16 @@ import { getGachaCapsuleSilhouette } from "../apps/mobile/src/features/draw/gach
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
 const visual = read("apps/mobile/src/features/draw/GachaCapsuleVisual.tsx");
 const machine = read("apps/mobile/src/features/draw/GachaLeverMachine.tsx");
+const reveal = read("apps/mobile/src/features/draw/DrawRevealScreen.tsx");
 
-test("the hero is exactly round while the poured chamber keeps its approved simple molded shape", () => {
+test("the chamber and hero share one lightweight spherical capsule profile", () => {
   for (const diameter of [17, 24, 200]) {
     const small = getGachaCapsuleSilhouette(diameter);
     const hero = getGachaCapsuleSilhouette(diameter, true);
     assert.equal(small.borderTopLeftRadius, diameter / 2);
     assert.equal(small.borderTopRightRadius, diameter / 2);
-    assert.equal(small.borderBottomLeftRadius, small.borderBottomRightRadius);
-    assert.ok(small.borderBottomLeftRadius < diameter / 2);
-    assert.ok(small.borderBottomLeftRadius < hero.borderBottomLeftRadius);
-    assert.ok(Math.abs(diameter - 2 * small.borderBottomLeftRadius - diameter * 0.36) < 1e-8);
+    assert.equal(small.borderBottomLeftRadius, diameter / 2);
+    assert.equal(small.borderBottomRightRadius, diameter / 2);
     assert.ok(Object.values(hero).every((radius) => radius === diameter / 2));
   }
 });
@@ -32,4 +31,22 @@ test("both small and fallback capsules size their contour once and clip all face
   assert.match(machine, /diameter=\{capsule.size\}/);
   assert.match(machine, /diameter=\{GACHA_PICKUP_GEOMETRY.capsuleSize\}/);
   assert.doesNotMatch(visual, /onLayout|useState|GLView|setInterval/);
+});
+
+test("the shared capsule uses a one-pixel seam and all three approved colorways", () => {
+  assert.match(visual, /orange:\s*\{/);
+  assert.match(visual, /lower: "#91E98E"/);
+  assert.match(visual, /lower: "#F4F0E6"/);
+  assert.match(visual, /lower: "#F36B2C"/);
+  assert.match(visual, /seam:[\s\S]*?height: 1/);
+});
+
+test("machine and reveal share anatomy without sharing the same material treatment", () => {
+  assert.match(visual, /const upperColor = heroDetail \? palette\.upper : palette\.machineUpper/);
+  assert.match(visual, /const lowerColor = heroDetail \? palette\.lower : palette\.machineLower/);
+  assert.match(visual, /!heroDetail && styles\.machineHighlight/);
+  assert.match(visual, /heroDetail \? <View style=\{styles\.lowerRoundShade\} \/> : <View style=\{styles\.machineLowerPlane\} \/>/);
+  assert.match(reveal, /import \{ GachaCapsuleVisual \}/);
+  assert.match(reveal, /<GachaCapsuleVisual tone="lime" depth=\{2\} heroDetail diameter=\{142\} \/>/);
+  assert.doesNotMatch(reveal, /capsuleTop|capsuleBottom|capsuleSeam/);
 });

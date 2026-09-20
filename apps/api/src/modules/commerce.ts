@@ -13,10 +13,11 @@ import {
   type DatabaseClient,
   type Queryable,
 } from "@dabboba/db";
-import { commerceModeForCategory } from "@dabboba/domain";
+import { commerceModeForCategory, isCustomerPurchasableCategory } from "@dabboba/domain";
 import { adminIdempotentMutation, sendAdminMutation } from "../lib/admin-idempotency.js";
 import { writeAdminAudit, writeOutbox } from "../lib/audit.js";
 import { AppError, badRequest, conflict, forbidden, notFound, unauthorized } from "../lib/errors.js";
+import { requireLiveCommerce } from "../lib/commerce-mode.js";
 import { assertDrawCapacity } from "../lib/draw-capacity.js";
 import {
   assignSealedKujiSlots,
@@ -26,18 +27,22 @@ import {
 import { beginIdempotency, completeIdempotency, idempotencyKey, requestHash } from "../lib/idempotency.js";
 import { enumInput, integerInput, nullableStringInput, objectInput, slugIdInput, stringInput, uuidInput } from "../lib/input.js";
 import { iso, nullableIso, numberValue } from "../lib/rows.js";
+import { DEMO_SELLER_PRODUCT_IDS, demoProfileRequested } from "../lib/demo-testing.js";
 import { releasePendingOrder } from "../lib/pending-order-release.js";
 import type { ApiContext } from "../types.js";
 import { KUJI_SLOT_SELECTION_ALGORITHM, loadSealedKujiSlotForConsume } from "./kuji-slots.js";
+import { registerPortOnePaymentRoutes } from "./portone-payments.js";
 
 type ProductOrderRow = {
   id: string; name: string; category: "gacha" | "figure" | "kuji" | "tcg"; price: number;
-  is_active: boolean; is_prize_only: boolean; on_hand: number; reserved: number; probability_version_id: string | null;
+  is_active: boolean; is_prize_only: boolean; sale_status: "DRAFT" | "COMING_SOON" | "ON_SALE" | "PAUSED";
+  on_hand: number; reserved: number; probability_version_id: string | null;
   probability_version: number | null;
 };
 type OrderRow = {
   id: string; user_id: string; status: string; currency: "KRW"; subtotal: number; discount_total: number;
   point_total: number; total: number; created_at: Date; updated_at: Date; payment_id: string;
+  order_kind: "PRODUCT" | "SHIPPING_FEE"; shipping_request_id: string | null;
 };
 type OrderLineRow = {
   id: string; product_id: string; product_name_snapshot: string; category_snapshot: "gacha" | "figure" | "kuji" | "tcg";
@@ -318,6 +323,7 @@ async function orderResponse(queryable: Queryable, orderId: string, ownerId?: st
   const entitlements = await queryable.query<{id:string}>("SELECT id FROM draw_entitlements WHERE order_line_id=ANY($1::uuid[]) ORDER BY created_at,id",[lines.rows.map((line)=>line.id)]);
   return {
     id:row.id,userId:row.user_id,paymentId:row.payment_id,status:row.status,currency:row.currency,
+    orderKind:row.order_kind ?? "PRODUCT",shippingRequestId:row.shipping_request_id ?? null,
     subtotal:numberValue(row.subtotal),discountTotal:numberValue(row.discount_total),pointTotal:numberValue(row.point_total),total:numberValue(row.total),
     lines:lines.rows.map((line)=>({productId:line.product_id,productName:line.product_name_snapshot,category:line.category_snapshot,unitPrice:numberValue(line.unit_price),quantity:numberValue(line.quantity),lineTotal:numberValue(line.line_total)})),
     drawEntitlementIds:entitlements.rows.map((item)=>item.id),createdAt:iso(row.created_at),updatedAt:iso(row.updated_at),
@@ -482,10 +488,12 @@ export async function registerCommerceRoutes(app:FastifyInstance,context:ApiCont
   app.get("/v1/catalog/products/:productId/draw-odds",async(request,reply)=>{
     reply.header("cache-control","no-store");
     const productId=slugIdInput((request.params as Record<string,unknown>).productId,"productId");
+    if(demoProfileRequested()&&!DEMO_SELLER_PRODUCT_IDS.includes(productId as typeof DEMO_SELLER_PRODUCT_IDS[number]))throw notFound("공개 중인 가챠·쿠지 확률표를 찾을 수 없습니다.");
     const version=await context.pool.query<{id:string;product_id:string;version:number;published_at:Date}>(`SELECT v.id,v.product_id,v.version,v.published_at
       FROM draw_probability_versions v
       JOIN catalog_products p ON p.id=v.product_id
-      WHERE v.product_id=$1 AND v.status='ACTIVE' AND p.is_active=true AND p.is_prize_only=false AND p.category IN ('gacha','kuji')`,[productId]);
+      WHERE v.product_id=$1 AND v.status='ACTIVE' AND p.is_active=true AND p.is_prize_only=false
+        AND p.sale_status='ON_SALE' AND p.category IN ('gacha','kuji')`,[productId]);
     if(!version.rowCount)throw notFound("공개 중인 가챠·쿠지 확률표를 찾을 수 없습니다.");
     const active=version.rows[0]!;
     const entries=await context.pool.query<{id:string;prize_product_id:string;rarity:string;weight:number;initial_quantity:number|null;remaining_quantity:number|null} & DrawPrizeSnapshotRow>(`SELECT e.id,e.prize_product_id,e.prize_name_snapshot,e.prize_image_url_snapshot,e.prize_sku_snapshot,e.prize_ip_id_snapshot,e.prize_category_snapshot,e.rarity,e.weight,e.initial_quantity,e.remaining_quantity
@@ -498,7 +506,7 @@ export async function registerCommerceRoutes(app:FastifyInstance,context:ApiCont
     return{id:active.id,productId:active.product_id,version:numberValue(active.version),publishedAt:iso(active.published_at),calculatedAt:new Date().toISOString(),calculation:"WEIGHT_X_REMAINING_QUANTITY",totalEffectiveWeight,entries:weighted.map(({entry,effectiveWeight})=>({id:entry.id,prizeProductId:entry.prize_product_id,...drawPrizeSnapshotFields(entry),rarity:entry.rarity,weight:numberValue(entry.weight),initialQuantity:entry.initial_quantity===null?null:numberValue(entry.initial_quantity),remainingQuantity:entry.remaining_quantity===null?null:numberValue(entry.remaining_quantity),effectiveWeight,probabilityNumerator:effectiveWeight,probabilityDenominator:totalEffectiveWeight,probabilityPercent:Math.round((effectiveWeight/totalEffectiveWeight)*100_000_000)/1_000_000}))};
   });
 
-  app.post("/v1/orders",{preHandler:context.auth.requireUser},async(request,reply)=>{
+  app.post("/v1/orders",{preHandler:[requireLiveCommerce(context),context.auth.requireUser]},async(request,reply)=>{
     const input=parseOrderInput(request.body);const key=idempotencyKey(request.headers);const hash=requestHash(input);
     const result=await withTransaction(context.pool,async(client)=>{const idem=await beginIdempotency(client,{actorId:request.actor!.userId,scope:"CREATE_ORDER",key,hash});if(!idem.fresh)return {replay:true,statusCode:idem.statusCode,body:idem.body};
       await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1::text,0))",[`checkout:${request.actor!.userId}`]);
@@ -510,7 +518,7 @@ export async function registerCommerceRoutes(app:FastifyInstance,context:ApiCont
         (SELECT COALESCE(sum(r.quantity),0) FROM stock_reservations r JOIN orders o ON o.id=r.order_id WHERE o.user_id=$1 AND o.status='PENDING_PAYMENT' AND r.status='ACTIVE' AND r.expires_at>now()) AS active_unit_count`,[request.actor!.userId]);
       const activeProducts=await client.query<{product_id:string;quantity:string}>(`SELECT r.product_id,sum(r.quantity) AS quantity FROM stock_reservations r JOIN orders o ON o.id=r.order_id WHERE o.user_id=$1 AND o.status='PENDING_PAYMENT' AND r.status='ACTIVE' AND r.expires_at>now() GROUP BY r.product_id`,[request.actor!.userId]);const activeByProduct=new Map(activeProducts.rows.map((row)=>[row.product_id,numberValue(row.quantity)]));const pressureRow=pressure.rows[0]!;const violation=checkoutReservationViolation({attemptCount:numberValue(pressureRow.attempt_count),activeOrderCount:numberValue(pressureRow.active_order_count),activeUnitCount:numberValue(pressureRow.active_unit_count),requestedUnitCount:input.items.reduce((sum,item)=>sum+item.quantity,0),productQuantities:input.items.map((item)=>({active:activeByProduct.get(item.productId)||0,requested:item.quantity}))});
       if(violation==="ATTEMPT_RATE")throw new AppError(429,"CHECKOUT_RATE_LIMITED","15분 뒤 다시 주문해 주세요.");if(violation)throw conflict("미결제 재고 예약 한도를 초과했습니다. 기존 주문을 결제하거나 만료 후 다시 시도해 주세요.");
-      const productRows:ProductOrderRow[]=[];for(const item of input.items){const product=await client.query<ProductOrderRow>(`SELECT p.id,p.name,p.category,p.price,p.is_active,p.is_prize_only,s.on_hand,s.reserved,
+      const productRows:ProductOrderRow[]=[];for(const item of input.items){const product=await client.query<ProductOrderRow>(`SELECT p.id,p.name,p.category,p.price,p.is_active,p.is_prize_only,p.sale_status,s.on_hand,s.reserved,
           (SELECT v.id FROM draw_probability_versions v
             WHERE v.product_id=p.id AND v.status='ACTIVE'
               AND (p.category<>'kuji' OR EXISTS (
@@ -521,7 +529,7 @@ export async function registerCommerceRoutes(app:FastifyInstance,context:ApiCont
               AND (p.category<>'kuji' OR EXISTS (
                 SELECT 1 FROM kuji_decks deck WHERE deck.probability_version_id=v.id
               ))) AS probability_version
-          FROM catalog_products p JOIN product_stock s ON s.product_id=p.id WHERE p.id=$1 FOR UPDATE OF p,s`,[item.productId]);if(!product.rowCount||!product.rows[0]!.is_active)throw notFound(`판매 중인 상품을 찾을 수 없습니다: ${item.productId}`);const row=product.rows[0]!;assertDirectPurchaseAllowed({name:row.name,isPrizeOnly:row.is_prize_only});if(row.on_hand-row.reserved<item.quantity)throw conflict(`${row.name} 재고가 부족합니다.`);if(isDrawCategory(row.category)){if(!row.probability_version_id||row.probability_version===null)throw conflict(`${row.name} 추첨 확률표가 아직 공개되지 않았습니다.`);if(item.expectedDrawVersion===null)throw badRequest(`${row.name} 결제 전 확인한 확률표 버전이 필요합니다.`);if(numberValue(row.probability_version)!==item.expectedDrawVersion)throw conflict(`${row.name} 확률표가 변경됐습니다. 최신 경품·확률을 다시 확인해 주세요.`);}else if(item.expectedDrawVersion!==null)throw badRequest("일반 구매 상품에는 확률표 버전을 보낼 수 없습니다.");if(row.probability_version_id)await assertDrawCapacity(client,{probabilityVersionId:row.probability_version_id,productId:row.id,onHand:numberValue(row.on_hand)});productRows.push(row);}assertKujiRoomOrderBinding(productRows,input.kujiRoomEntryId);
+          FROM catalog_products p JOIN product_stock s ON s.product_id=p.id WHERE p.id=$1 FOR UPDATE OF p,s`,[item.productId]);if(!product.rowCount||!product.rows[0]!.is_active)throw notFound(`판매 중인 상품을 찾을 수 없습니다: ${item.productId}`);const row=product.rows[0]!;if(row.sale_status!=="ON_SALE"||numberValue(row.price)<=0)throw conflict(`${row.name} 상품은 아직 구매할 수 없습니다.`);if(!isCustomerPurchasableCategory(row.category))throw conflict(`${row.name} 상품은 아직 구매할 수 없습니다.`);assertDirectPurchaseAllowed({name:row.name,isPrizeOnly:row.is_prize_only});if(row.on_hand-row.reserved<item.quantity)throw conflict(`${row.name} 재고가 부족합니다.`);if(isDrawCategory(row.category)){if(!row.probability_version_id||row.probability_version===null)throw conflict(`${row.name} 추첨 확률표가 아직 공개되지 않았습니다.`);if(item.expectedDrawVersion===null)throw badRequest(`${row.name} 결제 전 확인한 확률표 버전이 필요합니다.`);if(numberValue(row.probability_version)!==item.expectedDrawVersion)throw conflict(`${row.name} 확률표가 변경됐습니다. 최신 경품·확률을 다시 확인해 주세요.`);}else if(item.expectedDrawVersion!==null)throw badRequest("일반 구매 상품에는 확률표 버전을 보낼 수 없습니다.");if(row.probability_version_id)await assertDrawCapacity(client,{probabilityVersionId:row.probability_version_id,productId:row.id,onHand:numberValue(row.on_hand)});productRows.push(row);}assertKujiRoomOrderBinding(productRows,input.kujiRoomEntryId);
       const subtotal=input.items.reduce((sum,item)=>sum+productRows.find((product)=>product.id===item.productId)!.price*item.quantity,0);let couponId:string|null=null;let discountTotal=0;
       if(input.couponCode){const coupon=await client.query<{id:string;discount_type:"FIXED"|"PERCENT";discount_value:number;maximum_discount:number|null;minimum_order:number;usage_limit:number|null;used_count:number}>(`SELECT id,discount_type,discount_value,maximum_discount,minimum_order,usage_limit,used_count FROM coupons WHERE code=$1 AND is_active=true AND starts_at<=now() AND ends_at>now() FOR UPDATE`,[input.couponCode]);if(!coupon.rowCount)throw conflict("사용할 수 없는 쿠폰입니다.");const value=coupon.rows[0]!;if(subtotal<value.minimum_order||value.usage_limit!==null&&value.used_count>=value.usage_limit)throw conflict("쿠폰 사용 조건을 충족하지 못했습니다.");discountTotal=value.discount_type==="FIXED"?value.discount_value:Math.floor(subtotal*value.discount_value/100);if(value.maximum_discount!==null)discountTotal=Math.min(discountTotal,value.maximum_discount);discountTotal=Math.min(discountTotal,subtotal);couponId=value.id;await client.query("UPDATE coupons SET used_count=used_count+1 WHERE id=$1",[value.id]);}
       const afterDiscount=subtotal-discountTotal;if(input.pointAmount>afterDiscount)throw conflict("주문 금액보다 많은 포인트를 사용할 수 없습니다.");const orderTotal=afterDiscount-input.pointAmount;const paymentProvider=paymentProviderForOrder(context.config.paymentProvider,orderTotal);if(input.pointAmount>0){await client.query("INSERT INTO point_accounts(user_id,balance) VALUES($1,0) ON CONFLICT DO NOTHING",[request.actor!.userId]);const spent=await client.query("UPDATE point_accounts SET balance=balance-$2,version=version+1 WHERE user_id=$1 AND balance>=$2 RETURNING balance",[request.actor!.userId,input.pointAmount]);if(!spent.rowCount)throw conflict("사용 가능한 포인트가 부족합니다.");}
@@ -534,7 +542,7 @@ export async function registerCommerceRoutes(app:FastifyInstance,context:ApiCont
 
   app.get("/v1/orders/:orderId",{preHandler:context.auth.requireUser},async(request)=>orderResponse(context.pool,uuidInput((request.params as Record<string,unknown>).orderId,"orderId"),request.actor!.userId));
 
-  app.post("/v1/payments/webhooks/:provider",async(request,reply)=>{const provider=stringInput(request.params as Record<string,unknown>,"provider",{max:40})!;if(context.config.paymentProvider==="UNCONFIGURED"||!context.config.paymentWebhookSecret)throw new AppError(503,"PAYMENT_NOT_CONFIGURED","결제 웹훅이 구성되지 않았습니다.");if(provider==="INTERNAL_ZERO"||provider!==context.config.paymentProvider)throw forbidden("현재 구성된 결제 제공자가 아닙니다.");const signatureHeader=request.headers["x-dabboba-signature"];const signature=Array.isArray(signatureHeader)?signatureHeader[0]:signatureHeader;if(!signature||!request.rawBody||!signatureMatches(request.rawBody,signature,context.config.paymentWebhookSecret))throw unauthorized("결제 웹훅 서명이 유효하지 않습니다.");const body=objectInput(request.body);const eventId=stringInput(body,"eventId",{max:200})!;const eventType=enumInput(body,"eventType",["PAYMENT_SUCCEEDED","PAYMENT_FAILED","PAYMENT_CANCELLED","REFUND_SUCCEEDED"] as const)!;const paymentId=uuidInput(body.paymentId,"paymentId");const providerPaymentId=nullableStringInput(body,"providerPaymentId",{max:200});const occurredAt=new Date(stringInput(body,"occurredAt",{max:40})!);if(Number.isNaN(occurredAt.getTime()))throw badRequest("occurredAt 값을 확인해 주세요.");const amount=integerInput(body,"amount",{min:0})!;const signatureDigest=createHash("sha256").update(signature).digest("hex");
+  app.post("/v1/payments/webhooks/:provider",{preHandler:requireLiveCommerce(context)},async(request,reply)=>{const provider=stringInput(request.params as Record<string,unknown>,"provider",{max:40})!;if(context.config.paymentProvider==="UNCONFIGURED"||!context.config.paymentWebhookSecret)throw new AppError(503,"PAYMENT_NOT_CONFIGURED","결제 웹훅이 구성되지 않았습니다.");if(provider==="INTERNAL_ZERO"||provider!==context.config.paymentProvider)throw forbidden("현재 구성된 결제 제공자가 아닙니다.");const signatureHeader=request.headers["x-dabboba-signature"];const signature=Array.isArray(signatureHeader)?signatureHeader[0]:signatureHeader;if(!signature||!request.rawBody||!signatureMatches(request.rawBody,signature,context.config.paymentWebhookSecret))throw unauthorized("결제 웹훅 서명이 유효하지 않습니다.");const body=objectInput(request.body);const eventId=stringInput(body,"eventId",{max:200})!;const eventType=enumInput(body,"eventType",["PAYMENT_SUCCEEDED","PAYMENT_FAILED","PAYMENT_CANCELLED","REFUND_SUCCEEDED"] as const)!;const paymentId=uuidInput(body.paymentId,"paymentId");const providerPaymentId=nullableStringInput(body,"providerPaymentId",{max:200});const occurredAt=new Date(stringInput(body,"occurredAt",{max:40})!);if(Number.isNaN(occurredAt.getTime()))throw badRequest("occurredAt 값을 확인해 주세요.");const amount=integerInput(body,"amount",{min:0})!;const signatureDigest=createHash("sha256").update(signature).digest("hex");
     const outcome=await withTransaction(context.pool,async(client)=>{const paymentLookup=await client.query<{order_id:string}>("SELECT order_id FROM payments WHERE id=$1",[paymentId]);if(!paymentLookup.rowCount)throw notFound("결제 정보를 찾을 수 없습니다.");const linkedKujiRoom=await lockLinkedKujiRoomForOrder(client,paymentLookup.rows[0]!.order_id);const payment=await client.query<{id:string;order_id:string;provider:string;status:string;amount:number;provider_payment_id:string|null}>("SELECT id,order_id,provider,status,amount,provider_payment_id FROM payments WHERE id=$1 FOR UPDATE",[paymentId]);if(!payment.rowCount)throw notFound("결제 정보를 찾을 수 없습니다.");const pay=payment.rows[0]!;if(pay.order_id!==paymentLookup.rows[0]!.order_id)throw new Error(`Payment order changed while locking ${paymentId}`);if(pay.provider!==provider)throw forbidden("결제 제공자가 일치하지 않습니다.");const inserted=await client.query<{id:string}>(`INSERT INTO payment_provider_events(provider,provider_event_id,event_type,payment_id,signature_digest,payload,occurred_at,processed_at) VALUES($1,$2,$3,$4,$5,$6,$7,now()) ON CONFLICT (provider,provider_event_id) DO NOTHING RETURNING id`,[provider,eventId,eventType,paymentId,signatureDigest,JSON.stringify(body),occurredAt]);if(!inserted.rowCount){const existingEvent=await client.query<{payment_id:string;event_type:string;payload_matches:boolean}>("SELECT payment_id,event_type,payload=$3::jsonb AS payload_matches FROM payment_provider_events WHERE provider=$1 AND provider_event_id=$2",[provider,eventId,JSON.stringify(body)]);const prior=existingEvent.rows[0];if(!prior||prior.payment_id!==paymentId||prior.event_type!==eventType||!prior.payload_matches)throw conflict("같은 결제 이벤트 ID의 내용이 일치하지 않습니다.");return "duplicate" as const;}const orderResult=await client.query<OrderRow & {cancelled_at:Date|null}>("SELECT o.*,p.id AS payment_id FROM orders o JOIN payments p ON p.order_id=o.id WHERE o.id=$1 FOR UPDATE OF o",[pay.order_id]);const order=orderResult.rows[0]!;
       const markReview=async(reason:string,payload:Record<string,unknown>={})=>{await client.query("UPDATE payments SET status='REFUND_REVIEW',provider_payment_id=COALESCE($2,provider_payment_id),version=version+1 WHERE id=$1",[pay.id,providerPaymentId||null]);await client.query("UPDATE orders SET status='REFUND_REVIEW',version=version+1 WHERE id=$1",[order.id]);await writeOutbox(client,request.id,{aggregateType:"PAYMENT",aggregateId:pay.id,eventType:reason,payload:{paymentId:pay.id,orderId:order.id,providerEventId:eventId,...payload}});return "review" as const;};
       if(amount!==numberValue(pay.amount)){if(pay.status==="REFUNDED"){await writeOutbox(client,request.id,{aggregateType:"PAYMENT",aggregateId:pay.id,eventType:"payment.amount_mismatch_after_refund_observed",payload:{paymentId:pay.id,orderId:order.id,providerEventId:eventId,providerAmount:amount,ledgerAmount:numberValue(pay.amount),eventType}});return "ignored" as const;}return markReview("payment.amount_mismatch_requires_reconciliation",{providerAmount:amount,ledgerAmount:numberValue(pay.amount),eventType});}
@@ -560,10 +568,35 @@ export async function registerCommerceRoutes(app:FastifyInstance,context:ApiCont
           await writeOutbox(client,request.id,{aggregateType:"PAYMENT",aggregateId:pay.id,eventType:"payment.kuji_checkout_lease_requires_reconciliation",payload:{paymentId:pay.id,orderId:order.id,providerEventId:eventId,roomEntryId:linkedKujiRoom.id,roomState:linkedKujiRoom.state,checkoutExpiresAt:linkedKujiRoom.checkout_expires_at?.toISOString()??null,localAssetsReleased:true}});
           return "review" as const;
         }
+        if(order.order_kind==="SHIPPING_FEE"){
+          if(!order.shipping_request_id)return markReview("payment.shipping_request_missing",{eventType});
+          const shipping=await client.query<{status:string}>("SELECT status FROM shipping_requests WHERE id=$1 AND user_id=$2 FOR UPDATE",[order.shipping_request_id,order.user_id]);
+          const counts=await client.query<{item_count:string;shipping_count:string}>(`SELECT
+            count(item.inventory_unit_id)::text AS item_count,
+            count(item.inventory_unit_id) FILTER (WHERE inventory.status='SHIPPING')::text AS shipping_count
+            FROM shipping_request_items item
+            JOIN inventory_units inventory ON inventory.id=item.inventory_unit_id
+            WHERE item.shipping_request_id=$1`,[order.shipping_request_id]);
+          const shippingRow=shipping.rows[0]&&counts.rows[0]?{...shipping.rows[0],...counts.rows[0]}:null;
+          if(!shippingRow
+            || shippingRow.status!=="PAYMENT_PENDING"
+            || numberValue(shippingRow.item_count)<1
+            || numberValue(shippingRow.item_count)!==numberValue(shippingRow.shipping_count)){
+            await recordPaymentLedger(client,pay,order.id,eventId,"Verified shipping fee payment requiring reconciliation");
+            return markReview("payment.shipping_fulfillment_requires_reconciliation",{
+              shippingRequestId:order.shipping_request_id,
+              shippingStatus:shippingRow?.status??null,
+              itemCount:shippingRow?numberValue(shippingRow.item_count):0,
+              shippingItemCount:shippingRow?numberValue(shippingRow.shipping_count):0,
+            });
+          }
+          const promoted=await client.query("UPDATE shipping_requests SET status='REQUESTED',version=version+1 WHERE id=$1 AND user_id=$2 AND status='PAYMENT_PENDING' RETURNING id",[order.shipping_request_id,order.user_id]);
+          if(!promoted.rowCount)return markReview("payment.shipping_promotion_requires_reconciliation",{shippingRequestId:order.shipping_request_id});
+        }
         const lines=await client.query<OrderLineRow>("SELECT * FROM order_lines WHERE order_id=$1 ORDER BY product_id FOR UPDATE",[order.id]);const reservations=await client.query<{order_line_id:string;product_id:string;quantity:number}>("SELECT order_line_id,product_id,quantity FROM stock_reservations WHERE order_id=$1 AND status='ACTIVE' ORDER BY product_id,order_line_id FOR UPDATE",[order.id]);const reservationByLine=new Map(reservations.rows.map((item)=>[item.order_line_id,item]));let reservationSafe=reservations.rows.length===lines.rows.length;for(const line of lines.rows){const reservation=reservationByLine.get(line.id);const stock=await client.query<{on_hand:number;reserved:number}>("SELECT on_hand,reserved FROM product_stock WHERE product_id=$1 FOR UPDATE",[line.product_id]);if(!reservation||reservation.product_id!==line.product_id||numberValue(reservation.quantity)!==numberValue(line.quantity)||!stock.rowCount||numberValue(stock.rows[0]!.on_hand)<numberValue(line.quantity)||numberValue(stock.rows[0]!.reserved)<numberValue(line.quantity))reservationSafe=false;}
         if(!reservationSafe){await recordPaymentLedger(client,pay,order.id,eventId,"Verified success without fulfillable reservation");return markReview("payment.fulfillment_requires_reconciliation",{previousPaymentStatus:pay.status});}
         for(const line of lines.rows){await client.query("UPDATE product_stock SET on_hand=on_hand-$2,reserved=reserved-$2,version=version+1 WHERE product_id=$1",[line.product_id,line.quantity]);await client.query("UPDATE stock_reservations SET status='COMMITTED',resolved_at=now() WHERE order_line_id=$1 AND status='ACTIVE'",[line.id]);if(isDrawCategory(line.category_snapshot)){for(let i=0;i<line.quantity;i+=1)await client.query("INSERT INTO draw_entitlements(order_line_id,user_id,product_id,probability_version_id) VALUES($1,$2,$3,$4)",[line.id,order.user_id,line.product_id,line.probability_version_id]);}else{for(let i=0;i<line.quantity;i+=1)await client.query("INSERT INTO inventory_units(owner_id,product_id,source_type,source_id) VALUES($1,$2,'PURCHASE',$3)",[order.user_id,line.product_id,line.id]);}}
-        await client.query("UPDATE coupon_redemptions SET status='COMMITTED' WHERE order_id=$1 AND status='RESERVED'",[order.id]);await client.query("UPDATE payments SET status='PAID',provider_payment_id=COALESCE($2,provider_payment_id),paid_at=$3,version=version+1 WHERE id=$1",[pay.id,providerPaymentId||null,occurredAt]);await client.query("UPDATE orders SET status='PAID',paid_at=$2,version=version+1 WHERE id=$1",[order.id,occurredAt]);if(linkedKujiRoom){const drawingTime=await client.query<{server_now:Date}>("SELECT clock_timestamp() AS server_now");if(!(await startLockedKujiOrderDrawing(client,{orderId:order.id,serverNow:drawingTime.rows[0]!.server_now})))throw new Error(`Kuji room did not enter DRAWING for order ${order.id}`);}await recordPaymentLedger(client,pay,order.id,eventId,"Verified provider webhook");await writeOutbox(client,request.id,{aggregateType:"ORDER",aggregateId:order.id,eventType:"order.paid",payload:{orderId:order.id,userId:order.user_id}});return "processed" as const;
+        await client.query("UPDATE coupon_redemptions SET status='COMMITTED' WHERE order_id=$1 AND status='RESERVED'",[order.id]);await client.query("UPDATE payments SET status='PAID',provider_payment_id=COALESCE($2,provider_payment_id),paid_at=$3,version=version+1 WHERE id=$1",[pay.id,providerPaymentId||null,occurredAt]);await client.query("UPDATE orders SET status='PAID',paid_at=$2,version=version+1 WHERE id=$1",[order.id,occurredAt]);if(linkedKujiRoom){const drawingTime=await client.query<{server_now:Date}>("SELECT clock_timestamp() AS server_now");if(!(await startLockedKujiOrderDrawing(client,{orderId:order.id,serverNow:drawingTime.rows[0]!.server_now})))throw new Error(`Kuji room did not enter DRAWING for order ${order.id}`);}await recordPaymentLedger(client,pay,order.id,eventId,"Verified provider webhook");await writeOutbox(client,request.id,{aggregateType:order.order_kind==="SHIPPING_FEE"?"SHIPPING_REQUEST":"ORDER",aggregateId:order.order_kind==="SHIPPING_FEE"?order.shipping_request_id!:order.id,eventType:order.order_kind==="SHIPPING_FEE"?"shipping.requested":"order.paid",payload:{orderId:order.id,userId:order.user_id,...(order.shipping_request_id?{shippingRequestId:order.shipping_request_id}:{})}});return "processed" as const;
       }
 
       if(eventType==="PAYMENT_FAILED"||eventType==="PAYMENT_CANCELLED"){if(["PENDING","AUTHORIZED"].includes(pay.status)){await releasePendingOrder(client,order,eventType);await client.query("UPDATE payments SET status=$2,provider_payment_id=COALESCE($3,provider_payment_id),version=version+1 WHERE id=$1",[pay.id,eventType==="PAYMENT_FAILED"?"FAILED":"CANCELLED",providerPaymentId||null]);await client.query("UPDATE orders SET status='CANCELLED',cancelled_at=$2,version=version+1 WHERE id=$1",[order.id,occurredAt]);if(linkedKujiRoom){const releaseTime=await client.query<{server_now:Date}>("SELECT clock_timestamp() AS server_now");await releaseLockedKujiOrderRoom(client,{orderId:order.id,serverNow:releaseTime.rows[0]!.server_now,terminalState:"CANCELLED"});}await writeOutbox(client,request.id,{aggregateType:"ORDER",aggregateId:order.id,eventType:"order.cancelled",payload:{orderId:order.id,reason:eventType}});return "processed" as const;}await writeOutbox(client,request.id,{aggregateType:"PAYMENT",aggregateId:pay.id,eventType:"payment.terminal_event_observed",payload:{paymentId:pay.id,orderId:order.id,providerEventId:eventId,eventType,previousPaymentStatus:pay.status}});return "ignored" as const;}
@@ -571,6 +604,28 @@ export async function registerCommerceRoutes(app:FastifyInstance,context:ApiCont
       if(pay.status==="REFUNDED")return "processed" as const;
       if(["PENDING","AUTHORIZED","FAILED","CANCELLED"].includes(pay.status)){if(["PENDING","AUTHORIZED"].includes(pay.status)){await releasePendingOrder(client,order,"PROVIDER_REFUND_BEFORE_SUCCESS");if(linkedKujiRoom){const releaseTime=await client.query<{server_now:Date}>("SELECT clock_timestamp() AS server_now");await releaseLockedKujiOrderRoom(client,{orderId:order.id,serverNow:releaseTime.rows[0]!.server_now,terminalState:"CANCELLED"});}}await recordPaymentLedger(client,pay,order.id,eventId,"Payment inferred from verified provider refund");await recordRefundLedger(client,pay,order.id,eventId,"Verified provider refund before local fulfillment");await client.query("UPDATE payments SET status='REFUNDED',provider_payment_id=COALESCE($2,provider_payment_id),paid_at=COALESCE(paid_at,$3),refunded_at=$3,version=version+1 WHERE id=$1",[pay.id,providerPaymentId||null,occurredAt]);await client.query("UPDATE orders SET status='REFUNDED',paid_at=COALESCE(paid_at,$2),refunded_at=$2,version=version+1 WHERE id=$1",[order.id,occurredAt]);await writeOutbox(client,request.id,{aggregateType:"ORDER",aggregateId:order.id,eventType:"order.refunded",payload:{orderId:order.id,userId:order.user_id,withoutLocalFulfillment:true}});return "processed" as const;}
       if(!["PAID","REFUND_REVIEW"].includes(pay.status))return markReview("payment.refund_state_requires_reconciliation",{previousPaymentStatus:pay.status});
+      if(order.order_kind==="SHIPPING_FEE"){
+        if(!order.shipping_request_id){await recordRefundLedger(client,pay,order.id,eventId,"Verified shipping fee refund missing request");return markReview("payment.shipping_refund_requires_reconciliation",{});}
+        const shipping=await client.query<{status:string}>("SELECT status FROM shipping_requests WHERE id=$1 AND user_id=$2 FOR UPDATE",[order.shipping_request_id,order.user_id]);
+        const shippingStatus=shipping.rows[0]?.status;
+        await recordRefundLedger(client,pay,order.id,eventId,"Verified shipping fee refund");
+        if(shippingStatus==="REQUESTED"){
+          const expected=await client.query<{count:string}>("SELECT count(*)::text AS count FROM shipping_request_items WHERE shipping_request_id=$1",[order.shipping_request_id]);
+          const restored=await client.query(`UPDATE inventory_units inventory SET status='OWNED'
+            FROM shipping_request_items item
+            WHERE item.shipping_request_id=$1 AND item.inventory_unit_id=inventory.id
+              AND inventory.owner_id=$2 AND inventory.status='SHIPPING'
+            RETURNING inventory.id`,[order.shipping_request_id,order.user_id]);
+          if(restored.rowCount!==numberValue(expected.rows[0]?.count??0))return markReview("payment.shipping_refund_requires_reconciliation",{shippingRequestId:order.shipping_request_id,shippingStatus,transitionMismatch:true});
+          await client.query("UPDATE shipping_requests SET status='CANCELLED',version=version+1 WHERE id=$1 AND status='REQUESTED'",[order.shipping_request_id]);
+        }else if(shippingStatus!=="CANCELLED"){
+          return markReview("payment.shipping_refund_requires_reconciliation",{shippingRequestId:order.shipping_request_id,shippingStatus:shippingStatus??null});
+        }
+        await client.query("UPDATE payments SET status='REFUNDED',provider_payment_id=COALESCE($2,provider_payment_id),refunded_at=$3,version=version+1 WHERE id=$1",[pay.id,providerPaymentId||null,occurredAt]);
+        await client.query("UPDATE orders SET status='REFUNDED',refunded_at=$2,version=version+1 WHERE id=$1",[order.id,occurredAt]);
+        await writeOutbox(client,request.id,{aggregateType:"SHIPPING_REQUEST",aggregateId:order.shipping_request_id,eventType:"shipping.fee_refunded",payload:{shippingRequestId:order.shipping_request_id,orderId:order.id,userId:order.user_id}});
+        return "processed" as const;
+      }
       const assets=await lockRefundAssets(client,order);const lateSuccessWithoutAssets=pay.status==="REFUND_REVIEW"&&Boolean(order.cancelled_at)&&assets.inventoryIds.length===0&&assets.entitlementIds.length===0;if(!lateSuccessWithoutAssets&&refundRequiresReview(assets.safety)){await recordRefundLedger(client,pay,order.id,eventId,"Verified provider refund with assets requiring reconciliation");return markReview("payment.refund_requires_reconciliation",assets.safety);}
       if(lateSuccessWithoutAssets){await recordRefundLedger(client,pay,order.id,eventId,"Verified provider refund after late success");await client.query("UPDATE payments SET status='REFUNDED',provider_payment_id=COALESCE($2,provider_payment_id),refunded_at=$3,version=version+1 WHERE id=$1",[pay.id,providerPaymentId||null,occurredAt]);await client.query("UPDATE orders SET status='REFUNDED',refunded_at=$2,version=version+1 WHERE id=$1",[order.id,occurredAt]);await writeOutbox(client,request.id,{aggregateType:"ORDER",aggregateId:order.id,eventType:"order.refunded",payload:{orderId:order.id,userId:order.user_id,lateSuccessReconciled:true}});return "processed" as const;}
       await client.query("SAVEPOINT refund_asset_transition");const inventoryTransition=await client.query("UPDATE inventory_units SET status='REFUNDED' WHERE id=ANY($1::uuid[]) AND owner_id=$2 AND status='OWNED' RETURNING id",[assets.inventoryIds,order.user_id]);const entitlementTransition=await client.query("UPDATE draw_entitlements SET status='CANCELLED' WHERE id=ANY($1::uuid[]) AND status='AVAILABLE' RETURNING id",[assets.entitlementIds]);if(inventoryTransition.rowCount!==assets.inventoryIds.length||entitlementTransition.rowCount!==assets.entitlementIds.length){await client.query("ROLLBACK TO SAVEPOINT refund_asset_transition");await client.query("RELEASE SAVEPOINT refund_asset_transition");await recordRefundLedger(client,pay,order.id,eventId,"Verified provider refund with concurrent asset transition");return markReview("payment.refund_requires_reconciliation",{...assets.safety,transitionMismatch:true});}await client.query("RELEASE SAVEPOINT refund_asset_transition");
@@ -579,7 +634,9 @@ export async function registerCommerceRoutes(app:FastifyInstance,context:ApiCont
     });return reply.code(202).send({accepted:true,outcome});
   });
 
-  app.post("/v1/draws/:entitlementId/consume",{preHandler:context.auth.requireUser},async(request,reply)=>{
+  await registerPortOnePaymentRoutes(app, context);
+
+  app.post("/v1/draws/:entitlementId/consume",{preHandler:[requireLiveCommerce(context),context.auth.requireUser]},async(request,reply)=>{
     const entitlementId=uuidInput((request.params as Record<string,unknown>).entitlementId,"entitlementId");
     const key=idempotencyKey(request.headers);
     const hash=requestHash({entitlementId});
@@ -685,7 +742,7 @@ export async function registerCommerceRoutes(app:FastifyInstance,context:ApiCont
       const product=await client.query<{ip_id:string;category:string;is_active:boolean;is_prize_only:boolean}>("SELECT ip_id,category,is_active,is_prize_only FROM catalog_products WHERE id=$1 FOR UPDATE",[productId]);
       if(!product.rowCount)throw notFound("가챠·쿠지 상품을 찾을 수 없습니다.");
       if(!["gacha","kuji"].includes(product.rows[0]!.category))throw badRequest("가챠·쿠지 상품만 확률표를 가질 수 있습니다.");
-      if(!product.rows[0]!.is_active||product.rows[0]!.is_prize_only)throw conflict("활성 판매용 가챠·쿠지 상품만 확률표를 만들 수 있습니다.");
+      if(product.rows[0]!.is_prize_only)throw conflict("판매용 가챠·쿠지 상품만 추첨 구성을 만들 수 있습니다.");
       assertDrawVersionCategoryConfiguration(product.rows[0]!.category as ProductOrderRow["category"],totalSlots,entries);
       const prizeSnapshots=await loadValidatedDrawPrizeSnapshots(client,{drawIpId:product.rows[0]!.ip_id,prizeProductIds:entries.map((entry)=>entry.prizeProductId)});
       const snapshotsById=new Map(prizeSnapshots.map((snapshot)=>[snapshot.id,snapshot]));

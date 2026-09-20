@@ -8,7 +8,7 @@ type CapsuleAtlas = Parameters<typeof sampleGachaCapsuleAtlasFrame>[1] & {
   projection: { diameter: number };
 };
 
-const ATLAS = require("../../../assets/gacha-capsule-reveal-atlas-v1.json") as CapsuleAtlas;
+const ATLAS = require("../../../assets/draw/gacha/gacha-capsule-reveal-atlas-v1.json") as CapsuleAtlas;
 const FIXED_DISTANCE = Math.sqrt((2.7 / (ATLAS.projection.diameter / ATLAS.frameWidth)) ** 2 + 1);
 const PROJECTION_SCALE = 2.7 * ATLAS.frameWidth / 2 / ATLAS.projection.diameter;
 const RIM_RADIUS = 0.84; // Conservative optional clip inside the .98 inner seam; native light only projects the emitter.

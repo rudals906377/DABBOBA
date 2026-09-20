@@ -31,7 +31,7 @@ const blockerLabels: ReadonlyArray<[keyof AccountDeletionBlockers, string]> = [
 
 function Blockers({ value, title }: { value: AccountDeletionBlockers; title: string }) {
   return <section className="panel">
-    <div className="panel-heading"><div><h2>{title}</h2><p>승인 시에는 서버가 이 값을 다시 계산하며 하나라도 남아 있으면 요청을 거부합니다.</p></div></div>
+    <div className="panel-heading"><div><h2>{title}</h2><p>서버가 자동 삭제를 시작하기 전에 다시 계산합니다. 진행 항목이 있으면 BLOCKED로 유지하고 안전하게 재평가합니다.</p></div></div>
     <dl className="definition-grid">
       {blockerLabels.map(([key, label]) => <div key={key}><dt>{label}</dt><dd>{value[key].toLocaleString("ko-KR")}</dd></div>)}
     </dl>
@@ -69,31 +69,39 @@ export default async function AccountDeletionDetailPage({
       <div><dt>최근 요청</dt><dd>{formatDate(detail.lastRequestedAt)}</dd></div>
       <div><dt>결정 시각</dt><dd>{formatDate(detail.decidedAt)}</dd></div>
       <div><dt>결정 관리자</dt><dd>{detail.decidedBy?.nickname || "-"}</dd></div>
-      <div><dt>실제 삭제 실행</dt><dd>실행되지 않음</dd></div>
-      <div><dt>완료 기능</dt><dd>정책 확정 전 지원하지 않음</dd></div>
+      <div><dt>자동 처리 시작</dt><dd>{formatDate(detail.processingStartedAt)}</dd></div>
+      <div><dt>완료 시각</dt><dd>{formatDate(detail.completedAt)}</dd></div>
+      <div><dt>하드 삭제</dt><dd>실행하지 않음</dd></div>
+      <div><dt>처리 방식</dt><dd>{detail.status === "COMPLETED" ? "자동 익명화 완료" : detail.status === "PROCESSING" ? "자동 삭제 worker 처리 중" : "서버 자동 처리"}</dd></div>
+      <div><dt>연결 로그인 삭제</dt><dd>{detail.authDeletionStatus === "NOT_REQUIRED" ? "연결 계정 없음" : detail.authDeletionStatus === "COMPLETED" ? `완료 · ${formatDate(detail.authDeletedAt)}` : "안전하게 재시도 중"}</dd></div>
     </dl>
+
+    <section className="panel">
+      <div className="panel-heading"><div><h2>자동 삭제 작업</h2><p>회원탈퇴는 관리자 승인 없이 처리됩니다. 외부 Auth 삭제가 실패하면 identity를 유지한 채 로그인을 차단하고 worker가 재시도합니다.</p></div></div>
+      {detail.deletionJob ? <dl className="definition-grid">
+        <div><dt>작업 상태</dt><dd>{detail.deletionJob.status}</dd></div>
+        <div><dt>시도 횟수</dt><dd>{detail.deletionJob.attempts}회</dd></div>
+        <div><dt>다음 실행</dt><dd>{formatDate(detail.deletionJob.availableAt)}</dd></div>
+        <div><dt>임대 만료</dt><dd>{formatDate(detail.deletionJob.leaseExpiresAt)}</dd></div>
+        <div><dt>외부 삭제</dt><dd>{formatDate(detail.deletionJob.externalDeletedAt)}</dd></div>
+        <div><dt>최근 오류</dt><dd>{detail.deletionJob.lastError || "-"}</dd></div>
+      </dl> : <p className="muted">대기 중인 삭제 작업이 없습니다. 완료됐거나 연결 로그인 계정이 없는 요청입니다.</p>}
+    </section>
 
     <Blockers value={detail.currentBlockers} title="현재 서버 차단 항목" />
     <Blockers value={detail.blockers} title="마지막 요청 시점 스냅샷" />
 
     {detail.rejectionAvailable ? <section className="panel">
-      <div className="panel-heading"><div><h2>운영 결정 기록</h2><p>
-        {detail.approvalEligible
-          ? "현재 차단 항목이 없어 승인할 수 있습니다. 승인과 동시에 사용자 변경 요청을 차단하고 남은 세션을 폐기합니다."
-          : "차단 항목이 남아 있어 승인은 허용되지 않습니다. 반려만 기록하거나 원인을 해소한 뒤 새로고침하세요."}
-      </p></div></div>
+      <div className="panel-heading"><div><h2>예외 처리 중단</h2><p>법적 보존 충돌이나 본인확인 오류처럼 자동 처리를 중단해야 하는 예외에만 사용합니다. 일반적인 진행 결제·배송 차단은 worker가 재평가하므로 반려 사유가 아닙니다.</p></div></div>
       <form className="stack-form" action={decideAccountDeletion}>
         <input type="hidden" name="requestId" value={detail.id} />
+        <input type="hidden" name="decision" value="REJECTED" />
         <ReturnTo value={returnTo} />
-        <label>결정<select name="decision" defaultValue={detail.approvalEligible ? "APPROVED" : "REJECTED"}>
-          {detail.approvalEligible ? <option value="APPROVED">APPROVED · 승인 기록</option> : null}
-          <option value="REJECTED">REJECTED · 반려</option>
-        </select></label>
-        <ReasonField label="검토 결정 사유" />
-        <div className="form-actions"><button className="primary" type="submit">결정 이력 저장</button></div>
+        <ReasonField label="처리 중단 사유" />
+        <div className="form-actions"><button className="danger" type="submit">자동 처리 중단 기록</button></div>
       </form>
     </section> : <section className="panel">
-      <div className="panel-heading"><div><h2>운영 결정 완료</h2><p>이 요청은 더 이상 승인·반려할 수 없습니다. 승인된 계정의 접근과 새 변경은 차단되지만 실제 삭제나 익명화는 별도 보존 정책과 수동 절차가 마련되기 전까지 제공되지 않습니다.</p></div></div>
+      <div className="panel-heading"><div><h2>운영 상태</h2><p>수동 승인·완료 버튼은 제공하지 않습니다. 서버 작업이 Supabase Auth 삭제와 개인정보 익명화를 순서대로 완료합니다.</p></div></div>
       {detail.decisionReason ? <p><strong>결정 사유</strong><br />{detail.decisionReason}</p> : null}
     </section>}
 

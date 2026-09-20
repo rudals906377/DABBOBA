@@ -7,6 +7,7 @@ import { beginIdempotency, completeIdempotency, idempotencyKey, requestHash } fr
 import { booleanInput, enumInput, integerInput, objectInput, queryString, slugIdInput, stringInput, uuidInput } from "../lib/input.js";
 import { cursorPage, pagination } from "../lib/pagination.js";
 import { iso, numberValue } from "../lib/rows.js";
+import { assertUgcOperationsPolicyAccepted } from "../lib/ugc-policy.js";
 import { assertReadyOwnedMedia } from "./media.js";
 import type { ApiContext } from "../types.js";
 
@@ -55,8 +56,16 @@ const mapWanted = (row: WantedRequestRow) => ({
   updatedAt: iso(row.updated_at),
 });
 
+function wantedBlockVisibility(viewerParameter: string, authorExpression: string) {
+  return `(${viewerParameter}::uuid IS NULL OR NOT EXISTS(
+    SELECT 1 FROM user_blocks visibility_block
+    WHERE (visibility_block.blocker_id=${viewerParameter} AND visibility_block.blocked_id=${authorExpression})
+       OR (visibility_block.blocker_id=${authorExpression} AND visibility_block.blocked_id=${viewerParameter})
+  ))`;
+}
+
 async function optionalUserId(context: ApiContext, request: FastifyRequest): Promise<string | null> {
-  if (!request.headers.authorization) return null;
+  if (!request.headers?.authorization) return null;
   try {
     const actor = await context.auth.loadActor(request);
     return actor.sessionKind === "USER" && actor.role === "USER" ? actor.userId : null;
@@ -138,7 +147,11 @@ export async function registerWantedRoutes(app: FastifyInstance, context: ApiCon
       : enumInput(query, "category", PRODUCT_CATEGORIES);
     const ipId = query.ipId === undefined ? undefined : slugIdInput(query.ipId, "ipId");
     const values: unknown[] = [viewerId, limit + 1];
-    const filters = ["w.status='ACTIVE'", "(w.ip_id IS NULL OR i.is_active=true)"];
+    const filters = [
+      "w.status='ACTIVE'",
+      "(w.ip_id IS NULL OR i.is_active=true)",
+      wantedBlockVisibility("$1", "w.user_id"),
+    ];
     if (search) {
       values.push(`%${search}%`);
       filters.push(`(w.desired_item ILIKE $${values.length} OR w.details ILIKE $${values.length} OR w.ip_name_ko ILIKE $${values.length})`);
@@ -183,6 +196,7 @@ export async function registerWantedRoutes(app: FastifyInstance, context: ApiCon
       payload: input,
       resourceType: "WANTED_REQUEST",
       work: async (client) => {
+        await assertUgcOperationsPolicyAccepted(client, request.actor!.userId);
         let ipNameKo = input.ipNameKo;
         if (input.ipId) {
           const ip = await client.query<{ name_ko: string }>(
@@ -353,8 +367,11 @@ export async function registerWantedRoutes(app: FastifyInstance, context: ApiCon
       resourceType: "WANTED_REQUEST",
       work: async (client) => {
         const wanted = await client.query<{ user_id: string }>(
-          "SELECT user_id FROM wanted_requests WHERE id=$1 AND status='ACTIVE' FOR UPDATE",
-          [requestId],
+          `SELECT w.user_id FROM wanted_requests w
+            WHERE w.id=$2 AND w.status='ACTIVE'
+              AND ${wantedBlockVisibility("$1", "w.user_id")}
+            FOR UPDATE OF w`,
+          [request.actor!.userId, requestId],
         );
         if (!wanted.rowCount) throw notFound("신청 글을 찾을 수 없습니다.");
         if (wanted.rows[0]!.user_id === request.actor!.userId) {

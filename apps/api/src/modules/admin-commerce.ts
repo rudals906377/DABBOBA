@@ -13,7 +13,7 @@ const ORDER_STATUSES = ["PENDING_PAYMENT", "PAID", "FULFILLED", "CANCELLED", "RE
 const PAYMENT_STATUSES = ["PENDING", "AUTHORIZED", "PAID", "FAILED", "CANCELLED", "REFUND_REVIEW", "REFUNDED"] as const;
 const REVIEW_STATUSES = ["PENDING", "IN_REVIEW", "WAITING_PROVIDER", "ESCALATED", "CLOSED"] as const;
 const REVIEW_FILTER_STATUSES = ["UNTRACKED", ...REVIEW_STATUSES] as const;
-const SHIPPING_STATUSES = ["REQUESTED", "PROCESSING", "SHIPPED", "DELIVERED", "CANCELLED"] as const;
+const SHIPPING_STATUSES = ["PAYMENT_PENDING", "REQUESTED", "PROCESSING", "SHIPPED", "DELIVERED", "CANCELLED"] as const;
 const SHIPPING_TARGET_STATUSES = ["PROCESSING", "SHIPPED", "DELIVERED", "CANCELLED"] as const;
 
 type OrderStatus = (typeof ORDER_STATUSES)[number];
@@ -29,7 +29,8 @@ type InventoryUnitStatus =
   | "DELIVERED"
   | "TRANSFERRED"
   | "REFUNDED"
-  | "POINT_RETURNED";
+  | "POINT_RETURNED"
+  | "EXPIRED_HOLD";
 
 type OrderSummaryRow = {
   id: string; user_id: string; user_email: string | null; nickname: string; status: OrderStatus; currency: "KRW";

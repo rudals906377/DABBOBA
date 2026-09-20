@@ -56,67 +56,12 @@ function functionBlock(source, functionName) {
   assert.fail(`${functionName} function body is not balanced`);
 }
 
-test("seeded exchange listings, applications, and product requests keep complete domain fields", () => {
-  const ipIds = new Set(ipCatalog.map((ip) => ip.id));
-  const categoryIds = new Set(["gacha", "figure", "kuji", "tcg"]);
-
-  assert.deepEqual(REQUEST_CATEGORY_IDS, ["gacha", "tcg", "figure", "kuji"]);
-  assert.equal(new Set(DEFAULT_EXCHANGE_POSTS.map((post) => post.id)).size, DEFAULT_EXCHANGE_POSTS.length);
-  assert.ok(DEFAULT_EXCHANGE_POSTS.every((post) => !post.id.startsWith("exchange-user-")));
-  assert.equal(new Set(DEFAULT_PRODUCT_REQUESTS.map((request) => request.id)).size, DEFAULT_PRODUCT_REQUESTS.length);
-
-  for (const post of DEFAULT_EXCHANGE_POSTS) {
-    assert.ok(categoryIds.has(post.categoryId), `${post.id} needs a supported category`);
-    assert.ok(ipIds.has(post.ipId), `${post.id} needs a catalog IP`);
-    for (const value of [
-      post.authorId,
-      post.author,
-      post.title,
-      post.offeredInventoryUnitId,
-      post.offeredCatalogItemId,
-      post.offeredItem,
-      post.offeredItemImage,
-      post.body,
-      post.time,
-    ]) {
-      assert.ok(value.trim(), `${post.id} has an empty required field`);
-    }
-    assert.ok(post.appReferenceValue > 0);
-    assert.equal(post.sourceType, "GACHA", `${post.id} must come from a completed gacha draw`);
-    assert.notEqual(post.authorId, CURRENT_USER_ID, `${post.id} must remain a neutral other-user fixture`);
-    assert.ok(Number.isInteger(post.applications) && post.applications >= 0);
-
-    const applications = DEFAULT_EXCHANGE_APPLICATIONS[post.id];
-    assert.ok(Array.isArray(applications), `${post.id} needs an application fixture entry`);
-    assert.equal(new Set(applications.map((application) => application.id)).size, applications.length);
-    for (const application of applications) {
-      assert.ok(categoryIds.has(application.categoryId));
-      assert.ok(ipIds.has(application.ipId));
-      for (const value of [
-        application.authorId,
-        application.author,
-        application.offeredInventoryUnitId,
-        application.offeredCatalogItemId,
-        application.offeredItem,
-        application.offeredItemImage,
-        application.time,
-      ]) {
-        assert.ok(value.trim(), `${application.id} has an empty required field`);
-      }
-      assert.equal("message" in application, false, `${application.id} must stay product-only`);
-      assert.equal(application.sourceType, "GACHA", `${application.id} must come from a completed gacha draw`);
-      assert.ok(application.appReferenceValue > 0);
-    }
-  }
-
-  for (const request of DEFAULT_PRODUCT_REQUESTS) {
-    assert.ok(categoryIds.has(request.categoryId), `${request.id} needs a supported category`);
-    assert.ok(ipIds.has(request.ipId), `${request.id} needs a catalog IP`);
-    for (const value of [request.authorId, request.author, request.desiredItem, request.details, request.time]) {
-      assert.ok(value.trim(), `${request.id} has an empty required field`);
-    }
-    assert.ok(Number.isInteger(request.likes) && request.likes >= 0);
-  }
+test("bundled exchange and request fixtures stay empty until server records exist", () => {
+  assert.deepEqual(REQUEST_CATEGORY_IDS, ["gacha", "kuji", "figure"]);
+  assert.deepEqual(ipCatalog, []);
+  assert.deepEqual(DEFAULT_EXCHANGE_POSTS, []);
+  assert.deepEqual(DEFAULT_EXCHANGE_APPLICATIONS, {});
+  assert.deepEqual(DEFAULT_PRODUCT_REQUESTS, []);
 });
 
 test("exchange room keeps the compatible root id and pushes a footer-free exchange detail", () => {
@@ -147,19 +92,12 @@ test("exchange room keeps the compatible root id and pushes a footer-free exchan
   assert.match(exchangeRoomPage, /<KeyboardInput\b[\s\S]*?<KeyboardInput\b[\s\S]*?<KeyboardTextarea\b/);
 });
 
-test("exchange autocomplete fixtures keep registered ids, popularity signals, and owned inventory links", () => {
+test("exchange autocomplete starts empty until authenticated catalog and inventory records exist", () => {
   const itemIds = new Set(POPULAR_EXCHANGE_CATALOG_ITEMS.map((item) => item.id));
   assert.equal(itemIds.size, POPULAR_EXCHANGE_CATALOG_ITEMS.length);
   const eligibleInventory = eligibleSessionInventoryUnits(createInitialSessionCommerceState());
-  assert.ok(eligibleInventory.every((item) => item.source === "gacha"));
-  assert.ok(eligibleInventory.every((item) => itemIds.has(item.catalogItemId)));
-
-  const pokemonSuggestions = POPULAR_EXCHANGE_CATALOG_ITEMS.filter((item) => item.name.startsWith("포켓몬스터"));
-  assert.ok(pokemonSuggestions.length >= 3);
-  assert.ok(pokemonSuggestions.some((item) => item.name.includes("피카츄")));
-  assert.ok(pokemonSuggestions.some((item) => item.name.includes("파이리")));
-  assert.ok(pokemonSuggestions.every((item) => item.searchCount > 0 && item.postCount > 0));
-  assert.ok(POPULAR_EXCHANGE_CATALOG_ITEMS.every((item) => Number.isInteger(item.estimatedPrice) && item.estimatedPrice > 0));
+  assert.deepEqual(POPULAR_EXCHANGE_CATALOG_ITEMS, []);
+  assert.deepEqual(eligibleInventory, []);
 
   assert.match(prototypeSource, /popularity:\s*item\.postCount \* 10 \+ item\.searchCount/);
   assert.match(prototypeSource, /normalizeCatalogSearch\(item\.name\)/);

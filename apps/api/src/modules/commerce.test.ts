@@ -504,14 +504,14 @@ test("admin draw versions return the stored prize snapshot", async () => {
   });
 });
 
-test("creating a draw draft validates and stores the canonical prize snapshot in one transaction", async () => {
+test("creating a draw draft allows an inactive selling product and stores the canonical prize snapshot", async () => {
   let savedEntry: { sql: string; params: unknown[] } | undefined;
   const client = {
     async query(sql: string, params: unknown[] = []) {
       if (sql === "BEGIN" || sql === "COMMIT") return { rowCount: null, rows: [] };
       if (sql.startsWith("DELETE FROM idempotency_keys")) return { rowCount: 0, rows: [] };
       if (sql.includes("INSERT INTO idempotency_keys")) return { rowCount: 1, rows: [{ id: "idem-draft" }] };
-      if (sql === "SELECT ip_id,category,is_active,is_prize_only FROM catalog_products WHERE id=$1 FOR UPDATE") return { rowCount: 1, rows: [{ ip_id: "ip-1", category: "gacha", is_active: true, is_prize_only: false }] };
+      if (sql === "SELECT ip_id,category,is_active,is_prize_only FROM catalog_products WHERE id=$1 FOR UPDATE") return { rowCount: 1, rows: [{ ip_id: "ip-1", category: "gacha", is_active: false, is_prize_only: false }] };
       if (sql.includes("SELECT p.id,p.name,p.image_url,p.sku")) return { rowCount: 1, rows: [{
         id: "prize-a",
         name: "A상",

@@ -6,7 +6,8 @@ import {
 } from "jose";
 import { AppError, unauthorized } from "./errors.js";
 
-export const CUSTOMER_AUTH_PROVIDERS = ["KAKAO", "NAVER", "PHONE"] as const;
+export const CUSTOMER_AUTH_PROVIDERS = ["KAKAO", "NAVER", "GOOGLE", "APPLE", "EMAIL"] as const;
+export const CUSTOMER_SUBJECT_LOOKUP_PROVIDERS = [...CUSTOMER_AUTH_PROVIDERS, "PHONE"] as const;
 
 export type CustomerAuthProvider = (typeof CUSTOMER_AUTH_PROVIDERS)[number];
 
@@ -14,10 +15,11 @@ export type SupabaseCustomerClaims = {
   issuer: string;
   subject: string;
   canonicalSubject: string;
-  loginProvider: CustomerAuthProvider;
+};
+
+export type VerifiedSupabaseCustomer = SupabaseCustomerClaims & {
   providers: CustomerAuthProvider[];
   email: string | null;
-  phoneE164: string | null;
 };
 
 export type SupabaseJwtVerificationOptions = {
@@ -25,20 +27,27 @@ export type SupabaseJwtVerificationOptions = {
   audience: string;
 };
 
-const remoteKeySets = new Map<string, ReturnType<typeof createRemoteJWKSet>>();
+export type SupabaseCustomerVerificationOptions = SupabaseJwtVerificationOptions & {
+  publishableKey: string;
+  fetch?: typeof globalThis.fetch;
+};
 
-function metadataObject(value: unknown): Record<string, unknown> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
-  return value as Record<string, unknown>;
-}
+const remoteKeySets = new Map<string, ReturnType<typeof createRemoteJWKSet>>();
 
 function mappedProvider(value: string): CustomerAuthProvider | null {
   switch (value.toLocaleLowerCase("en-US")) {
     case "kakao": return "KAKAO";
     case "custom:naver": return "NAVER";
-    case "phone": return "PHONE";
+    case "google": return "GOOGLE";
+    case "apple": return "APPLE";
+    case "email": return "EMAIL";
     default: return null;
   }
+}
+
+function mappedLiveProvider(value: string): CustomerAuthProvider | "PHONE" | null {
+  if (value.toLocaleLowerCase("en-US") === "phone") return "PHONE";
+  return mappedProvider(value);
 }
 
 function normalizedEmail(value: unknown): string | null {
@@ -46,12 +55,6 @@ function normalizedEmail(value: unknown): string | null {
   const email = value.trim().toLocaleLowerCase("en-US");
   if (email.length > 254 || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return null;
   return email;
-}
-
-function normalizedPhone(value: unknown): string | null {
-  if (typeof value !== "string") return null;
-  const phone = value.trim();
-  return /^\+[1-9][0-9]{7,14}$/.test(phone) ? phone : null;
 }
 
 function canonicalSubject(issuer: string, subject: string): string {
@@ -73,43 +76,121 @@ export function mapSupabaseCustomerClaims(payload: JWTPayload): SupabaseCustomer
     throw unauthorized("익명 또는 인증되지 않은 계정은 사용할 수 없습니다.");
   }
 
-  const appMetadata = metadataObject(payload.app_metadata);
-  const loginProvider = typeof appMetadata.provider === "string"
-    ? mappedProvider(appMetadata.provider)
-    : null;
-  if (!loginProvider) {
-    throw unauthorized("지원하지 않는 로그인 방식입니다.");
-  }
-  const rawProviders = [
-    appMetadata.provider as string,
-    ...(Array.isArray(appMetadata.providers)
-      ? appMetadata.providers.filter((value): value is string => typeof value === "string")
-      : []),
-  ];
-  const mappedProviders = rawProviders.map(mappedProvider);
-  if (mappedProviders.some((provider) => provider === null)) {
-    throw unauthorized("지원하지 않는 로그인 방식이 연결되어 있습니다.");
-  }
-  const providerSet = new Set(mappedProviders as CustomerAuthProvider[]);
-  const providers = CUSTOMER_AUTH_PROVIDERS.filter((provider) => providerSet.has(provider));
-  if (providers.length !== 1 || providers[0] !== loginProvider) {
-    throw unauthorized("로그인 수단을 자동으로 합칠 수 없습니다. 고객센터에 문의해 주세요.");
-  }
-  const rawPhone = typeof payload.phone === "string" ? payload.phone.trim() : null;
-  const phoneE164 = providers.includes("PHONE") ? normalizedPhone(rawPhone) : null;
-  if (loginProvider === "PHONE" && !phoneE164) {
-    throw unauthorized("휴대폰 인증 정보를 확인해 주세요.");
-  }
-
   return {
     issuer: payload.iss,
     subject: payload.sub,
     canonicalSubject: canonicalSubject(payload.iss, payload.sub),
-    loginProvider,
-    providers,
-    email: normalizedEmail(payload.email),
-    phoneE164,
   };
+}
+
+async function readBoundedJson(response: Response): Promise<unknown> {
+  const limit = 65_536;
+  const declared = Number(response.headers.get("content-length"));
+  if (Number.isFinite(declared) && declared > limit) throw unauthorized("로그인 인증 정보를 확인해 주세요.");
+  if (!response.body) throw unauthorized("로그인 인증 정보를 확인해 주세요.");
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const next = await reader.read();
+      if (next.done) break;
+      total += next.value.byteLength;
+      if (total > limit) {
+        await reader.cancel().catch(() => undefined);
+        throw unauthorized("로그인 인증 정보를 확인해 주세요.");
+      }
+      chunks.push(next.value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  try {
+    return JSON.parse(new TextDecoder().decode(bytes));
+  } catch {
+    throw unauthorized("로그인 인증 정보를 확인해 주세요.");
+  }
+}
+
+function objectValue(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw unauthorized("로그인 인증 정보를 확인해 주세요.");
+  }
+  return value as Record<string, unknown>;
+}
+
+async function fetchLiveCustomer(
+  accessToken: string,
+  claims: SupabaseCustomerClaims,
+  options: SupabaseCustomerVerificationOptions,
+): Promise<VerifiedSupabaseCustomer> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 5_000);
+  try {
+    const request = options.fetch || globalThis.fetch;
+    const response = await request(`${options.supabaseUrl.replace(/\/$/, "")}/auth/v1/user`, {
+      method: "GET",
+      headers: {
+        apikey: options.publishableKey,
+        authorization: `Bearer ${accessToken}`,
+        accept: "application/json",
+      },
+      redirect: "error",
+      signal: controller.signal,
+    });
+    if (!response.ok) throw unauthorized("로그인 인증 정보가 만료되었거나 유효하지 않습니다.");
+    const user = objectValue(await readBoundedJson(response));
+    if (
+      user.id !== claims.subject
+      || user.role !== "authenticated"
+      || user.is_anonymous === true
+      || !Array.isArray(user.identities)
+      || user.identities.length < 1
+      || user.identities.length > 20
+    ) {
+      throw unauthorized("로그인 인증 정보를 확인해 주세요.");
+    }
+
+    const providerSet = new Set<CustomerAuthProvider>();
+    for (const rawIdentity of user.identities) {
+      const identity = objectValue(rawIdentity);
+      const identityId = identity.identity_id;
+      const provider = typeof identity.provider === "string" ? mappedLiveProvider(identity.provider) : null;
+      if (
+        typeof identityId !== "string"
+        || identityId.length < 1
+        || identityId.length > 512
+        || (identity.user_id !== undefined && identity.user_id !== claims.subject)
+        || !provider
+      ) {
+        throw unauthorized("지원하지 않는 로그인 방식이 연결되어 있습니다.");
+      }
+      if (provider !== "PHONE") providerSet.add(provider);
+    }
+    const providers = CUSTOMER_AUTH_PROVIDERS.filter((provider) => providerSet.has(provider));
+    if (providers.length < 1) throw unauthorized("지원하는 로그인 방식을 확인해 주세요.");
+    const emailConfirmedAt = typeof user.email_confirmed_at === "string"
+      ? Date.parse(user.email_confirmed_at)
+      : Number.NaN;
+    const email = Number.isFinite(emailConfirmedAt) && emailConfirmedAt <= Date.now()
+      ? normalizedEmail(user.email)
+      : null;
+    if (providers.includes("EMAIL") && !email) {
+      throw unauthorized("이메일 인증 정보를 확인해 주세요.");
+    }
+    return { ...claims, providers, email };
+  } catch (error) {
+    if (error instanceof AppError) throw error;
+    throw unauthorized("로그인 인증 정보를 확인하지 못했습니다.");
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 function remoteKeySet(jwksUrl: string): ReturnType<typeof createRemoteJWKSet> {
@@ -153,4 +234,13 @@ export async function verifySupabaseAccessToken(
     if (error instanceof AppError) throw error;
     throw unauthorized("로그인 인증 정보가 만료되었거나 유효하지 않습니다.");
   }
+}
+
+export async function verifySupabaseCustomerAccessToken(
+  accessToken: string,
+  options: SupabaseCustomerVerificationOptions,
+  keyResolver?: JWTVerifyGetKey,
+): Promise<VerifiedSupabaseCustomer> {
+  const claims = await verifySupabaseAccessToken(accessToken, options, keyResolver);
+  return fetchLiveCustomer(accessToken, claims, options);
 }

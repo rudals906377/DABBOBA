@@ -1,12 +1,9 @@
-import { Ionicons } from "@expo/vector-icons";
 import type { BottomTabBarProps } from "expo-router/js-tabs";
 import {
   AccessibilityInfo,
-  Animated,
   Pressable,
   StyleSheet,
   View,
-  useWindowDimensions,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
 } from "react-native";
@@ -16,39 +13,33 @@ import {
   useContext,
   useEffect,
   useMemo,
-  useRef,
   useState,
   type ReactNode,
 } from "react";
 import { AppText as Text } from "@/components/Typography";
-import { PpobaMachineIcon } from "@/components/PpobaMachineIcon";
+import { GachaCapsuleIcon } from "@/components/GachaCapsuleIcon";
+import { KujiTicketIcon } from "@/components/KujiTicketIcon";
+import {
+  HomeTabIcon,
+  ProfileTabIcon,
+  StorageTabIcon,
+} from "@/components/RootObjectTabIcon";
 import { seed } from "@/design-system/seed";
-
-type NavigationMode = "expanded" | "compact";
+import { colors } from "@/theme";
 
 type RootNavigationMotion = {
-  mode: NavigationMode;
-  progress: Animated.Value;
   reducedMotion: boolean;
   expand: () => void;
   onScroll: (event: NativeSyntheticEvent<NativeScrollEvent>) => void;
 };
 
-const ROOT_NAVIGATION_TOP_THRESHOLD = 12;
-const ROOT_NAVIGATION_COLLAPSE_THRESHOLD = 18;
-const ROOT_NAVIGATION_EXPAND_THRESHOLD = 10;
-
 export const ROOT_NAVIGATION_CONTENT_INSET = seed.size.bottomNavigation + seed.spacing.screenBottom;
+export const ROOT_TAB_LABEL_MAX_FONT_SIZE_MULTIPLIER = 2;
 
 const RootNavigationMotionContext = createContext<RootNavigationMotion | null>(null);
 
 export function RootNavigationMotionProvider({ children }: { children: ReactNode }) {
-  const [mode, setMode] = useState<NavigationMode>("expanded");
   const [reducedMotion, setReducedMotion] = useState(false);
-  const modeRef = useRef<NavigationMode>("expanded");
-  const lastScrollYRef = useRef(0);
-  const directionDistanceRef = useRef(0);
-  const progress = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     let active = true;
@@ -62,75 +53,12 @@ export function RootNavigationMotionProvider({ children }: { children: ReactNode
     };
   }, []);
 
-  const updateMode = useCallback((nextMode: NavigationMode) => {
-    if (modeRef.current === nextMode) return;
-    modeRef.current = nextMode;
-    setMode(nextMode);
-    const toValue = nextMode === "compact" ? 1 : 0;
-    progress.stopAnimation();
-    if (reducedMotion) {
-      progress.setValue(toValue);
-      return;
-    }
-    Animated.spring(progress, {
-      toValue,
-      damping: 25,
-      stiffness: 175,
-      mass: 0.95,
-      overshootClamping: true,
-      restDisplacementThreshold: 0.002,
-      restSpeedThreshold: 0.002,
-      useNativeDriver: false,
-    }).start();
-  }, [progress, reducedMotion]);
-
-  const expand = useCallback(() => {
-    lastScrollYRef.current = 0;
-    directionDistanceRef.current = 0;
-    updateMode("expanded");
-  }, [updateMode]);
-
-  const onScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
-    const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
-    const nextScrollY = Math.max(0, contentOffset.y);
-
-    if (contentSize.height <= layoutMeasurement.height + 2) {
-      lastScrollYRef.current = 0;
-      directionDistanceRef.current = 0;
-      updateMode("expanded");
-      return;
-    }
-
-    const delta = nextScrollY - lastScrollYRef.current;
-    lastScrollYRef.current = nextScrollY;
-
-    if (nextScrollY <= ROOT_NAVIGATION_TOP_THRESHOLD) {
-      directionDistanceRef.current = 0;
-      updateMode("expanded");
-      return;
-    }
-
-    if (delta === 0) return;
-
-    if (modeRef.current === "expanded") {
-      directionDistanceRef.current = Math.max(0, directionDistanceRef.current + delta);
-      if (directionDistanceRef.current >= ROOT_NAVIGATION_COLLAPSE_THRESHOLD) {
-        directionDistanceRef.current = 0;
-        updateMode("compact");
-      }
-      return;
-    }
-
-    directionDistanceRef.current = Math.min(0, directionDistanceRef.current + delta);
-    if (directionDistanceRef.current <= -ROOT_NAVIGATION_EXPAND_THRESHOLD) {
-      directionDistanceRef.current = 0;
-      updateMode("expanded");
-    }
-  }, [updateMode]);
+  const expand = useCallback(() => undefined, []);
+  const onScroll = useCallback((_event: NativeSyntheticEvent<NativeScrollEvent>) => undefined, []);
 
   const value = useMemo(
-    () => ({ mode, progress, reducedMotion, expand, onScroll }),
-    [expand, mode, onScroll, progress, reducedMotion],
+    () => ({ reducedMotion, expand, onScroll }),
+    [expand, onScroll, reducedMotion],
   );
   return <RootNavigationMotionContext.Provider value={value}>{children}</RootNavigationMotionContext.Provider>;
 }
@@ -142,85 +70,16 @@ export function useRootNavigationScroll() {
 }
 
 const TAB_LABELS: Record<string, string> = {
-  exchange: "교환방",
-  ppoba: "뽀바",
+  gacha: "가챠샵",
+  kuji: "쿠지샵",
   index: "홈",
-  dukroom: "보관함",
+  storage: "보관함",
   profile: "내정보",
-};
-
-const TAB_ICONS: Record<string, React.ComponentProps<typeof Ionicons>["name"]> = {
-  exchange: "swap-horizontal-outline",
-  index: "home-outline",
-  dukroom: "cube-outline",
-  profile: "person-circle-outline",
 };
 
 export function RootFloatingTabBar({ state, descriptors, navigation, insets }: BottomTabBarProps) {
   const motion = useContext(RootNavigationMotionContext);
   if (!motion) throw new Error("RootFloatingTabBar must be used inside RootNavigationMotionProvider");
-
-  const { width: windowWidth } = useWindowDimensions();
-  const selection = useRef(new Animated.Value(state.index)).current;
-  const previousIndexRef = useRef(state.index);
-  const expandedWidth = Math.min(windowWidth - seed.spacing.globalGutter * 2, 520);
-  const compactWidth = Math.max(260, Math.min(windowWidth - seed.spacing.x14, 304));
-  const routeCount = Math.max(1, state.routes.length);
-  const expandedTabWidth = expandedWidth / routeCount;
-  const compactTabWidth = compactWidth / routeCount;
-  const animatedTabWidth = motion.progress.interpolate({
-    inputRange: [0, 1],
-    outputRange: [expandedTabWidth, compactTabWidth],
-  });
-  const animatedTrackWidth = motion.progress.interpolate({
-    inputRange: [0, 1],
-    outputRange: [
-      Math.max(seed.size.touchTarget, expandedTabWidth - seed.spacing.x2),
-      Math.max(seed.size.touchTarget, compactTabWidth - seed.spacing.x2),
-    ],
-  });
-
-  useEffect(() => {
-    if (previousIndexRef.current === state.index) {
-      selection.setValue(state.index);
-      return;
-    }
-    previousIndexRef.current = state.index;
-    motion.expand();
-    if (motion.reducedMotion) {
-      selection.setValue(state.index);
-      return;
-    }
-    Animated.spring(selection, {
-      toValue: state.index,
-      damping: 23,
-      stiffness: 230,
-      mass: 0.8,
-      useNativeDriver: false,
-    }).start();
-  }, [motion.expand, motion.reducedMotion, selection, state.index]);
-
-  const animatedBarStyle = {
-    width: motion.progress.interpolate({ inputRange: [0, 1], outputRange: [expandedWidth, compactWidth] }),
-    height: motion.progress.interpolate({ inputRange: [0, 1], outputRange: [66, 54] }),
-    borderRadius: motion.progress.interpolate({ inputRange: [0, 1], outputRange: [22, 27] }),
-    transform: [
-      { translateY: motion.progress.interpolate({ inputRange: [0, 1], outputRange: [0, -6] }) },
-    ],
-  };
-
-  const labelAnimatedStyle = {
-    height: motion.progress.interpolate({ inputRange: [0, 0.78, 1], outputRange: [17, 6, 0] }),
-    opacity: motion.progress.interpolate({ inputRange: [0, 0.68, 1], outputRange: [1, 0.45, 0] }),
-    transform: [
-      { translateY: motion.progress.interpolate({ inputRange: [0, 1], outputRange: [0, 2] }) },
-    ],
-  };
-
-  const trackAnimatedStyle = {
-    width: animatedTrackWidth,
-    transform: [{ translateX: Animated.multiply(selection, animatedTabWidth) }],
-  };
 
   return (
     <View
@@ -228,27 +87,17 @@ export function RootFloatingTabBar({ state, descriptors, navigation, insets }: B
       style={[
         styles.footer,
         {
-          height: seed.size.bottomNavigation + insets.bottom + 16,
-          paddingBottom: Math.max(insets.bottom, seed.spacing.x2),
+          height: seed.size.bottomNavigation + insets.bottom,
+          paddingBottom: insets.bottom,
         },
       ]}
     >
-      <Animated.View
-        style={[styles.bar, animatedBarStyle]}
-      >
-        <Animated.View
-          pointerEvents="none"
-          style={[
-            styles.selectionTrack,
-            { left: seed.spacing.x1 },
-            trackAnimatedStyle,
-          ]}
-        />
-
+      <View style={styles.bar}>
         {state.routes.map((route, index) => {
           const options = descriptors[route.key]?.options ?? {};
           const selected = state.index === index;
-          const color = selected ? seed.color.foreground.brand : seed.color.foreground.muted;
+          const activeColor = route.name === "kuji" ? colors.kujiOrangeDark : seed.color.foreground.brand;
+          const color = selected ? activeColor : seed.color.foreground.muted;
           const label = TAB_LABELS[route.name] ?? (typeof options.title === "string" ? options.title : route.name);
 
           const onPress = () => {
@@ -275,18 +124,35 @@ export function RootFloatingTabBar({ state, descriptors, navigation, insets }: B
               onLongPress={onLongPress}
               style={({ pressed }) => [styles.tab, pressed && styles.tabPressed]}
             >
-              {route.name === "ppoba" ? (
-                <PpobaMachineIcon color={color} size={25} />
-              ) : (
-                <Ionicons name={TAB_ICONS[route.name] ?? "ellipse-outline"} size={25} color={color} />
-              )}
-              <Animated.View style={[styles.labelClip, labelAnimatedStyle]}>
-                <Text numberOfLines={1} style={[styles.label, selected && styles.selectedLabel]}>{label}</Text>
-              </Animated.View>
+              <View style={styles.iconSlot}>
+                {route.name === "gacha" ? (
+                  <GachaCapsuleIcon color={color} size={25} />
+                ) : route.name === "kuji" ? (
+                  <KujiTicketIcon color={color} size={25} />
+                ) : route.name === "index" ? (
+                  <HomeTabIcon color={color} size={25} />
+                ) : route.name === "storage" ? (
+                  <StorageTabIcon color={color} size={25} />
+                ) : route.name === "profile" ? (
+                  <ProfileTabIcon color={color} size={25} />
+                ) : (
+                  <View style={{ width: 25, height: 25 }} />
+                )}
+              </View>
+              <View style={styles.labelClip}>
+                <Text
+                  variant="finePrint"
+                  maxFontSizeMultiplier={ROOT_TAB_LABEL_MAX_FONT_SIZE_MULTIPLIER}
+                  numberOfLines={1}
+                  style={[styles.label, selected && { color }]}
+                >
+                  {label}
+                </Text>
+              </View>
             </Pressable>
           );
         })}
-      </Animated.View>
+      </View>
     </View>
   );
 }
@@ -298,30 +164,17 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     zIndex: 100,
-    alignItems: "center",
+    alignItems: "stretch",
     justifyContent: "flex-end",
-    backgroundColor: seed.color.background.transparent,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: seed.color.stroke.muted,
+    backgroundColor: seed.color.layer.default,
   },
   bar: {
-    overflow: "hidden",
+    flex: 1,
     flexDirection: "row",
     alignItems: "stretch",
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: "rgba(17, 20, 17, 0.13)",
-    backgroundColor: "rgba(252, 252, 248, 0.94)",
-    shadowColor: "#111411",
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.12,
-    shadowRadius: 18,
-    elevation: 10,
-  },
-  selectionTrack: {
-    position: "absolute",
-    top: seed.spacing.x1,
-    bottom: seed.spacing.x1,
-    alignItems: "center",
-    borderRadius: seed.radius.full,
-    backgroundColor: "rgba(17, 20, 17, 0.07)",
+    backgroundColor: seed.color.background.transparent,
   },
   tab: {
     zIndex: 1,
@@ -332,14 +185,23 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     paddingHorizontal: seed.spacing.x1,
   },
-  tabPressed: { opacity: seed.state.pressedOpacity },
-  labelClip: { overflow: "hidden", justifyContent: "flex-end" },
+  tabPressed: {
+    opacity: seed.state.pressedOpacity,
+    transform: [{ translateY: seed.state.pressedTranslateY }, { scale: seed.state.pressedScale }],
+  },
+  iconSlot: { height: 28, alignItems: "center", justifyContent: "center" },
+  labelClip: {
+    alignSelf: "stretch",
+    minHeight: 32,
+    alignItems: "center",
+    justifyContent: "flex-start",
+  },
   label: {
     color: seed.color.foreground.muted,
     fontFamily: "NotoSansKR_700Bold",
     fontSize: 11,
-    lineHeight: 15,
+    lineHeight: 16,
     fontWeight: "400",
+    textAlign: "center",
   },
-  selectedLabel: { color: seed.color.foreground.brand },
 });

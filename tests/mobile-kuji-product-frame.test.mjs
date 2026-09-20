@@ -30,7 +30,7 @@ test("the shared kuji frame is only a thin category-gated outline", () => {
   );
 });
 
-test("kuji catalog media reuses the outline across discovery surfaces", () => {
+test("kuji catalog media reuses only the clean category wrapper across discovery surfaces", () => {
   for (const [relativePath, source] of [
     ["apps/mobile/src/features/home/HomeScreen.tsx", homeSource],
     ["apps/mobile/src/features/shop/ShopScreen.tsx", shopSource],
@@ -40,16 +40,32 @@ test("kuji catalog media reuses the outline across discovery surfaces", () => {
     assert.match(source, /import \{ KujiProductFrame \} from "@\/components\/KujiProductFrame"/, relativePath);
     assert.match(source, /<KujiProductFrame/, relativePath);
   }
-  assert.match(homeSource, /<KujiProductFrame category=\{category\}>/);
-  assert.match(homeSource, /category === "kuji" && styles\.kujiProductMediaWindow/);
-  assert.match(homeSource, /kujiProductMediaWindow:\s*\{\s*borderWidth:\s*0,\s*borderRadius:\s*0,\s*backgroundColor:\s*"transparent"\s*\}/);
-  assert.match(shopSource, /<KujiProductFrame category=\{category\}>/);
-  assert.match(catalogRowSource, /<KujiProductFrame category=\{product\.category\} compact>/);
-  assert.match(profileSource, /<KujiProductFrame category=\{catalogFrameCategory\} compact>/);
+  assert.match(homeSource, /<KujiProductFrame category=\{layoutKind\} clean>/);
+  assert.match(homeSource, /isKuji && styles\.kujiProductMediaWindow/);
+  assert.match(homeSource, /const mediaAspectRatio = getHomeProductMediaAspectRatio\(layoutKind\)/);
+  assert.match(homeSource, /\{ aspectRatio: mediaAspectRatio \}/);
+  assert.match(homeSource, /<CatalogDiscoveryImage/);
+  assert.match(homeSource, /storefrontUri=\{storefrontUri\}/);
+  assert.match(homeSource, /primaryUri=\{primaryUri\}/);
+  assert.doesNotMatch(homeSource, /setImageAspectRatio/);
+  assert.doesNotMatch(homeSource, /kujiProductMediaSize/);
+  assert.match(homeSource, /kujiProductMediaWindow:\s*\{\s*borderWidth:\s*0,\s*borderRadius:\s*seed\.radius\.none,\s*backgroundColor:\s*"transparent"\s*\}/);
+  assert.match(shopSource, /<KujiProductFrame category=\{category\} clean>/);
+  assert.match(catalogRowSource, /<KujiProductFrame category=\{product\.category\} clean>/);
+  assert.match(profileSource, /<KujiProductFrame category=\{catalogFrameCategory\} clean>/);
 });
 
-test("the durable kuji rule keeps the outline minimal and out of transactional surfaces", () => {
-  assert.match(agentGuideSource, /shared `KujiProductFrame`/);
-  assert.match(agentGuideSource, /Home, 뽀바, search, product history, and wishlist catalog media/);
-  assert.match(agentGuideSource, /product detail, checkout, exchange, storage, kuji draw, or reveal summaries/);
+test("Home gives kuji its operator-selected wide landscape treatment", () => {
+  assert.match(homeSource, /collectionCard:\s*\{[^}]*\.\.\.catalogProductCardSurface/);
+  assert.match(homeSource, /<GachaMachineFrame category=\{layoutKind\} clean>/);
+  assert.match(homeSource, /<KujiProductFrame category=\{layoutKind\} clean>/);
+  assert.match(homeSource, /const cardWidth = getHomeProductCardWidth\(layoutKind\)/);
+  assert.match(homeSource, /targetAspectRatio=\{mediaAspectRatio\}/);
+  assert.doesNotMatch(homeSource, /productCardDivider/);
+});
+
+test("the durable kuji rule retires the duplicate discovery outline", () => {
+  assert.match(agentGuideSource, /former standalone `KujiProductFrame` outline is likewise retired/);
+  assert.match(agentGuideSource, /normal card\/media boundary/);
+  assert.match(agentGuideSource, /do not stack a second border/);
 });

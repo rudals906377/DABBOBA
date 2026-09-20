@@ -11,13 +11,15 @@ function readSource(relativePath) {
 }
 
 const searchSource = readSource("apps/mobile/src/features/search/ProductSearchScreen.tsx");
+const shopApiSource = readSource("apps/mobile/src/features/shop/shop-api.ts");
 const dukroomApiSource = readSource("apps/mobile/src/features/dukroom/dukroom-api.ts");
 
 test("native product search applies the customer-browsable category guard before rendering results", () => {
-  assert.match(searchSource, /isCustomerBrowsableCatalogCategory/);
+  assert.match(searchSource, /fetchCatalogProductPage/);
+  assert.match(shopApiSource, /isCustomerBrowsableCatalogCategory/);
   assert.match(
-    searchSource,
-    /snapshot\.products\.filter\(\(product\) =>\s*isCustomerBrowsableCatalogCategory\(product\.category\)/,
+    shopApiSource,
+    /products: result\.data\.items\.filter\(\(product\) => isCustomerBrowsableCatalogCategory\(product\.category\)\)/,
   );
 });
 

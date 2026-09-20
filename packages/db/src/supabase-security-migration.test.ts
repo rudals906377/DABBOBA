@@ -40,6 +40,8 @@ const reviewedDynamicSqlMigrations = new Set([
   "0031_enforce_worker_least_privilege.sql",
   "0032_worker_payment_reconciliation_schedule.sql",
   "0034_home_catalog_sections.sql",
+  "0042_storefront_category_settings.sql",
+  "0045_home_product_click_events.sql",
 ]);
 
 function tokenizeSql(source: string, includeDollarQuotedBodies = false): SqlToken[] {

@@ -37,8 +37,8 @@ export default async function AccountDeletionsPage({ searchParams }: { searchPar
   return <>
     <PageHeader
       eyebrow="ACCOUNT EXIT REVIEW"
-      title="탈퇴 요청 검토"
-      description="대기·차단 요청을 검토하고 승인 또는 반려 이력을 남깁니다. 승인은 세션과 새 변경을 차단하지만 계정 삭제나 개인정보 익명화는 실행하지 않습니다."
+      title="탈퇴 자동 처리 현황"
+      description="관리자 승인 없이 진행되는 개인정보 익명화와 연결 로그인 계정 삭제·재시도 상태를 확인합니다."
     />
     <Feedback searchParams={query} />
     <FilterBar>
@@ -48,6 +48,7 @@ export default async function AccountDeletionsPage({ searchParams }: { searchPar
         {[
           "PENDING_REVIEW",
           "BLOCKED",
+          "PROCESSING",
           "APPROVED",
           "REJECTED",
           "COMPLETED",
@@ -68,7 +69,7 @@ export default async function AccountDeletionsPage({ searchParams }: { searchPar
             <td>{blockerCount(item)}</td>
             <td>{item.requestCount}회</td>
             <td>{formatDate(item.lastRequestedAt)}</td>
-            <td><Link className="button-link" href={`/account-deletions/${encodeURIComponent(item.id)}`}>상세 · 검토</Link></td>
+            <td><Link className="button-link" href={`/account-deletions/${encodeURIComponent(item.id)}`}>처리 현황</Link></td>
           </tr>)}
         </tbody></table>}
     </section>

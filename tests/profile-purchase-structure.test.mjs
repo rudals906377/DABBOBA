@@ -50,7 +50,7 @@ function functionBlock(source, functionName) {
   assert.fail(`${functionName} function body is not balanced`);
 }
 
-test("commerce modes keep gacha and kuji in draw while figure and tcg purchase directly", () => {
+test("commerce mode rules remain defined while bundled product fixtures stay empty", () => {
   const expectedModes = {
     gacha: "draw",
     kuji: "draw",
@@ -63,19 +63,7 @@ test("commerce modes keep gacha and kuji in draw while figure and tcg purchase d
     assert.equal(isRandomDrawCategory(categoryId), expectedMode === "draw");
   }
 
-  const drawProducts = products.filter((product) => isRandomDrawCategory(product.categoryId));
-  const purchaseProducts = products.filter((product) => !isRandomDrawCategory(product.categoryId));
-
-  assert.equal(drawProducts.length, 15);
-  assert.equal(purchaseProducts.length, 10);
-  assert.deepEqual(
-    [...new Set(drawProducts.map((product) => product.categoryId))].sort(),
-    ["gacha", "kuji"],
-  );
-  assert.deepEqual(
-    [...new Set(purchaseProducts.map((product) => product.categoryId))].sort(),
-    ["figure", "tcg"],
-  );
+  assert.deepEqual(products, []);
 });
 
 test("profile root pushes a footer-free detail screen backed by context state", () => {

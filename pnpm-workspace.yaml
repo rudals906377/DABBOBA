@@ -8,6 +8,9 @@ allowBuilds:
   msgpackr-extract: false
 
 overrides:
+  decode-uri-component@<=0.4.2: 0.5.0
+  js-yaml@>=4.0.0 <4.3.2: 4.3.2
   metro@0.83.3: 0.83.8
   postcss@<=8.5.22: 8.5.26
+  sharp@>=0.35.0 <0.35.4: 0.35.4
   uuid@<11.1.1: 11.1.1

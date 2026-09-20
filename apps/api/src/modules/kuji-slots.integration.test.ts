@@ -5,6 +5,7 @@ import type { ApiConfig } from "@dabboba/config";
 import type { PaidKujiDrawRecovery, PaidKujiSelectionSnapshot } from "@dabboba/contracts";
 import { createDatabasePool, RUNTIME_DATABASE_ROLE } from "@dabboba/db";
 import { buildApp } from "../app.js";
+import { acceptRequiredPoliciesForIntegrationTest } from "../integration-test-fixtures.js";
 import { issueSession } from "../plugins/auth.js";
 
 const databaseUrl = process.env.DABBOBA_TEST_DATABASE_URL;
@@ -61,11 +62,11 @@ test(
       [ipId, ipId, `봉인 쿠지 ${suffix}`, `Sealed kuji ${suffix}`],
     );
     await pool.query(
-      `INSERT INTO catalog_products(id,sku,ip_id,category,name,price,is_prize_only)
+      `INSERT INTO catalog_products(id,sku,ip_id,category,name,price,image_url,is_prize_only)
        VALUES
-         ($1,$2,$3,'kuji',$4,0,false),
-         ($5,$6,$3,'figure',$7,0,true),
-         ($8,$9,$3,'figure',$10,0,true)`,
+         ($1,$2,$3,'kuji',$4,1000,'https://cdn.example.test/products/kuji-fixture.png',false),
+         ($5,$6,$3,'figure',$7,0,NULL,true),
+         ($8,$9,$3,'figure',$10,0,NULL,true)`,
       [
         productId,
         `SEALED-KUJI-${suffix}`.toUpperCase(),
@@ -89,6 +90,9 @@ test(
         "INSERT INTO users(email,nickname,role,status) VALUES($1,$2,$3,'ACTIVE') RETURNING id",
         [`sealed-kuji-${label}-${suffix}@example.test`, `${label} ${suffix}`, role],
       );
+      if (role === "USER") {
+        await acceptRequiredPoliciesForIntegrationTest(pool, created.rows[0]!.id);
+      }
       const session = await issueSession(apiPool, config, {
         userId: created.rows[0]!.id,
         kind: role === "USER" ? "USER" : "ADMIN",
@@ -128,6 +132,10 @@ test(
       payload: { reason: "봉인 쿠지 번호판 공개" },
     });
     assert.equal(published.statusCode, 200, published.body);
+    await pool.query(
+      "UPDATE catalog_products SET sale_status='ON_SALE' WHERE id=$1",
+      [productId],
+    );
 
     const persisted = await pool.query<{
       slot_id: string;
@@ -189,7 +197,18 @@ test(
       assert.equal(joined.statusCode, 201, joined.body);
       return (joined.json() as { viewer: { entryId: string } }).viewer.entryId;
     };
-    const payRoom = async (actor: { token: string }, quantity: number, roomEntryId: string) => {
+    const payRoom = async (actor: { id: string; token: string }, quantity: number, roomEntryId: string) => {
+      const pointAmount = quantity * 1000;
+      await pool.query(
+        `INSERT INTO point_accounts(user_id,balance) VALUES($1,$2)
+         ON CONFLICT (user_id) DO UPDATE SET balance=point_accounts.balance+EXCLUDED.balance`,
+        [actor.id, pointAmount],
+      );
+      await pool.query(
+        `INSERT INTO point_ledger_entries(user_id,entry_type,amount,reference_type,reference_id,reason)
+         VALUES($1,'EARN',$2,'TEST',$3,'Sealed kuji integration setup')`,
+        [actor.id, pointAmount, `sealed-kuji-${randomUUID()}`],
+      );
       const order = await app.inject({
         method: "POST",
         url: "/v1/orders",
@@ -199,7 +218,7 @@ test(
         },
         payload: {
           items: [{ productId, quantity, expectedDrawVersion: draft.version }],
-          pointAmount: 0,
+          pointAmount,
           kujiRoomEntryId: roomEntryId,
         },
       });
@@ -412,12 +431,21 @@ test(
     );
     const recoveryUser = await createActor("USER", "recovery");
     const recoveryRoomId = await joinRoom(recoveryUser);
+    await pool.query(
+      "INSERT INTO point_accounts(user_id,balance) VALUES($1,1000)",
+      [recoveryUser.id],
+    );
+    await pool.query(
+      `INSERT INTO point_ledger_entries(user_id,entry_type,amount,reference_type,reference_id,reason)
+       VALUES($1,'EARN',1000,'TEST',$2,'Sealed kuji recovery setup')`,
+      [recoveryUser.id, `sealed-kuji-recovery-${randomUUID()}`],
+    );
     const recoveryOrderResponse = await app.inject({
       method: "POST", url: "/v1/orders",
       headers: { ...auth(recoveryUser.token), "idempotency-key": `selection-order-${randomUUID()}` },
       payload: {
         items: [{ productId, quantity: 1, expectedDrawVersion: replacementDraft.version }],
-        pointAmount: 0, kujiRoomEntryId: recoveryRoomId,
+        pointAmount: 1000, kujiRoomEntryId: recoveryRoomId,
       },
     });
     assert.equal(recoveryOrderResponse.statusCode, 201, recoveryOrderResponse.body);
@@ -433,15 +461,15 @@ test(
     assert.equal((await app.inject({ method: "GET", url: selectionUrl, headers: auth(firstUser.token) })).statusCode, 404);
     const originalSelection = await readSelection();
     assert.equal(originalSelection.product.name, `봉인 쿠지 상품 ${suffix}`);
-    assert.equal(originalSelection.product.unitPrice, 0);
+    assert.equal(originalSelection.product.unitPrice, 1000);
     assert.equal(originalSelection.board?.probabilityVersion, replacementDraft.version);
     assert.equal(originalSelection.board?.totalSlots, 3);
     assert.deepEqual(originalSelection.board?.slots.map((slot) => slot.available), [true, true, true]);
     assert.equal(originalSelection.board?.calculatedAt, originalSelection.recovery.serverNow);
 
     await pool.query(
-      `INSERT INTO catalog_products(id,sku,ip_id,category,name,price,created_at)
-       SELECT 'selection-later-'||$1||'-'||n,'SELECTION-LATER-'||$1||'-'||n,$2,'figure','Later fixture '||n,0,
+      `INSERT INTO catalog_products(id,sku,ip_id,category,name,price,sale_status,created_at)
+       SELECT 'selection-later-'||$1||'-'||n,'SELECTION-LATER-'||$1||'-'||n,$2,'figure','Later fixture '||n,0,'COMING_SOON',
               clock_timestamp()+interval '1 second'
          FROM generate_series(1,101) AS n`,
       [suffix, ipId],
@@ -451,7 +479,10 @@ test(
     assert.equal((newestPage.json() as { items: Array<{ id: string }> }).items.some((product) => product.id === productId), false);
     assert.deepEqual((await readSelection()).board?.slots, originalSelection.board?.slots);
 
-    await pool.query("UPDATE catalog_products SET is_active=false,name='Changed after purchase',price=9900 WHERE id=$1", [productId]);
+    await pool.query(
+      "UPDATE catalog_products SET sale_status='PAUSED',is_active=false,name='Changed after purchase',price=9900 WHERE id=$1",
+      [productId],
+    );
     await pool.query("UPDATE catalog_ips SET is_active=false WHERE id=$1", [ipId]);
     await pool.query("UPDATE product_stock SET on_hand=0 WHERE product_id=$1", [productId]);
     // ACTIVE -> RETIRED is an allowed append-only version lifecycle. Do not

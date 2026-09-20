@@ -4,6 +4,7 @@ import test from "node:test";
 import { ADMIN_PROXY_IDENTITY_HEADERS, signAdminProxyIdentity, type ApiConfig } from "@dabboba/config";
 import { createDatabasePool } from "@dabboba/db";
 import { buildApp } from "./app.js";
+import { acceptRequiredPoliciesForIntegrationTest } from "./integration-test-fixtures.js";
 import { hashPassword } from "./lib/password.js";
 import { tokenDigest } from "./plugins/auth.js";
 
@@ -329,6 +330,7 @@ test(
     const first = await createDevSession(customerEmail);
     const second = await createDevSession(customerEmail);
     assert.equal(first.actor.userId, second.actor.userId);
+    await acceptRequiredPoliciesForIntegrationTest(pool, first.actor.userId);
 
     const me = await app.inject({
       method: "GET",
@@ -385,6 +387,32 @@ test(
       rotated_from_session_id: first.actor.sessionId,
     });
 
+    const loggedOutOthers = await app.inject({
+      method: "POST",
+      url: "/v1/auth/logout-others",
+      headers: authorization(refreshedBody.token),
+    });
+    assert.equal(loggedOutOthers.statusCode, 204, loggedOutOthers.body);
+    const otherSessionRejected = await app.inject({
+      method: "GET",
+      url: "/v1/auth/me",
+      headers: authorization(second.token),
+    });
+    assert.equal(otherSessionRejected.statusCode, 401, otherSessionRejected.body);
+    const currentSessionPreserved = await app.inject({
+      method: "GET",
+      url: "/v1/auth/me",
+      headers: authorization(refreshedBody.token),
+    });
+    assert.equal(currentSessionPreserved.statusCode, 200, currentSessionPreserved.body);
+
+    const repeatedLogoutOthers = await app.inject({
+      method: "POST",
+      url: "/v1/auth/logout-others",
+      headers: authorization(refreshedBody.token),
+    });
+    assert.equal(repeatedLogoutOthers.statusCode, 204, repeatedLogoutOthers.body);
+
     const loggedOut = await app.inject({
       method: "POST",
       url: "/v1/auth/logout",
@@ -397,13 +425,6 @@ test(
       headers: authorization(refreshedBody.token),
     });
     assert.equal(loggedOutRejected.statusCode, 401, loggedOutRejected.body);
-    const otherSessionStillActive = await app.inject({
-      method: "GET",
-      url: "/v1/auth/me",
-      headers: authorization(second.token),
-    });
-    assert.equal(otherSessionStillActive.statusCode, 200, otherSessionStillActive.body);
-
     const race = await createDevSession(customerEmail);
     const raceResults = await Promise.all([
       app.inject({ method: "POST", url: "/v1/auth/refresh", headers: authorization(race.token) }),
@@ -416,7 +437,7 @@ test(
     const noRequestYet = await app.inject({
       method: "GET",
       url: "/v1/account/deletion-request",
-      headers: authorization(second.token),
+      headers: authorization(raceToken),
     });
     assert.equal(noRequestYet.statusCode, 404, noRequestYet.body);
 
@@ -456,21 +477,21 @@ test(
     const missingIdempotencyKey = await app.inject({
       method: "POST",
       url: "/v1/account/deletion-request",
-      headers: authorization(second.token),
+      headers: authorization(raceToken),
       payload: {},
     });
     assert.equal(missingIdempotencyKey.statusCode, 409, missingIdempotencyKey.body);
     const unsupportedDeletionInput = await app.inject({
       method: "POST",
       url: "/v1/account/deletion-request",
-      headers: { ...authorization(second.token), "idempotency-key": `delete-invalid-${randomUUID()}` },
+      headers: { ...authorization(raceToken), "idempotency-key": `delete-invalid-${randomUUID()}` },
       payload: { hardDelete: true },
     });
     assert.equal(unsupportedDeletionInput.statusCode, 400, unsupportedDeletionInput.body);
     const stillActiveAfterRejectedRequests = await app.inject({
       method: "GET",
       url: "/v1/auth/me",
-      headers: authorization(second.token),
+      headers: authorization(raceToken),
     });
     assert.equal(stillActiveAfterRejectedRequests.statusCode, 200, stillActiveAfterRejectedRequests.body);
 
@@ -478,7 +499,7 @@ test(
     const deletion = await app.inject({
       method: "POST",
       url: "/v1/account/deletion-request",
-      headers: { ...authorization(second.token), "idempotency-key": deletionKey },
+      headers: { ...authorization(raceToken), "idempotency-key": deletionKey },
       payload: {},
     });
     assert.equal(deletion.statusCode, 202, deletion.body);
@@ -498,16 +519,20 @@ test(
     assert.equal(deletionBody.blockers.activeExchangeListingCount, 1);
     assert.equal(deletionBody.requestCount, 1);
     assert.equal(deletionBody.hardDeletePerformed, false);
-    assert.equal(deletionBody.policy, "MANUAL_REVIEW_REQUIRED");
+    assert.equal(deletionBody.policy, "AUTOMATED_SERVER_DELETION");
 
-    for (const revokedToken of [second.token, raceToken]) {
-      const rejected = await app.inject({
-        method: "GET",
-        url: "/v1/auth/me",
-        headers: authorization(revokedToken),
-      });
-      assert.equal(rejected.statusCode, 401, rejected.body);
-    }
+    const previouslyLoggedOut = await app.inject({
+      method: "GET",
+      url: "/v1/auth/me",
+      headers: authorization(second.token),
+    });
+    assert.equal(previouslyLoggedOut.statusCode, 401, previouslyLoggedOut.body);
+    const blockedRequestSession = await app.inject({
+      method: "GET",
+      url: "/v1/auth/me",
+      headers: authorization(raceToken),
+    });
+    assert.equal(blockedRequestSession.statusCode, 200, blockedRequestSession.body);
     const firstEvent = await pool.query<{
       revoked_session_count: number;
       event_type: string;
@@ -517,7 +542,7 @@ test(
        FROM account_deletion_request_events WHERE deletion_request_id=$1`,
       [deletionBody.id],
     );
-    assert.deepEqual(firstEvent.rows, [{ revoked_session_count: 2, event_type: "CREATED", status: "BLOCKED" }]);
+    assert.deepEqual(firstEvent.rows, [{ revoked_session_count: 0, event_type: "CREATED", status: "BLOCKED" }]);
 
     const replaySession = await createDevSession(customerEmail);
     const visibleRequest = await app.inject({
@@ -536,12 +561,12 @@ test(
     assert.equal(replay.statusCode, 202, replay.body);
     assert.equal(replay.headers["x-idempotent-replay"], "true");
     assert.deepEqual(replay.json(), deletionBody);
-    const replaySessionRejected = await app.inject({
+    const replaySessionPreserved = await app.inject({
       method: "GET",
       url: "/v1/auth/me",
       headers: authorization(replaySession.token),
     });
-    assert.equal(replaySessionRejected.statusCode, 401, replaySessionRejected.body);
+    assert.equal(replaySessionPreserved.statusCode, 200, replaySessionPreserved.body);
 
     await pool.query("UPDATE point_accounts SET balance=0 WHERE user_id=$1", [first.actor.userId]);
     await pool.query(
@@ -573,7 +598,7 @@ test(
     assert.equal(reassessed.statusCode, 202, reassessed.body);
     const reassessedBody = reassessed.json() as { id: string; status: string; requestCount: number };
     assert.equal(reassessedBody.id, deletionBody.id);
-    assert.equal(reassessedBody.status, "PENDING_REVIEW");
+    assert.equal(reassessedBody.status, "PROCESSING");
     assert.equal(reassessedBody.requestCount, 2);
 
     const durableState = await pool.query<{
@@ -589,7 +614,7 @@ test(
       [deletionBody.id],
     );
     assert.deepEqual(durableState.rows[0], {
-      status: "PENDING_REVIEW",
+      status: "PROCESSING",
       request_count: 2,
       user_status: "ACTIVE",
       event_count: "2",

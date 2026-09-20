@@ -2,6 +2,8 @@
 
 ## 문서 상태
 
+**2026-09-09 방향 변경:** 백엔드와 자동 작업의 배포 목표를 Supabase 내부로 통합한다. [전환 순서와 완료 조건](supabase-only-transition.md)을 우선한다. 아래 Fastify/Cloud Run 설명은 전환 전 코드의 현재 구조이며 새 인프라 생성 지침이 아니다. 전체 이전·배포 완료를 의미하지 않는다.
+
 이 문서는 현재 저장소에 만들어진 운영 기반과 아직 외부 준비가 필요한 경계를 구분하는 기준 문서다. `docs/ip-system-architecture.md`의 프런트엔드 Phase 1 설명보다 이 문서의 현재 상태가 우선한다.
 
 현재 목표는 Expo 네이티브 앱을 본체로 하는 TypeScript 모듈러 모놀리스다. 코드가 존재한다는 사실은 배포, 실결제, 실제 기기, 복구 훈련 또는 법적 출시 준비가 완료됐다는 뜻이 아니다. 앱 중심 이전의 구체 순서는 `docs/dabboba-mobile-first-migration.md`가 우선한다.
@@ -56,7 +58,7 @@ PostgreSQL만 다음 상태의 진실 공급원이다.
 2. `Idempotency-Key`와 요청 해시를 저장하고 재고·포인트·쿠폰을 한 트랜잭션에서 예약한다.
 3. 결제사는 서명된 webhook을 호출한다. API는 공급자 이벤트 ID를 중복 제거한 뒤 결제·주문·재고·원장을 함께 변경한다.
 4. 불확실하거나 이미 소비된 자산이 얽힌 환불은 자동 확정하지 않고 `REFUND_REVIEW`로 보낸다.
-5. 현재 특정 PG 어댑터와 실제 승인 요청은 연결되지 않았다. `PAYMENT_PROVIDER=UNCONFIGURED` 상태에서는 API가 주문 생성부터 503으로 닫아 재고 예약이나 가짜 결제 대기 주문을 만들지 않는다.
+5. PG는 KG이니시스로 선택됐으며 [거래조회와 worker 상태 대조](kg-inicis-integration.md)부터 연결한다. 조회 관측은 결제·주문 원장을 자동 확정하지 않는다. KG의 실제 승인·취소 요청과 callback은 아직 연결되지 않았다. `PAYMENT_PROVIDER=UNCONFIGURED` 상태에서는 API가 주문 생성부터 503으로 닫아 재고 예약이나 가짜 결제 대기 주문을 만들지 않는다.
 
 ### 가챠와 쿠지
 
@@ -89,7 +91,7 @@ PostgreSQL만 다음 상태의 진실 공급원이다.
 - 역할은 `USER`, `ADMIN`, `SUPER_ADMIN`으로 분리한다.
 - 사용자 세션과 관리자 세션은 종류가 다르며, API가 모든 요청에서 상태와 권한을 다시 확인한다.
 - 고객은 저장된 session을 서버에서 검증하고 만료 전에 refresh한다. 401 또는 실제 만료는 session을 폐기하지만 일시적인 network/5xx 실패는 남은 만료 시간 안에서 다시 시도하며, stale generation 응답이 새 session을 덮어쓰지 못하게 한다.
-- 탈퇴 승인 시 남아 있는 세션을 다시 폐기하고 이후 사용자 API 접근과 개발용 재로그인을 차단한다. 모든 고객 변경 요청의 `idempotency_keys` 삽입과 관리자 승인은 같은 사용자별 PostgreSQL advisory lock을 사용하므로 승인 직전·직후에 새 주문이나 콘텐츠 변경이 끼어들 수 없다.
+- 탈퇴 요청에 차단 항목이 없으면 API가 즉시 모든 세션을 폐기하고 자동 삭제 작업을 예약한다. worker는 사용자별 PostgreSQL advisory lock 안에서 차단 항목을 다시 계산하며, Supabase Auth 사용자 삭제가 성공하거나 404로 확인된 뒤에만 Storage 객체와 로컬 identity·PII를 정리한다. 외부 삭제 실패 시 로컬 identity·PII를 유지한 채 재시도한다.
 - 세션 원문은 발급 시 한 번만 반환하고 DB에는 pepper 기반 digest만 저장한다.
 - 관리자 브라우저는 API token을 JavaScript 저장소에 두지 않는다. Next.js same-origin 로그인 route가 `HttpOnly`, `Secure`, `SameSite=Strict` 쿠키에 넣고 서버 측 요청에만 사용한다.
 - 메뉴 숨김은 편의 기능일 뿐 권한 검사가 아니다. API의 role/permission 검사가 최종 권한 경계다.
@@ -103,7 +105,7 @@ PostgreSQL만 다음 상태의 진실 공급원이다.
 
 - 대시보드
 - 회원 상세와 상태 관리
-- 탈퇴 요청 목록·상세·승인/반려. 승인 직전 거래·보관·포인트·배송·교환 차단 항목을 서버에서 다시 계산하고 사용자 변경을 직렬화하며 세션을 폐기한다. 실제 삭제·익명화는 수행하지 않음
+- 탈퇴 요청 목록·상세와 예외 반려. 정상 경로에는 관리자 승인이 없으며, 승인·수동 완료 API는 거부한다. 자동 worker는 차단 항목 재확인, 외부 Auth 삭제, Storage 정리, 로컬 개인정보 삭제·UGC 익명화를 순서대로 수행한다.
 - 관리자 생성·역할·상태 관리
 - 공지 작성·수정·게시
 - 문의 목록·상세·운영 답변
@@ -155,13 +157,13 @@ API는 업무 상태와 outbox event를 같은 PostgreSQL 트랜잭션에 기록
 | 관리자 화면과 API RBAC | 구현됨 | 실제 운영 계정, 부정 권한 테스트, MFA 정책 필요 |
 | PostgreSQL 마이그레이션 | 구현됨 | disposable PostgreSQL CI와 운영/복원 환경 검증 필요 |
 | 관리자·교환 PostgreSQL 통합 테스트 | 구현됨 | CI 또는 로컬 disposable DB 실행 증거 필요 |
-| 계정 탈퇴 검토 | 차단 항목 재계산·사용자 변경 직렬화·승인 후 세션/재로그인 차단·감사/outbox 구현 | 보존 기간·익명화 범위·재가입 정책 승인과 실제 완료 배치 전 자동 삭제 불가 |
+| 계정 탈퇴 | preview → request → receipt status, 차단 항목 재계산, 즉시 세션 폐기, 외부 Auth 삭제 선행, Storage·로컬 PII 정리, UGC 익명화, idempotent 재시도 구현 | 운영 Supabase/Storage 계정, 보존 기간·익명화 범위·재가입 정책과 장애 복구 runbook 검증 필요 |
 | 주문·재고·포인트·추첨 원장 | 구현됨 | 실제 PG sandbox와 장애·환불 통합 테스트 필요 |
 | 고객 production 로그인 | 카카오·네이버·한국 휴대폰 OTP → Supabase Auth → Fastify 검증 → DABBOBA session 교환 구현 | 실제 provider 계정·redirect·SMS 연동, development build와 실기기 통합 검증 전 출시 불가 |
-| 결제 공급자 | generic webhook 경계만 존재 | PG 선정·승인 API·서명 규격·조정 adapter 전 실결제 불가 |
+| 결제 공급자 | KG이니시스 선정, generic webhook 유지 및 KG 거래조회 상태 대조 연결 | KG 결제창·승인 API·callback·취소/환불·실제 테스트 상점 검증 전 실결제 불가 |
 | 일반 API 실제 IP rate-limit | `trustProxy: false` fail-closed, ingress 전략 미확정 | 신뢰 proxy 또는 edge/WAF 설정과 spoofing·IP 분리 통합 증거 전 출시 불가 |
 | 미디어 | durable intent/complete idempotency·만료 410·미연결 소유 미디어 삭제·exact-size V4 POST policy·사용자 쿼터·generation/checksum/MIME 검증·decode 제한·orientation/EXIF 제거·WebP 재인코딩·worker 정리 경계 구현 | 실제 GCS CORS/IAM/삭제, 유해 콘텐츠 검사·CDN과 권리 자산 검증 필요 |
-| 배송 이력·추첨권 복원 | 소유권 기반 배송 목록/상세·송장, 취소 재신청 복구·배송 완료 중복 방지, `AVAILABLE` 추첨권 조회, 고객 이력/상품별 이어 뽑기 UI와 로컬 회귀 구현 | 실제 물류·PostgreSQL/PG 새로고침 및 실기기 검증 필요 |
+| 배송 이력·추첨권 복원 | 소유권 기반 배송 목록/상세·송장, 신청 시점 상품/IP/version 불변 스냅샷, 취소 재신청 복구·배송 완료 중복 방지, `AVAILABLE` 추첨권 조회, 고객 이력/상품별 이어 뽑기 UI와 로컬 회귀 구현 | 실제 물류·PostgreSQL/PG 새로고침 및 실기기 검증 필요 |
 | 알림 | 인앱, 영속 수신 설정·append-only 동의 이력·외부 선택 전달 차단, remote 조회/버전 저장/409 재동기화 구현. 개발/테스트 HTTP adapter만 허용하고 운영 설정은 fail-closed | 동일 key·동일 payload 중복 제거와 감사 가능한 receipt를 보장하는 APNs/FCM 또는 공급자 계약, 실기기 검증 필요 |
 | 고객 웹 API 전환 | 점진적 전환 중 | fixture/local 상태가 남은 화면은 운영 데이터로 간주 불가 |
 | Expo 고객 앱 | Router·네이티브 탭·API 홈 카탈로그·SQLite cache·SecureStore token 경계 구현, 나머지 화면은 이전 중 | iOS/Android bundle, development build와 실제 iPhone/Android 전체 흐름 검증 필요 |

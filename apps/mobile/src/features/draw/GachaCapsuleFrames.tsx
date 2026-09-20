@@ -8,6 +8,7 @@ import {
   sampleGachaPickupMotion,
 } from "@/features/draw/gacha-camera-motion";
 import { sampleGachaCapsuleAtlasFrame } from "@/features/draw/gacha-capsule-frames-motion";
+import type { GachaCapsuleTone } from "@/features/draw/gacha-capsule-motion";
 
 type CapsuleAtlasManifest = {
   schemaVersion: number;
@@ -23,8 +24,8 @@ type CapsuleAtlasManifest = {
   projection: { diameter: number };
 };
 
-const ATLAS = require("../../../assets/gacha-capsule-reveal-atlas-v1.json") as CapsuleAtlasManifest;
-const ATLAS_IMAGE = require("../../../assets/gacha-capsule-reveal-atlas-v1.png");
+const ATLAS = require("../../../assets/draw/gacha/gacha-capsule-reveal-atlas-v1.json") as CapsuleAtlasManifest;
+const ATLAS_IMAGE = require("../../../assets/draw/gacha/gacha-capsule-reveal-atlas-v1.png");
 
 type GachaCapsuleFramesProps = {
   progress: SharedValue<number>;
@@ -32,7 +33,7 @@ type GachaCapsuleFramesProps = {
   active: SharedValue<number>;
   viewportSize: { width: number; height: number };
   reduceMotion: boolean;
-  tone: "lime" | "ivory";
+  tone: GachaCapsuleTone;
   onReady?: () => void;
   onUnavailable?: (reason?: string) => void;
 };

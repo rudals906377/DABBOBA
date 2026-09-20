@@ -47,11 +47,10 @@ test("public profile editing remains a separate nickname and introduction flow",
   assert.doesNotMatch(profileEdit, /생년월일|이메일|휴대폰/);
 });
 
-test("unfinished account actions are not exposed as working controls", () => {
+test("unfinished account actions are absent from the release surface", () => {
   const member = readMobile("src/features/profile/ProfileMemberDetailScreen.tsx");
+  const sections = readMobile("src/features/profile/ProfileSectionScreen.tsx");
 
-  assert.doesNotMatch(member, /Alert\.alert\("결제수단 등록을 준비하고 있어요"/);
-  assert.doesNotMatch(member, /Alert\.alert\("모든 기기에서 로그아웃"/);
-  assert.match(member, /label="결제 카드 등록 준비 중"[\s\S]*?disabled/);
-  assert.match(member, /label="다른 기기 로그아웃 준비 중"[\s\S]*?disabled/);
+  assert.doesNotMatch(member, /결제 카드 등록 준비 중|다른 기기 로그아웃 준비 중/);
+  assert.doesNotMatch(sections, /결제사 연동 후 등록 가능|결제수단 연동 후 제공/);
 });

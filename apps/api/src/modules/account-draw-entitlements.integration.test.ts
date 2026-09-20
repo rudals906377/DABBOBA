@@ -4,6 +4,7 @@ import test from "node:test";
 import type { ApiConfig } from "@dabboba/config";
 import { createDatabasePool } from "@dabboba/db";
 import { buildApp } from "../app.js";
+import { acceptRequiredPoliciesForIntegrationTest } from "../integration-test-fixtures.js";
 import { issueSession } from "../plugins/auth.js";
 
 const databaseUrl = process.env.DABBOBA_TEST_DATABASE_URL;
@@ -42,6 +43,7 @@ test(
         "INSERT INTO users(email,nickname,role,status) VALUES($1,$2,'USER','ACTIVE') RETURNING id",
         [`${label}-${suffix}@example.test`, `${label} ${suffix}`],
       );
+      await acceptRequiredPoliciesForIntegrationTest(pool, user.rows[0]!.id);
       const session = await issueSession(pool, config, {
         userId: user.rows[0]!.id,
         kind: "USER",

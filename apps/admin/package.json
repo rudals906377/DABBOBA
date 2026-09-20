@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev --port 4180",
+    "dev": "node ../../scripts/run-local-backend.mjs admin",
     "build": "next build",
     "start": "next start --port 4180",
     "typecheck": "tsc --noEmit",
@@ -14,7 +14,7 @@
     "@dabboba/config": "workspace:*",
     "@dabboba/contracts": "workspace:*",
     "@dabboba/ui": "workspace:*",
-    "next": "16.3.0",
+    "next": "16.3.3",
     "react": "19.2.7",
     "react-dom": "19.2.7",
     "server-only": "0.0.1"

@@ -19,6 +19,7 @@ const nextConfig: NextConfig = {
   output: "standalone",
   poweredByHeader: false,
   transpilePackages: ["@dabboba/api-client", "@dabboba/config", "@dabboba/contracts", "@dabboba/ui"],
+  experimental: { serverActions: { bodySizeLimit: "11mb" } },
   async headers() {
     return [{ source: "/(.*)", headers: [...securityHeaders] }];
   },

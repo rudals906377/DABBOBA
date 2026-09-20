@@ -43,6 +43,7 @@ function releaseHarness(startRadians = 0, { reduceMotion = false, animationFinis
     leverRadians: shared(startRadians),
     clockwiseCueRotation: shared(0.25),
     clockwiseCueOpacity: shared(1),
+    leverSoundPlayed: shared(0),
     animationRun: shared(7),
     GESTURE_TAP_SLOP: numericConstant("GESTURE_TAP_SLOP"),
     GESTURE_CENTER: numericConstant("GESTURE_SIZE") / 2,
@@ -62,6 +63,7 @@ function releaseHarness(startRadians = 0, { reduceMotion = false, animationFinis
       return target;
     },
     scheduleOnRN: (callback, run) => callback(run),
+    playLeverSound: () => {},
     beginOpen: (run) => requests.push(run),
   };
   const down = runInNewContext(`(${downSource})`, scope);

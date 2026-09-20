@@ -6,7 +6,33 @@ export type UserStatus = (typeof USER_STATUSES)[number];
 
 export const PRODUCT_CATEGORIES = ["gacha", "figure", "kuji", "tcg"] as const;
 export type ProductCategoryId = (typeof PRODUCT_CATEGORIES)[number];
+export const PRODUCT_SALE_STATUSES = ["DRAFT", "COMING_SOON", "ON_SALE", "PAUSED"] as const;
+export type ProductSaleStatus = (typeof PRODUCT_SALE_STATUSES)[number];
 export type CommerceMode = "draw" | "purchase";
+
+export type CustomerCategoryAvailability = "active" | "coming-soon" | "hidden";
+
+/**
+ * Server-authoritative launch policy. Client-side filtering is presentation
+ * only; checkout must use this same policy so a crafted request cannot buy a
+ * category that the storefront still marks as unavailable.
+ */
+export const CUSTOMER_CATEGORY_AVAILABILITY = Object.freeze({
+  gacha: "active",
+  kuji: "active",
+  figure: "coming-soon",
+  tcg: "hidden",
+} as const satisfies Readonly<Record<ProductCategoryId, CustomerCategoryAvailability>>);
+
+export function customerCategoryAvailability(
+  category: ProductCategoryId,
+): CustomerCategoryAvailability {
+  return CUSTOMER_CATEGORY_AVAILABILITY[category];
+}
+
+export function isCustomerPurchasableCategory(category: ProductCategoryId): boolean {
+  return customerCategoryAvailability(category) === "active";
+}
 
 export const CONTENT_STATUSES = ["ACTIVE", "HIDDEN", "DELETED"] as const;
 export type ContentStatus = (typeof CONTENT_STATUSES)[number];

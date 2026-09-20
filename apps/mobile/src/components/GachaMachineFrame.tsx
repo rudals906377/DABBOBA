@@ -6,16 +6,21 @@ import { seed } from "@/design-system/seed";
 export function GachaMachineFrame({
   category,
   compact = false,
+  clean = false,
+  embedded = false,
   children,
 }: {
   category: CatalogProduct["category"];
   compact?: boolean;
+  clean?: boolean;
+  embedded?: boolean;
   children: ReactNode;
 }) {
   if (category !== "gacha") return <>{children}</>;
+  if (clean) return <View style={styles.cleanFrame}>{children}</View>;
 
   return (
-    <View style={[styles.cabinet, compact && styles.cabinetCompact]}>
+    <View style={[styles.cabinet, compact && styles.cabinetCompact, embedded && styles.cabinetEmbedded]}>
       <View
         accessible={false}
         accessibilityElementsHidden
@@ -44,6 +49,10 @@ export function GachaMachineFrame({
 }
 
 const styles = StyleSheet.create({
+  cleanFrame: {
+    alignSelf: "stretch",
+    overflow: "hidden",
+  },
   cabinet: {
     alignSelf: "stretch",
     overflow: "hidden",
@@ -56,6 +65,10 @@ const styles = StyleSheet.create({
     alignSelf: "flex-start",
     flexShrink: 0,
     borderRadius: seed.radius.r3_5,
+  },
+  cabinetEmbedded: {
+    borderWidth: 0,
+    borderRadius: 0,
   },
   canopy: {
     height: 10,

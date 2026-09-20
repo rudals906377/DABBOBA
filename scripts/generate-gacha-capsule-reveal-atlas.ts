@@ -11,18 +11,18 @@ import {
 import { sampleGachaRevealLighting, sampleGachaRevealRattle } from "../apps/mobile/src/features/draw/gacha-reveal-timeline.ts";
 
 const REPOSITORY_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const WORDMARK_PATH = resolve(REPOSITORY_ROOT, "apps/mobile/assets/dabboba-wordmark.png");
+const WORDMARK_PATH = resolve(REPOSITORY_ROOT, "apps/mobile/assets/brand/dabboba-wordmark.png");
 const REVEAL_TIMELINE_PATH = resolve(
   REPOSITORY_ROOT,
   "apps/mobile/src/features/draw/gacha-reveal-timeline.ts",
 );
 const ATLAS_PATH = resolve(
   REPOSITORY_ROOT,
-  "apps/mobile/assets/gacha-capsule-reveal-atlas-v1.png",
+  "apps/mobile/assets/draw/gacha/gacha-capsule-reveal-atlas-v1.png",
 );
 const MANIFEST_PATH = resolve(
   REPOSITORY_ROOT,
-  "apps/mobile/assets/gacha-capsule-reveal-atlas-v1.json",
+  "apps/mobile/assets/draw/gacha/gacha-capsule-reveal-atlas-v1.json",
 );
 
 const FRAME_WIDTH = 192;
@@ -351,8 +351,8 @@ await Promise.all([
 ]);
 
 console.log(JSON.stringify({
-  atlas: "apps/mobile/assets/gacha-capsule-reveal-atlas-v1.png",
-  manifest: "apps/mobile/assets/gacha-capsule-reveal-atlas-v1.json",
+  atlas: "apps/mobile/assets/draw/gacha/gacha-capsule-reveal-atlas-v1.png",
+  manifest: "apps/mobile/assets/draw/gacha/gacha-capsule-reveal-atlas-v1.json",
   frameCount: FRAME_COUNT,
   atlasWidth,
   atlasHeight,

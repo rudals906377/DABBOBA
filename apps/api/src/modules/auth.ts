@@ -115,14 +115,14 @@ export async function registerAuthRoutes(app: FastifyInstance, context: ApiConte
         [email, nickname],
       );
       const row = user.rows[0]!;
-      const approvedDeletion = await client.query(
+      const activeDeletion = await client.query(
         `SELECT 1 FROM account_deletion_requests
-         WHERE user_id=$1 AND status='APPROVED'
+       WHERE user_id=$1 AND status IN ('PROCESSING','APPROVED')
          LIMIT 1`,
         [row.id],
       );
-      if (approvedDeletion.rowCount) {
-        throw forbidden("탈퇴가 승인된 계정은 다시 로그인할 수 없습니다.");
+      if (activeDeletion.rowCount) {
+        throw forbidden("탈퇴 처리가 시작된 계정은 다시 로그인할 수 없습니다.");
       }
       await client.query(
         `INSERT INTO auth_identities (user_id, provider, provider_subject, verified_at)
@@ -228,14 +228,46 @@ export async function registerAuthRoutes(app: FastifyInstance, context: ApiConte
     });
   });
 
-  app.post("/v1/auth/logout", { preHandler: context.auth.requireUser }, async (request, reply) => {
+  app.post("/v1/auth/logout", { preHandler: context.auth.requireUserWithoutPolicy }, async (request, reply) => {
     const actor = request.actor!;
-    const revoked = await context.pool.query(
-      `UPDATE sessions SET revoked_at=now(),revoke_reason='LOGOUT'
-       WHERE id=$1 AND user_id=$2 AND session_kind='USER' AND revoked_at IS NULL`,
-      [actor.sessionId, actor.userId],
-    );
-    if (revoked.rowCount !== 1) throw unauthorized("세션이 만료되었거나 이미 로그아웃되었습니다.");
+    await withTransaction(context.pool, async (client) => {
+      const revoked = await client.query(
+        `UPDATE sessions SET revoked_at=now(),revoke_reason='LOGOUT'
+         WHERE id=$1 AND user_id=$2 AND session_kind='USER' AND revoked_at IS NULL`,
+        [actor.sessionId, actor.userId],
+      );
+      if (revoked.rowCount !== 1) throw unauthorized("세션이 만료되었거나 이미 로그아웃되었습니다.");
+      await client.query(
+        `UPDATE push_device_tokens
+            SET disabled_at=COALESCE(disabled_at,now()),
+                disabled_reason=COALESCE(disabled_reason,'LOGOUT')
+          WHERE user_id=$1 AND session_id=$2`,
+        [actor.userId, actor.sessionId],
+      );
+    });
+    return reply.code(204).send();
+  });
+
+  app.post("/v1/auth/logout-others", { preHandler: context.auth.requireUserWithoutPolicy }, async (request, reply) => {
+    const actor = request.actor!;
+    await withTransaction(context.pool, async (client) => {
+      await client.query(
+        `UPDATE sessions
+            SET revoked_at=now(),revoke_reason='LOGOUT_OTHER_DEVICES'
+          WHERE user_id=$1
+            AND session_kind='USER'
+            AND id<>$2
+            AND revoked_at IS NULL`,
+        [actor.userId, actor.sessionId],
+      );
+      await client.query(
+        `UPDATE push_device_tokens
+            SET disabled_at=COALESCE(disabled_at,now()),
+                disabled_reason=COALESCE(disabled_reason,'LOGOUT_OTHER_DEVICES')
+          WHERE user_id=$1 AND session_id<>$2`,
+        [actor.userId, actor.sessionId],
+      );
+    });
     return reply.code(204).send();
   });
 

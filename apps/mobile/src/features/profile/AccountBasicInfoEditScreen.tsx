@@ -1,6 +1,5 @@
-import { Ionicons } from "@expo/vector-icons";
-import { router } from "expo-router";
-import { useEffect, useState } from "react";
+import { router, useFocusEffect } from "expo-router";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -12,12 +11,14 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { KoreanPixelTitle } from "@/components/RootCategoryTitle";
-import { AppText as Text, AppTextInput as TextInput } from "@/components/Typography";
-import { SeedActionButton } from "@/design-system/components";
+import { DecorativeIonicon } from "@/components/DecorativeIonicon";
+import { DetailPageHeader } from "@/components/DetailPageHeader";
+import { AppText as Text } from "@/components/Typography";
+import { SeedActionButton, SeedTextInput } from "@/design-system/components";
 import { seed } from "@/design-system/seed";
 import { updateAccountBasicInfo } from "@/features/profile/profile-api";
 import { useProfileSnapshot } from "@/features/profile/use-profile-snapshot";
+import { ProfileSessionGate, isProfileSessionBlocked } from "@/features/profile/ProfileSessionGate";
 import { colors } from "@/theme";
 
 export function AccountBasicInfoEditScreen() {
@@ -26,6 +27,12 @@ export function AccountBasicInfoEditScreen() {
   const [nickname, setNickname] = useState("");
   const [birthDate, setBirthDate] = useState("");
   const [saving, setSaving] = useState(false);
+  const hasFocusedOnce = useRef(false);
+
+  useFocusEffect(useCallback(() => {
+    if (hasFocusedOnce.current) void profileState.reload();
+    else hasFocusedOnce.current = true;
+  }, [profileState.reload]));
 
   useEffect(() => {
     if (!basicInfo) return;
@@ -91,9 +98,11 @@ export function AccountBasicInfoEditScreen() {
       <Header />
       <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === "ios" ? "padding" : undefined}>
         <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-          {!profileState.snapshot && !profileState.message ? <ActivityIndicator color={colors.ink} style={styles.loading} /> : null}
-          {profileState.message ? <Text style={styles.error}>{profileState.message}</Text> : null}
-          {basicInfo ? (
+          {profileState.status === "loading" ? <ActivityIndicator color={colors.ink} style={styles.loading} /> : null}
+          {profileState.status === "error" ? <View><Text style={styles.error}>{profileState.message}</Text><SeedActionButton label="다시 불러오기" variant="neutralSolid" onPress={profileState.reload} style={styles.retry} /></View> : null}
+          {isProfileSessionBlocked(profileState.status) ? (
+            <ProfileSessionGate status={profileState.status} returnTo="/profile/member/personal/edit" guestBody="로그인하면 계정 기본정보를 수정할 수 있어요." />
+          ) : basicInfo ? (
             <>
               <Field
                 label="닉네임"
@@ -127,15 +136,15 @@ export function AccountBasicInfoEditScreen() {
 }
 
 function Header() {
-  return <View style={styles.header}><Pressable accessibilityRole="button" accessibilityLabel="뒤로 가기" hitSlop={10} onPress={() => router.back()} style={({ pressed }) => [styles.headerAction, pressed && styles.pressed]}><Ionicons name="chevron-back" size={25} color={colors.ink} /></Pressable><KoreanPixelTitle variant="header">계정 기본정보 수정</KoreanPixelTitle><View style={styles.headerAction} /></View>;
+  return <DetailPageHeader title="계정 기본정보 수정" titleMode="pixel" onBack={() => router.back()} />;
 }
 
-function Field({ label, optional = false, ...inputProps }: { label: string; optional?: boolean } & React.ComponentProps<typeof TextInput>) {
-  return <View style={styles.field}><View style={styles.labelRow}><Text style={styles.label}>{label}</Text>{optional ? <Text style={styles.optional}>선택</Text> : null}</View><TextInput {...inputProps} placeholderTextColor={colors.muted} style={styles.input} /></View>;
+function Field({ label, optional = false, ...inputProps }: { label: string; optional?: boolean } & React.ComponentProps<typeof SeedTextInput>) {
+  return <View style={styles.field}><View style={styles.labelRow}><Text style={styles.label}>{label}</Text>{optional ? <Text style={styles.optional}>선택</Text> : null}</View><SeedTextInput {...inputProps} placeholderTextColor={colors.muted} style={styles.input} /></View>;
 }
 
 function ReadOnlyField({ label, value }: { label: string; value: string }) {
-  return <View style={styles.field}><View style={styles.labelRow}><Text style={styles.label}>{label}</Text><Text style={styles.verificationBadge}>본인인증 후 변경</Text></View><View style={styles.readOnlyInput}><Text numberOfLines={1} style={styles.readOnlyValue}>{value}</Text><Ionicons name="lock-closed-outline" size={15} color={colors.muted} /></View></View>;
+  return <View style={styles.field}><View style={styles.labelRow}><Text style={styles.label}>{label}</Text><Text style={styles.verificationBadge}>본인인증 후 변경</Text></View><View style={styles.readOnlyInput}><Text numberOfLines={1} style={styles.readOnlyValue}>{value}</Text><DecorativeIonicon name="lock-closed-outline" size={15} color={colors.muted} /></View></View>;
 }
 
 function formatBirthDate(value: string | null): string {
@@ -185,12 +194,13 @@ const styles = StyleSheet.create({
   field: { marginTop: seed.spacing.x3 },
   labelRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: seed.spacing.x2, marginBottom: seed.spacing.x2 },
   label: { color: colors.ink, fontSize: 13, fontWeight: "900" },
-  optional: { color: colors.muted, fontSize: 10 },
-  verificationBadge: { color: colors.muted, fontSize: 9 },
-  input: { minHeight: seed.size.input, paddingHorizontal: seed.spacing.x3_5, borderWidth: 1, borderColor: seed.color.stroke.brand, borderRadius: seed.radius.r3, backgroundColor: seed.color.layer.default, color: colors.ink, fontSize: 14 },
+  optional: { color: colors.muted, ...seed.typography.finePrint },
+  verificationBadge: { color: colors.muted, ...seed.typography.finePrint },
+  input: { minHeight: seed.size.input, paddingHorizontal: seed.spacing.x3_5, borderWidth: 1, borderColor: seed.color.stroke.neutral, borderRadius: seed.radius.r3, backgroundColor: seed.color.layer.default, color: colors.ink, fontSize: 14 },
   readOnlyInput: { minHeight: seed.size.input, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: seed.spacing.x3, paddingHorizontal: seed.spacing.x3_5, borderWidth: 1, borderColor: seed.color.stroke.neutral, borderRadius: seed.radius.r3, backgroundColor: seed.color.background.neutralWeak },
   readOnlyValue: { flex: 1, color: colors.muted, fontSize: 13 },
-  verificationNote: { color: colors.muted, fontSize: 10, lineHeight: 16, marginTop: seed.spacing.x3 },
+  verificationNote: { color: colors.muted, ...seed.typography.finePrint, marginTop: seed.spacing.x3 },
   submit: { marginTop: seed.spacing.x5 },
-  pressed: { opacity: seed.state.pressedOpacity },
+  retry: { marginTop: seed.spacing.x3 },
+  pressed: { opacity: seed.state.pressedOpacity, transform: [{ scale: seed.state.pressedScale }] },
 });

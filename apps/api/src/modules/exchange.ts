@@ -3,6 +3,7 @@ import { withTransaction } from "@dabboba/db";
 import { PRODUCT_CATEGORIES } from "@dabboba/domain";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { adminMutationHeaders, writeAdminAudit, writeOutbox } from "../lib/audit.js";
+import { requireLiveCommerce } from "../lib/commerce-mode.js";
 import { AppError, badRequest, conflict, forbidden, notFound } from "../lib/errors.js";
 import {
   beginIdempotency,
@@ -13,6 +14,7 @@ import {
 import { enumInput, objectInput, queryString, stringInput, uuidInput } from "../lib/input.js";
 import { cursorPage, pagination } from "../lib/pagination.js";
 import { iso, nullableIso, numberValue } from "../lib/rows.js";
+import { assertUgcOperationsPolicyAccepted } from "../lib/ugc-policy.js";
 import type { Actor } from "../plugins/auth.js";
 import type { ApiContext } from "../types.js";
 
@@ -24,7 +26,8 @@ type InventoryStatus =
   | "DELIVERED"
   | "TRANSFERRED"
   | "REFUNDED"
-  | "POINT_RETURNED";
+  | "POINT_RETURNED"
+  | "EXPIRED_HOLD";
 type InventorySourceType = "PURCHASE" | "GACHA" | "KUJI" | "ADMIN_ADJUSTMENT";
 type ListingStatus = "OPEN" | "MATCHED" | "COMPLETED" | "CANCELLED" | "HIDDEN";
 type OfferStatus = "PENDING" | "ACCEPTED" | "REJECTED" | "WITHDRAWN";
@@ -37,6 +40,7 @@ type InventoryRow = {
   source_type: InventorySourceType;
   inventory_status: InventoryStatus;
   acquired_at: Date | string;
+  storage_expires_at?: Date | string;
   sku: string;
   ip_id: string;
   character_ids: string[];
@@ -48,6 +52,7 @@ type InventoryRow = {
   available_quantity: number | string;
   metadata: Record<string, unknown>;
   image_url: string | null;
+  storefront_image_url: string | null;
   product_active: boolean;
   is_prize_only: boolean;
   product_version: number;
@@ -74,6 +79,11 @@ type ListingLifecycleRow = {
   resolved_by_admin_id: string | null;
 };
 
+type LockedListingLifecycleRow = ListingLifecycleRow & {
+  expires_at: Date | string;
+  is_expired: boolean;
+};
+
 type ListingRow = InventoryRow & {
   listing_id: string;
   author_id: string;
@@ -95,6 +105,7 @@ type ListingRow = InventoryRow & {
   offered_inventories: InventoryRow[];
   listing_created_at: Date;
   listing_updated_at: Date;
+  listing_expires_at: Date;
 };
 
 type OfferLifecycleRow = {
@@ -124,6 +135,8 @@ type InventoryLockRow = {
   source_id: string | null;
   status: InventoryStatus;
   source_type: InventorySourceType;
+  storage_expires_at: Date | string;
+  storage_active: boolean;
   draw_owner_id: string | null;
   draw_entitlement_id: string | null;
   draw_prize_product_id: string | null;
@@ -162,8 +175,12 @@ export function isExchangeEligibleInventory(
   status: InventoryStatus,
   sourceType: InventorySourceType,
   isOriginalDrawOwner: boolean,
+  isStorageActive: boolean,
 ): boolean {
-  return status === "OWNED" && isDrawExchangeSource(sourceType) && isOriginalDrawOwner;
+  return status === "OWNED"
+    && isDrawExchangeSource(sourceType)
+    && isOriginalDrawOwner
+    && isStorageActive;
 }
 
 export function orderedInventoryIds(ids: readonly string[]): string[] {
@@ -192,13 +209,15 @@ export function exchangeInventoryBundleInput(input: Record<string, unknown>): st
 const inventoryProjection = (inventoryAlias: string, productAlias: string, stockAlias: string) => `
   ${inventoryAlias}.id,${inventoryAlias}.owner_id,${inventoryAlias}.product_id,
   ${inventoryAlias}.source_type,${inventoryAlias}.status AS inventory_status,${inventoryAlias}.acquired_at,
+  ${inventoryAlias}.storage_expires_at,
   ${productAlias}.sku,${productAlias}.ip_id,
   COALESCE((SELECT array_agg(pc.character_id::text ORDER BY pc.character_id)
     FROM product_characters pc WHERE pc.product_id=${productAlias}.id),'{}'::text[]) AS character_ids,
   ${productAlias}.category,${productAlias}.name AS product_name,${productAlias}.manufacturer,
   ${productAlias}.release_date,${productAlias}.price,
   COALESCE(${stockAlias}.on_hand-${stockAlias}.reserved,0) AS available_quantity,
-  ${productAlias}.metadata,${productAlias}.image_url,${productAlias}.is_active AS product_active,
+  ${productAlias}.metadata,${productAlias}.image_url,${productAlias}.storefront_image_url,
+  ${productAlias}.is_active AS product_active,
   ${productAlias}.is_prize_only,${productAlias}.version AS product_version,
   ${productAlias}.created_at AS product_created_at,${productAlias}.updated_at AS product_updated_at,
   ${inventoryAlias}.acquired_at AS created_at`;
@@ -284,7 +303,7 @@ const listingSelect = `SELECT
   l.id AS listing_id,l.author_id,u.nickname AS author_nickname,l.title AS listing_title,l.details AS listing_details,
   l.status AS listing_status,l.accepted_offer_id,l.matched_at,l.author_confirmed_at,l.proposer_confirmed_at,
   l.completed_at,l.completion_mode,l.cancelled_at,l.cancelled_by,l.cancel_reason,l.resolved_by_admin_id,
-  l.created_at AS listing_created_at,l.updated_at AS listing_updated_at,
+  l.created_at AS listing_created_at,l.updated_at AS listing_updated_at,l.expires_at AS listing_expires_at,
   (SELECT count(*)
    FROM exchange_offers o
    WHERE o.listing_id=l.id AND o.status<>'WITHDRAWN'
@@ -332,8 +351,10 @@ const mapProduct = (row: InventoryRow) => ({
   releaseDate: row.release_date,
   price: numberValue(row.price),
   availableQuantity: numberValue(row.available_quantity),
+  totalQuantity: null,
   metadata: row.metadata,
   imageUrl: row.image_url,
+  storefrontImageUrl: row.storefront_image_url,
   isActive: row.product_active,
   isPrizeOnly: row.is_prize_only,
   version: row.product_version,
@@ -349,6 +370,7 @@ const mapInventory = (row: InventoryRow) => ({
   sourceType: row.source_type,
   status: row.inventory_status,
   acquiredAt: iso(row.acquired_at),
+  ...(row.storage_expires_at ? { storageExpiresAt: iso(row.storage_expires_at) } : {}),
 });
 
 const mapListing = (row: ListingRow) => {
@@ -373,6 +395,7 @@ const mapListing = (row: ListingRow) => {
   cancelledBy: row.cancelled_by,
   cancelReason: row.cancel_reason,
   resolvedByAdminId: row.resolved_by_admin_id,
+  expiresAt: iso(row.listing_expires_at),
   createdAt: iso(row.listing_created_at),
   updatedAt: iso(row.listing_updated_at),
   };
@@ -403,6 +426,25 @@ function queryOf(request: FastifyRequest) {
   return (request.query || {}) as Record<string, unknown>;
 }
 
+function exchangeBlockVisibility(viewerParameter: string, authorExpression: string) {
+  return `(${viewerParameter}::uuid IS NULL OR NOT EXISTS(
+    SELECT 1 FROM user_blocks visibility_block
+    WHERE (visibility_block.blocker_id=${viewerParameter} AND visibility_block.blocked_id=${authorExpression})
+       OR (visibility_block.blocker_id=${authorExpression} AND visibility_block.blocked_id=${viewerParameter})
+  ))`;
+}
+
+async function optionalUserActor(context: ApiContext, request: FastifyRequest): Promise<Actor | null> {
+  if (!request.headers?.authorization) return null;
+  try {
+    const actor = await context.auth.loadActor(request);
+    return actor.sessionKind === "USER" && actor.role === "USER" ? actor : null;
+  } catch (error) {
+    if (error instanceof AppError && error.statusCode === 401) return null;
+    throw error;
+  }
+}
+
 async function fetchListing(queryable: Queryable, listingId: string) {
   const result = await queryable.query<ListingRow>(`${listingSelect} WHERE l.id=$1`, [listingId]);
   if (!result.rowCount) throw notFound();
@@ -416,13 +458,14 @@ async function fetchOffer(queryable: Queryable, offerId: string) {
 }
 
 async function lockListing(client: DatabaseClient, listingId: string) {
-  const result = await client.query<ListingLifecycleRow>(
+  const result = await client.query<LockedListingLifecycleRow>(
     `SELECT id,author_id,offered_inventory_unit_id,
       ARRAY(SELECT item.inventory_unit_id FROM exchange_listing_items item
         WHERE item.listing_id=exchange_listings.id ORDER BY item.position) AS offered_inventory_unit_ids,
       status,accepted_offer_id,matched_at,
       author_confirmed_at,proposer_confirmed_at,completed_at,completion_mode,cancelled_at,
-      cancelled_by,cancel_reason,resolved_by_admin_id
+      cancelled_by,cancel_reason,resolved_by_admin_id,
+      expires_at,expires_at<=now() AS is_expired
      FROM exchange_listings WHERE id=$1 FOR UPDATE`,
     [listingId],
   );
@@ -447,6 +490,7 @@ async function lockInventoryUnits(client: DatabaseClient, inventoryIds: readonly
   if (!ids.length) return new Map<string, InventoryLockRow>();
   const result = await client.query<InventoryLockRow>(
     `SELECT iu.id,iu.owner_id,iu.product_id,iu.source_id,iu.status,iu.source_type,
+       iu.storage_expires_at,iu.storage_expires_at>now() AS storage_active,
        draw_result.user_id AS draw_owner_id,
        draw_result.entitlement_id AS draw_entitlement_id,
        draw_result.prize_product_id AS draw_prize_product_id
@@ -524,10 +568,14 @@ function requireExchangeEligibleInventory(
   if (inventory.owner_id !== ownerId) {
     throw conflict("교환 상품의 소유권 또는 예약 상태가 변경되었습니다.");
   }
+  if (!inventory.storage_active) {
+    throw conflict("보관 기간이 만료된 상품은 교환에 사용할 수 없습니다.");
+  }
   if (!isExchangeEligibleInventory(
     inventory.status,
     inventory.source_type,
     hasOriginalGachaDrawProvenance(inventory, ownerId),
+    inventory.storage_active,
   )) {
     throw conflict("가챠로 직접 뽑아 보관함에 보관 중인 상품만 교환에 사용할 수 있습니다.");
   }
@@ -555,6 +603,19 @@ function requireOriginalGachaDrawBundle(
   }
 }
 
+function requireActiveStorageBundle(
+  locked: Map<string, InventoryLockRow>,
+  inventoryIds: readonly string[],
+) {
+  for (const inventoryId of inventoryIds) {
+    const inventory = locked.get(inventoryId);
+    if (!inventory) throw notFound("교환 상품을 찾을 수 없습니다.");
+    if (!inventory.storage_active) {
+      throw conflict("보관 기간이 만료된 상품은 교환에 사용할 수 없습니다.");
+    }
+  }
+}
+
 function requireExchangeEligibleBundle(
   locked: Map<string, InventoryLockRow>,
   inventoryIds: readonly string[],
@@ -578,10 +639,13 @@ async function reserveInventoryUnits(
   const reserved = await client.query(
     `UPDATE inventory_units SET status=$3
      WHERE id=ANY($1::uuid[]) AND owner_id=$2 AND status='OWNED'
+       AND storage_expires_at>now()
      RETURNING id`,
     [ids, ownerId, reservedStatus],
   );
-  if (reserved.rowCount !== ids.length) throw conflict("이미 다른 처리에 사용 중인 상품입니다.");
+  if (reserved.rowCount !== ids.length) {
+    throw conflict("이미 다른 처리에 사용 중이거나 보관 기간이 만료된 상품입니다.");
+  }
 }
 
 async function releaseInventoryUnits(
@@ -656,7 +720,8 @@ async function finalizeOwnershipExchange(
        WHEN id=ANY($1::uuid[]) THEN $4::uuid
        WHEN id=ANY($2::uuid[]) THEN $3::uuid
        ELSE owner_id
-     END,status='OWNED'
+     END,status='OWNED',
+       storage_expires_at=GREATEST(storage_expires_at,now()+interval '14 days')
      WHERE (id=ANY($1::uuid[]) AND owner_id=$3 AND status='EXCHANGE_LISTED')
         OR (id=ANY($2::uuid[]) AND owner_id=$4 AND status='EXCHANGE_OFFERED')
      RETURNING id`,
@@ -696,6 +761,56 @@ async function finalizeOwnershipExchange(
   if (!completed.rowCount) throw conflict("이미 완료되었거나 취소된 교환입니다.");
 }
 
+export async function expireStaleExchangeListings(queryable: Queryable): Promise<number> {
+  const expired = await queryable.query<{ id: string }>(
+    `WITH expired_listings AS (
+       UPDATE exchange_listings listing
+          SET status='CANCELLED',cancelled_at=now(),cancelled_by=author_id,
+              cancel_reason='AUTO_EXPIRED'
+        WHERE listing.status='OPEN'
+          AND (
+            listing.expires_at<=now()
+            OR EXISTS (
+              SELECT 1
+                FROM exchange_listing_items item
+                JOIN inventory_units inventory ON inventory.id=item.inventory_unit_id
+               WHERE item.listing_id=listing.id
+                 AND inventory.storage_expires_at<=now()
+            )
+          )
+        RETURNING listing.id
+     ), rejected_offers AS (
+       UPDATE exchange_offers offer
+          SET status='REJECTED',decided_at=now()
+        WHERE offer.status='PENDING'
+          AND offer.listing_id IN (SELECT id FROM expired_listings)
+        RETURNING offer.id
+     ), released_listing_items AS (
+       UPDATE inventory_units inventory
+          SET status='OWNED'
+        WHERE inventory.status='EXCHANGE_LISTED'
+          AND inventory.id IN (
+            SELECT item.inventory_unit_id
+              FROM exchange_listing_items item
+             WHERE item.listing_id IN (SELECT id FROM expired_listings)
+          )
+        RETURNING inventory.id
+     ), released_offer_items AS (
+       UPDATE inventory_units inventory
+          SET status='OWNED'
+        WHERE inventory.status='EXCHANGE_OFFERED'
+          AND inventory.id IN (
+            SELECT item.inventory_unit_id
+              FROM exchange_offer_items item
+             WHERE item.offer_id IN (SELECT id FROM rejected_offers)
+          )
+        RETURNING inventory.id
+     )
+     SELECT id FROM expired_listings`,
+  );
+  return expired.rowCount ?? expired.rows.length;
+}
+
 async function cancelMatchedExchange(
   client: DatabaseClient,
   listing: ListingLifecycleRow,
@@ -733,8 +848,9 @@ async function cancelMatchedExchange(
 export async function registerExchangeRoutes(app: FastifyInstance, context: ApiContext) {
   app.get(
     "/v1/exchange/inventory",
-    { preHandler: context.auth.requireUser },
+    { preHandler: [requireLiveCommerce(context), context.auth.requireUser] },
     async (request) => {
+      await expireStaleExchangeListings(context.pool);
       const query = queryOf(request);
       const { limit, cursor } = pagination(query);
       const search = queryString(query.q);
@@ -743,6 +859,7 @@ export async function registerExchangeRoutes(app: FastifyInstance, context: ApiC
         "iu.owner_id=$1",
         "iu.status='OWNED'",
         "iu.source_type='GACHA'",
+        "iu.storage_expires_at>now()",
         `EXISTS (
           SELECT 1 FROM draw_results draw_result
           WHERE draw_result.prize_inventory_unit_id=iu.id
@@ -772,17 +889,20 @@ export async function registerExchangeRoutes(app: FastifyInstance, context: ApiC
     },
   );
 
-  app.get("/v1/exchange/listings", async (request) => {
+  app.get("/v1/exchange/listings", { preHandler: requireLiveCommerce(context) }, async (request) => {
+    await expireStaleExchangeListings(context.pool);
+    const viewerId = (await optionalUserActor(context, request))?.userId ?? null;
     const query = queryOf(request);
     const { limit, cursor } = pagination(query);
     const search = queryString(query.q);
     const category = query.category === undefined
       ? undefined
       : enumInput(query, "category", PRODUCT_CATEGORIES);
-    const values: unknown[] = [limit + 1];
+    const values: unknown[] = [viewerId, limit + 1];
     const filters = [
       "l.status='OPEN'",
       listingBundleIsPubliclyEligible,
+      exchangeBlockVisibility("$1", "l.author_id"),
     ];
     if (search) {
       values.push(`%${search}%`);
@@ -818,41 +938,70 @@ export async function registerExchangeRoutes(app: FastifyInstance, context: ApiC
       filters.push(`(l.created_at,l.id)<($${values.length - 1},$${values.length})`);
     }
     const result = await context.pool.query<ListingRow>(
-      `${listingSelect} WHERE ${filters.join(" AND ")} ORDER BY l.created_at DESC,l.id DESC LIMIT $1`,
+      `${listingSelect} WHERE ${filters.join(" AND ")} ORDER BY l.created_at DESC,l.id DESC LIMIT $2`,
       values,
     );
     return listingPage(result.rows, limit);
   });
 
-  app.get("/v1/exchange/listings/:listingId", async (request) => {
+  app.get(
+    "/v1/exchange/activity",
+    { preHandler: [requireLiveCommerce(context), context.auth.requireUser] },
+    async (request) => {
+      await expireStaleExchangeListings(context.pool);
+      const actorId = request.actor!.userId;
+      const [authored, applied] = await Promise.all([
+        context.pool.query<ListingRow>(
+          `${listingSelect} WHERE l.author_id=$1 AND l.status<>'HIDDEN'
+           AND ${listingBundleIsPubliclyEligible}
+           ORDER BY l.updated_at DESC,l.id DESC LIMIT 100`,
+          [actorId],
+        ),
+        context.pool.query<ListingRow>(
+          `${listingSelect} WHERE l.status<>'HIDDEN'
+           AND ${listingBundleIsPubliclyEligible}
+           AND EXISTS (
+             SELECT 1 FROM exchange_offers my_offer
+              WHERE my_offer.listing_id=l.id AND my_offer.proposer_id=$1
+           )
+           ORDER BY l.updated_at DESC,l.id DESC LIMIT 100`,
+          [actorId],
+        ),
+      ]);
+      return {
+        authored: authored.rows.map(mapListing),
+        applied: applied.rows.map(mapListing),
+      };
+    },
+  );
+
+  app.get("/v1/exchange/listings/:listingId", { preHandler: requireLiveCommerce(context) }, async (request) => {
+    await expireStaleExchangeListings(context.pool);
     const listingId = uuidInput((request.params as Record<string, unknown>).listingId, "listingId");
+    const actor = await optionalUserActor(context, request);
     const result = await context.pool.query<ListingRow>(
-      `${listingSelect} WHERE l.id=$1 AND l.status<>'HIDDEN'
-       AND ${listingBundleIsPubliclyEligible}`,
-      [listingId],
+      `${listingSelect} WHERE l.id=$2 AND l.status<>'HIDDEN'
+       AND ${listingBundleIsPubliclyEligible}
+       AND ${exchangeBlockVisibility("$1", "l.author_id")}`,
+      [actor?.userId ?? null, listingId],
     );
     if (!result.rowCount) throw notFound();
     const listing = mapListing(result.rows[0]!);
-    let actor: Actor;
-    try {
-      actor = await context.auth.loadActor(request);
-    } catch (error) {
-      if (!(error instanceof AppError) || error.statusCode !== 401) throw error;
-      return listing;
-    }
+    if (!actor) return listing;
     const authorOwnsListing = actor.userId === result.rows[0]!.author_id;
     const offerRows = await context.pool.query<OfferRow>(
       `${offerSelect} WHERE o.listing_id=$1 ${authorOwnsListing ? "" : "AND o.proposer_id=$2"}
+       AND ${exchangeBlockVisibility("$2", "o.proposer_id")}
        AND ${offerBundleIsVisible}
        ORDER BY o.created_at DESC,o.id DESC`,
-      authorOwnsListing ? [listingId] : [listingId, actor.userId],
+      [listingId, actor.userId],
     );
     return { ...listing, offers: offerRows.rows.map(mapOffer) };
   });
 
   app.post(
     "/v1/exchange/listings",
-    { preHandler: context.auth.requireUser },
+    { preHandler: [requireLiveCommerce(context), context.auth.requireUser] },
     async (request, reply) => {
       const body = objectInput(request.body);
       const title = stringInput(body, "title", { max: 160 })!;
@@ -867,6 +1016,7 @@ export async function registerExchangeRoutes(app: FastifyInstance, context: ApiC
           resourceType: "EXCHANGE_LISTING",
         },
         async (client) => {
+          await assertUgcOperationsPolicyAccepted(client, request.actor!.userId);
           const locked = await lockInventoryUnits(client, inventoryIds);
           requireExchangeEligibleBundle(locked, inventoryIds, request.actor!.userId);
           const created = await client.query<{ id: string }>(
@@ -903,8 +1053,9 @@ export async function registerExchangeRoutes(app: FastifyInstance, context: ApiC
 
   app.post(
     "/v1/exchange/listings/:listingId/offers",
-    { preHandler: context.auth.requireUser },
+    { preHandler: [requireLiveCommerce(context), context.auth.requireUser] },
     async (request, reply) => {
+      await expireStaleExchangeListings(context.pool);
       const listingId = uuidInput((request.params as Record<string, unknown>).listingId, "listingId");
       const body = objectInput(request.body);
       const inventoryIds = exchangeInventoryBundleInput(body);
@@ -917,7 +1068,9 @@ export async function registerExchangeRoutes(app: FastifyInstance, context: ApiC
           resourceType: "EXCHANGE_OFFER",
         },
         async (client) => {
+          await assertUgcOperationsPolicyAccepted(client, request.actor!.userId);
           const listing = await lockListing(client, listingId);
+          if (listing.is_expired) throw conflict("교환 글의 등록 기간이 만료되었습니다.");
           if (listing.status !== "OPEN") throw conflict("제안을 받을 수 없는 교환 글입니다.");
           if (listing.author_id === request.actor!.userId) {
             throw forbidden("본인 글에는 교환을 제안할 수 없습니다.");
@@ -941,6 +1094,7 @@ export async function registerExchangeRoutes(app: FastifyInstance, context: ApiC
             listing.author_id,
             "EXCHANGE_LISTED",
           );
+          requireActiveStorageBundle(locked, listing.offered_inventory_unit_ids);
           requireOriginalGachaDrawBundle(
             locked,
             listing.offered_inventory_unit_ids,
@@ -949,11 +1103,15 @@ export async function registerExchangeRoutes(app: FastifyInstance, context: ApiC
           requireExchangeEligibleBundle(locked, inventoryIds, request.actor!.userId);
           const created = await client.query<{ id: string }>(
             `INSERT INTO exchange_offers(listing_id,proposer_id,offered_inventory_unit_id,message)
-             VALUES($1,$2,$3,'이 상품 묶음과 교환하실래요?')
+             SELECT listing.id,$2,$3,'이 상품 묶음과 교환하실래요?'
+               FROM exchange_listings listing
+              WHERE listing.id=$1 AND listing.status='OPEN' AND listing.expires_at>now()
              ON CONFLICT DO NOTHING RETURNING id`,
             [listingId, request.actor!.userId, inventoryIds[0]],
           );
-          if (!created.rowCount) throw conflict("이 교환 글에 이미 진행 중인 제안이 있습니다.");
+          if (!created.rowCount) {
+            throw conflict("교환 글이 만료되었거나 이미 진행 중인 제안이 있습니다.");
+          }
           const offerId = created.rows[0]!.id;
           if (inventoryIds.length === 2) {
             await client.query(
@@ -984,8 +1142,9 @@ export async function registerExchangeRoutes(app: FastifyInstance, context: ApiC
 
   app.post(
     "/v1/exchange/listings/:listingId/offers/:offerId/decision",
-    { preHandler: context.auth.requireUser },
+    { preHandler: [requireLiveCommerce(context), context.auth.requireUser] },
     async (request, reply) => {
+      await expireStaleExchangeListings(context.pool);
       const params = request.params as Record<string, unknown>;
       const listingId = uuidInput(params.listingId, "listingId");
       const offerId = uuidInput(params.offerId, "offerId");
@@ -1004,6 +1163,7 @@ export async function registerExchangeRoutes(app: FastifyInstance, context: ApiC
           if (listing.author_id !== request.actor!.userId) {
             throw forbidden("작성자만 제안을 처리할 수 있습니다.");
           }
+          if (listing.is_expired) throw conflict("교환 글의 등록 기간이 만료되었습니다.");
           if (listing.status !== "OPEN") throw conflict("이미 결정된 교환 글입니다.");
           const offers = await lockOffers(client, listingId);
           const offer = offers.find((candidate) => candidate.id === offerId);
@@ -1039,6 +1199,7 @@ export async function registerExchangeRoutes(app: FastifyInstance, context: ApiC
               listing.author_id,
               "EXCHANGE_LISTED",
             );
+            requireActiveStorageBundle(locked, listing.offered_inventory_unit_ids);
             for (const pending of pendingOffers) {
               requireInventoryBundle(
                 locked,
@@ -1047,6 +1208,7 @@ export async function registerExchangeRoutes(app: FastifyInstance, context: ApiC
                 "EXCHANGE_OFFERED",
               );
             }
+            requireActiveStorageBundle(locked, offer.offered_inventory_unit_ids);
             requireOriginalGachaDrawBundle(
               locked,
               listing.offered_inventory_unit_ids,
@@ -1081,7 +1243,7 @@ export async function registerExchangeRoutes(app: FastifyInstance, context: ApiC
             const matched = await client.query(
               `UPDATE exchange_listings
                SET status='MATCHED',accepted_offer_id=$2,matched_at=now()
-               WHERE id=$1 AND status='OPEN' RETURNING id`,
+               WHERE id=$1 AND status='OPEN' AND expires_at>now() RETURNING id`,
               [listingId, offerId],
             );
             if (!matched.rowCount) throw conflict("이미 결정된 교환 글입니다.");
@@ -1101,7 +1263,7 @@ export async function registerExchangeRoutes(app: FastifyInstance, context: ApiC
 
   app.post(
     "/v1/exchange/listings/:listingId/cancel",
-    { preHandler: context.auth.requireUser },
+    { preHandler: [requireLiveCommerce(context), context.auth.requireUser] },
     async (request, reply) => {
       const listingId = uuidInput((request.params as Record<string, unknown>).listingId, "listingId");
       const result = await runIdempotentMutation(
@@ -1182,7 +1344,7 @@ export async function registerExchangeRoutes(app: FastifyInstance, context: ApiC
 
   app.post(
     "/v1/exchange/listings/:listingId/offers/:offerId/withdraw",
-    { preHandler: context.auth.requireUser },
+    { preHandler: [requireLiveCommerce(context), context.auth.requireUser] },
     async (request, reply) => {
       const params = request.params as Record<string, unknown>;
       const listingId = uuidInput(params.listingId, "listingId");
@@ -1234,7 +1396,7 @@ export async function registerExchangeRoutes(app: FastifyInstance, context: ApiC
 
   app.post(
     "/v1/exchange/listings/:listingId/completion-confirmation",
-    { preHandler: context.auth.requireUser },
+    { preHandler: [requireLiveCommerce(context), context.auth.requireUser] },
     async (request, reply) => {
       const listingId = uuidInput((request.params as Record<string, unknown>).listingId, "listingId");
       const result = await runIdempotentMutation(

@@ -5,6 +5,8 @@ export type PendingOrderReleaseRow = {
   id: string;
   user_id: string;
   point_total: number;
+  order_kind?: "PRODUCT" | "SHIPPING_FEE";
+  shipping_request_id?: string | null;
 };
 
 export async function releasePendingOrder(
@@ -12,6 +14,39 @@ export async function releasePendingOrder(
   order: PendingOrderReleaseRow,
   reason: string,
 ): Promise<void> {
+  if (order.order_kind === "SHIPPING_FEE" && order.shipping_request_id) {
+    const shippingRequest = await client.query<{ status: string }>(
+      "SELECT status FROM shipping_requests WHERE id=$1 AND user_id=$2 FOR UPDATE",
+      [order.shipping_request_id, order.user_id],
+    );
+    if (shippingRequest.rows[0]?.status === "PAYMENT_PENDING") {
+      const releasedInventory = await client.query(
+        `UPDATE inventory_units inventory
+            SET status='OWNED'
+           FROM shipping_request_items item
+          WHERE item.shipping_request_id=$1
+            AND item.inventory_unit_id=inventory.id
+            AND inventory.owner_id=$2
+            AND inventory.status='SHIPPING'
+          RETURNING inventory.id`,
+        [order.shipping_request_id, order.user_id],
+      );
+      const expectedInventory = await client.query<{ count: string }>(
+        "SELECT count(*)::text AS count FROM shipping_request_items WHERE shipping_request_id=$1",
+        [order.shipping_request_id],
+      );
+      if (releasedInventory.rowCount !== Number(expectedInventory.rows[0]?.count ?? 0)) {
+        throw new Error(`Shipping inventory release invariant failed for ${order.shipping_request_id}`);
+      }
+      await client.query(
+        `UPDATE shipping_requests
+            SET status='CANCELLED',version=version+1
+          WHERE id=$1 AND user_id=$2 AND status='PAYMENT_PENDING'`,
+        [order.shipping_request_id, order.user_id],
+      );
+    }
+  }
+
   const reservations = await client.query<{ id: string; product_id: string; quantity: number }>(
     `SELECT id,product_id,quantity
        FROM stock_reservations

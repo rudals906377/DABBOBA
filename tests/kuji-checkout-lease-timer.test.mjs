@@ -102,10 +102,21 @@ test("native checkout binds kuji expiry to route state and never resets it on re
     "leaveKujiRoom",
     "beforeRemove",
     "kujiRoomFixture",
-    "서버가 연결되지 않아 개발용 결제 화면을 보여드리고 있어요.",
   ]) {
     assert.match(source, new RegExp(contract));
   }
+  assert.match(
+    source,
+    /const showInternalCommerceControls = __DEV__[\s\S]*?internalCommerce\) === "enabled"/,
+  );
+  assert.match(
+    source,
+    /if \(kujiRoomFixture === "development"\) \{[\s\S]*?Alert\.alert\([\s\S]*?"실제 대기실 연결이 필요해요"[\s\S]*?"현재 대기 정보로는 주문이나 추첨권을 만들지 않아요\./,
+  );
+  assert.match(
+    source,
+    /showInternalCommerceControls && product\.category === "kuji" && kujiRoomFixture === "development"[\s\S]*?INTERNAL QUEUE · 주문과 추첨권은 생성되지 않아요\./,
+  );
   assert.match(source, /createKujiCheckoutClock/);
   assert.match(source, /room\.viewer\.state !== "CHECKOUT_PENDING"/);
   assert.match(source, /room\.viewer\.entryId !== kujiEntryId/);

@@ -58,15 +58,57 @@ test("runtime database role can operate app data but cannot administer the schem
        ORDER BY relation.relname`,
       [RUNTIME_DATABASE_ROLE],
     );
-    assert.equal(tableAccess.rows.filter((row) => row.can_select).length, 69);
-    assert.equal(tableAccess.rows.filter((row) => row.can_insert).length, 72);
-    assert.equal(tableAccess.rows.filter((row) => row.can_update).length, 42);
-    assert.equal(tableAccess.rows.filter((row) => row.can_delete).length, 7);
+    assert.equal(tableAccess.rows.filter((row) => row.can_select).length, 80);
+    assert.equal(tableAccess.rows.filter((row) => row.can_insert).length, 80);
+    assert.equal(tableAccess.rows.filter((row) => row.can_update).length, 45);
+    assert.equal(tableAccess.rows.filter((row) => row.can_delete).length, 8);
     assert.deepEqual(tableAccess.rows.find((row) => row.relname === "home_catalog_sections"), {
       relname: "home_catalog_sections",
       can_select: true,
       can_insert: true,
       can_update: true,
+      can_delete: false,
+    });
+    assert.deepEqual(tableAccess.rows.find((row) => row.relname === "storefront_category_settings"), {
+      relname: "storefront_category_settings",
+      can_select: true,
+      can_insert: false,
+      can_update: true,
+      can_delete: false,
+    });
+    assert.deepEqual(tableAccess.rows.find((row) => row.relname === "user_policy_acceptances"), {
+      relname: "user_policy_acceptances",
+      can_select: true,
+      can_insert: true,
+      can_update: false,
+      can_delete: false,
+    });
+    assert.deepEqual(tableAccess.rows.find((row) => row.relname === "account_auth_deletion_jobs"), {
+      relname: "account_auth_deletion_jobs",
+      can_select: true,
+      can_insert: true,
+      can_update: false,
+      can_delete: false,
+    });
+    assert.deepEqual(tableAccess.rows.find((row) => row.relname === "push_device_tokens"), {
+      relname: "push_device_tokens",
+      can_select: true,
+      can_insert: true,
+      can_update: true,
+      can_delete: false,
+    });
+    assert.deepEqual(tableAccess.rows.find((row) => row.relname === "push_notification_deliveries"), {
+      relname: "push_notification_deliveries",
+      can_select: false,
+      can_insert: false,
+      can_update: false,
+      can_delete: false,
+    });
+    assert.deepEqual(tableAccess.rows.find((row) => row.relname === "shipping_quotes"), {
+      relname: "shipping_quotes",
+      can_select: true,
+      can_insert: true,
+      can_update: false,
       can_delete: false,
     });
     for (const exchangeBundleTable of ["exchange_listing_items", "exchange_offer_items"]) {
@@ -103,6 +145,40 @@ test("runtime database role can operate app data but cannot administer the schem
         can_delete: false,
       });
     }
+
+    const identityColumnAccess = await migrationPool.query<{
+      can_update_provider_subject: boolean;
+      can_update_user_id: boolean;
+      can_update_verified_at: boolean;
+    }>(
+      `SELECT
+         has_column_privilege($1, 'public.auth_identities', 'verified_at', 'UPDATE') AS can_update_verified_at,
+         has_column_privilege($1, 'public.auth_identities', 'user_id', 'UPDATE') AS can_update_user_id,
+         has_column_privilege($1, 'public.auth_identities', 'provider_subject', 'UPDATE') AS can_update_provider_subject`,
+      [RUNTIME_DATABASE_ROLE],
+    );
+    assert.deepEqual(identityColumnAccess.rows, [{
+      can_update_verified_at: true,
+      can_update_user_id: false,
+      can_update_provider_subject: false,
+    }]);
+
+    const shippingQuoteColumnAccess = await migrationPool.query<{
+      can_update_address_version: boolean;
+      can_update_consumed_at: boolean;
+      can_update_shipping_request_id: boolean;
+    }>(
+      `SELECT
+         has_column_privilege($1, 'public.shipping_quotes', 'consumed_at', 'UPDATE') AS can_update_consumed_at,
+         has_column_privilege($1, 'public.shipping_quotes', 'shipping_request_id', 'UPDATE') AS can_update_shipping_request_id,
+         has_column_privilege($1, 'public.shipping_quotes', 'address_version', 'UPDATE') AS can_update_address_version`,
+      [RUNTIME_DATABASE_ROLE],
+    );
+    assert.deepEqual(shippingQuoteColumnAccess.rows, [{
+      can_update_consumed_at: true,
+      can_update_shipping_request_id: true,
+      can_update_address_version: false,
+    }]);
 
     const schemaAccess = await migrationPool.query<{ can_create: boolean; can_use: boolean }>(
       `SELECT has_schema_privilege($1, 'public', 'USAGE') AS can_use,
@@ -190,6 +266,15 @@ test("runtime database role can operate app data but cannot administer the schem
         [userId],
       );
       assert.equal(profile.rows[0]?.user_id, userId);
+      const identitySubject = `runtime-role-subject-${Date.now()}`;
+      await runtimeClient.query(
+        `INSERT INTO auth_identities(user_id,provider,provider_subject,verified_at)
+         VALUES($1,'KAKAO',$2,now())
+         ON CONFLICT (provider,provider_subject) DO UPDATE
+           SET verified_at=GREATEST(auth_identities.verified_at,EXCLUDED.verified_at)
+           WHERE auth_identities.user_id=EXCLUDED.user_id`,
+        [userId, identitySubject],
+      );
       await runtimeClient.query("ROLLBACK");
     } catch (error) {
       await runtimeClient.query("ROLLBACK").catch(() => undefined);
@@ -212,6 +297,8 @@ test("runtime database role can operate app data but cannot administer the schem
     await expectDenied("CREATE TABLE runtime_role_must_not_create_tables (id integer)");
     await expectDenied("TRUNCATE TABLE users");
     await expectDenied("DELETE FROM users WHERE false");
+    await expectDenied("UPDATE auth_identities SET user_id=user_id WHERE false");
+    await expectDenied("UPDATE auth_identities SET provider_subject=provider_subject WHERE false");
     await expectDenied("CREATE ROLE runtime_role_must_not_create_roles");
     await expectDenied("SET ROLE pg_read_all_data");
   } finally {

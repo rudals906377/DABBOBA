@@ -5,6 +5,7 @@ import type { ApiConfig } from "@dabboba/config";
 import { createDatabasePool } from "@dabboba/db";
 import type { FastifyInstance } from "fastify";
 import { buildApp } from "../app.js";
+import { acceptRequiredPoliciesForIntegrationTest } from "../integration-test-fixtures.js";
 
 const databaseUrl = process.env.DABBOBA_TEST_DATABASE_URL;
 const provider = "TEST_PG";
@@ -88,7 +89,9 @@ test(
         payload: { email: `${label}-${suffix}-${sequence++}@example.test` },
       });
       assert.equal(response.statusCode, 201, response.body);
-      return response.json() as Session;
+      const created = response.json() as Session;
+      await acceptRequiredPoliciesForIntegrationTest(pool, created.actor.userId);
+      return created;
     };
     const createProduct = async (
       category: "gacha" | "figure" | "kuji" | "tcg",
@@ -99,9 +102,18 @@ test(
     ) => {
       const productId = `${label}-${suffix}-${sequence++}`.toLowerCase();
       await pool.query(
-        `INSERT INTO catalog_products(id,sku,ip_id,category,name,price,is_prize_only)
-         VALUES($1,$2,$3,$4,$5,$6,$7)`,
-        [productId, `${label}-${suffix}-${sequence}`.toUpperCase(), ipId, category, `${label} ${suffix}`, price, isPrizeOnly],
+        `INSERT INTO catalog_products(id,sku,ip_id,category,name,price,image_url,is_prize_only)
+         VALUES($1,$2,$3,$4,$5,$6,$7,$8)`,
+        [
+          productId,
+          `${label}-${suffix}-${sequence}`.toUpperCase(),
+          ipId,
+          category,
+          `${label} ${suffix}`,
+          price,
+          `https://cdn.example.test/products/${productId}.png`,
+          isPrizeOnly,
+        ],
       );
       await pool.query("INSERT INTO product_stock(product_id,on_hand,reserved) VALUES($1,$2,0)", [productId, onHand]);
       return productId;
@@ -139,7 +151,47 @@ test(
       return result.rows[0]!;
     };
 
-    const figureProduct = await createProduct("figure", 10_000, 40, "figure");
+    const paymentDrawProduct = await createProduct("gacha", 10_000, 40, "payment-draw");
+    const paymentPrizeProduct = await createProduct("figure", 0, 200, "payment-prize", true);
+    const paymentPublisher = await createSession("payment-draw-publisher");
+    const paymentVersion = await pool.query<{ id: string }>(
+      "INSERT INTO draw_probability_versions(product_id,version) VALUES($1,1) RETURNING id",
+      [paymentDrawProduct],
+    );
+    const paymentPrizeSnapshot = await pool.query<{
+      category: string;
+      image_url: string | null;
+      ip_id: string;
+      name: string;
+      sku: string;
+    }>(
+      "SELECT name,image_url,sku,ip_id,category FROM catalog_products WHERE id=$1",
+      [paymentPrizeProduct],
+    );
+    await pool.query(
+      `INSERT INTO draw_pool_entries(
+         probability_version_id,prize_product_id,prize_name_snapshot,prize_image_url_snapshot,
+         prize_sku_snapshot,prize_ip_id_snapshot,prize_category_snapshot,rarity,weight
+       ) VALUES($1,$2,$3,$4,$5,$6,$7,'A',1)`,
+      [
+        paymentVersion.rows[0]!.id,
+        paymentPrizeProduct,
+        paymentPrizeSnapshot.rows[0]!.name,
+        paymentPrizeSnapshot.rows[0]!.image_url,
+        paymentPrizeSnapshot.rows[0]!.sku,
+        paymentPrizeSnapshot.rows[0]!.ip_id,
+        paymentPrizeSnapshot.rows[0]!.category,
+      ],
+    );
+    await pool.query(
+      `UPDATE draw_probability_versions
+       SET status='ACTIVE',published_by=$2,published_at=now() WHERE id=$1`,
+      [paymentVersion.rows[0]!.id, paymentPublisher.actor.userId],
+    );
+    await pool.query(
+      "UPDATE catalog_products SET sale_status='ON_SALE' WHERE id=$1",
+      [paymentDrawProduct],
+    );
 
     const zeroUser = await createSession("zero-payment");
     await pool.query("INSERT INTO point_accounts(user_id,balance) VALUES($1,10000)", [zeroUser.actor.userId]);
@@ -148,12 +200,19 @@ test(
        VALUES($1,'EARN',10000,'TEST',$2,'Commerce integration setup')`,
       [zeroUser.actor.userId, suffix],
     );
-    const zeroOrder = await createOrder(zeroUser, figureProduct, 10_000);
+    const zeroOrder = await createOrder(zeroUser, paymentDrawProduct, 10_000);
     assert.equal(zeroOrder.status, "PAID");
     assert.equal(zeroOrder.total, 0);
-    const zeroPersisted = await pool.query<{ provider: string; payment_status: string; inventory_count: string; ledger_count: string }>(
+    const zeroPersisted = await pool.query<{
+      entitlement_count: string;
+      inventory_count: string;
+      ledger_count: string;
+      payment_status: string;
+      provider: string;
+    }>(
       `SELECT p.provider,p.status AS payment_status,
         (SELECT count(*) FROM inventory_units i JOIN order_lines l ON l.id=i.source_id WHERE l.order_id=o.id) AS inventory_count,
+        (SELECT count(*) FROM draw_entitlements e JOIN order_lines l ON l.id=e.order_line_id WHERE l.order_id=o.id) AS entitlement_count,
         (SELECT count(*) FROM payment_ledger_entries e WHERE e.payment_id=p.id) AS ledger_count
        FROM orders o JOIN payments p ON p.order_id=o.id WHERE o.id=$1`,
       [zeroOrder.id],
@@ -161,12 +220,13 @@ test(
     assert.deepEqual(zeroPersisted.rows[0], {
       provider: "INTERNAL_ZERO",
       payment_status: "PAID",
-      inventory_count: "1",
+      inventory_count: "0",
+      entitlement_count: "1",
       ledger_count: "0",
     });
 
     const refundFirstUser = await createSession("refund-first");
-    const refundFirstOrder = await createOrder(refundFirstUser, figureProduct);
+    const refundFirstOrder = await createOrder(refundFirstUser, paymentDrawProduct);
     const refundFirstEvent = `refund-first-${randomUUID()}`;
     const refundedBeforeSuccess = await sendWebhook(app, {
       eventId: refundFirstEvent,
@@ -195,7 +255,7 @@ test(
     assert.deepEqual(await state(refundFirstOrder.id), { order_status: "REFUNDED", payment_status: "REFUNDED" });
 
     const lateUser = await createSession("late-success");
-    const lateOrder = await createOrder(lateUser, figureProduct);
+    const lateOrder = await createOrder(lateUser, paymentDrawProduct);
     const cancelled = await sendWebhook(app, {
       eventType: "PAYMENT_CANCELLED",
       paymentId: lateOrder.paymentId,
@@ -219,18 +279,34 @@ test(
 
     const paidUser = await createSession("unsafe-refund-owner");
     const newOwner = await createSession("unsafe-refund-new-owner");
-    const unsafeOrder = await createOrder(paidUser, figureProduct);
+    const unsafeOrder = await createOrder(paidUser, paymentDrawProduct);
     const paid = await sendWebhook(app, {
       eventType: "PAYMENT_SUCCEEDED",
       paymentId: unsafeOrder.paymentId,
       amount: 10_000,
     });
     assert.equal((paid.json() as { outcome: string }).outcome, "processed");
+    const unsafeEntitlement = await pool.query<{ id: string }>(
+      `SELECT entitlement.id
+       FROM draw_entitlements entitlement
+       JOIN order_lines line ON line.id=entitlement.order_line_id
+       WHERE line.order_id=$1`,
+      [unsafeOrder.id],
+    );
+    assert.equal(unsafeEntitlement.rowCount, 1);
+    const consumedUnsafeDraw = await app.inject({
+      method: "POST",
+      url: `/v1/draws/${unsafeEntitlement.rows[0]!.id}/consume`,
+      headers: {
+        authorization: `Bearer ${paidUser.token}`,
+        "idempotency-key": `unsafe-refund-consume-${randomUUID()}`,
+      },
+    });
+    assert.equal(consumedUnsafeDraw.statusCode, 200, consumedUnsafeDraw.body);
+    const unsafeInventoryId = (consumedUnsafeDraw.json() as { prizeInventoryUnitId: string }).prizeInventoryUnitId;
     const moved = await pool.query<{ id: string }>(
-      `UPDATE inventory_units SET owner_id=$2
-       WHERE source_type='PURCHASE' AND source_id IN (SELECT id FROM order_lines WHERE order_id=$1)
-       RETURNING id`,
-      [unsafeOrder.id, newOwner.actor.userId],
+      "UPDATE inventory_units SET owner_id=$2 WHERE id=$1 RETURNING id",
+      [unsafeInventoryId, newOwner.actor.userId],
     );
     assert.equal(moved.rowCount, 1);
     const unsafeRefund = await sendWebhook(app, {
@@ -292,7 +368,7 @@ test(
       payload: { items: [{ productId: prizeProduct, quantity: 1 }], pointAmount: 0 },
     });
     assert.equal(prizeOrder.statusCode, 409, prizeOrder.body);
-    assert.match(prizeOrder.body, /경품 전용 상품은 직접 구매할 수 없습니다/);
+    assert.match(prizeOrder.body, /아직 구매할 수 없습니다/);
     const publisher = await createSession("draw-publisher");
     const createDrawVersion = async (version: number, quantity: number) => {
       const created = await pool.query<{ id: string }>(
@@ -323,6 +399,10 @@ test(
         `UPDATE draw_probability_versions
          SET status='ACTIVE',published_by=$2,published_at=now() WHERE id=$1`,
         [versionId, publisher.actor.userId],
+      );
+      await pool.query(
+        "UPDATE catalog_products SET sale_status='ON_SALE' WHERE id=$1",
+        [drawProduct],
       );
       return versionId;
     };

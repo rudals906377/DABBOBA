@@ -11,6 +11,7 @@ import {
 } from "@dabboba/db";
 import type { FastifyInstance } from "fastify";
 import { buildApp } from "../app.js";
+import { acceptRequiredPoliciesForIntegrationTest } from "../integration-test-fixtures.js";
 import { expireAndPromoteKujiRoomLocked } from "./kuji-rooms.js";
 
 const databaseUrl = process.env.DABBOBA_TEST_DATABASE_URL;
@@ -99,7 +100,9 @@ test(
         payload: { email: `${label}-${suffix}-${sequence++}@example.test` },
       });
       assert.equal(response.statusCode, 201, response.body);
-      return response.json() as Session;
+      const created = response.json() as Session;
+      await acceptRequiredPoliciesForIntegrationTest(pool, created.actor.userId);
+      return created;
     };
     const auth = (session: Session) => ({ authorization: `Bearer ${session.token}` });
     const publisher = await createSession("publisher");
@@ -113,9 +116,16 @@ test(
     const createKuji = async (label: string, price = 1_000, onHand = 5) => {
       const productId = `${label}-${suffix}-${sequence++}`.toLowerCase();
       await pool.query(
-        `INSERT INTO catalog_products(id,sku,ip_id,category,name,price,is_prize_only)
-         VALUES($1,$2,$3,'kuji',$4,$5,false)`,
-        [productId, `${label}-${suffix}-${sequence}`.toUpperCase(), ipId, `${label} ${suffix}`, price],
+        `INSERT INTO catalog_products(id,sku,ip_id,category,name,price,image_url,is_prize_only)
+         VALUES($1,$2,$3,'kuji',$4,$5,$6,false)`,
+        [
+          productId,
+          `${label}-${suffix}-${sequence}`.toUpperCase(),
+          ipId,
+          `${label} ${suffix}`,
+          price,
+          `https://cdn.example.test/products/${productId}.png`,
+        ],
       );
       await pool.query("INSERT INTO product_stock(product_id,on_hand,reserved) VALUES($1,$2,0)", [productId, onHand]);
       const version = await pool.query<{ id: string }>(
@@ -148,6 +158,10 @@ test(
       await pool.query(
         "UPDATE draw_probability_versions SET status='ACTIVE',published_by=$2,published_at=now() WHERE id=$1",
         [version.rows[0]!.id, publisher.actor.userId],
+      );
+      await pool.query(
+        "UPDATE catalog_products SET sale_status='ON_SALE' WHERE id=$1",
+        [productId],
       );
       return productId;
     };

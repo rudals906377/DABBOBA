@@ -1,53 +1,102 @@
 #!/usr/bin/env node
 import { execFile, spawn } from 'node:child_process';
-import { readFile, readdir, realpath } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
+import { readdir, realpath } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseEnv, promisify } from 'node:util';
 import { setTimeout as sleep } from 'node:timers/promises';
+import {
+  LOCAL_BACKEND_ENVIRONMENT_TIER,
+  LOCAL_BACKEND_PROFILE,
+  sanitizeLocalMobileEnvironment,
+} from './local-backend-profile.mjs';
 
 export const MOBILE_ROOT = fileURLToPath(new URL('../apps/mobile', import.meta.url));
 export const METRO_PORT = 8084;
-export const DABBOBA_SUPABASE_URL = 'https://yxkmvgfruphgghowzvmo.supabase.co';
+export const HOSTED_AUTH_PROFILE = 'supabase-hosted-auth';
+export const HOSTED_AUTH_PROJECT_REF = 'yxkmvgfruphgghowzvmo';
+export const HOSTED_AUTH_API_URL = `https://${HOSTED_AUTH_PROJECT_REF}.supabase.co/functions/v1/dabboba-api`;
+export const HOSTED_AUTH_ENV_FILE = path.join(MOBILE_ROOT, '.env');
 const SAFE_PARENT_KEYS = new Set(['PATH', 'HOME', 'USER', 'LOGNAME', 'SHELL', 'TMPDIR', 'LANG', 'LC_ALL', 'TERM', 'DEVELOPER_DIR']);
-const PUBLIC_SETTING_KEYS = ['EXPO_PUBLIC_SUPABASE_URL', 'EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY'];
-const FIXED_MOBILE_ENV = Object.freeze({
-  NODE_ENV: 'development', EXPO_NO_TELEMETRY: '1', EXPO_NO_DOTENV: '1',
-  EXPO_PUBLIC_DABBOBA_API_URL: 'http://127.0.0.1:8788',
-  EXPO_PUBLIC_DABBOBA_ASSET_BASE_URL: 'http://127.0.0.1:4174',
-  RCT_METRO_PORT: String(METRO_PORT), REACT_NATIVE_PACKAGER_HOSTNAME: '127.0.0.1',
-  EXPO_PACKAGER_PROXY_URL: '', BROWSER: 'none',
-});
-const ATTESTED_KEYS = [...PUBLIC_SETTING_KEYS, ...Object.keys(FIXED_MOBILE_ENV)];
+const ATTESTED_KEYS = [
+  'DABBOBA_ENVIRONMENT_TIER', 'DABBOBA_LOCAL_BACKEND_PROFILE',
+  'NODE_ENV', 'EXPO_NO_TELEMETRY', 'EXPO_NO_DOTENV',
+  'EXPO_PUBLIC_DABBOBA_API_URL', 'EXPO_PUBLIC_DABBOBA_ASSET_BASE_URL',
+  'EXPO_PUBLIC_DABBOBA_WEB_URL', 'EXPO_PUBLIC_DABBOBA_ALLOWED_ORIGINS',
+  'EXPO_PUBLIC_SUPABASE_URL', 'EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY',
+  'RCT_METRO_PORT', 'REACT_NATIVE_PACKAGER_HOSTNAME', 'EXPO_PACKAGER_PROXY_URL', 'BROWSER',
+];
 const IOS_APP_ID = 'host.exp.Exponent';
 const ANDROID_APP_ID = 'host.exp.exponent';
 const execute = promisify(execFile);
 const requireFromMobile = createRequire(path.join(MOBILE_ROOT, 'package.json'));
 
-export function buildMobileEnvironment(parent, publicSettings) {
-  if (publicSettings?.EXPO_PUBLIC_SUPABASE_URL?.replace(/\/$/, '') !== DABBOBA_SUPABASE_URL ||
-      !publicSettings.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY?.trim() ||
-      /\s/.test(publicSettings.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY)) {
-    throw new Error('DABBOBA mobile .env needs its own public Supabase URL and publishable key. Values were not printed.');
+export function buildMobileEnvironment(parent, options = {}) {
+  if (options.hostedAuth) {
+    return buildHostedAuthMobileEnvironment(parent, options.hostedAuthSource);
+  }
+  const localProfile = sanitizeLocalMobileEnvironment({});
+  const environment = {
+    ...Object.fromEntries(Object.entries(parent).filter(([key]) => SAFE_PARENT_KEYS.has(key))),
+    ...localProfile,
+  };
+  if (environment.DABBOBA_ENVIRONMENT_TIER !== LOCAL_BACKEND_ENVIRONMENT_TIER ||
+      environment.DABBOBA_LOCAL_BACKEND_PROFILE !== LOCAL_BACKEND_PROFILE ||
+      environment.EXPO_NO_DOTENV !== '1' || environment.RCT_METRO_PORT !== String(METRO_PORT) ||
+      environment.EXPO_PUBLIC_SUPABASE_URL?.trim() ||
+      environment.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY?.trim()) {
+    throw new Error('DABBOBA local mobile profile could not be verified. No environment values were printed.');
+  }
+  return environment;
+}
+
+export function buildHostedAuthMobileEnvironment(parent, sourceText = undefined) {
+  let source;
+  try {
+    source = parseEnv(sourceText ?? readFileSync(HOSTED_AUTH_ENV_FILE, 'utf8'));
+  } catch {
+    throw new Error('DABBOBA hosted auth public settings could not be read.');
+  }
+  const allowed = new Set(['EXPO_PUBLIC_SUPABASE_URL', 'EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY']);
+  if (Object.keys(source).some(key => !allowed.has(key))) {
+    throw new Error('DABBOBA hosted auth file contains an unexpected setting.');
+  }
+  let supabase;
+  try {
+    supabase = new URL(source.EXPO_PUBLIC_SUPABASE_URL);
+  } catch {
+    throw new Error('DABBOBA hosted auth public settings are incomplete.');
+  }
+  const publishableKey = source.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY?.trim();
+  if (
+    supabase.origin !== `https://${HOSTED_AUTH_PROJECT_REF}.supabase.co`
+    || supabase.pathname !== '/'
+    || supabase.username
+    || supabase.password
+    || supabase.search
+    || supabase.hash
+    || !publishableKey?.startsWith('sb_publishable_')
+    || publishableKey.length < 32
+  ) {
+    throw new Error('DABBOBA hosted auth public settings do not match the approved project.');
   }
   return {
     ...Object.fromEntries(Object.entries(parent).filter(([key]) => SAFE_PARENT_KEYS.has(key))),
-    EXPO_PUBLIC_SUPABASE_URL: DABBOBA_SUPABASE_URL,
-    EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY: publicSettings.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY,
-    ...FIXED_MOBILE_ENV,
+    NODE_ENV: 'development',
+    DABBOBA_LOCAL_BACKEND_PROFILE: HOSTED_AUTH_PROFILE,
+    DABBOBA_ENVIRONMENT_TIER: 'PRODUCTION',
+    EXPO_NO_TELEMETRY: '1',
+    EXPO_NO_DOTENV: '1',
+    RCT_METRO_PORT: String(METRO_PORT),
+    REACT_NATIVE_PACKAGER_HOSTNAME: '127.0.0.1',
+    EXPO_PACKAGER_PROXY_URL: `http://127.0.0.1:${METRO_PORT}`,
+    BROWSER: 'none',
+    EXPO_PUBLIC_DABBOBA_API_URL: HOSTED_AUTH_API_URL,
+    EXPO_PUBLIC_SUPABASE_URL: supabase.origin,
+    EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY: publishableKey,
   };
-}
-
-export async function readMobilePublicSettings() {
-  try {
-    const settings = parseEnv(await readFile(path.join(MOBILE_ROOT, '.env'), 'utf8'));
-    const selected = Object.fromEntries(PUBLIC_SETTING_KEYS.map(key => [key, settings[key]]));
-    buildMobileEnvironment({}, selected);
-    return selected;
-  } catch {
-    throw new Error('Cannot verify DABBOBA apps/mobile/.env public settings. No environment values were printed.');
-  }
 }
 
 export function assertMetroProcessEnvironment(raw, expected) {
@@ -59,12 +108,15 @@ export function assertMetroProcessEnvironment(raw, expected) {
     if (ATTESTED_KEYS.includes(key)) {
       if (values.has(key)) throw new Error('DABBOBA Metro configuration could not be verified.');
       values.set(key, value);
-    } else if (key.startsWith('EXPO_PUBLIC_') || ['CI', 'DATABASE_URL', 'DATABASE_MIGRATION_URL', 'SESSION_TOKEN_PEPPER', 'SUPABASE_SERVICE_ROLE_KEY', 'SUPABASE_SECRET_KEY'].includes(key)) {
+    } else if (key.startsWith('EXPO_PUBLIC_') || key.startsWith('DABBOBA_') ||
+        ['DATABASE_', 'WORKER_', 'SESSION_', 'SUPABASE_', 'PAYMENT_', 'ADMIN_', 'NOTIFICATION_', 'GCS_', 'GOOGLE_'].some(prefix => key.startsWith(prefix)) ||
+        key === 'CI') {
       throw new Error('DABBOBA Metro contains unexpected inherited configuration.');
     }
   }
   for (const key of ATTESTED_KEYS) {
-    if (typeof expected?.[key] !== 'string' || /\s/.test(expected[key]) || !values.has(key) || values.get(key) !== expected[key]) {
+    const expectedValue = expected?.[key];
+    if (expectedValue === undefined ? values.has(key) : /\s/.test(expectedValue) || !values.has(key) || values.get(key) !== expectedValue) {
       throw new Error('DABBOBA Metro configuration does not match this launcher. Stop its identified owner and reopen DABBOBA. Values were not printed.');
     }
   }
@@ -87,7 +139,7 @@ export function projectSdkVersion() {
 }
 
 export function parseLaunchOptions(args) {
-  const options = { platform: null, clear: false, device: null, help: false };
+  const options = { platform: null, clear: false, device: null, hostedAuth: false, help: false };
   for (let index = 0; index < args.length; index++) {
     const arg = args[index];
     if (arg === '--') continue;
@@ -96,6 +148,7 @@ export function parseLaunchOptions(args) {
       if (options.platform && options.platform !== platform) throw new Error('Choose one of --ios, --android or --web.');
       options.platform = platform;
     } else if (arg === '--clear' || arg === '-c') options.clear = true;
+    else if (arg === '--hosted-auth') options.hostedAuth = true;
     else if (arg === '--help' || arg === '-h') options.help = true;
     else if (arg === '--device') {
       const value = args[++index];
@@ -112,7 +165,7 @@ export function parseLaunchOptions(args) {
   return options;
 }
 
-export function buildExpoCommand(cli, options, env = process.env, publicSettings) {
+export function buildExpoCommand(cli, options, env = process.env) {
   return {
     command: process.execPath,
     args: ['--dns-result-order=ipv4first', cli, 'start', '--go', '--localhost', '--port', String(METRO_PORT), ...(options.clear ? ['--clear'] : []), ...(options.platform === 'web' ? ['--web'] : [])],
@@ -121,7 +174,7 @@ export function buildExpoCommand(cli, options, env = process.env, publicSettings
       // Pipes make Expo prompts non-interactive without CI=1, which disables Metro watching.
       stdio: ['ignore', 'pipe', 'pipe'],
       detached: true,
-      env: buildMobileEnvironment(env, publicSettings),
+      env: buildMobileEnvironment(env, options),
     },
   };
 }
@@ -162,7 +215,7 @@ export async function inspectMetro({ listeners = readListeners, status = readMet
   if (!owners.length) return { state: 'absent', owners };
   if (owners.some(owner => owner.cwd !== expectedRoot)) return { state: 'foreign', owners };
   try {
-    const expected = expectedEnvironment ?? buildMobileEnvironment({}, await readMobilePublicSettings());
+    const expected = expectedEnvironment ?? buildMobileEnvironment({});
     for (const owner of owners) assertMetroProcessEnvironment(await environment(owner.pid), expected);
   } catch {
     return { state: 'incompatible', owners };
@@ -332,8 +385,7 @@ async function stopChild(child) {
 }
 
 export async function launchMobile(options, overrides = {}) {
-  const publicSettings = overrides.publicSettings ?? await readMobilePublicSettings();
-  const expectedEnvironment = buildMobileEnvironment({}, publicSettings);
+  const expectedEnvironment = buildMobileEnvironment({}, options);
   const deps = { inspect: () => inspectMetro({ expectedEnvironment }), resolveCli: () => requireFromMobile.resolve('expo/bin/cli'), sdkVersion: projectSdkVersion(), prepareTarget, spawn, openTarget, stopChild, waitForChild, sleep, log: console.log, env: process.env, ...overrides };
   let snapshot = await deps.inspect();
   requireUsablePort(snapshot);
@@ -355,7 +407,7 @@ export async function launchMobile(options, overrides = {}) {
     deps.log(`Reusing DABBOBA Metro at ${url}.`);
     return { reused: true, url, exitCode: 0 };
   }
-  const command = buildExpoCommand(deps.resolveCli(), options, deps.env, publicSettings);
+  const command = buildExpoCommand(deps.resolveCli(), options, deps.env);
   const child = deps.spawn(command.command, command.args, command.options);
   child.stdout?.pipe(process.stdout);
   child.stderr?.pipe(process.stderr);
@@ -392,13 +444,12 @@ export async function launchMobile(options, overrides = {}) {
 async function main() {
   const options = parseLaunchOptions(process.argv.slice(2));
   if (options.help) {
-    console.log(`DABBOBA local Metro (fixed port 8084, installed Expo SDK ${projectSdkVersion().split('.')[0]})\nUsage: node scripts/dabboba-mobile-launch.mjs [--ios | --android | --web] [--device NAME_OR_ID] [--clear]\nAn existing healthy apps/mobile Metro is reused. Native hosts must already be installed and compatible. iOS defaults to a dedicated DABBOBA Simulator.`);
+    console.log(`DABBOBA Metro (fixed port 8084, installed Expo SDK ${projectSdkVersion().split('.')[0]})\nUsage: node scripts/dabboba-mobile-launch.mjs [--ios | --android | --web] [--device NAME_OR_ID] [--clear] [--hosted-auth]\n--hosted-auth uses only the approved hosted Supabase Auth project and deployed DABBOBA API. Native hosts must already be installed and compatible. iOS defaults to a dedicated DABBOBA Simulator.`);
     return;
   }
   const root = await realpath(MOBILE_ROOT);
-  const publicSettings = await readMobilePublicSettings();
-  const expectedEnvironment = buildMobileEnvironment({}, publicSettings);
-  const { exitCode } = await launchMobile(options, { publicSettings, inspect: () => inspectMetro({ expectedRoot: root, expectedEnvironment }) });
+  const expectedEnvironment = buildMobileEnvironment({}, options);
+  const { exitCode } = await launchMobile(options, { inspect: () => inspectMetro({ expectedRoot: root, expectedEnvironment }) });
   process.exitCode = exitCode;
 }
 

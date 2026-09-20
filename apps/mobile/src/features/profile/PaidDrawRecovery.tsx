@@ -7,6 +7,8 @@ import { ProductInfoDivider } from "@/components/ProductInfoDivider";
 import { AppText as Text, BalancedAppText } from "@/components/Typography";
 import { SeedActionButton, SeedCard } from "@/design-system/components";
 import { seed } from "@/design-system/seed";
+import { presentDrawOpenModeChoice } from "@/features/draw/draw-open-mode-prompt";
+import { drawEntitlementCountFromPath, withDrawOpenMode } from "@/features/draw/draw-open-mode";
 import { createPaidDrawRecoverySource } from "@/features/profile/paid-draw-recovery-api";
 import {
   groupAvailableDrawEntitlements,
@@ -103,7 +105,13 @@ export function PaidDrawRecovery({
       const currentTokens = await readAuthTokens();
       if (controller.signal.aborted) return;
       if (currentTokens?.accessToken !== accessToken) throw new Error("로그인 정보가 변경되었습니다. 구매 내역을 다시 불러와 주세요.");
-      router.push(route as Href);
+      if (route.startsWith("/draw/reveal/")) {
+        presentDrawOpenModeChoice(drawEntitlementCountFromPath(route), (mode) => {
+          if (!controller.signal.aborted) router.push(withDrawOpenMode(route, mode) as Href);
+        });
+      } else {
+        router.push(route as Href);
+      }
     } catch (error) {
       if (!controller.signal.aborted) setMessage(error instanceof Error ? error.message : "이어 뽑기를 시작하지 못했습니다.");
     } finally {

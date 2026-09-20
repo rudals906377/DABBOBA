@@ -1,6 +1,7 @@
 import * as Notifications from "expo-notifications";
 import { Platform } from "react-native";
 import { buildKujiTurnCall } from "@/features/kuji/kuji-entry-state";
+import { colors } from "@/theme";
 
 const KUJI_NOTIFICATION_CHANNEL = "kuji-turn";
 
@@ -27,7 +28,7 @@ export async function scheduleKujiTurnExampleNotification(
       name: "쿠지 차례 알림",
       importance: Notifications.AndroidImportance.MAX,
       vibrationPattern: [0, 180, 100, 180],
-      lightColor: "#91E98E",
+      lightColor: colors.brand,
     });
   }
 

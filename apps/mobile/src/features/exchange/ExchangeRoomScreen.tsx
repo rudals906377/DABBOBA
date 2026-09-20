@@ -1,5 +1,4 @@
 import Constants from "expo-constants";
-import { Ionicons } from "@expo/vector-icons";
 import { router, useFocusEffect } from "expo-router";
 import { useSQLiteContext } from "expo-sqlite";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -16,26 +15,24 @@ import {
   StyleSheet,
   View,
 } from "react-native";
+import { DecorativeIonicon } from "@/components/DecorativeIonicon";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { DetailPageHeader } from "@/components/DetailPageHeader";
 import { ProductInfoDivider } from "@/components/ProductInfoDivider";
-import { KoreanPixelTitle, KoreanPixelTitleAccessory, RootCategoryTitle } from "@/components/RootCategoryTitle";
-import { RootHeaderActions } from "@/components/RootHeaderActions";
-import {
-  ROOT_NAVIGATION_CONTENT_INSET,
-  useRootNavigationScroll,
-} from "@/components/RootFloatingTabBar";
+import { KoreanPixelTitle, KoreanPixelTitleAccessory } from "@/components/RootCategoryTitle";
 import { AppText as Text, AppTextInput as TextInput, BalancedAppText } from "@/components/Typography";
-import { SeedActionButton, SeedChip, SeedIconButton, SeedInputShell } from "@/design-system/components";
+import { catalogProductCardSurface, catalogProductImageSurface } from "@/design-system/catalog";
+import { SeedActionButton, SeedIconButton, SeedInputShell } from "@/design-system/components";
+import { subtleSectionHeaderRule } from "@/design-system/section";
 import { seed } from "@/design-system/seed";
+import { catalogPriceLabel } from "@/features/commerce/product-commerce-presentation";
 import { openCustomerLogin } from "@/features/auth/login-navigation";
-import { PRODUCT_CATEGORY_OPTIONS } from "@/features/catalog/product-categories";
 import {
   categoryLabel,
   fetchExchangeRoom,
   filterExchangeItems,
   normalizeExchangeSearch,
   type ExchangeCardItem,
-  type ExchangeCategory,
   type ExchangeRoomSnapshot,
 } from "@/features/exchange/exchange-api";
 import { areCustomerVisibleExchangeProducts } from "@/features/exchange/exchange-visibility";
@@ -54,15 +51,9 @@ import {
 import { readAuthTokens } from "@/lib/session-store";
 import { colors } from "@/theme";
 
-const CATEGORIES: ReadonlyArray<{ label: string; value?: ExchangeCategory }> = [
-  { label: "전체" },
-  ...PRODUCT_CATEGORY_OPTIONS,
-];
-
 type LoadSource = "live" | "cache" | "empty";
 
 export function ExchangeRoomScreen() {
-  const rootNavigationScroll = useRootNavigationScroll();
   const db = useSQLiteContext();
   const runtime = useMemo(
     () =>
@@ -75,7 +66,6 @@ export function ExchangeRoomScreen() {
       }),
     [],
   );
-  const [selectedCategory, setSelectedCategory] = useState<ExchangeCategory | undefined>();
   const [snapshot, setSnapshot] = useState<ExchangeRoomSnapshot | null>(null);
   const [source, setSource] = useState<LoadSource>("empty");
   const [message, setMessage] = useState("");
@@ -100,20 +90,34 @@ export function ExchangeRoomScreen() {
       if (manual) setRefreshing(true);
       if (debouncedQuery) setSearching(true);
       try {
-        const fresh = await fetchExchangeRoom(runtime.apiBaseUrl, selectedCategory, debouncedQuery, __DEV__);
+        const tokens = await readAuthTokens();
+        const fresh = await fetchExchangeRoom(
+          runtime.apiBaseUrl,
+          undefined,
+          debouncedQuery,
+          false,
+          tokens?.accessToken,
+        );
         if (sequence !== loadSequence.current) return;
         setSnapshot(fresh);
         setSource("live");
         setMessage("");
-        if (!debouncedQuery) await writeExchangeListingCache(db, selectedCategory, fresh);
+        if (!tokens && !debouncedQuery) await writeExchangeListingCache(db, undefined, fresh);
       } catch (error) {
         if (sequence !== loadSequence.current) return;
-        const cached = await readExchangeListingCache(db, selectedCategory);
+        const tokens = await readAuthTokens();
+        if (tokens) {
+          setSnapshot(null);
+          setSource("empty");
+          setMessage(error instanceof Error ? error.message : "교환 글을 불러오지 못했습니다.");
+          return;
+        }
+        const cached = await readExchangeListingCache(db, undefined);
         if (sequence !== loadSequence.current) return;
         if (cached) {
           const cachedItems = cached.items
             .filter((item) => areCustomerVisibleExchangeProducts(item.products?.length ? item.products : [item.product]))
-            .filter((item) => __DEV__ || !item.isExample);
+            .filter((item) => !item.isExample);
           setSnapshot(debouncedQuery
             ? {
                 ...cached,
@@ -140,12 +144,15 @@ export function ExchangeRoomScreen() {
         }
       }
     },
-    [db, debouncedQuery, runtime.apiBaseUrl, selectedCategory],
+    [db, debouncedQuery, runtime.apiBaseUrl],
   );
 
-  useEffect(() => {
+  useFocusEffect(useCallback(() => {
     void load();
-  }, [load]);
+    return () => {
+      loadSequence.current += 1;
+    };
+  }, [load]));
 
   useFocusEffect(
     useCallback(() => {
@@ -190,6 +197,15 @@ export function ExchangeRoomScreen() {
     router.push("/exchange/new");
   }, []);
 
+  const openMyActivity = useCallback(async () => {
+    const tokens = await readAuthTokens();
+    if (!tokens) {
+      openCustomerLogin("로그인 후 내가 등록하거나 신청한 교환을 확인할 수 있어요.", "/exchange/activity");
+      return;
+    }
+    router.push("/exchange/activity");
+  }, []);
+
   const normalizedQuery = normalizeExchangeSearch(query);
   const items = useMemo(
     () => filterExchangeItems(
@@ -204,21 +220,44 @@ export function ExchangeRoomScreen() {
   const searchPending = Boolean(normalizedQuery && (normalizedQuery !== debouncedQuery || searching));
   const assetBaseUrl = runtime.assetBaseUrl
     ?? (__DEV__ ? runtime.apiBaseUrl.replace(/:8788$/, ":4174") : null);
+  const goBack = () => {
+    if (router.canGoBack()) router.back();
+    else router.replace("/(tabs)/storage");
+  };
 
   return (
-    <SafeAreaView style={styles.safeArea} edges={["top", "left", "right"]}>
+    <SafeAreaView style={styles.safeArea} edges={["top", "bottom", "left", "right"]}>
+      <DetailPageHeader title="교환방" titleMode="pixel" onBack={goBack} backLabel="보관함으로 돌아가기" />
       <ScrollView
-        {...rootNavigationScroll}
         keyboardShouldPersistTaps="handled"
         contentContainerStyle={styles.content}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={() => void load(true)} tintColor={colors.ink} />
         }
       >
-        <Header />
+        <View style={styles.primaryActions}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="교환 상품 올리기"
+            onPress={() => void openComposer()}
+            style={({ pressed }) => [styles.createPrimary, pressed && styles.pressed]}
+          >
+            <DecorativeIonicon name="add" size={22} color={colors.ink} />
+            <Text style={styles.createPrimaryLabel}>상품 올리기</Text>
+          </Pressable>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="내 교환 현황"
+            onPress={() => void openMyActivity()}
+            style={({ pressed }) => [styles.myExchangeButton, pressed && styles.pressed]}
+          >
+            <DecorativeIonicon name="person-outline" size={20} color={colors.ink} />
+            <Text style={styles.myExchangeLabel}>현황</Text>
+          </Pressable>
+        </View>
 
         <SeedInputShell focused={searchFocused} variant="search" style={styles.searchBox}>
-          <Ionicons name="search-outline" size={20} color={colors.muted} />
+          <DecorativeIonicon name="search-outline" size={20} color={colors.muted} />
           <TextInput
             value={query}
             onChangeText={setQuery}
@@ -229,7 +268,7 @@ export function ExchangeRoomScreen() {
               Keyboard.dismiss();
             }}
             placeholder="상품명·작품 검색"
-            placeholderTextColor="#8D948C"
+            placeholderTextColor={colors.muted}
             returnKeyType="search"
             maxLength={120}
             style={styles.searchInput}
@@ -245,33 +284,10 @@ export function ExchangeRoomScreen() {
               }}
               style={styles.clearSearch}
             >
-              <Ionicons name="close-circle" size={20} color={colors.muted} />
+              <DecorativeIonicon name="close-circle" size={20} color={colors.muted} />
             </SeedIconButton>
           ) : null}
         </SeedInputShell>
-
-        <View style={styles.createAction}>
-          <SeedActionButton
-            label="교환 상품 올리기"
-            onPress={() => void openComposer()}
-            size="medium"
-            trailing={<Text style={styles.createButtonArrow}>＋</Text>}
-          />
-        </View>
-
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.categoryRail}>
-          {CATEGORIES.map((category) => {
-            const active = selectedCategory === category.value;
-            return (
-              <SeedChip
-                key={category.label}
-                label={category.label}
-                selected={active}
-                onPress={() => setSelectedCategory(category.value)}
-              />
-            );
-          })}
-        </ScrollView>
 
         <View style={styles.sectionHeader}>
           <KoreanPixelTitle variant="section" numberOfLines={2} style={styles.sectionTitle}>
@@ -284,7 +300,7 @@ export function ExchangeRoomScreen() {
           <View style={[styles.notice, source === "empty" && styles.noticeError]}>
             <Text style={styles.noticeText}>{message}</Text>
             {source === "empty" ? (
-              <Pressable accessibilityRole="button" onPress={() => void load(true)} style={styles.retry}>
+              <Pressable accessibilityRole="button" onPress={() => void load(true)} style={({ pressed }) => [styles.retry, pressed && styles.pressed]}>
                 <Text style={styles.retryLabel}>다시 불러오기</Text>
               </Pressable>
             ) : null}
@@ -304,7 +320,7 @@ export function ExchangeRoomScreen() {
               <ListingCard
                 key={item.id}
                 item={item}
-                ipName={snapshot?.ipNames[item.product.ipId]}
+                ipNames={snapshot?.ipNames ?? {}}
                 assetBaseUrl={assetBaseUrl}
               />
             ))}
@@ -313,7 +329,7 @@ export function ExchangeRoomScreen() {
 
         {snapshot && normalizedQuery && !searchPending && items.length === 0 && source !== "empty" ? (
           <View style={styles.searchEmpty}>
-            <Ionicons name="search-outline" size={32} color={colors.muted} />
+            <DecorativeIonicon name="search-outline" size={32} color={colors.muted} />
             <KoreanPixelTitle variant="section" style={styles.searchEmptyTitle}>검색 결과가 없어요</KoreanPixelTitle>
             <BalancedAppText style={styles.searchEmptyBody}>
               다른 상품명이나 작품 이름으로 다시 찾아보세요.
@@ -323,7 +339,7 @@ export function ExchangeRoomScreen() {
 
         {snapshot && !normalizedQuery && items.length === 0 && source !== "empty" ? (
           <View style={styles.searchEmpty}>
-            <Ionicons name="swap-horizontal-outline" size={32} color={colors.muted} />
+            <DecorativeIonicon name="swap-horizontal-outline" size={32} color={colors.muted} />
             <KoreanPixelTitle variant="section" style={styles.searchEmptyTitle}>아직 등록된 교환 상품이 없어요</KoreanPixelTitle>
             <BalancedAppText style={styles.searchEmptyBody}>
               보관함에 있는 상품으로 첫 교환을 시작해 보세요.
@@ -339,15 +355,6 @@ export function ExchangeRoomScreen() {
         onClose={() => void closeRules()}
       />
     </SafeAreaView>
-  );
-}
-
-function Header() {
-  return (
-    <View style={styles.header}>
-      <RootCategoryTitle>교환방</RootCategoryTitle>
-      <RootHeaderActions />
-    </View>
   );
 }
 
@@ -382,8 +389,11 @@ function ExchangeRulesModal({
             <Text style={styles.modalBadge}>입장 안내</Text>
           </View>
           <View style={styles.modalRuleList}>
-            <RuleLine>가챠로 직접 뽑아 현재 보관함에 보관 중인 상품만 교환 등록·제안을 신청할 수 있어요.</RuleLine>
-            <RuleLine>배송 신청이 접수되었거나 배송이 완료된 상품은 환불·교환·포인트 환급을 신청할 수 없어요.</RuleLine>
+            <RuleLine>가챠로 직접 뽑아 현재 보관함에 있는 상품만 등록하거나 신청할 수 있어요.</RuleLine>
+            <RuleLine>등록글은 7일 동안 공개되며 성사되지 않으면 자동으로 종료돼요.</RuleLine>
+            <RuleLine>교환 완료 시 남은 보관 기간이 14일보다 짧으면 14일로 연장돼요.</RuleLine>
+            <RuleLine>교환으로 받은 상품은 포인트 환급 대상이 아니며, 본인이 가챠에서 직접 뽑아 보관 중인 상품만 포인트로 환급할 수 있어요.</RuleLine>
+            <RuleLine>교환 진행과 문의는 다뽀바 안에서 완료해 주세요.</RuleLine>
           </View>
           <Pressable
             accessibilityRole="checkbox"
@@ -392,7 +402,7 @@ function ExchangeRulesModal({
             style={({ pressed }) => [styles.dismissOption, pressed && styles.pressed]}
           >
             <View style={[styles.checkbox, dismissChecked && styles.checkboxChecked]}>
-              {dismissChecked ? <Ionicons name="checkmark" size={16} color={colors.ink} /> : null}
+              {dismissChecked ? <DecorativeIonicon name="checkmark" size={16} color={colors.ink} /> : null}
             </View>
             <Text style={styles.dismissOptionLabel}>다시 보지 않기</Text>
           </Pressable>
@@ -414,48 +424,91 @@ function RuleLine({ children }: { children: string }) {
 
 function ListingCard({
   item,
-  ipName,
+  ipNames,
   assetBaseUrl,
 }: {
   item: ExchangeCardItem;
-  ipName?: string;
+  ipNames: Record<string, string>;
   assetBaseUrl: string | null;
 }) {
-  const uri = resolveCatalogImageUrl(item.product.imageUrl, assetBaseUrl, item.product.version);
+  const products = item.products.length ? item.products : [item.product];
+  const productDetails = products.map((product) => ({
+    product,
+    ipName: ipNames[product.ipId] ?? "작품 정보 없음",
+  }));
+  const expiryTime = Date.parse(item.expiresAt);
+  const daysLeft = Number.isFinite(expiryTime)
+    ? Math.max(0, Math.ceil((expiryTime - Date.now()) / 86_400_000))
+    : 7;
+  const listingAccessibilityLabel = [
+    item.title,
+    ...productDetails.map(({ product, ipName: productIpName }, index) => (
+      `등록 상품 ${index + 1}/${products.length}, ${productIpName}, ${product.name}, ${categoryLabel(product.category)}, ${catalogPriceLabel(product.price)}`
+    )),
+    `제안 ${item.offerCount}개`,
+    `마감 D-${daysLeft}`,
+    "교환 글 자세히 보기",
+  ].join(". ");
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`${item.products.length}개 상품 교환 글 자세히 보기`}
+      accessibilityLabel={listingAccessibilityLabel}
       onPress={() => router.push({ pathname: "/exchange/[listingId]", params: { listingId: item.id } })}
       style={({ pressed }) => [styles.listingCard, pressed && styles.pressed]}
     >
-      <View style={styles.imageFrame}>
-        {uri ? <Image source={{ uri }} style={styles.productImage} resizeMode="cover" /> : <MediaPlaceholder />}
-        <View style={styles.cardCategoryBadge}>
-          <Text style={styles.cardCategoryLabel}>{categoryLabel(item.product.category)}</Text>
-        </View>
-        {item.products.length > 1 ? (
-          <View style={styles.bundleCountBadge}>
-            <Text style={styles.bundleCountLabel}>{item.products.length}개 묶음</Text>
-          </View>
-        ) : null}
-      </View>
       <View style={styles.cardBody}>
-        <Text numberOfLines={2} style={styles.listingTitle}>{item.title}</Text>
-        <Text style={styles.productMeta}>{ipName ?? "작품 정보 확인 중"} · {categoryLabel(item.product.category)}</Text>
-        <Text numberOfLines={2} style={styles.productName}>
-          {productSubjectTitle(item.product.name, ipName)}{item.products.length > 1 ? ` 외 ${item.products.length - 1}개` : ""}
-        </Text>
-        {item.details.trim() ? (
-          <Text numberOfLines={2} style={styles.listingDetails}>{item.details}</Text>
-        ) : null}
-        <ProductInfoDivider style={styles.priceDivider} />
-        <View style={styles.priceBox}>
-          <Text style={styles.price}>{item.product.price.toLocaleString("ko-KR")}원</Text>
+        <View style={styles.cardHeadingRow}>
+          <View style={styles.cardHeadingCopy}>
+            <Text numberOfLines={1} style={styles.listingTitle}>{item.title}</Text>
+          </View>
+          <View style={styles.cardCategoryBadge}>
+            <Text style={styles.cardCategoryLabel}>{products.length > 1 ? `상품 ${products.length}개` : categoryLabel(item.product.category)}</Text>
+          </View>
+        </View>
+        <ProductInfoDivider style={styles.cardHeadingDivider} />
+        <View style={styles.exchangePanel}>
+          <View style={styles.bundleImages}>
+            {productDetails.map(({ product }, index) => {
+              const uri = resolveCatalogImageUrl(product.imageUrl, assetBaseUrl, product.version);
+              return (
+                <View
+                  key={`${product.id}-${index}`}
+                  accessible
+                  accessibilityLabel={`등록 상품 ${index + 1}/${products.length}: ${product.name}`}
+                  style={[styles.imageFrame, products.length > 1 && styles.imageFrameBundled]}
+                >
+                  {uri ? <Image source={{ uri }} style={styles.productImage} resizeMode="contain" /> : <MediaPlaceholder />}
+                </View>
+              );
+            })}
+          </View>
+          <DecorativeIonicon name="swap-horizontal" size={24} color={seed.color.stroke.contrast} />
+          <View style={styles.applyTile}>
+            <Text style={styles.applyTileLabel}>교환 신청</Text>
+            <Text style={styles.applyTileMeta}>제안 {item.offerCount}개</Text>
+          </View>
+        </View>
+        <View style={styles.bundleInfoList}>
+          {productDetails.map(({ product, ipName: productIpName }, index) => (
+            <View key={`${product.id}-information-${index}`} style={styles.bundleInfoGroup}>
+              {index > 0 ? <ProductInfoDivider style={styles.bundleItemDivider} /> : null}
+              <View style={styles.bundleInfoItem}>
+                <Text numberOfLines={1} style={styles.bundleIpName}>
+                  {products.length > 1 ? `상품 ${index + 1}/${products.length} · ` : ""}
+                  {productIpName} · {categoryLabel(product.category)}
+                </Text>
+                <Text numberOfLines={2} style={styles.bundleProductName}>
+                  {productSubjectTitle(product.name, productIpName)}
+                </Text>
+                <ProductInfoDivider style={styles.bundleValueDivider} />
+                <Text style={styles.bundleProductValue}>{catalogPriceLabel(product.price)}</Text>
+              </View>
+            </View>
+          ))}
         </View>
         <View style={styles.cardFooter}>
           <Text style={styles.author}>@{item.authorNickname}</Text>
-          <Text style={styles.offerCount}>제안 {item.offerCount}개</Text>
+          <Text style={styles.offerCount}>D-{daysLeft}</Text>
         </View>
       </View>
     </Pressable>
@@ -472,60 +525,70 @@ function MediaPlaceholder() {
 
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: seed.color.layer.basement },
-  content: { paddingBottom: ROOT_NAVIGATION_CONTENT_INSET },
-  header: { minHeight: seed.size.topNavigation, paddingHorizontal: seed.spacing.globalGutter, flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: seed.color.stroke.neutral },
-  searchBox: { marginHorizontal: seed.spacing.globalGutter, marginTop: seed.spacing.x3_5 },
-  searchInput: { flex: 1, color: colors.ink, fontSize: 15, paddingVertical: 12 },
+  content: { paddingBottom: seed.spacing.screenBottom },
+  primaryActions: { marginHorizontal: seed.spacing.globalGutter, marginTop: seed.spacing.x2_5, flexDirection: "row", gap: seed.spacing.x2_5 },
+  createPrimary: { minHeight: 56, flex: 1.45, borderRadius: seed.radius.r3, backgroundColor: seed.color.background.brandSolid, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: seed.spacing.x2 },
+  createPrimaryLabel: { color: colors.ink, ...seed.typography.button, fontWeight: "900" },
+  myExchangeButton: { minHeight: 56, flex: 1, borderRadius: seed.radius.r3, borderWidth: 1, borderColor: seed.color.stroke.neutral, backgroundColor: seed.color.layer.elevated, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: seed.spacing.x2 },
+  myExchangeLabel: { color: colors.ink, ...seed.typography.button },
+  searchBox: { marginHorizontal: seed.spacing.globalGutter, marginTop: seed.spacing.x2_5 },
+  searchInput: { flex: 1, color: colors.ink, ...seed.typography.body, paddingVertical: seed.spacing.x3 },
   clearSearch: { width: seed.size.touchTarget, height: seed.size.touchTarget, marginRight: -seed.spacing.x2 },
-  createAction: { marginHorizontal: seed.spacing.globalGutter, marginTop: seed.spacing.x3 },
-  createButtonArrow: { color: colors.ink, fontSize: 22, fontWeight: "600" },
   modalBackdrop: { flex: 1, paddingHorizontal: seed.spacing.globalGutter, justifyContent: "center", backgroundColor: "rgba(17, 20, 17, 0.48)" },
   modalCard: { width: "100%", maxWidth: 480, alignSelf: "center", borderRadius: seed.radius.r5, padding: seed.spacing.x5, backgroundColor: seed.color.layer.elevated, shadowColor: colors.black, shadowOpacity: 0.2, shadowRadius: 24, shadowOffset: { width: 0, height: 12 }, elevation: 12 },
   modalHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: seed.spacing.x3 },
-  modalBadge: { overflow: "hidden", borderRadius: seed.radius.r2, paddingHorizontal: seed.spacing.x2_5, paddingVertical: seed.spacing.x1_5, color: colors.greenInk, backgroundColor: seed.color.background.brandWeak, fontSize: 10, lineHeight: 15, fontWeight: "800" },
+  modalBadge: { overflow: "hidden", borderRadius: seed.radius.r2, paddingHorizontal: seed.spacing.x2_5, paddingVertical: seed.spacing.x1_5, color: colors.greenInk, backgroundColor: seed.color.background.brandWeak, ...seed.typography.finePrint, fontWeight: "800" },
   modalRuleList: { marginTop: seed.spacing.x4, gap: seed.spacing.x3_5 },
   modalRuleRow: { flexDirection: "row", alignItems: "flex-start", gap: seed.spacing.x2_5 },
-  modalRuleDot: { width: 7, height: 7, marginTop: 7, borderRadius: 4, backgroundColor: colors.brand },
+  modalRuleDot: { width: 7, height: 7, marginTop: 7, borderRadius: seed.radius.full, backgroundColor: colors.brand },
   modalRuleText: { flex: 1, maxWidth: "100%", color: colors.ink, fontSize: 14, lineHeight: 22, letterSpacing: -0.2 },
   dismissOption: { minHeight: seed.size.touchTarget, marginTop: seed.spacing.x4, flexDirection: "row", alignItems: "center", gap: seed.spacing.x2_5 },
   checkbox: { width: 22, height: 22, borderRadius: seed.radius.r1, borderWidth: 1, borderColor: seed.color.stroke.neutral, backgroundColor: seed.color.layer.default, alignItems: "center", justifyContent: "center" },
   checkboxChecked: { borderColor: colors.brand, backgroundColor: colors.brand },
   dismissOptionLabel: { color: colors.ink, fontSize: 14, lineHeight: 20, fontWeight: "700" },
   modalConfirm: { marginTop: seed.spacing.x2 },
-  pressed: { opacity: seed.state.pressedOpacity },
-  categoryRail: { paddingHorizontal: seed.spacing.globalGutter, paddingTop: seed.spacing.x3_5, gap: seed.spacing.betweenChips },
-  sectionHeader: { marginTop: seed.spacing.x7, marginBottom: seed.spacing.x3_5, paddingHorizontal: seed.spacing.globalGutter, flexDirection: "row", alignItems: "flex-end", justifyContent: "space-between", gap: seed.spacing.componentDefault },
+  pressed: { opacity: seed.state.pressedOpacity, transform: [{ scale: seed.state.pressedScale }] },
+  sectionHeader: { marginTop: seed.spacing.x4, marginBottom: seed.spacing.x3_5, paddingHorizontal: seed.spacing.globalGutter, ...subtleSectionHeaderRule, flexDirection: "row", alignItems: "flex-end", justifyContent: "space-between", gap: seed.spacing.componentDefault },
   sectionTitle: { flex: 1 },
   sectionCount: { paddingBottom: 3 },
   notice: { marginHorizontal: seed.spacing.globalGutter, marginBottom: seed.spacing.componentDefault, borderRadius: seed.radius.r3, backgroundColor: seed.color.background.brandWeak, padding: seed.spacing.x3_5, flexDirection: "row", alignItems: "center", gap: seed.spacing.componentDefault },
   noticeError: { backgroundColor: seed.color.background.criticalWeak },
   noticeText: { flex: 1, color: colors.ink, fontSize: 13, lineHeight: 19 },
-  retry: { minHeight: 40, justifyContent: "center", paddingHorizontal: 12, borderRadius: 10, backgroundColor: colors.ink },
+  retry: { minHeight: seed.size.touchTarget, justifyContent: "center", paddingHorizontal: seed.spacing.x3, borderRadius: seed.radius.r2_5, backgroundColor: colors.ink },
   retryLabel: { color: colors.white, fontSize: 12, fontWeight: "800" },
   loading: { paddingHorizontal: seed.spacing.globalGutter, paddingVertical: 58, alignItems: "center", gap: 12 },
   loadingText: { color: colors.muted, fontSize: 14 },
   list: { paddingHorizontal: seed.spacing.globalGutter, gap: seed.spacing.x3_5 },
-  searchEmpty: { minHeight: 230, marginHorizontal: seed.spacing.globalGutter, paddingHorizontal: seed.spacing.x5, alignItems: "center", justifyContent: "center", borderRadius: seed.radius.r4, borderWidth: 1, borderColor: seed.color.stroke.neutral, backgroundColor: seed.color.layer.default },
+  searchEmpty: { minHeight: 320, marginHorizontal: seed.spacing.globalGutter, paddingHorizontal: seed.spacing.x5, alignItems: "center", justifyContent: "center" },
   searchEmptyTitle: { marginTop: seed.spacing.x3_5, textAlign: "center" },
   searchEmptyBody: { marginTop: seed.spacing.x2, color: colors.muted, fontSize: 13, lineHeight: 20, textAlign: "center" },
-  listingCard: { minHeight: 188, padding: seed.spacing.componentDefault, borderRadius: seed.radius.r4, borderWidth: 1, borderColor: seed.color.stroke.neutral, backgroundColor: seed.color.layer.default, flexDirection: "row", gap: seed.spacing.x3_5 },
-  imageFrame: { width: 126, height: 164, borderRadius: seed.radius.r3_5, overflow: "hidden", borderWidth: 1, borderColor: seed.color.stroke.neutral, backgroundColor: seed.color.background.neutralWeak },
+  listingCard: { padding: seed.spacing.x4, ...catalogProductCardSurface },
+  bundleImages: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: seed.spacing.x1 },
+  imageFrame: { width: 92, height: 92, ...catalogProductImageSurface },
+  imageFrameBundled: { width: 56, height: 70 },
   productImage: { width: "100%", height: "100%" },
-  cardCategoryBadge: { position: "absolute", top: 8, left: 8, borderRadius: 7, paddingHorizontal: 8, paddingVertical: 6, backgroundColor: colors.brand },
-  cardCategoryLabel: { color: colors.ink, fontSize: 10, fontWeight: "900" },
-  bundleCountBadge: { position: "absolute", right: 8, bottom: 8, borderRadius: 7, paddingHorizontal: 8, paddingVertical: 6, backgroundColor: "rgba(17, 20, 17, 0.82)" },
-  bundleCountLabel: { color: colors.white, fontSize: 10, lineHeight: 14, fontWeight: "900" },
-  cardBody: { flex: 1, minWidth: 0 },
+  cardHeadingRow: { flexDirection: "row", alignItems: "flex-start", gap: seed.spacing.x3 },
+  cardHeadingCopy: { flex: 1, minWidth: 0 },
+  cardCategoryBadge: { borderRadius: seed.radius.r2, paddingHorizontal: seed.spacing.x2, paddingVertical: seed.spacing.x1_5, backgroundColor: seed.color.background.brandWeak },
+  cardCategoryLabel: { color: colors.ink, ...seed.typography.finePrint, fontWeight: "900" },
+  cardBody: { minWidth: 0 },
   listingTitle: { color: colors.ink, fontSize: 16, lineHeight: 22, fontWeight: "900" },
-  productName: { color: colors.ink, fontSize: 14, lineHeight: 20, fontWeight: "800", marginTop: 3 },
-  productMeta: { color: colors.muted, fontSize: 12, lineHeight: 17, marginTop: 5 },
-  listingDetails: { color: colors.muted, fontSize: 12, lineHeight: 18, marginTop: 8 },
-  priceDivider: { marginTop: 10 },
-  priceBox: { marginTop: 9 },
-  price: { color: colors.ink, fontSize: 15, lineHeight: 20, fontWeight: "900", marginTop: 2 },
-  cardFooter: { marginTop: 10, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 },
+  cardHeadingDivider: { marginTop: seed.spacing.x3 },
+  exchangePanel: { marginTop: seed.spacing.x3, borderRadius: seed.radius.r4, backgroundColor: seed.color.background.neutralWeak, padding: seed.spacing.x3, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: seed.spacing.x3 },
+  applyTile: { width: 104, height: 92, borderRadius: seed.radius.r3, backgroundColor: seed.color.background.neutralSolid, alignItems: "center", justifyContent: "center" },
+  applyTileLabel: { color: colors.white, ...seed.typography.bodyStrong },
+  applyTileMeta: { marginTop: seed.spacing.x1, color: "#C9CEC9", ...seed.typography.caption },
+  bundleInfoList: { marginTop: seed.spacing.x3 },
+  bundleInfoGroup: { minWidth: 0 },
+  bundleItemDivider: { marginVertical: seed.spacing.x2_5 },
+  bundleInfoItem: { minWidth: 0 },
+  bundleIpName: { color: colors.muted, ...seed.typography.catalogMetadata },
+  bundleProductName: { marginTop: seed.spacing.x1, color: colors.ink, ...seed.typography.catalogTitle },
+  bundleValueDivider: { marginTop: seed.spacing.x2 },
+  bundleProductValue: { marginTop: seed.spacing.x1_5, color: colors.ink, ...seed.typography.catalogPrice },
+  cardFooter: { marginTop: seed.spacing.x3, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 },
   author: { flex: 1, color: colors.muted, fontSize: 11, fontWeight: "700" },
   offerCount: { color: colors.greenInk, fontSize: 11, fontWeight: "900" },
   mediaPlaceholder: { flex: 1, alignItems: "center", justifyContent: "center", padding: 12 },
-  mediaPlaceholderLabel: { color: colors.muted, fontFamily: "monospace", fontSize: 9, fontWeight: "800", textAlign: "center" },
+  mediaPlaceholderLabel: { color: colors.muted, fontFamily: "monospace", ...seed.typography.finePrint, fontWeight: "800", textAlign: "center" },
 });

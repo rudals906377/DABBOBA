@@ -13,6 +13,8 @@ export type WorkerJob =
   | { kind: "reservation.sweep" }
   | { kind: "reservation.expire-order"; orderId: string }
   | { kind: "payment.reconcile" }
+  | { kind: "inventory.storage-expiry" }
+  | { kind: "account-auth.cleanup" }
   | { kind: "media.cleanup" };
 
 export function parseWorkerJob(value: unknown): WorkerJob {
@@ -21,6 +23,8 @@ export function parseWorkerJob(value: unknown): WorkerJob {
   if (input.kind === "outbox.event") return { kind: "outbox.event", event: parseOutboxEvent(input.event) };
   if (input.kind === "reservation.sweep") return { kind: "reservation.sweep" };
   if (input.kind === "payment.reconcile") return { kind: "payment.reconcile" };
+  if (input.kind === "inventory.storage-expiry") return { kind: "inventory.storage-expiry" };
+  if (input.kind === "account-auth.cleanup") return { kind: "account-auth.cleanup" };
   if (input.kind === "media.cleanup") return { kind: "media.cleanup" };
   if (input.kind === "reservation.expire-order" && typeof input.orderId === "string" && input.orderId.length > 0) {
     return { kind: "reservation.expire-order", orderId: input.orderId };

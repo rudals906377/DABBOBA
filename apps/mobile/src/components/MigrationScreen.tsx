@@ -1,11 +1,11 @@
 import { Image, ScrollView, StyleSheet, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { KoreanPixelTitle } from "@/components/RootCategoryTitle";
+import { ReadablePageTitle } from "@/components/RootCategoryTitle";
 import { AppText as Text } from "@/components/Typography";
 import { seed } from "@/design-system/seed";
 import { colors } from "@/theme";
 
-const WORDMARK = require("../../assets/dabboba-wordmark.png");
+const WORDMARK = require("../../assets/brand/dabboba-wordmark.png");
 
 type MigrationScreenProps = {
   title: string;
@@ -18,11 +18,11 @@ export function MigrationScreen({ title, description }: MigrationScreenProps) {
       <ScrollView contentContainerStyle={styles.content}>
         <Image source={WORDMARK} resizeMode="contain" style={styles.wordmark} />
         <View style={styles.card}>
-          <KoreanPixelTitle variant="hero">{title}</KoreanPixelTitle>
+          <ReadablePageTitle variant="screenTitle">{title}</ReadablePageTitle>
           <Text style={styles.description}>{description}</Text>
           <View style={styles.status}>
             <View style={styles.dot} />
-            <Text style={styles.statusLabel}>APP-FIRST MIGRATION</Text>
+            <Text style={styles.statusLabel}>화면 준비 중</Text>
           </View>
         </View>
       </ScrollView>
@@ -44,5 +44,5 @@ const styles = StyleSheet.create({
   description: { color: seed.color.foreground.muted, ...seed.typography.articleBody, marginTop: seed.spacing.x3_5 },
   status: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 24 },
   dot: { width: 9, height: 9, borderRadius: 5, backgroundColor: colors.brand },
-  statusLabel: { color: colors.ink, fontFamily: "monospace", fontSize: 10, fontWeight: "700" },
+  statusLabel: { color: colors.ink, ...seed.typography.finePrint, fontWeight: "700", letterSpacing: 0.3 },
 });

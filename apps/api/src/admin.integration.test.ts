@@ -4,6 +4,10 @@ import test from "node:test";
 import type { ApiConfig } from "@dabboba/config";
 import { createDatabasePool } from "@dabboba/db";
 import { buildApp } from "./app.js";
+import {
+  acceptRequiredPoliciesForIntegrationTest,
+  acceptUgcOperationsPolicyForIntegrationTest,
+} from "./integration-test-fixtures.js";
 import { hashPassword } from "./lib/password.js";
 
 const databaseUrl = process.env.DABBOBA_TEST_DATABASE_URL;
@@ -49,7 +53,10 @@ test(
         payload: { email: `${label}-${suffix}@example.test` },
       });
       assert.equal(response.statusCode, 201, response.body);
-      return response.json() as Session;
+      const session = response.json() as Session;
+      await acceptRequiredPoliciesForIntegrationTest(pool, session.actor.userId);
+      await acceptUgcOperationsPolicyForIntegrationTest(pool, session.actor.userId);
+      return session;
     };
     const author = await createUserSession("admin-flow-author");
     const reporter = await createUserSession("admin-flow-reporter");
@@ -180,6 +187,7 @@ test(
     assert.equal(catalogRequestReplay.headers["x-idempotent-replay"], "true");
     assert.equal((catalogRequestReplay.json() as { id: string }).id, catalogRequestId);
     const canonicalProductId = `approved-product-${suffix}`;
+    const canonicalProductImageUrl = `https://cdn.example.test/products/${canonicalProductId}.png`;
     const createdProduct = await app.inject({
       method: "POST",
       url: "/v1/admin/products",
@@ -196,7 +204,7 @@ test(
         price: 12_000,
         availableQuantity: 3,
         metadata: { source: "catalog-request-integration" },
-        imageUrl: null,
+        imageUrl: canonicalProductImageUrl,
         isActive: false,
         isPrizeOnly: false,
       },
@@ -218,7 +226,7 @@ test(
         price: 12_000,
         availableQuantity: 3,
         metadata: { source: "catalog-request-integration" },
-        imageUrl: null,
+        imageUrl: canonicalProductImageUrl,
         isActive: true,
         isPrizeOnly: false,
         expectedVersion: createdProductBody.version,
@@ -251,9 +259,10 @@ test(
         price: 12_000,
         availableQuantity: 3,
         metadata: { source: "catalog-request-integration" },
-        imageUrl: null,
+        imageUrl: canonicalProductImageUrl,
         isActive: true,
         isPrizeOnly: false,
+        saleStatus: "ON_SALE",
         expectedVersion: createdProductBody.version,
       },
     });

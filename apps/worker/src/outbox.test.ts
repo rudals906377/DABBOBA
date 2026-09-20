@@ -49,7 +49,7 @@ test("outbox is marked published only after the durable queue accepts it", async
 
 test("queue failure rolls back its savepoint and schedules a bounded retry", async () => {
   const { client, calls } = fakeClient(4);
-  const publisher: OutboxPublisher = { async add() { throw new Error("queue unavailable"); } };
+  const publisher: OutboxPublisher = { async add() { throw new Error("queue token=must-not-persist"); } };
   const now = new Date("2026-08-24T00:00:00.000Z");
 
   const outcome = await publishClaimedOutboxEvent(client, publisher, row, { jobAttempts: 8, jobBackoffMs: 1_000 }, now);
@@ -57,7 +57,7 @@ test("queue failure rolls back its savepoint and schedules a bounded retry", asy
   const retry = calls.at(-1)!;
   assert.match(retry.sql, /available_at=\$2/);
   assert.equal((retry.values![1] as Date).toISOString(), "2026-08-24T00:00:08.000Z");
-  assert.equal(retry.values![2], "queue unavailable");
+  assert.equal(retry.values![2], "Error");
   assert.equal(calls.some((call) => call.sql.startsWith("ROLLBACK TO SAVEPOINT")), true);
   assert.equal(calls.some((call) => call.sql.includes("published_at=$2")), false);
 });

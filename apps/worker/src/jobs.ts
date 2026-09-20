@@ -3,6 +3,7 @@ import { isDeepStrictEqual } from "node:util";
 import type { WorkerConfig } from "./config.js";
 import type { Logger } from "./logger.js";
 import { cleanupMediaBatch, type MediaStore } from "./media.js";
+import { cleanupSupabaseAuthUsers } from "./supabase-auth-deletion.js";
 import {
   ensureNotification,
   shouldDeliverNotificationExternally,
@@ -14,6 +15,7 @@ import {
   type PaymentReconciliationProvider,
 } from "./payments.js";
 import { expireOrderReservations, expireReservationBatch } from "./reservations.js";
+import { processInventoryStorageExpiryBatch } from "./storage-expiry.js";
 import { parseOutboxEvent, parseWorkerJob, type OutboxEvent, type WorkerJob } from "./types.js";
 
 export type JobDependencies = {
@@ -129,6 +131,23 @@ export async function processWorkerJob(dependencies: JobDependencies, raw: unkno
         dependencies.logger,
         new Date(),
         dependencies.shouldContinue,
+      );
+    case "inventory.storage-expiry":
+      return processInventoryStorageExpiryBatch(
+        dependencies.pool,
+        dependencies.config.outboxBatchSize,
+        dependencies.logger,
+        new Date(),
+        dependencies.shouldContinue,
+      );
+    case "account-auth.cleanup":
+      return cleanupSupabaseAuthUsers(
+        dependencies.pool,
+        dependencies.config,
+        dependencies.logger,
+        dependencies.shouldContinue,
+        undefined,
+        dependencies.mediaStore,
       );
     case "media.cleanup":
       return cleanupMediaBatch(

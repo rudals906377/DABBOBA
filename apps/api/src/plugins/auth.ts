@@ -4,6 +4,7 @@ import type { DatabasePool, Queryable } from "@dabboba/db";
 import { isAdminRole, type UserRole, type UserStatus } from "@dabboba/domain";
 import type { FastifyReply, FastifyRequest, preHandlerHookHandler } from "fastify";
 import { forbidden, unauthorized } from "../lib/errors.js";
+import { assertRequiredPolicyAcceptance } from "../lib/legal-policy.js";
 
 export type Actor = {
   userId: string;
@@ -28,10 +29,23 @@ export function tokenDigest(token: string, pepper: string): string {
 export async function issueSession(
   pool: Queryable,
   config: ApiConfig,
-  input: { userId: string; kind: "USER" | "ADMIN"; ip?: string; userAgent?: string },
+  input: {
+    userId: string;
+    kind: "USER" | "ADMIN";
+    ip?: string;
+    userAgent?: string;
+    expiresInMs?: number;
+  },
 ) {
   const token = randomBytes(32).toString("base64url");
-  const expiresAt = new Date(Date.now() + config.sessionTtlDays * 86_400_000);
+  const configuredTtlMs = config.sessionTtlDays * 86_400_000;
+  if (
+    input.expiresInMs !== undefined
+    && (!Number.isSafeInteger(input.expiresInMs) || input.expiresInMs < 60_000)
+  ) {
+    throw new Error("Session expiry override must be at least one minute");
+  }
+  const expiresAt = new Date(Date.now() + Math.min(input.expiresInMs ?? configuredTtlMs, configuredTtlMs));
   const result = await pool.query<{ id: string }>(
     `INSERT INTO sessions (user_id, session_kind, token_digest, ip_address, user_agent, expires_at)
      VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
@@ -107,20 +121,29 @@ export function createAuthHooks(pool: DatabasePool, config: ApiConfig) {
     return actor;
   };
 
-  const requireUser: preHandlerHookHandler = async (request) => {
+  const requireUserIdentity = async (request: FastifyRequest): Promise<void> => {
     const actor = await loadActor(request);
     if (actor.sessionKind !== "USER" || actor.role !== "USER") {
       throw forbidden("사용자 세션이 필요합니다.");
     }
-    const approvedDeletion = await pool.query(
+    const activeDeletion = await pool.query(
       `SELECT 1 FROM account_deletion_requests
-       WHERE user_id=$1 AND status='APPROVED'
+       WHERE user_id=$1 AND status IN ('PROCESSING','APPROVED')
        LIMIT 1`,
       [actor.userId],
     );
-    if (approvedDeletion.rowCount) {
-      throw forbidden("탈퇴가 승인된 계정은 더 이상 사용할 수 없습니다.");
+    if (activeDeletion.rowCount) {
+      throw forbidden("탈퇴 처리가 시작된 계정은 더 이상 사용할 수 없습니다.");
     }
+  };
+
+  const requireUserWithoutPolicy: preHandlerHookHandler = async (request) => {
+    await requireUserIdentity(request);
+  };
+
+  const requireUser: preHandlerHookHandler = async (request) => {
+    await requireUserIdentity(request);
+    await assertRequiredPolicyAcceptance(pool, request.actor!.userId);
   };
 
   const requireAdmin: preHandlerHookHandler = async (request) => {
@@ -143,5 +166,5 @@ export function createAuthHooks(pool: DatabasePool, config: ApiConfig) {
     if (!allowed.rowCount) throw forbidden();
   };
 
-  return { loadActor, requireUser, requireAdmin, requireSuperAdmin, requirePermission };
+  return { loadActor, requireUser, requireUserWithoutPolicy, requireAdmin, requireSuperAdmin, requirePermission };
 }

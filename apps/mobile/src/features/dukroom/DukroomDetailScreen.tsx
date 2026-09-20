@@ -1,4 +1,3 @@
-import { Ionicons } from "@expo/vector-icons";
 import Constants from "expo-constants";
 import { type Href, useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -14,10 +13,13 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { DecorativeIonicon, type DecorativeIoniconName } from "@/components/DecorativeIonicon";
+import { DetailPageHeader } from "@/components/DetailPageHeader";
 import { KoreanPixelTitle, KoreanPixelTitleAccessory } from "@/components/RootCategoryTitle";
 import { AppText as Text, AppTextInput as TextInput } from "@/components/Typography";
-import { SeedInlineGuidance } from "@/design-system/components";
+import { SeedActionButton, SeedInputShell } from "@/design-system/components";
 import { seed } from "@/design-system/seed";
+import { subtleSectionHeaderRule } from "@/design-system/section";
 import {
   createDukroomComment,
   fetchDukroomDetail,
@@ -25,6 +27,8 @@ import {
   type CommunityComment,
   type DukroomDetailSnapshot,
 } from "@/features/dukroom/dukroom-api";
+import { UgcSafetyActions } from "@/features/trust-safety/UgcSafetyActions";
+import { ensureUgcOperationsPolicyAcceptance } from "@/features/trust-safety/ugc-policy-consent";
 import { readAuthTokens } from "@/lib/session-store";
 import {
   resolveCatalogImageUrl,
@@ -52,6 +56,7 @@ export function DukroomDetailScreen() {
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
   const [comment, setComment] = useState("");
+  const [commentFocused, setCommentFocused] = useState(false);
   const [likePending, setLikePending] = useState(false);
   const [commentPending, setCommentPending] = useState(false);
 
@@ -75,7 +80,7 @@ export function DukroomDetailScreen() {
 
   const goBack = () => {
     if (router.canGoBack()) router.back();
-    else router.replace("/(tabs)/dukroom");
+    else router.replace("/(tabs)/storage");
   };
 
   const toggleLike = async () => {
@@ -86,18 +91,6 @@ export function DukroomDetailScreen() {
     }
 
     const nextLiked = !snapshot.item.post.likedByViewer;
-    const nextCount = Math.max(0, snapshot.item.post.likeCount + (nextLiked ? 1 : -1));
-    if (snapshot.item.isExample) {
-      setSnapshot((current) => current ? {
-        ...current,
-        item: {
-          ...current.item,
-          post: { ...current.item.post, likedByViewer: nextLiked, likeCount: nextCount },
-        },
-      } : current);
-      Alert.alert("화면 예시에 반영했어요", "예시 글의 좋아요는 서버에 저장되지 않습니다.");
-      return;
-    }
 
     setLikePending(true);
     try {
@@ -128,23 +121,14 @@ export function DukroomDetailScreen() {
       return;
     }
 
-    if (snapshot.item.isExample) {
-      const previewComment = createPreviewComment(snapshot.item.post.id, content);
-      setSnapshot((current) => current ? {
-        ...current,
-        comments: [...current.comments, previewComment],
-        item: {
-          ...current.item,
-          post: { ...current.item.post, commentCount: current.item.post.commentCount + 1 },
-        },
-      } : current);
-      setComment("");
-      Alert.alert("화면 예시에 추가했어요", "예시 글의 댓글은 서버에 저장되지 않습니다.");
-      return;
-    }
-
     setCommentPending(true);
     try {
+      const accepted = await ensureUgcOperationsPolicyAcceptance({
+        apiBaseUrl: runtime.apiBaseUrl,
+        accessToken,
+        openPolicy: () => router.push("/legal/exchange-request" as Href),
+      });
+      if (!accepted) return;
       const created = await createDukroomComment(runtime.apiBaseUrl, accessToken, snapshot.item.post.id, content);
       setSnapshot((current) => current ? {
         ...current,
@@ -162,7 +146,7 @@ export function DukroomDetailScreen() {
     }
   };
 
-  const item = snapshot?.item ?? null;
+  const item = snapshot?.item.isExample ? null : snapshot?.item ?? null;
   const imageUri = item
     ? resolveCatalogImageUrl(item.imageUrl, runtime.assetBaseUrl, item.imageVersion)
     : null;
@@ -170,34 +154,18 @@ export function DukroomDetailScreen() {
   return (
     <SafeAreaView style={styles.safeArea} edges={["top", "bottom", "left", "right"]}>
       <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === "ios" ? "padding" : undefined}>
-        <View style={styles.header}>
-          <Pressable accessibilityRole="button" accessibilityLabel="뒤로 가기" onPress={goBack} hitSlop={10} style={styles.headerAction}>
-            <Ionicons name="chevron-back" size={28} color={colors.ink} />
-          </Pressable>
-          <View style={styles.headerTitle}><KoreanPixelTitle variant="header">덕룸 상세</KoreanPixelTitle></View>
-          <View style={styles.headerAction} />
-        </View>
+        <DetailPageHeader title="덕룸 상세" titleMode="pixel" onBack={goBack} />
 
         {loading ? (
           <View style={styles.center}><ActivityIndicator color={colors.ink} /><Text style={styles.centerText}>덕룸 글을 불러오는 중</Text></View>
         ) : message || !snapshot || !item ? (
           <View style={styles.center}>
-            <Ionicons name="alert-circle-outline" size={34} color={colors.muted} />
+            <DecorativeIonicon name="alert-circle-outline" size={34} color={colors.muted} />
             <Text style={styles.errorTitle}>{message || "덕룸 글을 찾을 수 없습니다."}</Text>
-            <Pressable accessibilityRole="button" onPress={() => void load()} style={styles.retryButton}><Text style={styles.retryLabel}>다시 불러오기</Text></Pressable>
+            <SeedActionButton label="다시 불러오기" size="small" variant="neutralSolid" onPress={() => void load()} style={styles.retryButton} />
           </View>
         ) : (
           <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>
-            {item.isExample ? (
-              <SeedInlineGuidance
-                style={styles.exampleGuidance}
-                paragraphs={[
-                  "등록 상품으로 구성한 화면 예시입니다.",
-                  "좋아요와 댓글은 서버에 저장되지 않아요.",
-                ]}
-              />
-            ) : null}
-
             <View style={styles.authorRow}>
               <View style={styles.avatar}><Text style={styles.avatarText}>{item.post.authorNickname.slice(0, 1)}</Text></View>
               <View style={styles.authorCopy}><Text style={styles.authorName}>@{item.post.authorNickname}</Text><Text style={styles.postDate}>{formatDate(item.post.createdAt)}</Text></View>
@@ -205,13 +173,31 @@ export function DukroomDetailScreen() {
             </View>
 
             <View style={styles.hero}>
-              {imageUri ? <Image source={{ uri: imageUri }} resizeMode="cover" style={styles.heroImage} /> : <View style={styles.placeholder}><Ionicons name="images-outline" size={34} color={colors.muted} /></View>}
+              {imageUri ? <Image source={{ uri: imageUri }} resizeMode="cover" style={styles.heroImage} /> : <View style={styles.placeholder}><DecorativeIonicon name="images-outline" size={34} color={colors.muted} /></View>}
             </View>
 
             <View style={styles.postCopy}>
               <Text style={styles.title}>{item.post.title}</Text>
               <Text style={styles.body}>{item.post.content}</Text>
             </View>
+
+            {snapshot.viewerUserId !== item.post.authorId ? (
+              <View style={styles.safetySection}>
+                <UgcSafetyActions
+                  apiBaseUrl={runtime.apiBaseUrl}
+                  accessToken={accessToken}
+                  targetType={item.post.kind === "SNAP" ? "SNAP" : "POST"}
+                  targetId={item.post.id}
+                  targetUserId={item.post.authorId}
+                  targetLabel={`@${item.post.authorNickname}`}
+                  returnTo={`/dukroom/${encodeURIComponent(item.post.id)}`}
+                  onBlocked={() => {
+                    setSnapshot(null);
+                    router.replace("/(tabs)/storage");
+                  }}
+                />
+              </View>
+            ) : null}
 
             <View style={styles.reactionRow}>
               <Pressable
@@ -221,10 +207,10 @@ export function DukroomDetailScreen() {
                 onPress={() => void toggleLike()}
                 style={({ pressed }) => [styles.reactionButton, item.post.likedByViewer && styles.reactionButtonActive, pressed && styles.pressed]}
               >
-                <Ionicons name={item.post.likedByViewer ? "heart" : "heart-outline"} size={20} color={item.post.likedByViewer ? colors.greenInk : colors.ink} />
+                <DecorativeIonicon name={item.post.likedByViewer ? "heart" : "heart-outline"} size={20} color={item.post.likedByViewer ? colors.greenInk : colors.ink} />
                 <Text style={styles.reactionLabel}>좋아요 {item.post.likeCount}</Text>
               </Pressable>
-              <View style={styles.reactionButton}><Ionicons name="chatbubble-outline" size={18} color={colors.ink} /><Text style={styles.reactionLabel}>댓글 {item.post.commentCount}</Text></View>
+              <View style={styles.reactionButton}><DecorativeIonicon name="chatbubble-outline" size={18} color={colors.ink} /><Text style={styles.reactionLabel}>댓글 {item.post.commentCount}</Text></View>
             </View>
 
             <View style={styles.crossLinks}>
@@ -240,21 +226,50 @@ export function DukroomDetailScreen() {
                 <CrossLink
                   icon="storefront-outline"
                   title="같은 작품 상품 모아보기"
-                  caption="뽀바에서 작품별로 확인"
-                  onPress={() => router.push({ pathname: "/(tabs)/ppoba", params: { ipId: item.post.ipId ?? "" } } as Href)}
+                  caption="가챠샵에서 작품별로 확인"
+                  onPress={() => router.push({ pathname: "/(tabs)/gacha", params: { ipId: item.post.ipId ?? "" } } as Href)}
                 />
               ) : null}
             </View>
 
             <View style={styles.commentSection}>
               <View style={styles.sectionHeader}><KoreanPixelTitle variant="section">댓글</KoreanPixelTitle><KoreanPixelTitleAccessory>{snapshot.comments.length}개</KoreanPixelTitleAccessory></View>
-              {snapshot.comments.length ? snapshot.comments.map((entry) => <CommentRow key={entry.id} comment={entry} />) : (
+              {snapshot.comments.length ? snapshot.comments.map((entry) => (
+                <View key={entry.id}>
+                  <CommentRow comment={entry} />
+                  {snapshot.viewerUserId !== entry.authorId ? (
+                    <UgcSafetyActions
+                      compact
+                      apiBaseUrl={runtime.apiBaseUrl}
+                      accessToken={accessToken}
+                      targetType="COMMENT"
+                      targetId={entry.id}
+                      targetUserId={entry.authorId}
+                      targetLabel={`@${entry.authorNickname}`}
+                      returnTo={`/dukroom/${encodeURIComponent(item.post.id)}`}
+                      onBlocked={() => {
+                        if (entry.authorId === item.post.authorId) {
+                          setSnapshot(null);
+                          router.replace("/(tabs)/storage");
+                          return;
+                        }
+                        setSnapshot((current) => current ? {
+                          ...current,
+                          comments: current.comments.filter((commentItem) => commentItem.authorId !== entry.authorId),
+                        } : current);
+                      }}
+                    />
+                  ) : null}
+                </View>
+              )) : (
                 <View style={styles.commentEmpty}><Text style={styles.commentEmptyTitle}>아직 댓글이 없어요</Text><Text style={styles.commentEmptyBody}>첫 번째 수집 이야기를 남겨보세요.</Text></View>
               )}
-              <View style={styles.composer}>
+              <SeedInputShell focused={commentFocused} style={styles.composer}>
                 <TextInput
                   value={comment}
                   onChangeText={(value) => setComment(value.slice(0, 500))}
+                  onFocus={() => setCommentFocused(true)}
+                  onBlur={() => setCommentFocused(false)}
                   editable={!commentPending}
                   placeholder="댓글을 입력해 주세요"
                   placeholderTextColor={colors.muted}
@@ -264,9 +279,9 @@ export function DukroomDetailScreen() {
                   accessibilityLabel="덕룸 댓글 입력"
                 />
                 <Pressable accessibilityRole="button" disabled={commentPending} onPress={() => void submitComment()} style={({ pressed }) => [styles.sendButton, pressed && styles.pressed]}>
-                  <Ionicons name="arrow-up" size={21} color={colors.ink} />
+                  <DecorativeIonicon name="arrow-up" size={21} color={colors.ink} />
                 </Pressable>
-              </View>
+              </SeedInputShell>
             </View>
           </ScrollView>
         )}
@@ -275,12 +290,12 @@ export function DukroomDetailScreen() {
   );
 }
 
-function CrossLink({ icon, title, caption, onPress }: { icon: keyof typeof Ionicons.glyphMap; title: string; caption: string; onPress: () => void }) {
+function CrossLink({ icon, title, caption, onPress }: { icon: DecorativeIoniconName; title: string; caption: string; onPress: () => void }) {
   return (
     <Pressable accessibilityRole="button" onPress={onPress} style={({ pressed }) => [styles.crossLink, pressed && styles.pressed]}>
-      <View style={styles.crossLinkIcon}><Ionicons name={icon} size={21} color={colors.ink} /></View>
+      <View style={styles.crossLinkIcon}><DecorativeIonicon name={icon} size={21} color={colors.ink} /></View>
       <View style={styles.crossLinkCopy}><Text style={styles.crossLinkTitle}>{title}</Text><Text style={styles.crossLinkCaption}>{caption}</Text></View>
-      <Ionicons name="chevron-forward" size={20} color={colors.muted} />
+      <DecorativeIonicon name="chevron-forward" size={20} color={colors.muted} />
     </Pressable>
   );
 }
@@ -292,21 +307,6 @@ function CommentRow({ comment }: { comment: CommunityComment }) {
       <View style={styles.commentCopy}><View style={styles.commentMeta}><Text style={styles.commentAuthor}>@{comment.authorNickname}</Text><Text style={styles.commentDate}>{formatDate(comment.createdAt)}</Text></View><Text style={styles.commentBody}>{comment.content}</Text></View>
     </View>
   );
-}
-
-function createPreviewComment(postId: string, content: string): CommunityComment {
-  const createdAt = new Date().toISOString();
-  return {
-    id: `preview-${Date.now()}`,
-    postId,
-    authorId: "preview-viewer",
-    authorNickname: "나",
-    content,
-    status: "ACTIVE",
-    reportCount: 0,
-    createdAt,
-    updatedAt: createdAt,
-  };
 }
 
 function firstParam(value: string | string[] | undefined): string | undefined {
@@ -321,18 +321,13 @@ function formatDate(value: string): string {
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: seed.color.layer.basement },
   flex: { flex: 1 },
-  header: { minHeight: seed.size.topNavigation, paddingHorizontal: seed.spacing.x3_5, flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: seed.color.stroke.neutral, backgroundColor: seed.color.layer.default },
-  headerAction: { width: seed.size.touchTarget, height: seed.size.touchTarget, alignItems: "center", justifyContent: "center" },
-  headerTitle: { alignItems: "center" },
   center: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: seed.spacing.globalGutter, paddingVertical: 28, gap: 12 },
   centerText: { color: colors.muted, fontSize: 14 },
   errorTitle: { color: colors.ink, fontSize: 16, lineHeight: 23, fontWeight: "800", textAlign: "center" },
-  retryButton: { minHeight: 44, justifyContent: "center", paddingHorizontal: 18, borderRadius: 10, backgroundColor: colors.ink },
-  retryLabel: { color: colors.white, fontSize: 13, fontWeight: "800" },
+  retryButton: { marginTop: seed.spacing.x2 },
   content: { paddingBottom: seed.spacing.screenBottom },
-  exampleGuidance: { marginHorizontal: seed.spacing.globalGutter, marginTop: seed.spacing.x4 },
   authorRow: { paddingHorizontal: seed.spacing.globalGutter, paddingTop: seed.spacing.x5, flexDirection: "row", alignItems: "center", gap: seed.spacing.x2_5 },
-  avatar: { width: 42, height: 42, borderRadius: 21, alignItems: "center", justifyContent: "center", backgroundColor: colors.ink },
+  avatar: { width: 42, height: 42, borderRadius: seed.radius.full, alignItems: "center", justifyContent: "center", backgroundColor: colors.ink },
   avatarText: { color: colors.brand, fontSize: 16, fontWeight: "900" },
   authorCopy: { flex: 1 },
   authorName: { color: colors.ink, fontSize: 14, fontWeight: "900" },
@@ -343,6 +338,7 @@ const styles = StyleSheet.create({
   heroImage: { width: "100%", height: "100%" },
   placeholder: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: seed.color.background.neutralWeak },
   postCopy: { paddingHorizontal: seed.spacing.globalGutter },
+  safetySection: { paddingHorizontal: seed.spacing.globalGutter },
   title: { color: seed.color.foreground.neutral, ...seed.typography.screenTitle },
   body: { color: seed.color.foreground.muted, ...seed.typography.body, lineHeight: 23, marginTop: seed.spacing.componentDefault },
   reactionRow: { paddingHorizontal: seed.spacing.globalGutter, paddingTop: seed.spacing.x5, flexDirection: "row", gap: seed.spacing.x2_5 },
@@ -351,19 +347,19 @@ const styles = StyleSheet.create({
   reactionLabel: { color: colors.ink, fontSize: 13, fontWeight: "800" },
   crossLinks: { paddingHorizontal: seed.spacing.globalGutter, paddingTop: seed.spacing.x6, gap: seed.spacing.x2_5 },
   crossLink: { minHeight: 66, padding: seed.spacing.componentDefault, flexDirection: "row", alignItems: "center", gap: seed.spacing.componentDefault, borderRadius: seed.radius.r4, borderWidth: 1, borderColor: seed.color.stroke.neutral, backgroundColor: seed.color.layer.default },
-  crossLinkIcon: { width: 40, height: 40, borderRadius: 12, alignItems: "center", justifyContent: "center", backgroundColor: colors.brand },
+  crossLinkIcon: { width: 40, height: 40, borderRadius: seed.radius.r3, alignItems: "center", justifyContent: "center", backgroundColor: colors.brand },
   crossLinkCopy: { flex: 1 },
   crossLinkTitle: { color: colors.ink, fontSize: 14, fontWeight: "900" },
   crossLinkCaption: { color: colors.muted, fontSize: 12, marginTop: 4 },
   commentSection: { marginTop: seed.spacing.x8, paddingHorizontal: seed.spacing.globalGutter },
-  sectionHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 12 },
+  sectionHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 12, ...subtleSectionHeaderRule },
   commentRow: { paddingVertical: 14, flexDirection: "row", alignItems: "flex-start", gap: 11, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.line },
-  commentAvatar: { width: 34, height: 34, borderRadius: 17, alignItems: "center", justifyContent: "center", backgroundColor: "#E9F7E7" },
+  commentAvatar: { width: 34, height: 34, borderRadius: seed.radius.full, alignItems: "center", justifyContent: "center", backgroundColor: seed.color.background.brandWeak },
   commentAvatarText: { color: colors.greenInk, fontSize: 13, fontWeight: "900" },
   commentCopy: { flex: 1 },
   commentMeta: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 },
   commentAuthor: { flex: 1, color: colors.ink, fontSize: 12, fontWeight: "900" },
-  commentDate: { color: colors.muted, fontSize: 10 },
+  commentDate: { color: colors.muted, ...seed.typography.finePrint },
   commentBody: { color: colors.ink, fontSize: 13, lineHeight: 20, marginTop: 6 },
   commentEmpty: { paddingVertical: 25, alignItems: "center", borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.line },
   commentEmptyTitle: { color: colors.ink, fontSize: 14, fontWeight: "900" },
@@ -371,5 +367,5 @@ const styles = StyleSheet.create({
   composer: { marginTop: seed.spacing.componentDefault, minHeight: seed.size.input, paddingLeft: seed.spacing.x3_5, paddingRight: seed.spacing.x1_5, flexDirection: "row", alignItems: "center", gap: seed.spacing.x2, borderRadius: seed.radius.r3, borderWidth: 1, borderColor: seed.color.stroke.neutral, backgroundColor: seed.color.layer.default },
   commentInput: { flex: 1, minHeight: 48, maxHeight: 112, color: colors.ink, fontSize: 14, lineHeight: 20, paddingVertical: 12 },
   sendButton: { width: seed.size.touchTarget, height: seed.size.touchTarget, borderRadius: seed.radius.r3, alignItems: "center", justifyContent: "center", backgroundColor: seed.color.background.brandSolid },
-  pressed: { opacity: seed.state.pressedOpacity },
+  pressed: { opacity: seed.state.pressedOpacity, transform: [{ translateY: seed.state.pressedTranslateY }, { scale: seed.state.pressedScale }] },
 });

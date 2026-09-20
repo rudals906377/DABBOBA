@@ -5,9 +5,9 @@ set -Eeuo pipefail
 readonly DABBOBA_CLOUD_RUN_REGION="asia-northeast3"
 readonly CLOUD_RUN_OPS_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 readonly DABBOBA_REPO_ROOT="$(cd -- "$CLOUD_RUN_OPS_DIR/../.." && pwd -P)"
-readonly DABBOBA_DATABASE_RELEASE_MIGRATION="packages/db/migrations/0037_draw_result_published_version.sql"
-readonly DABBOBA_DATABASE_RELEASE_SHA256="b2f4a6eb8f79685c33d4fbd3eb63b1d947182dc78fa2dd5596663319f2c7ffa9"
-readonly DABBOBA_REQUIRED_DATABASE_RELEASE_ATTESTATION="0037:${DABBOBA_DATABASE_RELEASE_SHA256}:runtime+worker"
+readonly DABBOBA_DATABASE_RELEASE_MIGRATION="packages/db/migrations/0039_retire_prototype_catalog.sql"
+readonly DABBOBA_DATABASE_RELEASE_SHA256="9bee32390788e2c57c549bfad41d882b2bb626da9b3a175182bfa240e1449502"
+readonly DABBOBA_REQUIRED_DATABASE_RELEASE_ATTESTATION="0039:${DABBOBA_DATABASE_RELEASE_SHA256}:runtime+worker"
 readonly DABBOBA_WORKER_SCHEDULER_CRON="* * * * *"
 readonly DABBOBA_WORKER_SCHEDULER_TIME_ZONE="Asia/Seoul"
 readonly DABBOBA_WORKER_SCHEDULER_ATTEMPT_DEADLINE="30s"
@@ -57,7 +57,7 @@ assert_database_release_migration_checksum() {
   local actual
   actual="$(sha256_file "$migration")"
   [[ "$actual" == "$DABBOBA_DATABASE_RELEASE_SHA256" ]] \
-    || die "Migration 0037 checksum changed; review the migration and intentionally rotate the database release attestation"
+    || die "Migration 0039 checksum changed; review the migration and intentionally rotate the database release attestation"
 }
 
 require_env() {
@@ -511,7 +511,7 @@ assert_public_api_abuse_controls_attestation() {
 assert_database_release_attestation() {
   assert_database_release_migration_checksum
   [[ "${DABBOBA_DATABASE_RELEASE_ATTESTATION:-}" == "$DABBOBA_REQUIRED_DATABASE_RELEASE_ATTESTATION" ]] \
-    || die "API and worker deployment is blocked. Set DABBOBA_DATABASE_RELEASE_ATTESTATION to the documented release value only after migration 0037 and both restricted database roles are verified against the target database"
+    || die "API and worker deployment is blocked. Set DABBOBA_DATABASE_RELEASE_ATTESTATION to the documented release value only after migration 0039 and both restricted database roles are verified against the target database"
 }
 
 api_candidate_tag() {

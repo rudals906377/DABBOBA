@@ -108,7 +108,9 @@ test("native waiting room joins once, polls every two seconds, promotes to check
     queueScreen.indexOf("실시간 뽑기 현황") < queueScreen.indexOf("대기 중"),
     "live committed results must appear before the waiting list",
   );
-  assert.match(queueScreen, /서버가 연결되지 않아 개발용 대기 현황/);
+  assert.match(queueScreen, /internalQueueEnabled/);
+  assert.match(queueScreen, /INTERNAL QUEUE · 주문과 추첨권은 생성되지 않아요/);
+  assert.doesNotMatch(queueScreen, /개발용 대기 현황/);
   assert.doesNotMatch(queueScreen, /Math\.random|purchasedCount|결제 완료|추첨권 발급 완료/);
   assert.match(roomApi, /\/v1\/kuji\/rooms\/\$\{encodeURIComponent\(productId\)\}\/entries/);
   assert.match(roomApi, /method: "POST" \| "GET" \| "DELETE"/);

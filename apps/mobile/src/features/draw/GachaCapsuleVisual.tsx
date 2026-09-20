@@ -19,18 +19,31 @@ type GachaCapsuleVisualProps = {
 
 const PALETTES = {
   lime: {
-    upper: "#C9F45A",
-    lower: "#78B727",
-    seam: "#E9FDB0",
-    border: "#3D571C",
-    cavity: "#15210D",
+    upper: "rgba(224, 248, 225, 0.9)",
+    lower: "#91E98E",
+    machineUpper: "#D1F1CE",
+    machineLower: "#72C971",
+    seam: "rgba(107, 190, 106, 0.72)",
+    border: "rgba(61, 105, 62, 0.42)",
+    cavity: "#173018",
   },
   ivory: {
-    upper: "#FFF2D0",
-    lower: "#D7BB83",
-    seam: "#FFF8E7",
-    border: "#806F51",
-    cavity: "#241D14",
+    upper: "rgba(252, 250, 243, 0.92)",
+    lower: "#F4F0E6",
+    machineUpper: "#FBF7ED",
+    machineLower: "#DFD4BD",
+    seam: "rgba(192, 181, 158, 0.72)",
+    border: "rgba(118, 107, 88, 0.34)",
+    cavity: "#312C24",
+  },
+  orange: {
+    upper: "rgba(255, 221, 207, 0.9)",
+    lower: "#F36B2C",
+    machineUpper: "#FFB18A",
+    machineLower: "#E95E24",
+    seam: "rgba(210, 76, 25, 0.72)",
+    border: "rgba(128, 48, 17, 0.42)",
+    cavity: "#3B190D",
   },
 } as const;
 
@@ -46,9 +59,11 @@ export function GachaCapsuleVisual({
   testID,
 }: GachaCapsuleVisualProps) {
   const palette = PALETTES[tone];
+  const upperColor = heroDetail ? palette.upper : palette.machineUpper;
+  const lowerColor = heroDetail ? palette.lower : palette.machineLower;
   const depthShadeOpacity = depth >= 2 ? 0.01 : depth === 1 ? 0.05 : 0.13;
   const highlightOpacity = depth >= 2 ? 0.9 : depth === 1 ? 0.72 : 0.5;
-  // Keep the small poured pile's molded base; only the hero is now spherical.
+  // Every context shares one spherical shell; lighting and detail adapt by scale.
   const silhouette = getGachaCapsuleSilhouette(diameter, heroDetail);
   const upperRadius = silhouette.borderTopLeftRadius;
   const lowerRadius = silhouette.borderBottomLeftRadius;
@@ -73,13 +88,13 @@ export function GachaCapsuleVisual({
           split && styles.splitUpperHalf,
           split && { borderTopLeftRadius: upperRadius, borderTopRightRadius: upperRadius },
           split && heroDetail && styles.heroSplitHalf,
-          { backgroundColor: palette.upper, borderColor: palette.border },
+          { backgroundColor: upperColor, borderColor: palette.border },
           upperStyle,
         ]}
       >
         {heroDetail ? <View style={styles.upperMaterialDepth} /> : null}
-        <View style={[styles.highlight, { opacity: highlightOpacity }]} />
-        <View style={[styles.highlightPixel, { opacity: highlightOpacity * 0.72 }]} />
+        <View style={[styles.highlight, !heroDetail && styles.machineHighlight, { opacity: highlightOpacity }]} />
+        {!heroDetail ? <View style={[styles.highlightPixel, { opacity: highlightOpacity * 0.72 }]} /> : null}
         {heroDetail ? (
           <>
             <View style={styles.heroGlossStepWide} />
@@ -107,11 +122,11 @@ export function GachaCapsuleVisual({
           split && styles.splitLowerHalf,
           split && { borderBottomLeftRadius: lowerRadius, borderBottomRightRadius: lowerRadius },
           split && heroDetail && styles.heroSplitHalf,
-          { backgroundColor: palette.lower, borderColor: palette.border },
+          { backgroundColor: lowerColor, borderColor: palette.border },
           lowerStyle,
         ]}
       >
-        <View style={styles.lowerRoundShade} />
+        {heroDetail ? <View style={styles.lowerRoundShade} /> : <View style={styles.machineLowerPlane} />}
         {heroDetail ? (
           <>
             <View style={styles.heroLowerCoreShade} />
@@ -178,14 +193,14 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     top: 0,
-    height: "52%",
+    height: "50.5%",
   },
   lowerHalf: {
     position: "absolute",
     left: 0,
     right: 0,
     bottom: 0,
-    height: "52%",
+    height: "50.5%",
   },
   splitUpperHalf: {
     borderWidth: 0.75,
@@ -208,8 +223,8 @@ const styles = StyleSheet.create({
     position: "absolute",
     left: 1,
     right: 1,
-    top: "47%",
-    height: "6%",
+    top: "49.4%",
+    height: 1,
     minHeight: 1,
     borderRadius: 1,
   },
@@ -217,10 +232,10 @@ const styles = StyleSheet.create({
     position: "absolute",
     left: 1,
     right: 1,
-    top: "52%",
-    height: "5%",
+    top: "50.4%",
+    height: 1,
     minHeight: 1,
-    opacity: 0.48,
+    opacity: 0.2,
   },
   heroSeam: { top: "49%", height: "1%", minHeight: 0.5 },
   heroSeamShadow: { top: "50%", height: "1%", minHeight: 0.5 },
@@ -229,7 +244,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    height: "8%",
+    height: 1,
     minHeight: 1,
   },
   splitUpperSeamShadow: {
@@ -237,18 +252,18 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    height: "14%",
+    height: 1,
     minHeight: 1,
-    opacity: 0.48,
+    opacity: 0.2,
   },
   splitLowerSeam: {
     position: "absolute",
     left: 0,
     right: 0,
     top: 0,
-    height: "7%",
+    height: 1,
     minHeight: 1,
-    opacity: 0.48,
+    opacity: 0.24,
   },
   heroUpperCavity: {
     position: "absolute",
@@ -284,19 +299,28 @@ const styles = StyleSheet.create({
     position: "absolute",
     left: "23%",
     top: "20%",
-    width: "18%",
-    height: "22%",
-    borderRadius: 1,
-    backgroundColor: "rgba(255, 255, 255, 0.82)",
+    width: "20%",
+    height: "24%",
+    borderRadius: seed.radius.full,
+    backgroundColor: "rgba(255, 255, 255, 0.7)",
   },
   highlightPixel: {
     position: "absolute",
     left: "17%",
     top: "48%",
-    width: "12%",
-    height: "11%",
+    width: "10%",
+    height: "8%",
     minHeight: 1,
-    backgroundColor: "rgba(255, 255, 255, 0.72)",
+    borderRadius: seed.radius.full,
+    backgroundColor: "rgba(255, 255, 255, 0.42)",
+  },
+  machineHighlight: {
+    left: "17%",
+    top: "18%",
+    width: "22%",
+    height: "16%",
+    borderRadius: 1,
+    backgroundColor: "rgba(255, 255, 255, 0.56)",
   },
   upperMaterialDepth: {
     position: "absolute",
@@ -346,9 +370,9 @@ const styles = StyleSheet.create({
     position: "absolute",
     right: 0,
     top: "25%",
-    width: "12%",
+    width: "8%",
     height: "64%",
-    backgroundColor: "rgba(9, 13, 10, 0.18)",
+    backgroundColor: "rgba(9, 13, 10, 0.08)",
   },
   lowerRoundShade: {
     position: "absolute",
@@ -358,6 +382,15 @@ const styles = StyleSheet.create({
     height: "104%",
     borderRadius: seed.radius.full,
     backgroundColor: "rgba(15, 20, 16, 0.14)",
+  },
+  machineLowerPlane: {
+    position: "absolute",
+    right: "4%",
+    top: "8%",
+    width: "24%",
+    height: "84%",
+    backgroundColor: "rgba(12, 20, 13, 0.12)",
+    transform: [{ rotate: "6deg" }],
   },
   heroLowerCoreShade: {
     position: "absolute",
@@ -410,18 +443,18 @@ const styles = StyleSheet.create({
     position: "absolute",
     right: 0,
     top: 0,
-    width: "12%",
+    width: "8%",
     height: "72%",
-    backgroundColor: "rgba(9, 13, 10, 0.18)",
+    backgroundColor: "rgba(9, 13, 10, 0.08)",
   },
   bottomShade: {
     position: "absolute",
     left: "18%",
     right: "12%",
     bottom: 0,
-    height: "13%",
+    height: "8%",
     minHeight: 1,
-    backgroundColor: "rgba(8, 12, 9, 0.2)",
+    backgroundColor: "rgba(8, 12, 9, 0.1)",
   },
   heroCouplingLip: {
     position: "absolute",
@@ -480,16 +513,16 @@ const styles = StyleSheet.create({
   },
   heroLightRim: {
     ...StyleSheet.absoluteFill,
-    borderTopWidth: 2,
-    borderLeftWidth: 2,
+    borderTopWidth: 1,
+    borderLeftWidth: 1,
     borderTopColor: "rgba(255, 255, 255, 0.5)",
     borderLeftColor: "rgba(255, 255, 255, 0.24)",
     borderRadius: seed.radius.full,
   },
   heroDarkRim: {
     ...StyleSheet.absoluteFill,
-    borderRightWidth: 3,
-    borderBottomWidth: 3,
+    borderRightWidth: 1,
+    borderBottomWidth: 1,
     borderRightColor: "rgba(14, 20, 15, 0.42)",
     borderBottomColor: "rgba(14, 20, 15, 0.56)",
     borderRadius: seed.radius.full,
@@ -499,7 +532,7 @@ const styles = StyleSheet.create({
     left: "30%",
     top: 0,
     width: "40%",
-    height: 2,
+    height: 1,
     backgroundColor: "rgba(255, 255, 255, 0.34)",
   },
   heroPixelEdgeBottom: {
@@ -507,7 +540,7 @@ const styles = StyleSheet.create({
     left: "30%",
     bottom: 0,
     width: "40%",
-    height: 3,
+    height: 1,
     backgroundColor: "rgba(8, 12, 9, 0.38)",
   },
 });

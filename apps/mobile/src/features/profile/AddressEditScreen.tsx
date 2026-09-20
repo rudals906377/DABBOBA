@@ -1,6 +1,5 @@
-import { Ionicons } from "@expo/vector-icons";
-import { router } from "expo-router";
-import { useEffect, useState } from "react";
+import { router, useFocusEffect } from "expo-router";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -12,12 +11,13 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { KoreanPixelTitle } from "@/components/RootCategoryTitle";
-import { AppText as Text, AppTextInput as TextInput } from "@/components/Typography";
-import { SeedActionButton } from "@/design-system/components";
+import { DetailPageHeader } from "@/components/DetailPageHeader";
+import { AppText as Text } from "@/components/Typography";
+import { SeedActionButton, SeedTextInput } from "@/design-system/components";
 import { seed } from "@/design-system/seed";
 import { upsertDefaultShippingAddress } from "@/features/profile/account-detail-api";
 import { useProfileSnapshot } from "@/features/profile/use-profile-snapshot";
+import { ProfileSessionGate, isProfileSessionBlocked } from "@/features/profile/ProfileSessionGate";
 import { colors } from "@/theme";
 
 export function AddressEditScreen() {
@@ -30,6 +30,12 @@ export function AddressEditScreen() {
   const [addressLine2, setAddressLine2] = useState("");
   const [deliveryNote, setDeliveryNote] = useState("");
   const [saving, setSaving] = useState(false);
+  const hasFocusedOnce = useRef(false);
+
+  useFocusEffect(useCallback(() => {
+    if (hasFocusedOnce.current) void profileState.reload();
+    else hasFocusedOnce.current = true;
+  }, [profileState.reload]));
 
   useEffect(() => {
     if (!address) return;
@@ -78,9 +84,11 @@ export function AddressEditScreen() {
       <Header />
       <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === "ios" ? "padding" : undefined}>
         <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-          {!profileState.snapshot && !profileState.message ? <ActivityIndicator color={colors.ink} style={styles.loading} /> : null}
-          {profileState.message ? <Text style={styles.error}>{profileState.message}</Text> : null}
-          {profileState.snapshot ? (
+          {profileState.status === "loading" ? <ActivityIndicator color={colors.ink} style={styles.loading} /> : null}
+          {profileState.status === "error" ? <View><Text style={styles.error}>{profileState.message}</Text><SeedActionButton label="다시 불러오기" variant="neutralSolid" onPress={profileState.reload} style={styles.retry} /></View> : null}
+          {isProfileSessionBlocked(profileState.status) ? (
+            <ProfileSessionGate status={profileState.status} returnTo="/profile/member/address/edit" guestBody="로그인하면 기본 배송지를 등록하거나 수정할 수 있어요." />
+          ) : profileState.snapshot ? (
             <>
               <Field label="받는 사람" value={recipient} onChangeText={(value) => setRecipient(value.slice(0, 80))} placeholder="이름" />
               <Field label="연락처" value={phone} onChangeText={(value) => setPhone(value.slice(0, 30))} placeholder="010-0000-0000" keyboardType="phone-pad" />
@@ -98,11 +106,11 @@ export function AddressEditScreen() {
 }
 
 function Header() {
-  return <View style={styles.header}><Pressable accessibilityRole="button" accessibilityLabel="뒤로 가기" hitSlop={10} onPress={() => router.back()} style={({ pressed }) => [styles.headerAction, pressed && styles.pressed]}><Ionicons name="chevron-back" size={25} color={colors.ink} /></Pressable><KoreanPixelTitle variant="header">기본 배송지</KoreanPixelTitle><View style={styles.headerAction} /></View>;
+  return <DetailPageHeader title="기본 배송지" titleMode="pixel" onBack={() => router.back()} />;
 }
 
-function Field({ label, optional = false, ...inputProps }: { label: string; optional?: boolean } & React.ComponentProps<typeof TextInput>) {
-  return <View style={styles.field}><View style={styles.labelRow}><Text style={styles.label}>{label}</Text>{optional ? <Text style={styles.optional}>선택</Text> : null}</View><TextInput {...inputProps} placeholderTextColor={colors.muted} style={styles.input} /></View>;
+function Field({ label, optional = false, ...inputProps }: { label: string; optional?: boolean } & React.ComponentProps<typeof SeedTextInput>) {
+  return <View style={styles.field}><View style={styles.labelRow}><Text style={styles.label}>{label}</Text>{optional ? <Text style={styles.optional}>선택</Text> : null}</View><SeedTextInput {...inputProps} placeholderTextColor={colors.muted} style={styles.input} /></View>;
 }
 
 const styles = StyleSheet.create({
@@ -116,8 +124,9 @@ const styles = StyleSheet.create({
   field: { marginTop: seed.spacing.x3 },
   labelRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: seed.spacing.x2 },
   label: { color: colors.ink, fontSize: 13, fontWeight: "900" },
-  optional: { color: colors.muted, fontSize: 10 },
-  input: { minHeight: seed.size.input, paddingHorizontal: seed.spacing.x3_5, borderWidth: 1, borderColor: seed.color.stroke.brand, borderRadius: seed.radius.r3, backgroundColor: seed.color.layer.default, color: colors.ink, fontSize: 14 },
+  optional: { color: colors.muted, ...seed.typography.finePrint },
+  input: { minHeight: seed.size.input, paddingHorizontal: seed.spacing.x3_5, borderWidth: 1, borderColor: seed.color.stroke.neutral, borderRadius: seed.radius.r3, backgroundColor: seed.color.layer.default, color: colors.ink, fontSize: 14 },
   submit: { marginTop: seed.spacing.x5 },
-  pressed: { opacity: seed.state.pressedOpacity },
+  retry: { marginTop: seed.spacing.x3 },
+  pressed: { opacity: seed.state.pressedOpacity, transform: [{ scale: seed.state.pressedScale }] },
 });

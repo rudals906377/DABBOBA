@@ -13,35 +13,40 @@ import {
   updateSessionOrderStatus,
 } from "../src/data/sessionCommerceFixtures.ts";
 
-test("initial commerce sessions are isolated and expose only stored gacha inventory for exchange or point return", () => {
+const TEST_GACHA_UNIT = {
+  id: "test-gacha-inventory",
+  ownerId: CURRENT_USER_ID,
+  catalogItemId: "test-prize",
+  productId: "test-gacha",
+  ipId: "test-ip",
+  categoryId: "gacha",
+  itemName: "테스트 경품",
+  itemImage: "/test-product.png",
+  appReferenceValue: 5_000,
+  source: "gacha",
+  acquiredAt: "2026.08.24",
+  shippingDeadline: "2026.09.23",
+  shippingStatus: "stored",
+  exchangeStatus: "available",
+};
+
+test("initial commerce sessions are isolated and contain no bundled example products", () => {
   const first = createInitialSessionCommerceState();
   const second = createInitialSessionCommerceState();
 
   assert.notEqual(first, second);
   assert.notEqual(first.orders, second.orders);
   assert.notEqual(first.inventoryUnits, second.inventoryUnits);
-  first.wishlistProductIds.pop();
-  assert.equal(second.wishlistProductIds.length, 6);
-
-  const eligible = eligibleSessionInventoryUnits(second, CURRENT_USER_ID);
-  assert.equal(eligible.length, 2);
-  for (const item of eligible) {
-    assert.equal(item.ownerId, CURRENT_USER_ID);
-    assert.equal(item.source, "gacha");
-    assert.equal(item.shippingStatus, "stored");
-    assert.equal(item.exchangeStatus, "available");
-    assert.ok(item.itemName.trim());
-    assert.ok(item.itemImage.startsWith("/assets/dabboba/products/"));
-    assert.ok(item.ipId.trim());
-    assert.ok(item.categoryId.trim());
-    assert.ok(item.appReferenceValue > 0);
-  }
+  assert.deepEqual(second.wishlistProductIds, []);
+  assert.deepEqual(second.orders, []);
+  assert.deepEqual(second.inventoryUnits, []);
+  assert.deepEqual(second.pointLedger, []);
+  assert.equal(second.pointBalance, 0);
 });
 
 test("exchange and point-return eligibility follows acquisition source instead of product category", () => {
   const initial = createInitialSessionCommerceState();
-  const gachaTemplate = initial.inventoryUnits.find((item) => item.source === "gacha");
-  assert.ok(gachaTemplate);
+  const gachaTemplate = TEST_GACHA_UNIT;
 
   const state = {
     ...initial,
@@ -64,13 +69,16 @@ test("exchange and point-return eligibility follows acquisition source instead o
 });
 
 test("orders, point usage, inventory, and draw completion are recorded exactly once", () => {
-  const initial = createInitialSessionCommerceState();
+  const initial = {
+    ...createInitialSessionCommerceState(),
+    pointBalance: 1_000,
+  };
   const order = {
     id: "DBB-order-focused-test",
     userId: CURRENT_USER_ID,
     productId: "one-piece-tcg",
     productTitle: "원피스 카드게임 OP-13 계승되는 의지",
-    productImage: "/assets/dabboba/products/ip/one-piece.jpg",
+    productImage: "/test-product.png",
     categoryId: "tcg",
     orderedAt: "2026.08.24",
     quantity: 1,
@@ -113,8 +121,11 @@ test("orders, point usage, inventory, and draw completion are recorded exactly o
 });
 
 test("shipping requests persist once and immediately remove units from exchange eligibility", () => {
-  const initial = createInitialSessionCommerceState();
-  const inventoryUnitId = eligibleSessionInventoryUnits(initial)[0].id;
+  const initial = {
+    ...createInitialSessionCommerceState(),
+    inventoryUnits: [TEST_GACHA_UNIT],
+  };
+  const inventoryUnitId = TEST_GACHA_UNIT.id;
   const request = {
     id: "shipping-request-focused-test",
     userId: CURRENT_USER_ID,

@@ -6,8 +6,10 @@ import {
   assertProductionMigrationDatabaseTarget,
   assertProductionRuntimeDatabaseRole,
   createDatabasePool,
+  createMigrationDatabasePool,
   databaseConnectionConfig,
   databaseSslConfig,
+  withTransaction,
 } from "./index.js";
 import { WORKER_DATABASE_ROLE } from "./runtime-role.js";
 
@@ -32,6 +34,14 @@ test("production Supabase runtime connections require the restricted database ro
       /restricted dabboba_runtime database role/,
     );
   }
+});
+
+test("an explicit pool runtime environment enforces the production role without global NODE_ENV", () => {
+  assert.throws(() => createDatabasePool(
+    "postgresql://postgres.abcdefghijklmnopqrst:secret@aws-0-ap-northeast-2.pooler.supabase.com:6543/postgres",
+    "dabboba-edge-role-guard-test",
+    { runtimeEnvironment: "production" },
+  ), /restricted dabboba_runtime database role/);
 });
 
 test("database target guards do not constrain non-production databases", () => {
@@ -148,6 +158,77 @@ test("runtime pool operation timeouts are bounded", async () => {
     { connectionTimeoutMs: 5_000, queryTimeoutMs: 30_000, statementTimeoutMs: 30_000 },
   );
   await pool.end();
+});
+
+test("database pools observe idle client errors without exposing raw messages", async () => {
+  const faults: Array<{ errorCode: string | null }> = [];
+  const pool = createDatabasePool(
+    "postgresql://dabboba_runtime:secret@127.0.0.1:55433/dabboba",
+    "dabboba-idle-error-test",
+    { onIdleClientError: (fault) => faults.push(fault) },
+  );
+  const error = Object.assign(new Error("credential=must-not-be-reported"), { code: "57P01" });
+
+  pool.emit("error", error, {} as never);
+  pool.emit("error", Object.assign(new Error("secret"), { code: "SECRE" }), {} as never);
+
+  assert.deepEqual(faults, [{ errorCode: "57P01" }, { errorCode: null }]);
+  assert.equal(JSON.stringify(faults).includes("must-not-be-reported"), false);
+  await pool.end();
+});
+
+test("migration pools always install an idle client error listener", async () => {
+  const pool = createMigrationDatabasePool(
+    "postgresql://migration:secret@127.0.0.1:55433/dabboba",
+    "dabboba-migration-idle-error-test",
+  );
+
+  assert.ok(pool.listenerCount("error") > 0);
+  await pool.end();
+});
+
+test("transaction rollback failure preserves the work error and destroys the client", async () => {
+  const operationError = new Error("operation failed");
+  let releasedWith: boolean | undefined;
+  const client = {
+    async query(sql: string) {
+      if (sql === "ROLLBACK") throw new Error("rollback failed");
+      return { rowCount: 0, rows: [] };
+    },
+    release(destroy?: boolean) {
+      releasedWith = destroy;
+    },
+  };
+  const pool = { async connect() { return client; } };
+
+  await assert.rejects(
+    () => withTransaction(pool as never, async () => { throw operationError; }),
+    (error) => error === operationError,
+  );
+  assert.equal(releasedWith, true);
+});
+
+test("successful rollback returns a transaction client to the pool", async () => {
+  const operationError = new Error("operation failed");
+  let releasedWith: boolean | undefined;
+  const queries: string[] = [];
+  const client = {
+    async query(sql: string) {
+      queries.push(sql);
+      return { rowCount: 0, rows: [] };
+    },
+    release(destroy?: boolean) {
+      releasedWith = destroy;
+    },
+  };
+  const pool = { async connect() { return client; } };
+
+  await assert.rejects(
+    () => withTransaction(pool as never, async () => { throw operationError; }),
+    (error) => error === operationError,
+  );
+  assert.deepEqual(queries, ["BEGIN", "ROLLBACK"]);
+  assert.equal(releasedWith, false);
 });
 
 test("integration pools reject the application database target", () => {
