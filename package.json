@@ -13,7 +13,8 @@
     "update:runtime-lock": "node scripts/update-mobile-runtime-lock.mjs",
     "test:runtime": "playwright test",
     "test:sites": "node --test tests/sites-worker.test.mjs",
-    "build:public-site": "node scripts/prepare-public-site-build.mjs",
+    "build:storefront": "corepack pnpm --filter @dabboba/storefront build",
+    "build:public-site": "corepack pnpm run build:storefront && node scripts/prepare-public-site-build.mjs",
     "predev": "corepack pnpm run check:runtime",
     "dev": "vite --host 0.0.0.0 --port 4174 --strictPort",
     "dev:lan": "vite --host 0.0.0.0 --port 4174 --strictPort",
@@ -48,14 +49,14 @@
     "mobile:android": "corepack pnpm --filter @dabboba/mobile android",
     "prebuild": "corepack pnpm run check:runtime",
     "typecheck": "tsc --noEmit",
-    "build": "tsc && vite build && node scripts/prepare-sites-build.mjs && node scripts/prepare-public-site-build.mjs",
+    "build": "tsc && vite build && node scripts/prepare-sites-build.mjs && corepack pnpm run build:public-site",
     "build:all": "turbo run build",
     "audit:prod": "corepack pnpm audit --prod --audit-level high",
     "pretest": "node scripts/check-test-backend-env.mjs",
     "test": "corepack pnpm run test:unit",
     "test:unit": "node --test tests/*.test.mjs && corepack pnpm --filter @dabboba/api exec tsx --test '../../tests/*.test.ts'",
     "pretest:all": "node scripts/check-test-backend-env.mjs",
-    "test:all": "corepack pnpm run workspace:assert && turbo run build && turbo run typecheck && turbo run test --concurrency=4 && corepack pnpm run test:runtime && corepack pnpm run test:sites"
+    "test:all": "corepack pnpm run workspace:assert && turbo run build && turbo run typecheck && turbo run test --concurrency=4 && corepack pnpm --filter @dabboba/storefront run test:browser && corepack pnpm run test:runtime && corepack pnpm run test:sites"
   },
   "dependencies": {
     "@fontsource/press-start-2p": "^5.3.0",

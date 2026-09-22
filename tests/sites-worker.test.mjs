@@ -62,10 +62,10 @@ test("serves existing static assets without a fallback", async () => {
   assert.deepEqual(calls, ["/assets/app.js"]);
 });
 
-test("serves every public policy URL from its static document with security headers", async () => {
+test("serves the public storefront root and every policy URL with security headers", async () => {
   const routes = new Map([
-    ["/", "/legal/"],
-    ["/index.html", "/legal/"],
+    ["/", "/index.html"],
+    ["/index.html", "/index.html"],
     ["/privacy", "/legal/privacy/"],
     ["/privacy/", "/legal/privacy/"],
     ["/terms", "/legal/terms/"],
@@ -104,13 +104,31 @@ test("serves every public policy URL from its static document with security head
   }
 });
 
-test("public hosts never expose the prototype app or its unrelated assets", async () => {
+test("public hosts serve storefront assets but do not fall back for unknown or prototype routes", async () => {
   for (const publicHost of [
     "dabboba.net",
     "dabboba.pages.dev",
     "release-id.dabboba.pages.dev",
     "dabboba-random.pages.dev",
   ]) {
+    const storefrontAssetCalls = [];
+    const storefrontAsset = await worker.fetch(new Request(`https://${publicHost}/assets/storefront-main.js`), {
+      ASSETS: {
+        fetch: async (request) => {
+          storefrontAssetCalls.push(new URL(request.url).pathname);
+          return new Response("storefront", {
+            status: 200,
+            headers: { "content-type": "text/javascript" },
+          });
+        },
+      },
+    });
+
+    assert.equal(storefrontAsset.status, 200);
+    assert.deepEqual(storefrontAssetCalls, ["/assets/storefront-main.js"]);
+    assert.equal(storefrontAsset.headers.get("content-type"), "text/javascript");
+    assert.equal(storefrontAsset.headers.get("x-content-type-options"), "nosniff");
+
     for (const pathname of ["/flow/step-two", "/unexpected-route", "/assets/dabboba/draw/gacha/arcade-cabinet.png"]) {
       let assetFetches = 0;
       const response = await worker.fetch(new Request(`https://${publicHost}${pathname}`, {
@@ -119,13 +137,13 @@ test("public hosts never expose the prototype app or its unrelated assets", asyn
         ASSETS: {
           fetch: async () => {
             assetFetches += 1;
-            return new Response("prototype", { status: 200 });
+            return new Response("missing", { status: 404 });
           },
         },
       });
 
       assert.equal(response.status, 404);
-      assert.equal(assetFetches, 0);
+      assert.equal(assetFetches, 1);
       assert.equal(response.headers.get("x-content-type-options"), "nosniff");
     }
   }
@@ -527,7 +545,14 @@ test("account deletion page stores only the receipt and presents an accessible r
   assert.doesNotMatch(callback, /localStorage/);
 });
 
-test("public root explains the prelaunch scope without promising live commerce", async () => {
+test("account deletion remains requestable when automated web verification is unavailable", async () => {
+  const html = await readFile(new URL("../public/legal/account-deletion/index.html", import.meta.url), "utf8");
+  assert.match(html, /계정 삭제 요청 이메일 보내기/);
+  assert.match(html, /mailto:support@dabboba\.net\?subject=/);
+  assert.match(html, /앱을 사용할 수 없는 경우에도/);
+});
+
+test("legacy legal landing retains the full prelaunch limitation notice", async () => {
   const html = await readFile(new URL("../public/legal/index.html", import.meta.url), "utf8");
   assert.match(html, /PRELAUNCH/);
   assert.match(html, /결제, 뽑기와 배송 신청은 정식 오픈 전까지 사용할 수 없습니다/);
@@ -537,6 +562,17 @@ test("public root explains the prelaunch scope without promising live commerce",
   assert.match(html, /href="\/account-deletion"/);
   assert.match(html, /support@dabboba\.net/);
   assert.doesNotMatch(html, /결제하기|지금 뽑기|구매하기/);
+});
+
+test("public storefront stays prelaunch-only and links every required policy surface", async () => {
+  const source = await readFile(new URL("../apps/storefront/src/App.tsx", import.meta.url), "utf8");
+  assert.match(source, /PRELAUNCH/);
+  assert.match(source, /OPENING SOON/);
+  assert.match(source, /정식 오픈 후 적용 예정/);
+  for (const href of ["/privacy", "/terms", "/support", "/account-deletion"]) {
+    assert.match(source, new RegExp(`href=\"${href.replace("/", "\\/")}\"`));
+  }
+  assert.doesNotMatch(source, /결제하기|뽑기 시작|구매하기|>0원</);
 });
 
 test("falls back to index.html for an unknown app route", async () => {
@@ -594,11 +630,16 @@ test("emits the files required by Sites packaging", async () => {
   await access(new URL("../dist/client/legal/account-deletion/app.js", import.meta.url));
   await access(new URL("../dist/client/legal/account-deletion/social-callback.html", import.meta.url));
   await access(new URL("../dist/client/legal/account-deletion/social-callback.js", import.meta.url));
+  await access(new URL("../dist/public-site/index.html", import.meta.url));
   await access(new URL("../dist/public-site/_worker.js", import.meta.url));
   await access(new URL("../dist/public-site/legal/index.html", import.meta.url));
   await access(new URL("../dist/public-site/legal/privacy/index.html", import.meta.url));
-  assert.deepEqual(
-    (await readdir(new URL("../dist/public-site/", import.meta.url))).sort(),
-    ["_worker.js", "legal"],
+  const outputEntries = (await readdir(new URL("../dist/public-site/", import.meta.url))).sort();
+  assert.ok(outputEntries.includes("assets"));
+  assert.ok(outputEntries.includes("index.html"));
+  assert.ok(outputEntries.includes("_worker.js"));
+  assert.ok(outputEntries.includes("legal"));
+  await assert.rejects(
+    access(new URL("../dist/public-site/assets/dabboba/draw/gacha/arcade-cabinet.png", import.meta.url)),
   );
 });

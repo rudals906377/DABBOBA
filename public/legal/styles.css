@@ -8,7 +8,8 @@
 body { margin: 0; }
 main { width: min(760px, calc(100% - 32px)); margin: 0 auto; padding: 56px 0 96px; }
 header { margin-bottom: 40px; }
-.brand { color: #147b39; font-size: 14px; font-weight: 800; letter-spacing: .08em; }
+.brand { width: 168px; }
+.brand img { display: block; width: 100%; height: auto; }
 h1 { margin: 10px 0 12px; font-size: clamp(30px, 7vw, 46px); line-height: 1.15; letter-spacing: -.04em; }
 .updated, .muted { color: #69716b; }
 nav { display: flex; flex-wrap: wrap; gap: 8px; margin: 24px 0 40px; }

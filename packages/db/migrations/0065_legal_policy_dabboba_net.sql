@@ -64,11 +64,11 @@ UPDATE public.legal_document_versions
 INSERT INTO public.legal_document_versions
   (policy_key,policy_version,content_sha256,public_url,effective_at)
 VALUES
-  ('TERMS','2026-09-22','fc59d9bb090dd11474fdee337662a1d227ef98004337dcb5e3bed22269d418a0',
+  ('TERMS','2026-09-22','48b0950d22e7d2716b1824bfa895ed70d86c8ef35e9acbf6778025965b4b9ec6',
    'https://dabboba.net/terms','2026-09-22T00:00:00+09:00'),
-  ('PRIVACY','2026-09-22','0c668094006c6eee3a73d2d8cdb51838abf53f9e0dba6884f47f8c67cd6c3863',
+  ('PRIVACY','2026-09-22','6c1067c30ca2fd55628f0c443975fbfc243537d1e5c99217011e1d5714d88739',
    'https://dabboba.net/privacy','2026-09-22T00:00:00+09:00'),
-  ('OPERATIONS','2026-09-22','95d97d5d00a55d553ee8bb6a1a99ae43325880ee5c9ef56356cc29ab5dfd23cf',
+  ('OPERATIONS','2026-09-22','8c3b1e9d351590a1c978d7d731acf153b6895c5d5c95768f4cc9021b75163792',
    'https://dabboba.net/community-operations','2026-09-22T00:00:00+09:00');
 
 COMMENT ON CONSTRAINT legal_document_versions_public_url_check ON public.legal_document_versions IS

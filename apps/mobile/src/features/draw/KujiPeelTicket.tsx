@@ -449,7 +449,15 @@ export function KujiPeelTicket({
               <View style={styles.ticketShell}>
                 <View style={styles.resultTicketLayer}>
                   <View style={styles.resultTicketBand}>
-                    <Text style={styles.resultTicketBrand}>DABBOBA KUJI</Text>
+                    <View style={styles.resultTicketBrandLockup}>
+                      <Image
+                        accessibilityIgnoresInvertColors
+                        resizeMode="contain"
+                        source={DABBOBA_WORDMARK}
+                        style={styles.resultTicketBrandWordmark}
+                      />
+                      <Text style={styles.resultTicketBrandSuffix}>KUJI</Text>
+                    </View>
                   </View>
                   <View style={styles.resultTicketBody}>
                     <Text numberOfLines={1} adjustsFontSizeToFit style={styles.resultTicketGrade}>
@@ -463,7 +471,15 @@ export function KujiPeelTicket({
                     </View>
                   </View>
                   <View style={[styles.resultTicketBand, styles.resultTicketFooter]}>
-                    <Text style={styles.resultTicketFooterText}>DABBOBA ONLINE KUJI</Text>
+                    <View style={styles.resultTicketBrandLockup}>
+                      <Image
+                        accessibilityIgnoresInvertColors
+                        resizeMode="contain"
+                        source={DABBOBA_WORDMARK}
+                        style={styles.resultTicketBrandWordmark}
+                      />
+                      <Text style={styles.resultTicketBrandSuffix}>ONLINE KUJI</Text>
+                    </View>
                   </View>
                 </View>
                 <View pointerEvents="none" style={styles.ticketOuterLayer}>
@@ -627,12 +643,21 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: "#FFF4DF",
   },
-  resultTicketBrand: {
-    color: colors.white,
+  resultTicketBrandLockup: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: seed.spacing.x2,
+  },
+  resultTicketBrandWordmark: {
+    width: 92,
+    height: 14,
+  },
+  resultTicketBrandSuffix: {
+    color: "#2B241F",
     fontSize: 11,
     lineHeight: 16,
     fontWeight: "800",
-    letterSpacing: 1.2,
+    letterSpacing: 0.8,
   },
   resultTicketBody: {
     flex: 1,
@@ -676,13 +701,6 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: "#FFF4DF",
     borderBottomWidth: 0,
-  },
-  resultTicketFooterText: {
-    color: colors.white,
-    fontSize: 11,
-    lineHeight: 15,
-    fontWeight: "800",
-    letterSpacing: 0.8,
   },
   ticketOuterLayer: {
     ...StyleSheet.absoluteFill,

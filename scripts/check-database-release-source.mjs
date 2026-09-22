@@ -91,7 +91,7 @@ export const DATABASE_RELEASE_MIGRATIONS = Object.freeze([
   Object.freeze({
     file: '0065_legal_policy_dabboba_net.sql',
     path: 'packages/db/migrations/0065_legal_policy_dabboba_net.sql',
-    sha256: '2aa7be2206b8a936c4a1d65b9bfa653df168478394dd292cb4a9ac4eb9c22ad7',
+    sha256: 'd893ceb9ccd56cf7830b1b73b0e61f58d8663bc596d5fa6e8b4e069def2b64e3',
   }),
 ]);
 

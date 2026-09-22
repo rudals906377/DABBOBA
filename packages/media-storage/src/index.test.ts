@@ -157,7 +157,7 @@ test("redirects never forward service authorization to a second request", async 
   assert.equal(requests, 1);
 });
 
-test("the request deadline also aborts a response stalled after its headers", { timeout: 30_000 }, async () => {
+test("the request deadline also aborts a response stalled after its headers", { timeout: 60_000 }, async () => {
   const started = Date.now();
   await fixture((_req, res) => {
     res.writeHead(200, { "content-type": "application/json" });

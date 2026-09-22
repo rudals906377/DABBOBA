@@ -122,7 +122,7 @@ SUPABASE_URL=https://<운영 project ref>.supabase.co
 SUPABASE_PUBLISHABLE_KEY=<운영 publishable key>
 ```
 
-빌드 명령은 `corepack pnpm run build`, Cloudflare Pages의 운영 정적 출력 디렉터리는 `dist/public-site`입니다. 이 디렉터리에는 공개 정책·지원·탈퇴 문서와 Pages advanced-mode 진입점인 `_worker.js`만 들어갑니다. `dist/client`는 내부 웹 프로토타입까지 포함하므로 운영 정책 도메인에 배포하지 않습니다. Pages 프로젝트에는 위 세 환경변수와 `dist/public-site`만 연결해야 합니다. 저장소에는 Cloudflare 계정 ID, 프로젝트 ID, API 토큰 또는 운영 배포 자격증명을 두지 않으므로 실제 프로젝트 연결과 custom domain 설정은 Cloudflare에서 별도로 완료해야 합니다.
+빌드 명령은 `corepack pnpm run build`, Cloudflare Pages의 운영 정적 출력 디렉터리는 `dist/public-site`입니다. 이 디렉터리에는 공개 사전오픈 랜딩과 정적 자산, 공개 정책·지원·탈퇴 문서, Pages advanced-mode 진입점인 `_worker.js`가 들어갑니다. `dist/client`는 내부 웹 프로토타입까지 포함하므로 운영 도메인에 배포하지 않습니다. Pages 프로젝트에는 위 세 환경변수와 `dist/public-site`만 연결해야 합니다. 저장소에는 Cloudflare 계정 ID, 프로젝트 ID, API 토큰 또는 운영 배포 자격증명을 두지 않으므로 실제 프로젝트 연결과 custom domain 설정은 Cloudflare에서 별도로 완료해야 합니다.
 
 친구 소유 계정으로 이전할 때의 Git 연동, DNS·메일, 검증, 롤백 순서는 `docs/cloudflare-pages-handoff.md`를 따릅니다.
 

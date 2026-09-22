@@ -1,6 +1,7 @@
 import type { Actor } from "../lib/admin-types";
 import { can } from "../lib/capabilities";
 import { ADMIN_NAVIGATION } from "../lib/navigation";
+import { BrandWordmark } from "./brand-wordmark";
 import { SidebarNav } from "./sidebar-nav";
 
 export function AdminShell({ actor, children }: { actor: Actor; children: React.ReactNode }) {
@@ -10,7 +11,7 @@ export function AdminShell({ actor, children }: { actor: Actor; children: React.
     <div className="admin-frame">
       <aside className="admin-sidebar">
         <div className="admin-brand">
-          <strong>DABBOBA</strong>
+          <span className="admin-brand__wordmark-surface"><BrandWordmark /></span>
           <span>OPERATIONS</span>
         </div>
         <SidebarNav items={navigation} />

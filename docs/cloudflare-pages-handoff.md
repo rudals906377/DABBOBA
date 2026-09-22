@@ -41,7 +41,7 @@ PNPM_VERSION=11.22.0
 
 중요:
 
-- `dist/public-site`만 공개한다.
+- 공개 사전오픈 랜딩과 정책·지원·탈퇴 문서가 조립된 `dist/public-site`만 공개한다.
 - `dist/client`는 내부 앱 프로토타입과 미출시 화면을 포함하므로 절대 Pages 출력 경로로 지정하지 않는다.
 - Cloudflare의 `Email Address Obfuscation`은 꺼 둔다. 활성화하면 검토·기록한 정책 HTML의 SHA-256과 실제 공개 본문이 달라진다.
 - 처음에는 Preview 배포 주소에서 검수하고, `main` 배포가 통과한 뒤에만 커스텀 도메인을 연결한다.
@@ -51,7 +51,7 @@ PNPM_VERSION=11.22.0
 
 ## 3. 운영 변수는 API 준비 후 연결
 
-정책 문서는 변수 없이도 공개되지만, 웹 회원탈퇴 인증은 운영 API가 준비될 때까지 의도적으로 `503` 상태로 닫혀 있다. API, Supabase 운영 프로젝트, 이메일 OTP가 모두 준비된 뒤 아래 **공개 값 세 개만** Pages의 Production 환경변수로 등록한다.
+정책 문서는 변수 없이도 공개되며, Google Play의 외부 계정삭제 요청 요건을 위해 자동 인증 연동 전에도 `/account-deletion`에서 `support@dabboba.net`으로 삭제 요청을 보낼 수 있게 유지한다. 자동 웹 본인확인·접수 API는 운영 API가 준비될 때까지 의도적으로 `503` 상태로 닫혀 있다. API, Supabase 운영 프로젝트, 이메일 OTP가 모두 준비된 뒤 아래 **공개 값 세 개만** Pages의 Production 환경변수로 등록한다.
 
 ```text
 DABBOBA_PUBLIC_API_ORIGIN=https://<운영 고객 API origin>
@@ -124,7 +124,7 @@ curl -sS -o /dev/null -w '%{http_code}\n' https://<새-project>.pages.dev/assets
 
 - `/`, `/privacy`, `/terms`, `/support`, `/account-deletion`, OAuth callback: `200`
 - 존재하지 않는 경로와 내부 프로토타입 이미지: `404`
-- API 변수 연결 전 `/account-deletion/runtime-config.json`: `503`가 정상
+- API 변수 연결 전 `/account-deletion/runtime-config.json`: `503`가 정상이며 계정삭제 페이지의 이메일 요청 경로는 계속 노출
 - API 변수 연결 후 runtime config와 실제 인증 흐름: 정상 응답
 - 공개 페이지 응답에 CSP 등 보안 헤더 존재
 - `www` 접속은 `https://dabboba.net`으로 리디렉션
@@ -147,7 +147,7 @@ npx --yes wrangler@4.135.0 pages deploy dist/public-site --project-name <친구-
 
 - 저장소 루트에서 Wrangler를 실행하면 로컬 `.env` 또는 `.dev.vars`를 자동으로 읽을 수 있으므로 운영 배포에 사용하지 않는다.
 - 필요할 때는 `dist/public-site`만 별도 임시 디렉터리에 복사한 뒤 그 디렉터리에서 실행한다.
-- 업로드 전 파일 목록에 `_worker.js`와 `legal/` 외의 앱 프로토타입·비밀 파일이 없는지 확인한다.
+- 업로드 전 파일 목록에 storefront의 `index.html`, 정적 `assets/`, `_worker.js`, `legal/` 외의 앱 프로토타입·비밀 파일이 없는지 확인한다.
 - Global API Key 대신 최소 권한 API token을 사용하고, 토큰을 저장소·문서·터미널 기록에 남기지 않는다.
 
 ## 8. 임시 사이트 정리 시점

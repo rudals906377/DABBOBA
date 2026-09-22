@@ -372,7 +372,7 @@ test("Expo entry is native-first with typed routes, API contracts, secure tokens
 });
 
 test("native Home follows the operator-defined editorial structure and layoutKind geometry", () => {
-  assert.match(homeSource, /원하는 거 다 뽑아/);
+  assert.match(homeSource, /원하는 거 다 뽀바/);
   const tickerIndex = homeSource.indexOf("<HomeAnnouncement");
   const introIndex = homeSource.indexOf("<HomeIntroBanner");
   const recentDrawIndex = homeSource.indexOf("<RecentDrawActivityPanel");

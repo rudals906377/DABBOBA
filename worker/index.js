@@ -11,8 +11,8 @@ export default {
     if (accountDeletionResponse) return accountDeletionResponse;
 
     const policyRoutes = new Map([
-      ["/", { assetPath: "/legal/" }],
-      ["/index.html", { assetPath: "/legal/" }],
+      ["/", { assetPath: "/index.html" }],
+      ["/index.html", { assetPath: "/index.html" }],
       ["/privacy", { assetPath: "/legal/privacy/" }],
       ["/privacy/", { assetPath: "/legal/privacy/" }],
       ["/terms", { assetPath: "/legal/terms/" }],
@@ -38,8 +38,9 @@ export default {
     }
 
     if (isPublicSiteHost(requestUrl.hostname)) {
-      if (requestUrl.pathname.startsWith("/legal/") && ["GET", "HEAD"].includes(request.method)) {
-        return withPublicPageHeaders(await env.ASSETS.fetch(request));
+      if (["GET", "HEAD"].includes(request.method)) {
+        const assetResponse = await env.ASSETS.fetch(request);
+        if (assetResponse.status !== 404) return withPublicPageHeaders(assetResponse);
       }
       return withPublicPageHeaders(new Response("Not found", {
         status: 404,

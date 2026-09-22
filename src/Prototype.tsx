@@ -1363,7 +1363,7 @@ export default function Prototype() {
   }, [advanceAuthGeneration, apiRuntime.client]);
 
   useEffect(() => {
-    document.title = "DABBOBA — 원하는 거 다 뽑아";
+    document.title = "DABBOBA — 원하는 거 다 뽀바";
   }, []);
 
   useEffect(() => {
@@ -3072,7 +3072,7 @@ function DabbobaSplash({ state }: { state: Exclude<SplashState, "hidden"> }) {
     <div className="dabboba-splash" data-state={state} role="status" aria-label="DABBOBA 불러오는 중">
       <div className="dabboba-splash-lockup">
         <DabbobaWordmark className="dabboba-splash-wordmark" alt="" />
-        <small>원하는 거 다 뽑아</small>
+        <small>원하는 거 다 뽀바</small>
         <span className="dabboba-splash-loader" aria-hidden="true"><i /><i /><i /><i /></span>
       </div>
     </div>
@@ -3591,7 +3591,7 @@ function CatalogHeader({ flow }: { flow: FlowControls }) {
     <div className="app-toolbar catalog-toolbar">
       <div className="brand-lockup">
         <DabbobaWordmark className="catalog-wordmark" />
-        <span>원하는 거 다 뽑아</span>
+        <span>원하는 거 다 뽀바</span>
       </div>
       <div className="catalog-toolbar-actions">
         <button

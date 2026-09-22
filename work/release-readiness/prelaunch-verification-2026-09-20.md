@@ -10,7 +10,7 @@
 
 PRELAUNCH 코드 범위와 자동검증은 대부분 완료됐고, 결제·주문·추첨·재고 소비·쿠지 입장·유료 배송 신청을 사전오픈 빌드에서 차단하는 방어선도 마련됐다. 그러나 현재 결과물은 아직 App Store/Google Play에 제출할 수 없다.
 
-차단 사유는 기능 코드보다 외부 운영 준비에 있다. 출시 범위는 migration `0064`까지 HEAD에 포함된 깨끗한 기준 커밋으로 고정했고 release source gate도 통과했다. 그러나 운영 DB는 `0051`까지만 적용되어 있으며, 공개 정책 사이트·검증된 로그인 제공자·최신 PRELAUNCH API/worker 배포·서명된 IPA/AAB·실기기 검증·실제 고객지원 메일함이 없다. 따라서 이 문서의 통과 항목은 **코드와 로컬 검증 통과**를 의미할 뿐, 배포 또는 스토어 승인 가능성을 의미하지 않는다.
+차단 사유는 기능 코드보다 외부 운영 준비에 있다. 2026-09-20 초기 기준은 migration `0064`까지였고, 2026-09-22 후속 출시 소스에 공개 정책 도메인을 반영한 `0065`를 추가했다. 현재 제출 범위는 `0065`까지이지만, 운영 DB는 `0051`까지만 적용되어 있으며 검증된 로그인 제공자·최신 PRELAUNCH API/worker 배포·서명된 IPA/AAB·실기기 검증·실제 고객지원 메일함이 없다. 따라서 이 문서의 통과 항목은 **코드와 로컬 검증 통과**를 의미할 뿐, 스토어 승인 가능성을 의미하지 않는다.
 
 ## 2. 구현된 PRELAUNCH 범위
 
@@ -50,18 +50,18 @@ PRELAUNCH 코드 범위와 자동검증은 대부분 완료됐고, 결제·주�
 
 | 검증 | 결과 |
 |---|---:|
-| 루트 Node 단위 테스트 | 789/789 통과 |
+| 루트 Node 단위 테스트 | 795/795 통과 |
 | 루트 TypeScript 테스트 | 6/6 통과 |
 | API 테스트 | 267건 중 243 통과, 24 의도적 skip, 실패 0 |
 | Worker 테스트 | 105/105 통과 |
 | Admin 테스트 | 41/41 통과 |
 | Mobile 구조 테스트 | 38/38 통과 |
 | Contracts 테스트 | 25/25 통과 |
-| 공개 사이트 테스트 | 17/17 통과 |
-| Playwright runtime 테스트 | 9/9 통과 |
-| 전체 build 작업 | 11/11 통과 |
-| 전체 typecheck 작업 | 19/19 통과 |
-| 전체 package test 작업 | 19/19 통과 |
+| 공개 사이트 테스트 | 19/19 통과 |
+| Playwright 상품 소개·runtime 테스트 | 11/11 통과 |
+| 전체 build 작업 | 12/12 통과 |
+| 전체 typecheck 작업 | 20/20 통과 |
+| 전체 package test 작업 | 20/20 통과 |
 | Expo Doctor | 21/21 통과 |
 | Expo 권장 의존성 검사 | 최신 권장 범위 통과 |
 | iOS·Android production bundle 금칙어 검사 | 통과 |
@@ -119,16 +119,15 @@ PRELAUNCH 코드 범위와 자동검증은 대부분 완료됐고, 결제·주�
 ### 해결된 출시 기반
 
 - `7fa57f9`에 migration `0064`까지의 출시 범위를 원자적 PRELAUNCH 기준으로 고정했고, 이후 커밋에서 공개 정책 사이트와 제출 방어선을 보강했다.
-- 전체 build 11/11, typecheck 19/19, package test 19/19, Playwright 9/9, 공개 사이트 17/17을 통과했다.
+- 2026-09-22 현재 전체 build 12/12, typecheck 20/20, package test 20/20, Playwright 11/11, 공개 사이트 19/19를 통과했다.
 - 이 보고서가 포함된 제출 커밋에서 `db:release-source:check`와 원격 PR 검사를 다시 확인한다.
 
 ### P0 — 제출 전에 반드시 해결
 
-1. **공개 도메인·정책·고객지원 미개통**
-   - `dabboba.com`과 `www.dabboba.com` DNS 조회가 `SERVFAIL`이다.
-   - `dabboba.com` MX 조회도 `SERVFAIL`이며 `support@dabboba.com` 송수신 가능 증거가 없다.
-   - `/privacy`, `/terms`, `/support`, `/account-deletion`은 현재 외부에서 HTTPS 200으로 열리지 않는다.
-   - Cloudflare Pages 배포, 루트/www 리디렉션, TLS, 정책 버전·시행일·해시 일치, 실제 메일 송수신을 확인해야 한다.
+1. **고객지원 메일 미개통**
+   - `dabboba.net`과 `www.dabboba.net`, `/privacy`, `/terms`, `/support`, `/account-deletion`의 HTTPS 공개와 `www` 리디렉션은 2026-09-22 외부 스모크 테스트를 통과했다.
+   - `support@dabboba.net`의 MX·SPF·DKIM·DMARC 및 실제 송수신 증거는 아직 없다.
+   - Google Play용 웹 계정삭제 요청 페이지는 유지하되, 실제 지원 메일함 송수신을 확인하기 전에는 완료로 판정하지 않는다.
 
 2. **서명 빌드·스토어 자격증명·실기기 검증 부재**
    - 로컬 Expo CLI가 앱 설정의 EAS project ID를 해석하는 것은 확인했지만, 친구 명의 조직 소유권·지속 가능한 접근 권한·Apple 배포 인증서·프로비저닝·Android keystore·App Store Connect/Play Console 제출 증거가 없다.
@@ -136,9 +135,9 @@ PRELAUNCH 코드 범위와 자동검증은 대부분 완료됐고, 결제·주�
    - 보관함 `/storage` 딥링크를 포함해 실기기에서 전 경로를 다시 검증해야 한다.
 
 3. **운영 DB 및 운영 제공자 검증 부재**
-   - 읽기 전용 release check에서 운영 DB는 65개 중 52개가 일치했고 `0052`~`0064` 13개가 대기 중이다. 역할 분리·TLS·RLS·공개 역할 차단은 통과했다.
+   - 읽기 전용 release check 당시 운영 DB는 65개 중 52개가 일치했고 `0052`~`0064` 13개가 대기 중이었다. 이후 `0065_legal_policy_dabboba_net.sql`이 출시 소스에 추가됐으므로 현재 적용 전 기준은 66개 중 52개 일치, `0052`~`0065` 14개 대기다. 역할 분리·TLS·RLS·공개 역할 차단은 당시 통과했다.
    - 변경 전 AES-256-GCM 논리 백업을 생성해 인증 태그와 SHA-256, 파일·디렉터리 권한을 확인했다. 단, Supabase 관리 schema/extension까지 포함한 플랫폼 복원 증거는 아니다.
-   - `0056`·`0057`은 현재 열리지 않는 `dabboba.com` 정책 URL을 유효 문서로 등록하므로 공개 사이트 확인 전 운영 migration을 강행하지 않았다.
+   - `0056`·`0057`이 참조하는 공개 정책 URL은 후속 migration에서 `dabboba.net`으로 전환했지만, 운영 DB 적용 전 최신 migration 연속성과 정책 버전을 다시 확인해야 한다.
    - 출시 Edge 프로필에 외부에서 검증된 로그인 제공자 목록과 공개 Supabase 키가 없어 배포 gate가 의도대로 차단된다.
    - 현재 운영 API의 `/healthz`와 `/readyz`는 200이지만 최신 계약인 `/v1/public/config`는 404이므로 구버전이다.
    - 실제 운영 설정이 확인된 로그인 제공자만 첫 빌드에 노출해야 한다.
@@ -168,8 +167,8 @@ PRELAUNCH 코드 범위와 자동검증은 대부분 완료됐고, 결제·주�
 다음 조건을 모두 충족한 뒤에만 `GO`로 전환한다.
 
 1. **완료:** 출시 범위를 선별 커밋하고 Git 상태를 깨끗하게 유지하며 release source gate를 통과한다.
-2. 공개 정책 사이트와 검증된 로그인 제공자를 준비한 뒤 migration `0052`~`0064`를 운영 DB에 반영하고 DB release check 65/65를 통과한다.
-3. `dabboba.com` 네 정책 경로와 `support@dabboba.com`을 외부에서 검증한다.
+2. 공개 정책 사이트와 검증된 로그인 제공자를 준비한 뒤 migration `0052`~`0065`를 운영 DB에 반영하고 DB release check 66/66을 통과한다.
+3. `dabboba.net` 네 정책 경로의 공개 상태를 유지하고 `support@dabboba.net` 송수신을 외부에서 검증한다.
 4. 대표 유선번호, 실제 로그인 제공자, APNs/FCM, 탈퇴 외부 연동을 운영 계정으로 검증한다.
 5. `production-prelaunch` 서명 IPA/AAB를 생성하고 iOS·Android 실기기 전체 흐름을 통과한다.
 6. PRELAUNCH 배포 환경에서 주문·결제·추첨·재고·배송 mutation 0건을 로그로 확인한다.
@@ -181,9 +180,9 @@ PRELAUNCH 코드 범위와 자동검증은 대부분 완료됐고, 결제·주�
 
 - 기존에 설정된 사업자 연락처는 앱 사업자정보·공개 약관·개인정보처리방침에서 동일하게 유지한다. 소유자 검증을 마친 연락처로 간주하지 않으며, PG 심사용 유선 또는 대표번호는 계정 소유자가 실제 번호를 확인하기 전까지 출시 게이트를 통과시키지 않는다.
 - iOS 앱 설정에 Sign in with Apple capability 선언을 추가했다. Apple Developer Team ID와 서명 자격 증명은 계정 소유자가 확인한 값만 사용한다.
-- 공개 정책 도메인용 산출물을 `dist/public-site`로 분리해 앱 프로토타입과 내부 자산이 정책 사이트에 함께 배포되지 않도록 했다. 임시 검수용 `https://dabboba.pages.dev`는 친구 계정의 최종 운영 배포가 아니며, 공개 사이트 Worker 테스트는 17/17 통과했다.
+- 공개 사전오픈 랜딩과 정책 문서를 `dist/public-site`로 분리해 내부 앱 프로토타입이 운영 사이트에 함께 배포되지 않도록 했다. 임시 검수용 `https://dabboba.pages.dev`는 친구 계정의 최종 운영 배포가 아니며, 공개 사이트 Worker 테스트는 19/19 통과했다.
 - 모바일 출시 구조 검사, 모바일 타입검사, Expo Doctor 21/21, Expo 의존성 검사, production 의존성 보안 감사, PRELAUNCH iOS·Android 번들 금칙어 검사가 통과했다.
-- 전체 workspace 검증은 build 11/11, typecheck 19/19, package test 19/19, Playwright 9/9, 사이트 테스트 17/17로 통과했다. 테스트 단계는 생성 디렉터리 경합과 고부하 타임아웃을 피하도록 순차화했고, 제품의 실제 미디어 타임아웃 경계는 별도 16/16 테스트로 확인했다.
+- 당시 전체 workspace 검증은 build 11/11, typecheck 19/19, package test 19/19, Playwright 9/9, 사이트 테스트 17/17로 통과했다. 테스트 단계는 생성 디렉터리 경합과 고부하 타임아웃을 피하도록 순차화했고, 제품의 실제 미디어 타임아웃 경계는 별도 16/16 테스트로 확인했다.
 - EAS `production-prelaunch`와 `production-live` 설정은 고정된 Node·pnpm 버전과 각 commerce capability를 사용하며, EAS lifecycle hook이 출시 설정 및 실제 iOS·Android 번들 검사를 자동 실행한다. 현재 EAS Production 환경의 운영 변수와 서명 자격증명은 아직 소유자가 등록·검증해야 한다.
 - PRELAUNCH Expo config에서는 PortOne native plugin이 제거되어 결제 앱 URL scheme과 package query가 들어가지 않고, LIVE config에만 포함되는 것을 구조 테스트와 Expo config introspection으로 확인했다.
-- `dabboba.com`은 여전히 DNS 해석이 되지 않아 정책·지원·계정삭제 URL과 지원 메일 검증은 미완료다. Apple 서명 인증과 App Store Connect 앱 레코드, Google Play 계정 확인도 외부 계정 단계로 남아 있으므로 공개 제출 판정은 계속 **NO-GO**다.
+- `dabboba.net`과 `www.dabboba.net`은 HTTPS로 열리고 네 정책 경로도 200 응답을 확인했다. 다만 `support@dabboba.net` 송수신과 자동 웹 탈퇴 연동은 아직 검증되지 않았다. Apple 서명 인증과 App Store Connect 앱 레코드, Google Play 계정 확인도 외부 계정 단계로 남아 있으므로 공개 제출 판정은 계속 **NO-GO**다.

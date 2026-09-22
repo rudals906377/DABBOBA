@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { getAdminSession } from "../../lib/auth";
 import type { SearchParams } from "../../lib/admin-types";
 import { first } from "../../components/operations";
+import { BrandWordmark } from "../../components/brand-wordmark";
 import { safeInternalPath } from "../../lib/request-security";
 
 const ERROR_MESSAGES: Record<string, string> = {
@@ -23,7 +24,10 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
   return (
     <main className="login-shell">
       <section className="login-brand">
-        <div><strong>DABBOBA</strong><br /><span>PRIVILEGED OPERATIONS</span></div>
+        <div className="login-brand__lockup">
+          <span className="login-brand__wordmark-surface"><BrandWordmark /></span>
+          <span>PRIVILEGED OPERATIONS</span>
+        </div>
         <div>
           <h1>운영 판단을<br />안전하게 기록합니다.</h1>
           <p>회원, 커뮤니티, 고객 문의와 카탈로그를 한곳에서 관리합니다. 실제 권한과 모든 상태 변경은 API 서버가 최종 판단합니다.</p>

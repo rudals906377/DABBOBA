@@ -10,6 +10,10 @@
       "dependsOn": ["^build"],
       "outputs": ["dist/**", ".next/**", "!.next/cache/**"]
     },
+    "@dabboba/web#build": {
+      "dependsOn": ["@dabboba/storefront#build", "^build"],
+      "outputs": ["dist/**"]
+    },
     "typecheck": {
       "dependsOn": ["^build"],
       "outputs": []

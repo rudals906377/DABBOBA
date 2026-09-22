@@ -311,7 +311,7 @@ function HomeHeader() {
     <RootPageHeader>
       <View style={styles.brandLockup}>
         <Image source={WORDMARK} resizeMode="contain" style={styles.wordmark} accessibilityLabel="DABBOBA" />
-        <Text variant="finePrint" maxFontSizeMultiplier={2} style={styles.brandTagline}>원하는 거 다 뽑아</Text>
+        <Text variant="finePrint" maxFontSizeMultiplier={2} style={styles.brandTagline}>원하는 거 다 뽀바</Text>
       </View>
     </RootPageHeader>
   );

@@ -4,6 +4,12 @@
 > `work/audits/`, and root-level `design-qa-*.png` files referenced below
 > were moved to `/Users/kyoungmin/Desktop/DBB/UI-history-backups/DABBOBA_repository_cleanup_archive_2026-09-08/ui-history/`.
 > They are production-history evidence, not runtime app assets.
+>
+> Current brand override (2026-09-22): the only active wordmark source is
+> `apps/mobile/assets/brand/dabboba-wordmark.png` (`1170 × 172`) and its
+> byte-identical shipped copies. Earlier dated sections that describe the retired
+> `dabboba-wordmark.svg` or the slogan `원하는 거 다 뽑아` are retained strictly as
+> historical QA evidence and are superseded by the PNG wordmark and `원하는 거 다 뽀바`.
 
 ## Source visuals
 
