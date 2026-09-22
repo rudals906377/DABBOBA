@@ -4,6 +4,32 @@ This document separates repository readiness from evidence that can exist only
 after using external developer accounts, signed artifacts, store consoles, and
 physical devices. A green local check is not App Store or Google Play approval.
 
+The authoritative external ownership checklist is
+[friend-owned-release-accounts.md](friend-owned-release-accounts.md).
+
+## Release ownership boundary — 2026-09-22
+
+The final publisher and operator is the user's designated friend. Apple
+Developer/App Store Connect, Google Play Console, Expo/EAS, GitHub, Cloudflare
+and the domain registrar, Supabase, authentication and push providers, support
+mail, PortOne/KG INICIS, settlement, billing, tax, and seller records must be
+owned or legally controlled by that friend or by a business whose representation
+and control by that friend have been verified.
+The developer may retain only named least-privilege collaborator access.
+
+Apple Team `52HC8BV2BL` belongs to the current developer's individual account.
+Its certificate and provisioning profile are retained temporarily to avoid a
+destructive credential change, but they are not approved for a DABBOBA public
+build, App Store Connect record, TestFlight upload, or submission. Replace them
+with the friend-owned Apple team before producing the first signed artifact.
+
+The public legal identity must also be internally consistent. The store seller
+name, published policy operator, domain and support-mail controller, PG merchant,
+settlement account, tax records, and customer-support contact must identify the
+friend or the same verified friend-controlled business. Do not put personal identifiers
+or recovery details in this repository; retain only non-secret account IDs and
+dated verification evidence.
+
 ## Current repository boundary
 
 - `apps/mobile/eas.json` defines an internal payment-disabled `preview`, an
@@ -21,9 +47,9 @@ physical devices. A green local check is not App Store or Google Play approval.
   and publish this organization project, and its default Android keystore is
   attached. Sign in with Apple is declared, and Apple Team `52HC8BV2BL`
   currently has the Bundle ID, distribution certificate, and provisioning
-  profile. Confirm that this individual team is the intended service owner
-  before creating a public store record. App Store Connect and signed artifact
-  evidence are still missing.
+  profile. This developer-owned individual team is explicitly not the final
+  publisher and must not be used for a public build. App Store Connect and
+  friend-owned signed-artifact evidence are still missing.
 - Android uses a separate transparent safe-zone foreground and the DABBOBA
   green background for its adaptive icon. The signed AAB still needs launcher
   inspection across circle, squircle, and manufacturer masks.
@@ -130,28 +156,46 @@ contact before public submission.
 
 ## External account steps — not performed by repository work
 
-1. Confirm the linked Expo project remains `@dabboba-team/dabboba-mobile` and
-   that its project ID matches `apps/mobile/app.json` before every signed build.
-2. The Apple Bundle ID is registered; create the App Store Connect app record
-   only after confirming the current individual Apple Developer team is the
-   intended service owner. Confirm the Google Play
-   app record, package ownership, agreements, tax/banking state where relevant,
-   and least-privilege submit access. Add submit IDs only after those exact
-   records exist; never add signing keys or service-account JSON to Git.
-3. Produce signed builds from a clean, reviewed commit. `cli.requireCommit` is
+1. Make the friend the durable owner of the Expo/EAS organization, GitHub
+   repository or organization, Cloudflare/domain account, Supabase organization,
+   support mailbox, identity/push providers, and later PG/settlement accounts.
+   Confirm recovery and MFA before reducing the current developer to a scoped
+   collaborator. Do not record personal recovery data or secrets in Git.
+2. Enroll or sign in to the friend-owned paid Apple Developer team and record its
+   non-secret Team ID. Do not use Team `52HC8BV2BL` for DABBOBA release.
+3. Resolve the Bundle ID before creating an App Store Connect record. The current
+   team already registered `com.dabboba.mobile`. Apple allows an App ID to be
+   removed only when it has not been uploaded to App Store Connect, and an App
+   transfer requires at least one released version. Because DABBOBA has no
+   released App Store version, do not attempt the normal app-transfer flow.
+   After confirming the current identifier's upload and Sign in with Apple
+   status in Apple's portal, use one of these reviewed paths:
+   - remove the unused App ID and its obsolete profile from the current team,
+     then register the same Bundle ID and fresh credentials in the friend team;
+   - if Apple does not permit safe reuse, select a new friend-owned Bundle ID and
+     update Expo, deep links, Sign in with Apple, push, auth redirects, and later
+     PG/store configuration before building.
+   See Apple's [App ID removal rules](https://developer.apple.com/help/account/identifiers/delete-an-app-id)
+   and [app-transfer criteria](https://developer.apple.com/help/app-store-connect/transfer-an-app/app-transfer-criteria).
+4. Create the friend-owned Google Play app record and confirm package ownership,
+   agreements, seller identity, tax/banking state where relevant, and
+   least-privilege submit access. Add submit IDs only after those exact records
+   exist; never add signing keys or service-account JSON to Git.
+5. Produce signed builds from a clean, reviewed commit. `cli.requireCommit` is
    intentionally enabled, so uncommitted migrations or UI changes cannot become
    an untraceable store binary.
-4. Upload the first iOS build to TestFlight and the first Android App Bundle to
+6. Upload the first iOS build to TestFlight and the first Android App Bundle to
    a Play internal-testing track. EAS Submit can upload binaries, but store
    metadata, screenshots, review notes, and release decisions still belong in
    App Store Connect and Play Console: <https://docs.expo.dev/deploy/submit-to-app-stores/>.
-5. Do not promote either build until the signed-artifact checks below pass.
+7. Do not promote either build until the signed-artifact checks below pass.
 
 Expo organization access, the existing Android build credential, and the iOS
 distribution certificate/provisioning profile were confirmed on 2026-09-22.
 The fail-closed PRELAUNCH public values were also registered in EAS Production,
 without PortOne or server secrets. No cloud build, TestFlight/Play upload, or
-store submission has been completed yet.
+store submission has been completed yet. These credentials are not release
+approval until the friend-owned account boundary above is satisfied.
 
 ## Signed artifact and device QA
 

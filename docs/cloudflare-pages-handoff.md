@@ -1,6 +1,6 @@
 # DABBOBA Cloudflare Pages 소유권 이전 체크리스트
 
-이 문서는 공개 정책 사이트를 **서비스 소유자인 친구의 Cloudflare 계정**으로 옮길 때 사용하는 운영 체크리스트다. 현재 계정에 배포된 `https://dabboba.pages.dev`는 임시 확인용이며, 최종 서비스 소유권이나 `dabboba.net` 운영 배포로 간주하지 않는다.
+이 문서는 공개 정책 사이트가 **서비스 소유자인 친구의 Cloudflare 계정**에서 운영되도록 확인하거나 이전할 때 사용하는 체크리스트다. 현재 계정에 배포된 `https://dabboba.pages.dev`는 기술 검수에는 사용할 수 있지만, 계정 소유자와 결제 주체가 친구라는 증거가 확인되기 전에는 최종 서비스 소유권으로 간주하지 않는다.
 
 ## 1. 계정과 권한
 
@@ -10,9 +10,9 @@
 - 협업이 필요하면 비밀번호 공유 대신 Cloudflare 멤버 초대와 최소 권한을 사용한다.
 - GitHub 연결도 친구 또는 서비스 조직이 소유한 계정에서 승인한다. 개인 개발자 계정만 승인 주체로 남기지 않는다.
 
-## 2. 새 Pages 프로젝트 만들기
+## 2. Pages 프로젝트 소유권 확인 또는 새 프로젝트 만들기
 
-새 프로젝트는 **Git 연동 방식**으로 만든다. 현재 임시 프로젝트를 계정 이전 대상으로 삼지 않으며, 친구 계정에서 새 프로젝트를 만든다. Cloudflare도 Direct Upload 프로젝트를 나중에 Git 연동 프로젝트로 변경할 수 없다고 안내한다.
+현재 계정이 친구 소유로 확인되면 기존 Git 연동 프로젝트를 유지할 수 있다. 확인되지 않거나 다른 사람 소유라면 친구 계정에서 **Git 연동 방식**의 새 프로젝트를 만든다. Cloudflare도 Direct Upload 프로젝트를 나중에 Git 연동 프로젝트로 변경할 수 없다고 안내한다.
 
 [Cloudflare Git 연동 안내](https://developers.cloudflare.com/pages/configuration/git-integration/) · [Direct Upload 제한](https://developers.cloudflare.com/pages/get-started/direct-upload/)
 
@@ -37,7 +37,7 @@ NODE_VERSION=24
 PNPM_VERSION=11.22.0
 ```
 
-2026-09-22 현재 친구 계정의 Pages 프로젝트 `dabboba`에는 위 설정이 적용되어 있으며, PR #1 병합 전 검증을 위해 운영 브랜치를 임시로 `feat/dabboba-capsule-gacha`에 두었다. 병합 후에는 반드시 `main`으로 되돌린다.
+2026-09-22 현재 접속 중인 Cloudflare 계정에는 Pages 프로젝트 `dabboba`, `dabboba.net` zone, Email Routing이 존재한다. 계정에는 활성 Super Administrator가 한 명만 보이지만 그 관리자가 지정 친구인지, 복구·결제 주체가 친구인지, 2FA가 활성화됐는지는 확인되지 않았다. 현재 production branch도 대시보드에서 `main`인지 다시 확인해야 한다. 이 세 가지가 확인되기 전에는 최종 운영 계정으로 판정하지 않는다.
 
 중요:
 
@@ -45,7 +45,7 @@ PNPM_VERSION=11.22.0
 - `dist/client`는 내부 앱 프로토타입과 미출시 화면을 포함하므로 절대 Pages 출력 경로로 지정하지 않는다.
 - Cloudflare의 `Email Address Obfuscation`은 꺼 둔다. 활성화하면 검토·기록한 정책 HTML의 SHA-256과 실제 공개 본문이 달라진다.
 - 처음에는 Preview 배포 주소에서 검수하고, `main` 배포가 통과한 뒤에만 커스텀 도메인을 연결한다.
-- 현재 `dabboba.pages.dev` 프로젝트가 존재하므로 친구 계정의 새 프로젝트는 다른 임시 프로젝트명을 사용할 수 있다. 최종 사용자는 `dabboba.net`으로 접속하므로 임시 `*.pages.dev` 이름을 맞추기 위해 기존 프로젝트를 먼저 삭제하지 않는다.
+- 현재 `dabboba.pages.dev` 프로젝트가 존재하므로 이전이 필요할 때 친구 계정의 새 프로젝트는 다른 임시 프로젝트명을 사용할 수 있다. 최종 사용자는 `dabboba.net`으로 접속하므로 임시 `*.pages.dev` 이름을 맞추기 위해 기존 프로젝트를 먼저 삭제하지 않는다.
 
 [Cloudflare 빌드 설정](https://developers.cloudflare.com/pages/configuration/build-configuration/) · [빌드 런타임 버전 설정](https://developers.cloudflare.com/pages/configuration/build-image/)
 
@@ -78,7 +78,7 @@ SUPABASE_PUBLISHABLE_KEY=<운영 publishable key>
 
 ### Pages 연결
 
-- [x] 친구 계정의 Pages 프로젝트에서 Custom domains에 `dabboba.net`을 먼저 추가
+- [x] 현재 Pages 프로젝트에서 Custom domains에 `dabboba.net`을 먼저 추가
 - [x] 인증서가 Active가 되고 HTTPS가 정상인지 확인
 - [x] `www.dabboba.net`을 추가하고 루트 도메인으로 리디렉션
 - [x] 수동 CNAME만 먼저 만들지 않는다. Pages의 Custom domains 절차를 통해 연결한다.
@@ -89,11 +89,12 @@ SUPABASE_PUBLISHABLE_KEY=<운영 publishable key>
 
 `support@dabboba.net`을 실제 송수신 가능한 메일함으로 만든 뒤 메일 공급자가 안내하는 값을 그대로 등록한다.
 
-- [ ] MX 레코드
-- [ ] SPF TXT 레코드
+- [x] MX 레코드
+- [x] SPF TXT 레코드
 - [ ] DKIM TXT/CNAME 레코드
 - [ ] DMARC TXT 레코드(초기에는 보고 수집 후 차단 정책 강화)
-- [ ] 외부 메일 → `support@dabboba.net` 수신 확인
+- [x] 외부 메일 → `support@dabboba.net` 요청이 Cloudflare 로그에서 `Forwarded`가 된 사례 1건 확인
+- [ ] 전달 대상 받은편지함 도착과 운영자 확인까지 검증
 - [ ] `support@dabboba.net` → Gmail/Naver/Daum 발신 및 스팸 여부 확인
 - [ ] 개인정보처리방침·지원 페이지·스토어 메타데이터의 지원 주소가 모두 일치하는지 확인
 
@@ -149,12 +150,14 @@ npx --yes wrangler@4.135.0 pages deploy dist/public-site --project-name <친구-
 - 필요할 때는 `dist/public-site`만 별도 임시 디렉터리에 복사한 뒤 그 디렉터리에서 실행한다.
 - 업로드 전 파일 목록에 storefront의 `index.html`, 정적 `assets/`, `_worker.js`, `legal/` 외의 앱 프로토타입·비밀 파일이 없는지 확인한다.
 - Global API Key 대신 최소 권한 API token을 사용하고, 토큰을 저장소·문서·터미널 기록에 남기지 않는다.
+- 현재 로컬 Wrangler 세션은 브라우저에서 운영 중인 Cloudflare 계정과 다른 계정으로 확인됐다. 소유권과 대상 account ID를 명시적으로 대조하기 전에는 그 로컬 세션으로 운영 Pages를 배포하거나 DNS를 변경하지 않는다.
 
 ## 8. 임시 사이트 정리 시점
 
-현재 계정의 `https://dabboba.pages.dev`는 새 친구 계정 배포가 완료될 때까지 비교·복구용으로 유지한다. 다음 조건을 모두 충족한 뒤에만 기존 임시 프로젝트 정리를 결정한다.
+현재 계정의 `https://dabboba.pages.dev`는 친구 명의 계정의 소유권이 확인되고 운영 배포가 완료될 때까지 비교·복구용으로 유지한다. 다음 조건을 모두 충족한 뒤에만 기존 임시 프로젝트 정리를 결정한다.
 
-- [x] 친구 계정의 Git 연동 Production 배포 성공
+- [ ] Cloudflare 계정의 Account Super Administrator, 복구 이메일, 2FA, 결제·갱신 주체가 친구 또는 친구 사업자인지 본인이 확인
+- [x] 현재 계정의 Git 연동 Production 배포 성공
 - [x] 위 스모크 테스트 통과
 - [x] `dabboba.net`과 `www.dabboba.net` HTTPS 연결 완료
 - [ ] `support@dabboba.net` 송수신 확인
