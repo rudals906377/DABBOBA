@@ -1728,7 +1728,7 @@ final result: local checkout UI verified with documented brand adaptations; prod
 ### Source and rendered evidence
 
 - Source visual truth: `/var/folders/ym/kg6qcm917wv2wdk0qby6y6tw0000gn/T/TemporaryItems/NSIRD_screencaptureui_t1a6W3/스크린샷 2026-09-13 오후 7.04.15.png` (`384 × 330` px). The comparison target is one capsule's angular molded-plastic anatomy, not the pile, chamber, green/beige palette, or background.
-- Generated project asset: `apps/mobile/assets/icons/gacha-capsule-chunky.png` (`128 × 128` transparent PNG), reduced to one original grayscale capsule with a faceted cap, broad cup, raised seam and block highlight.
+- Historical project asset: `apps/mobile/assets/icons/gacha-capsule-chunky.png` (`128 × 128` transparent PNG), reduced to one original grayscale capsule with a faceted cap, broad cup, raised seam and block highlight. It was retired and removed during the 2026-09-22 asset cleanup after the navigation moved to the lighter capsule set.
 - Native implementation: `work/qa/gacha-capsule-chunky-final-active-2026-09-13.png` and `work/qa/gacha-capsule-chunky-final-inactive-2026-09-13.png` (`1206 × 2622` px), captured from the DABBOBA SDK57 iOS Simulator at `402 × 874` logical points / `3×` density.
 - Same-input focused comparison: `work/qa/gacha-capsule-reference-comparison-2026-09-13.png` (`640 × 300` px), containing the full source pile and the final active-tab crop side by side. A focused comparison is appropriate because the source is an asset reference rather than a complete app viewport.
 - State: expanded root navigation on 가챠샵, with the selected background and label visible; the inactive icon was also checked on 쿠지샵.
@@ -1758,7 +1758,7 @@ final result: passed
 
 ### Source and rendered evidence
 
-- Style target: the existing `apps/mobile/assets/icons/gacha-capsule-chunky-active.png` establishes the shared faceted molded-object language; the Kuji subject was generated independently as a text-free ticket rather than copied from another service.
+- Historical style target: the former `apps/mobile/assets/icons/gacha-capsule-chunky-active.png` established the shared faceted molded-object language; that unused capsule asset was retired and removed during the 2026-09-22 cleanup, while the Kuji subject remains an independently generated text-free ticket rather than a copy from another service.
 - Generated source: `/Users/kyoungmin/.codex/generated_images/01a03307-96b0-7562-be08-8081a07e57ee/exec-49ea8598-3609-4f13-b0d6-7c69af00a5e8.png`. The source was transparently trimmed, rotated for a compact diagonal footprint, and reduced without overwriting the generated original.
 - Project assets: `apps/mobile/assets/icons/kuji-ticket-chunky-active.png` and `apps/mobile/assets/icons/kuji-ticket-chunky.png` (`128 × 128` transparent PNG).
 - Native implementation: `work/qa/kuji-ticket-chunky-orange-active-2026-09-13.png` and `work/qa/kuji-ticket-chunky-gray-inactive-2026-09-13.png` (`1206 × 2622` px), captured from the DABBOBA SDK57 iOS Simulator at `402 × 874` logical points / `3×` density.

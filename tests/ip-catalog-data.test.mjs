@@ -24,7 +24,7 @@ test("active Expo assets are grouped by brand, icon and draw responsibility", ()
   for (const relative of [
     "apps/mobile/assets/brand/dabboba-wordmark.png",
     "apps/mobile/assets/icons/app-icon.png",
-    "apps/mobile/assets/icons/product-history-capsule.png",
+    "apps/mobile/assets/icons/adaptive-icon-foreground.png",
     "apps/mobile/assets/draw/gacha/capsule-machine-front-empty.png",
     "apps/mobile/assets/draw/kuji/kuji-ticket-front.png",
   ]) {
