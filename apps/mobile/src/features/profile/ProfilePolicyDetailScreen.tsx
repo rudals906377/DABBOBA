@@ -16,7 +16,7 @@ export function ProfilePolicyDetailScreen() {
   let publicUrl: string | null = null;
   if (policy?.id === "terms") publicUrl = resolvePublicAppLink("terms");
   if (policy?.id === "privacy") publicUrl = resolvePublicAppLink("privacy");
-  if (policy?.id === "exchange-request") publicUrl = "https://dabboba.com/community-operations";
+  if (policy?.id === "exchange-request") publicUrl = "https://dabboba.net/community-operations";
 
   return (
     <SafeAreaView style={styles.safeArea} edges={["top", "bottom", "left", "right"]}>

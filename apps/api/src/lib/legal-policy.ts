@@ -2,8 +2,8 @@ import type { Queryable } from "@dabboba/db";
 import { AppError } from "./errors.js";
 
 export const FALLBACK_REQUIRED_POLICY_VERSIONS = Object.freeze({
-  terms: "2026-09-14",
-  privacy: "2026-09-20",
+  terms: "2026-09-22",
+  privacy: "2026-09-22",
 } as const);
 
 export type RequiredPolicyVersions = {

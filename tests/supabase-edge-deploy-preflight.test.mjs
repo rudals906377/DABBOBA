@@ -150,7 +150,7 @@ test('Supabase Edge release preflight requires a committed source and a passing 
     },
     checkSource() {
       calls.push('source');
-      return { status: 'pass', head: 'a'.repeat(40), latestMigration: '0064_account_deletion_authored_data_cleanup.sql', worktreeClean: true, blockers: [] };
+      return { status: 'pass', head: 'a'.repeat(40), latestMigration: '0065_legal_policy_dabboba_net.sql', worktreeClean: true, blockers: [] };
     },
     runReleaseCheck({ environment }) {
       calls.push('database');
@@ -200,7 +200,7 @@ test('Supabase Edge release preflight rejects a dirty worktree attestation befor
     checkSource: () => ({
       status: 'pass',
       head: 'a'.repeat(40),
-      latestMigration: '0064_account_deletion_authored_data_cleanup.sql',
+      latestMigration: '0065_legal_policy_dabboba_net.sql',
       worktreeClean: false,
       blockers: [],
     }),
@@ -214,7 +214,7 @@ test('Supabase Edge release preflight fails before a database connection when Gi
   await assert.rejects(runSupabaseEdgeReleasePreflight({
     edgeProfile,
     sourceEnvironment: { DATABASE_MIGRATION_URL: 'postgresql://fixture' },
-    checkSource: () => ({ status: 'blocked', head: null, latestMigration: null, blockers: ['required_migration_not_committed:0064_account_deletion_authored_data_cleanup.sql'] }),
+    checkSource: () => ({ status: 'blocked', head: null, latestMigration: null, blockers: ['required_migration_not_committed:0065_legal_policy_dabboba_net.sql'] }),
     runReleaseCheck() { databaseCalled = true; },
   }), /source is not a reviewed Git commit/);
   assert.equal(databaseCalled, false);

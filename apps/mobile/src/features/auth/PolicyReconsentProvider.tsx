@@ -22,8 +22,8 @@ import {
 import { resolveMobileRuntimeConfig, type MobilePlatform } from "@/lib/runtime-config";
 import { colors } from "@/theme";
 
-const TERMS_URL = process.env.EXPO_PUBLIC_DABBOBA_TERMS_URL?.trim() || "https://dabboba.com/terms";
-const PRIVACY_URL = process.env.EXPO_PUBLIC_DABBOBA_PRIVACY_POLICY_URL?.trim() || "https://dabboba.com/privacy";
+const TERMS_URL = process.env.EXPO_PUBLIC_DABBOBA_TERMS_URL?.trim() || "https://dabboba.net/terms";
+const PRIVACY_URL = process.env.EXPO_PUBLIC_DABBOBA_PRIVACY_POLICY_URL?.trim() || "https://dabboba.net/privacy";
 
 type PendingConsent = {
   challenge: PolicyReconsentChallenge;

@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
@@ -11,9 +10,8 @@ const policyMigration = readFile(
   new URL("../migrations/0057_ugc_operations_policy_evidence.sql", import.meta.url),
   "utf8",
 );
-const publicPolicy = readFile(
-  new URL("../../../public/legal/community-operations/index.html", import.meta.url),
-);
+const HISTORICAL_OPERATIONS_SHA256 =
+  "0f489584d8039f6754463956ab154e0f52cc24d401e23c583d7c69ae83b0a848";
 
 test("exchange and wanted content can use the existing report pipeline", async () => {
   const source = await reportMigration;
@@ -28,12 +26,14 @@ test("exchange and wanted content can use the existing report pipeline", async (
 });
 
 test("UGC policy acceptance binds the exact published document in append-only evidence", async () => {
-  const [source, document] = await Promise.all([policyMigration, publicPolicy]);
-  const digest = createHash("sha256").update(document).digest("hex");
+  const source = await policyMigration;
 
   assert.match(source, /policy_key IN \('TERMS','PRIVACY','OPERATIONS'\)/i);
   assert.match(source, /source IN \('MOBILE_LOGIN','WEB_ACCOUNT_DELETION','UGC_OPERATION'\)/i);
   assert.match(source, /'https:\/\/dabboba\.com\/community-operations'/i);
-  assert.match(source, new RegExp(`'OPERATIONS','2026-09-20','${digest}'`, "i"));
+  assert.match(
+    source,
+    new RegExp(`'OPERATIONS','2026-09-20','${HISTORICAL_OPERATIONS_SHA256}'`, "i"),
+  );
   assert.doesNotMatch(source, /GRANT\s+/i);
 });

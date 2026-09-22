@@ -1,6 +1,6 @@
 # DABBOBA Cloudflare Pages 소유권 이전 체크리스트
 
-이 문서는 공개 정책 사이트를 **서비스 소유자인 친구의 Cloudflare 계정**으로 옮길 때 사용하는 운영 체크리스트다. 현재 계정에 배포된 `https://dabboba.pages.dev`는 임시 확인용이며, 최종 서비스 소유권이나 `dabboba.com` 운영 배포로 간주하지 않는다.
+이 문서는 공개 정책 사이트를 **서비스 소유자인 친구의 Cloudflare 계정**으로 옮길 때 사용하는 운영 체크리스트다. 현재 계정에 배포된 `https://dabboba.pages.dev`는 임시 확인용이며, 최종 서비스 소유권이나 `dabboba.net` 운영 배포로 간주하지 않는다.
 
 ## 1. 계정과 권한
 
@@ -42,7 +42,7 @@ PNPM_VERSION=11.22.0
 - `dist/public-site`만 공개한다.
 - `dist/client`는 내부 앱 프로토타입과 미출시 화면을 포함하므로 절대 Pages 출력 경로로 지정하지 않는다.
 - 처음에는 Preview 배포 주소에서 검수하고, `main` 배포가 통과한 뒤에만 커스텀 도메인을 연결한다.
-- 현재 `dabboba.pages.dev` 프로젝트가 존재하므로 친구 계정의 새 프로젝트는 다른 임시 프로젝트명을 사용할 수 있다. 최종 사용자는 `dabboba.com`으로 접속하므로 임시 `*.pages.dev` 이름을 맞추기 위해 기존 프로젝트를 먼저 삭제하지 않는다.
+- 현재 `dabboba.pages.dev` 프로젝트가 존재하므로 친구 계정의 새 프로젝트는 다른 임시 프로젝트명을 사용할 수 있다. 최종 사용자는 `dabboba.net`으로 접속하므로 임시 `*.pages.dev` 이름을 맞추기 위해 기존 프로젝트를 먼저 삭제하지 않는다.
 
 [Cloudflare 빌드 설정](https://developers.cloudflare.com/pages/configuration/build-configuration/) · [빌드 런타임 버전 설정](https://developers.cloudflare.com/pages/configuration/build-image/)
 
@@ -58,10 +58,10 @@ SUPABASE_PUBLISHABLE_KEY=<운영 publishable key>
 
 - 데이터베이스 URL, service-role/secret key, 세션 pepper, 결제 키, 전체 `.env` 파일은 Pages에 넣지 않는다.
 - Preview 환경에는 운영 인증값을 복사하지 않는다. 필요하면 별도 staging 값만 사용한다.
-- 위 값을 등록하기 전에는 `dabboba.com`을 운영 API의 허용 origin에 추가하지 않는다.
+- 위 값을 등록하기 전에는 `dabboba.net`을 운영 API의 허용 origin에 추가하지 않는다.
 - 값 등록 후 이메일 OTP 요청·검증, 탈퇴 가능 상태 확인, 탈퇴 요청, 접수번호 조회를 실제 운영 계정으로 다시 검수한다.
 
-## 4. `dabboba.com` 도메인과 DNS
+## 4. `dabboba.net` 도메인과 DNS
 
 도메인은 친구 또는 사업자 명의로 구매하고 갱신 결제 수단과 만료 알림도 소유자 계정에 둔다.
 
@@ -70,41 +70,41 @@ SUPABASE_PUBLISHABLE_KEY=<운영 publishable key>
 - [ ] 도메인 등록자와 결제 주체가 서비스 소유자인지 확인
 - [ ] 현재 DNS의 `A`, `AAAA`, `CNAME`, `MX`, `TXT`, CAA 레코드를 백업
 - [ ] 기존 DNSSEC가 켜져 있다면 등록기관의 기존 DS 레코드를 먼저 해제하고 TTL 만료를 확인
-- [ ] Cloudflare에 `dabboba.com` zone을 추가하고 자동 탐지된 레코드를 검토
-- [ ] Cloudflare가 안내한 네임서버를 도메인 등록기관에 입력
+- [x] Cloudflare에 `dabboba.net` zone을 추가하고 자동 탐지된 레코드를 검토
+- [x] Cloudflare가 안내한 네임서버를 도메인 등록기관에 입력
 
 ### Pages 연결
 
-- [ ] 친구 계정의 Pages 프로젝트에서 Custom domains에 `dabboba.com`을 먼저 추가
+- [ ] 친구 계정의 Pages 프로젝트에서 Custom domains에 `dabboba.net`을 먼저 추가
 - [ ] 인증서가 Active가 되고 HTTPS가 정상인지 확인
-- [ ] `www.dabboba.com`을 추가하고 루트 도메인으로 리디렉션
+- [ ] `www.dabboba.net`을 추가하고 루트 도메인으로 리디렉션
 - [ ] 수동 CNAME만 먼저 만들지 않는다. Pages의 Custom domains 절차를 통해 연결한다.
 
 루트 도메인을 Pages에 연결하려면 해당 zone의 네임서버가 Cloudflare를 향해야 한다. 다른 DNS 사업자를 계속 쓰면서 서브도메인만 연결할 때는 CNAME 방식이 가능하다. 자세한 절차는 [Cloudflare Pages 커스텀 도메인 문서](https://developers.cloudflare.com/pages/configuration/custom-domains/)를 따른다.
 
 ### 이메일 DNS
 
-`support@dabboba.com`을 실제 송수신 가능한 메일함으로 만든 뒤 메일 공급자가 안내하는 값을 그대로 등록한다.
+`support@dabboba.net`을 실제 송수신 가능한 메일함으로 만든 뒤 메일 공급자가 안내하는 값을 그대로 등록한다.
 
 - [ ] MX 레코드
 - [ ] SPF TXT 레코드
 - [ ] DKIM TXT/CNAME 레코드
 - [ ] DMARC TXT 레코드(초기에는 보고 수집 후 차단 정책 강화)
-- [ ] 외부 메일 → `support@dabboba.com` 수신 확인
-- [ ] `support@dabboba.com` → Gmail/Naver/Daum 발신 및 스팸 여부 확인
+- [ ] 외부 메일 → `support@dabboba.net` 수신 확인
+- [ ] `support@dabboba.net` → Gmail/Naver/Daum 발신 및 스팸 여부 확인
 - [ ] 개인정보처리방침·지원 페이지·스토어 메타데이터의 지원 주소가 모두 일치하는지 확인
 
 ### DNSSEC
 
 - [ ] 네임서버 전환과 사이트·메일 확인이 끝난 뒤 Cloudflare에서 DNSSEC 활성화
 - [ ] Cloudflare가 생성한 DS 값을 도메인 등록기관에 등록
-- [ ] `dig DS dabboba.com`과 외부 DNSSEC 검사에서 정상 확인
+- [ ] `dig DS dabboba.net`과 외부 DNSSEC 검사에서 정상 확인
 
 기존 DNSSEC 상태에서 네임서버를 먼저 바꾸면 해석 오류가 날 수 있다. 전환 순서와 TTL 대기는 [Cloudflare DNSSEC 문서](https://developers.cloudflare.com/dns/dnssec/)를 따른다.
 
 ## 5. 공개 전 스모크 테스트
 
-새 프로젝트의 `*.pages.dev` 주소와 최종 `https://dabboba.com` 양쪽에서 아래 항목을 확인한다.
+새 프로젝트의 `*.pages.dev` 주소와 최종 `https://dabboba.net` 양쪽에서 아래 항목을 확인한다.
 
 ```sh
 curl -sS -o /dev/null -w '%{http_code}\n' https://<새-project>.pages.dev/
@@ -124,7 +124,7 @@ curl -sS -o /dev/null -w '%{http_code}\n' https://<새-project>.pages.dev/assets
 - API 변수 연결 전 `/account-deletion/runtime-config.json`: `503`가 정상
 - API 변수 연결 후 runtime config와 실제 인증 흐름: 정상 응답
 - 공개 페이지 응답에 CSP 등 보안 헤더 존재
-- `www` 접속은 `https://dabboba.com`으로 리디렉션
+- `www` 접속은 `https://dabboba.net`으로 리디렉션
 - 모바일 네트워크에서도 HTTPS 경고 없이 열림
 
 ## 6. 배포와 롤백
@@ -153,9 +153,9 @@ npx --yes wrangler@4.135.0 pages deploy dist/public-site --project-name <친구-
 
 - [ ] 친구 계정의 Git 연동 Production 배포 성공
 - [ ] 위 스모크 테스트 통과
-- [ ] `dabboba.com`과 `www.dabboba.com` HTTPS 연결 완료
-- [ ] `support@dabboba.com` 송수신 확인
+- [ ] `dabboba.net`과 `www.dabboba.net` HTTPS 연결 완료
+- [ ] `support@dabboba.net` 송수신 확인
 - [ ] 운영 API 연결 후 회원탈퇴 전체 흐름 확인
 - [ ] 최소 한 개의 이전 성공 배포가 있어 롤백 가능
 
-기존 임시 프로젝트를 지워도 `dabboba.com`은 친구 계정의 Pages 프로젝트에만 연결되어 있어야 한다. 기존 프로젝트에 커스텀 도메인, Git 저장소, 운영 변수 또는 운영 API 권한을 연결하지 않는다.
+기존 임시 프로젝트를 지워도 `dabboba.net`은 친구 계정의 Pages 프로젝트에만 연결되어 있어야 한다. 기존 프로젝트에 커스텀 도메인, Git 저장소, 운영 변수 또는 운영 API 권한을 연결하지 않는다.

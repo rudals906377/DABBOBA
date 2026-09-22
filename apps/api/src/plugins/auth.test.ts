@@ -75,8 +75,8 @@ test("active customer sessions fail closed with exact current policy versions", 
         return {
           rowCount: 2,
           rows: [
-            { policy_key: "PRIVACY", policy_version: "2026-09-20", content_sha256: "b".repeat(64) },
-            { policy_key: "TERMS", policy_version: "2026-09-14", content_sha256: "a".repeat(64) },
+            { policy_key: "PRIVACY", policy_version: "2026-09-22", content_sha256: "b".repeat(64) },
+            { policy_key: "TERMS", policy_version: "2026-09-22", content_sha256: "a".repeat(64) },
           ],
         };
       }
@@ -91,7 +91,7 @@ test("active customer sessions fail closed with exact current policy versions", 
       && error.statusCode === 428
       && error.code === "LEGAL_ACCEPTANCE_REQUIRED"
       && JSON.stringify(error.details) === JSON.stringify({
-        requiredPolicyVersions: { terms: "2026-09-14", privacy: "2026-09-20" },
+        requiredPolicyVersions: { terms: "2026-09-22", privacy: "2026-09-22" },
       }),
   );
   assert.equal(calls, 4);

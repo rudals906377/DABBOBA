@@ -193,7 +193,7 @@ test("wanted request creation is one authenticated idempotent transaction", asyn
   assert.equal((result.body as { id: string }).id, requestId);
   assert.deepEqual(
     queries.find(({ sql }) => sql.includes("FROM user_policy_acceptance_events event"))?.params,
-    [authorId, "2026-09-20"],
+    [authorId, "2026-09-22"],
   );
   assert.deepEqual(queries.find(({ sql }) => sql.includes("SELECT name_ko FROM catalog_ips"))?.params, ["spy-family"]);
   assert.deepEqual(queries.find(({ sql }) => sql.includes("INSERT INTO wanted_requests"))?.params, [

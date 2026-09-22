@@ -124,7 +124,7 @@ test("push device contract exposes registration without returning the provider t
 test("generated public config exposes the fail-closed commerce mode and legal versions", () => {
   const config: components["schemas"]["PublicConfig"] = {
     commerceMode: "PRELAUNCH",
-    requiredPolicyVersions: { terms: "2026-09-14", privacy: "2026-09-20" },
+    requiredPolicyVersions: { terms: "2026-09-22", privacy: "2026-09-22" },
   };
   assert.equal(config.commerceMode, "PRELAUNCH");
 });

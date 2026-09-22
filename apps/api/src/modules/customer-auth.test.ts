@@ -7,12 +7,12 @@ test("customer auth discovery exposes the five approved methods only when live b
   assert.deepEqual(customerLoginProviderDiscovery(null, null), {
     methods: [],
     brokerExchangeConfigured: false,
-    requiredPolicyVersions: { terms: "2026-09-14", privacy: "2026-09-20" },
+    requiredPolicyVersions: { terms: "2026-09-22", privacy: "2026-09-22" },
   });
   assert.deepEqual(customerLoginProviderDiscovery("https://project.supabase.co", null, ["KAKAO"]), {
     methods: [],
     brokerExchangeConfigured: false,
-    requiredPolicyVersions: { terms: "2026-09-14", privacy: "2026-09-20" },
+    requiredPolicyVersions: { terms: "2026-09-22", privacy: "2026-09-22" },
   });
   assert.deepEqual(customerLoginProviderDiscovery(
     "https://project.supabase.co",
@@ -21,15 +21,15 @@ test("customer auth discovery exposes the five approved methods only when live b
   ), {
     methods: ["KAKAO", "EMAIL"],
     brokerExchangeConfigured: true,
-    requiredPolicyVersions: { terms: "2026-09-14", privacy: "2026-09-20" },
+    requiredPolicyVersions: { terms: "2026-09-22", privacy: "2026-09-22" },
   });
 });
 
 test("customer auth rejects absent or stale legal acceptance with exact current versions", () => {
-  const required = { terms: "2026-09-14", privacy: "2026-09-20" };
+  const required = { terms: "2026-09-22", privacy: "2026-09-22" };
   for (const input of [
     {},
-    { acceptedPolicies: { terms: "2026-09-14", privacy: "2026-09-19" } },
+    { acceptedPolicies: { terms: "2026-09-22", privacy: "2026-09-21" } },
   ]) {
     assert.throws(
       () => requiredPolicyAcceptance(input, required),

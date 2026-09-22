@@ -75,15 +75,15 @@ Run the first public PRELAUNCH configuration gate only with the exact public
 build values for the candidate:
 
 ```sh
-EXPO_PUBLIC_DABBOBA_API_URL=https://api.dabboba.com \
+EXPO_PUBLIC_DABBOBA_API_URL=https://api.dabboba.net \
 PAYMENT_PROVIDER=UNCONFIGURED \
 DABBOBA_COMMERCE_MODE=PRELAUNCH \
 EXPO_PUBLIC_SUPABASE_URL=https://... \
 EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY=... \
-EXPO_PUBLIC_DABBOBA_PRIVACY_POLICY_URL=https://dabboba.com/privacy \
-EXPO_PUBLIC_DABBOBA_TERMS_URL=https://dabboba.com/terms \
-EXPO_PUBLIC_DABBOBA_SUPPORT_URL=https://dabboba.com/support \
-EXPO_PUBLIC_DABBOBA_ACCOUNT_DELETION_URL=https://dabboba.com/account-deletion \
+EXPO_PUBLIC_DABBOBA_PRIVACY_POLICY_URL=https://dabboba.net/privacy \
+EXPO_PUBLIC_DABBOBA_TERMS_URL=https://dabboba.net/terms \
+EXPO_PUBLIC_DABBOBA_SUPPORT_URL=https://dabboba.net/support \
+EXPO_PUBLIC_DABBOBA_ACCOUNT_DELETION_URL=https://dabboba.net/account-deletion \
 EXPO_PUBLIC_COMMERCE_CAPABILITY=PRELAUNCH \
 corepack pnpm run release:mobile:check
 ```

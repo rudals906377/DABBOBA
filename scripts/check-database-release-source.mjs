@@ -88,6 +88,11 @@ export const DATABASE_RELEASE_MIGRATIONS = Object.freeze([
     path: 'packages/db/migrations/0064_account_deletion_authored_data_cleanup.sql',
     sha256: 'c3d0832852cca2610aabfb07fef4f85acdc86a5104e0d6ddcca3478661c07a32',
   }),
+  Object.freeze({
+    file: '0065_legal_policy_dabboba_net.sql',
+    path: 'packages/db/migrations/0065_legal_policy_dabboba_net.sql',
+    sha256: '2aa7be2206b8a936c4a1d65b9bfa653df168478394dd292cb4a9ac4eb9c22ad7',
+  }),
 ]);
 
 export const MINIMUM_DATABASE_RELEASE_VERSION =

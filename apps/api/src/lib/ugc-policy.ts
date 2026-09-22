@@ -2,7 +2,7 @@ import type { DatabaseClient, Queryable } from "@dabboba/db";
 import type { FastifyRequest } from "fastify";
 import { AppError, badRequest } from "./errors.js";
 
-export const REQUIRED_UGC_OPERATIONS_POLICY_VERSION = "2026-09-20" as const;
+export const REQUIRED_UGC_OPERATIONS_POLICY_VERSION = "2026-09-22" as const;
 
 type UgcPolicyAcceptanceRow = {
   accepted_at: Date | string;

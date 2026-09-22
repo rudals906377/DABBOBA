@@ -26,8 +26,8 @@ test("public config exposes fail-closed commerce and exact required policy versi
         return {
           rowCount: 2,
           rows: [
-            { policy_key: "PRIVACY", policy_version: "2026-09-20", content_sha256: "b".repeat(64) },
-            { policy_key: "TERMS", policy_version: "2026-09-14", content_sha256: "a".repeat(64) },
+            { policy_key: "PRIVACY", policy_version: "2026-09-22", content_sha256: "b".repeat(64) },
+            { policy_key: "TERMS", policy_version: "2026-09-22", content_sha256: "a".repeat(64) },
           ],
         };
       },
@@ -42,7 +42,7 @@ test("public config exposes fail-closed commerce and exact required policy versi
   });
   assert.deepEqual(body, {
     commerceMode: "PRELAUNCH",
-    requiredPolicyVersions: { terms: "2026-09-14", privacy: "2026-09-20" },
+    requiredPolicyVersions: { terms: "2026-09-22", privacy: "2026-09-22" },
   });
   assert.match(headers.get("cache-control") || "", /max-age=60/);
 });

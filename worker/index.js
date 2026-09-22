@@ -1,8 +1,9 @@
 export default {
   async fetch(request, env) {
     const requestUrl = new URL(request.url);
-    if (requestUrl.hostname === "www.dabboba.com") {
-      requestUrl.hostname = "dabboba.com";
+    if (requestUrl.hostname === "www.dabboba.net") {
+      requestUrl.protocol = "https:";
+      requestUrl.hostname = "dabboba.net";
       return Response.redirect(requestUrl.toString(), 308);
     }
 
@@ -61,7 +62,7 @@ export default {
 };
 
 function isPublicSiteHost(hostname) {
-  return hostname === "dabboba.com"
+  return hostname === "dabboba.net"
     || hostname.endsWith(".pages.dev");
 }
 
@@ -108,7 +109,7 @@ export async function handleAccountDeletionService(
 ) {
   const url = new URL(request.url);
   if (!ACCOUNT_DELETION_ROUTES.has(url.pathname)) return null;
-  if (url.origin !== "https://dabboba.com") return accountDeletionUnavailable();
+  if (url.origin !== "https://dabboba.net") return accountDeletionUnavailable();
 
   const expectedMethod = url.pathname === "/account-deletion/runtime-config.json"
     || url.pathname === "/account-deletion/service/preview"
@@ -239,7 +240,7 @@ async function handleSocialLoginStart(request, runtime, externalFetch) {
     }
 
     const state = randomBase64Url(32);
-    const redirectUrl = new URL("https://dabboba.com/account-deletion/auth/social/callback");
+    const redirectUrl = new URL("https://dabboba.net/account-deletion/auth/social/callback");
     redirectUrl.searchParams.set("state", state);
     const authorizeUrl = new URL(`${runtime.supabaseOrigin}/auth/v1/authorize`);
     authorizeUrl.searchParams.set("provider", SOCIAL_PROVIDER_IDS[provider]);

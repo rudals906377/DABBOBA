@@ -4,12 +4,12 @@ import test from "node:test";
 import worker, { handleAccountDeletionService } from "../worker/index.js";
 
 const accountDeletionRuntime = {
-  DABBOBA_PUBLIC_API_ORIGIN: "https://api.dabboba.com",
+  DABBOBA_PUBLIC_API_ORIGIN: "https://api.dabboba.net",
   SUPABASE_URL: "https://project.supabase.co",
   SUPABASE_PUBLISHABLE_KEY: "sb_publishable_public_web_account_deletion_fixture",
 };
 
-const policyVersions = { terms: "2026-09-20", privacy: "2026-09-20" };
+const policyVersions = { terms: "2026-09-22", privacy: "2026-09-22" };
 const emptyBlockers = {
   pointBalance: 0,
   activeOrderCount: 0,
@@ -31,7 +31,7 @@ function json(body, status = 200) {
 test("redirects the www host to the canonical apex host", async () => {
   let assetFetches = 0;
   const response = await worker.fetch(
-    new Request("https://www.dabboba.com/privacy?source=store"),
+    new Request("http://www.dabboba.net/privacy?source=store"),
     {
       ASSETS: {
         fetch: async () => {
@@ -43,7 +43,7 @@ test("redirects the www host to the canonical apex host", async () => {
   );
 
   assert.equal(response.status, 308);
-  assert.equal(response.headers.get("location"), "https://dabboba.com/privacy?source=store");
+  assert.equal(response.headers.get("location"), "https://dabboba.net/privacy?source=store");
   assert.equal(assetFetches, 0);
 });
 
@@ -78,7 +78,7 @@ test("serves every public policy URL from its static document with security head
   for (const [publicPath, assetPath] of routes) {
     const calls = [];
     const response = await worker.fetch(
-      new Request(`https://dabboba.com${publicPath}?source=store`, {
+      new Request(`https://dabboba.net${publicPath}?source=store`, {
         headers: { accept: "text/html" },
       }),
       {
@@ -106,7 +106,7 @@ test("serves every public policy URL from its static document with security head
 
 test("public hosts never expose the prototype app or its unrelated assets", async () => {
   for (const publicHost of [
-    "dabboba.com",
+    "dabboba.net",
     "dabboba.pages.dev",
     "release-id.dabboba.pages.dev",
     "dabboba-random.pages.dev",
@@ -150,12 +150,12 @@ test("web account deletion stays fail-closed until all public bindings are safe"
   };
   for (const env of [
     {},
-    { ...accountDeletionRuntime, DABBOBA_PUBLIC_API_ORIGIN: "http://api.dabboba.com" },
+    { ...accountDeletionRuntime, DABBOBA_PUBLIC_API_ORIGIN: "http://api.dabboba.net" },
     { ...accountDeletionRuntime, SUPABASE_URL: "https://project.supabase.co/auth/v1" },
     { ...accountDeletionRuntime, SUPABASE_PUBLISHABLE_KEY: "sb_secret_never_public" },
   ]) {
     const response = await handleAccountDeletionService(
-      new Request("https://dabboba.com/account-deletion/runtime-config.json"),
+      new Request("https://dabboba.net/account-deletion/runtime-config.json"),
       env,
       fetcher,
     );
@@ -183,7 +183,7 @@ test("web account deletion stays fail-closed until all public bindings are safe"
 test("web account deletion runtime requires EMAIL and matching live policy versions", async () => {
   const calls = [];
   const response = await handleAccountDeletionService(
-    new Request("https://dabboba.com/account-deletion/runtime-config.json"),
+    new Request("https://dabboba.net/account-deletion/runtime-config.json"),
     accountDeletionRuntime,
     async (url) => {
       calls.push(url);
@@ -207,12 +207,12 @@ test("web account deletion runtime requires EMAIL and matching live policy versi
     expiresAfterSeconds: 600,
   });
   assert.deepEqual(calls.sort(), [
-    "https://api.dabboba.com/v1/auth/providers",
-    "https://api.dabboba.com/v1/public/config",
+    "https://api.dabboba.net/v1/auth/providers",
+    "https://api.dabboba.net/v1/public/config",
   ]);
 
   const mismatched = await handleAccountDeletionService(
-    new Request("https://dabboba.com/account-deletion/runtime-config.json"),
+    new Request("https://dabboba.net/account-deletion/runtime-config.json"),
     accountDeletionRuntime,
     async (url) => url.endsWith("/v1/auth/providers")
       ? json({ methods: ["KAKAO"], brokerExchangeConfigured: true, requiredPolicyVersions: policyVersions })
@@ -227,7 +227,7 @@ test("social account deletion uses bounded PKCE and exchanges only an existing p
   const challenge = Buffer.from(digest).toString("base64url");
   const startCalls = [];
   const start = await handleAccountDeletionService(
-    new Request("https://dabboba.com/account-deletion/auth/social/start", {
+    new Request("https://dabboba.net/account-deletion/auth/social/start", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ provider: "KAKAO", codeChallenge: challenge, acceptedPolicies: policyVersions }),
@@ -251,8 +251,8 @@ test("social account deletion uses bounded PKCE and exchanges only an existing p
   assert.equal(authorizationUrl.searchParams.get("provider"), "kakao");
   assert.equal(authorizationUrl.searchParams.get("code_challenge"), challenge);
   assert.equal(authorizationUrl.searchParams.get("code_challenge_method"), "s256");
-  assert.match(authorizationUrl.searchParams.get("redirect_to") ?? "", /https:\/\/dabboba\.com\/account-deletion\/auth\/social\/callback/);
-  assert.deepEqual(startCalls.map(({ url }) => url), ["https://api.dabboba.com/v1/auth/providers"]);
+  assert.match(authorizationUrl.searchParams.get("redirect_to") ?? "", /https:\/\/dabboba\.net\/account-deletion\/auth\/social\/callback/);
+  assert.deepEqual(startCalls.map(({ url }) => url), ["https://api.dabboba.net/v1/auth/providers"]);
   const setCookie = start?.headers.get("set-cookie") ?? "";
   assert.match(setCookie, /^__Host-dabboba_deletion_oauth=/);
   assert.match(setCookie, /HttpOnly/);
@@ -263,7 +263,7 @@ test("social account deletion uses bounded PKCE and exchanges only an existing p
   const customerSession = "z".repeat(43);
   const verifyCalls = [];
   const verified = await handleAccountDeletionService(
-    new Request("https://dabboba.com/account-deletion/auth/social/verify", {
+    new Request("https://dabboba.net/account-deletion/auth/social/verify", {
       method: "POST",
       headers: {
         "content-type": "application/json",
@@ -300,7 +300,7 @@ test("social account deletion uses bounded PKCE and exchanges only an existing p
   assert.equal(verifyCalls.length, 3);
 
   const replay = await handleAccountDeletionService(
-    new Request("https://dabboba.com/account-deletion/auth/social/verify", {
+    new Request("https://dabboba.net/account-deletion/auth/social/verify", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ state: startBody.state, code: "oauth-code-" + "c".repeat(32), codeVerifier: verifier }),
@@ -316,7 +316,7 @@ test("email OTP request never creates a user and does not reveal account existen
   for (const upstreamStatus of [200, 400]) {
     const calls = [];
     const response = await handleAccountDeletionService(
-      new Request("https://dabboba.com/account-deletion/auth/email-otp", {
+      new Request("https://dabboba.net/account-deletion/auth/email-otp", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ email: "Member@Example.com" }),
@@ -342,7 +342,7 @@ test("email OTP request never creates a user and does not reveal account existen
 
   let invalidEmailUpstreamCalls = 0;
   const invalidEmail = await handleAccountDeletionService(
-    new Request("https://dabboba.com/account-deletion/auth/email-otp", {
+    new Request("https://dabboba.net/account-deletion/auth/email-otp", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ email: "not-an-email" }),
@@ -363,7 +363,7 @@ test("email OTP verification exchanges a transient Supabase token for a DABBOBA 
   const supabaseToken = `supabase.${"a".repeat(80)}.token`;
   const customerSession = "s".repeat(43);
   const response = await handleAccountDeletionService(
-    new Request("https://dabboba.com/account-deletion/auth/verify", {
+    new Request("https://dabboba.net/account-deletion/auth/verify", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
@@ -426,7 +426,7 @@ test("web deletion proxies only preview, request, session logout, and receipt-st
   };
 
   const preview = await handleAccountDeletionService(
-    new Request("https://dabboba.com/account-deletion/service/preview", {
+    new Request("https://dabboba.net/account-deletion/service/preview", {
       headers: { authorization: `Bearer ${customerSession}` },
     }),
     accountDeletionRuntime,
@@ -436,7 +436,7 @@ test("web deletion proxies only preview, request, session logout, and receipt-st
   assert.deepEqual(await preview?.json(), { canDeleteNow: true, blockers: emptyBlockers });
 
   const deletion = await handleAccountDeletionService(
-    new Request("https://dabboba.com/account-deletion/service/request", {
+    new Request("https://dabboba.net/account-deletion/service/request", {
       method: "POST",
       headers: {
         authorization: `Bearer ${customerSession}`,
@@ -452,7 +452,7 @@ test("web deletion proxies only preview, request, session logout, and receipt-st
   assert.equal((await deletion?.json()).statusToken, statusToken);
 
   const status = await handleAccountDeletionService(
-    new Request("https://dabboba.com/account-deletion/service/status", {
+    new Request("https://dabboba.net/account-deletion/service/status", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ requestId, statusToken }),
@@ -477,7 +477,7 @@ test("web deletion can revoke an abandoned verified session without exposing API
   const customerSession = "d".repeat(43);
   const calls = [];
   const response = await handleAccountDeletionService(
-    new Request("https://dabboba.com/account-deletion/auth/logout", {
+    new Request("https://dabboba.net/account-deletion/auth/logout", {
       method: "POST",
       headers: { authorization: `Bearer ${customerSession}` },
     }),
@@ -490,12 +490,12 @@ test("web deletion can revoke an abandoned verified session without exposing API
 
   assert.equal(response?.status, 204);
   assert.equal(calls.length, 1);
-  assert.equal(calls[0].url, "https://api.dabboba.com/v1/auth/logout");
+  assert.equal(calls[0].url, "https://api.dabboba.net/v1/auth/logout");
   assert.equal(calls[0].init.headers.authorization, `Bearer ${customerSession}`);
   assert.equal(calls[0].init.redirect, "error");
 
   const unavailable = await handleAccountDeletionService(
-    new Request("https://dabboba.com/account-deletion/auth/logout", {
+    new Request("https://dabboba.net/account-deletion/auth/logout", {
       method: "POST",
       headers: { authorization: `Bearer ${customerSession}` },
     }),
@@ -535,7 +535,7 @@ test("public root explains the prelaunch scope without promising live commerce",
   assert.match(html, /href="\/terms"/);
   assert.match(html, /href="\/support"/);
   assert.match(html, /href="\/account-deletion"/);
-  assert.match(html, /support@dabboba\.com/);
+  assert.match(html, /support@dabboba\.net/);
   assert.doesNotMatch(html, /결제하기|지금 뽑기|구매하기/);
 });
 

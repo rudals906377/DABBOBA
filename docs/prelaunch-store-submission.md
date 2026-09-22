@@ -32,8 +32,8 @@ binary rather than later LIVE commerce plans.
 - Secondary category: Entertainment
 - Promotional text: `좋아하는 작품의 가챠·쿠지 상품을 둘러보고, 새로운 소식과 관심 상품을 한곳에서 확인해 보세요.`
 - Keywords: `가챠,쿠지,피규어,캐릭터,애니메이션,굿즈,컬렉션`
-- Support URL: `https://dabboba.com/support`
-- Privacy policy URL: `https://dabboba.com/privacy`
+- Support URL: `https://dabboba.net/support`
+- Privacy policy URL: `https://dabboba.net/privacy`
 - Marketing URL: leave empty for 1.0.0 unless a separate public product page is approved
 - Copyright: `2026 다뽀바`
 - Price: Free
@@ -50,10 +50,10 @@ deployed data flows. Do not infer those declarations from source code.
 - Free or paid: Free
 - Category: Shopping
 - Short description: `가챠·쿠지 상품을 미리 둘러보고 관심 상품을 저장하는 다뽀바 사전오픈판`
-- Support email: `support@dabboba.com`
+- Support email: `support@dabboba.net`
 - Support phone: unresolved; enter only the account owner's verified business contact
-- Website: `https://dabboba.com/support`
-- Privacy policy: `https://dabboba.com/privacy`
+- Website: `https://dabboba.net/support`
+- Privacy policy: `https://dabboba.net/privacy`
 - Ads: No, unless an advertising SDK or paid placement is added before signing
 
 The developer must still complete Target audience, Content rating, App access,
@@ -75,7 +75,7 @@ DABBOBA는 좋아하는 작품의 가챠·쿠지 상품을 한곳에서 찾고 �
 포인트 환급, 배송 신청은 제공하지 않습니다. 해당 기능이 열리기 전에
 앱 업데이트와 공지를 통해 별도로 안내합니다.
 
-고객지원: support@dabboba.com
+고객지원: support@dabboba.net
 
 ## Review notes
 
@@ -136,9 +136,9 @@ approved first-release diagnostics boundary.
 
 ## External evidence checklist
 
-- [ ] `https://dabboba.com/privacy`, `/terms`, `/support`, and
+- [ ] `https://dabboba.net/privacy`, `/terms`, `/support`, and
   `/account-deletion` return HTTPS 200 without login.
-- [ ] `support@dabboba.com` can send and receive.
+- [ ] `support@dabboba.net` can send and receive.
 - [ ] Legal owner, retention periods, and policy wording were approved.
 - [ ] Image/IP rights evidence is attached to the release record.
 - [ ] Signed IPA/AAB was inspected and tested on physical iOS/Android devices.

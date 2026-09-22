@@ -9,17 +9,17 @@ test("required policy versions come from the two effective published documents",
       return {
         rowCount: 2,
         rows: [
-          { policy_key: "PRIVACY", policy_version: "2026-09-20", content_sha256: "b".repeat(64) },
-          { policy_key: "TERMS", policy_version: "2026-09-14", content_sha256: "a".repeat(64) },
+          { policy_key: "PRIVACY", policy_version: "2026-09-22", content_sha256: "b".repeat(64) },
+          { policy_key: "TERMS", policy_version: "2026-09-22", content_sha256: "a".repeat(64) },
         ],
       };
     },
   } as unknown as Queryable;
   assert.deepEqual(await loadRequiredPolicyDocuments(queryable), {
-    versions: { terms: "2026-09-14", privacy: "2026-09-20" },
+    versions: { terms: "2026-09-22", privacy: "2026-09-22" },
     documents: [
-      { key: "TERMS", version: "2026-09-14", contentSha256: "a".repeat(64) },
-      { key: "PRIVACY", version: "2026-09-20", contentSha256: "b".repeat(64) },
+      { key: "TERMS", version: "2026-09-22", contentSha256: "a".repeat(64) },
+      { key: "PRIVACY", version: "2026-09-22", contentSha256: "b".repeat(64) },
     ],
   });
 });
@@ -29,7 +29,7 @@ test("required policy loading fails closed when one current document is absent",
     async query() {
       return {
         rowCount: 1,
-        rows: [{ policy_key: "TERMS", policy_version: "2026-09-14", content_sha256: "a".repeat(64) }],
+        rows: [{ policy_key: "TERMS", policy_version: "2026-09-22", content_sha256: "a".repeat(64) }],
       };
     },
   } as unknown as Queryable;
