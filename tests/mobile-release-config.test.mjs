@@ -136,6 +136,11 @@ test("production mobile release gate accepts a payment-disabled public prelaunch
   assert.equal(codes.has("PRELAUNCH_PAYMENT_PROVIDER_MUST_BE_UNCONFIGURED"), false);
   assert.equal(codes.has("ENV_EXPO_PUBLIC_PORTONE_STORE_ID_MISSING"), false);
   assert.equal(codes.has("ENV_EXPO_PUBLIC_PORTONE_CHANNEL_KEY_MISSING"), false);
+  assert.equal(codes.has("PG_REVIEW_BUSINESS_PHONE_MOBILE"), false);
+  assert.equal(
+    report.warnings.some((issue) => issue.code === "PG_REVIEW_BUSINESS_PHONE_MOBILE"),
+    true,
+  );
 });
 
 test("production mobile release gate accepts the wired PortOne boundary but blocks stale prelaunch legal copy", () => {
@@ -152,6 +157,7 @@ test("production mobile release gate accepts the wired PortOne boundary but bloc
   assert.equal(codes.has("PORTONE_LIVE_CHANNEL_REQUIRED"), false);
   assert.equal(codes.has("SERVER_COMMERCE_LIVE_REQUIRED"), false);
   assert.equal(codes.has("MOBILE_COMMERCE_LIVE_REQUIRED"), false);
+  assert.equal(codes.has("PG_REVIEW_BUSINESS_PHONE_MOBILE"), true);
   assert.equal(codes.has("LIVE_LEGAL_DOCUMENTS_PRELAUNCH_COPY"), true);
 });
 

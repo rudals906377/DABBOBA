@@ -355,7 +355,7 @@ function validateLiveLegalDocuments(rootDir, environment, errors) {
   }
 }
 
-function validateCardReviewBusinessPhone(rootDir, errors, warnings, structureOnly) {
+function validateCardReviewBusinessPhone(rootDir, errors, warnings, strict) {
   const businessInfoPath = path.join(
     rootDir,
     "apps/mobile/src/features/profile/business-information.ts",
@@ -380,7 +380,7 @@ function validateCardReviewBusinessPhone(rootDir, errors, warnings, structureOnl
   }
   if (/^01(?:0|1|6|7|8|9)/.test(phone)) {
     addIssue(
-      structureOnly ? warnings : errors,
+      strict ? errors : warnings,
       "PG_REVIEW_BUSINESS_PHONE_MOBILE",
       "PG·카드사 심사용 대표전화는 휴대폰 번호가 아닌 사업자 유선 또는 대표번호로 교체해야 합니다.",
     );
@@ -572,7 +572,13 @@ export function inspectMobileReleaseConfig({
   validateEasConfiguration(resolvedRoot, errors);
   validateSourceGates(resolvedRoot, errors);
   validateEnvironmentExample(resolvedRoot, errors);
-  validateCardReviewBusinessPhone(resolvedRoot, errors, warnings, structureOnly && !pgReview);
+  const commerceCapability = environment.EXPO_PUBLIC_COMMERCE_CAPABILITY?.trim();
+  validateCardReviewBusinessPhone(
+    resolvedRoot,
+    errors,
+    warnings,
+    pgReview || (!structureOnly && commerceCapability !== "PRELAUNCH"),
+  );
   if (pgReview) {
     validatePgReviewEnvironment(resolvedRoot, environment, errors);
   } else if (!structureOnly) {

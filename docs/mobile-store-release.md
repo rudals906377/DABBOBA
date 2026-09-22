@@ -17,10 +17,13 @@ physical devices. A green local check is not App Store or Google Play approval.
   uploaded binary.
 - Local Expo CLI resolution matches the configured
   `@dabboba-team/dabboba-mobile` project ID
-  `fa48d52e-3b3c-4e2b-82d5-ae0726382587`. This does not prove the friend's
-  organization ownership or durable access. Sign in with Apple is declared,
-  but the friend's Apple Team ID, certificates, provisioning profiles, App
-  Store Connect record, and signed artifacts still require the account owner.
+  `fa48d52e-3b3c-4e2b-82d5-ae0726382587`. The current Expo account can manage
+  and publish this organization project, and its default Android keystore is
+  attached. Sign in with Apple is declared, and Apple Team `52HC8BV2BL`
+  currently has the Bundle ID, distribution certificate, and provisioning
+  profile. Confirm that this individual team is the intended service owner
+  before creating a public store record. App Store Connect and signed artifact
+  evidence are still missing.
 - Android uses a separate transparent safe-zone foreground and the DABBOBA
   green background for its adaptive icon. The signed AAB still needs launcher
   inspection across circle, squircle, and manufacturer masks.
@@ -119,12 +122,19 @@ to fail during PG onboarding even when all public URLs are supplied; that
 failure is the intended payment-release boundary, not a reason to weaken the
 checker.
 
+The currently registered mobile representative number remains a visible
+warning for a payment-disabled PRELAUNCH build so it does not block creation of
+an internal signed artifact. It is still a hard error for `pg-review` and
+`production-live`, and the account owner must verify the final store review
+contact before public submission.
+
 ## External account steps — not performed by repository work
 
 1. Confirm the linked Expo project remains `@dabboba-team/dabboba-mobile` and
    that its project ID matches `apps/mobile/app.json` before every signed build.
-2. Complete Apple Bundle ID registration and create the App Store Connect app
-   record. Confirm the Apple Developer team, Google Play
+2. The Apple Bundle ID is registered; create the App Store Connect app record
+   only after confirming the current individual Apple Developer team is the
+   intended service owner. Confirm the Google Play
    app record, package ownership, agreements, tax/banking state where relevant,
    and least-privilege submit access. Add submit IDs only after those exact
    records exist; never add signing keys or service-account JSON to Git.
@@ -137,10 +147,11 @@ checker.
    App Store Connect and Play Console: <https://docs.expo.dev/deploy/submit-to-app-stores/>.
 5. Do not promote either build until the signed-artifact checks below pass.
 
-Local Expo CLI project resolution has been observed. The account owner must
-still confirm organization ownership and least-privilege access. No cloud
-build, credential generation, TestFlight/Play upload, or store submission is
-performed by the repository setup above.
+Expo organization access, the existing Android build credential, and the iOS
+distribution certificate/provisioning profile were confirmed on 2026-09-22.
+The fail-closed PRELAUNCH public values were also registered in EAS Production,
+without PortOne or server secrets. No cloud build, TestFlight/Play upload, or
+store submission has been completed yet.
 
 ## Signed artifact and device QA
 
