@@ -11,7 +11,9 @@ export default {
     if (accountDeletionResponse) return accountDeletionResponse;
 
     const policyRoutes = new Map([
-      ["/", { assetPath: "/index.html" }],
+      // Pages serves the root index directly and canonicalizes /index.html back
+      // to /. Rewriting / to /index.html would therefore create a 308 loop.
+      ["/", { assetPath: "/" }],
       ["/index.html", { assetPath: "/index.html" }],
       ["/privacy", { assetPath: "/legal/privacy/" }],
       ["/privacy/", { assetPath: "/legal/privacy/" }],

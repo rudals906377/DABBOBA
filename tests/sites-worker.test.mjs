@@ -64,7 +64,7 @@ test("serves existing static assets without a fallback", async () => {
 
 test("serves the public storefront root and every policy URL with security headers", async () => {
   const routes = new Map([
-    ["/", "/index.html"],
+    ["/", "/"],
     ["/index.html", "/index.html"],
     ["/privacy", "/legal/privacy/"],
     ["/privacy/", "/legal/privacy/"],
