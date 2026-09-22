@@ -1,0 +1,142 @@
+# DABBOBA 고객 로그인 연결 안내
+
+## 최신 승인 방향 · 2026-09-09
+
+최신 사용자 결정은 **카카오·네이버·구글·애플·이메일** 다섯 가지다. 이메일은 **비밀번호 없는 인증번호 방식**이다. 휴대폰 로그인은 고객 선택지에서 제외하되 기존 PHONE identity, 전화번호 및 연결된 계정·주문 데이터는 삭제하지 않는다.
+
+사용자는 **본인확인도 제외하고 SNS·이메일 연결만** 하기로 명시했다. 국내 본인확인, CI/DI 수집, 본인확인 업체 계약과 1인1계정 강제는 이번 범위에서 제외한다. SNS·이메일만으로 동일인의 여러 가입을 확실히 막을 수는 없다. 사용자가 명시적으로 연결한 수단은 동일한 DABBOBA 계정으로 사용하게 한다.
+
+개발 순서는 기존 계정·자동 연결 안전 경계 확인 → 로그인 및 명시적 연결 DB/API·앱 구현 → 로컬 검증 → 승인된 외부 설정 → 실제 로그인/복구/취소/기기 검증이다. 외부 작업은 해당 단계에 필요한 것만 함께 확인하며 마지막에 일괄 숙제로 넘기지 않는다. 요구 확정과 구현·운영 검증 완료를 구분한다.
+
+사용자는 후속 메시지 **“자동연결해줘”**로 Supabase의 인증된 동일 이메일 자동 연결을 승인했다. 이는 이전 수동 연결 전용·모든 다중 identity 거부 검토안을 대체한다. API는 Supabase가 같은 주체(`issuer + sub`)로 인증한 연결을 받아 기존 canonical user ID와 주문·포인트·보관함을 유지한다. 앱이 보낸 이메일 문자열이나 서로 다른 broker 주체의 이메일이 같다는 이유로 별도 DABBOBA 계정을 합치지는 않는다. 이메일이 다르거나 제공되지 않으면 로그인 상태에서 직접 연결하는 경로를 사용한다. [공식 identity linking 설명](https://supabase.com/docs/guides/auth/auth-identity-linking)
+
+Supabase 변경 기록에서 신규 Free 프로젝트의 기본 SMTP 이메일 템플릿 제한을 확인했다. 2026-09-10 운영 프로젝트의 이메일 OTP 길이는 앱과 같은 6자리로 반영했고 실제 메일 발송도 확인했지만, 기본 발송기의 Free 제한 때문에 확인·Magic Link 템플릿 변경은 거절됐다. 코드와 `supabase/templates`에는 두 흐름 모두 `{{ .Token }}`을 표시하는 동일한 한국어 OTP 템플릿을 준비했다. 실제 적용에는 Supabase Pro 전환 또는 custom SMTP 설정이 먼저 필요하며, 적용 전까지 이메일 OTP는 출시 완료로 보지 않는다. [이메일 템플릿 변경](https://supabase.com/changelog/46599-changes-to-email-template-customisation-on-free-tier)
+
+## DBB022 · SNS·이메일 및 명시적 계정 연결 계약
+
+이전 국내 본인확인 adapter 계획은 사용자 요청으로 **파일 생성 전 중단**했다. 해당 모듈·테스트·DB 변경은 생성되지 않았다. PortOne 결제 연동은 별도 범위이며 이 취소로 삭제하거나 변경하지 않는다.
+
+### 사진 참고 화면과 동작
+
+- 기존 회원정보 상세에 계정 정보와 카카오·네이버·구글·애플 연결 상태를 표시한다. 참고 사진의 실제 이름·번호는 코드나 테스트 자료에 복사하지 않는다. 기존 닉네임을 본인확인된 실명으로 표시하지 않는다.
+- 스위치 켜기: 현재 계정 재인증 → 선택한 SNS 인증 → 서버 승인 저장 → 목록 재조회. 로컬 스위치만 켜서 성공으로 표시하지 않는다.
+- 스위치 끄기: 확인 → 재인증 → 실제 연결 해제 → 서버 확인. 마지막 사용 가능한 로그인 수단 해제는 차단한다.
+- 이메일 인증번호는 SNS OAuth 스위치와 별도 경로로 취급한다. 휴대폰 번호가 표시돼도 전화 로그인이나 국내 본인확인이 도입됐다는 의미는 아니다.
+- 취소·중복 탭·인증 만료·통신 오류·부분 성공은 별도 처리하고 주문·포인트·보관함과 canonical user ID를 보존한다.
+
+### 서버 승인 경계와 운영 활성화 조건
+
+자동 연결 승인으로 구현을 재개한다. 먼저 다섯 로그인 방법과 broker가 연결한 동일 주체의 기존 계정 재사용을 구현·검증하고, 직접 연결·해제 화면을 뒤이어 연결한다. 실제 배포·공급자 로그인 검증과 로컬 구현 상태는 별도로 기록한다.
+
+- 일반 로그인은 서명·issuer·audience·만료·비익명 인증 상태와 허용 공급자를 검증하고 Auth 서버의 사용자 조회로 같은 주체인지 확인한다. 여러 허용 identity가 있다는 이유만으로 거부하지 않는다. JWT의 provider 문자열·AMR이나 사용자가 수정 가능한 metadata로 현재 사용한 SNS를 추측하지 않는다.
+- 동일 broker 주체의 동시 로그인도 하나의 DABBOBA 계정만 만들도록 기존 트랜잭션 잠금을 유지한다. 다른 계정에 연결된 주체, 관리자, 정지·탈퇴 계정은 거부하며 기존 주문·잔액은 이동하지 않는다.
+- 직접 연결·해제는 현재 USER 세션과 같은 broker 주체의 재인증, Supabase의 실제 인증·연결·해제 및 서버 재조회를 사용한다. 로컬 상태만 바꾸거나 다른 broker 주체의 토큰으로 현재 계정 상태를 덮어쓰지 않는다.
+- Supabase 자동 연결을 별도 DABBOBA 승인 identity 목록과 비교해 다시 막는 검토안은 폐기한다. 원격 연결 성공 후 앱 종료·통신 실패가 발생해도 다음 인증 시 동일 broker 주체로 안전하게 상태를 복구해야 한다.
+- Supabase manual linking, Google·Apple·Naver·Kakao 설정, 이메일 인증번호 템플릿과 발송 공급자, 실제 기기 callback 검증은 코드 구현과 별도의 운영 단계다. 비용·실제 발송·운영 설정 변경은 그 단계에서 확인한다.
+
+통합 완료 증거는 다섯 방식의 신규/재로그인, 기존 계정으로의 명시적 연결, 다른 계정 연결 거부, 마지막 수단 보호, callback 위조/재사용/만료, 동시 변경과 부분 실패, 정지·탈퇴·관리자 경계, 기존 거래 보존 및 실제 기기 복구를 포함한다. 아직 실행하지 않은 항목은 통과로 기록하지 않는다.
+
+### 배포 순서와 기존 데이터 보존
+
+- `0040_customer_auth_providers.sql`은 기존 공급자 제약에 APPLE·EMAIL만 추가한다. PHONE·LOCAL_ADMIN·DEV와 기존 identity/사용자/거래 데이터는 삭제하지 않는다. 운영 반영은 승인된 migration 연결로 별도 수행한다.
+- `0041_customer_auth_runtime_grant.sql`은 기존 로그인 upsert에 누락된 `auth_identities.verified_at` 열 UPDATE 권한만 제한 API 역할에 추가한다. 사용자 소유권·provider·provider_subject 변경 권한은 주지 않는다. `ON CONFLICT DO UPDATE`는 최초 삽입에서도 해당 권한을 요구하므로 두 migration을 API 배포 전에 적용한다.
+- 운영 DB 제약 확장 → API의 공개 키·다중 공급자 검증 준비 → 실제 공급자 시험 → 앱 배포 순서다. 개발 UI용 로컬 실행기는 의도적으로 외부 Supabase 설정을 전달하지 않으므로 그 화면의 미설정 상태가 운영 인증 완료 증거는 아니다.
+- 다중 identity가 생긴 뒤 과거 세 방식 API로 되돌리면 정상 계정도 거부될 수 있다. 복구 시 호환 API를 유지하고 신규 경로 노출을 조절해야 한다. 기존 APPLE·EMAIL identity를 삭제하거나 제약을 무조건 축소하는 rollback은 하지 않는다.
+
+## 자동 연결 1차 구현 · 2026-09-09 검증 결과
+
+- 다섯 로그인 선택지, 이메일 인증번호 흐름, 서명 JWT와 실시간 Auth 사용자 조회를 조합한 동일 broker 주체 재사용을 로컬 코드에 반영했다. 휴대폰 로그인 UI는 제외했으며 기존 PHONE identity는 보존한다. 사진의 SNS 직접 연결·해제 스위치는 다음 구현 단계이며 아직 제공하지 않는다.
+- 최종 focused 검사 53개 통과·실패 0·skip 0: config/모바일 소스 검사 28개, Auth/API Edge 16개, DB migration/runtime 권한 3개, Edge bundle/Sites 패키징 6개. 서로 중복되는 재실행은 합산하지 않았다.
+- API 통합검사는 **실제 로컬 PostgreSQL + 제한 runtime 역할 + 합성 verified-broker 경계**로 실행했다. 동일 주체 동시 로그인, 카카오 계정에 구글·이메일 추가 후 동일 user ID와 1,250 포인트 보존, 이메일이 같아도 다른 주체는 별도 계정, 기존 PHONE 보존, 관리자·정지·차단·탈퇴 계정 거부를 확인했다. JWT 검사는 실제 서명과 합성 Auth HTTP 응답을 사용했으며 hosted OAuth 성공 증거가 아니다.
+- 테스트 전용 `127.0.0.1:55441/dabboba_edge_test`에 0040·0041을 적용하고 각각 재실행 no-op를 확인했다. 기존 0026의 verified_at UPDATE 누락을 통합검사에서 발견해 0041로 보완했다. identity 소유권/subject UPDATE 거부와 기존 제한 역할 경계도 통과했다.
+- 통합검사 fixture의 nickname 길이와 정리 절차 오류도 수정했다. 합성 사용자 ID에 한해 로컬 owner 트랜잭션으로 자동생성 기록까지 정리하며 append-only 제품 정책은 유지한다. 테스트 후 기존 사용자 수 390명으로 복구됐고 운영 데이터는 변경하지 않았다.
+- config/contracts/API 빌드, 모바일 TypeScript, 보호 runtime 28개 파일 검사, 웹 빌드, Supabase API bundle 빌드가 통과했다. 웹 chunk 크기 및 기존 Fastify logging deprecation 경고는 남아 있다. 환경 파일·API/모바일 package 파일·lockfile은 이번 작업 전과 동일하다.
+- SDK57 iPhone Simulator에서 다섯 선택지의 **서비스 미설정 상태 화면**을 확인했다: `output/auth-auto-link-2026-09-09/login-five-methods.png`. 실제 OAuth/OTP 발송, 개발 서명 앱·실물 기기 callback/세션 복원, hosted Auth 설정, 운영 migration/배포, 직접 연결·해제 및 계정 복구는 아직 완료 증거가 없다.
+
+## 변경 전 구현 기준선
+
+- 변경 전 로그인 선택은 `카카오`, `네이버`, `휴대폰번호` 세 가지였다. 최신 승인 목표는 다섯 가지이며 아래는 과거 기준선이다.
+- 카카오·네이버는 native PKCE callback `dabboba://auth/callback`, 휴대폰은 한국 `010` 번호의 SMS OTP를 사용한다.
+- 앱은 Supabase의 public project URL과 publishable key만 사용한다. secret/service-role key는 앱에 들어가지 않는다.
+- Fastify API가 Supabase access token의 서명·issuer·audience·만료·인증 상태와 허용 provider를 확인한 뒤 별도의 DABBOBA session을 발급한다.
+- 계정은 broker의 `issuer + sub`로 연결한다. 이메일이나 휴대폰 번호가 같다는 이유만으로 카카오·네이버·휴대폰 계정을 자동 병합하지 않는다.
+- PostgreSQL migration `0023_customer_broker_auth.sql`에 이메일 없는 계정과 검증된 E.164 휴대폰 번호 저장 구조가 포함돼 있다.
+
+## 사용자가 직접 해야 하는 설정
+
+아래는 기존 세 가지 방식의 설정 참고 자료이며 지금 전부 수행하라는 요청이 아니다. 이미 존재하는 Supabase 프로젝트를 중복 생성하지 않는다. 실제 해당 단계에 도달하면 필요한 작업만 사용자와 함께 확인한다. 외부 서비스의 소유자 권한, 약관 동의, 결제수단 또는 비밀값이 필요한 부분을 코드 완료로 대신 표시하지 않는다. 비밀값은 채팅이나 Git에 붙이지 말고 배포 환경의 secret manager 또는 각 서비스 콘솔에 직접 입력한다.
+
+### 1. Supabase project와 운영 DB 만들기
+
+1. 서울 또는 최종 운영 지역에 Supabase project를 만든다.
+2. Dashboard에서 project URL과 publishable key를 확인한다.
+3. 운영 API가 사용할 제한 계정 `dabboba_runtime`의 PostgreSQL connection string을 배포 secret manager의 `DATABASE_URL`에 넣는다. worker는 별도 `dabboba_worker` 연결을 `WORKER_DATABASE_URL`로 받고, schema owner인 `postgres` 연결은 `DATABASE_MIGRATION_URL`에 별도로 보관해 단일 migration job에만 주입한다. 세 값 모두 모바일 앱에 넣지 않는다.
+4. Node API 환경에는 `SUPABASE_URL`, `SUPABASE_JWT_AUDIENCE=authenticated`, `SUPABASE_PUBLISHABLE_KEY`를 넣고, 실제 콘솔 설정과 실기기 검증을 끝낸 방식만 `CUSTOMER_AUTH_ENABLED_PROVIDERS`에 쉼표로 나열한다(예: `KAKAO,EMAIL`). 값이 없으면 `/v1/auth/providers`는 로그인 방식을 하나도 노출하지 않는 fail-closed 상태다. 이 public key는 사용자 JWT로 Auth 서버를 재조회하는 데 사용하며 service-role/secret key로 대체하지 않는다. Apple을 노출하려면 API와 탈퇴 worker 양쪽에 같은 `APPLE_TOKEN_ENCRYPTION_KEY`(무작위 32바이트 base64/base64url)와 `APPLE_TOKEN_ENCRYPTION_KEY_VERSION`을 넣고, worker에만 `APPLE_CLIENT_ID`와 `APPLE_CLIENT_SECRET`을 추가한다. Apple refresh token은 로그인 직후 API에서 AES-256-GCM으로 암호화되며 탈퇴 worker가 Apple revoke 성공을 확인한 뒤에만 Supabase 사용자 삭제를 진행한다. 네 값 중 일부가 없거나 복호화/폐기가 실패하면 worker는 로컬 identity와 PII를 유지한 채 재시도한다. Supabase Edge에서는 예약된 사용자 정의 이름 대신 `DABBOBA_API_SUPABASE_PUBLISHABLE_KEY`, `DABBOBA_API_CUSTOMER_AUTH_ENABLED_PROVIDERS`, `DABBOBA_API_APPLE_TOKEN_ENCRYPTION_KEY`, `DABBOBA_API_APPLE_TOKEN_ENCRYPTION_KEY_VERSION`을 사용하거나 플랫폼의 기본 `SUPABASE_ANON_KEY`를 사용한다.
+5. 모바일 build 환경에는 `EXPO_PUBLIC_SUPABASE_URL`, `EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY`만 넣는다.
+6. JWT signing key가 공개 JWKS로 검증 가능한 `ES256` 또는 `RS256` 비대칭 키인지 확인한다. 현재 API는 공유 secret 방식의 `HS256` 토큰을 받지 않는다.
+7. 값 입력이 끝나면 담당 개발자가 Session pooler(5432)의 migration 재실행이 no-op인지, runtime 역할의 허용·차단 권한, `/readyz`, `/v1/auth/providers`를 다시 검증한다.
+
+### 2. 공통 redirect 등록
+
+- Supabase Auth의 redirect allow list: `dabboba://auth/callback**` (PKCE 재개용 `state`와 `sb_flow_id` query를 포함한다.)
+- Kakao/Naver에 등록할 Supabase callback: `https://<project-ref>.supabase.co/auth/v1/callback`
+- App scheme: `dabboba`
+
+Expo Go는 실제 custom-scheme OAuth 출시 증거로 사용하지 않는다. provider 연결 확인은 development build, TestFlight/내부 테스트 build와 실제 iPhone·Android에서 한다.
+
+### 3. 카카오 로그인
+
+1. Kakao Developers에서 사업자 소유 앱을 만들고 Kakao Login을 활성화한다.
+2. 위 Supabase callback URL을 허용 redirect URI로 등록한다.
+3. REST API key와 필요한 client secret을 Supabase의 Kakao provider 설정에 직접 입력한다.
+4. 이메일 권한은 요청하지 않고, 이메일이 없는 사용자도 로그인할 수 있게 설정한다.
+5. 로그인 성공·사용자 취소·동의 철회·재로그인을 실제 테스트 계정으로 확인한다.
+
+### 4. 네이버 로그인
+
+1. Naver Developers에서 사업자 소유 애플리케이션을 만들고 client ID/secret을 발급한다.
+2. 위 Supabase callback URL을 Callback URL로 등록한다.
+3. Supabase에서 `Auto-discovery (OIDC)` 방식으로 만들고 식별자를 반드시 `custom:naver`, issuer를 `https://nid.naver.com`으로 설정한다. scope는 `openid profile`, `email_optional`은 `true`, PKCE는 활성 상태로 둔다.
+4. 이메일 scope는 추가하지 않고, Naver OIDC의 stable `sub`가 Supabase 사용자 식별자에 일관되게 매핑되는지 확인한다.
+5. 실제 계정으로 신규 로그인·재로그인·동의 철회·provider 응답 누락을 확인한다.
+
+카카오·네이버의 위 이메일 최소수집 설정은 기존 설정 참고다. 자동 연결은 공급자가 실제로 제공하고 인증한 이메일이 같은 경우에만 가능하다. 해당 공급자의 이메일 동의·제공 설정을 실제 연결 단계에서 확인하며, 이메일이 없거나 다르면 같은 사람이라고 추측하지 않고 직접 연결을 사용한다. 이번 로컬 코드 변경으로 공급자 콘솔의 동의 항목을 변경하지 않았다.
+
+네이버 provider가 Supabase의 현재 Custom OAuth/OIDC 요구사항을 충족하지 못하면 중간 인증 adapter가 추가로 필요하다. client secret을 앱에 직접 넣는 방식으로 우회하지 않는다.
+
+### 5. 휴대폰번호 로그인 · 제외된 과거 설정 참고
+
+이번 출시 로그인에서는 SMS 및 국내 본인확인을 제외한다. 새 SMS 공급자 계약이나 발송 설정은 요청하지 않는다. 기존 PHONE 계정은 삭제하지 않으며, 해당 계정 사용자의 안전한 로그인 수단 전환·복구는 기존 계정 소유권을 확인한 뒤 별도로 처리한다.
+
+### 6. 출시 전 운영 결정
+
+- Supabase의 인증된 동일 이메일 자동 연결은 승인됐다. 별도 DABBOBA 계정 간의 주문·잔액 병합이나 고객센터 임의 병합은 승인되지 않았다.
+- 같은 이메일이라는 이유만으로 DABBOBA 계정을 합치지 않는다. 본인확인을 제외했으므로 사람 단위 중복 가입 방지는 보장하지 않고, 로그인 상태에서 소유권을 확인한 명시적 연결을 제공한다.
+- provider 또는 Supabase 사용자가 차단·삭제됐을 때 이미 발급된 DABBOBA session을 언제 폐기할지 정책과 webhook/재인증 방식을 확정한다.
+- 개인정보 처리방침에 전화번호, provider 식별자, 처리 목적, 보유 기간, SMS/OAuth 처리위탁과 국외 이전 여부를 실제 계약 기준으로 적는다.
+- Apple 로그인 추가는 이제 사용자 승인 목표에 포함된다. iOS 심사 기준 4.8을 충족하는 동등한 선택지와 실제 로그인·탈퇴 동작을 검증한다.
+
+## 연결 뒤 확인할 완료 기준
+
+- 카카오·네이버·구글·애플·이메일 인증번호 각각 신규 가입과 재로그인이 성공한다. 휴대폰은 선택지에 없고 기존 계정 데이터는 보존된다.
+- 외부 access token은 API에서만 검증되고, 앱에는 DABBOBA session만 남는다.
+- 잘못된 issuer/audience/signature, 만료 token, 익명 계정, 지원하지 않는 provider 및 broker 조회의 주체 불일치는 거부된다. Supabase가 같은 주체로 인증한 허용 다중 identity는 같은 계정을 사용한다.
+- 정지·탈퇴 계정은 로그인할 수 없고, 만료된 DABBOBA session은 앱에서 제거된다.
+- OAuth 취소와 앱 cold/warm start callback이 멈춤 없이 로그인 화면으로 복귀한다.
+- 실제 iPhone·Android development build에서 딥링크와 SecureStore session 복원이 확인된다.
+
+## 공식 참고 문서
+
+- Supabase Kakao login: <https://supabase.com/docs/guides/auth/social-login/auth-kakao>
+- Supabase Custom OAuth providers: <https://supabase.com/docs/guides/auth/custom-oauth-providers>
+- Naver login developer guide: <https://developers.naver.com/docs/login/devguide/devguide.md>
+- Naver OIDC discovery: <https://nid.naver.com/.well-known/openid-configuration>
+- Supabase phone login: <https://supabase.com/docs/guides/auth/phone-login>
+- Supabase Send SMS Hook: <https://supabase.com/docs/guides/auth/auth-hooks/send-sms-hook>
+- Naver Cloud SENS SMS API: <https://api.ncloud-docs.com/docs/sens-sms-send>
+- Naver Cloud SENS sender registration: <https://guide.ncloud-docs.com/docs/sens-callingno>
+- Supabase native mobile deep linking: <https://supabase.com/docs/guides/auth/native-mobile-deep-linking>
+- Supabase JWT signing keys: <https://supabase.com/docs/guides/auth/signing-keys>
+- Supabase identity linking: <https://supabase.com/docs/guides/auth/auth-identity-linking>
+- Expo authentication: <https://docs.expo.dev/guides/authentication/>
+- Apple App Review Guidelines: <https://developer.apple.com/app-store/review/guidelines/>

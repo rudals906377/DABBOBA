@@ -1,0 +1,44 @@
+timeout: 1200s
+steps:
+  - id: build-api
+    name: gcr.io/cloud-builders/docker@sha256:3d00b6c1a9b862621c30fc74d4f2abfc62bcbdee631ed3febd31e7edbdf6252c
+    env:
+      - DOCKER_BUILDKIT=1
+    args:
+      - build
+      - --pull
+      - --target
+      - api-runtime
+      - --tag
+      - ${_API_IMAGE}
+      - .
+  - id: build-worker
+    name: gcr.io/cloud-builders/docker@sha256:3d00b6c1a9b862621c30fc74d4f2abfc62bcbdee631ed3febd31e7edbdf6252c
+    env:
+      - DOCKER_BUILDKIT=1
+    args:
+      - build
+      - --pull
+      - --target
+      - worker-runtime
+      - --tag
+      - ${_WORKER_IMAGE}
+      - .
+  - id: build-migration
+    name: gcr.io/cloud-builders/docker@sha256:3d00b6c1a9b862621c30fc74d4f2abfc62bcbdee631ed3febd31e7edbdf6252c
+    env:
+      - DOCKER_BUILDKIT=1
+    args:
+      - build
+      - --pull
+      - --target
+      - migration-runtime
+      - --tag
+      - ${_MIGRATION_IMAGE}
+      - .
+images:
+  - ${_API_IMAGE}
+  - ${_WORKER_IMAGE}
+  - ${_MIGRATION_IMAGE}
+options:
+  logging: CLOUD_LOGGING_ONLY

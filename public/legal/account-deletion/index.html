@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="robots" content="index,follow">
+  <title>다뽀바 계정 삭제</title>
+  <link rel="stylesheet" href="/legal/styles.css">
+  <script src="/legal/account-deletion/app.js" defer></script>
+</head>
+<body>
+<main>
+  <header>
+    <div class="brand"><img src="/assets/brand/dabboba-wordmark.png" alt="DABBOBA" width="1170" height="172"></div>
+    <h1>계정과 데이터 삭제</h1>
+    <p class="updated">앱을 설치하지 않아도 이메일 본인 확인 후 탈퇴를 요청하고 처리 상태를 확인할 수 있습니다.</p>
+  </header>
+
+  <nav aria-label="정책 및 고객지원">
+    <a href="../privacy/">개인정보처리방침</a>
+    <a href="../terms/">이용약관</a>
+    <a href="../support/">고객지원</a>
+  </nav>
+
+  <section class="deletion-flow" aria-labelledby="web-deletion-title">
+    <h2 id="web-deletion-title">웹에서 바로 탈퇴 요청</h2>
+    <p class="notice">가입 이메일 인증번호 또는 기존 소셜 로그인으로 본인 확인할 수 있습니다. 계정 존재 여부를 보호하기 위해 이메일 인증번호 요청 결과는 항상 같은 문구로 안내합니다.</p>
+
+    <div id="service-loading" class="flow-status" role="status">안전한 탈퇴 요청 화면을 준비하고 있습니다.</div>
+    <div id="service-unavailable" class="flow-status error-panel" role="alert" hidden>
+      <strong>자동 탈퇴 접수 기능을 준비하고 있습니다.</strong>
+      <span>앱을 사용할 수 없는 경우에도 아래 이메일로 계정 삭제를 요청할 수 있습니다. 계정 존재 여부는 메일에서 바로 안내하지 않으며, 안전한 본인 확인 후 처리합니다.</span>
+      <p><a class="button primary" href="mailto:support@dabboba.net?subject=%EB%8B%A4%EB%BD%80%EB%B0%94%20%EA%B3%84%EC%A0%95%20%EC%82%AD%EC%A0%9C%20%EC%9A%94%EC%B2%AD">계정 삭제 요청 이메일 보내기</a></p>
+    </div>
+
+    <div id="receipt-step" class="flow-step" hidden>
+      <div class="step-heading">
+        <span class="step-number" aria-hidden="true">✓</span>
+        <div><h3>탈퇴 요청 처리 상태</h3><p class="muted">이 브라우저에 안전하게 보관된 접수 정보로 조회합니다.</p></div>
+      </div>
+      <dl class="receipt-summary">
+        <div><dt>접수번호</dt><dd id="receipt-id">-</dd></div>
+        <div><dt>처리 상태</dt><dd><span id="receipt-status" class="status-chip">확인 중</span></dd></div>
+        <div><dt>최근 요청</dt><dd id="receipt-updated">-</dd></div>
+      </dl>
+      <p id="receipt-guidance" class="muted"></p>
+      <div class="button-row">
+        <button id="refresh-status-button" class="button primary" type="button">처리 상태 새로고침</button>
+        <button id="clear-receipt-button" class="button" type="button">이 브라우저에서 접수정보 지우기</button>
+      </div>
+    </div>
+
+    <div id="authentication-flow" hidden>
+      <div id="consent-step" class="flow-step">
+        <div class="step-heading">
+          <span class="step-number" aria-hidden="true">1</span>
+          <div><h3>정책 확인</h3><p class="muted">본인 확인을 시작하기 전에 두 문서를 각각 확인해 주세요.</p></div>
+        </div>
+        <label class="check-row">
+          <input id="accept-terms" type="checkbox">
+          <span><a href="../terms/" target="_blank" rel="noopener">이용약관</a>을 확인하고 동의합니다.</span>
+        </label>
+        <label class="check-row">
+          <input id="accept-privacy" type="checkbox">
+          <span><a href="../privacy/" target="_blank" rel="noopener">개인정보처리방침</a>을 확인하고 동의합니다.</span>
+        </label>
+      </div>
+
+      <div id="social-auth-step" class="flow-step" hidden>
+        <div class="step-heading">
+          <span class="step-number" aria-hidden="true">2</span>
+          <div><h3>기존 소셜 계정으로 확인</h3><p class="muted">다뽀바 가입에 사용한 로그인 방식만 선택해 주세요.</p></div>
+        </div>
+        <div id="social-auth-buttons" class="social-auth-grid">
+          <button class="button social-auth-button" type="button" data-provider="KAKAO">카카오로 확인</button>
+          <button class="button social-auth-button" type="button" data-provider="NAVER">네이버로 확인</button>
+          <button class="button social-auth-button" type="button" data-provider="GOOGLE">Google로 확인</button>
+          <button class="button social-auth-button" type="button" data-provider="APPLE">Apple로 확인</button>
+        </div>
+      </div>
+
+      <form id="email-form" class="flow-step" novalidate>
+        <div class="step-heading">
+          <span class="step-number" aria-hidden="true">2</span>
+          <div><h3>이메일로 확인</h3><p class="muted">가입에 사용한 이메일 주소를 입력해 주세요.</p></div>
+        </div>
+        <label class="field-label" for="account-email">이메일</label>
+        <input id="account-email" name="email" type="email" inputmode="email" autocomplete="email" autocapitalize="none" maxlength="254" required aria-describedby="email-help">
+        <p id="email-help" class="field-help">가입 여부와 관계없이 동일한 안내가 표시됩니다.</p>
+        <button id="send-otp-button" class="button primary full-width" type="submit">인증번호 받기</button>
+      </form>
+
+      <form id="otp-form" class="flow-step" novalidate hidden>
+        <div class="step-heading">
+          <span class="step-number" aria-hidden="true">3</span>
+          <div><h3>본인 확인</h3><p id="otp-sent-message" class="muted">인증번호를 확인해 주세요.</p></div>
+        </div>
+        <label class="field-label" for="account-otp">이메일 인증번호 6자리</label>
+        <input id="account-otp" name="otp" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required aria-describedby="otp-help">
+        <p id="otp-help" class="field-help">인증번호는 10분 동안 사용할 수 있습니다.</p>
+
+        <div class="button-row">
+          <button id="verify-otp-button" class="button primary" type="submit">본인 확인</button>
+          <button id="resend-otp-button" class="button" type="button" disabled>60초 후 다시 받기</button>
+          <button id="change-email-button" class="button" type="button">이메일 다시 입력</button>
+        </div>
+      </form>
+
+      <div id="preview-step" class="flow-step" hidden>
+        <div class="step-heading">
+          <span class="step-number" aria-hidden="true">4</span>
+          <div><h3>삭제 전 최종 확인</h3><p class="muted">진행 중인 거래와 보유 항목을 서버에서 다시 확인했습니다.</p></div>
+        </div>
+        <div id="deletion-ready" hidden>
+          <p class="notice">탈퇴 요청을 접수하면 모든 앱 세션이 종료되고, 로그인 연결과 개인정보 삭제 절차가 자동으로 시작됩니다.</p>
+          <label class="check-row danger-check">
+            <input id="confirm-deletion" type="checkbox">
+            <span>삭제되는 정보와 법정 보관 정보를 확인했으며 계정 삭제를 요청합니다.</span>
+          </label>
+          <button id="request-deletion-button" class="button danger full-width" type="button" disabled>계정 삭제 요청</button>
+        </div>
+        <div id="deletion-blocked" class="error-panel" hidden>
+          <strong>먼저 정리해야 하는 항목이 있습니다.</strong>
+          <ul id="blocker-list"></ul>
+          <p>앱 또는 고객지원을 통해 위 항목을 정리한 다음 다시 확인해 주세요.</p>
+          <button id="refresh-preview-button" class="button" type="button">다시 확인</button>
+        </div>
+      </div>
+    </div>
+
+    <p id="flow-message" class="flow-message" role="status" aria-live="polite"></p>
+    <p id="flow-error" class="flow-error" role="alert" aria-live="assertive" hidden></p>
+  </section>
+
+  <section>
+    <h2>앱 안에서 요청</h2>
+    <ol>
+      <li>다뽀바 앱의 내정보를 엽니다.</li>
+      <li>설정 → 로그아웃·회원탈퇴를 선택합니다.</li>
+      <li>화면에 표시된 보유 상품·주문·결제·배송·교환·포인트를 정리한 뒤 탈퇴를 요청합니다.</li>
+    </ol>
+    <p>요청을 접수하면 남은 세션을 종료하고 개인정보 익명화와 연결 로그인 계정 삭제를 자동으로 처리합니다. 관리자 승인은 정상 처리의 필수 단계가 아닙니다.</p>
+  </section>
+
+  <section>
+    <h2>본인 확인이 어려운 경우</h2>
+    <p>가입 이메일을 더 이상 사용할 수 없거나 접수정보를 잃어버린 경우 고객지원으로 문의해 주세요. 문의만으로 계정 존재 여부를 알려드리지 않으며, 안전한 본인 확인을 마친 뒤 처리합니다.</p>
+    <p><a class="button" href="mailto:support@dabboba.net?subject=%EB%8B%A4%EB%BD%80%EB%B0%94%20%EA%B3%84%EC%A0%95%20%EC%82%AD%EC%A0%9C%20%EB%AC%B8%EC%9D%98">support@dabboba.net으로 문의</a></p>
+  </section>
+
+  <section>
+    <h2>삭제되는 정보</h2>
+    <p>로그인 연결, 프로필, 주소, 연락처, 알림 동의, 찜·관심 정보와 법적 보관 의무가 없는 이용 기록을 삭제하거나 계정과 분리합니다. 회원이 작성한 공개 콘텐츠가 운영 중인 경우에도 계정 삭제 절차에서 함께 삭제합니다.</p>
+  </section>
+
+  <section>
+    <h2>보관되는 정보</h2>
+    <p>전자상거래법에 따라 계약·청약철회, 결제 및 재화 공급 기록은 5년, 소비자 불만·분쟁 기록은 3년, 표시·광고 기록은 6개월 보관할 수 있습니다. 이 기록은 일반 회원정보와 분리해 법령상 목적에만 사용하고 기간 종료 후 파기합니다.</p>
+  </section>
+
+  <section>
+    <h2>처리 기간</h2>
+    <p>진행 중인 거래가 없고 본인 확인이 완료된 요청은 관리자 승인 없이 삭제 처리 대기열에 접수됩니다. 외부 로그인 연결 삭제가 일시적으로 실패하면 로그인을 차단한 상태로 안전하게 재시도하고, 접수번호와 완료 상태를 안내합니다.</p>
+  </section>
+
+  <footer>서비스명 다뽀바 · 개발자 다뽀바 · 문의 <a href="mailto:support@dabboba.net">support@dabboba.net</a></footer>
+</main>
+</body>
+</html>

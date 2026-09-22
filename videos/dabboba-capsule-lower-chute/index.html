@@ -1,0 +1,704 @@
+<!doctype html>
+<html lang="ko" data-resolution="portrait">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1080, height=1920" />
+    <title>DABBOBA Capsule — Lower Chute</title>
+    <script src="./assets/vendor/gsap.min.js"></script>
+    <style>
+      :root {
+        --canvas: #f3efe6;
+        --ink: #151515;
+        --lime: #c9f23a;
+        --ivory: #eee8d8;
+        --stone: #8b887f;
+        --glass: rgba(238, 232, 216, 0.12);
+        --shadow: rgba(21, 21, 21, 0.22);
+        --soft-shadow: rgba(21, 21, 21, 0.06);
+        --hairline: rgba(139, 136, 127, 0.08);
+      }
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      html, body {
+        width: 1080px;
+        height: 1920px;
+        overflow: hidden;
+        background: var(--canvas);
+      }
+      body { font-family: Arial, Helvetica, sans-serif; }
+      #stage {
+        position: relative;
+        width: 1080px;
+        height: 1920px;
+        overflow: hidden;
+        isolation: isolate;
+        background: var(--canvas);
+      }
+      #cinematic { position: absolute; inset: 0; overflow: hidden; }
+      #three-layer { display: block; width: 1080px; height: 1920px; }
+      .optical-overlay {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        background:
+          radial-gradient(circle at 50% 45%, transparent 44%, var(--shadow) 150%),
+          linear-gradient(115deg, var(--glass), transparent 29%, transparent 71%, var(--glass));
+        box-shadow: inset 0 0 120px var(--soft-shadow);
+        opacity: 0.7;
+      }
+      .safe-frame {
+        position: absolute;
+        inset: 28px;
+        border: 1px solid var(--hairline);
+        pointer-events: none;
+      }
+      .sr-only {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <main
+      id="stage"
+      data-composition-id="main"
+      data-start="0"
+      data-duration="6"
+      data-fps="60"
+      data-width="1080"
+      data-height="1920"
+    >
+      <section
+        id="cinematic"
+        class="clip"
+        data-start="0"
+        data-duration="6"
+        data-track-index="1"
+        aria-label="DABBOBA capsule machine animation"
+      >
+        <canvas id="three-layer" width="1080" height="1920"></canvas>
+        <div class="optical-overlay" aria-hidden="true"></div>
+        <div class="safe-frame" aria-hidden="true"></div>
+        <span class="sr-only" data-layout-ignore="true">DABBOBA</span>
+      </section>
+    </main>
+
+    <script>
+      window.__timelines = window.__timelines || {};
+      const timelineCursor = { time: 0 };
+      const tl = gsap.timeline({ paused: true });
+      tl.to(timelineCursor, { time: 6, duration: 6, ease: "none" }, 0);
+      tl.to(".optical-overlay", { opacity: 0.62, duration: 3.3, ease: "power2.inOut" }, 0);
+      tl.to(".optical-overlay", { opacity: 0.68, duration: 2.7, ease: "power2.inOut" }, 3.3);
+      window.__timelines.main = tl;
+      tl.seek(0);
+    </script>
+
+    <script type="module">
+      import * as THREE from "./assets/vendor/three.module.min.js";
+
+      const WIDTH = 1080;
+      const HEIGHT = 1920;
+      const DURATION = 6;
+      const PALETTE = Object.freeze({
+        canvas: 0xf3efe6,
+        ink: 0x151515,
+        inner: 0x0c0d0b,
+        graphite: 0x292a27,
+        lime: 0xc9f23a,
+        limeShell: 0xaad525,
+        limeDeep: 0x72990e,
+        ivory: 0xeee8d8,
+        key: 0xfffbef,
+        stone: 0x8b887f,
+        chrome: 0xcfd0c8,
+        shadow: 0x454640,
+      });
+
+      const canvas = document.getElementById("three-layer");
+      const renderer = new THREE.WebGLRenderer({
+        canvas,
+        alpha: false,
+        antialias: true,
+        powerPreference: "high-performance",
+      });
+      renderer.setSize(WIDTH, HEIGHT, false);
+      renderer.setPixelRatio(1);
+      renderer.setClearColor(PALETTE.canvas, 1);
+      renderer.outputColorSpace = THREE.SRGBColorSpace;
+      renderer.toneMapping = THREE.ACESFilmicToneMapping;
+      renderer.toneMappingExposure = 1.08;
+      renderer.shadowMap.enabled = true;
+      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+      const scene = new THREE.Scene();
+      scene.background = new THREE.Color(PALETTE.canvas);
+      scene.fog = new THREE.Fog(PALETTE.canvas, 25, 39);
+
+      const camera = new THREE.PerspectiveCamera(35, WIDTH / HEIGHT, 0.1, 80);
+      camera.position.set(0, 4.7, 21.5);
+      const cameraTarget = new THREE.Vector3(0, 3.72, 0);
+
+      const materials = {
+        matteBlack: new THREE.MeshStandardMaterial({
+          color: PALETTE.ink, roughness: 0.78, metalness: 0.1,
+        }),
+        graphite: new THREE.MeshStandardMaterial({
+          color: PALETTE.graphite, roughness: 0.65, metalness: 0.2,
+        }),
+        innerBlack: new THREE.MeshStandardMaterial({
+          color: PALETTE.inner, roughness: 0.88, metalness: 0.04,
+        }),
+        lime: new THREE.MeshPhysicalMaterial({
+          color: PALETTE.lime,
+          roughness: 0.27,
+          metalness: 0.08,
+          clearcoat: 0.62,
+          clearcoatRoughness: 0.22,
+          emissive: PALETTE.limeDeep,
+          emissiveIntensity: 0.12,
+        }),
+        limeLower: new THREE.MeshPhysicalMaterial({
+          color: PALETTE.limeShell,
+          roughness: 0.34,
+          metalness: 0.06,
+          clearcoat: 0.46,
+          clearcoatRoughness: 0.28,
+          emissive: PALETTE.limeDeep,
+          emissiveIntensity: 0.08,
+        }),
+        ivory: new THREE.MeshPhysicalMaterial({
+          color: PALETTE.ivory,
+          roughness: 0.32,
+          metalness: 0.03,
+          clearcoat: 0.28,
+          clearcoatRoughness: 0.35,
+        }),
+        stone: new THREE.MeshStandardMaterial({
+          color: PALETTE.stone, roughness: 0.62, metalness: 0.2,
+        }),
+        chrome: new THREE.MeshStandardMaterial({
+          color: PALETTE.chrome, roughness: 0.14, metalness: 0.96,
+        }),
+        glass: new THREE.MeshPhysicalMaterial({
+          color: PALETTE.ivory,
+          roughness: 0.15,
+          metalness: 0.02,
+          transparent: true,
+          opacity: 0.13,
+          transmission: 0.16,
+          clearcoat: 1,
+          clearcoatRoughness: 0.08,
+          side: THREE.DoubleSide,
+          depthWrite: false,
+        }),
+        seam: new THREE.MeshStandardMaterial({
+          color: PALETTE.shadow, roughness: 0.42, metalness: 0.66,
+        }),
+        seamGlow: new THREE.MeshStandardMaterial({
+          color: PALETTE.lime,
+          roughness: 0.3,
+          metalness: 0.18,
+          emissive: PALETTE.lime,
+          emissiveIntensity: 0.18,
+        }),
+        bayWord: new THREE.MeshStandardMaterial({
+          color: PALETTE.lime,
+          roughness: 0.3,
+          metalness: 0.12,
+          emissive: PALETTE.lime,
+          emissiveIntensity: 0.1,
+        }),
+        marqueeWord: new THREE.MeshStandardMaterial({
+          color: PALETTE.lime,
+          roughness: 0.34,
+          metalness: 0.1,
+          emissive: PALETTE.limeDeep,
+          emissiveIntensity: 0.26,
+        }),
+      };
+
+      function clamp01(value) {
+        return Math.min(1, Math.max(0, value));
+      }
+      function rangeProgress(time, start, end) {
+        return clamp01((time - start) / (end - start));
+      }
+      function smoothstep(value) {
+        const x = clamp01(value);
+        return x * x * (3 - 2 * x);
+      }
+      function smootherstep(value) {
+        const x = clamp01(value);
+        return x * x * x * (x * (x * 6 - 15) + 10);
+      }
+      function power2In(value) {
+        const x = clamp01(value);
+        return x * x;
+      }
+      function power4Out(value) {
+        const x = clamp01(value);
+        return 1 - Math.pow(1 - x, 4);
+      }
+      function cubicOut(value) {
+        const x = clamp01(value);
+        return 1 - Math.pow(1 - x, 3);
+      }
+
+      function addBox(parent, name, size, position, material, options = {}) {
+        const mesh = new THREE.Mesh(new THREE.BoxGeometry(size[0], size[1], size[2]), material);
+        mesh.name = name;
+        mesh.position.set(position[0], position[1], position[2]);
+        mesh.castShadow = options.castShadow !== false;
+        mesh.receiveShadow = options.receiveShadow !== false;
+        parent.add(mesh);
+        return mesh;
+      }
+
+      function roundedShape(width, height, radius) {
+        const shape = new THREE.Shape();
+        const x = -width / 2;
+        const y = -height / 2;
+        const r = Math.min(radius, width / 2, height / 2);
+        shape.moveTo(x + r, y);
+        shape.lineTo(x + width - r, y);
+        shape.quadraticCurveTo(x + width, y, x + width, y + r);
+        shape.lineTo(x + width, y + height - r);
+        shape.quadraticCurveTo(x + width, y + height, x + width - r, y + height);
+        shape.lineTo(x + r, y + height);
+        shape.quadraticCurveTo(x, y + height, x, y + height - r);
+        shape.lineTo(x, y + r);
+        shape.quadraticCurveTo(x, y, x + r, y);
+        return shape;
+      }
+
+      function addRoundedPanel(parent, name, width, height, depth, radius, position, material) {
+        const geometry = new THREE.ExtrudeGeometry(roundedShape(width, height, radius), {
+          depth,
+          steps: 1,
+          curveSegments: 8,
+          bevelEnabled: true,
+          bevelSegments: 3,
+          bevelSize: 0.055,
+          bevelThickness: 0.055,
+        });
+        geometry.translate(0, 0, -depth / 2);
+        const mesh = new THREE.Mesh(geometry, material);
+        mesh.name = name;
+        mesh.position.set(position[0], position[1], position[2]);
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+        parent.add(mesh);
+        return mesh;
+      }
+
+      function addCylinder(parent, name, radius, height, position, material, rotation = [0, 0, 0]) {
+        const mesh = new THREE.Mesh(
+          new THREE.CylinderGeometry(radius, radius, height, 48, 1),
+          material,
+        );
+        mesh.name = name;
+        mesh.position.set(position[0], position[1], position[2]);
+        mesh.rotation.set(rotation[0], rotation[1], rotation[2]);
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+        parent.add(mesh);
+        return mesh;
+      }
+
+      function createClosedCapsule(radius, upperMaterial, lowerMaterial) {
+        const group = new THREE.Group();
+        const upper = new THREE.Mesh(
+          new THREE.SphereGeometry(radius, 40, 24, 0, Math.PI * 2, 0, Math.PI / 2),
+          upperMaterial,
+        );
+        const lower = new THREE.Mesh(
+          new THREE.SphereGeometry(radius, 40, 24, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2),
+          lowerMaterial,
+        );
+        const seam = new THREE.Mesh(
+          new THREE.TorusGeometry(radius * 0.985, radius * 0.038, 10, 64),
+          materials.seam,
+        );
+        seam.rotation.x = Math.PI / 2;
+        upper.castShadow = true;
+        upper.receiveShadow = true;
+        lower.castShadow = true;
+        lower.receiveShadow = true;
+        seam.castShadow = true;
+        group.add(upper, lower, seam);
+        return group;
+      }
+
+      function createHingedCapsule(radius) {
+        const group = new THREE.Group();
+        const lower = new THREE.Mesh(
+          new THREE.SphereGeometry(radius, 56, 32, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2),
+          materials.limeLower,
+        );
+        lower.name = "selected-lower-shell";
+        lower.castShadow = true;
+        lower.receiveShadow = true;
+
+        const lowerRim = new THREE.Mesh(
+          new THREE.TorusGeometry(radius * 0.986, radius * 0.047, 12, 72),
+          materials.seamGlow,
+        );
+        lowerRim.name = "selected-lower-rim";
+        lowerRim.rotation.x = Math.PI / 2;
+
+        const hingePivot = new THREE.Group();
+        hingePivot.name = "rear-hinge-pivot";
+        hingePivot.position.set(0, 0, -radius * 0.72);
+
+        const upper = new THREE.Mesh(
+          new THREE.SphereGeometry(radius, 56, 32, 0, Math.PI * 2, 0, Math.PI / 2),
+          materials.lime,
+        );
+        upper.name = "selected-upper-shell";
+        upper.position.z = radius * 0.72;
+        upper.castShadow = true;
+        upper.receiveShadow = true;
+
+        const upperRim = new THREE.Mesh(
+          new THREE.TorusGeometry(radius * 0.986, radius * 0.047, 12, 72),
+          materials.seamGlow,
+        );
+        upperRim.name = "selected-upper-rim";
+        upperRim.position.z = radius * 0.72;
+        upperRim.rotation.x = Math.PI / 2;
+        upperRim.castShadow = true;
+
+        const innerDisk = new THREE.Mesh(
+          new THREE.CylinderGeometry(radius * 0.64, radius * 0.64, 0.08, 64),
+          materials.ivory,
+        );
+        innerDisk.name = "ivory-inner-disk";
+        innerDisk.position.y = 0.018;
+        innerDisk.castShadow = true;
+        innerDisk.receiveShadow = true;
+
+        const innerRing = new THREE.Mesh(
+          new THREE.TorusGeometry(radius * 0.48, radius * 0.035, 10, 64),
+          materials.lime,
+        );
+        innerRing.name = "inner-disk-ring";
+        innerRing.rotation.x = Math.PI / 2;
+        innerRing.position.y = 0.066;
+
+        hingePivot.add(upper, upperRim);
+        group.add(lower, lowerRim, innerDisk, innerRing, hingePivot);
+        return { group, hingePivot, lowerRim, upperRim };
+      }
+
+      const PIXEL_FONT = Object.freeze({
+        A: ["01110", "10001", "10001", "11111", "10001", "10001", "10001"],
+        B: ["11110", "10001", "10001", "11110", "10001", "10001", "11110"],
+        D: ["11110", "10001", "10001", "10001", "10001", "10001", "11110"],
+        O: ["01110", "10001", "10001", "10001", "10001", "10001", "01110"],
+      });
+
+      function createPixelWord(text, pixelSize, depth, material) {
+        const group = new THREE.Group();
+        const glyphWidth = 5;
+        const glyphHeight = 7;
+        const letterGap = 1;
+        const totalColumns = text.length * glyphWidth + (text.length - 1) * letterGap;
+        const cellGeometry = new THREE.BoxGeometry(pixelSize * 0.82, pixelSize * 0.82, depth);
+        for (let letterIndex = 0; letterIndex < text.length; letterIndex += 1) {
+          const rows = PIXEL_FONT[text[letterIndex]];
+          for (let row = 0; row < glyphHeight; row += 1) {
+            for (let column = 0; column < glyphWidth; column += 1) {
+              if (rows[row][column] !== "1") continue;
+              const cell = new THREE.Mesh(cellGeometry, material);
+              const globalColumn = letterIndex * (glyphWidth + letterGap) + column;
+              cell.position.set(
+                (globalColumn - (totalColumns - 1) / 2) * pixelSize,
+                ((glyphHeight - 1) / 2 - row) * pixelSize,
+                0,
+              );
+              cell.castShadow = true;
+              group.add(cell);
+            }
+          }
+        }
+        return group;
+      }
+
+      const machine = new THREE.Group();
+      machine.name = "continuous-machine-housing";
+      scene.add(machine);
+
+      addRoundedPanel(machine, "rear-monolith", 6.92, 11.35, 0.46, 0.32, [0, 0.55, -1.16], materials.matteBlack);
+      addRoundedPanel(machine, "left-front-pillar", 0.48, 10.82, 0.66, 0.16, [-3.23, 0.7, 1.08], materials.matteBlack);
+      addRoundedPanel(machine, "right-front-pillar", 0.48, 10.82, 0.66, 0.16, [3.23, 0.7, 1.08], materials.matteBlack);
+      addRoundedPanel(machine, "top-marquee", 6.88, 1.12, 0.72, 0.25, [0, 6.25, 1.02], materials.matteBlack);
+      addRoundedPanel(machine, "bottom-plinth", 6.86, 0.72, 0.72, 0.22, [0, -4.83, 1.0], materials.matteBlack);
+
+      addRoundedPanel(machine, "chamber-back", 6.0, 4.58, 0.16, 0.24, [0, 3.72, -0.82], materials.graphite);
+      addRoundedPanel(machine, "chamber-glass", 5.96, 4.5, 0.06, 0.22, [0, 3.72, 1.39], materials.glass);
+      addBox(machine, "chamber-left-rail", [0.22, 4.72, 0.5], [-2.98, 3.74, 1.3], materials.matteBlack);
+      addBox(machine, "chamber-right-rail", [0.22, 4.72, 0.5], [2.98, 3.74, 1.3], materials.matteBlack);
+      addBox(machine, "chamber-top-rail", [6.05, 0.23, 0.5], [0, 6.04, 1.3], materials.matteBlack);
+      addBox(machine, "chamber-bottom-rail", [6.05, 0.24, 0.52], [0, 1.46, 1.3], materials.matteBlack);
+      const chamberFloor = addBox(
+        machine,
+        "chamber-funnel-floor",
+        [5.95, 0.2, 2.15],
+        [0, 1.58, 0.18],
+        materials.graphite,
+      );
+      chamberFloor.rotation.z = -0.014;
+
+      const marqueeWord = createPixelWord("DABBOBA", 0.108, 0.075, materials.marqueeWord);
+      marqueeWord.name = "exact-dabboba-marquee";
+      marqueeWord.position.set(0, 6.27, 1.45);
+      machine.add(marqueeWord);
+
+      const screwPositions = [
+        [-2.84, 5.77], [2.84, 5.77], [-2.84, 1.7],
+        [2.84, 1.7], [-2.92, -4.43], [2.92, -4.43],
+      ];
+      screwPositions.forEach((position, index) => {
+        addCylinder(
+          machine,
+          "chrome-fastener-" + index,
+          0.09,
+          0.08,
+          [position[0], position[1], 1.68],
+          materials.chrome,
+          [Math.PI / 2, 0, 0],
+        );
+      });
+
+      const upperCapsules = [];
+      const capsuleLayout = [
+        [-2.28, 2.48, 0.15, 0.11, -0.07],
+        [-1.27, 2.42, 0.56, -0.09, 0.12],
+        [1.23, 2.46, 0.52, 0.08, -0.09],
+        [2.28, 2.5, 0.12, -0.06, 0.11],
+        [-2.38, 3.36, 0.58, -0.12, 0.04],
+        [-1.2, 3.3, 0.05, 0.07, -0.08],
+        [0.03, 3.42, 0.62, -0.05, 0.05],
+        [1.2, 3.3, 0.03, 0.11, 0.06],
+        [2.35, 3.38, 0.62, -0.08, -0.05],
+        [-2.3, 4.25, 0.04, 0.06, 0.09],
+        [-1.13, 4.25, 0.58, -0.08, -0.06],
+        [0.04, 4.36, 0.02, 0.04, 0.08],
+        [1.16, 4.25, 0.58, -0.06, 0.04],
+        [2.3, 4.28, 0.04, 0.08, -0.07],
+        [-1.78, 5.13, 0.18, -0.06, 0.05],
+        [-0.62, 5.18, 0.62, 0.05, -0.08],
+        [0.62, 5.18, 0.62, -0.04, 0.07],
+        [1.78, 5.13, 0.18, 0.07, -0.04],
+      ];
+      capsuleLayout.forEach((entry, index) => {
+        const isIvory = index % 3 === 1;
+        const capsule = createClosedCapsule(
+          0.48,
+          isIvory ? materials.ivory : materials.lime,
+          isIvory ? materials.ivory : materials.limeLower,
+        );
+        capsule.name = "closed-chamber-capsule-" + index;
+        capsule.position.set(entry[0], entry[1], entry[2]);
+        capsule.rotation.set(entry[3], 0, entry[4]);
+        capsule.userData.baseY = entry[1];
+        capsule.userData.phase = index * 0.73;
+        machine.add(capsule);
+        upperCapsules.push(capsule);
+      });
+
+      const chute = new THREE.Group();
+      chute.name = "enclosed-internal-vertical-chute";
+      machine.add(chute);
+      addBox(chute, "chute-back", [2.05, 3.68, 0.22], [0, -0.3, -0.85], materials.innerBlack);
+      addBox(chute, "chute-left-wall", [0.23, 3.7, 1.82], [-1.03, -0.3, 0.02], materials.graphite);
+      addBox(chute, "chute-right-wall", [0.23, 3.7, 1.82], [1.03, -0.3, 0.02], materials.graphite);
+      addBox(chute, "chute-front-smoke", [1.84, 3.52, 0.05], [0, -0.3, 1.0], materials.glass, {
+        castShadow: false,
+      });
+      const gate = addRoundedPanel(
+        chute,
+        "internal-lateral-gate",
+        1.88,
+        0.18,
+        1.28,
+        0.06,
+        [0, 1.5, 0.08],
+        materials.chrome,
+      );
+
+      const tray = new THREE.Group();
+      tray.name = "recessed-bottom-collection-bay";
+      machine.add(tray);
+      addRoundedPanel(tray, "tray-rear-wall", 5.78, 2.5, 0.25, 0.18, [0, -2.5, -1.02], materials.innerBlack);
+      addRoundedPanel(tray, "tray-floor", 5.7, 0.24, 2.62, 0.13, [0, -3.58, 0.24], materials.graphite);
+      addRoundedPanel(tray, "tray-left-side-wall", 0.3, 2.58, 2.7, 0.12, [-2.86, -2.46, 0.25], materials.matteBlack);
+      addRoundedPanel(tray, "tray-right-side-wall", 0.3, 2.58, 2.7, 0.12, [2.86, -2.46, 0.25], materials.matteBlack);
+      addRoundedPanel(tray, "tray-top-lintel", 6.08, 0.34, 2.82, 0.13, [0, -1.18, 0.28], materials.matteBlack);
+      addRoundedPanel(tray, "front-safety-lip", 5.86, 0.82, 0.32, 0.15, [0, -3.16, 1.5], materials.matteBlack);
+      addBox(tray, "left-wall-readable-edge", [0.07, 1.9, 0.05], [-2.67, -2.46, 1.56], materials.stone);
+      addBox(tray, "right-wall-readable-edge", [0.07, 1.9, 0.05], [2.67, -2.46, 1.56], materials.stone);
+      addBox(tray, "front-lip-top-edge", [5.45, 0.055, 0.08], [0, -2.735, 1.53], materials.chrome);
+      addBox(tray, "rear-wall-edge", [5.3, 0.055, 0.06], [0, -1.34, -0.87], materials.stone);
+
+      const bayWord = createPixelWord("DABBOBA", 0.084, 0.058, materials.bayWord);
+      bayWord.name = "contained-dabboba-backplate-wordmark";
+      bayWord.position.set(0, -2.08, -0.82);
+      tray.add(bayWord);
+
+      const bayGlow = new THREE.Mesh(
+        new THREE.PlaneGeometry(4.8, 1.35),
+        new THREE.MeshBasicMaterial({
+          color: PALETTE.lime,
+          transparent: true,
+          opacity: 0,
+          depthWrite: false,
+          blending: THREE.AdditiveBlending,
+        }),
+      );
+      bayGlow.name = "restrained-wordmark-glow";
+      bayGlow.position.set(0, -2.05, -0.855);
+      tray.add(bayGlow);
+
+      const selected = createHingedCapsule(0.72);
+      selected.group.name = "selected-contained-capsule";
+      selected.group.position.set(0, 2.62, 0.28);
+      machine.add(selected.group);
+
+      const sideControl = new THREE.Group();
+      sideControl.name = "mechanical-control-detail";
+      machine.add(sideControl);
+      addCylinder(sideControl, "chrome-control-hub", 0.28, 0.18, [2.53, 0.8, 1.68], materials.chrome, [Math.PI / 2, 0, 0]);
+      const controlArm = addBox(sideControl, "control-arm", [0.17, 1.08, 0.16], [2.53, 0.32, 1.82], materials.chrome);
+      controlArm.rotation.z = -0.22;
+      addCylinder(sideControl, "control-knob", 0.22, 0.28, [2.65, -0.22, 1.84], materials.lime, [Math.PI / 2, 0, 0]);
+
+      const ground = new THREE.Mesh(
+        new THREE.PlaneGeometry(42, 42),
+        new THREE.MeshStandardMaterial({
+          color: PALETTE.canvas, roughness: 0.95, metalness: 0,
+        }),
+      );
+      ground.name = "warm-off-white-studio-floor";
+      ground.rotation.x = -Math.PI / 2;
+      ground.position.set(0, -5.23, 1.2);
+      ground.receiveShadow = true;
+      scene.add(ground);
+
+      scene.add(new THREE.HemisphereLight(PALETTE.ivory, PALETTE.shadow, 2.25));
+      const keyLight = new THREE.DirectionalLight(PALETTE.key, 5.1);
+      keyLight.position.set(-7.5, 11, 10.5);
+      keyLight.castShadow = true;
+      keyLight.shadow.mapSize.set(2048, 2048);
+      keyLight.shadow.camera.left = -8;
+      keyLight.shadow.camera.right = 8;
+      keyLight.shadow.camera.top = 12;
+      keyLight.shadow.camera.bottom = -10;
+      keyLight.shadow.camera.near = 0.5;
+      keyLight.shadow.camera.far = 40;
+      keyLight.shadow.bias = -0.0004;
+      scene.add(keyLight);
+      const fillLight = new THREE.PointLight(PALETTE.ivory, 2.5, 28, 1.5);
+      fillLight.position.set(6.5, 2.5, 9);
+      scene.add(fillLight);
+      const edgeLight = new THREE.PointLight(PALETTE.lime, 2.1, 17, 2);
+      edgeLight.position.set(-5.8, 3.4, 2.8);
+      scene.add(edgeLight);
+      const bayLight = new THREE.PointLight(PALETTE.lime, 0, 6.8, 2);
+      bayLight.position.set(0, -1.8, 1.15);
+      scene.add(bayLight);
+
+      function selectedCapsuleYAt(time) {
+        if (time < 0.7) return 2.62;
+        if (time < 1.6) {
+          return THREE.MathUtils.lerp(
+            2.62,
+            2.24,
+            smootherstep(rangeProgress(time, 0.7, 1.6)),
+          );
+        }
+        if (time < 2.5) {
+          return THREE.MathUtils.lerp(
+            2.24,
+            -2.42,
+            power2In(rangeProgress(time, 1.6, 2.5)),
+          );
+        }
+        if (time < 2.67) {
+          return THREE.MathUtils.lerp(
+            -2.42,
+            -2.8,
+            power2In(rangeProgress(time, 2.5, 2.67)),
+          );
+        }
+        if (time < 2.86) {
+          return THREE.MathUtils.lerp(
+            -2.8,
+            -2.63,
+            cubicOut(rangeProgress(time, 2.67, 2.86)),
+          );
+        }
+        if (time < 3.12) {
+          return THREE.MathUtils.lerp(
+            -2.63,
+            -2.8,
+            smoothstep(rangeProgress(time, 2.86, 3.12)),
+          );
+        }
+        return -2.8;
+      }
+
+      function renderAt(inputTime) {
+        const time = Math.min(DURATION, Math.max(0, Number(inputTime) || 0));
+        const cameraProgress = smootherstep(rangeProgress(time, 0.7, 3.28));
+        camera.position.x = 0;
+        camera.position.z = 21.5;
+        camera.position.y = THREE.MathUtils.lerp(4.7, -1.12, cameraProgress);
+        cameraTarget.set(0, THREE.MathUtils.lerp(3.72, -2.76, cameraProgress), 0);
+        camera.lookAt(cameraTarget);
+
+        const gateProgress = power4Out(rangeProgress(time, 0.7, 1.48));
+        gate.position.x = THREE.MathUtils.lerp(0, -1.62, gateProgress);
+
+        upperCapsules.forEach((capsule) => {
+          const activity = 1 - smoothstep(rangeProgress(time, 1.0, 1.78));
+          capsule.position.y =
+            capsule.userData.baseY +
+            Math.sin(time * 3.15 + capsule.userData.phase) * 0.045 * activity;
+        });
+
+        selected.group.position.y = selectedCapsuleYAt(time);
+
+        const seamProgress = smoothstep(rangeProgress(time, 3.7, 4.08));
+        const openingProgress = cubicOut(rangeProgress(time, 4.0, 4.72));
+        selected.hingePivot.rotation.x =
+          -THREE.MathUtils.degToRad(65) * openingProgress;
+        materials.seamGlow.emissiveIntensity =
+          THREE.MathUtils.lerp(0.18, 2.1, seamProgress);
+        materials.lime.emissiveIntensity =
+          THREE.MathUtils.lerp(0.12, 0.45, seamProgress);
+        materials.limeLower.emissiveIntensity =
+          THREE.MathUtils.lerp(0.08, 0.3, seamProgress);
+
+        const logoResolve = smoothstep(rangeProgress(time, 4.8, 5.25));
+        materials.bayWord.emissiveIntensity =
+          THREE.MathUtils.lerp(0.1, 1.35, logoResolve);
+        bayGlow.material.opacity = 0.18 * logoResolve;
+        bayLight.intensity = 2.2 * logoResolve;
+        renderer.render(scene, camera);
+      }
+
+      window.addEventListener("hf-seek", (event) => {
+        renderAt(event.detail.time);
+      });
+      renderAt(window.__hfThreeTime || 0);
+    </script>
+  </body>
+</html>

@@ -1,0 +1,325 @@
+import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+import { readFile } from "node:fs/promises";
+import { createRequire } from "node:module";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import test from "node:test";
+import vm from "node:vm";
+import React from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+
+const require = createRequire(import.meta.url);
+const { transformSync } = require("next/dist/build/swc");
+const adminRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
+
+async function loadModule(path, mocks = {}, context = {}) {
+  const source = await readFile(path, "utf8");
+  const output = transformSync(source, {
+    filename: path,
+    jsc: { parser: { syntax: "typescript", tsx: path.endsWith(".tsx") }, transform: { react: { runtime: "automatic" } } },
+    module: { type: "commonjs" },
+  }).code;
+  const module = { exports: {} };
+  vm.runInNewContext(`(function(require,module,exports){${output}\n})`, {
+    AbortSignal, Buffer, File, FormData, Headers, Response, URL, URLSearchParams, crypto, process, ...context,
+  })((id) => {
+    if (id === "server-only") return {};
+    if (id === "node:crypto") return require("node:crypto");
+    if (id === "react") return React;
+    if (id === "react/jsx-runtime") return require("react/jsx-runtime");
+    if (id in mocks) return mocks[id];
+    throw new Error(`Unexpected import: ${id}`);
+  }, module, module.exports);
+  return module.exports;
+}
+
+function form(file, overrides = {}) {
+  const data = new FormData();
+  const values = {
+    productId: "product-1",
+    expectedVersion: "7",
+    returnTo: "/catalog/products?q=test",
+    reason: "상품 대표 사진 교체",
+    idempotencyKey: "123e4567-e89b-42d3-a456-426614174000",
+    completeIdempotencyKey: "223e4567-e89b-42d3-a456-426614174000",
+    attachIdempotencyKey: "323e4567-e89b-42d3-a456-426614174000",
+    role: "primary",
+    ...overrides,
+  };
+  for (const [name, value] of Object.entries(values)) data.set(name, value);
+  if (file) data.set("image", file);
+  return data;
+}
+
+async function loadActions({ apiFailure, deny = false } = {}) {
+  const uploads = [];
+  const apiCalls = [];
+  const redirects = [];
+  const revalidations = [];
+  const helper = await loadModule(join(adminRoot, "lib/catalog-media-upload.ts"), {}, {
+    fetch: async (url, init) => {
+      uploads.push([String(url), init]);
+      return new Response(null, { status: 200 });
+    },
+  });
+  class ApiError extends Error {
+    constructor(status) { super("api failure"); this.status = status; this.requestId = null; }
+  }
+  const actions = await loadModule(join(adminRoot, "lib/actions.ts"), {
+    "server-only": {},
+    "next/cache": { revalidatePath(path) { revalidations.push(path); } },
+    "next/navigation": { redirect(path) { redirects.push(path); throw new Error(`REDIRECT:${path}`); } },
+    "./api": {
+      AdminApiError: ApiError,
+      async adminApi(path, options) {
+        apiCalls.push([path, options]);
+        if (apiFailure?.path === path) throw new ApiError(apiFailure.status);
+        if (path === "/v1/admin/catalog-media/uploads") return {
+          mediaId: "123e4567-e89b-42d3-a456-426614174001",
+          uploadUrl: "https://storage.example.test/catalog-object",
+          method: "PUT",
+          bodyEncoding: "raw",
+          headers: { "content-type": "image/png", "x-upload-token": "signed" },
+          expiresAt: "2099-01-01T00:00:00.000Z",
+          maxBytes: 4,
+        };
+        if (path.endsWith("/complete")) return { mediaId: "123e4567-e89b-42d3-a456-426614174001", status: "READY", mimeType: "image/webp" };
+        return {
+          productId: "product-1",
+          imageUrl: "/v1/catalog/media/123/image",
+          version: 8,
+          mediaId: "123e4567-e89b-42d3-a456-426614174001",
+          role: options.body.role,
+        };
+      },
+    },
+    "./auth": { requireCapability: async () => { if (deny) throw new Error("DENIED"); return { token: "admin-token" }; } },
+    "./request-security": { safeInternalPath: (value) => String(value || "/") },
+    "./draw-version-draft": { buildDrawVersionDraftPayload() { throw new Error("unused draw helper"); } },
+    "./catalog-media-upload": helper,
+  });
+  return { actions, apiCalls, uploads, redirects, revalidations };
+}
+
+test("product image action uploads, completes, and attaches only the image with fresh idempotency keys", async () => {
+  const bytes = new Uint8Array([1, 2, 3, 4]);
+  const file = new File([bytes], "대표 사진.png", { type: "image/png" });
+  const run = await loadActions();
+  await assert.rejects(() => run.actions.uploadProductImage(form(file)), /REDIRECT/);
+
+  assert.equal(run.apiCalls.length, 3);
+  const [intentPath, intentOptions] = run.apiCalls[0];
+  assert.equal(intentPath, "/v1/admin/catalog-media/uploads");
+  assert.deepEqual(JSON.parse(JSON.stringify(intentOptions.body)), {
+    filename: "대표 사진.png", mimeType: "image/png", byteSize: 4,
+    checksumSha256: createHash("sha256").update(bytes).digest("hex"),
+    acceptedUploadMethods: ["POST", "PUT"],
+  });
+  assert.equal(intentOptions.body.purpose, undefined);
+  assert.equal(intentOptions.headers["idempotency-key"], "123e4567-e89b-42d3-a456-426614174000");
+  assert.equal(run.uploads.length, 1);
+  assert.equal(run.uploads[0][0], "https://storage.example.test/catalog-object");
+  assert.equal(run.uploads[0][1].method, "PUT");
+  assert.equal(run.uploads[0][1].body, file);
+  assert.equal(run.uploads[0][1].credentials, "omit");
+
+  assert.equal(run.apiCalls[1][0], "/v1/admin/catalog-media/123e4567-e89b-42d3-a456-426614174001/complete");
+  assert.equal(run.apiCalls[1][1].headers["idempotency-key"], "223e4567-e89b-42d3-a456-426614174000");
+  assert.equal(run.apiCalls[2][0], "/v1/admin/products/product-1/image");
+  assert.equal(run.apiCalls[2][1].headers["idempotency-key"], "323e4567-e89b-42d3-a456-426614174000");
+  assert.deepEqual(JSON.parse(JSON.stringify(run.apiCalls[2][1].body)), {
+    mediaId: "123e4567-e89b-42d3-a456-426614174001", expectedVersion: 7, role: "primary",
+  });
+  assert.equal(run.revalidations.length, 1);
+  assert.match(run.redirects.at(-1), /success=/);
+});
+
+test("product image action forwards the storefront role to the atomic attach", async () => {
+  const file = new File([new Uint8Array([1, 2, 3, 4])], "목록 사진.png", { type: "image/png" });
+  const run = await loadActions();
+  await assert.rejects(() => run.actions.uploadProductImage(form(file, { role: "storefront" })), /REDIRECT/);
+
+  assert.equal(run.apiCalls.length, 3);
+  assert.deepEqual(JSON.parse(JSON.stringify(run.apiCalls[2][1].body)), {
+    mediaId: "123e4567-e89b-42d3-a456-426614174001", expectedVersion: 7, role: "storefront",
+  });
+});
+
+test("storefront image clear action is confirmed and sends only the protected storefront role", async () => {
+  const run = await loadActions();
+  await assert.rejects(() => run.actions.clearStorefrontProductImage(form(null, {
+    role: "storefront",
+    reason: "목록 사진 교체 전 연결 해제",
+    confirmStorefrontImageClear: "on",
+  })), /REDIRECT/);
+
+  assert.equal(run.apiCalls.length, 1);
+  assert.equal(run.apiCalls[0][0], "/v1/admin/products/product-1/image");
+  assert.equal(run.apiCalls[0][1].method, "DELETE");
+  assert.equal(run.apiCalls[0][1].headers["idempotency-key"], "123e4567-e89b-42d3-a456-426614174000");
+  assert.deepEqual(JSON.parse(JSON.stringify(run.apiCalls[0][1].body)), {
+    expectedVersion: 7,
+    role: "storefront",
+  });
+  assert.equal(run.revalidations.length, 1);
+  assert.match(run.redirects.at(-1), /success=/);
+
+  const unconfirmed = await loadActions();
+  await assert.rejects(() => unconfirmed.actions.clearStorefrontProductImage(form(null, {
+    role: "storefront",
+    reason: "목록 사진 연결 해제",
+  })), /REDIRECT/);
+  assert.equal(unconfirmed.apiCalls.length, 0);
+  assert.equal(unconfirmed.revalidations.length, 0);
+  assert.match(unconfirmed.redirects.at(-1), /error=/);
+
+  const primaryRole = await loadActions();
+  await assert.rejects(() => primaryRole.actions.clearStorefrontProductImage(form(null, {
+    role: "primary",
+    reason: "대표 사진은 연결 해제 금지",
+    confirmStorefrontImageClear: "on",
+  })), /REDIRECT/);
+  assert.equal(primaryRole.apiCalls.length, 0);
+  assert.equal(primaryRole.revalidations.length, 0);
+  assert.match(primaryRole.redirects.at(-1), /error=/);
+});
+
+test("catalog image transport follows multipart POST fields and rejects mismatched or invalid files", async () => {
+  const uploads = [];
+  const helper = await loadModule(join(adminRoot, "lib/catalog-media-upload.ts"), {}, {
+    fetch: async (url, init) => { uploads.push([String(url), init]); return new Response(null, { status: 204 }); },
+  });
+  const file = new File([new Uint8Array([1, 2])], "photo.jpg", { type: "image/jpeg" });
+  await helper.uploadCatalogImage({
+    mediaId: "123e4567-e89b-42d3-a456-426614174001", uploadUrl: "https://storage.example.test/post",
+    method: "POST", fields: { policy: "signed-policy" }, fileFieldName: "file",
+    expiresAt: "2099-01-01T00:00:00.000Z", maxBytes: 2,
+  }, file);
+  assert.equal(uploads[0][1].method, "POST");
+  assert.equal(uploads[0][1].body.get("policy"), "signed-policy");
+  const postedFile = uploads[0][1].body.get("file");
+  assert.equal(postedFile.name, file.name);
+  assert.equal(postedFile.size, file.size);
+  assert.equal(postedFile.type, file.type);
+  assert.throws(() => helper.catalogImageFile(new File([], "empty.png", { type: "image/png" })), /10MB 이하/);
+  assert.throws(() => helper.catalogImageFile(new File(["x"], "script.svg", { type: "image/svg+xml" })), /JPG, PNG/);
+  await assert.rejects(() => helper.uploadCatalogImage({
+    mediaId: "123e4567-e89b-42d3-a456-426614174001", uploadUrl: "https://storage.example.test/put",
+    method: "PUT", bodyEncoding: "raw", headers: {}, expiresAt: "2099-01-01T00:00:00.000Z", maxBytes: 3,
+  }, file), /파일 정보와 일치/);
+});
+
+test("product image action cannot fake success on capability, storage, or stale attach failures", async () => {
+  const file = new File([new Uint8Array([1, 2, 3, 4])], "photo.png", { type: "image/png" });
+  const denied = await loadActions({ deny: true });
+  await assert.rejects(() => denied.actions.uploadProductImage(form(file)), /DENIED/);
+  assert.equal(denied.apiCalls.length, 0);
+  assert.equal(denied.uploads.length, 0);
+
+  const unavailable = await loadActions({ apiFailure: { path: "/v1/admin/catalog-media/uploads", status: 503 } });
+  await assert.rejects(() => unavailable.actions.uploadProductImage(form(file)), /REDIRECT/);
+  assert.equal(unavailable.uploads.length, 0);
+  assert.equal(unavailable.revalidations.length, 0);
+  assert.match(unavailable.redirects.at(-1), /error=.*%EC%83%81%ED%92%88/);
+  assert.doesNotMatch(unavailable.redirects.at(-1), /success=/);
+
+  const expired = await loadActions({ apiFailure: { path: "/v1/admin/catalog-media/123e4567-e89b-42d3-a456-426614174001/complete", status: 410 } });
+  await assert.rejects(() => expired.actions.uploadProductImage(form(file)), /REDIRECT/);
+  assert.equal(expired.revalidations.length, 0);
+  assert.match(expired.redirects.at(-1), /error=.*%EB%A7%8C%EB%A3%8C/);
+
+  const stale = await loadActions({ apiFailure: { path: "/v1/admin/products/product-1/image", status: 409 } });
+  await assert.rejects(() => stale.actions.uploadProductImage(form(file)), /REDIRECT/);
+  assert.equal(stale.apiCalls.length, 3);
+  assert.equal(stale.revalidations.length, 0);
+  assert.doesNotMatch(stale.redirects.at(-1), /success=/);
+});
+
+test("product image form renders a same-origin server action without editable image URL", async () => {
+  const module = await loadModule(join(adminRoot, "components/catalog-forms.tsx"), {
+    "../lib/actions": {
+      clearStorefrontProductImage() {}, createCharacter() {}, createIp() {}, createProduct() {}, updateCharacter() {}, updateIp() {}, updateProduct() {}, uploadProductImage() {},
+    },
+    "./operations": {
+      ReturnTo: ({ value }) => React.createElement(React.Fragment, null,
+        React.createElement("input", { type: "hidden", name: "returnTo", value, readOnly: true }),
+        React.createElement("input", { type: "hidden", name: "idempotencyKey", value: "intent-key", readOnly: true })),
+      ReasonField: ({ label }) => React.createElement("label", null, label, React.createElement("textarea", { name: "reason" })),
+      safeExternalUrl: (value) => /^https?:\/\//.test(String(value || "")) ? String(value) : null,
+    },
+  });
+  const html = renderToStaticMarkup(React.createElement(module.ProductImageForm, {
+    item: {
+      id: "product-1",
+      version: 7,
+      category: "gacha",
+      imageUrl: "https://cdn.example.test/primary.webp",
+      storefrontImageUrl: "https://cdn.example.test/storefront.webp",
+    },
+    returnTo: "/catalog/products",
+  }));
+  assert.equal((html.match(/type="file"/g) || []).length, 2);
+  assert.match(html, /accept="image\/jpeg,image\/png,image\/webp,image\/gif"/);
+  assert.match(html, /name="expectedVersion" value="7"/);
+  assert.match(html, /name="role" value="primary"/);
+  assert.match(html, /name="role" value="storefront"/);
+  assert.match(html, /정확한 1:1 비율/);
+  assert.match(html, /최소 1080×1080px/);
+  assert.match(html, /현재 대표 사진/);
+  assert.match(html, /현재 목록 사진/);
+  assert.equal((html.match(/data-image-status="populated"/g) || []).length, 2);
+  assert.equal((html.match(/<img /g) || []).length, 2);
+  assert.match(html, /href="https:\/\/cdn\.example\.test\/storefront\.webp"/);
+  assert.match(html, /type="checkbox" required="" name="confirmStorefrontImageClear"/);
+  assert.match(html, /목록 카드와의 연결만 해제합니다/);
+  assert.match(html, /대표 사진과 업로드된 파일은 삭제되지 않습니다/);
+  assert.match(html, /class="danger">목록 사진 연결 해제/);
+  assert.doesNotMatch(html, /name="imageUrl"/);
+});
+
+test("product image form hides the clear action when no storefront image exists and never links unsafe URLs", async () => {
+  const module = await loadModule(join(adminRoot, "components/catalog-forms.tsx"), {
+    "../lib/actions": {
+      clearStorefrontProductImage() {}, createCharacter() {}, createIp() {}, createProduct() {}, updateCharacter() {}, updateIp() {}, updateProduct() {}, uploadProductImage() {},
+    },
+    "./operations": {
+      ReturnTo: () => null,
+      ReasonField: () => null,
+      safeExternalUrl: () => null,
+    },
+  });
+  const html = renderToStaticMarkup(React.createElement(module.ProductImageForm, {
+    item: {
+      id: "product-1",
+      version: 7,
+      category: "kuji",
+      imageUrl: "javascript:alert(1)",
+      storefrontImageUrl: null,
+    },
+    returnTo: "/catalog/products",
+  }));
+
+  assert.match(html, /현재 URL은 안전하게 미리 볼 수 없습니다/);
+  assert.match(html, /현재 목록 사진<\/strong><p>등록되지 않음/);
+  assert.match(html, /정확한 16:9 비율/);
+  assert.doesNotMatch(html, /(?:src|href)="javascript:/);
+  assert.doesNotMatch(html, /name="confirmStorefrontImageClear"/);
+  assert.doesNotMatch(html, /class="danger"/);
+});
+
+test("IP form identifies its image as the Home popular-work square artwork", async () => {
+  const module = await loadModule(join(adminRoot, "components/catalog-forms.tsx"), {
+    "../lib/actions": {
+      clearStorefrontProductImage() {}, createCharacter() {}, createIp() {}, createProduct() {}, updateCharacter() {}, updateIp() {}, updateProduct() {}, uploadProductImage() {},
+    },
+    "./operations": {
+      ReturnTo: () => null,
+      ReasonField: () => null,
+      safeExternalUrl: () => null,
+    },
+  });
+  const html = renderToStaticMarkup(React.createElement(module.IpForm, { returnTo: "/catalog/ips" }));
+  assert.match(html, /홈 인기 작품용 1:1 대표 이미지 URL/);
+  assert.match(html, /정사각형 IP 이미지/);
+});

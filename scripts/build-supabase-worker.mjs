@@ -1,0 +1,171 @@
+import { builtinModules, createRequire } from "node:module";
+import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join, relative, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+
+const EXPECTED_ESBUILD_VERSION = "0.28.2";
+const MAX_EDGE_ARTIFACT_BYTES = 5 * 1024 * 1024;
+const FORBIDDEN_BUNDLE_FRAGMENTS = [
+  "@google-cloud/storage",
+  "google-auth-library",
+  "gcp-metadata",
+  "gaxios",
+  "sharp",
+];
+const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const defaultOutputPath = join(
+  repositoryRoot,
+  "supabase/functions/dabboba-worker/worker.generated.js",
+);
+
+function resolveEsbuildEntry() {
+  const workerRequire = createRequire(join(repositoryRoot, "apps/worker/package.json"));
+  try {
+    return workerRequire.resolve("esbuild");
+  } catch {
+    // Existing workspaces may not have relinked the newly direct dependency yet.
+    // Vite uses the same exact, lockfile-pinned esbuild version in this checkout.
+    const rootRequire = createRequire(join(repositoryRoot, "package.json"));
+    const viteRequire = createRequire(rootRequire.resolve("vite/package.json"));
+    return viteRequire.resolve("esbuild");
+  }
+}
+
+async function loadPinnedEsbuild() {
+  const esbuild = await import(pathToFileURL(resolveEsbuildEntry()).href);
+  if (esbuild.version !== EXPECTED_ESBUILD_VERSION) {
+    throw new Error(`Supabase worker build requires esbuild ${EXPECTED_ESBUILD_VERSION}`);
+  }
+  return esbuild;
+}
+
+function normalizedBuiltin(path) {
+  const candidate = path.startsWith("node:") ? path.slice(5) : path;
+  const topLevel = candidate.split("/")[0];
+  return topLevel && builtinModules.includes(topLevel) ? `node:${candidate}` : null;
+}
+
+function edgeResolutionPlugin(nativeStubPath) {
+  return {
+    name: "dabboba-edge-resolution",
+    setup(build) {
+      build.onResolve({ filter: /^@dabboba\/config$/ }, () => ({
+        path: join(repositoryRoot, "packages/config/src/index.ts"),
+      }));
+      build.onResolve({ filter: /^@dabboba\/db$/ }, () => ({
+        path: join(repositoryRoot, "packages/db/src/index.ts"),
+      }));
+      build.onResolve({ filter: /^@dabboba\/media-storage$/ }, () => ({
+        path: join(repositoryRoot, "packages/media-storage/src/index.ts"),
+      }));
+      build.onResolve({ filter: /^pg-native$/ }, () => ({ path: nativeStubPath }));
+      build.onResolve({ filter: /^(?:node:)?[A-Za-z0-9_/-]+$/ }, (args) => {
+        const builtin = normalizedBuiltin(args.path);
+        return builtin ? { path: builtin, external: true } : null;
+      });
+    },
+  };
+}
+
+function inspectBundle(metafile, code) {
+  const inputNames = Object.keys(metafile.inputs).map((name) => name.toLowerCase());
+  const loweredCode = code.toLowerCase();
+  for (const fragment of FORBIDDEN_BUNDLE_FRAGMENTS) {
+    if (inputNames.some((name) => name.includes(fragment)) || loweredCode.includes(fragment)) {
+      throw new Error(`Supabase worker bundle contains forbidden dependency: ${fragment}`);
+    }
+  }
+
+  const externalImports = Object.values(metafile.outputs)
+    .flatMap((output) => output.imports)
+    .filter((entry) => entry.external)
+    .map((entry) => entry.path);
+  if (externalImports.some((path) => !path.startsWith("node:"))) {
+    throw new Error("Supabase worker bundle contains an unpinned external package import");
+  }
+  return [...new Set(externalImports)].sort();
+}
+
+export async function buildSupabaseWorker(outputPath = defaultOutputPath) {
+  const esbuild = await loadPinnedEsbuild();
+  const temporaryDirectory = await mkdtemp(join(tmpdir(), "dabboba-edge-build-"));
+  const temporaryOutput = join(temporaryDirectory, "worker.generated.js");
+  const globalsShim = join(temporaryDirectory, "node-globals.ts");
+  const nativeStub = join(temporaryDirectory, "pg-native.ts");
+  try {
+    await writeFile(globalsShim, [
+      'import { Buffer } from "node:buffer";',
+      'import process from "node:process";',
+      "const global = globalThis;",
+      "const setImmediate = (callback, ...args) => setTimeout(callback, 0, ...args);",
+      "const clearImmediate = (handle) => clearTimeout(handle);",
+      "export { Buffer, clearImmediate, global, process, setImmediate };",
+      "",
+    ].join("\n"));
+    await writeFile(nativeStub, [
+      'throw new Error("Native PostgreSQL bindings are unavailable in Supabase Edge Functions");',
+      "export default null;",
+      "",
+    ].join("\n"));
+
+    const result = await esbuild.build({
+      absWorkingDir: repositoryRoot,
+      entryPoints: [join(repositoryRoot, "apps/worker/src/edge-handler.ts")],
+      outfile: temporaryOutput,
+      bundle: true,
+      platform: "node",
+      format: "esm",
+      target: "es2022",
+      minify: true,
+      treeShaking: true,
+      sourcemap: false,
+      legalComments: "none",
+      charset: "utf8",
+      metafile: true,
+      inject: [globalsShim],
+      plugins: [edgeResolutionPlugin(nativeStub)],
+      // Bundled CommonJS dependencies such as node-postgres retain dynamic
+      // built-in requires. Deno's ESM runtime needs an explicit local require
+      // rather than esbuild's browser-style fallback that always throws.
+      banner: { js: [
+        "// Generated by scripts/build-supabase-worker.mjs; do not edit.",
+        'import { createRequire as __dabbobaCreateRequire } from "node:module";',
+        "const require = __dabbobaCreateRequire(import.meta.url);",
+      ].join("\n") },
+    });
+
+    const code = await readFile(temporaryOutput, "utf8");
+    const bytes = Buffer.byteLength(code, "utf8");
+    if (bytes > MAX_EDGE_ARTIFACT_BYTES) {
+      throw new Error("Supabase worker bundle exceeds the hosted deployment size limit");
+    }
+    const externalImports = inspectBundle(result.metafile, code);
+    await mkdir(dirname(outputPath), { recursive: true });
+    const stagedOutput = `${outputPath}.tmp`;
+    await writeFile(stagedOutput, code, { mode: 0o644 });
+    await rename(stagedOutput, outputPath);
+    return {
+      bytes,
+      outputPath,
+      externalImports,
+      inputCount: Object.keys(result.metafile.inputs).length,
+    };
+  } finally {
+    await rm(temporaryDirectory, { recursive: true, force: true });
+  }
+}
+
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  buildSupabaseWorker().then((result) => {
+    process.stdout.write(`${JSON.stringify({
+      artifact: relative(repositoryRoot, result.outputPath),
+      bytes: result.bytes,
+      externalImports: result.externalImports,
+      inputCount: result.inputCount,
+    })}\n`);
+  }).catch(() => {
+    process.stderr.write("Supabase worker artifact build failed.\n");
+    process.exitCode = 1;
+  });
+}

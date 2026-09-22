@@ -1,0 +1,15 @@
+{
+  "name": "dabboba-capsule-lower-chute",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "npx --yes hyperframes@0.8.11 preview",
+    "check": "npx --yes hyperframes@0.8.11 check",
+    "render": "npx --yes hyperframes@0.8.11 render",
+    "publish": "npx --yes hyperframes@0.8.11 publish"
+  },
+  "dependencies": {
+    "gsap": "3.14.2",
+    "three": "0.181.2"
+  }
+}

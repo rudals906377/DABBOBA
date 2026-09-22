@@ -1,0 +1,11 @@
+:root {
+  --db-brand: #91e98e;
+  --db-green: var(--db-brand);
+  --db-green-ink: #176f2a;
+  --db-ink: #111411;
+  --db-canvas: #f5f5f1;
+  --db-surface: #fcfcf8;
+  --db-border: #d8ddd6;
+  --db-muted: #687068;
+  --db-danger: #b42318;
+}

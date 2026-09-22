@@ -1,0 +1,27 @@
+{
+  "name": "@dabboba/contracts",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./openapi": "./openapi/dabboba.openapi.yaml"
+  },
+  "scripts": {
+    "generate": "openapi-typescript openapi/dabboba.openapi.yaml -o src/generated.ts",
+    "prebuild": "corepack pnpm run generate",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "corepack pnpm run generate && tsc -p tsconfig.json --noEmit",
+    "test": "node --test dist/contract.test.js"
+  },
+  "devDependencies": {
+    "@types/node": "^26.2.0",
+    "openapi-typescript": "^7.13.0",
+    "typescript": "5.9.3"
+  }
+}

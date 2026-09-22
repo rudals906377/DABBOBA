@@ -1,0 +1,45 @@
+name: dabboba-local
+
+services:
+  postgres:
+    # Official pgmq development image, pinned to the inspected multi-arch digest.
+    # A new volume name preserves the previous PostgreSQL 16 local volume.
+    image: tembo.docker.scarf.sh/tembo/pg17-pgmq@sha256:ba00a1ec2694b76be07b9bc5331e2bc0fa671f296919d2bb12a1cb2e22dd15fd
+    environment:
+      POSTGRES_DB: dabboba
+      POSTGRES_USER: dabboba
+      POSTGRES_PASSWORD: dabboba_local
+    ports:
+      - "127.0.0.1:55433:5432"
+    volumes:
+      - dabboba_postgres17_pgmq_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dabboba -d dabboba"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  # Optional local-only shared rate-limit store for API compatibility. The
+  # Cloud Run API and finite worker do not require or deploy Redis.
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "127.0.0.1:56380:6379"
+    volumes:
+      - dabboba_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+volumes:
+  dabboba_postgres17_pgmq_data:
+  dabboba_redis_data:
+    # Adopt the existing local-redis-1 data without replacing either Redis volume.
+    # External ownership also keeps Compose from creating an empty substitute.
+    name: local_dabboba_redis_data
+    external: true

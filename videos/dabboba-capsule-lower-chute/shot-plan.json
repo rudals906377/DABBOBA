@@ -1,0 +1,155 @@
+{
+  "status": "FINAL",
+  "category": "logo-reveal",
+  "category_rationale": "Closest valid form category: this is a six-second branded DABBOBA sting that resolves on the wordmark. The logo-reveal catalog form does not cover a modeled gacha machine, internal chute, contained tray landing, or hinged capsule opening, so those shots are explicitly identified below as a custom procedural Three.js gap.",
+  "duration_s": 6,
+  "fps": 60,
+  "canvas": {
+    "w": 1080,
+    "h": 1920,
+    "aspect": "9:16"
+  },
+  "style": "Adult-minimal product cinematic in a warm off-white studio: restrained luxury lighting, a monolithic matte-black gacha machine, lime and ivory capsules, soft contact shadows, precise mechanical motion, no playful bounce, no visual clutter, and one continuous downward camera move.",
+  "palette": [
+    "#F3EFE6",
+    "#151515",
+    "#C9F23A",
+    "#EEE8D8",
+    "#8B887F"
+  ],
+  "font": "Space Grotesk",
+  "beats": [
+    0,
+    42,
+    96,
+    150,
+    204,
+    288,
+    359
+  ],
+  "export": "mp4",
+  "asset_needs": [],
+  "block": "logo-outro",
+  "customize": {
+    "reuse_scope": "Reuse only the logo-outro block's final lockup structure, restrained glow landing, and legible hold during frames 288-359.",
+    "logo": "Replace the logo asset slot with a procedural HTML text wordmark reading DABBOBA; no external logo file or network fetch.",
+    "tagline": "",
+    "url": "",
+    "palette": [
+      "#F3EFE6",
+      "#151515",
+      "#C9F23A",
+      "#EEE8D8"
+    ],
+    "disable": [
+      "piece-by-piece logo assembly",
+      "particle assembly or burst",
+      "scale-pop overshoot",
+      "tagline entrance",
+      "URL pill",
+      "any element moving toward the camera"
+    ]
+  },
+  "animation_rules": [
+    {
+      "id": "nudge-curve",
+      "use": "Adapt the slow-fast-slow 10/65/25 distance profile to the camera's single downward y-axis pedestal move. Camera x and z remain constant, the long power4.out tail settles before the tray opening beat, and no orbit, push-in, or micro-drift is allowed."
+    },
+    {
+      "id": "ambient-glow-bloom",
+      "use": "Apply one finite, low-opacity lime bloom behind the DABBOBA wordmark only after the hinged tray capsule has finished opening. Peak opacity is capped at 0.20, with no breathing loop and no particle or outward-radiating burst."
+    }
+  ],
+  "audio": {
+    "enabled": false
+  },
+  "shot_brief": "The viewer begins close to the capsule chamber of a matte-black DABBOBA machine, where every lime and ivory capsule is visibly closed. A single lime capsule aligns over an enclosed center chute and drops straight down inside the machine while the camera tracks downward to reveal the bottom collection tray. The capsule lands, settles fully inside that receiving bay, and only then opens on a restrained rear hinge without either shell half leaving the tray. The other capsules remain closed above. The dominant motion idea is a single vertical descent shared by capsule and camera, resolving on a quiet DABBOBA wordmark inside the lower bay.",
+  "hard_constraints": [
+    "The selected capsule must travel vertically downward through an internal lower chute into the machine's bottom collection tray or receiving bay.",
+    "The capsule must never launch toward the camera, fly, pass through the front opening, cross the machine's exterior silhouette, or otherwise leave the machine.",
+    "From chute alignment through landing and opening, the selected capsule group's x and z translations remain exactly constant; only its vertical y translation may change before it settles.",
+    "The camera moves downward to the lower tray; the capsule does not move forward to meet the camera.",
+    "The selected capsule must be visibly resting and settled inside the bottom tray before opening begins.",
+    "Only the capsule resting in the bottom tray opens. Every capsule remaining in the upper chamber stays fully closed for all 360 frames.",
+    "Both opened shell halves remain physically contained within the tray bounds; the upper half rotates on a rear hinge and does not pop off or fly away.",
+    "During the landing, opening, and final hold, the receiving bay's front safety lip, left and right side walls, and rear wall must remain simultaneously visible so containment is never ambiguous.",
+    "No external assets, network requests, random values, audio, particles that imply an outward burst, or non-deterministic simulation.",
+    "All motion and rendering must be deterministic and seek-safe at 1080x1920, 60 fps, for exactly 360 frames."
+  ],
+  "timeline": [
+    {
+      "id": "closed-chamber-hook",
+      "start_frame": 0,
+      "end_frame": 41,
+      "camera": "Front three-quarter macro of the upper chamber, framed entirely within the matte-black housing. Camera is locked with no push-in or orbit.",
+      "action": "Show a dense but orderly field of closed lime and ivory capsules. The chosen lime capsule settles above the center throat without opening.",
+      "continuity": "All chamber capsules are closed; no capsule crosses the housing front plane."
+    },
+    {
+      "id": "chute-alignment",
+      "start_frame": 42,
+      "end_frame": 95,
+      "camera": "Begin a smooth downward pedestal move while keeping the internal centerline aligned vertically in frame.",
+      "action": "A matte internal gate retracts laterally, revealing the enclosed lower chute directly beneath the selected capsule. The capsule remains closed and moves only a few millimeters downward into alignment.",
+      "continuity": "The chute walls and front housing remain visible enough to establish that the path is internal."
+    },
+    {
+      "id": "internal-vertical-drop",
+      "start_frame": 96,
+      "end_frame": 149,
+      "camera": "Track downward at a slightly slower speed than the falling capsule, transitioning attention from chamber to the lower housing.",
+      "action": "The selected closed capsule drops on the chute centerline with x and z translations locked to their alignment values. Only vertical y translation changes, using a short eased mechanical fall rather than a projectile arc.",
+      "continuity": "Capsule x and z stay exactly fixed; only vertical position changes. Upper chamber capsules remain closed and recede above frame."
+    },
+    {
+      "id": "contained-tray-landing",
+      "start_frame": 150,
+      "end_frame": 203,
+      "camera": "Complete the downward move into a clean close-up of the machine's bottom receiving bay, with the front safety lip clearly visible between capsule and viewer.",
+      "action": "The closed capsule enters vertically from directly above the center of the bay, lands on the tray floor, makes one small damped vertical compression with no lateral or depth translation, then comes fully to rest behind the front lip.",
+      "continuity": "The front safety lip, both side walls, and rear wall remain visible. Capsule x and z remain fixed: no camera-facing translation, no launch, no crossing of the tray lip, and no shell separation during landing."
+    },
+    {
+      "id": "rest-then-open",
+      "start_frame": 204,
+      "end_frame": 287,
+      "camera": "Locked lower-bay hero close-up with a subtle lens compression; keep the full capsule and tray boundaries readable.",
+      "action": "Hold the closed, motionless capsule for 18 frames to prove it has settled. Then the seam emits a restrained lime line, and the upper shell rotates upward and rearward approximately 65 degrees around a rear hinge while the lower shell stays planted. Reveal an ivory inner disk and the DABBOBA wordmark on the bay backplate.",
+      "continuity": "Only this tray capsule opens. The front lip, both side walls, and rear wall remain visible; the hinge is anchored, the capsule group's x and z translations stay fixed, both halves remain inside the receiving bay, and nothing ejects toward the viewer."
+    },
+    {
+      "id": "contained-brand-resolve",
+      "start_frame": 288,
+      "end_frame": 359,
+      "camera": "Hold the lower tray composition completely locked, with no final push-in, orbit, or depth move.",
+      "action": "The opened capsule remains still inside the tray. The small DABBOBA wordmark gains a soft lime edge light and holds legibly through the final frame.",
+      "continuity": "The front safety lip, both side walls, and rear wall remain visible. No object exits, no further capsule motion, no upper-chamber capsule opens, and the final state remains fully contained inside the machine."
+    }
+  ],
+  "custom_threejs_gap": {
+    "reason": "The logo-outro block can inform the restrained final wordmark hold, but no motion-graphics catalog block supplies a dimensional gacha machine, an enclosed lower chute, a receiving tray, collision-contained capsule motion, or a mechanically hinged capsule shell.",
+    "scope": "Hand-author one procedural Three.js scene in HTML for the machine, chamber capsules, internal gate and chute, lower tray, selected capsule, hinge, camera, lights, and shadows. Use HTML or CSS only for the final DABBOBA wordmark if preferred; do not source external media.",
+    "spatial_contract": {
+      "machine": "A single continuous matte-black housing whose internal chute connects the upper chamber to the bottom receiving bay.",
+      "chute": "Centered inside the housing and visually occluded by machine walls where appropriate; its exit terminates above the rear half of the bottom tray.",
+      "selected_capsule": "Closed two-part lime shell; group translation x and z are constants for the entire selection, drop, landing, and opening sequence. Only group y changes before rest, and the final center remains behind the tray safety lip.",
+      "tray": "Recessed bottom collection bay with floor, rear wall, left and right side walls, top lintel, and a front safety lip. The front lip, both side walls, and rear wall must all be visible in every landing, opening, and final-hold frame.",
+      "opening": "Upper shell is parented to a rear hinge pivot on the planted lower shell. It rotates upward and away from the camera, is capped near 65 degrees, and every point of both shells remains within the tray volume while the capsule group's x and z translations remain unchanged."
+    },
+    "determinism": "Drive every transform directly from the master timeline with fixed easing and analytic keyframes. Do not use Math.random(), Date.now(), an unconstrained physics engine, or frame-delta integration.",
+    "forbidden_motion": [
+      "Any positive camera-facing launch or z-axis ejection",
+      "Any capsule-group x or z translation after chute alignment",
+      "Any ballistic arc out of the housing",
+      "Any capsule crossing above or in front of the tray safety lip",
+      "Any shell half detaching from the hinge",
+      "Any upper chamber capsule opening",
+      "Any camera orbit that makes an internal fall read as an outward launch"
+    ]
+  },
+  "content": {
+    "logo": "procedural:DABBOBA-wordmark",
+    "tagline": "",
+    "url": ""
+  }
+}
