@@ -40,9 +40,18 @@ export default {
     }
 
     if (isPublicSiteHost(requestUrl.hostname)) {
-      if (["GET", "HEAD"].includes(request.method)) {
+      if (
+        ["GET", "HEAD"].includes(request.method)
+        && isPublicStaticAssetPath(requestUrl.pathname)
+      ) {
         const assetResponse = await env.ASSETS.fetch(request);
-        if (assetResponse.status !== 404) return withPublicPageHeaders(assetResponse);
+        const contentType = assetResponse.headers.get("content-type")?.toLowerCase() ?? "";
+        // Cloudflare's static binding can apply an SPA fallback and return the
+        // storefront HTML for a missing file. Never turn that fallback into a
+        // successful public asset response.
+        if (assetResponse.status !== 404 && !contentType.startsWith("text/html")) {
+          return withPublicPageHeaders(assetResponse);
+        }
       }
       return withPublicPageHeaders(new Response("Not found", {
         status: 404,
@@ -67,6 +76,16 @@ export default {
 function isPublicSiteHost(hostname) {
   return hostname === "dabboba.net"
     || hostname.endsWith(".pages.dev");
+}
+
+const PUBLIC_LEGAL_ASSET_PATHS = new Set([
+  "/legal/styles.css",
+  "/legal/account-deletion/app.js",
+  "/legal/account-deletion/social-callback.js",
+]);
+
+function isPublicStaticAssetPath(pathname) {
+  return pathname.startsWith("/assets/") || PUBLIC_LEGAL_ASSET_PATHS.has(pathname);
 }
 
 function withPublicPageHeaders(response) {
