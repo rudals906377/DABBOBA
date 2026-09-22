@@ -37,6 +37,8 @@ NODE_VERSION=24
 PNPM_VERSION=11.22.0
 ```
 
+2026-09-22 현재 친구 계정의 Pages 프로젝트 `dabboba`에는 위 설정이 적용되어 있으며, PR #1 병합 전 검증을 위해 운영 브랜치를 임시로 `feat/dabboba-capsule-gacha`에 두었다. 병합 후에는 반드시 `main`으로 되돌린다.
+
 중요:
 
 - `dist/public-site`만 공개한다.
@@ -75,10 +77,10 @@ SUPABASE_PUBLISHABLE_KEY=<운영 publishable key>
 
 ### Pages 연결
 
-- [ ] 친구 계정의 Pages 프로젝트에서 Custom domains에 `dabboba.net`을 먼저 추가
-- [ ] 인증서가 Active가 되고 HTTPS가 정상인지 확인
-- [ ] `www.dabboba.net`을 추가하고 루트 도메인으로 리디렉션
-- [ ] 수동 CNAME만 먼저 만들지 않는다. Pages의 Custom domains 절차를 통해 연결한다.
+- [x] 친구 계정의 Pages 프로젝트에서 Custom domains에 `dabboba.net`을 먼저 추가
+- [x] 인증서가 Active가 되고 HTTPS가 정상인지 확인
+- [x] `www.dabboba.net`을 추가하고 루트 도메인으로 리디렉션
+- [x] 수동 CNAME만 먼저 만들지 않는다. Pages의 Custom domains 절차를 통해 연결한다.
 
 루트 도메인을 Pages에 연결하려면 해당 zone의 네임서버가 Cloudflare를 향해야 한다. 다른 DNS 사업자를 계속 쓰면서 서브도메인만 연결할 때는 CNAME 방식이 가능하다. 자세한 절차는 [Cloudflare Pages 커스텀 도메인 문서](https://developers.cloudflare.com/pages/configuration/custom-domains/)를 따른다.
 
@@ -151,9 +153,9 @@ npx --yes wrangler@4.135.0 pages deploy dist/public-site --project-name <친구-
 
 현재 계정의 `https://dabboba.pages.dev`는 새 친구 계정 배포가 완료될 때까지 비교·복구용으로 유지한다. 다음 조건을 모두 충족한 뒤에만 기존 임시 프로젝트 정리를 결정한다.
 
-- [ ] 친구 계정의 Git 연동 Production 배포 성공
-- [ ] 위 스모크 테스트 통과
-- [ ] `dabboba.net`과 `www.dabboba.net` HTTPS 연결 완료
+- [x] 친구 계정의 Git 연동 Production 배포 성공
+- [x] 위 스모크 테스트 통과
+- [x] `dabboba.net`과 `www.dabboba.net` HTTPS 연결 완료
 - [ ] `support@dabboba.net` 송수신 확인
 - [ ] 운영 API 연결 후 회원탈퇴 전체 흐름 확인
 - [ ] 최소 한 개의 이전 성공 배포가 있어 롤백 가능
