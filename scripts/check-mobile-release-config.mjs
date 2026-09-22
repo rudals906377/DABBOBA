@@ -71,6 +71,7 @@ const PLACEHOLDER_HOST = /(^|\.)(?:localhost|example(?:\.com)?|invalid|test|loca
 const FORBIDDEN_PRODUCTION_MARKERS = /TEST_PG|INTERNAL_ZERO|ENABLE_DEMO|ENABLE_DEV_SESSION|MOBILE_TEST_FIXTURE/i;
 const PRELAUNCH_LEGAL_MARKERS = /사전오픈판|결제(?:와|·주문·뽑기·배송 신청은).*제공하지 않습니다/;
 const PORTONE_CONFIG_PLUGIN = "@portone/react-native-sdk/plugin";
+const EXPECTED_IOS_RELEASE_TEAM_ID = "MCZ4884P7F";
 const require = createRequire(import.meta.url);
 
 function addIssue(collection, code, message) {
@@ -157,6 +158,13 @@ function validateAppConfiguration(rootDir, environment, errors, warnings, struct
   }
   if (!validReverseDns(expo.ios?.bundleIdentifier)) {
     addIssue(errors, "IOS_BUNDLE_ID_INVALID", "iOS bundleIdentifier가 유효한 운영 식별자가 아닙니다.");
+  }
+  if (expo.ios?.appleTeamId !== EXPECTED_IOS_RELEASE_TEAM_ID) {
+    addIssue(
+      errors,
+      "IOS_RELEASE_TEAM_MISMATCH",
+      "iOS 공개 빌드는 확인된 친구 명의 Apple Developer 팀으로만 서명해야 합니다.",
+    );
   }
   if (expo.ios?.usesAppleSignIn !== true) {
     addIssue(errors, "IOS_APPLE_SIGN_IN_CAPABILITY_MISSING", "Apple 로그인을 제공하는 iOS 빌드는 usesAppleSignIn capability를 선언해야 합니다.");

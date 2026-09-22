@@ -175,7 +175,8 @@ Expo Go 확인은 standalone/store build와 custom scheme의 운영 증거가 �
 
 ## 8. Apple/Google 스토어
 
-- [ ] `계정 필요` 친구 명의 Apple Developer 계정과 App Store Connect 소유자 권한, 인증서/프로비저닝/EAS 자격 준비. 현재 개발자 개인 Team `52HC8BV2BL`은 출시용으로 사용하지 않음
+- [x] `계정 확인` 친구 명의 활성 Apple Developer Program 개인 Team `MCZ4884P7F`와 빈 Identifiers/App Store Connect 앱 목록 확인
+- [ ] `전환 필요` `com.dabboba.mobile`을 기존 개발자 Team `52HC8BV2BL`에서 안전하게 해제·재등록하거나 새 Bundle ID를 선택하고, 친구 팀 인증서·프로비저닝/EAS 자격 준비. 기존 개발자 팀은 출시용으로 사용하지 않음
 - [ ] `계정 필요` 친구 명의 Google Play Console 계정과 앱 소유권, signing, service account 준비
 - [ ] `미결정` bundle ID/package name, 앱 이름, 연령 등급, 카테고리, 지원 URL 확정
 - [ ] `승인 필요` 개인정보 처리방침 URL, 이용약관 URL, 계정 삭제 웹 경로, 사업자/고객지원 정보 공개

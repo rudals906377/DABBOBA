@@ -23,6 +23,12 @@ destructive credential change, but they are not approved for a DABBOBA public
 build, App Store Connect record, TestFlight upload, or submission. Replace them
 with the friend-owned Apple team before producing the first signed artifact.
 
+The friend-owned individual Apple Developer Program Team `MCZ4884P7F` was
+verified active on 2026-09-22. Its Identifiers list and App Store Connect app
+list were empty. `apps/mobile/app.json` and the mobile release gate are pinned
+to this Team ID. This proves the destination account only; the Bundle ID,
+certificate, profile, App Store record, and signed artifact remain incomplete.
+
 The public legal identity must also be internally consistent. The store seller
 name, published policy operator, domain and support-mail controller, PG merchant,
 settlement account, tax records, and customer-support contact must identify the
@@ -161,8 +167,8 @@ contact before public submission.
    support mailbox, identity/push providers, and later PG/settlement accounts.
    Confirm recovery and MFA before reducing the current developer to a scoped
    collaborator. Do not record personal recovery data or secrets in Git.
-2. Enroll or sign in to the friend-owned paid Apple Developer team and record its
-   non-secret Team ID. Do not use Team `52HC8BV2BL` for DABBOBA release.
+2. Use the verified friend-owned paid Apple Developer Team `MCZ4884P7F`. Do not
+   use Team `52HC8BV2BL` for DABBOBA release.
 3. Resolve the Bundle ID before creating an App Store Connect record. The current
    team already registered `com.dabboba.mobile`. Apple allows an App ID to be
    removed only when it has not been uploaded to App Store Connect, and an App

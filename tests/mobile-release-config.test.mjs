@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -10,6 +11,12 @@ import {
 } from "../scripts/check-mobile-release-config.mjs";
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+test("iOS release configuration targets the verified friend-owned Apple team", () => {
+  const appConfig = JSON.parse(readFileSync(path.join(rootDir, "apps/mobile/app.json"), "utf8"));
+
+  assert.equal(appConfig.expo.ios.appleTeamId, "MCZ4884P7F");
+});
 
 const productionPublicEnvironment = {
   DABBOBA_COMMERCE_MODE: "LIVE",
@@ -38,6 +45,7 @@ test("mobile release structure is store-shaped without external credentials", ()
   assert.equal(report.warnings.some((issue) => issue.code === "ANDROID_ADAPTIVE_ICON_REQUIRED"), false);
   assert.equal(report.warnings.some((issue) => issue.code === "PG_REVIEW_BUSINESS_PHONE_MOBILE"), true);
   assert.equal(report.errors.some((issue) => issue.code === "IOS_APPLE_SIGN_IN_CAPABILITY_MISSING"), false);
+  assert.equal(report.errors.some((issue) => issue.code === "IOS_RELEASE_TEAM_MISMATCH"), false);
   assert.equal(report.errors.some((issue) => issue.code === "EAS_PG_REVIEW_PROFILE_INVALID"), false);
 });
 

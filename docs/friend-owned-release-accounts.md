@@ -10,7 +10,7 @@
 | 서비스 | 현재 확인된 상태 | 친구 명의 출시 판정 | 다음 완료 조건 |
 | --- | --- | --- | --- |
 | 사업자·법적 고지 | 앱과 공개 정책에는 한 사업자 정보가 설정돼 있음 | 미확인 | 해당 사업자의 대표·통제 주체가 지정한 친구인지 본인이 확인하고 스토어 판매자·PG·정산·세금 주체와 일치시킴 |
-| Apple Developer / App Store Connect | 개발자 개인 Team `52HC8BV2BL`에 `com.dabboba.mobile`과 배포 자격증명이 있음 | 사용 금지 | 친구 명의 유료 팀의 Account Holder·Team ID 확인 후 아래 Bundle ID 전환 절차 완료 |
+| Apple Developer / App Store Connect | 친구 명의 활성 개인 Team `MCZ4884P7F` 확인. Identifiers와 App Store Connect 앱 목록은 비어 있음. 기존 개발자 Team `52HC8BV2BL`에는 `com.dabboba.mobile`과 배포 자격증명이 있음 | 계정 확인 완료 · Bundle ID/서명 전환 대기 | 아래 Bundle ID 전환 절차를 마치고 친구 팀에서 새 인증서·프로비저닝과 서명 IPA를 검증 |
 | Google Play Console | 친구 명의 앱 레코드·소유권·제출 계정 증거 없음 | 차단 | 친구 명의 계정에서 앱 생성, 계약·신원·결제 프로필 확인, 개발자를 최소 권한 사용자로 초대 |
 | Expo / EAS | `@dabboba-team/dabboba-mobile` 연결됨. 현재 개발자 계정 `kyoungminoh`가 Owner 권한을 보유 | 미확인 | 친구 계정을 조직 Owner와 복구·MFA·billing 주체로 확인한 뒤 개발자 권한 축소 |
 | GitHub | private 저장소 `rudals906377/DABBOBA`; 현재 확인된 collaborator는 개발자 개인 계정 하나 | 사용 금지 | 친구 계정 또는 친구 소유 조직으로 저장소를 안전하게 이전하고 branch protection·Actions·환경값 재검증 |
@@ -25,14 +25,14 @@
 
 `미확인`은 서비스가 동작하지 않는다는 뜻이 아니라, 현재 증거만으로 친구 명의라고 판정하지 않는다는 뜻이다. `사용 금지` 또는 `차단` 항목은 친구 명의 대체 계정이 검증되기 전 공개 서명·제출·실결제에 사용할 수 없다.
 
-현재 엄격한 증거 기준으로 친구 명의가 완료된 외부 서비스는 **0개**다. 연결됨, 배포됨, 관리자 접근 가능은 법적 소유권 완료와 같은 뜻이 아니다.
+현재 엄격한 증거 기준으로 친구 명의가 확인된 외부 서비스는 **Apple Developer/App Store Connect 계정 1개**다. 다만 Bundle ID·서명 자격증명·앱 레코드는 아직 이전되지 않았으므로 iOS 출시 준비 전체가 완료된 것은 아니다. 연결됨, 배포됨, 관리자 접근 가능은 법적 소유권 완료와 같은 뜻이 아니다.
 
 ## Apple Bundle ID 안전 전환
 
-현재 `com.dabboba.mobile`은 개발자 개인 팀에 등록돼 있다. Apple의 일반 앱 이전은 App Store에 출시된 버전이 하나 이상 있어야 하며, DABBOBA에는 그런 출시 기록이 없다. 따라서 아직 일반 앱 이전을 시도하지 않는다.
+친구 명의 Apple Developer Program 개인 Team `MCZ4884P7F`은 2026-09-22 활성 상태로 확인됐고 Identifiers와 App Store Connect 앱 목록은 모두 비어 있었다. 앱 설정과 출시 검사는 이 팀 ID로 고정한다. 현재 `com.dabboba.mobile`은 개발자 개인 팀에 등록돼 있다. Apple의 일반 앱 이전은 App Store에 출시된 버전이 하나 이상 있어야 하며, DABBOBA에는 그런 출시 기록이 없다. 따라서 아직 일반 앱 이전을 시도하지 않는다.
 
-1. 친구 명의 Apple Developer Program 유료 가입과 Account Holder, Team ID를 확인한다.
-2. 현재 팀에서 이 App ID가 App Store Connect에 업로드된 적이 없는지와 Sign in with Apple 그룹 상태를 확인한다.
+1. [완료] 친구 명의 Apple Developer Program 유료 가입과 Team `MCZ4884P7F`, 빈 Identifiers/App Store Connect 앱 목록을 확인한다.
+2. 현재 개발자 팀에서 이 App ID가 App Store Connect에 업로드된 적이 없는지와 Sign in with Apple 그룹 상태를 확인한다.
 3. Apple이 제거를 허용하는 미사용 App ID라면, 사용자의 별도 확인 뒤 기존 프로비저닝 프로파일과 App ID를 제거한다.
 4. 친구 팀에서 같은 Bundle ID를 등록할 수 있는지 확인하고 새 인증서·프로비저닝을 만든다.
 5. 같은 ID 재등록이 불가능하면 새 Bundle ID를 선택하고 Expo, 딥링크, Apple 로그인, 푸시, OAuth redirect, 스토어와 향후 PG 설정을 한 번에 갱신한다.
