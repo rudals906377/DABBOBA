@@ -43,6 +43,7 @@ PNPM_VERSION=11.22.0
 
 - `dist/public-site`만 공개한다.
 - `dist/client`는 내부 앱 프로토타입과 미출시 화면을 포함하므로 절대 Pages 출력 경로로 지정하지 않는다.
+- Cloudflare의 `Email Address Obfuscation`은 꺼 둔다. 활성화하면 검토·기록한 정책 HTML의 SHA-256과 실제 공개 본문이 달라진다.
 - 처음에는 Preview 배포 주소에서 검수하고, `main` 배포가 통과한 뒤에만 커스텀 도메인을 연결한다.
 - 현재 `dabboba.pages.dev` 프로젝트가 존재하므로 친구 계정의 새 프로젝트는 다른 임시 프로젝트명을 사용할 수 있다. 최종 사용자는 `dabboba.net`으로 접속하므로 임시 `*.pages.dev` 이름을 맞추기 위해 기존 프로젝트를 먼저 삭제하지 않는다.
 
@@ -158,6 +159,6 @@ npx --yes wrangler@4.135.0 pages deploy dist/public-site --project-name <친구-
 - [x] `dabboba.net`과 `www.dabboba.net` HTTPS 연결 완료
 - [ ] `support@dabboba.net` 송수신 확인
 - [ ] 운영 API 연결 후 회원탈퇴 전체 흐름 확인
-- [ ] 최소 한 개의 이전 성공 배포가 있어 롤백 가능
+- [x] 최소 한 개의 이전 성공 배포가 있어 롤백 가능
 
 기존 임시 프로젝트를 지워도 `dabboba.net`은 친구 계정의 Pages 프로젝트에만 연결되어 있어야 한다. 기존 프로젝트에 커스텀 도메인, Git 저장소, 운영 변수 또는 운영 API 권한을 연결하지 않는다.
