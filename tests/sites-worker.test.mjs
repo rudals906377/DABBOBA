@@ -137,13 +137,16 @@ test("public hosts serve storefront assets but do not fall back for unknown or p
         ASSETS: {
           fetch: async () => {
             assetFetches += 1;
-            return new Response("missing", { status: 404 });
+            return new Response("storefront fallback", {
+              status: 200,
+              headers: { "content-type": "text/html; charset=UTF-8" },
+            });
           },
         },
       });
 
       assert.equal(response.status, 404);
-      assert.equal(assetFetches, 1);
+      assert.equal(assetFetches, pathname.startsWith("/assets/") ? 1 : 0);
       assert.equal(response.headers.get("x-content-type-options"), "nosniff");
     }
   }
