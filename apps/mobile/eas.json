@@ -39,7 +39,15 @@
     }
   },
   "submit": {
-    "production-prelaunch": {},
-    "production-live": {}
+    "production-prelaunch": {
+      "ios": {
+        "ascAppId": "6815146511"
+      }
+    },
+    "production-live": {
+      "ios": {
+        "ascAppId": "6815146511"
+      }
+    }
   }
 }
