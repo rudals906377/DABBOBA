@@ -7,7 +7,7 @@ physical devices. A green local check is not App Store or Google Play approval.
 The authoritative external ownership checklist is
 [friend-owned-release-accounts.md](friend-owned-release-accounts.md).
 
-## Release ownership boundary — 2026-09-22
+## Release ownership boundary — 2026-09-23
 
 The final publisher and operator is the user's designated friend. Apple
 Developer/App Store Connect, Google Play Console, Expo/EAS, GitHub, Cloudflare
@@ -17,17 +17,16 @@ owned or legally controlled by that friend or by a business whose representation
 and control by that friend have been verified.
 The developer may retain only named least-privilege collaborator access.
 
-Apple Team `52HC8BV2BL` belongs to the current developer's individual account.
-Its certificate and provisioning profile are retained temporarily to avoid a
-destructive credential change, but they are not approved for a DABBOBA public
-build, App Store Connect record, TestFlight upload, or submission. Replace them
-with the friend-owned Apple team before producing the first signed artifact.
+Apple Team `52HC8BV2BL` belongs to the current developer's individual account
+and is not used for the DABBOBA public build. The former team's unused DABBOBA
+App ID and provisioning profile were removed after approval; other app assets
+and shared certificates were preserved.
 
-The friend-owned individual Apple Developer Program Team `MCZ4884P7F` was
-verified active on 2026-09-22. Its Identifiers list and App Store Connect app
-list were empty. `apps/mobile/app.json` and the mobile release gate are pinned
-to this Team ID. This proves the destination account only; the Bundle ID,
-certificate, profile, App Store record, and signed artifact remain incomplete.
+The friend-owned individual Apple Developer Program Team `MCZ4884P7F` now owns
+`com.dabboba.mobile`, App Store Connect app ID `6815146511`, and the signing
+credentials for PRELAUNCH `1.0.0 (1)`. Apple verified the uploaded TestFlight
+build and its metadata reports `MCZ4884P7F.com.dabboba.mobile`. Physical-device
+testing and public App Store submission remain separate gates.
 
 The public legal identity must also be internally consistent. The store seller
 name, published policy operator, domain and support-mail controller, PG merchant,
@@ -41,8 +40,8 @@ dated verification evidence.
 - `apps/mobile/eas.json` defines an internal payment-disabled `preview`, an
   internal payment-window `pg-review`, a payment-disabled
   `production-prelaunch`, and a payment-enabled `production-live` build.
-  It deliberately contains no Apple, Google, Expo account ID, submit credential,
-  or secret.
+  Its iOS submit profiles contain only the public App Store Connect app ID;
+  submit credentials and secrets stay outside Git.
 - App version `1.0.0`, iOS build number `1`, Android version code `1`, bundle and
   package IDs, and the approved app icon are explicit in
   `apps/mobile/app.json`. Bump both platform build identifiers for every
@@ -199,9 +198,11 @@ contact before public submission.
 Expo organization access, the existing Android build credential, and the iOS
 distribution certificate/provisioning profile were confirmed on 2026-09-22.
 The fail-closed PRELAUNCH public values were also registered in EAS Production,
-without PortOne or server secrets. No cloud build, TestFlight/Play upload, or
-store submission has been completed yet. These credentials are not release
-approval until the friend-owned account boundary above is satisfied.
+without PortOne or server secrets. The signed iOS build
+`579aa393-b5d6-42de-a167-dec3bce3e4ec` from commit `933186d` was uploaded
+through EAS submission `c1235fc9-d334-4e63-bdf9-d3f5f9091bd5` and Apple
+marked it valid and ready for internal beta testing on 2026-09-23. This is not
+physical-device QA, Google Play testing, or public App Store approval.
 
 ## Signed artifact and device QA
 

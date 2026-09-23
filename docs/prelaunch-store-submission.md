@@ -26,7 +26,7 @@ binary rather than later LIVE commerce plans.
 - Name: `DABBOBA`
 - Primary language: Korean
 - Bundle ID: `com.dabboba.mobile`
-- SKU: `com.dabboba.mobile`
+- SKU: `DABBOBA-IOS-001`
 - Subtitle: `가챠·쿠지 상품을 한곳에서`
 - Primary category: Shopping
 - Secondary category: Entertainment

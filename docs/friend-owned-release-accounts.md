@@ -1,6 +1,6 @@
 # DABBOBA 친구 명의 출시 계정 전환대장
 
-> 기준일: 2026-09-22
+> 기준일: 2026-09-23
 > 최종 결정: DABBOBA의 출시·운영·정산 주체는 사용자가 지정한 친구 또는 그 친구가 대표·통제하는 것으로 확인된 사업자다. 개발자는 비밀번호를 공유받는 소유자가 아니라 필요한 범위의 협업자로만 참여한다.
 
 이 문서는 코드 설정이 되어 있다는 사실과 **친구 명의 소유권이 확인됐다**는 사실을 구분한다. 비밀번호, 복구 코드, 주민등록번호, 인증서 원문, API secret, 서비스 계정 JSON은 이 문서나 Git에 기록하지 않는다.
@@ -10,7 +10,7 @@
 | 서비스 | 현재 확인된 상태 | 친구 명의 출시 판정 | 다음 완료 조건 |
 | --- | --- | --- | --- |
 | 사업자·법적 고지 | 앱과 공개 정책에는 한 사업자 정보가 설정돼 있음 | 미확인 | 해당 사업자의 대표·통제 주체가 지정한 친구인지 본인이 확인하고 스토어 판매자·PG·정산·세금 주체와 일치시킴 |
-| Apple Developer / App Store Connect | 친구 명의 활성 개인 Team `MCZ4884P7F` 확인. Identifiers와 App Store Connect 앱 목록은 비어 있음. 기존 개발자 Team `52HC8BV2BL`에는 `com.dabboba.mobile`과 배포 자격증명이 있음 | 계정 확인 완료 · Bundle ID/서명 전환 대기 | 아래 Bundle ID 전환 절차를 마치고 친구 팀에서 새 인증서·프로비저닝과 서명 IPA를 검증 |
+| Apple Developer / App Store Connect | 친구 명의 Team `MCZ4884P7F`에 `com.dabboba.mobile`과 App Store Connect 앱 ID `6815146511` 등록. PRELAUNCH `1.0.0 (1)` TestFlight 빌드가 Apple에서 검증되어 내부 테스트 가능 | Apple 앱·서명·업로드 확인 | 내부 테스터 초대와 실기기 회귀 테스트, 스토어 심사 자료 확인 |
 | Google Play Console | 친구 명의 앱 레코드·소유권·제출 계정 증거 없음 | 차단 | 친구 명의 계정에서 앱 생성, 계약·신원·결제 프로필 확인, 개발자를 최소 권한 사용자로 초대 |
 | Expo / EAS | `@dabboba-team/dabboba-mobile` 연결됨. 현재 개발자 계정 `kyoungminoh`가 Owner 권한을 보유 | 미확인 | 친구 계정을 조직 Owner와 복구·MFA·billing 주체로 확인한 뒤 개발자 권한 축소 |
 | GitHub | private 저장소 `rudals906377/DABBOBA`; 현재 확인된 collaborator는 개발자 개인 계정 하나 | 사용 금지 | 친구 계정 또는 친구 소유 조직으로 저장소를 안전하게 이전하고 branch protection·Actions·환경값 재검증 |
@@ -25,18 +25,18 @@
 
 `미확인`은 서비스가 동작하지 않는다는 뜻이 아니라, 현재 증거만으로 친구 명의라고 판정하지 않는다는 뜻이다. `사용 금지` 또는 `차단` 항목은 친구 명의 대체 계정이 검증되기 전 공개 서명·제출·실결제에 사용할 수 없다.
 
-현재 엄격한 증거 기준으로 친구 명의가 확인된 외부 서비스는 **Apple Developer/App Store Connect 계정 1개**다. 다만 Bundle ID·서명 자격증명·앱 레코드는 아직 이전되지 않았으므로 iOS 출시 준비 전체가 완료된 것은 아니다. 연결됨, 배포됨, 관리자 접근 가능은 법적 소유권 완료와 같은 뜻이 아니다.
+현재 친구 명의 Apple Developer/App Store Connect의 Bundle ID, 앱 레코드, 서명된 TestFlight 빌드는 확인됐다. 다른 서비스의 친구 명의 소유권과 실제 기기 검수는 이 증거로 대체되지 않는다. 연결됨, 배포됨, 관리자 접근 가능은 법적 소유권 완료와 같은 뜻이 아니다.
 
 ## Apple Bundle ID 안전 전환
 
-친구 명의 Apple Developer Program 개인 Team `MCZ4884P7F`은 2026-09-22 활성 상태로 확인됐고 Identifiers와 App Store Connect 앱 목록은 모두 비어 있었다. 앱 설정과 출시 검사는 이 팀 ID로 고정한다. 현재 `com.dabboba.mobile`은 개발자 개인 팀에 등록돼 있다. Apple의 일반 앱 이전은 App Store에 출시된 버전이 하나 이상 있어야 하며, DABBOBA에는 그런 출시 기록이 없다. 따라서 아직 일반 앱 이전을 시도하지 않는다.
+친구 명의 Apple Developer Program 개인 Team `MCZ4884P7F`은 활성 상태이며 앱 설정과 출시 검사는 이 팀 ID로 고정한다. 이전 팀의 미사용 DABBOBA App ID와 프로파일을 제거한 뒤 친구 팀에 `com.dabboba.mobile`을 새로 등록했다. Apple의 일반 앱 이전은 사용하지 않았다.
 
-1. [완료] 친구 명의 Apple Developer Program 유료 가입과 Team `MCZ4884P7F`, 빈 Identifiers/App Store Connect 앱 목록을 확인한다.
-2. 현재 개발자 팀에서 이 App ID가 App Store Connect에 업로드된 적이 없는지와 Sign in with Apple 그룹 상태를 확인한다.
-3. Apple이 제거를 허용하는 미사용 App ID라면, 사용자의 별도 확인 뒤 기존 프로비저닝 프로파일과 App ID를 제거한다.
-4. 친구 팀에서 같은 Bundle ID를 등록할 수 있는지 확인하고 새 인증서·프로비저닝을 만든다.
-5. 같은 ID 재등록이 불가능하면 새 Bundle ID를 선택하고 Expo, 딥링크, Apple 로그인, 푸시, OAuth redirect, 스토어와 향후 PG 설정을 한 번에 갱신한다.
-6. 친구 팀으로 서명된 IPA와 TestFlight 업로드가 확인된 뒤에만 기존 개발자 자격증명을 폐기한다.
+1. [완료] 친구 명의 Apple Developer Program 유료 가입과 Team `MCZ4884P7F`를 확인했다.
+2. [완료] 기존 팀의 미사용 DABBOBA 프로비저닝 프로파일과 App ID를 승인 후 제거했다. 다른 앱과 공유 인증서는 유지했다.
+3. [완료] 친구 팀에 같은 Bundle ID를 등록하고 새 배포 인증서·프로비저닝을 만들었다.
+4. [완료] App Store Connect 앱 ID `6815146511`을 생성하고 서명된 PRELAUNCH `1.0.0 (1)`을 업로드했다.
+5. [완료] Apple 빌드 메타데이터에서 `MCZ4884P7F.com.dabboba.mobile`, `get-task-allow: false`, 배포용 푸시 환경, `검증됨`을 확인했다.
+6. [대기] 내부 테스터 초대와 실제 iPhone 설치·로그인·핵심 흐름 검수를 진행한다.
 
 근거: [Apple App ID 삭제 조건](https://developer.apple.com/help/account/identifiers/delete-an-app-id), [Apple 앱 이전 조건](https://developer.apple.com/help/app-store-connect/transfer-an-app/app-transfer-criteria).
 
