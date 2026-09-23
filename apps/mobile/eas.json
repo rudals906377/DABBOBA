@@ -5,8 +5,7 @@
   },
   "build": {
     "base": {
-      "node": "24.21.0",
-      "corepack": true
+      "node": "24.21.0"
     },
     "preview": {
       "extends": "base",

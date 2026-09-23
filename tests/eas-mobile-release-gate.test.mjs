@@ -10,14 +10,13 @@ import {
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
-test("EAS profiles use Corepack's pinned package manager, select an Expo environment, and install the lifecycle gate", () => {
+test("EAS profiles use the repository package manager pin, select an Expo environment, and install the lifecycle gate", () => {
   const eas = JSON.parse(readFileSync(path.join(repositoryRoot, "apps/mobile/eas.json"), "utf8"));
   const rootPackage = JSON.parse(readFileSync(path.join(repositoryRoot, "package.json"), "utf8"));
   const mobilePackage = JSON.parse(readFileSync(path.join(repositoryRoot, "apps/mobile/package.json"), "utf8"));
 
   assert.deepEqual(eas.build.base, {
     node: "24.21.0",
-    corepack: true,
   });
   assert.equal(rootPackage.packageManager, "pnpm@11.22.0");
   for (const [profile, environment, capability] of [
