@@ -31,7 +31,7 @@ test("EAS profiles use the repository package manager pin, select an Expo enviro
   }
   assert.equal(
     mobilePackage.scripts["eas-build-post-install"],
-    "node ../../scripts/eas-mobile-release-gate.mjs",
+    "corepack pnpm run prepare:workspace && node ../../scripts/eas-mobile-release-gate.mjs",
   );
 });
 
