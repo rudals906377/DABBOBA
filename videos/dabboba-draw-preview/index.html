@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=390,height=500">
+  <title>DABBOBA — Gacha motion</title><link rel="icon" href="data:,">
+  <script src="./assets/vendor/gsap.min.js"></script><link rel="stylesheet" href="./capture.css">
+</head>
+<body>
+  <div data-hf-id="hf-0ge7" id="root" data-composition-id="main" data-scene="gacha" data-start="0" data-duration="4.2" data-width="390" data-height="500">
+    <section data-hf-id="hf-bi81" id="gacha-shot" class="clip" data-start="0" data-duration="4.2" data-track-index="1"><div data-hf-id="hf-b78c" class="stage-fill"></div><canvas data-hf-id="hf-i2bv" id="scene-canvas"></canvas><div data-hf-id="hf-f2cl" id="capture-result"><img data-hf-id="hf-1s2g" src="./assets/products/sample-maomao.png" width="149" height="192" alt="시안용 마오마오 피규어"><span data-hf-id="hf-u9g0">마오마오</span><p data-hf-id="hf-z8c8">시안 예시 · 실제 당첨 아님</p></div></section>
+  </div>
+  <script>
+    window.__timelines = window.__timelines || {};
+    window.__timelines.main = gsap.timeline({paused:true}).fromTo('#capture-result',{opacity:0},{opacity:1,duration:.24,ease:'power2.out'},3.82);
+  </script>
+  <script type="module" src="./capture.mjs"></script>
+</body>
+</html>

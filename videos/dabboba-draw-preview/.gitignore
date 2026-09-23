@@ -1,0 +1,15 @@
+.preview.log
+.hyperframes/
+.thumbnails/
+.media/
+test-results/
+node_modules/
+
+# Keep local visual evidence, renders and diagnostics off the source PR.
+# Frozen source baselines are required by the pixel-regression tests.
+snapshots/
+proof/*
+!proof/*.mjs
+*.mp4
+*.webm
+out/

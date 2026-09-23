@@ -1,0 +1,11 @@
+@font-face{font-family:Galmuri11;src:url('./assets/fonts/Galmuri11.woff2') format('woff2')}
+@font-face{font-family:'Noto Sans KR';src:url('./assets/fonts/NotoSansKR_900Black.ttf') format('truetype');font-weight:900}
+*{box-sizing:border-box}html,body{margin:0;width:390px;height:500px;overflow:hidden;background:#111411}#root{position:relative;width:390px;height:500px;overflow:hidden}.clip,.stage-fill,canvas{position:absolute;inset:0;width:100%;height:100%}.stage-fill{background:#111411}canvas{display:block}#capture-result{position:absolute;top:45%;left:0;right:0;text-align:center;color:#233221;font-family:Galmuri11,sans-serif}#capture-result span{font-size:20px;display:block}#capture-result p{font-size:12px;color:#707b6b;margin:8px 0 0}[data-scene=kuji] #capture-result{color:#28271f}[data-scene=kuji] #capture-result p{color:#655f50}
+#capture-result p{color:#657160}[data-scene=kuji] #capture-result p{color:#655f50}
+[data-scene=gacha] #capture-result{inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px;font-family:'Noto Sans KR',sans-serif;font-weight:900}
+[data-scene=gacha] #capture-result img{width:189px;height:auto;max-height:250px;object-fit:contain;margin-bottom:22px}
+[data-scene=gacha] #capture-result p{font-family:Galmuri11,sans-serif;font-weight:400;color:#596252}
+[data-scene=kuji] #capture-result{right:auto;display:grid;grid-template-columns:48% minmax(0,1fr);grid-template-rows:minmax(0,1fr) auto;gap:6px 12px;align-items:center;text-align:left;padding:2px 0;font-family:'Noto Sans KR',sans-serif}
+[data-scene=kuji] #capture-result img{display:block;width:100%;height:auto;max-height:112px;object-fit:contain;border-radius:0}
+[data-scene=kuji] #capture-result span{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;min-height:3.1em;font-size:14px;line-height:1.55;font-weight:900;color:#28271f}
+[data-scene=kuji] #capture-result p{grid-column:1/-1;text-align:center;white-space:nowrap;font-family:Galmuri11,sans-serif;font-size:10px;line-height:1.6;margin:0;color:#655f50}

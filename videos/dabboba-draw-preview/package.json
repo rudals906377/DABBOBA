@@ -1,0 +1,14 @@
+{
+  "name": "dabboba-draw-preview",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "preview": "node server.mjs --background",
+    "test": "node --test --test-concurrency=1 tests/*.test.mjs",
+    "dev": "npx --yes hyperframes@0.8.62 preview",
+    "check": "npx --yes hyperframes@0.8.62 check",
+    "check:captures": "node check-captures.mjs gacha && node check-captures.mjs kuji",
+    "render": "npx --yes hyperframes@0.8.62 render",
+    "publish": "npx --yes hyperframes@0.8.62 publish"
+  }
+}

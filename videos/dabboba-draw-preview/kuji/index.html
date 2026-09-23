@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=390,height=500">
+  <title>DABBOBA — Kuji motion</title><link rel="icon" href="data:,"><base href="/">
+  <script src="assets/vendor/gsap.min.js"></script><link rel="stylesheet" href="capture.css">
+</head>
+<body>
+  <div data-hf-id="hf-uvp0" id="root" data-composition-id="main" data-scene="kuji" data-start="0" data-duration="1.62" data-width="390" data-height="500">
+    <section data-hf-id="hf-o52u" id="kuji-shot" class="clip" data-start="0" data-duration="1.62" data-track-index="1"><div data-hf-id="hf-b78c" class="stage-fill"></div><canvas data-hf-id="hf-i2bv" id="scene-canvas"></canvas><div data-hf-id="hf-f2cl" id="capture-result"><img src="assets/products/sample-kuji-rabbit.jpeg" width="529" height="528" alt="시안용 초콜릿 토끼와 티아라"><span data-hf-id="hf-u9g0">초콜릿 토끼<br>티아라</span><p data-hf-id="hf-z8c8">시안 예시 · 실제 당첨 아님</p></div></section>
+  </div>
+  <script>
+    window.__timelines = window.__timelines || {};
+    window.__timelines.main = gsap.timeline({paused:true}).fromTo('#capture-result',{opacity:0},{opacity:1,duration:.20,ease:'power2.out'},1.146);
+  </script>
+  <script type="module" src="capture.mjs"></script>
+</body>
+</html>
