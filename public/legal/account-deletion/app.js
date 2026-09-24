@@ -65,7 +65,7 @@
   });
   elements["refresh-preview-button"].addEventListener("click", function () {
     if (!activeVerifiedSession()) {
-      resetAuthentication("다시 확인하려면 이메일로 본인 확인을 진행해 주세요.");
+      resetAuthentication("다시 확인하려면 가입에 사용한 방법으로 본인 확인을 진행해 주세요.");
       return;
     }
     void loadDeletionPreview();
@@ -93,7 +93,7 @@
       if (!isRuntimeConfig(config)) throw new Error("service unavailable");
       runtimeConfig = config;
       elements["service-loading"].hidden = true;
-      configureSocialMethods(config.socialMethods);
+      configureAuthenticationMethods(config);
       if (!receipt) {
         elements["authentication-flow"].hidden = false;
         await consumeSocialLoginResult();
@@ -103,6 +103,11 @@
       elements["service-unavailable"].hidden = false;
       elements["authentication-flow"].hidden = true;
     }
+  }
+
+  function configureAuthenticationMethods(config) {
+    elements["email-form"].hidden = !config?.emailOtpEnabled;
+    configureSocialMethods(config?.socialMethods);
   }
 
   function configureSocialMethods(methods) {
@@ -214,7 +219,7 @@
 
   async function requestOtp(isResend) {
     clearError();
-    if (!runtimeConfig) return showError("현재 웹 탈퇴 요청을 사용할 수 없습니다.");
+    if (!runtimeConfig?.emailOtpEnabled) return showError("현재 이메일 인증을 사용할 수 없습니다.");
     const email = normalizeEmail(elements["account-email"].value);
     if (!email) return showError("이메일 주소 형식을 확인해 주세요.", elements["account-email"]);
     if (Date.now() < resendAvailableAt) return;
@@ -460,12 +465,15 @@
 
   function isRuntimeConfig(value) {
     const versions = value && value.requiredPolicyVersions;
-    return value && value.ready === true && value.authMethod === "EMAIL_OTP"
+    return value && value.ready === true
+      && typeof value.emailOtpEnabled === "boolean"
+      && value.authMethod === (value.emailOtpEnabled ? "EMAIL_OTP" : null)
       && Array.isArray(value.socialMethods)
       && value.socialMethods.every(function (method, index, methods) {
         return ["KAKAO", "NAVER", "GOOGLE", "APPLE"].includes(method)
           && methods.indexOf(method) === index;
       })
+      && (value.emailOtpEnabled || value.socialMethods.length > 0)
       && versions && VERSION.test(versions.terms) && VERSION.test(versions.privacy)
       && Number.isSafeInteger(value.resendAfterSeconds) && value.resendAfterSeconds >= 30
       && Number.isSafeInteger(value.expiresAfterSeconds) && value.expiresAfterSeconds >= 300;
@@ -491,9 +499,8 @@
 
   function prepareFreshAuthentication() {
     clearSensitiveState();
-    elements["email-form"].hidden = false;
+    configureAuthenticationMethods(runtimeConfig);
     elements["consent-step"].hidden = false;
-    configureSocialMethods(runtimeConfig && runtimeConfig.socialMethods);
     elements["account-email"].readOnly = false;
     elements["account-email"].value = "";
     elements["otp-form"].hidden = true;

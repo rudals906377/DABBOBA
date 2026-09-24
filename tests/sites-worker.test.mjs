@@ -201,7 +201,7 @@ test("web account deletion stays fail-closed until all public bindings are safe"
   assert.equal(upstreamCalls, 0);
 });
 
-test("web account deletion runtime requires EMAIL and matching live policy versions", async () => {
+test("web account deletion runtime requires an available login method and matching live policy versions", async () => {
   const calls = [];
   const response = await handleAccountDeletionService(
     new Request("https://dabboba.net/account-deletion/runtime-config.json"),
@@ -222,6 +222,7 @@ test("web account deletion runtime requires EMAIL and matching live policy versi
   assert.deepEqual(await response?.json(), {
     ready: true,
     authMethod: "EMAIL_OTP",
+    emailOtpEnabled: true,
     socialMethods: [],
     requiredPolicyVersions: policyVersions,
     resendAfterSeconds: 60,
@@ -231,6 +232,33 @@ test("web account deletion runtime requires EMAIL and matching live policy versi
     "https://api.dabboba.net/v1/auth/providers",
     "https://api.dabboba.net/v1/public/config",
   ]);
+
+  const socialOnly = await handleAccountDeletionService(
+    new Request("https://dabboba.net/account-deletion/runtime-config.json"),
+    accountDeletionRuntime,
+    async (url) => url.endsWith("/v1/auth/providers")
+      ? json({ methods: ["GOOGLE"], brokerExchangeConfigured: true, requiredPolicyVersions: policyVersions })
+      : json({ commerceMode: "PRELAUNCH", requiredPolicyVersions: policyVersions }),
+  );
+  assert.equal(socialOnly?.status, 200);
+  assert.deepEqual(await socialOnly?.json(), {
+    ready: true,
+    authMethod: null,
+    emailOtpEnabled: false,
+    socialMethods: ["GOOGLE"],
+    requiredPolicyVersions: policyVersions,
+    resendAfterSeconds: 60,
+    expiresAfterSeconds: 600,
+  });
+
+  const noMethods = await handleAccountDeletionService(
+    new Request("https://dabboba.net/account-deletion/runtime-config.json"),
+    accountDeletionRuntime,
+    async (url) => url.endsWith("/v1/auth/providers")
+      ? json({ methods: [], brokerExchangeConfigured: true, requiredPolicyVersions: policyVersions })
+      : json({ commerceMode: "PRELAUNCH", requiredPolicyVersions: policyVersions }),
+  );
+  assert.equal(noMethods?.status, 503);
 
   const mismatched = await handleAccountDeletionService(
     new Request("https://dabboba.net/account-deletion/runtime-config.json"),
@@ -257,7 +285,7 @@ test("social account deletion uses bounded PKCE and exchanges only an existing p
     async (url, init) => {
       startCalls.push({ url, init });
       return json({
-        methods: ["KAKAO", "EMAIL"],
+        methods: ["KAKAO"],
         brokerExchangeConfigured: true,
         requiredPolicyVersions: policyVersions,
       });
@@ -345,18 +373,22 @@ test("email OTP request never creates a user and does not reveal account existen
       accountDeletionRuntime,
       async (url, init) => {
         calls.push({ url, init });
+        if (url.endsWith("/v1/auth/providers")) {
+          return json({ methods: ["EMAIL"], brokerExchangeConfigured: true });
+        }
         return json(upstreamStatus === 200 ? {} : { error: "user_not_found" }, upstreamStatus);
       },
     );
     assert.equal(response?.status, 202);
     responses.push(await response?.text());
-    assert.equal(calls.length, 1);
-    assert.equal(calls[0].url, "https://project.supabase.co/auth/v1/otp");
-    assert.deepEqual(JSON.parse(calls[0].init.body), {
+    assert.equal(calls.length, 2);
+    assert.equal(calls[0].url, "https://api.dabboba.net/v1/auth/providers");
+    assert.equal(calls[1].url, "https://project.supabase.co/auth/v1/otp");
+    assert.deepEqual(JSON.parse(calls[1].init.body), {
       email: "member@example.com",
       create_user: false,
     });
-    assert.equal(calls[0].init.headers.apikey, accountDeletionRuntime.SUPABASE_PUBLISHABLE_KEY);
+    assert.equal(calls[1].init.headers.apikey, accountDeletionRuntime.SUPABASE_PUBLISHABLE_KEY);
   }
   assert.equal(responses[0], responses[1]);
   assert.doesNotMatch(responses[0], /member@example\.com|user_not_found/i);
@@ -377,6 +409,33 @@ test("email OTP request never creates a user and does not reveal account existen
   assert.equal(invalidEmail?.status, 202);
   assert.equal(await invalidEmail?.text(), responses[0]);
   assert.equal(invalidEmailUpstreamCalls, 0);
+});
+
+test("web account deletion does not send OTP when email login is disabled", async () => {
+  const calls = [];
+  const response = await handleAccountDeletionService(
+    new Request("https://dabboba.net/account-deletion/auth/email-otp", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ email: "member@example.com" }),
+    }),
+    accountDeletionRuntime,
+    async (url) => {
+      calls.push(url);
+      if (url.endsWith("/v1/auth/providers")) {
+        return json({ methods: ["GOOGLE"], brokerExchangeConfigured: true });
+      }
+      throw new Error("disabled email login must not send OTP");
+    },
+  );
+  assert.equal(response?.status, 202);
+  assert.deepEqual(calls, ["https://api.dabboba.net/v1/auth/providers"]);
+  assert.deepEqual(await response?.json(), {
+    accepted: true,
+    message: "입력한 이메일이 가입 계정과 일치하면 인증번호를 보냈습니다.",
+    resendAfterSeconds: 60,
+    expiresAfterSeconds: 600,
+  });
 });
 
 test("email OTP verification exchanges a transient Supabase token for a DABBOBA session", async () => {

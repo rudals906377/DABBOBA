@@ -195,12 +195,15 @@ async function handleRuntimeConfig(runtime, externalFetch) {
     const publicBody = publicConfig.body;
     const providerVersions = requiredPolicyVersions(providerBody?.requiredPolicyVersions);
     const publicVersions = requiredPolicyVersions(publicBody?.requiredPolicyVersions);
+    const methods = Array.isArray(providerBody?.methods) ? providerBody.methods : [];
+    const emailOtpEnabled = methods.includes("EMAIL");
+    const socialMethods = [...new Set(methods.filter((method) => Object.hasOwn(SOCIAL_PROVIDER_IDS, method)))];
     if (
       !providers.response.ok
       || !publicConfig.response.ok
       || providerBody?.brokerExchangeConfigured !== true
       || !Array.isArray(providerBody?.methods)
-      || !providerBody.methods.includes("EMAIL")
+      || (!emailOtpEnabled && socialMethods.length === 0)
       || !providerVersions
       || !publicVersions
       || providerVersions.terms !== publicVersions.terms
@@ -210,8 +213,9 @@ async function handleRuntimeConfig(runtime, externalFetch) {
     }
     return jsonResponse({
       ready: true,
-      authMethod: "EMAIL_OTP",
-      socialMethods: providerBody.methods.filter((method) => ["KAKAO", "NAVER", "GOOGLE", "APPLE"].includes(method)),
+      authMethod: emailOtpEnabled ? "EMAIL_OTP" : null,
+      emailOtpEnabled,
+      socialMethods,
       requiredPolicyVersions: publicVersions,
       resendAfterSeconds: EMAIL_OTP_RESPONSE.resendAfterSeconds,
       expiresAfterSeconds: EMAIL_OTP_RESPONSE.expiresAfterSeconds,
@@ -389,6 +393,15 @@ async function handleEmailOtp(request, runtime, externalFetch) {
   if (!email) return jsonResponse(EMAIL_OTP_RESPONSE, 202, { "retry-after": "60" });
 
   try {
+    const providers = await fetchJson(externalFetch, `${runtime.apiOrigin}/v1/auth/providers`, {
+      headers: { accept: "application/json" },
+      signal: requestTimeoutSignal(),
+    });
+    if (!providers.response.ok || providers.body?.brokerExchangeConfigured !== true
+      || !Array.isArray(providers.body?.methods)) return accountDeletionUnavailable();
+    if (!providers.body.methods.includes("EMAIL")) {
+      return jsonResponse(EMAIL_OTP_RESPONSE, 202, { "retry-after": "60" });
+    }
     const result = await fetchJson(externalFetch, `${runtime.supabaseOrigin}/auth/v1/otp`, {
       method: "POST",
       headers: supabaseHeaders(runtime.supabasePublishableKey),
