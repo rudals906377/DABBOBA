@@ -11,10 +11,31 @@ import { runSupabaseEdgeReleasePreflight } from './supabase-edge-release-preflig
 import { waitForPublicEdgeSurface } from './verify-public-edge-surface.mjs';
 
 const SUPABASE_CLI_VERSION = '2.117.0';
-export const SUPABASE_PRODUCTION_CLI_PROFILE = 'dabboba-production';
 
 export function supabaseCommandArgs(...args) {
-  return ['--yes', `supabase@${SUPABASE_CLI_VERSION}`, ...args, '--profile', SUPABASE_PRODUCTION_CLI_PROFILE];
+  return ['--yes', `supabase@${SUPABASE_CLI_VERSION}`, ...args];
+}
+
+export function verifySupabaseTargetProjectAccess({
+  projectRef = SUPABASE_INTEGRATION_PROJECT_REF,
+  runCommand = spawnSync,
+} = {}) {
+  const result = runCommand('npx', supabaseCommandArgs('projects', 'list', '--output', 'json'), {
+    cwd: new URL('../', import.meta.url),
+    env: process.env,
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let projects;
+  try {
+    projects = JSON.parse(result.stdout);
+  } catch {
+    throw new Error('Supabase CLI project access could not be verified.');
+  }
+  if (result.error || result.status !== 0 || !Array.isArray(projects)
+    || !projects.some((project) => project.ref === projectRef && project.status === 'ACTIVE_HEALTHY')) {
+    throw new Error('Supabase CLI is not authenticated for the expected active production project.');
+  }
 }
 
 function run(command, args) {
@@ -34,6 +55,7 @@ export async function deploySupabaseEdge({
   prepareProfile = prepareSupabaseEdgeProfile,
   readEdgeProfile = () => parseEnv(readFileSync(SUPABASE_EDGE_PROFILE_FILE, 'utf8')),
   preflight = ({ edgeProfile }) => runSupabaseEdgeReleasePreflight({ edgeProfile }),
+  verifyProjectAccess = verifySupabaseTargetProjectAccess,
   run: runCommand = run,
   supabase: runSupabase = supabase,
   verifyPublicSurface = waitForPublicEdgeSurface,
@@ -48,6 +70,7 @@ export async function deploySupabaseEdge({
   }
 
   const release = await preflight({ edgeProfile: profile });
+  verifyProjectAccess();
   runCommand('corepack', ['pnpm', '--filter', '@dabboba/api', 'build:supabase']);
   runCommand('corepack', ['pnpm', '--filter', '@dabboba/worker', 'build:edge']);
   runSupabase('secrets', 'set', '--env-file', SUPABASE_EDGE_PROFILE_FILE, '--project-ref', SUPABASE_INTEGRATION_PROJECT_REF);

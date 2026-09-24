@@ -4,7 +4,7 @@ import { runSupabaseEdgeReleasePreflight } from '../scripts/supabase-edge-releas
 import {
   deploySupabaseEdge,
   supabaseCommandArgs,
-  SUPABASE_PRODUCTION_CLI_PROFILE,
+  verifySupabaseTargetProjectAccess,
 } from '../scripts/deploy-supabase-edge.mjs';
 import {
   assertSupabaseEdgeReleaseConfiguration,
@@ -37,8 +37,7 @@ const completeAppleProfile = {
   DABBOBA_WORKER_APPLE_TOKEN_ENCRYPTION_KEY_VERSION: '1',
 };
 
-test('production Edge deployment always selects its dedicated Supabase CLI profile', () => {
-  assert.equal(SUPABASE_PRODUCTION_CLI_PROFILE, 'dabboba-production');
+test('production Edge deployment uses an explicit project ref without mistaking CLI backend profiles for logins', () => {
   assert.deepEqual(
     supabaseCommandArgs('functions', 'deploy', 'dabboba-api', '--project-ref', 'rconfxsykttfvznakile'),
     [
@@ -49,10 +48,26 @@ test('production Edge deployment always selects its dedicated Supabase CLI profi
       'dabboba-api',
       '--project-ref',
       'rconfxsykttfvznakile',
-      '--profile',
-      'dabboba-production',
     ],
   );
+});
+
+test('production Edge deployment checks CLI access to the exact active target project', () => {
+  const expected = { ref: 'rconfxsykttfvznakile', status: 'ACTIVE_HEALTHY' };
+  const runCommand = (_command, args) => {
+    assert.deepEqual(args, supabaseCommandArgs('projects', 'list', '--output', 'json'));
+    return { status: 0, stdout: JSON.stringify([expected]) };
+  };
+  assert.doesNotThrow(() => verifySupabaseTargetProjectAccess({ runCommand }));
+  assert.throws(() => verifySupabaseTargetProjectAccess({
+    runCommand: () => ({ status: 0, stdout: JSON.stringify([{ ...expected, ref: 'another-project' }]) }),
+  }), /expected active production project/);
+  assert.throws(() => verifySupabaseTargetProjectAccess({
+    runCommand: () => ({ status: 0, stdout: JSON.stringify([{ ...expected, status: 'PAUSED' }]) }),
+  }), /expected active production project/);
+  assert.throws(() => verifySupabaseTargetProjectAccess({
+    runCommand: () => ({ status: 1, stdout: 'not-json' }),
+  }), /project access could not be verified/);
 });
 
 test('Supabase Edge release profile distinguishes required auth from optional remote push', () => {
@@ -256,11 +271,12 @@ test('Supabase Edge deployment performs both preflights before build, secret, or
         releaseConfiguration: assertSupabaseEdgeReleaseConfiguration(suppliedProfile),
       };
     },
+    verifyProjectAccess() { calls.push('project-access'); },
     run(command, args) { calls.push(`${command}:${args.join(' ')}`); },
     supabase(...args) { calls.push(`supabase:${args.join(' ')}`); },
     verifyPublicSurface() { calls.push('public-smoke'); },
   });
-  assert.deepEqual(calls.slice(0, 3), ['profile', 'profile-read', 'preflight']);
+  assert.deepEqual(calls.slice(0, 4), ['profile', 'profile-read', 'preflight', 'project-access']);
   assert.equal(calls.some((call) => call.includes('build:supabase')), true);
   assert.equal(calls.some((call) => call.includes('functions deploy dabboba-api')), true);
   assert.ok(calls.indexOf('public-smoke') > calls.findIndex((call) => call.includes('functions deploy dabboba-worker')));
@@ -272,10 +288,24 @@ test('a failed database preflight leaves build, secrets, and functions untouched
     prepareProfile: () => edgeProfile,
     readEdgeProfile: () => ({}),
     preflight: async () => { throw new Error('database release blocked'); },
+    verifyProjectAccess: () => commands.push('project-access'),
     run: (...args) => commands.push(args),
     supabase: (...args) => commands.push(args),
     verifyPublicSurface: () => commands.push('public-smoke'),
   }), /database release blocked/);
+  assert.deepEqual(commands, []);
+});
+
+test('missing target project access leaves builds, secrets, and functions untouched', async () => {
+  const commands = [];
+  await assert.rejects(deploySupabaseEdge({
+    prepareProfile: () => edgeProfile,
+    readEdgeProfile: () => ({}),
+    preflight: async () => ({ sourceHead: 'a'.repeat(40), targetHash: 'b'.repeat(64) }),
+    verifyProjectAccess: () => { throw new Error('wrong Supabase account'); },
+    run: (...args) => commands.push(args),
+    supabase: (...args) => commands.push(args),
+  }), /wrong Supabase account/);
   assert.deepEqual(commands, []);
 });
 
@@ -289,6 +319,7 @@ test('deployment cannot report success when the mobile public API smoke fails', 
       targetHash: 'b'.repeat(64),
       releaseConfiguration: assertSupabaseEdgeReleaseConfiguration(edgeProfile),
     }),
+    verifyProjectAccess: () => calls.push('project-access'),
     run: (command, args) => calls.push(`${command}:${args.join(' ')}`),
     supabase: (...args) => calls.push(`supabase:${args.join(' ')}`),
     verifyPublicSurface: async () => { throw new Error('Public config returned HTTP 404'); },
