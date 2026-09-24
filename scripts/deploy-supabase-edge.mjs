@@ -11,6 +11,11 @@ import { runSupabaseEdgeReleasePreflight } from './supabase-edge-release-preflig
 import { waitForPublicEdgeSurface } from './verify-public-edge-surface.mjs';
 
 const SUPABASE_CLI_VERSION = '2.117.0';
+export const SUPABASE_PRODUCTION_CLI_PROFILE = 'dabboba-production';
+
+export function supabaseCommandArgs(...args) {
+  return ['--yes', `supabase@${SUPABASE_CLI_VERSION}`, ...args, '--profile', SUPABASE_PRODUCTION_CLI_PROFILE];
+}
 
 function run(command, args) {
   const result = spawnSync(command, args, {
@@ -22,7 +27,7 @@ function run(command, args) {
 }
 
 function supabase(...args) {
-  run('npx', ['--yes', `supabase@${SUPABASE_CLI_VERSION}`, ...args]);
+  run('npx', supabaseCommandArgs(...args));
 }
 
 export async function deploySupabaseEdge({

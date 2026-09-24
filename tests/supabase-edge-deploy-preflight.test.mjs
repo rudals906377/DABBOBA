@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { runSupabaseEdgeReleasePreflight } from '../scripts/supabase-edge-release-preflight.mjs';
-import { deploySupabaseEdge } from '../scripts/deploy-supabase-edge.mjs';
+import {
+  deploySupabaseEdge,
+  supabaseCommandArgs,
+  SUPABASE_PRODUCTION_CLI_PROFILE,
+} from '../scripts/deploy-supabase-edge.mjs';
 import {
   assertSupabaseEdgeReleaseConfiguration,
   edgeExternalValuesFromSource,
@@ -32,6 +36,24 @@ const completeAppleProfile = {
   DABBOBA_WORKER_APPLE_TOKEN_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString('base64url'),
   DABBOBA_WORKER_APPLE_TOKEN_ENCRYPTION_KEY_VERSION: '1',
 };
+
+test('production Edge deployment always selects its dedicated Supabase CLI profile', () => {
+  assert.equal(SUPABASE_PRODUCTION_CLI_PROFILE, 'dabboba-production');
+  assert.deepEqual(
+    supabaseCommandArgs('functions', 'deploy', 'dabboba-api', '--project-ref', 'rconfxsykttfvznakile'),
+    [
+      '--yes',
+      'supabase@2.117.0',
+      'functions',
+      'deploy',
+      'dabboba-api',
+      '--project-ref',
+      'rconfxsykttfvznakile',
+      '--profile',
+      'dabboba-production',
+    ],
+  );
+});
 
 test('Supabase Edge release profile distinguishes required auth from optional remote push', () => {
   assert.deepEqual(SUPABASE_EDGE_EXTERNAL_REQUIRED_KEYS, [
