@@ -200,6 +200,13 @@ jobs:
           DATABASE_URL: ""
         run: node --test apps/api/dist/runtime-role-routes.integration.test.js
 
+      - name: Verify customer authentication broker with the runtime database role
+        env:
+          DATABASE_URL: ""
+        run: |
+          node scripts/check-test-backend-env.mjs --require-integration-db
+          node --test apps/api/dist/customer-auth.integration.test.js
+
       - name: Run PostgreSQL-backed worker integration tests
         env:
           DATABASE_URL: ""
