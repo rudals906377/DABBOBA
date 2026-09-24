@@ -5,13 +5,13 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repositoryRoot = fileURLToPath(new URL("../", import.meta.url));
-const textExtensions = new Set([".js", ".json", ".html"]);
+const bundleExtensions = new Set([".js", ".json", ".html", ".hbc", ".bundle", ".jsbundle"]);
 
 const forbiddenMarkers = Object.freeze([
-  { code: "TEST_PAYMENT", pattern: /\bTEST_PG\b/ },
+  { code: "TEST_PAYMENT", pattern: /TEST_PG/ },
   { code: "DEMO_SESSION", pattern: /\/v1\/demo\/(?:capabilities|session|payments)/ },
   { code: "MOBILE_TEST_FIXTURE", pattern: /MOBILE_TEST_FIXTURE|mobile-test-account/i },
-  { code: "LOOPBACK_HOST", pattern: /(?:localhost|127\.0\.0\.1|10\.0\.2\.2)(?::\d+)?/i },
+  { code: "LOOPBACK_HOST", pattern: /(?:https?|wss?):\/\/(?:localhost|127\.0\.0\.1|10\.0\.2\.2)(?::\d+)?/i },
   { code: "PREVIEW_ROUTE", pattern: /\/draw\/preview(?:\/|\\\/)/ },
 ]);
 
@@ -50,9 +50,19 @@ export function mobileProductionExportInvocation({
 export function scanMobileProductionBundle(directory) {
   const issues = [];
   for (const file of walk(directory)) {
-    if (!textExtensions.has(path.extname(file)) || file.endsWith(".map")) continue;
+    if (!bundleExtensions.has(path.extname(file)) || file.endsWith(".map")) continue;
     const source = readFileSync(file, "utf8");
+    const isBytecode = path.extname(file) === ".hbc";
     for (const marker of forbiddenMarkers) {
+      // Hermes embeds Expo/dev-library URL defaults in its string table. The
+      // release config gate checks the actual API origin; here only a loopback
+      // customer API route is actionable in bytecode.
+      if (isBytecode && marker.code === "LOOPBACK_HOST") {
+        if (/(?:https?|wss?):\/\/(?:localhost|127\.0\.0\.1|10\.0\.2\.2)(?::\d+)?\/v1\//i.test(source)) {
+          issues.push({ code: marker.code, file: path.relative(directory, file) });
+        }
+        continue;
+      }
       if (marker.pattern.test(source)) {
         issues.push({ code: marker.code, file: path.relative(directory, file) });
       }
@@ -110,7 +120,7 @@ export function verifyMobileProductionBundles() {
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
     verifyMobileProductionBundles();
-    process.stdout.write("iOS and Android production bundles contain no test payment, demo-session, fixture, or loopback markers.\n");
+    process.stdout.write("iOS and Android production bundles contain no test payment, demo-session, fixture, or customer API loopback markers.\n");
   } catch (error) {
     process.stderr.write(`${error instanceof Error ? error.message : "Mobile production bundle verification failed"}\n`);
     process.exitCode = 1;
