@@ -42,7 +42,7 @@ import { useStorefrontCategorySettings } from "@/features/catalog/StorefrontCate
 import { isCustomerProductCategoryEnabledOn, productCategoryLabel } from "@/features/catalog/product-categories";
 import { catalogQuantityLabel, remainingInventoryLabel, shouldShowCatalogInventory } from "@/features/catalog/remaining-inventory";
 import { useCommerceCapability } from "@/features/commerce/CommerceCapabilityProvider";
-import { productPriceLabel } from "@/features/commerce/product-commerce-presentation";
+import { productPriceLabel, productPriceParts } from "@/features/commerce/product-commerce-presentation";
 import { AnnouncementTicker } from "@/features/home/AnnouncementTicker";
 import { mergeFreshHomeCatalogWithCachedSections } from "@/features/home/home-catalog-recovery";
 import { remainingKujiTierAccessibilityLabel } from "@/features/kuji/kuji-tier-availability";
@@ -616,6 +616,7 @@ function CollectionProductCard({
   const storefrontUri = resolveCatalogImageUrl(product.storefrontImageUrl, assetBaseUrl, product.version);
   const primaryUri = resolveCatalogImageUrl(product.imageUrl, assetBaseUrl, product.version);
   const cardWidth = getHomeProductCardWidth(layoutKind);
+  const price = productPriceParts(product, commerceEnabled);
   return (
     <Pressable
       accessibilityRole="button"
@@ -649,12 +650,27 @@ function CollectionProductCard({
         >
           {layoutKind === "gacha" ? catalogCardTitle(product.name, ipName) : productSubjectTitle(product.name, ipName)}
         </Text>
+        {layoutKind === "gacha" && price.qualifier ? (
+          <Text
+            variant="catalogMetadata"
+            maxFontSizeMultiplier={CATALOG_CARD_TEXT_MAX_FONT_SIZE_MULTIPLIER}
+            style={styles.collectionProductPriceQualifier}
+          >
+            {price.qualifier}
+          </Text>
+        ) : null}
         <Text
           variant="catalogPrice"
           maxFontSizeMultiplier={CATALOG_CARD_TEXT_MAX_FONT_SIZE_MULTIPLIER}
-          style={[styles.collectionProductPrice, layoutKind === "gacha" && styles.collectionProductPriceGacha]}
+          style={[
+            styles.collectionProductPrice,
+            layoutKind === "gacha" && styles.collectionProductPriceGacha,
+            layoutKind === "gacha" && price.qualifier && styles.collectionProductPriceAfterQualifier,
+          ]}
         >
-          {productPriceLabel(product, commerceEnabled)}
+          {layoutKind === "gacha" && price.qualifier
+            ? price.amount.replace(/원$/, "\u2060원")
+            : productPriceLabel(product, commerceEnabled)}
         </Text>
         {shouldShowCatalogInventory(product, commerceEnabled) ? (
           <RemainingInventoryMeter
@@ -882,8 +898,10 @@ const styles = StyleSheet.create({
   collectionProductName: { minHeight: 40, flexShrink: 1, color: colors.ink, ...seed.typography.catalogTitle, marginTop: seed.spacing.x1 },
   collectionProductNameGacha: { marginTop: 0 },
   collectionProductNameKuji: { minHeight: 0, ...seed.typography.catalogTitleWide },
+  collectionProductPriceQualifier: { color: colors.muted, ...seed.typography.catalogMetadata, marginTop: seed.spacing.x0_5 },
   collectionProductPrice: { color: colors.ink, ...seed.typography.catalogPrice, fontWeight: "500", marginTop: seed.spacing.x1 },
   collectionProductPriceGacha: { marginTop: seed.spacing.x0_5 },
+  collectionProductPriceAfterQualifier: { marginTop: 0 },
   pressed: {
     opacity: seed.state.pressedOpacity,
     transform: [{ translateY: seed.state.pressedTranslateY }, { scale: seed.state.pressedScale }],

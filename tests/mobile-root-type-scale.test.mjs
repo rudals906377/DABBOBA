@@ -34,7 +34,7 @@ test("native catalog, storage, and profile roots share the approved readable sca
     assert.match(source, /seed\.typography\.catalogPrice/);
     assert.match(source, /seed\.typography\.catalogMetadata/);
   }
-  assert.match(homeSource, /variant=\{layoutKind === "kuji" \? "catalogTitleWide" : "catalogTitle"\}[\s\S]*?variant="catalogPrice"[\s\S]*?style=\{\[styles\.collectionProductPrice, layoutKind === "gacha" && styles\.collectionProductPriceGacha\]\}/);
+  assert.match(homeSource, /variant=\{layoutKind === "kuji" \? "catalogTitleWide" : "catalogTitle"\}[\s\S]*?variant="catalogPrice"[\s\S]*?styles\.collectionProductPriceGacha/);
   assert.doesNotMatch(homeSource, /style=\{styles\.collectionProductMeta\}/);
   assert.doesNotMatch(homeSource, /productCategoryLabel\(product\.category\)\}\s*·\s*\{product\.price/);
   assert.match(shopSource, /type ShopRootCategory = Extract<ProductCategory, "gacha" \| "kuji">/);

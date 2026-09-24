@@ -39,6 +39,8 @@ test("Home gacha cards use a wider, lower profile without shrinking typography",
   assert.match(homeSource, /collectionProductPrice:\s*\{[^}]*fontWeight:\s*"500"/);
   assert.match(homeSource, /collectionProductPrice:\s*\{[^}]*marginTop:\s*seed\.spacing\.x1/);
   assert.match(homeSource, /collectionProductPriceGacha:\s*\{[^}]*marginTop:\s*seed\.spacing\.x0_5/);
+  assert.match(homeSource, /collectionProductPriceQualifier:\s*\{[^}]*seed\.typography\.catalogMetadata/);
+  assert.match(homeSource, /collectionProductPriceAfterQualifier:\s*\{[^}]*marginTop:\s*0/);
   assert.match(homeSource, /collectionProductIp:\s*\{[^}]*seed\.typography\.catalogMetadata/);
   assert.match(homeSource, /productInventory:\s*\{[^}]*marginTop:\s*seed\.spacing\.x1_5/);
   assert.match(homeSource, /productInventoryGacha:\s*\{[^}]*marginTop:\s*seed\.spacing\.x1/);
@@ -60,10 +62,11 @@ test("Home operator cards use a wider title treatment only for kuji", () => {
   assert.match(productCardSource, /variant=\{layoutKind === "kuji" \? "catalogTitleWide" : "catalogTitle"\}/);
   assert.match(homeSource, /collectionProductNameKuji:\s*\{[^}]*seed\.typography\.catalogTitleWide/);
   assert.doesNotMatch(homeSource, /collectionProductMeta/);
-  assert.match(
-    productCardSource,
-    /variant="catalogPrice"[\s\S]*?style=\{\[styles\.collectionProductPrice, layoutKind === "gacha" && styles\.collectionProductPriceGacha\]\}[\s\S]*?\{productPriceLabel\(product, commerceEnabled\)\}/,
-  );
+  assert.match(productCardSource, /const price = productPriceParts\(product, commerceEnabled\)/);
+  assert.match(productCardSource, /layoutKind === "gacha" && price\.qualifier \? \([\s\S]*?variant="catalogMetadata"[\s\S]*?\{price\.qualifier\}/);
+  assert.match(productCardSource, /variant="catalogPrice"[\s\S]*?styles\.collectionProductPriceAfterQualifier/);
+  assert.ok(productCardSource.includes(String.raw`price.amount.replace(/원$/, "\u2060원")`));
+  assert.match(productCardSource, /productPriceLabel\(product, commerceEnabled\)/);
 });
 
 test("Home kuji cards use a wider rail card and landscape discovery media", () => {
