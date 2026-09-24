@@ -4,6 +4,7 @@ import { writeAdminAudit, writeOutbox } from "../lib/audit.js";
 import { AppError, badRequest, conflict, notFound } from "../lib/errors.js";
 import { enumInput, integerInput, objectInput, slugIdInput, uuidInput } from "../lib/input.js";
 import type { ApiContext } from "../types.js";
+import { legacyCatalogMediaDeliveryUrl } from "./catalog-media-url.js";
 import { signMediaAsset, type MediaRow } from "./media.js";
 
 type CatalogMediaMetadata = Record<string, unknown> & { catalogDeliveryUrl?: unknown };
@@ -240,34 +241,35 @@ export async function registerCatalogMediaRoutes(app: FastifyInstance, context: 
   app.get("/v1/catalog/media/:mediaId/image", async (request, reply) => {
     const mediaId = mediaIdFromParams(request.params);
     const deliveryUrl = catalogMediaDeliveryUrl(context, mediaId);
+    const deliveryUrls = [deliveryUrl, legacyCatalogMediaDeliveryUrl(mediaId)];
     const media = await context.pool.query<MediaRow>(
       `SELECT media.*
        FROM media_assets AS media
        WHERE media.id=$1
          AND media.status='READY'
          AND media.purpose='CATALOG'
-         AND media.metadata->>'catalogDeliveryUrl'=$2
+         AND media.metadata->>'catalogDeliveryUrl'=ANY($2::text[])
          AND (
            EXISTS (
              SELECT 1
              FROM catalog_products AS product
              JOIN catalog_ips AS ip ON ip.id=product.ip_id
-             WHERE (product.image_url=$2 OR product.storefront_image_url=$2)
+             WHERE (product.image_url=ANY($2::text[]) OR product.storefront_image_url=ANY($2::text[]))
                AND product.is_active AND ip.is_active
            )
            OR EXISTS (
              SELECT 1
              FROM draw_pool_entries AS entry
              JOIN draw_probability_versions AS version ON version.id=entry.probability_version_id
-             WHERE entry.prize_image_url_snapshot=$2 AND version.status IN ('ACTIVE','RETIRED')
+             WHERE entry.prize_image_url_snapshot=ANY($2::text[]) AND version.status IN ('ACTIVE','RETIRED')
            )
            OR EXISTS (
              SELECT 1
              FROM shipping_request_items AS item
-             WHERE item.product_snapshot->>'imageUrl'=$2
+             WHERE item.product_snapshot->>'imageUrl'=ANY($2::text[])
            )
          )`,
-      [mediaId, deliveryUrl],
+      [mediaId, deliveryUrls],
     );
     if (!media.rowCount) throw notFound("공개된 상품 이미지를 찾을 수 없습니다.");
     const signed = await signMediaAsset(context, media.rows[0]!);

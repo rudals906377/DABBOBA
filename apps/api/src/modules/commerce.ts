@@ -30,6 +30,7 @@ import { iso, nullableIso, numberValue } from "../lib/rows.js";
 import { DEMO_SELLER_PRODUCT_IDS, demoProfileRequested } from "../lib/demo-testing.js";
 import { releasePendingOrder } from "../lib/pending-order-release.js";
 import type { ApiContext } from "../types.js";
+import { rebaseLegacyCatalogMediaUrl } from "./catalog-media-url.js";
 import { KUJI_SLOT_SELECTION_ALGORITHM, loadSealedKujiSlotForConsume } from "./kuji-slots.js";
 import { registerPortOnePaymentRoutes } from "./portone-payments.js";
 
@@ -200,10 +201,10 @@ export async function assertLatestDrawDraft(
   }
 }
 
-export function drawPrizeSnapshotFields(row: DrawPrizeSnapshotRow) {
+export function drawPrizeSnapshotFields(row: DrawPrizeSnapshotRow, catalogMediaBaseUrl?: string | null) {
   return {
     prizeName: row.prize_name_snapshot,
-    prizeImageUrl: row.prize_image_url_snapshot,
+    prizeImageUrl: rebaseLegacyCatalogMediaUrl(catalogMediaBaseUrl, row.prize_image_url_snapshot),
     prizeSku: row.prize_sku_snapshot,
     prizeIpId: row.prize_ip_id_snapshot,
     prizeCategory: row.prize_category_snapshot,
@@ -503,7 +504,7 @@ export async function registerCommerceRoutes(app:FastifyInstance,context:ApiCont
     const weighted=entries.rows.map((entry)=>({entry,effectiveWeight:numberValue(entry.weight)*(entry.remaining_quantity===null?1:numberValue(entry.remaining_quantity))}));
     const totalEffectiveWeight=weighted.reduce((sum,item)=>sum+item.effectiveWeight,0);
     if(!Number.isSafeInteger(totalEffectiveWeight)||totalEffectiveWeight<=0)throw conflict("현재 확률표를 안전하게 계산할 수 없습니다.");
-    return{id:active.id,productId:active.product_id,version:numberValue(active.version),publishedAt:iso(active.published_at),calculatedAt:new Date().toISOString(),calculation:"WEIGHT_X_REMAINING_QUANTITY",totalEffectiveWeight,entries:weighted.map(({entry,effectiveWeight})=>({id:entry.id,prizeProductId:entry.prize_product_id,...drawPrizeSnapshotFields(entry),rarity:entry.rarity,weight:numberValue(entry.weight),initialQuantity:entry.initial_quantity===null?null:numberValue(entry.initial_quantity),remainingQuantity:entry.remaining_quantity===null?null:numberValue(entry.remaining_quantity),effectiveWeight,probabilityNumerator:effectiveWeight,probabilityDenominator:totalEffectiveWeight,probabilityPercent:Math.round((effectiveWeight/totalEffectiveWeight)*100_000_000)/1_000_000}))};
+    return{id:active.id,productId:active.product_id,version:numberValue(active.version),publishedAt:iso(active.published_at),calculatedAt:new Date().toISOString(),calculation:"WEIGHT_X_REMAINING_QUANTITY",totalEffectiveWeight,entries:weighted.map(({entry,effectiveWeight})=>({id:entry.id,prizeProductId:entry.prize_product_id,...drawPrizeSnapshotFields(entry,context.config.catalogMediaBaseUrl),rarity:entry.rarity,weight:numberValue(entry.weight),initialQuantity:entry.initial_quantity===null?null:numberValue(entry.initial_quantity),remainingQuantity:entry.remaining_quantity===null?null:numberValue(entry.remaining_quantity),effectiveWeight,probabilityNumerator:effectiveWeight,probabilityDenominator:totalEffectiveWeight,probabilityPercent:Math.round((effectiveWeight/totalEffectiveWeight)*100_000_000)/1_000_000}))};
   });
 
   app.post("/v1/orders",{preHandler:[requireLiveCommerce(context),context.auth.requireUser]},async(request,reply)=>{
@@ -652,7 +653,7 @@ export async function registerCommerceRoutes(app:FastifyInstance,context:ApiCont
       if(ticket.status==="CONSUMED"){
         const existing=await client.query<{id:string;entitlement_id:string;product_id:string;prize_product_id:string;prize_inventory_unit_id:string;probability_version:number;rarity:string;committed_at:Date;slot_number:number|null} & DrawPrizeSnapshotRow>(`SELECT r.*,e.rarity,e.prize_name_snapshot,e.prize_image_url_snapshot,e.prize_sku_snapshot,e.prize_ip_id_snapshot,e.prize_category_snapshot,assignment.slot_number FROM draw_results r JOIN draw_pool_entries e ON e.id=r.pool_entry_id LEFT JOIN kuji_slot_bindings binding ON binding.id=r.kuji_slot_binding_id LEFT JOIN kuji_slot_assignments assignment ON assignment.id=binding.slot_assignment_id WHERE r.entitlement_id=$1`,[entitlementId]);
         const row=existing.rows[0]!;
-        const body={id:row.id,entitlementId:row.entitlement_id,productId:row.product_id,prizeProductId:row.prize_product_id,...drawPrizeSnapshotFields(row),prizeInventoryUnitId:row.prize_inventory_unit_id,probabilityVersion:row.probability_version,rarity:row.rarity,...(row.slot_number===null?{}:{kujiSlotNumber:numberValue(row.slot_number)}),committedAt:iso(row.committed_at)};
+        const body={id:row.id,entitlementId:row.entitlement_id,productId:row.product_id,prizeProductId:row.prize_product_id,...drawPrizeSnapshotFields(row,context.config.catalogMediaBaseUrl),prizeInventoryUnitId:row.prize_inventory_unit_id,probabilityVersion:row.probability_version,rarity:row.rarity,...(row.slot_number===null?{}:{kujiSlotNumber:numberValue(row.slot_number)}),committedAt:iso(row.committed_at)};
         await completeIdempotency(client,idem.id,{statusCode:200,body,resourceType:"DRAW_RESULT",resourceId:row.id});
         return {replay:true,statusCode:200,body};
       }
@@ -707,7 +708,7 @@ export async function registerCommerceRoutes(app:FastifyInstance,context:ApiCont
       ]);
       await client.query("UPDATE draw_entitlements SET status='CONSUMED',consumed_at=now() WHERE id=$1",[entitlementId]);
       if(linkedKujiRoom){const completionTime=await client.query<{server_now:Date}>("SELECT clock_timestamp() AS server_now");await completeLockedKujiOrderRoomIfDrawn(client,{orderId:lockTarget.order_id,productId:linkedKujiRoom.product_id,serverNow:completionTime.rows[0]!.server_now});}
-      const body={id:created.rows[0]!.id,entitlementId,productId:ticket.product_id,prizeProductId:selected.prize_product_id,...drawPrizeSnapshotFields(selected),prizeInventoryUnitId:inventory.rows[0]!.id,probabilityVersion:ticket.version,rarity:selected.rarity,...(kujiSlotNumber===null?{}:{kujiSlotNumber}),committedAt:iso(created.rows[0]!.committed_at)};
+      const body={id:created.rows[0]!.id,entitlementId,productId:ticket.product_id,prizeProductId:selected.prize_product_id,...drawPrizeSnapshotFields(selected,context.config.catalogMediaBaseUrl),prizeInventoryUnitId:inventory.rows[0]!.id,probabilityVersion:ticket.version,rarity:selected.rarity,...(kujiSlotNumber===null?{}:{kujiSlotNumber}),committedAt:iso(created.rows[0]!.committed_at)};
       await writeOutbox(client,request.id,{aggregateType:"DRAW_RESULT",aggregateId:body.id,eventType:"draw.committed",payload:{...body,userId:request.actor!.userId}});
       await completeIdempotency(client,idem.id,{statusCode:200,body,resourceType:"DRAW_RESULT",resourceId:body.id});
       return {replay:false,statusCode:200,body};

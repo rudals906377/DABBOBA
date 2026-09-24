@@ -83,8 +83,8 @@ const productRow = {
   updated_at: new Date("2026-09-04T00:00:00.000Z"),
 };
 
-function contextWithPool(pool: Record<string, unknown>) {
-  return { pool, auth: authStub } as unknown as ApiContext;
+function contextWithPool(pool: Record<string, unknown>, catalogMediaBaseUrl: string | null = null) {
+  return { pool, auth: authStub, config: { catalogMediaBaseUrl } } as unknown as ApiContext;
 }
 
 function transactionPool(query: (sql: string, values?: unknown[]) => Promise<{ rowCount: number; rows: unknown[] }>) {
@@ -475,6 +475,8 @@ test("public Home sections preserve configured state for unclassified legacy row
 test("public Home recent draws expose only immutable prize snapshots without customer identity", async () => {
   const { app, routes } = routeHarness();
   const committedAt = new Date("2026-09-12T07:30:00.000Z");
+  const mediaId = "11111111-1111-4111-8111-111111111111";
+  const currentBase = "https://rconfxsykttfvznakile.supabase.co/functions/v1/dabboba-api";
   const observed: Array<{ sql: string; values: unknown[] }> = [];
   const pool = transactionPool(async (sql, values = []) => {
     observed.push({ sql, values });
@@ -486,7 +488,7 @@ test("public Home recent draws expose only immutable prize snapshots without cus
           product_id: productRow.id,
           category: "gacha",
           prize_name_snapshot: "리치 피규어",
-          prize_image_url_snapshot: "/assets/prizes/rich-figure.webp",
+          prize_image_url_snapshot: `https://yxkmvgfruphgghowzvmo.supabase.co/functions/v1/dabboba-api/v1/catalog/media/${mediaId}/image`,
           rarity: "A",
           committed_at: committedAt,
         }],
@@ -494,7 +496,7 @@ test("public Home recent draws expose only immutable prize snapshots without cus
     }
     return { rowCount: 0, rows: [] };
   });
-  await registerHomeCatalogRoutes(app, contextWithPool(pool));
+  await registerHomeCatalogRoutes(app, contextWithPool(pool, currentBase));
 
   const handler = routes.get("GET /v1/catalog/recent-draws");
   assert.ok(handler);
@@ -510,7 +512,7 @@ test("public Home recent draws expose only immutable prize snapshots without cus
     productId: productRow.id,
     category: "gacha",
     prizeName: "리치 피규어",
-    prizeImageUrl: "/assets/prizes/rich-figure.webp",
+    prizeImageUrl: `${currentBase}/v1/catalog/media/${mediaId}/image`,
     rarity: "A",
     committedAt: committedAt.toISOString(),
   }]);

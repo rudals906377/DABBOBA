@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify";
+import { rebaseLegacyCatalogMediaUrl } from "./catalog-media-url.js";
 import { withTransaction, type DatabaseClient } from "@dabboba/db";
 import type { CommerceLaunchMode } from "@dabboba/config";
 import type { ProductCategoryId, ProductSaleStatus } from "@dabboba/domain";
@@ -176,17 +177,17 @@ const mapProduct = (row: HomeCatalogProductRow, commerceMode: CommerceLaunchMode
   }),
 });
 
-const mapHomeRecentDraw = (row: HomeRecentDrawRow) => ({
+const mapHomeRecentDraw = (row: HomeRecentDrawRow, catalogMediaBaseUrl: string | null | undefined) => ({
   id: row.id,
   productId: row.product_id,
   category: row.category,
   prizeName: row.prize_name_snapshot,
-  prizeImageUrl: row.prize_image_url_snapshot,
+  prizeImageUrl: rebaseLegacyCatalogMediaUrl(catalogMediaBaseUrl, row.prize_image_url_snapshot),
   rarity: row.rarity,
   committedAt: iso(row.committed_at),
 });
 
-async function homeRecentDrawActivity(client: Pick<DatabaseClient, "query">, demo: boolean) {
+async function homeRecentDrawActivity(client: Pick<DatabaseClient, "query">, demo: boolean, catalogMediaBaseUrl: string | null | undefined) {
   const result = await client.query<HomeRecentDrawRow>(
     `SELECT result.id,result.product_id,draw_product.category,
             pool_entry.prize_name_snapshot,pool_entry.prize_image_url_snapshot,
@@ -209,7 +210,7 @@ async function homeRecentDrawActivity(client: Pick<DatabaseClient, "query">, dem
       LIMIT $3`,
     [demo ? CUSTOMER_CATALOG_GENERATION : null, [...DEMO_SELLER_PRODUCT_IDS], HOME_RECENT_DRAW_LIMIT],
   );
-  return result.rows.map(mapHomeRecentDraw);
+  return result.rows.map((row) => mapHomeRecentDraw(row, catalogMediaBaseUrl));
 }
 
 async function homeProductBadgeState(client: DatabaseClient, demo: boolean) {
@@ -343,7 +344,7 @@ export async function registerHomeCatalogRoutes(app: FastifyInstance, context: A
       await client.query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY");
       return {
         serverNow: new Date().toISOString(),
-        items: await homeRecentDrawActivity(client, demo),
+        items: await homeRecentDrawActivity(client, demo, context.config.catalogMediaBaseUrl),
       };
     });
   });

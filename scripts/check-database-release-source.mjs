@@ -98,6 +98,11 @@ export const DATABASE_RELEASE_MIGRATIONS = Object.freeze([
     path: 'packages/db/migrations/0066_worker_pgmq_set_vt_dependency.sql',
     sha256: '0f05466a1bbd71fa2b752da4e3506ab27c5e717de68ca92198db667ce5387792',
   }),
+  Object.freeze({
+    file: '0067_catalog_media_project_rebase.sql',
+    path: 'packages/db/migrations/0067_catalog_media_project_rebase.sql',
+    sha256: '0a1bb0922d0052665c79e2158cf10e7048f7e99fe0254c3603ae8993fa731a42',
+  }),
 ]);
 
 export const MINIMUM_DATABASE_RELEASE_VERSION =

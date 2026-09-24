@@ -3,6 +3,7 @@ import test from "node:test";
 import type { FastifyInstance } from "fastify";
 import { AppError } from "../lib/errors.js";
 import type { ApiContext } from "../types.js";
+import { legacyCatalogMediaDeliveryUrl } from "./catalog-media-url.js";
 import { assertStorefrontImageDimensions, registerCatalogMediaRoutes } from "./catalog-media.js";
 
 function assertBadRequest(run: () => void, message: RegExp) {
@@ -49,6 +50,35 @@ function routeHarness() {
   } as unknown as FastifyInstance;
   return { app, routes };
 }
+
+test("public catalog media lookup accepts only this asset's current and legacy delivery URLs", async () => {
+  const { app, routes } = routeHarness();
+  const mediaId = "11111111-1111-4111-8111-111111111111";
+  const baseUrl = "https://new.example.test/functions/v1/dabboba-api";
+  let observed: unknown[] | null = null;
+  await registerCatalogMediaRoutes(app, {
+    config: { catalogMediaBaseUrl: baseUrl },
+    pool: {
+      async query(sql: string, values: unknown[]) {
+        assert.match(sql, /media\.metadata->>'catalogDeliveryUrl'=ANY\(\$2::text\[\]\)/);
+        assert.match(sql, /entry\.prize_image_url_snapshot=ANY\(\$2::text\[\]\)/);
+        observed = values;
+        return { rowCount: 0, rows: [] };
+      },
+    },
+    auth: { requirePermission: () => async () => undefined },
+  } as unknown as ApiContext);
+  const handler = routes.get("GET /v1/catalog/media/:mediaId/image");
+  assert.ok(handler);
+  await assert.rejects(
+    handler({ params: { mediaId } }, {}),
+    (error: unknown) => error instanceof AppError && error.statusCode === 404,
+  );
+  assert.deepEqual(observed, [mediaId, [
+    `${baseUrl}/v1/catalog/media/${mediaId}/image`,
+    legacyCatalogMediaDeliveryUrl(mediaId),
+  ]]);
+});
 
 function clearRequest(input: { expectedVersion: number; role: string; key: string }) {
   return {
