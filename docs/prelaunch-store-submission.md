@@ -6,7 +6,7 @@ It is not proof that the values were entered or approved in either console.
 ## Product scope
 
 - Version: `1.0.0`
-- iOS build: `1`
+- iOS build: `2`
 - Android versionCode: `1`
 - Locale: Korean first
 - Capability: product discovery, search, wishlist, notices, account settings,
