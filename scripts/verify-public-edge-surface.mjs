@@ -21,6 +21,13 @@ function isRecord(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
+function exposesPrelaunchInventory(product) {
+  return !isRecord(product)
+    || product.availableQuantity !== 0
+    || product.totalQuantity !== null
+    || (Array.isArray(product.remainingKujiTiers) && product.remainingKujiTiers.length > 0);
+}
+
 function assertBody(route, body, expectedCommerceMode) {
   if (!isRecord(body)) throw new Error(`${route} contract is incomplete.`);
   if (route === 'Public config') {
@@ -45,6 +52,10 @@ function assertBody(route, body, expectedCommerceMode) {
         || !Array.isArray(item.products))) {
       throw new Error('Home sections contract is incomplete.');
     }
+    if (expectedCommerceMode === 'PRELAUNCH'
+      && body.items.some((item) => item.products.some(exposesPrelaunchInventory))) {
+      throw new Error('Home sections expose inventory during PRELAUNCH.');
+    }
   } else if (route === 'Products' || route === 'IPs') {
     if (!Array.isArray(body.items)
       || !(body.nextCursor === null || typeof body.nextCursor === 'string')) {
@@ -52,6 +63,10 @@ function assertBody(route, body, expectedCommerceMode) {
     }
     if (route === 'Products' && body.items.length === 0) {
       throw new Error('Products catalog is empty; a catalog-only mobile release needs a public gacha product.');
+    }
+    if (route === 'Products' && expectedCommerceMode === 'PRELAUNCH'
+      && body.items.some(exposesPrelaunchInventory)) {
+      throw new Error('Products expose inventory during PRELAUNCH.');
     }
   }
 }

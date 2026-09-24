@@ -3358,8 +3358,9 @@ export interface components {
             releaseDate?: string | null;
             /** @description Positive public price or null while the price is not published. Customer APIs never expose a zero-price sellable product. */
             price: number | null;
+            /** @description Customer catalog responses return 0 without disclosing real inventory during PRELAUNCH or COMING_SOON; this is not a stock-out signal. Admin responses retain the real value. */
             availableQuantity: number;
-            /** @description ACTIVE 쿠지 덱의 전체 슬롯 수 또는 모든 항목에 초기 수량이 있는 ACTIVE 유한 가챠 풀의 초기 수량 합계입니다. 신뢰할 총수량이 없으면 null입니다. */
+            /** @description LIVE 판매 중에만 공개하는 총수량입니다. PRELAUNCH·COMING_SOON에는 null이며, 그 밖에는 ACTIVE 쿠지 덱의 전체 슬롯 수 또는 모든 항목에 초기 수량이 있는 ACTIVE 유한 가챠 풀의 초기 수량 합계입니다. */
             totalQuantity: number | null;
             /** @description ACTIVE 쿠지 덱에서 아직 결과 확정으로 소진되지 않은 상만 순서대로 제공합니다. 가챠이거나 공개 덱이 없으면 빈 배열이며, 봉인된 번호별 결과는 포함하지 않습니다. */
             remainingKujiTiers?: components["schemas"]["PublicKujiTierRemaining"][];

@@ -28,6 +28,7 @@ import { catalogProductCardSurface } from "@/design-system/catalog";
 import { subtleSectionHeaderRule } from "@/design-system/section";
 import { openCustomerLogin } from "@/features/auth/login-navigation";
 import { CategoryAvailabilityState } from "@/features/catalog/CategoryAvailabilityState";
+import { shouldShowCatalogInventory } from "@/features/catalog/remaining-inventory";
 import { useStorefrontCategorySettings } from "@/features/catalog/StorefrontCategorySettingsProvider";
 import { useCommerceCapability } from "@/features/commerce/CommerceCapabilityProvider";
 import {
@@ -260,14 +261,14 @@ export function ProductDetailScreen() {
                 <View style={styles.categoryBadge}><Text style={styles.categoryBadgeLabel}>{categoryLabel(product.category)}</Text></View>
                 {readOnlyReference ? (
                   <Text style={styles.stock}>{ownedCollectible ? "내 보관 상품" : "교환 등록 상품"}</Text>
-                ) : (
+                ) : shouldShowCatalogInventory(product, commerceEnabled) ? (
                   <RemainingInventoryMeter
                     category={product.category}
                     availableQuantity={product.availableQuantity}
                     totalQuantity={product.totalQuantity}
                     style={styles.detailInventory}
                   />
-                )}
+                ) : null}
               </View>
             </View>
 

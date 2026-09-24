@@ -8,6 +8,13 @@ export type RemainingInventory = Pick<
 export const COMPACT_INVENTORY_INLINE_MAX_FONT_SCALE = 1.3;
 export const COMPACT_INVENTORY_MAX_FONT_SIZE_MULTIPLIER = 2;
 
+export function shouldShowCatalogInventory(
+  product: { saleStatus?: CatalogProduct["saleStatus"] },
+  commerceEnabled: boolean,
+): boolean {
+  return commerceEnabled && (product.saleStatus === undefined || product.saleStatus === "ON_SALE");
+}
+
 export function shouldStackCompactInventoryMeter(
   compact: boolean,
   fontScale: number,

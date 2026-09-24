@@ -247,6 +247,42 @@ test("public Home sections are render-ready, stably ordered, and distinguish an 
   );
 });
 
+test("prelaunch Home cards do not expose unconfirmed stock or kuji tier counts", async () => {
+  const { app, routes } = routeHarness();
+  const snapshot = publicSnapshotPool(async (sql) => {
+    if (sql.includes("information_schema.columns")) {
+      return { rowCount: 1, rows: [{ configured: true, supports_section_sources: true }] };
+    }
+    if (sql.includes("GROUP BY click_event.product_id")) return { rowCount: 0, rows: [] };
+    if (sql.includes("FROM home_catalog_sections s")) return { rowCount: 1, rows: [publicSectionRow] };
+    if (sql.includes("FROM section_targets section_target")) return { rowCount: 1, rows: [{
+      ...productRow,
+      home_section_id: publicSectionRow.id,
+      category: "kuji",
+      sale_status: "COMING_SOON",
+      available_quantity: 100,
+      total_quantity: 100,
+      remaining_kuji_tiers: [{
+        tierCode: "A", tierRank: "0", label: "A상", initialQuantity: "1", remainingQuantity: "1",
+      }],
+    }] };
+    throw new Error(`unexpected query: ${sql}`);
+  });
+  const context = {
+    ...contextWithPool(snapshot.pool),
+    config: { environment: "test", commerceMode: "PRELAUNCH" },
+  } as unknown as ApiContext;
+  await registerHomeCatalogRoutes(app, context);
+  const handler = routes.get("GET /v1/catalog/home-sections");
+  assert.ok(handler);
+  const result = await handler({ query: {} }, readReply) as {
+    items: Array<{ products: Array<{ availableQuantity: number; totalQuantity: number | null; remainingKujiTiers: unknown[] }> }>;
+  };
+  assert.equal(result.items[0]?.products[0]?.availableQuantity, 0);
+  assert.equal(result.items[0]?.products[0]?.totalQuantity, null);
+  assert.deepEqual(result.items[0]?.products[0]?.remainingKujiTiers, []);
+});
+
 test("public Home sections isolate Gacha and Kuji products by section id even when they share one IP", async () => {
   const { app, routes } = routeHarness();
   const gachaSection = {

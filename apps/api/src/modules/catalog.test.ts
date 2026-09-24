@@ -171,6 +171,7 @@ test("public products exclude prize-only rows and expose storefront media", asyn
         rows: [productRow({
           category: "gacha",
           is_prize_only: false,
+          sale_status: "ON_SALE",
           total_quantity: 120,
           storefront_image_url: "https://cdn.example.test/anya-storefront.webp",
         })],
@@ -192,6 +193,41 @@ test("public products exclude prize-only rows and expose storefront media", asyn
   assert.equal(result.items[0]?.isPrizeOnly, false);
   assert.equal(result.items[0]?.totalQuantity, 120);
   assert.equal(result.items[0]?.storefrontImageUrl, "https://cdn.example.test/anya-storefront.webp");
+});
+
+test("prelaunch customer catalog conceals unconfirmed stock while admin retains the real row", async () => {
+  const { app, routes } = routeHarness();
+  const row = productRow({
+    category: "kuji",
+    is_prize_only: false,
+    sale_status: "COMING_SOON",
+    available_quantity: 100,
+    total_quantity: 100,
+    remaining_kuji_tiers: [{
+      tierCode: "A", tierRank: "0", label: "A상", initialQuantity: "1", remainingQuantity: "1",
+    }],
+  });
+  const context = {
+    ...contextWithPool({ async query() { return { rowCount: 1, rows: [row] }; } }),
+    config: { environment: "test", commerceMode: "PRELAUNCH" },
+  } as unknown as ApiContext;
+  await registerCatalogRoutes(app, context);
+  const publicList = routes.get("GET /v1/catalog/products");
+  const publicDetail = routes.get("GET /v1/catalog/products/:productId");
+  const adminDetail = routes.get("GET /v1/admin/products/:productId");
+  assert.ok(publicList && publicDetail && adminDetail);
+
+  const list = await publicList({ query: {} }, readReply) as { items: Array<Record<string, unknown>> };
+  const detail = await publicDetail({ params: { productId: row.id } }, readReply) as Record<string, unknown>;
+  const admin = await adminDetail({ params: { productId: row.id } }, readReply) as Record<string, unknown>;
+  for (const product of [list.items[0], detail]) {
+    assert.equal(product?.availableQuantity, 0);
+    assert.equal(product?.totalQuantity, null);
+    assert.deepEqual(product?.remainingKujiTiers, []);
+    assert.equal(product?.purchasable, false);
+  }
+  assert.equal(admin.availableQuantity, 100);
+  assert.equal(admin.totalQuantity, 100);
 });
 
 test("public product discovery applies server search, stock filter, stable popularity ordering, and cursor", async () => {
@@ -274,6 +310,7 @@ test("public product detail resolves one active sellable product by canonical id
         rows: [productRow({
           category: "kuji",
           is_prize_only: false,
+          sale_status: "ON_SALE",
           total_quantity: 80,
           remaining_kuji_tiers: [{
             tierCode: "A",

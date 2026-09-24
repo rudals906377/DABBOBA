@@ -143,39 +143,44 @@ function productBlockedReason(row: HomeCatalogProductRow, commerceMode: Commerce
   return null;
 }
 
-const mapProduct = (row: HomeCatalogProductRow, commerceMode: CommerceLaunchMode) => ({
-  id: row.id,
-  sku: row.sku,
-  ipId: row.ip_id,
-  characterIds: row.character_ids,
-  category: row.category,
-  name: row.name,
-  manufacturer: row.manufacturer,
-  releaseDate: row.release_date,
-  price: numberValue(row.price) > 0 ? numberValue(row.price) : null,
-  availableQuantity: numberValue(row.available_quantity),
-  totalQuantity: row.total_quantity === null ? null : numberValue(row.total_quantity),
-  metadata: row.metadata,
-  imageUrl: row.image_url,
-  storefrontImageUrl: row.storefront_image_url,
-  isActive: row.is_active,
-  isPrizeOnly: row.is_prize_only,
-  saleStatus: row.sale_status,
-  purchasable: productBlockedReason(row, commerceMode) === null,
-  blockedReason: productBlockedReason(row, commerceMode),
-  version: row.version,
-  createdAt: iso(row.created_at),
-  updatedAt: iso(row.updated_at),
-  ...(row.remaining_kuji_tiers === undefined ? {} : {
-    remainingKujiTiers: row.remaining_kuji_tiers.map((tier) => ({
-      tierCode: tier.tierCode,
-      tierRank: numberValue(tier.tierRank),
-      label: tier.label,
-      initialQuantity: numberValue(tier.initialQuantity),
-      remainingQuantity: numberValue(tier.remainingQuantity),
-    })),
-  }),
-});
+const mapProduct = (row: HomeCatalogProductRow, commerceMode: CommerceLaunchMode) => {
+  const discloseInventory = commerceMode === "LIVE" && row.sale_status === "ON_SALE";
+  return {
+    id: row.id,
+    sku: row.sku,
+    ipId: row.ip_id,
+    characterIds: row.character_ids,
+    category: row.category,
+    name: row.name,
+    manufacturer: row.manufacturer,
+    releaseDate: row.release_date,
+    price: numberValue(row.price) > 0 ? numberValue(row.price) : null,
+    availableQuantity: discloseInventory ? numberValue(row.available_quantity) : 0,
+    totalQuantity: discloseInventory && row.total_quantity !== null
+      ? numberValue(row.total_quantity)
+      : null,
+    metadata: row.metadata,
+    imageUrl: row.image_url,
+    storefrontImageUrl: row.storefront_image_url,
+    isActive: row.is_active,
+    isPrizeOnly: row.is_prize_only,
+    saleStatus: row.sale_status,
+    purchasable: productBlockedReason(row, commerceMode) === null,
+    blockedReason: productBlockedReason(row, commerceMode),
+    version: row.version,
+    createdAt: iso(row.created_at),
+    updatedAt: iso(row.updated_at),
+    ...(row.remaining_kuji_tiers === undefined ? {} : {
+      remainingKujiTiers: (discloseInventory ? row.remaining_kuji_tiers : []).map((tier) => ({
+        tierCode: tier.tierCode,
+        tierRank: numberValue(tier.tierRank),
+        label: tier.label,
+        initialQuantity: numberValue(tier.initialQuantity),
+        remainingQuantity: numberValue(tier.remainingQuantity),
+      })),
+    }),
+  };
+};
 
 const mapHomeRecentDraw = (row: HomeRecentDrawRow, catalogMediaBaseUrl: string | null | undefined) => ({
   id: row.id,

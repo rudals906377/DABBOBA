@@ -73,7 +73,10 @@ test('deployment retries a briefly unavailable Edge route without hiding a persi
 test('mobile release smoke verifies the configured customer API, not only the Edge default URL', async () => {
   assert.equal(typeof publicApiSmoke.verifyMobilePublicApiSurface, 'function');
   const calls = [];
-  const productPage = { items: [{ id: 'product-1', name: '가챠 상품', category: 'gacha' }], nextCursor: null };
+  const productPage = {
+    items: [{ id: 'product-1', name: '가챠 상품', category: 'gacha', availableQuantity: 0, totalQuantity: null }],
+    nextCursor: null,
+  };
   const fetchImpl = async (url, init) => {
     calls.push({ url, method: init.method, signal: init.signal });
     const pathname = new URL(url).pathname;
@@ -125,6 +128,21 @@ test('mobile release smoke rejects unsafe origins and broken product catalog rou
           : responses[new URL(url).pathname],
     ), { status: 200 }),
   }), /Products catalog.*empty/);
+});
+
+test('mobile release smoke rejects a prelaunch catalog that exposes invented stock', async () => {
+  await assert.rejects(publicApiSmoke.verifyMobilePublicApiSurface({
+    apiBaseUrl: 'https://api.dabboba.net',
+    fetchImpl: async (url) => {
+      const pathname = new URL(url).pathname;
+      const body = pathname === '/v1/catalog/products'
+        ? { items: [{ id: 'product-1', availableQuantity: 100, totalQuantity: 100 }], nextCursor: null }
+        : pathname === '/v1/catalog/ips'
+          ? { items: [], nextCursor: null }
+          : responses[pathname];
+      return new Response(JSON.stringify(body), { status: 200 });
+    },
+  }), /Products expose inventory during PRELAUNCH/);
 });
 
 test('the release workflow checks the customer API after configuration and before bundling', () => {

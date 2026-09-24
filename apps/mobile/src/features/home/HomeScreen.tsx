@@ -40,7 +40,7 @@ import {
 } from "@/features/catalog/catalog-api";
 import { useStorefrontCategorySettings } from "@/features/catalog/StorefrontCategorySettingsProvider";
 import { isCustomerProductCategoryEnabledOn, productCategoryLabel } from "@/features/catalog/product-categories";
-import { catalogQuantityLabel, remainingInventoryLabel } from "@/features/catalog/remaining-inventory";
+import { catalogQuantityLabel, remainingInventoryLabel, shouldShowCatalogInventory } from "@/features/catalog/remaining-inventory";
 import { useCommerceCapability } from "@/features/commerce/CommerceCapabilityProvider";
 import { productPriceLabel } from "@/features/commerce/product-commerce-presentation";
 import { AnnouncementTicker } from "@/features/home/AnnouncementTicker";
@@ -76,6 +76,8 @@ type HomeSectionsSource = "loading" | "live" | "cache" | "error";
 
 export function HomeScreen() {
   const rootNavigationScroll = useRootNavigationScroll();
+  const { fontScale } = useWindowDimensions();
+  const expandedConnectionNotice = fontScale > 1.35;
   const db = useSQLiteContext();
   const router = useRouter();
   const { commerceEnabled } = useCommerceCapability();
@@ -252,14 +254,24 @@ export function HomeScreen() {
         {message ? (
           <View
             accessibilityLiveRegion="polite"
-            style={[styles.connectionNotice, source === "empty" && styles.connectionNoticeError]}
+            style={[styles.connectionNotice, expandedConnectionNotice && styles.connectionNoticeLargeText, source === "empty" && styles.connectionNoticeError]}
           >
-            <Text variant="finePrint" numberOfLines={2} style={styles.connectionNoticeText}>{message}</Text>
+            <Text
+              variant="finePrint"
+              numberOfLines={expandedConnectionNotice ? undefined : 2}
+              style={[styles.connectionNoticeText, expandedConnectionNotice && styles.connectionNoticeTextLarge]}
+            >{message}</Text>
             <Pressable
               accessibilityRole="button"
               accessibilityLabel={source === "cache" ? "홈 새로고침" : "홈 다시 불러오기"}
               onPress={() => void load(true)}
-              style={({ pressed }) => [styles.retry, source === "cache" && styles.retryCache, pressed && styles.pressed]}
+              style={({ pressed }) => [
+                styles.retry,
+                source === "cache" && styles.retryCache,
+                expandedConnectionNotice && styles.retryLargeText,
+                source === "cache" && expandedConnectionNotice && styles.retryCacheLargeText,
+                pressed && styles.pressed,
+              ]}
             >
               <Text variant="finePrint" style={[styles.retryLabel, source === "cache" && styles.retryLabelCache]}>
                 {source === "cache" ? "새로고침" : "다시 불러오기"}
@@ -618,7 +630,7 @@ function CollectionProductCard({
         imageRequestKey={imageRequestKey}
         layoutKind={layoutKind}
         statusBadge={badge}
-        remainingKujiTiers={product.remainingKujiTiers}
+        remainingKujiTiers={shouldShowCatalogInventory(product, commerceEnabled) ? product.remainingKujiTiers : undefined}
       />
       <View style={[styles.productCardBody, layoutKind === "gacha" && styles.productCardBodyGacha]}>
         {layoutKind === "kuji" && ipName ? (
@@ -644,14 +656,16 @@ function CollectionProductCard({
         >
           {productPriceLabel(product, commerceEnabled)}
         </Text>
-        <RemainingInventoryMeter
-          category={product.category}
-          availableQuantity={product.availableQuantity}
-          totalQuantity={product.totalQuantity}
-          compact
-          style={[styles.productInventory, layoutKind === "gacha" && styles.productInventoryGacha]}
-          quantityTextStyle={styles.homeInventoryQuantity}
-        />
+        {shouldShowCatalogInventory(product, commerceEnabled) ? (
+          <RemainingInventoryMeter
+            category={product.category}
+            availableQuantity={product.availableQuantity}
+            totalQuantity={product.totalQuantity}
+            compact
+            style={[styles.productInventory, layoutKind === "gacha" && styles.productInventoryGacha]}
+            quantityTextStyle={styles.homeInventoryQuantity}
+          />
+        ) : null}
       </View>
     </Pressable>
   );
@@ -672,7 +686,9 @@ function homeProductAccessibilityLabel(
     ipName,
     product.name,
     productPriceLabel(product, commerceEnabled),
-    `${remainingInventoryLabel(product.category)} ${catalogQuantityLabel(product)}`,
+    shouldShowCatalogInventory(product, commerceEnabled)
+      ? `${remainingInventoryLabel(product.category)} ${catalogQuantityLabel(product)}`
+      : null,
     tierAccessibilityLabel,
     "상세 보기",
   ].filter(Boolean).join(", ");
@@ -743,9 +759,13 @@ const styles = StyleSheet.create({
   },
   connectionNoticeError: { backgroundColor: seed.color.background.criticalWeak },
   connectionNoticeText: { flex: 1, color: colors.ink },
+  connectionNoticeLargeText: { flexDirection: "column", alignItems: "stretch", padding: seed.spacing.x3 },
+  connectionNoticeTextLarge: { flex: 0 },
   retry: { minHeight: seed.size.touchTarget, justifyContent: "center", paddingHorizontal: 10, borderRadius: seed.radius.r2, backgroundColor: colors.ink },
+  retryLargeText: { alignSelf: "stretch", alignItems: "center", paddingVertical: seed.spacing.x2 },
   retryLabel: { color: colors.white, fontWeight: "800" },
   retryCache: { borderLeftWidth: StyleSheet.hairlineWidth, borderLeftColor: seed.color.stroke.brand, backgroundColor: seed.color.background.transparent },
+  retryCacheLargeText: { borderLeftWidth: 0, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: seed.color.stroke.brand },
   retryLabelCache: { color: colors.greenInk },
   hero: {
     position: "relative",

@@ -8,7 +8,7 @@ import { RemainingInventoryMeter } from "@/components/RemainingInventoryMeter";
 import { AppText as Text } from "@/components/Typography";
 import { catalogProductCardSurface, catalogProductImageSurface } from "@/design-system/catalog";
 import { seed } from "@/design-system/seed";
-import { catalogQuantityLabel, remainingInventoryLabel } from "@/features/catalog/remaining-inventory";
+import { catalogQuantityLabel, remainingInventoryLabel, shouldShowCatalogInventory } from "@/features/catalog/remaining-inventory";
 import { useCommerceCapability } from "@/features/commerce/CommerceCapabilityProvider";
 import { productPriceLabel } from "@/features/commerce/product-commerce-presentation";
 import { productSubjectTitle } from "@/features/shop/product-title";
@@ -19,7 +19,7 @@ import { colors } from "@/theme";
 type CatalogProductRowProduct = Pick<
   CatalogProduct,
   "id" | "name" | "category" | "price" | "imageUrl"
-> & Partial<Pick<CatalogProduct, "version" | "availableQuantity" | "totalQuantity" | "storefrontImageUrl">>;
+> & Partial<Pick<CatalogProduct, "version" | "availableQuantity" | "totalQuantity" | "storefrontImageUrl" | "saleStatus">>;
 
 export function CatalogProductRow({
   product,
@@ -42,7 +42,7 @@ export function CatalogProductRow({
   const resizeMode = product.category === "kuji" || (product.category === "gacha" && !storefrontUri)
     ? "contain"
     : "cover";
-  const inventoryAccessibilityLabel = typeof product.availableQuantity === "number"
+  const inventoryAccessibilityLabel = shouldShowCatalogInventory(product, commerceEnabled) && typeof product.availableQuantity === "number"
     ? `, ${remainingInventoryLabel(product.category)} ${catalogQuantityLabel({
       availableQuantity: product.availableQuantity,
       totalQuantity: product.totalQuantity ?? null,
@@ -77,7 +77,7 @@ export function CatalogProductRow({
         <Text numberOfLines={2} style={styles.name}>{productSubjectTitle(product.name, ipName)}</Text>
         <ProductInfoDivider style={styles.fieldDivider} />
         <Text style={styles.price}>{priceLabel}</Text>
-        {typeof product.availableQuantity === "number" ? (
+        {shouldShowCatalogInventory(product, commerceEnabled) && typeof product.availableQuantity === "number" ? (
           <RemainingInventoryMeter
             category={product.category}
             availableQuantity={product.availableQuantity}

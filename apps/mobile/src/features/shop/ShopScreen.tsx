@@ -43,7 +43,7 @@ import {
   isCustomerProductCategoryComingSoon,
   isCustomerProductCategoryEnabledOn,
 } from "@/features/catalog/product-categories";
-import { catalogQuantityLabel, remainingInventoryLabel } from "@/features/catalog/remaining-inventory";
+import { catalogQuantityLabel, remainingInventoryLabel, shouldShowCatalogInventory } from "@/features/catalog/remaining-inventory";
 import { remainingKujiTierAccessibilityLabel } from "@/features/kuji/kuji-tier-availability";
 import {
   categoryLabel,
@@ -69,7 +69,7 @@ type ShopRootCategory = Extract<ProductCategory, "gacha" | "kuji">;
 export function ShopScreen({ category }: { category: ShopRootCategory }) {
   const rootNavigationScroll = useRootNavigationScroll();
   const router = useRouter();
-  const { width: viewportWidth } = useWindowDimensions();
+  const { width: viewportWidth, fontScale } = useWindowDimensions();
   const safeAreaInsets = useSafeAreaInsets();
   const params = useLocalSearchParams<{ ipId?: string | string[] }>();
   const requestedIpId = firstParam(params.ipId);
@@ -242,7 +242,7 @@ export function ShopScreen({ category }: { category: ShopRootCategory }) {
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="상품 필터 및 정렬 열기"
-          accessibilityHint="품절 제외와 상품 정렬 방식을 선택합니다"
+          accessibilityHint={commerceEnabled ? "품절 제외와 상품 정렬 방식을 선택합니다" : "상품 정렬 방식을 선택합니다"}
           accessibilityValue={{ text: excludeSoldOut || sortOption !== "latest" ? "필터 적용됨" : "기본 필터" }}
           hitSlop={4}
           onPress={() => { Keyboard.dismiss(); setFilterDrawerOpen(true); }}
@@ -276,7 +276,9 @@ export function ShopScreen({ category }: { category: ShopRootCategory }) {
       {message && products.length > 0 && !loading && !refreshing ? (
         <View style={styles.refreshFailure} accessibilityLiveRegion="polite">
           <Text variant="caption" style={styles.refreshFailureText}>
-            목록을 갱신하지 못했어요. 표시된 가격·재고가 최신이 아닐 수 있습니다.
+            {commerceEnabled
+              ? "목록을 갱신하지 못했어요. 표시된 가격·재고가 최신이 아닐 수 있습니다."
+              : "목록을 갱신하지 못했어요. 표시된 예정가가 최신이 아닐 수 있습니다."}
           </Text>
           <Pressable
             accessibilityRole="button"
@@ -304,7 +306,7 @@ export function ShopScreen({ category }: { category: ShopRootCategory }) {
   ) : message ? (
     <View style={styles.empty}>
       <DecorativeIonicon name="alert-circle-outline" size={30} color={colors.muted} />
-      <KoreanPixelTitle variant="section">상품을 불러오지 못했어요</KoreanPixelTitle>
+      <KoreanPixelTitle variant="section" numberOfLines={fontScale > 1.35 ? 4 : 2}>상품을 불러오지 못했어요</KoreanPixelTitle>
       <Text variant="bodyCompact" style={styles.emptyBody}>{message}</Text>
       <Pressable accessibilityRole="button" accessibilityLabel="상품 다시 불러오기" onPress={() => void loadProducts({ manual: true })} style={({ pressed }) => [styles.retryButton, pressed && styles.pressed]}>
         <Text variant="button" style={styles.retryLabel}>다시 불러오기</Text>
@@ -313,7 +315,7 @@ export function ShopScreen({ category }: { category: ShopRootCategory }) {
   ) : hasSearchConditions ? (
     <View style={styles.empty}>
       <DecorativeIonicon name="search-outline" size={30} color={colors.muted} />
-      <KoreanPixelTitle variant="section">검색 결과가 없어요</KoreanPixelTitle>
+      <KoreanPixelTitle variant="section" numberOfLines={fontScale > 1.35 ? 4 : 2}>검색 결과가 없어요</KoreanPixelTitle>
       <Text variant="bodyCompact" style={styles.emptyBody}>검색어나 작품·품절 조건을 바꿔보세요.</Text>
       <Pressable accessibilityRole="button" accessibilityLabel="상품 검색 조건 초기화" onPress={resetSearchConditions} style={({ pressed }) => [styles.retryButton, pressed && styles.pressed]}>
         <Text variant="button" style={styles.retryLabel}>검색 조건 초기화</Text>
@@ -322,7 +324,7 @@ export function ShopScreen({ category }: { category: ShopRootCategory }) {
   ) : (
     <View style={styles.empty}>
       <DecorativeIonicon name="cube-outline" size={30} color={colors.muted} />
-      <KoreanPixelTitle variant="section">상품을 준비 중이에요.</KoreanPixelTitle>
+      <KoreanPixelTitle variant="section" numberOfLines={fontScale > 1.35 ? 4 : 2}>상품을 준비 중이에요.</KoreanPixelTitle>
       <Text variant="bodyCompact" style={styles.emptyBody}>곧 새로운 상품을 보여드릴게요.</Text>
     </View>
   );
@@ -386,6 +388,7 @@ export function ShopScreen({ category }: { category: ShopRootCategory }) {
       />
       <ShopFilterDrawer
         visible={filterDrawerOpen}
+        showStockFilter={commerceEnabled}
         excludeSoldOut={excludeSoldOut}
         sortOption={sortOption}
         onApply={(next) => {
@@ -401,12 +404,14 @@ export function ShopScreen({ category }: { category: ShopRootCategory }) {
 
 function ShopFilterDrawer({
   visible,
+  showStockFilter,
   excludeSoldOut,
   sortOption,
   onApply,
   onClose,
 }: {
   visible: boolean;
+  showStockFilter: boolean;
   excludeSoldOut: boolean;
   sortOption: ShopSortOption;
   onApply: (value: { excludeSoldOut: boolean; sortOption: ShopSortOption }) => void;
@@ -440,23 +445,26 @@ function ShopFilterDrawer({
             </SeedIconButton>
           </View>
 
-          <Pressable
-            accessibilityRole="switch"
-            accessibilityLabel="품절 상품 제외"
-            accessibilityState={{ checked: draftExcludeSoldOut }}
-            onPress={() => setDraftExcludeSoldOut((current) => !current)}
-            style={({ pressed }) => [styles.drawerToggleRow, pressed && styles.drawerRowPressed]}
-          >
-            <View style={styles.drawerRowCopy}>
-              <Text variant="subheading" style={styles.drawerRowTitle}>품절 제외</Text>
-              <Text variant="caption" style={styles.drawerRowBody}>재고가 남아 있는 상품만 보여드려요.</Text>
-            </View>
-            <View style={[styles.switchTrack, draftExcludeSoldOut && styles.switchTrackActive]}>
-              <View style={[styles.switchThumb, draftExcludeSoldOut && styles.switchThumbActive]} />
-            </View>
-          </Pressable>
-
-          <View style={styles.drawerDivider} />
+          {showStockFilter ? (
+            <>
+              <Pressable
+                accessibilityRole="switch"
+                accessibilityLabel="품절 상품 제외"
+                accessibilityState={{ checked: draftExcludeSoldOut }}
+                onPress={() => setDraftExcludeSoldOut((current) => !current)}
+                style={({ pressed }) => [styles.drawerToggleRow, pressed && styles.drawerRowPressed]}
+              >
+                <View style={styles.drawerRowCopy}>
+                  <Text variant="subheading" style={styles.drawerRowTitle}>품절 제외</Text>
+                  <Text variant="caption" style={styles.drawerRowBody}>재고가 남아 있는 상품만 보여드려요.</Text>
+                </View>
+                <View style={[styles.switchTrack, draftExcludeSoldOut && styles.switchTrackActive]}>
+                  <View style={[styles.switchThumb, draftExcludeSoldOut && styles.switchThumbActive]} />
+                </View>
+              </Pressable>
+              <View style={styles.drawerDivider} />
+            </>
+          ) : null}
           <Text variant="caption" style={styles.drawerSectionLabel}>정렬</Text>
           <View accessibilityRole="radiogroup">
             {SHOP_SORT_OPTIONS.map((option) => {
@@ -483,7 +491,7 @@ function ShopFilterDrawer({
           <SeedActionButton
             label="적용"
             onPress={() => onApply({
-              excludeSoldOut: draftExcludeSoldOut,
+              excludeSoldOut: showStockFilter && draftExcludeSoldOut,
               sortOption: draftSortOption,
             })}
             style={styles.drawerApplyButton}
@@ -527,8 +535,10 @@ function ProductCard({
         ipName,
         product.name,
         productPriceLabel(product, commerceEnabled),
-        `${remainingInventoryLabel(product.category)} ${catalogQuantityLabel(product)}`,
-        tierAccessibilityLabel,
+        shouldShowCatalogInventory(product, commerceEnabled)
+          ? `${remainingInventoryLabel(product.category)} ${catalogQuantityLabel(product)}`
+          : null,
+        shouldShowCatalogInventory(product, commerceEnabled) ? tierAccessibilityLabel : null,
         "상세 보기",
       ].filter(Boolean).join(", ")}
       onPress={onPress}
@@ -563,16 +573,18 @@ function ProductCard({
           ) : null}
           <Text variant="catalogPrice" maxFontSizeMultiplier={CATALOG_CARD_TEXT_MAX_FONT_SIZE_MULTIPLIER} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.72} style={styles.productPrice}>{price.amount}</Text>
         </View>
-        {product.category === "kuji" ? (
+        {product.category === "kuji" && shouldShowCatalogInventory(product, commerceEnabled) ? (
           <KujiPrizeTierRow tiers={product.remainingKujiTiers} style={styles.kujiPrizeTiers} />
         ) : null}
-        <RemainingInventoryMeter
-          category={product.category}
-          availableQuantity={product.availableQuantity}
-          totalQuantity={product.totalQuantity}
-          compact
-          style={[styles.productInventory, wide && styles.kujiProductInventory]}
-        />
+        {shouldShowCatalogInventory(product, commerceEnabled) ? (
+          <RemainingInventoryMeter
+            category={product.category}
+            availableQuantity={product.availableQuantity}
+            totalQuantity={product.totalQuantity}
+            compact
+            style={[styles.productInventory, wide && styles.kujiProductInventory]}
+          />
+        ) : null}
       </View>
     </Pressable>
   );

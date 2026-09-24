@@ -1098,7 +1098,7 @@ test("native fixed-category shop empty states separate catalog absence, filtered
   assert.doesNotMatch(shopSource, /error instanceof Error \? error\.message/);
   assert.match(homeSource, /setMessage\("홈을 불러오지 못했어요\. 연결 상태를 확인해 주세요\."\)/);
   assert.doesNotMatch(homeSource, /setMessage\(error instanceof Error \? error\.message/);
-  assert.equal((shopSource.match(/<KoreanPixelTitle variant="section">/g) ?? []).length >= 4, true);
+  assert.equal((shopSource.match(/<KoreanPixelTitle variant="section"(?:\s+[^>]*)?>/g) ?? []).length >= 4, true);
 
   const resetConditionsSource = shopSource.slice(
     shopSource.indexOf("const resetSearchConditions"),

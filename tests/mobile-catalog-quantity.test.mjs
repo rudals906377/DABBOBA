@@ -9,6 +9,7 @@ import {
   catalogQuantityLabel,
   remainingInventoryLabel,
   remainingInventoryRatio,
+  shouldShowCatalogInventory,
   shouldStackCompactInventoryMeter,
   visibleInventoryQuantityLabel,
 } from "../apps/mobile/src/features/catalog/remaining-inventory.ts";
@@ -20,6 +21,13 @@ test("remaining inventory labels distinguish kuji tickets from gacha products", 
   assert.equal(remainingInventoryLabel("kuji"), "잔여 티켓");
   assert.equal(remainingInventoryLabel("gacha"), "잔여 상품");
   assert.equal(remainingInventoryLabel("figure"), "잔여 수량");
+});
+
+test("prelaunch and coming-soon discovery never display unconfirmed inventory", () => {
+  assert.equal(shouldShowCatalogInventory({ saleStatus: "COMING_SOON" }, false), false);
+  assert.equal(shouldShowCatalogInventory({ saleStatus: "COMING_SOON" }, true), false);
+  assert.equal(shouldShowCatalogInventory({ saleStatus: "ON_SALE" }, false), false);
+  assert.equal(shouldShowCatalogInventory({ saleStatus: "ON_SALE" }, true), true);
 });
 
 test("catalog quantity and meter ratio share the same inventory source", () => {
