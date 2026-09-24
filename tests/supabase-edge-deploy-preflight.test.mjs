@@ -150,7 +150,7 @@ test('Supabase Edge release preflight requires a committed source and a passing 
     },
     checkSource() {
       calls.push('source');
-      return { status: 'pass', head: 'a'.repeat(40), latestMigration: '0066_worker_pgmq_set_vt_dependency.sql', worktreeClean: true, blockers: [] };
+      return { status: 'pass', head: 'a'.repeat(40), latestMigration: '0067_catalog_media_project_rebase.sql', worktreeClean: true, blockers: [] };
     },
     runReleaseCheck({ environment }) {
       calls.push('database');
@@ -200,7 +200,7 @@ test('Supabase Edge release preflight rejects a dirty worktree attestation befor
     checkSource: () => ({
       status: 'pass',
       head: 'a'.repeat(40),
-      latestMigration: '0066_worker_pgmq_set_vt_dependency.sql',
+      latestMigration: '0067_catalog_media_project_rebase.sql',
       worktreeClean: false,
       blockers: [],
     }),
@@ -214,7 +214,7 @@ test('Supabase Edge release preflight fails before a database connection when Gi
   await assert.rejects(runSupabaseEdgeReleasePreflight({
     edgeProfile,
     sourceEnvironment: { DATABASE_MIGRATION_URL: 'postgresql://fixture' },
-    checkSource: () => ({ status: 'blocked', head: null, latestMigration: null, blockers: ['required_migration_not_committed:0066_worker_pgmq_set_vt_dependency.sql'] }),
+    checkSource: () => ({ status: 'blocked', head: null, latestMigration: null, blockers: ['required_migration_not_committed:0067_catalog_media_project_rebase.sql'] }),
     runReleaseCheck() { databaseCalled = true; },
   }), /source is not a reviewed Git commit/);
   assert.equal(databaseCalled, false);
