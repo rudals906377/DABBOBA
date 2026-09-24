@@ -12,7 +12,7 @@
       "bundleIdentifier": "com.dabboba.mobile",
       "appleTeamId": "MCZ4884P7F",
       "usesAppleSignIn": true,
-      "buildNumber": "1",
+      "buildNumber": "2",
       "config": {
         "usesNonExemptEncryption": false
       }

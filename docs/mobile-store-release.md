@@ -42,10 +42,11 @@ dated verification evidence.
   `production-prelaunch`, and a payment-enabled `production-live` build.
   Its iOS submit profiles contain only the public App Store Connect app ID;
   submit credentials and secrets stay outside Git.
-- App version `1.0.0`, iOS build number `1`, Android version code `1`, bundle and
-  package IDs, and the approved app icon are explicit in
-  `apps/mobile/app.json`. Bump both platform build identifiers for every
-  uploaded binary.
+- App version `1.0.0`, the next iOS build number `2`, Android version code `1`,
+  bundle and package IDs, and the approved app icon are explicit in
+  `apps/mobile/app.json`. iOS build `1` is the older TestFlight upload from
+  commit `933186d`; a new candidate cannot reuse that build string. Bump each
+  platform's build identifier before another upload to that store.
 - Local Expo CLI resolution matches the configured
   `@dabboba-team/dabboba-mobile` project ID
   `fa48d52e-3b3c-4e2b-82d5-ae0726382587`. The current Expo account can manage
