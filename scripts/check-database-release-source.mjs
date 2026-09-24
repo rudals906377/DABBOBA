@@ -96,7 +96,7 @@ export const DATABASE_RELEASE_MIGRATIONS = Object.freeze([
   Object.freeze({
     file: '0066_worker_pgmq_set_vt_dependency.sql',
     path: 'packages/db/migrations/0066_worker_pgmq_set_vt_dependency.sql',
-    sha256: 'eeaab86151dff6f90332df27f1778968b1e164eb011bcd46718ec13b75b78243',
+    sha256: '0f05466a1bbd71fa2b752da4e3506ab27c5e717de68ca92198db667ce5387792',
   }),
 ]);
 

@@ -327,20 +327,28 @@ test("API and worker database identities are isolated around pgmq", {
     );
     assert.equal(unreviewedCallable.rows[0]?.count, "0");
     const setVtDependency = await migrationPool.query<{
-      worker_can_execute: boolean;
-      runtime_can_execute: boolean;
+      timestamp_overload_exists: boolean;
+      worker_can_execute: boolean | null;
+      runtime_can_execute: boolean | null;
     }>(
-      `SELECT
-         has_function_privilege($1,'pgmq.set_vt(text,bigint,timestamp with time zone)','EXECUTE')
-           AS worker_can_execute,
-         has_function_privilege($2,'pgmq.set_vt(text,bigint,timestamp with time zone)','EXECUTE')
-           AS runtime_can_execute`,
+      `WITH dependency AS (
+         SELECT to_regprocedure('pgmq.set_vt(text,bigint,timestamp with time zone)') AS routine
+       )
+       SELECT routine IS NOT NULL AS timestamp_overload_exists,
+              CASE WHEN routine IS NULL THEN NULL
+                   ELSE has_function_privilege($1,routine::oid,'EXECUTE') END
+                AS worker_can_execute,
+              CASE WHEN routine IS NULL THEN NULL
+                   ELSE has_function_privilege($2,routine::oid,'EXECUTE') END
+                AS runtime_can_execute
+         FROM dependency`,
       [WORKER_DATABASE_ROLE, RUNTIME_DATABASE_ROLE],
     );
-    assert.deepEqual(setVtDependency.rows, [{
-      worker_can_execute: true,
-      runtime_can_execute: false,
-    }]);
+    assert.equal(setVtDependency.rows.length, 1);
+    assert.deepEqual(setVtDependency.rows[0],
+      setVtDependency.rows[0]?.timestamp_overload_exists
+        ? { timestamp_overload_exists: true, worker_can_execute: true, runtime_can_execute: false }
+        : { timestamp_overload_exists: false, worker_can_execute: null, runtime_can_execute: null });
 
     // API data access remains intact while every direct queue/dead-letter path
     // fails closed after 0029.
