@@ -1,6 +1,13 @@
 {
   "$schema": "https://turbo.build/schema.json",
-  "globalEnv": ["DABBOBA_TEST_DATABASE_URL"],
+  "globalEnv": [
+    "NODE_ENV",
+    "DABBOBA_ENVIRONMENT_TIER",
+    "DATABASE_MIGRATION_URL",
+    "DABBOBA_TEST_DATABASE_URL",
+    "DABBOBA_RUNTIME_TEST_DATABASE_URL",
+    "DABBOBA_WORKER_TEST_DATABASE_URL"
+  ],
   "tasks": {
     "dev": {
       "cache": false,
@@ -20,6 +27,7 @@
     },
     "test": {
       "dependsOn": ["^build"],
+      "cache": false,
       "outputs": ["coverage/**"]
     }
   }

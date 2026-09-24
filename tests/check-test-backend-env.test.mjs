@@ -10,6 +10,42 @@ test('test preflight accepts absent or loopback-only backend settings', () => {
   }));
 });
 
+test('required integration preflight refuses missing role databases and accepts one isolated local database', () => {
+  assert.throws(
+    () => assertTestBackendEnvironment({}, { requireIntegrationDatabase: true }),
+    /DABBOBA_TEST_DATABASE_URL/,
+  );
+  assert.throws(
+    () => assertTestBackendEnvironment({
+      DABBOBA_ENVIRONMENT_TIER: 'TEST',
+      DABBOBA_TEST_DATABASE_URL: 'postgresql://owner:fixture@127.0.0.1:55433/dabboba_test',
+    }, { requireIntegrationDatabase: true }),
+    /DABBOBA_RUNTIME_TEST_DATABASE_URL/,
+  );
+  assert.throws(
+    () => assertTestBackendEnvironment({
+      DABBOBA_ENVIRONMENT_TIER: 'TEST',
+      DABBOBA_TEST_DATABASE_URL: 'postgresql://owner:fixture@127.0.0.1:55433/dabboba_test',
+      DABBOBA_RUNTIME_TEST_DATABASE_URL: 'postgresql://runtime:fixture@127.0.0.1:55433/dabboba_test',
+      DABBOBA_WORKER_TEST_DATABASE_URL: 'postgresql://worker:fixture@127.0.0.1:55433/dabboba_test',
+    }, { requireIntegrationDatabase: true }),
+    /DATABASE_MIGRATION_URL/,
+  );
+  assert.doesNotThrow(() => assertTestBackendEnvironment({
+    DABBOBA_ENVIRONMENT_TIER: 'TEST',
+    DABBOBA_TEST_DATABASE_URL: 'postgresql://owner:fixture@127.0.0.1:55433/dabboba_test',
+    DABBOBA_RUNTIME_TEST_DATABASE_URL: 'postgresql://runtime:fixture@127.0.0.1:55433/dabboba_test',
+    DABBOBA_WORKER_TEST_DATABASE_URL: 'postgresql://worker:fixture@127.0.0.1:55433/dabboba_test',
+    DATABASE_MIGRATION_URL: 'postgresql://owner:fixture@127.0.0.1:55433/dabboba_test',
+  }, { requireIntegrationDatabase: true }));
+  assert.throws(() => assertTestBackendEnvironment({
+    DABBOBA_TEST_DATABASE_URL: 'postgresql://owner:fixture@127.0.0.1:55433/dabboba_test',
+    DABBOBA_RUNTIME_TEST_DATABASE_URL: 'postgresql://runtime:fixture@127.0.0.1:55433/dabboba_test',
+    DABBOBA_WORKER_TEST_DATABASE_URL: 'postgresql://worker:fixture@127.0.0.1:55433/dabboba_test',
+    DATABASE_MIGRATION_URL: 'postgresql://owner:fixture@127.0.0.1:55433/dabboba_test',
+  }, { requireIntegrationDatabase: true }), /DABBOBA_ENVIRONMENT_TIER=TEST/);
+});
+
 test('test preflight rejects remote, query-overridden, mixed-database, and production settings', () => {
   assert.throws(() => assertTestBackendEnvironment({
     DABBOBA_TEST_DATABASE_URL: 'postgresql://owner:secret@db.example.test/dabboba',
@@ -23,6 +59,13 @@ test('test preflight rejects remote, query-overridden, mixed-database, and produ
     DABBOBA_RUNTIME_TEST_DATABASE_URL: 'postgresql://runtime:secret@127.0.0.1:55433/two',
     DABBOBA_WORKER_TEST_DATABASE_URL: 'postgresql://worker:secret@localhost:55433/one',
   }), /same local database/);
+  assert.throws(() => assertTestBackendEnvironment({
+    DABBOBA_ENVIRONMENT_TIER: 'TEST',
+    DABBOBA_TEST_DATABASE_URL: 'postgresql://owner:fixture@127.0.0.1:55433/dabboba_test',
+    DABBOBA_RUNTIME_TEST_DATABASE_URL: 'postgresql://runtime:fixture@127.0.0.1:55433/dabboba_test',
+    DABBOBA_WORKER_TEST_DATABASE_URL: 'postgresql://worker:fixture@127.0.0.1:55433/dabboba_test',
+    DATABASE_MIGRATION_URL: 'postgresql://owner:fixture@127.0.0.1:55433/other_test',
+  }, { requireIntegrationDatabase: true }), /same local database/);
 });
 
 test('test preflight rejects inherited remote provider configuration', () => {

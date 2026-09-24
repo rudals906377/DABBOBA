@@ -93,6 +93,11 @@ export const DATABASE_RELEASE_MIGRATIONS = Object.freeze([
     path: 'packages/db/migrations/0065_legal_policy_dabboba_net.sql',
     sha256: 'd893ceb9ccd56cf7830b1b73b0e61f58d8663bc596d5fa6e8b4e069def2b64e3',
   }),
+  Object.freeze({
+    file: '0066_worker_pgmq_set_vt_dependency.sql',
+    path: 'packages/db/migrations/0066_worker_pgmq_set_vt_dependency.sql',
+    sha256: 'eeaab86151dff6f90332df27f1778968b1e164eb011bcd46718ec13b75b78243',
+  }),
 ]);
 
 export const MINIMUM_DATABASE_RELEASE_VERSION =

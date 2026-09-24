@@ -326,6 +326,21 @@ test("API and worker database identities are isolated around pgmq", {
       [WORKER_DATABASE_ROLE],
     );
     assert.equal(unreviewedCallable.rows[0]?.count, "0");
+    const setVtDependency = await migrationPool.query<{
+      worker_can_execute: boolean;
+      runtime_can_execute: boolean;
+    }>(
+      `SELECT
+         has_function_privilege($1,'pgmq.set_vt(text,bigint,timestamp with time zone)','EXECUTE')
+           AS worker_can_execute,
+         has_function_privilege($2,'pgmq.set_vt(text,bigint,timestamp with time zone)','EXECUTE')
+           AS runtime_can_execute`,
+      [WORKER_DATABASE_ROLE, RUNTIME_DATABASE_ROLE],
+    );
+    assert.deepEqual(setVtDependency.rows, [{
+      worker_can_execute: true,
+      runtime_can_execute: false,
+    }]);
 
     // API data access remains intact while every direct queue/dead-letter path
     // fails closed after 0029.

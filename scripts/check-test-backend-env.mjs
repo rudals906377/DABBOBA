@@ -20,7 +20,7 @@ function databaseIdentity(value) {
   return `${loopback}:${parsed.port || '5432'}:${decodeURIComponent(parsed.pathname.slice(1))}`;
 }
 
-export function assertTestBackendEnvironment(env) {
+export function assertTestBackendEnvironment(env, { requireIntegrationDatabase = false } = {}) {
   if (env.DABBOBA_ENVIRONMENT_TIER?.trim() && env.DABBOBA_ENVIRONMENT_TIER.trim() !== 'TEST') {
     throw new Error('Test commands require DABBOBA_ENVIRONMENT_TIER=TEST when the tier is set.');
   }
@@ -38,6 +38,28 @@ export function assertTestBackendEnvironment(env) {
   ].map((value) => value?.trim()).filter(Boolean);
   if (roleTestUrls.length === 3 && new Set(roleTestUrls.map(databaseIdentity)).size !== 1) {
     throw new Error('Owner, runtime, and worker test URLs must identify the same local database.');
+  }
+  if (requireIntegrationDatabase) {
+    for (const key of [
+      'DABBOBA_TEST_DATABASE_URL',
+      'DABBOBA_RUNTIME_TEST_DATABASE_URL',
+      'DABBOBA_WORKER_TEST_DATABASE_URL',
+      'DATABASE_MIGRATION_URL',
+    ]) {
+      if (!env[key]?.trim()) throw new Error(`${key} is required for database integration tests.`);
+    }
+    const requiredDatabaseUrls = [
+      env.DABBOBA_TEST_DATABASE_URL,
+      env.DABBOBA_RUNTIME_TEST_DATABASE_URL,
+      env.DABBOBA_WORKER_TEST_DATABASE_URL,
+      env.DATABASE_MIGRATION_URL,
+    ];
+    if (new Set(requiredDatabaseUrls.map(databaseIdentity)).size !== 1) {
+      throw new Error('Owner, runtime, worker, and migration URLs must identify the same local database.');
+    }
+    if (env.DABBOBA_ENVIRONMENT_TIER?.trim() !== 'TEST') {
+      throw new Error('DABBOBA_ENVIRONMENT_TIER=TEST is required for database integration tests.');
+    }
   }
   for (const key of ['SUPABASE_URL', 'SUPABASE_STORAGE_S3_ENDPOINT', 'NOTIFICATION_DELIVERY_URL']) {
     if (env[key]?.trim()) assertLoopbackUrl(env[key], key, ['http:', 'https:']);
@@ -63,9 +85,15 @@ export function assertTestBackendEnvironment(env) {
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   try {
-    assertTestBackendEnvironment(process.env);
+    const arguments_ = process.argv.slice(2);
+    if (arguments_.some((argument) => argument !== '--require-integration-db')) {
+      throw new Error('Unknown test preflight option.');
+    }
+    assertTestBackendEnvironment(process.env, {
+      requireIntegrationDatabase: arguments_.includes('--require-integration-db'),
+    });
   } catch {
-    process.stderr.write('Test execution blocked: database tier, target, or provider environment is not local-test safe.\n');
+    process.stderr.write('Test execution blocked: required local database roles are missing or the test environment is unsafe.\n');
     process.exit(78);
   }
 }
