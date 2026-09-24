@@ -321,6 +321,9 @@ export async function registerCustomerAuthRoutes(
       const acceptedPolicies = requiredPolicyAcceptance(input, policy.versions);
       const accessToken = stringInput(input, "accessToken", { min: 64, max: 16_384, trim: false })!;
       const loginProvider = enumInput(input, "loginProvider", CUSTOMER_LOGIN_METHODS)!;
+      if (!context.config.customerLoginProviders?.includes(loginProvider)) {
+        throw new AppError(503, "CUSTOMER_LOGIN_PROVIDER_UNAVAILABLE", "현재 선택한 로그인 방식을 사용할 수 없습니다.");
+      }
       const appleRefreshToken = loginProvider === "APPLE"
         ? validateAppleRefreshToken(stringInput(input, "appleRefreshToken", { min: 32, max: 16_384, trim: false }))
         : null;

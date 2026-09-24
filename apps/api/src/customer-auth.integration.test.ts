@@ -35,6 +35,7 @@ test("customer broker reuses one Supabase subject without merging email peers an
     supabaseUrl: "https://project.supabase.co",
     supabaseJwtAudience: "authenticated",
     supabasePublishableKey: "sb_publishable_customer_auth_fixture",
+    customerLoginProviders: ["KAKAO", "NAVER", "GOOGLE", "APPLE", "EMAIL"],
     appleCredentialEncryption: {
       key: Buffer.alloc(32, 6).toString("base64url"),
       keyVersion: 1,
