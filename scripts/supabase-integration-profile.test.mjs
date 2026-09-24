@@ -7,6 +7,7 @@ import { parseEnv } from 'node:util';
 import { LOCAL_BACKEND_PROFILE } from './local-backend-profile.mjs';
 import {
   SUPABASE_DEMO_PROFILE,
+  SUPABASE_DEMO_PROJECT_REF,
   SUPABASE_INTEGRATION_PROFILE,
   SUPABASE_INTEGRATION_PROJECT_REF,
   assertSupabaseDemoApiEnvironment,
@@ -23,6 +24,10 @@ import {
 const source = {
   DATABASE_URL: `postgresql://dabboba_runtime.${SUPABASE_INTEGRATION_PROJECT_REF}:fixture-password@aws-0-ap-northeast-2.pooler.supabase.com:5432/postgres`,
   SUPABASE_URL: `https://${SUPABASE_INTEGRATION_PROJECT_REF}.supabase.co`,
+};
+const demoSource = {
+  DATABASE_URL: `postgresql://dabboba_runtime.${SUPABASE_DEMO_PROJECT_REF}:fixture-password@aws-0-ap-northeast-2.pooler.supabase.com:5432/postgres`,
+  SUPABASE_URL: `https://${SUPABASE_DEMO_PROJECT_REF}.supabase.co`,
 };
 const secrets = {
   DABBOBA_BACKEND_PROFILE: SUPABASE_INTEGRATION_PROFILE,
@@ -87,7 +92,7 @@ test('explicit demo profile adds only TEST_PG and fixed demo capability settings
     DABBOBA_ENABLE_DEV_SESSION: 'true',
     SUPABASE_SERVICE_ROLE_KEY: 'must-not-leak',
     REDIS_URL: 'redis://must-not-leak:6379',
-  }, { source, secrets: demoSecrets });
+  }, { source: demoSource, secrets: demoSecrets });
   assert.doesNotThrow(() => assertSupabaseDemoApiEnvironment(env));
   assert.equal(env.DABBOBA_BACKEND_PROFILE, SUPABASE_DEMO_PROFILE);
   assert.equal(env.DABBOBA_COMMERCE_MODE, 'LIVE');
@@ -101,6 +106,7 @@ test('explicit demo profile adds only TEST_PG and fixed demo capability settings
   assert.throws(() => assertSupabaseDemoApiEnvironment({ ...env, DABBOBA_ENVIRONMENT_TIER: 'PRODUCTION' }));
   assert.throws(() => assertSupabaseDemoApiEnvironment({ ...env, DABBOBA_COMMERCE_MODE: 'PRELAUNCH' }));
   assert.throws(() => assertSupabaseDemoApiEnvironment({ ...env, ALLOW_ADMIN_BOOTSTRAP: 'true' }));
+  assert.throws(() => assertSupabaseDemoApiEnvironment({ ...env, DATABASE_URL: source.DATABASE_URL, SUPABASE_URL: source.SUPABASE_URL }));
 });
 
 test('admin profile points at the same loopback API without database or mobile auth settings', () => {
@@ -141,7 +147,7 @@ test('demo preparation creates three distinct private secrets once', async () =>
     selectionFile: join(directory, 'backend-profile'),
   };
   try {
-    await writeFile(paths.sourceFile, `DATABASE_URL=${source.DATABASE_URL}\nSUPABASE_URL=${source.SUPABASE_URL}\n`);
+    await writeFile(paths.sourceFile, `DATABASE_URL=${demoSource.DATABASE_URL}\nSUPABASE_URL=${demoSource.SUPABASE_URL}\n`);
     assert.equal(configureBackendProfile(SUPABASE_DEMO_PROFILE, paths), SUPABASE_DEMO_PROFILE);
     const first = await readFile(paths.secretsFile, 'utf8');
     const parsed = parseEnv(first);
@@ -150,6 +156,20 @@ test('demo preparation creates three distinct private secrets once', async () =>
     assert.equal((await stat(paths.secretsFile)).mode & 0o777, 0o600);
     configureBackendProfile(SUPABASE_DEMO_PROFILE, paths);
     assert.equal(await readFile(paths.secretsFile, 'utf8'), first);
+  } finally { await rm(directory, { recursive: true }); }
+});
+
+test('the production project cannot be selected for TEST_PG demo commerce', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'dabboba-production-demo-guard-'));
+  const paths = {
+    sourceFile: join(directory, '.env'),
+    secretsFile: join(directory, 'supabase-demo.env'),
+    selectionFile: join(directory, 'backend-profile'),
+  };
+  try {
+    await writeFile(paths.sourceFile, `DATABASE_URL=${source.DATABASE_URL}\nSUPABASE_URL=${source.SUPABASE_URL}\n`);
+    assert.throws(() => configureBackendProfile(SUPABASE_DEMO_PROFILE, paths));
+    await assert.rejects(readFile(paths.selectionFile, 'utf8'));
   } finally { await rm(directory, { recursive: true }); }
 });
 

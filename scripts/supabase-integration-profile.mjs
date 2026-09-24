@@ -21,7 +21,9 @@ import {
 
 export const SUPABASE_INTEGRATION_PROFILE = 'supabase-integration';
 export const SUPABASE_DEMO_PROFILE = 'supabase-demo';
-export const SUPABASE_INTEGRATION_PROJECT_REF = 'yxkmvgfruphgghowzvmo';
+export const SUPABASE_INTEGRATION_PROJECT_REF = 'rconfxsykttfvznakile';
+// TEST_PG remains bound to the historical QA project and must never target production.
+export const SUPABASE_DEMO_PROJECT_REF = 'yxkmvgfruphgghowzvmo';
 
 const repositoryRoot = fileURLToPath(new URL('../', import.meta.url));
 const launchDirectory = resolve(repositoryRoot, '../.dabboba-launch');
@@ -51,7 +53,7 @@ function sourceError() {
   return new Error('Supabase integration source settings are missing or do not match the approved DABBOBA project and runtime role.');
 }
 
-export function assertSupabaseIntegrationSource(source) {
+export function assertSupabaseIntegrationSource(source, expectedProjectRef = SUPABASE_INTEGRATION_PROJECT_REF) {
   let database;
   let supabase;
   try {
@@ -66,12 +68,12 @@ export function assertSupabaseIntegrationSource(source) {
     || !database.hostname.endsWith('.pooler.supabase.com')
     || database.port !== '5432'
     || database.pathname !== '/postgres'
-    || username !== `dabboba_runtime.${SUPABASE_INTEGRATION_PROJECT_REF}`
+    || username !== `dabboba_runtime.${expectedProjectRef}`
     || !database.password
     || database.search
     || database.hash
     || supabase.protocol !== 'https:'
-    || supabase.origin !== `https://${SUPABASE_INTEGRATION_PROJECT_REF}.supabase.co`
+    || supabase.origin !== `https://${expectedProjectRef}.supabase.co`
     || supabase.pathname !== '/'
     || supabase.username
     || supabase.password
@@ -200,7 +202,7 @@ function readDemoProfileFiles(sourceFile = SUPABASE_INTEGRATION_SOURCE_FILE, sec
     throw new Error('Supabase demo profile is not prepared. Select another profile or prepare it explicitly.');
   }
   return {
-    source: assertSupabaseIntegrationSource(parseEnv(sourceText)),
+    source: assertSupabaseIntegrationSource(parseEnv(sourceText), SUPABASE_DEMO_PROJECT_REF),
     secrets: assertSupabaseDemoSecrets(parseEnv(secretsText)),
   };
 }
@@ -246,7 +248,7 @@ export function assertSupabaseDemoApiEnvironment(env) {
     || env.DABBOBA_ENABLE_DEMO_TESTING !== 'true'
     || env.DABBOBA_DEMO_FIXTURE_TAG !== 'supabase-demo-v1'
   ) throw new Error('Supabase demo API settings do not match the approved profile.');
-  assertSupabaseIntegrationSource(env);
+  assertSupabaseIntegrationSource(env, SUPABASE_DEMO_PROJECT_REF);
   assertSupabaseDemoSecrets(env);
   for (const key of [
     'DATABASE_MIGRATION_URL', 'WORKER_DATABASE_URL', 'DABBOBA_ENABLE_DEV_SESSION',
@@ -403,7 +405,10 @@ export function configureBackendProfile(
     let sourceText;
     try { sourceText = readFileSync(paths.sourceFile, 'utf8'); }
     catch { throw new Error('Supabase integration source settings could not be read.'); }
-    const source = assertSupabaseIntegrationSource(parseEnv(sourceText));
+    const source = assertSupabaseIntegrationSource(
+      parseEnv(sourceText),
+      profile === SUPABASE_DEMO_PROFILE ? SUPABASE_DEMO_PROJECT_REF : SUPABASE_INTEGRATION_PROJECT_REF,
+    );
     if (profile === SUPABASE_DEMO_PROFILE) {
       const secrets = createDemoSecretsFile(paths.secretsFile);
       assertSupabaseDemoApiEnvironment(supabaseDemoApiEnvironment({}, { source, secrets }));

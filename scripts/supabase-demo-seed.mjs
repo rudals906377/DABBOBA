@@ -7,7 +7,7 @@ import { parseEnv } from 'node:util';
 import { createMigrationDatabasePool } from '../packages/db/dist/index.js';
 import {
   SUPABASE_DEMO_PROFILE,
-  SUPABASE_INTEGRATION_PROJECT_REF,
+  SUPABASE_DEMO_PROJECT_REF,
   assertSupabaseDemoApiEnvironment,
   readSelectedBackendProfile,
   supabaseDemoApiEnvironment,
@@ -52,7 +52,7 @@ async function main() {
     || migrationTarget.hostname !== runtimeTarget.hostname
     || migrationTarget.port !== '5432'
     || migrationTarget.pathname !== '/postgres'
-    || decodeURIComponent(migrationTarget.username) !== `postgres.${SUPABASE_INTEGRATION_PROJECT_REF}`
+    || decodeURIComponent(migrationTarget.username) !== `postgres.${SUPABASE_DEMO_PROJECT_REF}`
     || !migrationTarget.password
     || migrationTarget.search
     || migrationTarget.hash

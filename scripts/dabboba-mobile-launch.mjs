@@ -16,7 +16,7 @@ import {
 export const MOBILE_ROOT = fileURLToPath(new URL('../apps/mobile', import.meta.url));
 export const METRO_PORT = 8084;
 export const HOSTED_AUTH_PROFILE = 'supabase-hosted-auth';
-export const HOSTED_AUTH_PROJECT_REF = 'yxkmvgfruphgghowzvmo';
+export const HOSTED_AUTH_PROJECT_REF = 'rconfxsykttfvznakile';
 export const HOSTED_AUTH_API_URL = `https://${HOSTED_AUTH_PROJECT_REF}.supabase.co/functions/v1/dabboba-api`;
 export const HOSTED_AUTH_ENV_FILE = path.join(MOBILE_ROOT, '.env');
 const SAFE_PARENT_KEYS = new Set(['PATH', 'HOME', 'USER', 'LOGNAME', 'SHELL', 'TMPDIR', 'LANG', 'LC_ALL', 'TERM', 'DEVELOPER_DIR']);

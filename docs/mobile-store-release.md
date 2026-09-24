@@ -103,6 +103,12 @@ dated verification evidence.
   and the new exact-URL mobile API smoke failed before its first response. DNS
   setup and a successful five-route read-only smoke are required before this
   address can be used in a signed customer build.
+- Later on 2026-09-24, the project in the user-designated Dabboba organization (`rconfxsykttfvznakile`) received
+  the migrated database and private media, and its direct Edge API passed the
+  public route smoke in PRELAUNCH. EAS production now targets that direct API
+  instead of unresolved `api.dabboba.net`. The full mobile catalog smoke still
+  fails because every migrated product is a private DRAFT; authentication,
+  account deletion, the worker and a newly signed build remain unverified.
 - On 2026-09-24 the local required integration run passed with no skipped DB,
   worker, or API cases after migration 0066 repaired the pgmq worker's
   `set_vt` dependency and Turbo forwarded all test-role URLs. The full local
@@ -129,7 +135,7 @@ Run the first public PRELAUNCH configuration gate only with the exact public
 build values for the candidate:
 
 ```sh
-EXPO_PUBLIC_DABBOBA_API_URL=https://api.dabboba.net \
+EXPO_PUBLIC_DABBOBA_API_URL=https://rconfxsykttfvznakile.supabase.co/functions/v1/dabboba-api \
 PAYMENT_PROVIDER=UNCONFIGURED \
 DABBOBA_COMMERCE_MODE=PRELAUNCH \
 EXPO_PUBLIC_SUPABASE_URL=https://... \

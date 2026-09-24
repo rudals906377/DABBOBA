@@ -3,7 +3,7 @@ import { spawn } from 'node:child_process';
 import { EventEmitter, once } from 'node:events';
 import { test } from 'node:test';
 import {
-  HOSTED_AUTH_API_URL, HOSTED_AUTH_PROFILE, MOBILE_ROOT, METRO_PORT, assertLaunchUrl,
+  HOSTED_AUTH_API_URL, HOSTED_AUTH_PROFILE, HOSTED_AUTH_PROJECT_REF, MOBILE_ROOT, METRO_PORT, assertLaunchUrl,
   assertMetroProcessEnvironment, buildExpoCommand, buildMobileEnvironment,
   buildHostedAuthMobileEnvironment, ensureAndroidReverse, inspectMetro,
   launchMobile, parseLaunchOptions, readMetroProcessEnvironment, selectIosSimulator,
@@ -191,7 +191,7 @@ test('only an explicitly selected internal demo profile enables development comm
 
 test('hosted auth environment uses only the approved project public values and deployed API', () => {
   const source = [
-    'EXPO_PUBLIC_SUPABASE_URL=https://yxkmvgfruphgghowzvmo.supabase.co',
+    `EXPO_PUBLIC_SUPABASE_URL=https://${HOSTED_AUTH_PROJECT_REF}.supabase.co`,
     `EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_${'a'.repeat(40)}`,
     '',
   ].join('\n');
@@ -205,14 +205,14 @@ test('hosted auth environment uses only the approved project public values and d
   assert.equal(environment.DABBOBA_LOCAL_BACKEND_PROFILE, HOSTED_AUTH_PROFILE);
   assert.equal(environment.DABBOBA_ENVIRONMENT_TIER, 'PRODUCTION');
   assert.equal(environment.EXPO_PUBLIC_DABBOBA_API_URL, HOSTED_AUTH_API_URL);
-  assert.equal(environment.EXPO_PUBLIC_SUPABASE_URL, 'https://yxkmvgfruphgghowzvmo.supabase.co');
+  assert.equal(environment.EXPO_PUBLIC_SUPABASE_URL, `https://${HOSTED_AUTH_PROJECT_REF}.supabase.co`);
   assert.match(environment.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY, /^sb_publishable_/);
   assert.equal(environment.DATABASE_URL, undefined);
   assert.equal(environment.SUPABASE_SERVICE_ROLE_KEY, undefined);
   assert.doesNotThrow(() => assertMetroProcessEnvironment(environmentLine(environment), environment));
 
   for (const invalid of [
-    source.replace('yxkmvgfruphgghowzvmo', 'abcdefghijklmnopqrst'),
+    source.replace(HOSTED_AUTH_PROJECT_REF, 'abcdefghijklmnopqrst'),
     source.replace('sb_publishable_', 'sb_secret_'),
     `${source}DATABASE_URL=private\n`,
   ]) {
