@@ -267,6 +267,9 @@ export function LoginScreen() {
   const providerAvailable = (provider: DabbobaLoginProvider) => (
     brokerReady && enabledProviders.includes(provider)
   );
+  const hasSocialProvider = (["KAKAO", "NAVER", "GOOGLE", "APPLE"] as const).some(providerAvailable);
+  const emailProviderAvailable = providerAvailable("EMAIL");
+  const showLoginActions = hasSocialProvider || emailProviderAvailable || (__DEV__ && internalSessionState === "failed");
   const otpExpired = otpExpiresAt !== null && clockMs >= otpExpiresAt;
   const resendSeconds = resendAvailableAt === null
     ? 0
@@ -275,7 +278,7 @@ export function LoginScreen() {
     ? Math.floor(EMAIL_OTP_TTL_MS / 1_000)
     : Math.max(0, Math.ceil((otpExpiresAt - clockMs) / 1_000));
   const connectionRetryVisible = !checking
-    && (providerCheckFailed || (configReady && !requiredPolicyVersions));
+    && (providerCheckFailed || (configReady && (!requiredPolicyVersions || !brokerReady || enabledProviders.length === 0)));
 
   return (
     <SafeAreaView style={styles.safeArea} edges={["top", "left", "right", "bottom"]}>
@@ -314,51 +317,62 @@ export function LoginScreen() {
             />
           ) : null}
 
-          <View style={[styles.actions, connectionRetryVisible && styles.actionsAfterRetry]}>
-            <ProviderButton
-              label="카카오로 계속하기"
-              mark="K"
-              backgroundColor="#FEE500"
-              foregroundColor="#191919"
-              loading={busy === "KAKAO"}
-              disabled={unavailable || !providerAvailable("KAKAO")}
-              onPress={() => void loginSocial("KAKAO")}
-            />
-            <ProviderButton
-              label="네이버로 계속하기"
-              mark="N"
-              backgroundColor="#03C75A"
-              foregroundColor="#FFFFFF"
-              loading={busy === "NAVER"}
-              disabled={unavailable || !providerAvailable("NAVER")}
-              onPress={() => void loginSocial("NAVER")}
-            />
-            <ProviderButton
-              label="구글로 계속하기"
-              icon="logo-google"
-              backgroundColor="#FFFFFF"
-              foregroundColor="#202124"
-              loading={busy === "GOOGLE"}
-              disabled={unavailable || !providerAvailable("GOOGLE")}
-              onPress={() => void loginSocial("GOOGLE")}
-            />
-            <ProviderButton
-              label="애플로 계속하기"
-              icon="logo-apple"
-              backgroundColor="#111111"
-              foregroundColor="#FFFFFF"
-              loading={busy === "APPLE"}
-              disabled={unavailable || !providerAvailable("APPLE")}
-              onPress={() => void loginSocial("APPLE")}
-            />
+          {showLoginActions ? (
+            <View style={[styles.actions, connectionRetryVisible && styles.actionsAfterRetry]}>
+              {providerAvailable("KAKAO") ? (
+                <ProviderButton
+                  label="카카오로 계속하기"
+                  mark="K"
+                  backgroundColor="#FEE500"
+                  foregroundColor="#191919"
+                  loading={busy === "KAKAO"}
+                  disabled={unavailable}
+                  onPress={() => void loginSocial("KAKAO")}
+                />
+              ) : null}
+              {providerAvailable("NAVER") ? (
+                <ProviderButton
+                  label="네이버로 계속하기"
+                  mark="N"
+                  backgroundColor="#03C75A"
+                  foregroundColor="#FFFFFF"
+                  loading={busy === "NAVER"}
+                  disabled={unavailable}
+                  onPress={() => void loginSocial("NAVER")}
+                />
+              ) : null}
+              {providerAvailable("GOOGLE") ? (
+                <ProviderButton
+                  label="구글로 계속하기"
+                  icon="logo-google"
+                  backgroundColor="#FFFFFF"
+                  foregroundColor="#202124"
+                  loading={busy === "GOOGLE"}
+                  disabled={unavailable}
+                  onPress={() => void loginSocial("GOOGLE")}
+                />
+              ) : null}
+              {providerAvailable("APPLE") ? (
+                <ProviderButton
+                  label="애플로 계속하기"
+                  icon="logo-apple"
+                  backgroundColor="#111111"
+                  foregroundColor="#FFFFFF"
+                  loading={busy === "APPLE"}
+                  disabled={unavailable}
+                  onPress={() => void loginSocial("APPLE")}
+                />
+              ) : null}
 
-            <View style={styles.dividerRow}>
-              <View style={styles.divider} />
-              <Text style={styles.dividerLabel}>또는</Text>
-              <View style={styles.divider} />
-            </View>
+              {hasSocialProvider && emailProviderAvailable ? (
+                <View style={styles.dividerRow}>
+                  <View style={styles.divider} />
+                  <Text style={styles.dividerLabel}>또는</Text>
+                  <View style={styles.divider} />
+                </View>
+              ) : null}
 
-            {emailStep === "ADDRESS" ? (
+              {emailProviderAvailable && (emailStep === "ADDRESS" ? (
               <>
                 <Text style={styles.fieldLabel}>이메일</Text>
                 <SeedInputShell focused={emailFocused}>
@@ -451,20 +465,21 @@ export function LoginScreen() {
                   style={styles.emailButton}
                 />
               </>
-            )}
+              ))}
 
-            {__DEV__ && internalSessionState === "failed" ? (
-              <View style={styles.sessionRecovery}>
-                <SeedActionButton
-                  label="로그인 다시 시도"
-                  variant="neutralSolid"
-                  loading={busy === "SESSION_RECOVERY"}
-                  disabled={busy !== null}
-                  onPress={() => void retryInternalSession()}
-                />
-              </View>
-            ) : null}
-          </View>
+              {__DEV__ && internalSessionState === "failed" ? (
+                <View style={styles.sessionRecovery}>
+                  <SeedActionButton
+                    label="로그인 다시 시도"
+                    variant="neutralSolid"
+                    loading={busy === "SESSION_RECOVERY"}
+                    disabled={busy !== null}
+                    onPress={() => void retryInternalSession()}
+                  />
+                </View>
+              ) : null}
+            </View>
+          ) : null}
 
           {message ? <Text accessibilityRole="alert" style={styles.message}>{message}</Text> : null}
           <View style={styles.legalLinks}>

@@ -51,7 +51,21 @@ test("native login exposes Kakao, Naver, Google, Apple, and email OTP without ph
   assert.match(screen, /accessibilityRole="checkbox"/);
 });
 
-test("login explains missing legal configuration before the disabled sign-in choices", () => {
+test("native login renders only server-enabled methods and offers retry when none are ready", () => {
+  const screen = read("apps/mobile/src/features/auth/LoginScreen.tsx");
+  for (const provider of ["KAKAO", "NAVER", "GOOGLE", "APPLE"]) {
+    assert.ok(
+      new RegExp(`\\{providerAvailable\\("${provider}"\\) \\? \\(\\s*<ProviderButton`, "s").test(screen),
+      `${provider} login button must be gated by server availability`,
+    );
+  }
+  assert.ok(/\{emailProviderAvailable && \(emailStep === "ADDRESS"/.test(screen), "email form must require availability");
+  assert.ok(/\{hasSocialProvider && emailProviderAvailable \? \(\s*<View style=\{styles\.dividerRow\}>/s.test(screen), "divider needs both method groups");
+  assert.ok(/showLoginActions = hasSocialProvider \|\| emailProviderAvailable/.test(screen), "empty method list must not leave blank actions");
+  assert.ok(/connectionRetryVisible = !checking[\s\S]*!brokerReady[\s\S]*enabledProviders\.length === 0/.test(screen), "unavailable login needs retry");
+});
+
+test("login explains missing legal configuration before sign-in choices", () => {
   const screen = read("apps/mobile/src/features/auth/LoginScreen.tsx");
   const render = screen.slice(screen.indexOf("return (\n    <SafeAreaView"), screen.indexOf("function formatCountdown"));
   const unavailable = render.indexOf("약관 정보를 확인할 수 없어 로그인을 잠시 이용할 수 없어요.");
