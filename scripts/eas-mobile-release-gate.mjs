@@ -72,6 +72,12 @@ export function planEasMobileReleaseGate({
         args: releaseConfigArgs,
         cwd: resolvedRoot,
       },
+      ...(!PG_REVIEW_PROFILES.has(profile) ? [{
+        label: "mobile public API",
+        command: process.execPath,
+        args: ["scripts/verify-mobile-public-api.mjs"],
+        cwd: resolvedRoot,
+      }] : []),
       {
         label: "mobile production bundle",
         command: process.execPath,

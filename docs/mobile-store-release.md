@@ -147,7 +147,9 @@ values as the candidate build, run `corepack pnpm run release:mobile:api:verify`
 before signing. This read-only gate checks public configuration, recent draws,
 Home sections, products, and IPs through the exact URL the app will use. A
 missing DNS record, stale Edge deployment, invalid response, or wrong commerce
-mode fails the gate; do not replace the result with local fixture products.
+mode fails the gate; do not replace the result with local fixture products. The
+same check runs automatically inside production EAS builds; the separate
+internal PG-review profile does not require the public catalog to be live.
 
 For the later LIVE candidate, use the payment-enabled values:
 
