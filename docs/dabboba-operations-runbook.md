@@ -1,5 +1,7 @@
 # DABBOBA 운영 런북
 
+> 2026-09-25 대상 변경: 현재 사전오픈 운영 Supabase 프로젝트는 `rconfxsykttfvznakile` (`dabboba-production`)이다. 아래 2026-09-09 기록의 `yxkmvgfruphgghowzvmo`와 target hash는 과거 프로젝트에 대한 기록이며, 새 프로젝트의 배포·역할 준비·스케줄 명령에 재사용하지 않는다. 새 대상 `postgres`의 독립 계산 hash는 `7f6fdac67f393af1aecb9dfe38bde3dec838262e4e94a6e6aceb492fe16822f3`이다. 이 값만으로 운영 변경이 승인되거나 worker가 준비된 것은 아니다. 현재 새 프로젝트에는 `dabboba-api`만 배포돼 있고 `dabboba-worker`는 배포되지 않았다.
+
 > 2026-09-09: 신규 배포 목표는 [Supabase 내부 통합](supabase-only-transition.md)이다. 이 문서의 Cloud Run 절차는 이전 구현 참고용이며 실행하지 않는다. 운영 DB·스케줄·유료 서비스 변경은 별도 승인 대상이다.
 
 ## 목적과 제한
