@@ -5,6 +5,7 @@ import {
   ActivityIndicator,
   Image,
   KeyboardAvoidingView,
+  Linking,
   Platform,
   Pressable,
   ScrollView,
@@ -44,9 +45,20 @@ import {
   type MobilePlatform,
 } from "@/lib/runtime-config";
 import { clearUserScopedLocalData } from "@/lib/local-database";
+import { resolvePublicAppLink } from "@/lib/public-app-links";
 import { colors } from "@/theme";
 
 const WORDMARK = require("../../../assets/brand/dabboba-wordmark.png");
+
+function openCurrentPolicy(kind: "terms" | "privacy") {
+  const localRoute = `/legal/${kind}` as Href;
+  const url = resolvePublicAppLink(kind);
+  if (!url) {
+    router.push(localRoute);
+    return;
+  }
+  void Linking.openURL(url).catch(() => router.push(localRoute));
+}
 
 type EmailStep = "ADDRESS" | "OTP";
 type LoginMethod = DabbobaLoginProvider | "SESSION_RECOVERY";
@@ -460,13 +472,13 @@ export function LoginScreen() {
               label="[필수] 서비스 이용약관 동의"
               checked={termsAccepted}
               onToggle={() => setTermsAccepted((value) => !value)}
-              onOpen={() => router.push("/legal/terms" as Href)}
+              onOpen={() => openCurrentPolicy("terms")}
             />
             <PolicyAcceptanceRow
               label="[필수] 개인정보처리방침 동의"
               checked={privacyAccepted}
               onToggle={() => setPrivacyAccepted((value) => !value)}
-              onOpen={() => router.push("/legal/privacy" as Href)}
+              onOpen={() => openCurrentPolicy("privacy")}
             />
           </View>
         </ScrollView>

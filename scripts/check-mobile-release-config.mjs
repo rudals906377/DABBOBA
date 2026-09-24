@@ -57,8 +57,13 @@ const SOURCE_GATES = Object.freeze([
   },
   {
     relativePath: "apps/mobile/src/features/auth/LoginScreen.tsx",
-    required: [/\/legal\/terms/, /\/legal\/privacy/],
-    description: "login must expose terms and privacy before authentication",
+    required: [
+      /onOpen=\{\(\) => openCurrentPolicy\("terms"\)\}/,
+      /onOpen=\{\(\) => openCurrentPolicy\("privacy"\)\}/,
+      /resolvePublicAppLink\(kind\)/,
+      /Linking\.openURL\(url\)/,
+    ],
+    description: "login must open the published terms and privacy before authentication",
   },
   {
     relativePath: "apps/mobile/src/features/profile/ProfileMemberDetailScreen.tsx",

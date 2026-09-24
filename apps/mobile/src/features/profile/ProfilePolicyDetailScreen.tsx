@@ -26,8 +26,8 @@ export function ProfilePolicyDetailScreen() {
           <>
             <View style={styles.lead}>
               <ReadablePageTitle variant="subtitle" numberOfLines={2}>{policy.title}</ReadablePageTitle>
-              <Text style={styles.summary}>{policy.summary}</Text>
-              <Text style={styles.updated}>최근 업데이트 {policy.updatedAt}</Text>
+              <Text style={styles.summary}>{publicUrl ? `핵심 안내 · ${policy.summary}` : policy.summary}</Text>
+              <Text style={styles.updated}>{publicUrl ? "공개 문서 시행일" : "최근 업데이트"} {policy.updatedAt}</Text>
             </View>
             {policy.sections.map((section) => (
               <View key={section.heading} style={styles.section}>
