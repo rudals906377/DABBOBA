@@ -11,12 +11,12 @@ import { assertSupabaseEdgeReleaseConfiguration } from './prepare-supabase-edge-
 
 const defaultRepositoryRoot = fileURLToPath(new URL('../', import.meta.url));
 
-function defaultReleaseCheck({ repositoryRoot, environment }) {
+export function defaultReleaseCheck({ repositoryRoot, environment }) {
   return spawnSync(
-    process.execPath,
-    ['--import', 'tsx', 'packages/db/src/check-release.ts'],
+    resolve(repositoryRoot, 'packages/db/node_modules/.bin/tsx'),
+    ['src/check-release.ts'],
     {
-      cwd: repositoryRoot,
+      cwd: resolve(repositoryRoot, 'packages/db'),
       env: { ...process.env, ...environment },
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],

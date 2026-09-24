@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { runSupabaseEdgeReleasePreflight } from '../scripts/supabase-edge-release-preflight.mjs';
+import { fileURLToPath } from 'node:url';
+import { defaultReleaseCheck, runSupabaseEdgeReleasePreflight } from '../scripts/supabase-edge-release-preflight.mjs';
 import {
   deploySupabaseEdge,
   supabaseCommandArgs,
@@ -36,6 +37,23 @@ const completeAppleProfile = {
   DABBOBA_WORKER_APPLE_TOKEN_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString('base64url'),
   DABBOBA_WORKER_APPLE_TOKEN_ENCRYPTION_KEY_VERSION: '1',
 };
+
+test('database release preflight can execute the installed checker and return a JSON report', () => {
+  const result = defaultReleaseCheck({
+    repositoryRoot: fileURLToPath(new URL('../', import.meta.url)),
+    environment: {
+      DABBOBA_RELEASE_ENVIRONMENT_TIER: 'TEST',
+      DATABASE_MIGRATION_URL: '',
+      DATABASE_URL: '',
+      WORKER_DATABASE_URL: '',
+    },
+  });
+  assert.equal(result.status, 1);
+  const report = JSON.parse(result.stdout);
+  assert.equal(report.scope, 'database-release-check/v1');
+  assert.equal(report.status, 'blocked');
+  assert.ok(report.blockers.includes('missing_migration_database_url'));
+});
 
 test('production Edge deployment uses an explicit project ref without mistaking CLI backend profiles for logins', () => {
   assert.deepEqual(
