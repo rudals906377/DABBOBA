@@ -40,6 +40,8 @@ export type ShopProductPageInput = CatalogProductPageInput & {
   category: Extract<ProductCategory, "gacha" | "kuji">;
 };
 
+const CATALOG_PAGE_TIMEOUT_MS = 8_000;
+
 export type ProductDetailSnapshot = {
   product: CatalogProduct;
   ip: CatalogIp | null;
@@ -51,6 +53,7 @@ export type ProductDetailSnapshot = {
 
 type ProductDetailContext = {
   exchangeListingId?: string;
+  signal?: AbortSignal;
 };
 
 export async function fetchShopSnapshot(apiBaseUrl: string): Promise<ShopSnapshot> {
@@ -99,25 +102,36 @@ export async function fetchCatalogProductPage(
   input: CatalogProductPageInput,
 ): Promise<ShopProductPage> {
   const client = createDabbobaClient({ baseUrl: apiBaseUrl, requestId: randomUUID });
-  const result = await client.GET("/v1/catalog/products", {
-    params: {
-      query: {
-        limit: input.limit ?? 20,
-        ...(input.cursor ? { cursor: input.cursor } : {}),
-        ...(input.query?.trim() ? { q: input.query.trim() } : {}),
-        ...(input.category ? { category: input.category } : {}),
-        ...(input.ipId ? { ipId: input.ipId } : {}),
-        sort: input.sort ?? "latest",
-        excludeSoldOut: input.excludeSoldOut ?? false,
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), CATALOG_PAGE_TIMEOUT_MS);
+  try {
+    const result = await client.GET("/v1/catalog/products", {
+      params: {
+        query: {
+          limit: input.limit ?? 20,
+          ...(input.cursor ? { cursor: input.cursor } : {}),
+          ...(input.query?.trim() ? { q: input.query.trim() } : {}),
+          ...(input.category ? { category: input.category } : {}),
+          ...(input.ipId ? { ipId: input.ipId } : {}),
+          sort: input.sort ?? "latest",
+          excludeSoldOut: input.excludeSoldOut ?? false,
+        },
       },
-    },
-  });
-  if (!result.data) throw new Error(errorMessage(result.error, "상품을 불러오지 못했습니다."));
-  return {
-    products: result.data.items.filter((product) => isCustomerBrowsableCatalogCategory(product.category)),
-    nextCursor: result.data.nextCursor ?? null,
-    fetchedAt: new Date().toISOString(),
-  };
+      signal: controller.signal,
+    });
+    if (controller.signal.aborted) throw new Error("상품 응답 시간이 초과됐습니다. 다시 시도해 주세요.");
+    if (!result.data) throw new Error(errorMessage(result.error, "상품을 불러오지 못했습니다."));
+    return {
+      products: result.data.items.filter((product) => isCustomerBrowsableCatalogCategory(product.category)),
+      nextCursor: result.data.nextCursor ?? null,
+      fetchedAt: new Date().toISOString(),
+    };
+  } catch (error) {
+    if (controller.signal.aborted) throw new Error("상품 응답 시간이 초과됐습니다. 다시 시도해 주세요.");
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export async function fetchProductDetail(
@@ -132,10 +146,10 @@ export async function fetchProductDetail(
     ...(accessToken ? { token: () => accessToken } : {}),
   });
   const [productResult, ipResult, wishlistResult] = await Promise.all([
-    client.GET("/v1/catalog/products/{productId}", { params: { path: { productId } } }),
-    client.GET("/v1/catalog/ips", { params: { query: { limit: 100 } } }),
+    client.GET("/v1/catalog/products/{productId}", { params: { path: { productId } }, signal: context.signal }),
+    client.GET("/v1/catalog/ips", { params: { query: { limit: 100 } }, signal: context.signal }),
     accessToken
-      ? client.GET("/v1/account/wishlist", { params: { query: { limit: 100 } } })
+      ? client.GET("/v1/account/wishlist", { params: { query: { limit: 100 } }, signal: context.signal })
       : Promise.resolve({ data: undefined }),
   ]);
 
@@ -146,6 +160,7 @@ export async function fetchProductDetail(
   const ownedProductResult = !publicProduct && accessToken
     ? await client.GET("/v1/account/owned-products/{productId}", {
       params: { path: { productId } },
+      signal: context.signal,
     })
     : null;
   const exchangeListingResult = !publicProduct
@@ -153,6 +168,7 @@ export async function fetchProductDetail(
     && context.exchangeListingId
     ? await client.GET("/v1/exchange/listings/{listingId}", {
       params: { path: { listingId: context.exchangeListingId } },
+      signal: context.signal,
     })
     : null;
   const exchangeProducts = exchangeListingResult?.data
@@ -173,6 +189,7 @@ export async function fetchProductDetail(
   if (!ownedCollectible && !exchangeReference && isDrawCategory(product.category)) {
     const oddsResult = await client.GET("/v1/catalog/products/{productId}/draw-odds", {
       params: { path: { productId } },
+      signal: context.signal,
     });
     drawOdds = oddsResult.data ?? null;
   }

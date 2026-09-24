@@ -140,7 +140,7 @@ export function HomeScreen() {
         const cached = await readHomeCatalogCache(db).catch(() => null);
         const recoveredRecentDrawActivity = recentResult.status === "fulfilled"
           ? recentResult.value
-          : cached?.recentDrawActivity ?? null;
+          : null;
         setRecentDrawActivity(recoveredRecentDrawActivity);
 
         if (catalogResult.status === "rejected") {

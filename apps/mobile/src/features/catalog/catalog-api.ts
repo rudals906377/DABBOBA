@@ -8,6 +8,7 @@ import type {
   components,
 } from "@dabboba/contracts";
 import { isCustomerProductCategoryEnabledOn } from "@/features/catalog/product-categories";
+import { isCurrentHomeSectionList } from "../home/home-catalog-contract.ts";
 import { createMobileDabbobaClient as createDabbobaClient } from "@/lib/mobile-api-client";
 import { readAuthTokens } from "@/lib/session-store";
 
@@ -59,17 +60,20 @@ export async function fetchHomeCatalog(apiBaseUrl: string): Promise<HomeCatalogS
   }
 
   const fetchedAt = new Date().toISOString();
+  const homeSections = isCurrentHomeSectionList(homeSectionResult?.data)
+    ? homeSectionResult.data
+    : null;
   return {
     ips: ipResult.data.items,
     products: productResult.data.items.filter((product) => (
       isCustomerProductCategoryEnabledOn(product.category, "home")
     )),
     notices: noticeResult.data?.items ?? [],
-    homeSections: homeSectionResult?.data ?? null,
-    homeProductBadges: homeSectionResult?.data
+    homeSections,
+    homeProductBadges: homeSections
       ? {
-          bestProductId: homeSectionResult.data.bestProductId,
-          evaluatedAt: homeSectionResult.data.evaluatedAt,
+          bestProductId: homeSections.bestProductId,
+          evaluatedAt: homeSections.evaluatedAt,
         }
       : { bestProductId: null, evaluatedAt: fetchedAt },
     recentDrawActivity: null,

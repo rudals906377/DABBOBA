@@ -93,6 +93,7 @@ import {
   resolveMobileRuntimeConfig,
   type MobilePlatform,
 } from "@/lib/runtime-config";
+import { clearUserScopedLocalData } from "@/lib/local-database";
 import { readAuthTokens } from "@/lib/session-store";
 import { colors } from "@/theme";
 
@@ -199,7 +200,7 @@ export function CheckoutScreen() {
     setDemoOrder(null);
     try {
       const tokens = __DEV__
-        ? (await ensureInternalCustomerSession(runtime.apiBaseUrl).catch(() => null))
+        ? (await ensureInternalCustomerSession(runtime.apiBaseUrl, () => clearUserScopedLocalData(db)))
           ?? await readAuthTokens()
         : await readAuthTokens();
       if (!tokens?.accessToken) throw new Error("로그인 후 결제 준비 화면을 확인할 수 있어요.");
@@ -327,7 +328,7 @@ export function CheckoutScreen() {
     setQuantity((current) => normalizeDrawPurchaseCount(current, product.availableQuantity));
   }, [productId, product?.availableQuantity]);
 
-  useEffect(() => {
+  useFocusEffect(useCallback(() => {
     if (!isKujiCheckout) return undefined;
 
     const syncNow = () => setNowMs(Date.now());
@@ -341,7 +342,7 @@ export function CheckoutScreen() {
       clearInterval(timer);
       appStateSubscription.remove();
     };
-  }, [isKujiCheckout, kujiCheckoutClock]);
+  }, [isKujiCheckout, kujiCheckoutClock]));
 
   const subtotal = (product?.price ?? 0) * quantity;
   const pointUsed = checkoutPointUsed(pointInput, pointBalance, subtotal);
@@ -428,6 +429,7 @@ export function CheckoutScreen() {
   }, [kujiEntryId, productId, runtime.apiBaseUrl]);
 
   const expireKujiCheckout = useCallback(() => {
+    if (!checkoutFocusedRef.current) return;
     const phase = resolveKujiCheckoutPhase(
       kujiCheckoutClock,
       Date.now(),
@@ -448,6 +450,7 @@ export function CheckoutScreen() {
   }, [kujiCheckoutClock, releaseKujiEntryBestEffort, replaceWithProduct]);
 
   const cancelKujiCheckout = useCallback(() => {
+    if (!checkoutFocusedRef.current) return;
     checkoutExpiredHandledRef.current = true;
     void releaseKujiEntryBestEffort();
     AccessibilityInfo.announceForAccessibility("결제를 취소하고 상품 페이지로 이동합니다.");
@@ -455,7 +458,7 @@ export function CheckoutScreen() {
   }, [releaseKujiEntryBestEffort, replaceWithProduct]);
 
   const confirmKujiCheckoutCancellation = useCallback(() => {
-    if (orderSubmittingRef.current) return;
+    if (!checkoutFocusedRef.current || orderSubmittingRef.current) return;
     const remaining = kujiCheckoutRemainingSeconds(kujiCheckoutClock, Date.now());
     if (remaining <= 0) {
       expireKujiCheckout();
@@ -494,6 +497,7 @@ export function CheckoutScreen() {
   useEffect(() => navigation.addListener("beforeRemove", (event) => {
     if (
       !isKujiCheckout
+      || !checkoutFocusedRef.current
       || checkoutCompletedRef.current
       || checkoutExpiredHandledRef.current
     ) return;

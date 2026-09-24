@@ -339,6 +339,7 @@ export function ProductDetailScreen() {
 
 function ProductHero({ snapshot, assetBaseUrl }: { snapshot: ProductDetailSnapshot; assetBaseUrl: string | null }) {
   const uri = resolveCatalogImageUrl(snapshot.product.imageUrl, assetBaseUrl, snapshot.product.version);
+  const editionLabel = productMetadataText(snapshot.product, "edition")?.trim();
 
   return (
     <View style={styles.heroContainer}>
@@ -352,7 +353,9 @@ function ProductHero({ snapshot, assetBaseUrl }: { snapshot: ProductDetailSnapsh
           resizeMode="contain"
           style={styles.heroImage}
         />
-        <View style={styles.editionBadge}><Text style={styles.editionLabel}>{productMetadataText(snapshot.product, "edition") ?? snapshot.product.sku}</Text></View>
+        {editionLabel ? (
+          <View style={styles.editionBadge}><Text style={styles.editionLabel}>{editionLabel}</Text></View>
+        ) : null}
       </View>
     </View>
   );

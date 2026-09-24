@@ -51,6 +51,98 @@ test("native login exposes Kakao, Naver, Google, Apple, and email OTP without ph
   assert.match(screen, /accessibilityRole="checkbox"/);
 });
 
+test("login explains missing legal configuration before the disabled sign-in choices", () => {
+  const screen = read("apps/mobile/src/features/auth/LoginScreen.tsx");
+  const render = screen.slice(screen.indexOf("return (\n    <SafeAreaView"), screen.indexOf("function formatCountdown"));
+  const unavailable = render.indexOf("약관 정보를 확인할 수 없어 로그인을 잠시 이용할 수 없어요.");
+  const providerChoices = render.indexOf("<View style={[styles.actions");
+  assert.ok(unavailable >= 0 && providerChoices > unavailable);
+  assert.match(render.slice(0, providerChoices), /accessibilityRole="alert"/);
+  assert.equal(render.match(/약관 정보를 확인할 수 없어 로그인을 잠시 이용할 수 없어요\./g)?.length, 1);
+});
+
+test("failed public config refresh invalidates previously verified legal versions as well as commerce", () => {
+  const provider = read("apps/mobile/src/features/commerce/CommerceCapabilityProvider.tsx");
+  const failedRefresh = provider.slice(provider.indexOf("} catch (error) {"), provider.indexOf("} finally {"));
+  assert.match(failedRefresh, /setServerCapability\(null\)/);
+  assert.match(failedRefresh, /setRequiredPolicyVersions\(null\)/);
+});
+
+test("login can retry both legal policy and provider availability after a temporary API failure", () => {
+  const screen = read("apps/mobile/src/features/auth/LoginScreen.tsx");
+  assert.match(screen, /useFocusEffect\(/);
+  assert.match(screen, /setEnabledProviders\(\[\]\)/);
+  assert.match(screen, /setBrokerReady\(false\)/);
+  assert.match(screen, /setProviderCheckFailed\(true\)/);
+  assert.match(screen, /label="로그인 연결 다시 확인"/);
+  assert.match(screen, /Promise\.all\(\[refreshPublicConfig\(\), refreshProviderAvailability\(\)\]\)/);
+  const render = screen.slice(screen.indexOf("return (\n    <SafeAreaView"), screen.indexOf("function formatCountdown"));
+  assert.ok(render.indexOf('label="로그인 연결 다시 확인"') < render.indexOf("<View style={[styles.actions"));
+});
+
+test("provider discovery times out and lets the login screen offer retry", async () => {
+  const source = read("apps/mobile/src/features/auth/auth-api.ts");
+  const output = ts.transpileModule(source, {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+    fileName: "auth-api.ts",
+  }).outputText;
+  const module = { exports: {} };
+  let timeoutCallback;
+  let requestSignal;
+  let clearedTimeout = false;
+  let respondNormally = false;
+  vm.runInNewContext(output, {
+    module,
+    exports: module.exports,
+    Map,
+    AbortController,
+    setTimeout(callback, duration) {
+      assert.equal(duration, 8_000);
+      timeoutCallback = callback;
+      return 1;
+    },
+    clearTimeout(id) {
+      assert.equal(id, 1);
+      clearedTimeout = true;
+    },
+    require(specifier) {
+      if (specifier === "expo-crypto") return { randomUUID: () => "request-id" };
+      if (specifier === "@dabboba/api-client") return {
+        createDabbobaClient: () => ({
+          GET(_path, options) {
+            requestSignal = options?.signal;
+            if (respondNormally) return Promise.resolve({ data: { brokerExchangeConfigured: true, methods: ["EMAIL"] } });
+            return new Promise((_resolve, reject) => {
+              requestSignal?.addEventListener("abort", () => reject(new Error("aborted")));
+            });
+          },
+        }),
+        errorMessage: (_error, fallback) => fallback,
+      };
+      if (specifier.startsWith("@/")) return {};
+      throw new Error(`Unexpected dependency: ${specifier}`);
+    },
+  });
+
+  const discovery = module.exports.fetchAuthProviderAvailability("https://api.dabboba.net");
+  await Promise.resolve();
+  assert.ok(requestSignal instanceof AbortSignal);
+  assert.equal(typeof timeoutCallback, "function");
+  timeoutCallback();
+  await assert.rejects(discovery, /로그인 연결 확인이 지연되고 있어요/);
+  assert.equal(requestSignal.aborted, true);
+  assert.equal(clearedTimeout, true);
+
+  respondNormally = true;
+  clearedTimeout = false;
+  assert.deepEqual(await module.exports.fetchAuthProviderAvailability("https://api.dabboba.net"), {
+    brokerExchangeConfigured: true,
+    methods: ["EMAIL"],
+  });
+  assert.equal(requestSignal.aborted, false);
+  assert.equal(clearedTimeout, true);
+});
+
 test("development restores one customer session without exposing a test-account login", () => {
   const screen = read("apps/mobile/src/features/auth/LoginScreen.tsx");
   const demoApi = read("apps/mobile/src/features/demo/demo-api.ts");

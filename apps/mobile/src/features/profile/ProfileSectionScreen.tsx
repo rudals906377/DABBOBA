@@ -935,15 +935,16 @@ function RequestRoom({ profileState }: { profileState: ReturnType<typeof useProf
 }
 
 function Support({ profileState }: { profileState: ReturnType<typeof useProfileSnapshot> }) {
+  const { commerceEnabled } = useCommerceCapability();
   const snapshot = profileState.snapshot!;
   const blockedStatus = isProfileSessionBlocked(profileState.status) ? profileState.status : null;
   return (
     <>
       <SectionLead title="무엇을 도와드릴까요?" description="신청방은 상품 요청 공간이고, 고객센터는 공지·이용 안내·문의 처리를 담당해요." />
-      <View style={styles.supportContact}><DecorativeIonicon name="time-outline" size={22} color={colors.greenInk} /><View><Text style={styles.supportTitle}>운영 안내</Text><Text style={styles.supportBody}>평일 10:00–17:00 · 주말·공휴일 휴무</Text></View></View>
+      <View style={styles.supportContact}><DecorativeIonicon name="chatbubble-ellipses-outline" size={22} color={colors.greenInk} /><View><Text style={styles.supportTitle}>문의 안내</Text><Text style={styles.supportBody}>문의는 1:1 문의에서 접수할 수 있어요.</Text></View></View>
       <Text style={styles.listHeading}>자주 묻는 질문</Text>
-      <Faq title="보관 상품은 언제 배송할 수 있나요?" body="보관함에 보관 중인 상품을 선택해 배송 신청할 수 있어요." />
-      <Faq title="교환 중인 상품도 배송할 수 있나요?" body="교환 등록이나 제안에 사용 중인 상품은 교환을 취소하거나 종료한 뒤 배송할 수 있어요." />
+      <Faq title="보관 상품은 언제 배송할 수 있나요?" body={commerceEnabled ? "보관함에 보관 중인 상품을 선택해 배송 신청할 수 있어요." : "사전오픈 기간에는 배송 신청을 이용할 수 없어요."} />
+      {commerceEnabled ? <Faq title="교환 중인 상품도 배송할 수 있나요?" body="교환 등록이나 제안에 사용 중인 상품은 교환을 취소하거나 종료한 뒤 배송할 수 있어요." /> : null}
       <Text style={styles.listHeading}>공지사항</Text>
       {snapshot.sectionErrors.notices ? <SeedInlineGuidance style={styles.sectionErrorGuidance}>{snapshot.sectionErrors.notices} 아래로 당겨 다시 시도해 주세요.</SeedInlineGuidance> : null}
       {snapshot.notices.map((notice) => <Pressable key={notice.id} accessibilityRole="button" accessibilityLabel={`${notice.title} 공지 상세`} onPress={() => router.push(`/profile/notices/${encodeURIComponent(notice.id)}` as Href)} style={({ pressed }) => [styles.noticeCard, pressed && styles.pressed]}><Text style={styles.noticeTitle}>{notice.isPinned ? "[중요] " : ""}{notice.title}</Text><Text numberOfLines={3} style={styles.noticeBody}>{notice.content}</Text><Text style={styles.historyMeta}>{formatDate(notice.publishedAt ?? notice.createdAt)}</Text></Pressable>)}

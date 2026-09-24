@@ -10,6 +10,7 @@ import {
   remainingInventoryLabel,
   remainingInventoryRatio,
   shouldStackCompactInventoryMeter,
+  visibleInventoryQuantityLabel,
 } from "../apps/mobile/src/features/catalog/remaining-inventory.ts";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -34,6 +35,9 @@ test("catalog quantity and meter ratio share the same inventory source", () => {
   assert.equal(remainingInventoryRatio({ availableQuantity: 90, totalQuantity: 70 }), 1);
   assert.equal(remainingInventoryRatio({ availableQuantity: -1, totalQuantity: 70 }), 0);
   assert.equal(remainingInventoryRatio({ availableQuantity: 10, totalQuantity: null }), null);
+  assert.equal(visibleInventoryQuantityLabel("gacha", { availableQuantity: 154, totalQuantity: null }), "154개 남음");
+  assert.equal(visibleInventoryQuantityLabel("kuji", { availableQuantity: 80, totalQuantity: null }), "80장 남음");
+  assert.equal(visibleInventoryQuantityLabel("kuji", { availableQuantity: 80, totalQuantity: 80 }), "80/80");
 });
 
 test("compact inventory meters keep 1, 2, and 3 digit quantities stable as text grows", () => {
@@ -72,7 +76,7 @@ test("the shared remaining inventory meter is used across discovery and detail s
   assert.match(meterSource, /fillKuji:[^\n]*backgroundColor:\s*colors\.kujiOrange/);
   assert.match(
     meterSource,
-    /quantityAndBar[\s\S]*?\{quantity\}[\s\S]*?ratio === null \? null : \([\s\S]*?styles\.track/,
+    /quantityAndBar[\s\S]*?visibleInventoryQuantityLabel\(category, inventory\)[\s\S]*?ratio === null \? null : \([\s\S]*?styles\.track/,
   );
   assert.equal((meterSource.match(/flexWrap:\s*"wrap"/g) ?? []).length, 2);
   assert.match(meterSource, /quantityAndBar:\s*\{[\s\S]*?minWidth:\s*64/);

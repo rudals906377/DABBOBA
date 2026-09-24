@@ -33,6 +33,15 @@ export function catalogQuantityLabel(
     : `${inventory.availableQuantity}`;
 }
 
+export function visibleInventoryQuantityLabel(
+  category: CatalogProduct["category"],
+  inventory: Pick<CatalogProduct, "availableQuantity" | "totalQuantity">,
+): string {
+  const quantity = catalogQuantityLabel(inventory);
+  if (typeof inventory.totalQuantity === "number") return quantity;
+  return `${quantity}${category === "kuji" ? "장" : "개"} 남음`;
+}
+
 export function remainingInventoryRatio(
   inventory: Pick<CatalogProduct, "availableQuantity" | "totalQuantity">,
 ): number | null {

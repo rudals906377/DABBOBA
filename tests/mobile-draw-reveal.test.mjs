@@ -84,6 +84,22 @@ test("committed gacha and kuji opens use a footer-free native route without a pr
   assert.equal(existsSync(path.join(root, "apps/mobile/app/draw/preview/[productId].tsx")), false);
 });
 
+test("a finished single gacha draw offers a visible return action without covering the result", () => {
+  const screen = read("apps/mobile/src/features/draw/DrawRevealScreen.tsx");
+
+  assert.match(screen, /const gachaResultFooterVisible = sourceCategory === "gacha"[\s\S]*?&& drawSequenceFinished[\s\S]*?&& !committedBatchSummaryVisible/);
+  assert.match(screen, /sourceCategory === "gacha" && !gachaResultFooterVisible \? gachaBottomInset : floatingBottomInset/);
+  assert.match(screen, /\(sourceCategory !== "gacha" \|\| gachaResultFooterVisible\) && !committedBatchSummaryVisible/);
+  assert.match(screen, /const handleAction = \(\) => \{[\s\S]*?if \(drawSequenceFinished\) \{[\s\S]*?returnToSourceProduct\(\)/);
+});
+
+test("customer draw results never expose internal product SKUs", () => {
+  const screen = read("apps/mobile/src/features/draw/DrawRevealScreen.tsx");
+  assert.doesNotMatch(screen, /\{(?:result|item)\.prizeSku\}/);
+  assert.match(screen, /<Text style=\{styles\.resultMeta\}>\{categoryLabel\(result\.prizeCategory\)\}<\/Text>/);
+  assert.match(screen, /<Text style=\{styles\.committedBatchMeta\}>\{categoryLabel\(item\.prizeCategory\)\}<\/Text>/);
+});
+
 test("a real product reveal consumes only the explicitly opened server entitlement", () => {
   const api = read("apps/mobile/src/features/draw/draw-reveal-api.ts");
   const screen = read("apps/mobile/src/features/draw/DrawRevealScreen.tsx");

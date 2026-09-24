@@ -28,6 +28,7 @@ import {
   readAccountDeletionReceipt,
   requestAccountDeletion,
   storeAccountDeletionReceipt,
+  type AccountDeletionReceipt,
   type AccountDeletionRequest,
   type AccountPolicyAcceptanceStatus,
 } from "@/features/profile/account-detail-api";
@@ -48,6 +49,7 @@ import {
   unregisterCurrentAccountPushDevice,
 } from "@/features/notifications/push-device";
 import { clearUserScopedLocalData } from "@/lib/local-database";
+import { clearAccountDeviceState } from "@/features/profile/account-device-cleanup";
 import { colors } from "@/theme";
 
 type Preferences = components["schemas"]["NotificationPreferences"];
@@ -490,6 +492,7 @@ function AccountActions({ profileState }: { profileState: ReturnType<typeof useP
   const snapshot = profileState.snapshot!;
   const [deletionRequest, setDeletionRequest] = useState<AccountDeletionRequest | null>(null);
   const [deletionPending, setDeletionPending] = useState(false);
+  const [logoutPending, setLogoutPending] = useState(false);
   const publicDeletionUrl = resolvePublicAppLink("accountDeletion");
   useEffect(() => {
     if (snapshot.isExample || !profileState.accessToken) return;
@@ -500,9 +503,13 @@ function AccountActions({ profileState }: { profileState: ReturnType<typeof useP
     return () => { active = false; };
   }, [profileState.accessToken, profileState.runtime.apiBaseUrl, snapshot.isExample]);
 
-  const logout = () => Alert.alert("로그아웃할까요?", "이 기기의 로그인 세션을 종료합니다.", [
+  const logout = () => {
+    if (logoutPending) return;
+    Alert.alert("로그아웃할까요?", "이 기기의 로그인 세션을 종료합니다.", [
     { text: "취소", style: "cancel" },
     { text: "로그아웃", style: "destructive", onPress: () => { void (async () => {
+      setLogoutPending(true);
+      let remoteFailure: unknown = null;
       try {
         if (profileState.accessToken && !snapshot.isExample) {
           await unregisterCurrentAccountPushDevice(
@@ -512,17 +519,64 @@ function AccountActions({ profileState }: { profileState: ReturnType<typeof useP
           await logoutAccount(profileState.runtime.apiBaseUrl, profileState.accessToken);
         }
       } catch (error) {
-        Alert.alert("로그아웃 상태를 확인하지 못했어요", error instanceof Error ? error.message : "이 기기의 로그인 정보는 정리할게요.");
-      } finally {
-        await Promise.all([
-          clearAuthTokens(),
-          clearBrokerSession(),
-          clearUserScopedLocalData(db),
-        ]);
-        router.replace("/(tabs)/profile");
+        remoteFailure = error;
+      }
+      try {
+        await clearAccountDeviceState({
+          clearLocalData: () => clearUserScopedLocalData(db),
+          clearBrokerSession,
+          clearAuthTokens,
+        });
+      } catch (error) {
+        setLogoutPending(false);
+        void profileState.reload();
+        Alert.alert(
+          "기기 로그아웃을 완료하지 못했어요",
+          `이전 계정의 기기 정보를 지우지 못해 계정 전환을 막았어요. 다시 시도해 주세요. ${error instanceof Error ? error.message : ""}`.trim(),
+        );
+        return;
+      }
+      setLogoutPending(false);
+      router.replace("/(tabs)/profile");
+      if (remoteFailure) {
+        Alert.alert(
+          "서버 로그아웃 상태를 확인하지 못했어요",
+          "이 기기의 로그인 정보는 삭제했지만 서버 세션 종료는 확인되지 않았어요. 다시 로그인한 뒤 로그인 및 보안에서 다른 기기 로그아웃을 확인해 주세요.",
+        );
       }
     })(); } },
-  ]);
+    ]);
+  };
+
+  const finalizeAcceptedDeletion = async (result: AccountDeletionReceipt) => {
+    setDeletionPending(true);
+    try {
+      await storeAccountDeletionReceipt({ id: result.id, statusToken: result.statusToken });
+      if (result.status === "BLOCKED") {
+        Alert.alert("탈퇴 처리가 보류됐어요", deletionBlockerMessage(result.blockers));
+        return;
+      }
+      await clearAccountDeviceState({
+        clearLocalData: () => clearUserScopedLocalData(db),
+        clearBrokerSession,
+        clearAuthTokens,
+      });
+      Alert.alert("탈퇴 요청을 접수했어요", `접수번호 ${result.id}\n처리가 완료될 때까지 이 계정의 로그인이 제한됩니다. 내정보 > 설정 > 로그아웃·회원탈퇴에서 상태를 확인할 수 있어요.`, [
+        { text: "확인", onPress: () => router.replace("/(tabs)/profile") },
+      ]);
+    } catch {
+      Alert.alert(
+        "탈퇴 요청은 서버에 접수됐어요",
+        `접수번호 ${result.id}\n기기의 접수 기록 또는 로그인 정보 정리를 완료하지 못했어요. 서버 요청은 다시 보내지 않고 기기 정리만 다시 시도할 수 있어요.`,
+        [
+          { text: "나중에", style: "cancel" },
+          { text: "다시 정리", onPress: () => { void finalizeAcceptedDeletion(result); } },
+        ],
+      );
+    } finally {
+      setDeletionPending(false);
+    }
+  };
 
   const requestDeletion = async () => {
     if (snapshot.isExample || !profileState.accessToken) {
@@ -558,19 +612,7 @@ function AccountActions({ profileState }: { profileState: ReturnType<typeof useP
               setDeletionPending(true);
               const result = await requestAccountDeletion(profileState.runtime.apiBaseUrl, profileState.accessToken!);
               setDeletionRequest(result);
-              await storeAccountDeletionReceipt({ id: result.id, statusToken: result.statusToken });
-              if (result.status === "BLOCKED") {
-                Alert.alert("탈퇴 처리가 보류됐어요", deletionBlockerMessage(result.blockers));
-                return;
-              }
-              await Promise.all([
-                clearAuthTokens(),
-                clearBrokerSession(),
-                clearUserScopedLocalData(db),
-              ]);
-              Alert.alert("탈퇴 요청을 접수했어요", `접수번호 ${result.id}\n처리가 완료될 때까지 이 계정의 로그인이 제한됩니다. 내정보 > 설정 > 로그아웃·회원탈퇴에서 상태를 확인할 수 있어요.`, [
-                { text: "확인", onPress: () => router.replace("/(tabs)/profile") },
-              ]);
+              await finalizeAcceptedDeletion(result);
             } catch (error) {
               Alert.alert("탈퇴를 요청하지 못했어요", error instanceof Error ? error.message : "잠시 후 다시 시도해 주세요.");
             } finally {
@@ -588,7 +630,7 @@ function AccountActions({ profileState }: { profileState: ReturnType<typeof useP
       <View style={styles.actionCard}>
         <DecorativeIonicon name="log-out-outline" size={25} color={colors.ink} />
         <View style={styles.actionText}><Text style={styles.actionTitle}>로그아웃</Text><Text style={styles.actionBody}>이 기기의 현재 로그인 세션만 종료해요.</Text></View>
-        <Pressable accessibilityRole="button" accessibilityLabel="이 기기에서 로그아웃" onPress={logout} style={({ pressed }) => [styles.smallButton, pressed && styles.pressed]}><Text style={styles.smallButtonLabel}>로그아웃</Text></Pressable>
+        <Pressable accessibilityRole="button" accessibilityLabel="이 기기에서 로그아웃" accessibilityState={{ disabled: logoutPending, busy: logoutPending }} disabled={logoutPending} onPress={logout} style={({ pressed }) => [styles.smallButton, logoutPending && styles.disabled, pressed && styles.pressed]}><Text style={styles.smallButtonLabel}>{logoutPending ? "정리 중" : "로그아웃"}</Text></Pressable>
       </View>
       <View style={styles.dangerCard}>
         <DecorativeIonicon name="warning-outline" size={25} color={colors.danger} />

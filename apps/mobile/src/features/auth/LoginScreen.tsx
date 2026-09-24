@@ -1,6 +1,6 @@
 import Constants from "expo-constants";
-import { router, useLocalSearchParams, type Href } from "expo-router";
-import { useEffect, useMemo, useState } from "react";
+import { router, useFocusEffect, useLocalSearchParams, type Href } from "expo-router";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Image,
@@ -12,6 +12,7 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useSQLiteContext } from "expo-sqlite";
 import { DecorativeIonicon, type DecorativeIoniconName } from "@/components/DecorativeIonicon";
 import { DetailPageHeader } from "@/components/DetailPageHeader";
 import { AppText as Text, AppTextInput as TextInput } from "@/components/Typography";
@@ -42,6 +43,7 @@ import {
   resolveMobileRuntimeConfig,
   type MobilePlatform,
 } from "@/lib/runtime-config";
+import { clearUserScopedLocalData } from "@/lib/local-database";
 import { colors } from "@/theme";
 
 const WORDMARK = require("../../../assets/brand/dabboba-wordmark.png");
@@ -51,7 +53,8 @@ type LoginMethod = DabbobaLoginProvider | "SESSION_RECOVERY";
 type InternalSessionState = "checking" | "unavailable" | "failed";
 
 export function LoginScreen() {
-  const { requiredPolicyVersions, configReady } = useCommerceCapability();
+  const db = useSQLiteContext();
+  const { requiredPolicyVersions, configReady, refresh: refreshPublicConfig } = useCommerceCapability();
   const params = useLocalSearchParams<{ returnTo?: string | string[] }>();
   const returnPath = resolveAfterLoginPath(params.returnTo);
   const runtime = useMemo(
@@ -67,6 +70,9 @@ export function LoginScreen() {
   const [brokerReady, setBrokerReady] = useState(false);
   const [enabledProviders, setEnabledProviders] = useState<DabbobaLoginProvider[]>([]);
   const [checking, setChecking] = useState(true);
+  const [providerCheckFailed, setProviderCheckFailed] = useState(false);
+  const [providerAvailabilityMessage, setProviderAvailabilityMessage] = useState("");
+  const providerRequestGeneration = useRef(0);
   const [busy, setBusy] = useState<LoginMethod | null>(null);
   const [message, setMessage] = useState("");
   const [emailStep, setEmailStep] = useState<EmailStep>("ADDRESS");
@@ -111,35 +117,42 @@ export function LoginScreen() {
     return () => clearInterval(timer);
   }, [emailStep, otpExpiresAt]);
 
-  useEffect(() => {
-    let active = true;
-    void (async () => {
-      try {
-        const localConfigured = Boolean(resolveSupabaseBrokerConfig());
-        const availability = await fetchAuthProviderAvailability(runtime.apiBaseUrl);
-        if (active) {
-          const ready = localConfigured && availability.brokerExchangeConfigured;
-          setEnabledProviders(availability.methods);
-          setBrokerReady(ready);
-          if (!ready || availability.methods.length === 0) {
-            setMessage("사용 가능한 로그인 방식이 아직 설정되지 않았습니다.");
-          }
-        }
-      } catch (error) {
-        if (active) setMessage(error instanceof Error ? error.message : "로그인 연결 상태를 확인하지 못했습니다.");
-      } finally {
-        if (active) setChecking(false);
-      }
-    })();
-    return () => {
-      active = false;
-    };
+  const refreshProviderAvailability = useCallback(async () => {
+    const generation = ++providerRequestGeneration.current;
+    setChecking(true);
+    setProviderCheckFailed(false);
+    try {
+      const localConfigured = Boolean(resolveSupabaseBrokerConfig());
+      const availability = await fetchAuthProviderAvailability(runtime.apiBaseUrl);
+      if (generation !== providerRequestGeneration.current) return;
+      const ready = localConfigured && availability.brokerExchangeConfigured;
+      setEnabledProviders(availability.methods);
+      setBrokerReady(ready);
+      setProviderAvailabilityMessage(
+        !ready || availability.methods.length === 0
+          ? "사용 가능한 로그인 방식이 아직 설정되지 않았습니다."
+          : "",
+      );
+    } catch (error) {
+      if (generation !== providerRequestGeneration.current) return;
+      setEnabledProviders([]);
+      setBrokerReady(false);
+      setProviderCheckFailed(true);
+      setProviderAvailabilityMessage(error instanceof Error ? error.message : "로그인 연결 상태를 확인하지 못했습니다.");
+    } finally {
+      if (generation === providerRequestGeneration.current) setChecking(false);
+    }
   }, [runtime.apiBaseUrl]);
+
+  useFocusEffect(useCallback(() => {
+    void refreshProviderAvailability();
+    return () => { providerRequestGeneration.current += 1; };
+  }, [refreshProviderAvailability]));
 
   useEffect(() => {
     if (!__DEV__) return;
     let active = true;
-    void ensureInternalCustomerSession(runtime.apiBaseUrl, () => active)
+    void ensureInternalCustomerSession(runtime.apiBaseUrl, () => clearUserScopedLocalData(db), () => active)
       .then((tokens) => {
         if (!active) return;
         if (tokens) {
@@ -156,7 +169,7 @@ export function LoginScreen() {
     return () => {
       active = false;
     };
-  }, [returnPath, runtime.apiBaseUrl]);
+  }, [db, returnPath, runtime.apiBaseUrl]);
 
   const finish = async (supabaseAccessToken: string) => {
     if (!requiredPolicyVersions || !termsAccepted || !privacyAccepted) {
@@ -164,7 +177,7 @@ export function LoginScreen() {
     }
     let exchanged = false;
     try {
-      await exchangeBrokerSession(runtime.apiBaseUrl, supabaseAccessToken, requiredPolicyVersions, "EMAIL");
+      await exchangeBrokerSession(runtime.apiBaseUrl, supabaseAccessToken, requiredPolicyVersions, "EMAIL", () => clearUserScopedLocalData(db));
       exchanged = true;
     } finally {
       await clearBrokerSession();
@@ -181,7 +194,7 @@ export function LoginScreen() {
     setMessage("");
     try {
       const callbackUrl = await beginSocialLogin(provider, String(returnPath), requiredPolicyVersions);
-      const completedReturnTo = await completeSocialCustomerLogin(runtime.apiBaseUrl, callbackUrl);
+      const completedReturnTo = await completeSocialCustomerLogin(runtime.apiBaseUrl, callbackUrl, () => clearUserScopedLocalData(db));
       router.replace(completedReturnTo as Href);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "로그인을 완료하지 못했습니다.");
@@ -218,7 +231,7 @@ export function LoginScreen() {
     setBusy("SESSION_RECOVERY");
     setMessage("");
     try {
-      const tokens = await ensureInternalCustomerSession(runtime.apiBaseUrl);
+      const tokens = await ensureInternalCustomerSession(runtime.apiBaseUrl, () => clearUserScopedLocalData(db));
       if (!tokens) {
         setInternalSessionState("unavailable");
         return;
@@ -249,6 +262,8 @@ export function LoginScreen() {
   const otpSeconds = otpExpiresAt === null
     ? Math.floor(EMAIL_OTP_TTL_MS / 1_000)
     : Math.max(0, Math.ceil((otpExpiresAt - clockMs) / 1_000));
+  const connectionRetryVisible = !checking
+    && (providerCheckFailed || (configReady && !requiredPolicyVersions));
 
   return (
     <SafeAreaView style={styles.safeArea} edges={["top", "left", "right", "bottom"]}>
@@ -265,8 +280,29 @@ export function LoginScreen() {
           <Image accessibilityLabel="DABBOBA" source={WORDMARK} resizeMode="contain" style={styles.wordmark} />
           <Text style={styles.title}>다뽀바를 계속 즐겨보세요</Text>
           <Text style={styles.subtitle}>관심 상품과 계정 정보를 안전하게 저장해요.</Text>
+          {!configReady ? (
+            <Text accessibilityLiveRegion="polite" style={styles.policyAvailabilityStatus}>현재 약관 버전을 확인하고 있어요.</Text>
+          ) : !requiredPolicyVersions ? (
+            <Text accessibilityRole="alert" style={styles.policyAvailabilityError}>약관 정보를 확인할 수 없어 로그인을 잠시 이용할 수 없어요.</Text>
+          ) : null}
+          {checking ? <ActivityIndicator color={colors.ink} style={styles.status} /> : null}
+          {!checking && providerAvailabilityMessage && requiredPolicyVersions ? (
+            <Text accessibilityRole="alert" style={styles.message}>{providerAvailabilityMessage}</Text>
+          ) : null}
+          {connectionRetryVisible ? (
+            <SeedActionButton
+              label="로그인 연결 다시 확인"
+              variant="neutralSolid"
+              size="small"
+              onPress={() => {
+                setMessage("");
+                void Promise.all([refreshPublicConfig(), refreshProviderAvailability()]);
+              }}
+              style={styles.connectionRetry}
+            />
+          ) : null}
 
-          <View style={styles.actions}>
+          <View style={[styles.actions, connectionRetryVisible && styles.actionsAfterRetry]}>
             <ProviderButton
               label="카카오로 계속하기"
               mark="K"
@@ -418,10 +454,6 @@ export function LoginScreen() {
             ) : null}
           </View>
 
-          {checking ? <ActivityIndicator color={colors.ink} style={styles.status} /> : null}
-          {!checking && !brokerReady && !message ? (
-            <Text accessibilityRole="alert" style={styles.message}>로그인 서비스 연결 정보가 아직 설정되지 않았습니다.</Text>
-          ) : null}
           {message ? <Text accessibilityRole="alert" style={styles.message}>{message}</Text> : null}
           <View style={styles.legalLinks}>
             <PolicyAcceptanceRow
@@ -436,8 +468,6 @@ export function LoginScreen() {
               onToggle={() => setPrivacyAccepted((value) => !value)}
               onOpen={() => router.push("/legal/privacy" as Href)}
             />
-            {!configReady ? <Text style={styles.legalStatus}>현재 약관 버전을 확인하고 있어요.</Text> : null}
-            {configReady && !requiredPolicyVersions ? <Text accessibilityRole="alert" style={styles.legalStatus}>약관 정보를 확인할 수 없어 로그인을 잠시 이용할 수 없어요.</Text> : null}
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -542,6 +572,7 @@ const styles = StyleSheet.create({
   title: { color: colors.ink, fontSize: 24, lineHeight: 34, fontWeight: "900", textAlign: "center", marginTop: 32 },
   subtitle: { color: colors.muted, fontSize: 13, lineHeight: 20, textAlign: "center", marginTop: 8 },
   actions: { width: "100%", maxWidth: 480, alignSelf: "center", marginTop: 42, gap: 12 },
+  actionsAfterRetry: { marginTop: seed.spacing.x4 },
   providerButton: { minHeight: 54, borderRadius: seed.radius.r3, paddingHorizontal: 18, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   providerMark: { width: 24, alignItems: "center", justifyContent: "center" },
   providerMarkText: { width: 24, fontSize: 17, fontWeight: "900", textAlign: "center" },
@@ -573,6 +604,7 @@ const styles = StyleSheet.create({
   resendLabel: { color: colors.greenInk, fontSize: 12, fontWeight: "700" },
   status: { marginTop: 24 },
   message: { color: seed.color.foreground.critical, fontSize: 12, lineHeight: 18, textAlign: "center", marginTop: 20 },
+  connectionRetry: { alignSelf: "center", marginTop: seed.spacing.x3 },
   legalLinks: { alignItems: "center", marginTop: 28, paddingHorizontal: seed.spacing.x3 },
   requiredPolicyRow: { width: "100%", minHeight: 48, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: seed.spacing.x2 },
   requiredPolicyToggle: { flex: 1, minHeight: 44, flexDirection: "row", alignItems: "center", gap: seed.spacing.x2 },
@@ -581,5 +613,6 @@ const styles = StyleSheet.create({
   legalNotice: { flex: 1, color: colors.muted, fontSize: 12, lineHeight: 18 },
   legalLinkTarget: { minWidth: seed.size.touchTarget, minHeight: seed.size.touchTarget, alignItems: "center", justifyContent: "center", paddingHorizontal: seed.spacing.x2 },
   legalLink: { color: colors.ink, fontSize: 11, fontWeight: "700", textDecorationLine: "underline" },
-  legalStatus: { marginTop: seed.spacing.x1, color: colors.muted, fontSize: 11, lineHeight: 17, textAlign: "center" },
+  policyAvailabilityStatus: { marginTop: seed.spacing.x3, color: colors.muted, ...seed.typography.caption, textAlign: "center" },
+  policyAvailabilityError: { marginTop: seed.spacing.x3, color: seed.color.foreground.critical, ...seed.typography.caption, textAlign: "center" },
 });

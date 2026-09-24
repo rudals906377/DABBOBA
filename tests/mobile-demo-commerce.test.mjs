@@ -1,8 +1,143 @@
 import assert from "node:assert/strict";
 import { access, readFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import test from "node:test";
+import vm from "node:vm";
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
+const requireFromMobile = createRequire(new URL("../apps/mobile/package.json", import.meta.url));
+const ts = requireFromMobile("typescript");
+
+test("a stalled internal login request releases the app instead of loading forever", async () => {
+  const source = await read("apps/mobile/src/features/demo/demo-api.ts");
+  const output = ts.transpileModule(source, {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+    fileName: "demo-api.ts",
+  }).outputText;
+  const capability = {
+    enabled: true,
+    profile: "supabase-demo",
+    paymentProvider: "TEST_PG",
+    actions: ["approve", "fail", "cancel", "refund"],
+  };
+
+  for (const blockedPath of ["/v1/demo/capabilities", "/v1/auth/me", "/v1/demo/session"]) {
+    const module = { exports: {} };
+    const timers = [];
+    const requests = [];
+    vm.runInNewContext(output, {
+      module,
+      exports: module.exports,
+      __DEV__: true,
+      AbortController,
+      Date,
+      setTimeout(callback, duration) {
+        assert.equal(duration, 8_000);
+        const timer = { callback, cleared: false };
+        timers.push(timer);
+        return timer;
+      },
+      clearTimeout(timer) { timer.cleared = true; },
+      async fetch(url, options) {
+        const path = new URL(url).pathname;
+        requests.push({ path, signal: options?.signal });
+        if (path === blockedPath) {
+          return new Promise((_resolve, reject) => {
+            options?.signal?.addEventListener("abort", () => reject(new Error("aborted")));
+          });
+        }
+        if (path === "/v1/demo/capabilities") return { status: 200, ok: true, json: async () => capability };
+        throw new Error(`Unexpected request: ${path}`);
+      },
+      require(specifier) {
+        if (specifier === "@/lib/session-store") return {
+          readAuthTokens: async () => blockedPath === "/v1/auth/me" ? { accessToken: "stored-token" } : null,
+          clearAuthTokens: async () => undefined,
+          writeAuthTokens: async () => undefined,
+        };
+        throw new Error(`Unexpected dependency: ${specifier}`);
+      },
+    });
+
+    const pending = module.exports.ensureInternalCustomerSession("https://api.dabboba.net", async () => undefined);
+    for (let step = 0; step < 20 && !requests.some((request) => request.path === blockedPath); step += 1) {
+      await Promise.resolve();
+    }
+    const request = requests.find((item) => item.path === blockedPath);
+    assert.ok(request, `${blockedPath} was not requested`);
+    assert.ok(request.signal instanceof AbortSignal, `${blockedPath} had no abort signal`);
+    const activeTimer = timers.findLast((timer) => !timer.cleared);
+    assert.ok(activeTimer, `${blockedPath} had no deadline`);
+    activeTimer.callback();
+    await assert.rejects(pending, /테스트 기능 연결 상태를 확인하지 못했습니다/);
+    assert.equal(request.signal.aborted, true);
+    assert.equal(activeTimer.cleared, true);
+  }
+});
+
+test("a stalled TEST_PG approval stops waiting without implying the payment failed", async () => {
+  const source = await read("apps/mobile/src/features/demo/demo-api.ts");
+  const output = ts.transpileModule(source, {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+    fileName: "demo-api.ts",
+  }).outputText;
+  const module = { exports: {} };
+  const timers = [];
+  const requests = [];
+  vm.runInNewContext(output, {
+    module,
+    exports: module.exports,
+    __DEV__: true,
+    AbortController,
+    setTimeout(callback, duration) {
+      assert.equal(duration, 8_000);
+      const timer = { callback, cleared: false };
+      timers.push(timer);
+      return timer;
+    },
+    clearTimeout(timer) { timer.cleared = true; },
+    async fetch(url, options) {
+      const path = new URL(url).pathname;
+      requests.push({ path, options });
+      if (path === "/v1/demo/capabilities") return {
+        status: 200,
+        ok: true,
+        json: async () => ({
+          enabled: true,
+          profile: "supabase-demo",
+          paymentProvider: "TEST_PG",
+          actions: ["approve", "fail", "cancel", "refund"],
+        }),
+      };
+      if (path === "/v1/demo/payments/order-1/transition") {
+        return new Promise((_resolve, reject) => {
+          options.signal?.addEventListener("abort", () => reject(new Error("aborted")));
+        });
+      }
+      throw new Error(`Unexpected request: ${path}`);
+    },
+    require(specifier) {
+      if (specifier === "@/lib/session-store") return {};
+      throw new Error(`Unexpected dependency: ${specifier}`);
+    },
+  });
+
+  const pending = module.exports.transitionDemoPayment(
+    "http://127.0.0.1:8788", "customer-token", "order-1", "approve",
+  );
+  for (let step = 0; step < 20 && requests.length < 2; step += 1) await Promise.resolve();
+  assert.equal(requests.length, 2);
+  const payment = requests[1];
+  assert.equal(payment.options.headers["Idempotency-Key"], "demo-payment-approve-order-1");
+  assert.equal(payment.options.signal instanceof AbortSignal, true);
+  const paymentTimer = timers.findLast((timer) => !timer.cleared);
+  assert.ok(paymentTimer);
+  paymentTimer.callback();
+  await assert.rejects(pending, /결제 결과.*주문 내역.*확인/);
+  assert.equal(payment.options.signal.aborted, true);
+  assert.equal(paymentTimer.cleared, true);
+  assert.equal(requests.length, 2);
+});
 
 test("development commerce restores one canonical customer without exposing account controls", async () => {
   const [api, login, layout, profile] = await Promise.all([
@@ -33,13 +168,13 @@ test("development commerce restores one canonical customer without exposing acco
   assert.match(api, /storedSessionState === "current"\) return stored/);
 
   await assert.rejects(access(new URL("../apps/mobile/src/features/demo/DemoAccountSwitcher.tsx", import.meta.url)));
-  assert.match(login, /ensureInternalCustomerSession\(runtime\.apiBaseUrl, \(\) => active\)/);
+  assert.match(login, /ensureInternalCustomerSession\(runtime\.apiBaseUrl, \(\) => clearUserScopedLocalData\(db\), \(\) => active\)/);
   assert.match(login, /internalSessionState === "failed"/);
   assert.match(login, /label="로그인 다시 시도"/);
   assert.doesNotMatch(login, /DemoAccountSwitcher|테스트 계정|데모 계정|계정 A|계정 B/);
   assert.doesNotMatch(profile, /DemoAccountSwitcher|테스트 계정|데모 계정|계정 A|계정 B/);
   assert.match(layout, /InternalCustomerSessionBootstrap enabled=\{__DEV__\}/);
-  assert.match(layout, /ensureInternalCustomerSession\(runtime\.apiBaseUrl, \(\) => active\)/);
+  assert.match(layout, /ensureInternalCustomerSession\(runtime\.apiBaseUrl, \(\) => clearUserScopedLocalData\(db\), \(\) => active\)/);
   assert.doesNotMatch(layout, /ensureDevelopmentAuthSession|customerAuthSetupAttempted/);
 });
 

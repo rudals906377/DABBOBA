@@ -58,6 +58,18 @@ export function mostRestrictiveCommerceCapability(
   return buildCapability === "LIVE" && serverCapability === "LIVE" ? "LIVE" : "PRELAUNCH";
 }
 
+export function resolveCommerceRouteAccess(
+  buildCapability: CommerceCapability,
+  serverCapability: CommerceCapability | null,
+  configReady: boolean,
+): "WAIT" | "ALLOW" | "DENY" {
+  if (buildCapability !== "LIVE") return "DENY";
+  if (!configReady) return "WAIT";
+  return mostRestrictiveCommerceCapability(buildCapability, serverCapability) === "LIVE"
+    ? "ALLOW"
+    : "DENY";
+}
+
 export function resolveCatalogImageUrl(
   imageUrl: string | null,
   assetBaseUrl: string | null,

@@ -28,7 +28,7 @@ export const DEMO_CATALOG_KUJI_PRODUCT_IDS = Object.freeze([
   "kuji-sylvanian-adventure",
 ]);
 export const DEMO_GACHA_PRODUCT_ID = DEMO_CATALOG_GACHA_PRODUCT_IDS[0]!;
-export const DEMO_KUJI_PRODUCT_ID = "demo-test-kuji";
+export const DEMO_KUJI_PRODUCT_ID = DEMO_CATALOG_KUJI_PRODUCT_IDS[0]!;
 export const DEMO_GACHA_PRIZE_PRODUCT_IDS = Object.freeze([
   "demo-test-gacha-prize-a",
   "demo-test-gacha-prize-b",

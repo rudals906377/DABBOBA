@@ -64,6 +64,8 @@ test("capability mismatch stops before sessions or commerce mutations", async ()
 });
 
 test("the exact capability contract and only fixed sellable demo products pass", () => {
+  assert.equal(DEMO.gacha.id, "gacha-demon-slayer-onemutan-13");
+  assert.equal(DEMO.kuji.id, "kuji-sylvanian-adventure");
   assert.equal(assertDemoCapabilities({
     enabled: true,
     profile: "supabase-demo",
@@ -80,18 +82,40 @@ test("the exact capability contract and only fixed sellable demo products pass",
     ipId: "demo-test-ip",
     isActive: true,
     isPrizeOnly: false,
-    metadata: { dabbobaFixture: "supabase-demo-v1" },
+    saleStatus: "ON_SALE",
+    price: 1000,
+    metadata: {
+      dabbobaFixture: "supabase-demo-v1",
+      catalogGeneration: "product-photos-2026-09-10",
+      internalTestOnly: true,
+    },
     availableQuantity: 20,
   };
   assert.equal(assertFixedDemoProduct(product, DEMO.gacha).id, DEMO.gacha.id);
+  assert.equal(DEMO.gacha.name, "예시상품 A (가챠)");
+  assert.equal(DEMO.kuji.name, "예시상품 B (쿠지)");
+  assert.throws(
+    () => assertFixedDemoProduct({ ...product, name: "실제 상품" }, DEMO.gacha),
+    (error) => error?.code === "FIXTURE_MISMATCH",
+  );
   assert.throws(
     () => assertFixedDemoProduct({ ...product, id: "arbitrary-product" }, DEMO.gacha),
+    (error) => error?.code === "FIXTURE_MISMATCH",
+  );
+  assert.throws(
+    () => assertFixedDemoProduct({ ...product, price: 0 }, DEMO.gacha),
     (error) => error?.code === "FIXTURE_MISMATCH",
   );
 });
 
 test("request safety rejects destructive, admin, webhook, and arbitrary routes", () => {
   assert.equal(assertSafeRequestTarget("POST", "/v1/orders"), "/v1/orders");
+  assert.equal(assertSafeRequestTarget("GET", "/v1/catalog/products?limit=100"), "/v1/catalog/products");
+  assert.equal(assertSafeRequestTarget("GET", "/v1/catalog/home-sections"), "/v1/catalog/home-sections");
+  assert.equal(assertSafeRequestTarget("GET", "/v1/account/policy-acceptances"), "/v1/account/policy-acceptances");
+  assert.equal(assertSafeRequestTarget("POST", "/v1/account/policy-acceptances"), "/v1/account/policy-acceptances");
+  assert.equal(assertSafeRequestTarget("GET", `/v1/catalog/products/${DEMO.gacha.id}`), `/v1/catalog/products/${DEMO.gacha.id}`);
+  assert.equal(assertSafeRequestTarget("POST", `/v1/kuji/rooms/${DEMO.kuji.id}/entries`), `/v1/kuji/rooms/${DEMO.kuji.id}/entries`);
   assert.equal(assertSafeRequestTarget("GET", "/v1/account/inventory?limit=100"), "/v1/account/inventory");
   assert.equal(
     assertSafeRequestTarget("GET", "/v1/orders/00000000-0000-4000-8000-000000000000/draw-completion"),
@@ -103,6 +127,7 @@ test("request safety rejects destructive, admin, webhook, and arbitrary routes",
     ["POST", "/v1/admin/commerce/orders"],
     ["POST", "/v1/payments/webhooks/TEST_PG"],
     ["POST", "/v1/catalog/requests"],
+    ["GET", "/v1/catalog/products/demo-test-gacha"],
     ["POST", "/v1/exchange/listings/00000000-0000-4000-8000-000000000000/completion-confirmation"],
     ["GET", "https://example.test/v1/demo/capabilities"],
   ]) {

@@ -4,8 +4,10 @@ import test from "node:test";
 
 import {
   KUJI_CHECKOUT_LIMIT_SECONDS,
+  KUJI_CLOCK_SKEW_WARNING_MS,
   createKujiCheckoutClock,
   formatKujiCheckoutRemainingTime,
+  isKujiServerClockSkewed,
   kujiCheckoutRemainingSeconds,
   resolveKujiCheckoutPhase,
 } from "../apps/mobile/src/features/kuji/kuji-checkout-state.ts";
@@ -58,6 +60,22 @@ test("a stale serverNow snapshot never extends the absolute checkout deadline", 
   );
 
   assert.equal(kujiCheckoutRemainingSeconds(clock, clientNow), 120);
+});
+
+test("kuji queue explains a large clock mismatch before entering checkout", async () => {
+  const now = Date.parse("2026-09-24T02:00:00.000Z");
+  assert.equal(KUJI_CLOCK_SKEW_WARNING_MS, 300_000);
+  assert.equal(isKujiServerClockSkewed(new Date(now - 60_000).toISOString(), now), false);
+  assert.equal(isKujiServerClockSkewed(new Date(now - 301_000).toISOString(), now), true);
+  assert.equal(isKujiServerClockSkewed(new Date(now + 301_000).toISOString(), now), true);
+  assert.equal(isKujiServerClockSkewed("not-a-date", now), false);
+
+  const screen = await readFile(
+    new URL("../apps/mobile/src/features/kuji/KujiQueueScreen.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.match(screen, /if \(isKujiServerClockSkewed\(next\.serverNow, Date\.now\(\)\)\) \{[\s\S]*?setMessage\(/);
+  assert.ok(screen.indexOf("isKujiServerClockSkewed(next.serverNow") < screen.indexOf("redirectedRef.current = true"));
 });
 
 test("invalid or past kuji checkout leases fail closed while paid takes precedence", () => {
@@ -127,8 +145,11 @@ test("native checkout binds kuji expiry to route state and never resets it on re
   assert.match(source, /resolveKujiCheckoutPhase\([\s\S]*?checkoutCompletedRef\.current,[\s\S]*?orderSubmittingRef\.current/);
   assert.match(source, /room\.viewer\.state === "DRAWING"[\s\S]*?orderSubmittingRef\.current/);
   assert.match(source, /checkoutCompletedRef\.current = false;[\s\S]{0,180}\}, \[kujiEntryId, productId\]\);/);
-  assert.match(source, /const confirmKujiCheckoutCancellation = useCallback\(\(\) => \{\s*if \(orderSubmittingRef\.current\) return;/);
+  assert.match(source, /const confirmKujiCheckoutCancellation = useCallback\(\(\) => \{\s*if \(!checkoutFocusedRef\.current \|\| orderSubmittingRef\.current\) return;/);
   assert.match(source, /`\/kuji\/draw\/\$\{encodeURIComponent\(product\.id\)\}\?\$\{query\.toString\(\)\}`/);
   assert.match(source, /kujiCheckoutExpired \|\| !drawAvailable \|\| quantity <= 0/);
   assert.doesNotMatch(source, /setRemainingSeconds\(\(current\) => current - 1\)/);
+  assert.match(source, /useFocusEffect\(useCallback\(\(\) => \{\s*if \(!isKujiCheckout\) return undefined;[\s\S]*?const timer = setInterval\(syncNow, 1_000\)/);
+  assert.match(source, /const expireKujiCheckout = useCallback\(\(\) => \{\s*if \(!checkoutFocusedRef\.current\) return;/);
+  assert.match(source, /navigation\.addListener\("beforeRemove", \(event\) => \{[\s\S]*?!checkoutFocusedRef\.current/);
 });

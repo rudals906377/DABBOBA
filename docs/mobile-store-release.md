@@ -50,11 +50,10 @@ dated verification evidence.
   `@dabboba-team/dabboba-mobile` project ID
   `fa48d52e-3b3c-4e2b-82d5-ae0726382587`. The current Expo account can manage
   and publish this organization project, and its default Android keystore is
-  attached. Sign in with Apple is declared, and Apple Team `52HC8BV2BL`
-  currently has the Bundle ID, distribution certificate, and provisioning
-  profile. This developer-owned individual team is explicitly not the final
-  publisher and must not be used for a public build. App Store Connect and
-  friend-owned signed-artifact evidence are still missing.
+  attached. Sign in with Apple is declared. The friend-owned Apple Team
+  `MCZ4884P7F` owns the Bundle ID and the verified PRELAUNCH TestFlight upload
+  described below. This establishes iOS signing and upload only; it does not
+  establish physical-device QA or public App Store approval.
 - Android uses a separate transparent safe-zone foreground and the DABBOBA
   green background for its adaptive icon. The signed AAB still needs launcher
   inspection across circle, squircle, and manufacturer masks.
@@ -92,6 +91,26 @@ dated verification evidence.
   they do not explicitly promise that a TestFlight or Play closed-test link
   alone is accepted. Keep the written confirmation request and capture sequence
   in `docs/kg-inicis-card-review.md`.
+- After a reviewed Edge deployment, run `corepack pnpm run supabase:edge:public:verify`.
+  The deploy command also runs this read-only smoke before reporting success. It
+  requires `PRELAUNCH` public config and the current Home/recent-draw response
+  contracts, not merely an API health check. On 2026-09-24 the deployed API
+  returned 404 for `/v1/public/config` and `/v1/catalog/recent-draws`, while
+  the local API source registered both routes. This deployment remains a
+  release blocker until a clean reviewed build is deployed and the smoke passes.
+- On 2026-09-24, `api.dabboba.net` did not resolve from the development host,
+  and the new exact-URL mobile API smoke failed before its first response. DNS
+  setup and a successful five-route read-only smoke are required before this
+  address can be used in a signed customer build.
+- On 2026-09-24 the local required integration run passed with no skipped DB,
+  worker, or API cases after migration 0066 repaired the pgmq worker's
+  `set_vt` dependency and Turbo forwarded all test-role URLs. The full local
+  suite, Expo dependency check, runtime integrity check, and iOS/Android
+  production JavaScript export marker scan also passed. The marker scan used a
+  non-production publishable-key placeholder and proves only bundle contents,
+  not signed artifacts or customer login. The exact mobile public API smoke
+  still fails because the API hostname does not resolve; the deployed Edge
+  function's public config still returns HTTP 404.
 
 ## Explicit automated gates
 
@@ -121,6 +140,14 @@ EXPO_PUBLIC_DABBOBA_ACCOUNT_DELETION_URL=https://dabboba.net/account-deletion \
 EXPO_PUBLIC_COMMERCE_CAPABILITY=PRELAUNCH \
 corepack pnpm run release:mobile:check
 ```
+
+The configuration check validates URL shape, not DNS or API availability. With
+the same `EXPO_PUBLIC_DABBOBA_API_URL` and `EXPO_PUBLIC_COMMERCE_CAPABILITY`
+values as the candidate build, run `corepack pnpm run release:mobile:api:verify`
+before signing. This read-only gate checks public configuration, recent draws,
+Home sections, products, and IPs through the exact URL the app will use. A
+missing DNS record, stale Edge deployment, invalid response, or wrong commerce
+mode fails the gate; do not replace the result with local fixture products.
 
 For the later LIVE candidate, use the payment-enabled values:
 

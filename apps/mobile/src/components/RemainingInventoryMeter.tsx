@@ -9,6 +9,7 @@ import {
   remainingInventoryLabel,
   remainingInventoryRatio,
   shouldStackCompactInventoryMeter,
+  visibleInventoryQuantityLabel,
 } from "@/features/catalog/remaining-inventory";
 import { colors } from "@/theme";
 
@@ -57,7 +58,7 @@ export function RemainingInventoryMeter({
           maxFontSizeMultiplier={compact ? COMPACT_INVENTORY_MAX_FONT_SIZE_MULTIPLIER : undefined}
           style={[styles.quantity, dark && styles.quantityDark, quantityTextStyle]}
         >
-          {quantity}
+          {visibleInventoryQuantityLabel(category, inventory)}
         </Text>
         {ratio === null ? null : (
           <View style={[

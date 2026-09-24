@@ -25,6 +25,7 @@ const ATTESTED_KEYS = [
   'NODE_ENV', 'EXPO_NO_TELEMETRY', 'EXPO_NO_DOTENV',
   'EXPO_PUBLIC_DABBOBA_API_URL', 'EXPO_PUBLIC_DABBOBA_ASSET_BASE_URL',
   'EXPO_PUBLIC_DABBOBA_WEB_URL', 'EXPO_PUBLIC_DABBOBA_ALLOWED_ORIGINS',
+  'EXPO_PUBLIC_COMMERCE_CAPABILITY',
   'EXPO_PUBLIC_SUPABASE_URL', 'EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY',
   'RCT_METRO_PORT', 'REACT_NATIVE_PACKAGER_HOSTNAME', 'EXPO_PACKAGER_PROXY_URL', 'BROWSER',
 ];
@@ -37,10 +38,15 @@ export function buildMobileEnvironment(parent, options = {}) {
   if (options.hostedAuth) {
     return buildHostedAuthMobileEnvironment(parent, options.hostedAuthSource);
   }
+  const backendProfile = options.backendProfile ?? LOCAL_BACKEND_PROFILE;
+  if (![LOCAL_BACKEND_PROFILE, 'supabase-integration', 'supabase-demo'].includes(backendProfile)) {
+    throw new Error('DABBOBA mobile backend profile is not approved for local launch.');
+  }
   const localProfile = sanitizeLocalMobileEnvironment({});
   const environment = {
     ...Object.fromEntries(Object.entries(parent).filter(([key]) => SAFE_PARENT_KEYS.has(key))),
     ...localProfile,
+    EXPO_PUBLIC_COMMERCE_CAPABILITY: backendProfile === 'supabase-demo' ? 'LIVE' : 'PRELAUNCH',
   };
   if (environment.DABBOBA_ENVIRONMENT_TIER !== LOCAL_BACKEND_ENVIRONMENT_TIER ||
       environment.DABBOBA_LOCAL_BACKEND_PROFILE !== LOCAL_BACKEND_PROFILE ||
@@ -149,6 +155,7 @@ export function parseLaunchOptions(args) {
       options.platform = platform;
     } else if (arg === '--clear' || arg === '-c') options.clear = true;
     else if (arg === '--hosted-auth') options.hostedAuth = true;
+    else if (arg === '--demo-commerce') options.backendProfile = 'supabase-demo';
     else if (arg === '--help' || arg === '-h') options.help = true;
     else if (arg === '--device') {
       const value = args[++index];
@@ -162,6 +169,9 @@ export function parseLaunchOptions(args) {
     }
   }
   if (options.device && !['ios', 'android'].includes(options.platform)) throw new Error('--device requires --ios or --android.');
+  if (options.backendProfile === 'supabase-demo' && (!['ios', 'android'].includes(options.platform) || options.hostedAuth)) {
+    throw new Error('--demo-commerce is limited to an isolated local iOS or Android TEST_PG run.');
+  }
   return options;
 }
 
@@ -348,7 +358,13 @@ async function openTarget(target, url) {
     const current = Object.values(JSON.parse(stdout).devices).flat().find(device => device.udid === target.udid);
     if (!current) throw new Error('Selected Simulator is no longer available.');
     if (current.state !== 'Booted') await run('xcrun', ['simctl', 'boot', target.udid]);
-    await run('open', ['-a', 'Simulator', '--args', '-CurrentDeviceUDID', target.udid]);
+    // Some CI-like Xcode installations have simctl but no Simulator.app frontend.
+    // A booted Simulator can still receive the Expo URL and run the app headlessly.
+    try {
+      await run('open', ['-a', 'Simulator', '--args', '-CurrentDeviceUDID', target.udid]);
+    } catch {
+      console.warn('[DABBOBA] Simulator 창을 열 수 없어 부팅된 기기에서 앱을 계속 실행합니다.');
+    }
     await run('xcrun', ['simctl', 'bootstatus', target.udid, '-b'], { timeout: 120_000 });
     await run('xcrun', ['simctl', 'openurl', target.udid, url]);
   } else {
@@ -444,7 +460,7 @@ export async function launchMobile(options, overrides = {}) {
 async function main() {
   const options = parseLaunchOptions(process.argv.slice(2));
   if (options.help) {
-    console.log(`DABBOBA Metro (fixed port 8084, installed Expo SDK ${projectSdkVersion().split('.')[0]})\nUsage: node scripts/dabboba-mobile-launch.mjs [--ios | --android | --web] [--device NAME_OR_ID] [--clear] [--hosted-auth]\n--hosted-auth uses only the approved hosted Supabase Auth project and deployed DABBOBA API. Native hosts must already be installed and compatible. iOS defaults to a dedicated DABBOBA Simulator.`);
+    console.log(`DABBOBA Metro (fixed port 8084, installed Expo SDK ${projectSdkVersion().split('.')[0]})\nUsage: node scripts/dabboba-mobile-launch.mjs [--ios | --android | --web] [--device NAME_OR_ID] [--clear] [--hosted-auth] [--demo-commerce]\n--hosted-auth uses only the approved hosted Supabase Auth project and deployed DABBOBA API. --demo-commerce is native-only and requires the isolated local TEST_PG API. Native hosts must already be installed and compatible. iOS defaults to a dedicated DABBOBA Simulator.`);
     return;
   }
   const root = await realpath(MOBILE_ROOT);

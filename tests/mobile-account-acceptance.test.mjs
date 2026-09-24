@@ -66,8 +66,8 @@ test("account deletion previews blockers, preserves blocked sessions, and stores
   assert.match(member, /fetchAccountDeletionStatusByReceipt/);
   assert.match(member, /로그아웃된 뒤에도 이 기기에 안전하게 저장된 접수증/);
   const blocked = member.indexOf('if (result.status === "BLOCKED")');
-  const clearTokens = member.indexOf("clearAuthTokens()", blocked);
-  assert.ok(blocked >= 0 && clearTokens > blocked, "blocked branch must return before local logout");
+  const clearDeviceState = member.indexOf("await clearAccountDeviceState({", blocked);
+  assert.ok(blocked >= 0 && clearDeviceState > blocked, "blocked branch must return before local logout");
   assert.match(api, /expo-secure-store/);
   assert.match(api, /X-Deletion-Status-Token/);
   assert.match(api, /\^\[A-Za-z0-9_-\]\{43\}\$/);

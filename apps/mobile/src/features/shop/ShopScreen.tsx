@@ -38,7 +38,7 @@ import { seed } from "@/design-system/seed";
 import { CategoryAvailabilityState } from "@/features/catalog/CategoryAvailabilityState";
 import { useStorefrontCategorySettings } from "@/features/catalog/StorefrontCategorySettingsProvider";
 import { useCommerceCapability } from "@/features/commerce/CommerceCapabilityProvider";
-import { productPriceLabel } from "@/features/commerce/product-commerce-presentation";
+import { productPriceLabel, productPriceParts } from "@/features/commerce/product-commerce-presentation";
 import {
   isCustomerProductCategoryComingSoon,
   isCustomerProductCategoryEnabledOn,
@@ -273,6 +273,21 @@ export function ShopScreen({ category }: { category: ShopRootCategory }) {
           </Pressable>
         </View>
       ) : null}
+      {message && products.length > 0 && !loading && !refreshing ? (
+        <View style={styles.refreshFailure} accessibilityLiveRegion="polite">
+          <Text variant="caption" style={styles.refreshFailureText}>
+            목록을 갱신하지 못했어요. 표시된 가격·재고가 최신이 아닐 수 있습니다.
+          </Text>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="상품 목록 다시 불러오기"
+            onPress={() => void loadProducts({ manual: true })}
+            style={({ pressed }) => [styles.refreshFailureRetry, pressed && styles.pressed]}
+          >
+            <Text variant="button" style={styles.refreshFailureRetryText}>다시 시도</Text>
+          </Pressable>
+        </View>
+      ) : null}
       {loading && products.length ? (
         <View accessible accessibilityRole="progressbar" accessibilityLabel="상품 목록 갱신 중" style={styles.inlineLoading}>
           <ActivityIndicator size="small" color={colors.ink} />
@@ -503,6 +518,7 @@ function ProductCard({
   const tierAccessibilityLabel = product.category === "kuji"
     ? remainingKujiTierAccessibilityLabel(product.remainingKujiTiers)
     : null;
+  const price = productPriceParts(product, commerceEnabled);
   return (
     <Pressable
       accessibilityRole="button"
@@ -542,7 +558,10 @@ function ProductCard({
           {wide ? productSubjectTitle(product.name, ipName) : catalogCardTitle(product.name, ipName)}
         </Text>
         <View style={[styles.productMeta, wide && styles.kujiProductMeta]}>
-          <Text variant="catalogPrice" maxFontSizeMultiplier={CATALOG_CARD_TEXT_MAX_FONT_SIZE_MULTIPLIER} style={styles.productPrice}>{productPriceLabel(product, commerceEnabled)}</Text>
+          {price.qualifier ? (
+            <Text variant="catalogMetadata" maxFontSizeMultiplier={CATALOG_CARD_TEXT_MAX_FONT_SIZE_MULTIPLIER} numberOfLines={1} style={styles.productPriceQualifier}>예정가</Text>
+          ) : null}
+          <Text variant="catalogPrice" maxFontSizeMultiplier={CATALOG_CARD_TEXT_MAX_FONT_SIZE_MULTIPLIER} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.72} style={styles.productPrice}>{price.amount}</Text>
         </View>
         {product.category === "kuji" ? (
           <KujiPrizeTierRow tiers={product.remainingKujiTiers} style={styles.kujiPrizeTiers} />
@@ -624,6 +643,10 @@ const styles = StyleSheet.create({
   loading: { paddingHorizontal: seed.spacing.globalGutter, paddingVertical: 70, alignItems: "center", gap: 12 },
   loadingText: { color: colors.muted },
   inlineLoading: { minHeight: seed.size.touchTarget, alignItems: "center", justifyContent: "center" },
+  refreshFailure: { marginHorizontal: seed.spacing.globalGutter, marginTop: seed.spacing.componentDefault, paddingLeft: seed.spacing.x3, borderLeftWidth: 2, borderLeftColor: colors.muted, flexDirection: "row", alignItems: "center", gap: seed.spacing.x2 },
+  refreshFailureText: { flex: 1, color: colors.muted },
+  refreshFailureRetry: { minHeight: seed.size.touchTarget, justifyContent: "center", paddingHorizontal: seed.spacing.x2 },
+  refreshFailureRetryText: { color: colors.ink },
   productGridTopSpacer: { height: seed.spacing.x7 },
   gachaColumn: { paddingHorizontal: seed.spacing.globalGutter, justifyContent: "space-between", columnGap: seed.spacing.componentDefault },
   kujiListItem: { paddingHorizontal: seed.spacing.globalGutter },
@@ -652,9 +675,10 @@ const styles = StyleSheet.create({
   productName: { minHeight: 40, color: colors.ink, ...seed.typography.catalogTitle, marginTop: seed.spacing.x1 },
   gachaProductName: { marginTop: 0 },
   kujiProductName: { minHeight: 0, marginTop: seed.spacing.x1, ...seed.typography.catalogTitleWide },
-  productMeta: { marginTop: seed.spacing.x2, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 6 },
+  productMeta: { marginTop: seed.spacing.x2, flexDirection: "row", alignItems: "baseline", gap: 4 },
   kujiProductMeta: { marginTop: seed.spacing.x2 },
-  productPrice: { flexShrink: 1, color: colors.ink, ...seed.typography.catalogPrice },
+  productPriceQualifier: { flexShrink: 0, color: colors.muted, ...seed.typography.catalogMetadata },
+  productPrice: { flexShrink: 1, minWidth: 0, color: colors.ink, ...seed.typography.catalogPrice },
   kujiPrizeTiers: { marginTop: seed.spacing.x1_5 },
   productInventory: { marginTop: seed.spacing.x1_5 },
   kujiProductInventory: { marginTop: seed.spacing.x1_5 },

@@ -33,6 +33,7 @@ type OrderResponse = {
 
 async function sendWebhook(
   app: FastifyInstance,
+  pool: ReturnType<typeof createDatabasePool>,
   input: {
     eventType: "PAYMENT_SUCCEEDED" | "PAYMENT_FAILED" | "PAYMENT_CANCELLED" | "REFUND_SUCCEEDED";
     paymentId: string;
@@ -40,12 +41,17 @@ async function sendWebhook(
     occurredAt?: string;
   },
 ) {
+  // The provider event should use the same clock as the checkout lease under test.
+  // Local PostgreSQL can run in a VM whose clock differs from the test runner's.
+  const serverTime = input.occurredAt
+    ? null
+    : await pool.query<{ occurred_at: Date }>("SELECT clock_timestamp() AS occurred_at");
   const payload = JSON.stringify({
     eventId: `kuji-event-${randomUUID()}`,
     eventType: input.eventType,
     paymentId: input.paymentId,
     providerPaymentId: `provider-${input.paymentId}`,
-    occurredAt: input.occurredAt ?? new Date().toISOString(),
+    occurredAt: input.occurredAt ?? serverTime!.rows[0]!.occurred_at.toISOString(),
     amount: input.amount,
   });
   const signature = createHmac("sha256", webhookSecret).update(payload).digest("hex");
@@ -462,7 +468,7 @@ test(
     const successRoom = await join(successUser, successProduct);
     const successWaitingRoom = await join(successWaiter, successProduct);
     const successOrder = await createOrder({ session: successUser, productId: successProduct, entryId: successRoom.viewer.entryId });
-    const successWebhook = await sendWebhook(app, {
+    const successWebhook = await sendWebhook(app, pool, {
       eventType: "PAYMENT_SUCCEEDED",
       paymentId: successOrder.paymentId,
       amount: 1_000,
@@ -569,7 +575,7 @@ test(
     });
     assert.equal(lateOrder.total, 800);
     const lateOccurredAt = new Date(new Date(lateRoom.viewer.checkoutExpiresAt!).getTime() + 1);
-    const lateSuccess = await sendWebhook(app, {
+    const lateSuccess = await sendWebhook(app, pool, {
       eventType: "PAYMENT_SUCCEEDED",
       paymentId: lateOrder.paymentId,
       amount: lateOrder.total,
@@ -624,7 +630,7 @@ test(
         entitlement_count: "0",
       },
     );
-    const lateRefund = await sendWebhook(app, {
+    const lateRefund = await sendWebhook(app, pool, {
       eventType: "REFUND_SUCCEEDED",
       paymentId: lateOrder.paymentId,
       amount: lateOrder.total,
@@ -664,7 +670,7 @@ test(
     const failedRoom = await join(failedUser, failedProduct);
     const failedWaitingRoom = await join(failedWaiter, failedProduct);
     const failedOrder = await createOrder({ session: failedUser, productId: failedProduct, entryId: failedRoom.viewer.entryId });
-    const failedWebhook = await sendWebhook(app, {
+    const failedWebhook = await sendWebhook(app, pool, {
       eventType: "PAYMENT_FAILED",
       paymentId: failedOrder.paymentId,
       amount: 1_000,

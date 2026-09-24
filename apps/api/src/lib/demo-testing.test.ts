@@ -6,6 +6,7 @@ import {
   DEMO_FIXTURE_TAG,
   DEMO_GACHA_PRODUCT_ID,
   DEMO_CATALOG_KUJI_PRODUCT_IDS,
+  DEMO_KUJI_PRODUCT_ID,
   DEMO_PROFILE,
   assertDemoActor,
   assertDemoLoopbackRequest,
@@ -67,6 +68,7 @@ test("demo requests require direct loopback access without forwarded identity he
 });
 
 test("demo actor and order guards admit only the fixed customer and seller products", () => {
+  assert.equal(DEMO_KUJI_PRODUCT_ID, DEMO_CATALOG_KUJI_PRODUCT_IDS[0]);
   assert.doesNotThrow(() => assertDemoActor({ userId: INTERNAL_CUSTOMER_ACCOUNT.id, email: INTERNAL_CUSTOMER_ACCOUNT.email }));
   assert.throws(() => assertDemoActor({ userId: INTERNAL_CUSTOMER_ACCOUNT.id, email: "other@dabboba.local" }));
   assert.throws(() => assertDemoActor({ userId: "da000000-0000-4000-8000-00000000000b", email: "demo-b@dabboba.test" }));

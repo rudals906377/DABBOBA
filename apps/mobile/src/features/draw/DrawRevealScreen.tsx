@@ -50,6 +50,7 @@ import {
   consumeDrawEntitlement,
   type DrawResult,
 } from "@/features/draw/draw-reveal-api";
+import { fetchCommittedDrawProductSnapshot } from "@/features/draw/draw-product-snapshot";
 import {
   consumeDrawsSequentially,
   resolveDrawOpenMode,
@@ -522,7 +523,7 @@ export function DrawRevealScreen({ preview = false }: { preview?: boolean }) {
       if (representative) {
         setBatchResults(outcome.results);
         try {
-          const committedSnapshot = await fetchProductDetail(
+          const committedSnapshot = await fetchCommittedDrawProductSnapshot(
             runtime.apiBaseUrl,
             representative.productId,
             tokens.accessToken,
@@ -613,7 +614,7 @@ export function DrawRevealScreen({ preview = false }: { preview?: boolean }) {
       }
       let committedSnapshot: ProductDetailSnapshot | null = null;
       try {
-        committedSnapshot = await fetchProductDetail(
+        committedSnapshot = await fetchCommittedDrawProductSnapshot(
           runtime.apiBaseUrl,
           committed.productId,
           tokens.accessToken,
@@ -735,6 +736,9 @@ export function DrawRevealScreen({ preview = false }: { preview?: boolean }) {
     committedResultPresented && committedSequence.nextEntitlementId === null
   );
   const drawSequenceFinished = committedSequenceFinished || previewCompleted || singlePreviewFinished;
+  const gachaResultFooterVisible = sourceCategory === "gacha"
+    && drawSequenceFinished
+    && !committedBatchSummaryVisible;
   const kujiMotionVisible = sourceCategory === "kuji"
     && !previewOpened
     && !previewCompleted
@@ -1001,7 +1005,7 @@ export function DrawRevealScreen({ preview = false }: { preview?: boolean }) {
               contentContainerStyle={[
                 styles.content,
                 sourceCategory === "gacha" && styles.gachaContent,
-                { paddingBottom: sourceCategory === "gacha" ? gachaBottomInset : floatingBottomInset },
+                { paddingBottom: sourceCategory === "gacha" && !gachaResultFooterVisible ? gachaBottomInset : floatingBottomInset },
               ]}
             >
               {showStageHeader ? (
@@ -1171,7 +1175,7 @@ export function DrawRevealScreen({ preview = false }: { preview?: boolean }) {
             </ScrollView>
           )}
 
-          {sourceCategory !== "gacha" && !committedBatchSummaryVisible ? (
+          {(sourceCategory !== "gacha" || gachaResultFooterVisible) && !committedBatchSummaryVisible ? (
             <FloatingBottomActionPanel panelStyle={footerPanelStyle}>
               {showSplitOpenActions && previewOpenActions.openAllLabel ? (
                 <View style={styles.footerActions}>
@@ -1231,7 +1235,7 @@ function CommittedResult({
       )}
       <Text style={styles.resultIp}>{ipName}</Text>
       <Text style={styles.resultName}>{productSubjectTitle(result.prizeName, ipName)}</Text>
-      <Text style={styles.resultMeta}>{categoryLabel(result.prizeCategory)} · {result.prizeSku}</Text>
+      <Text style={styles.resultMeta}>{categoryLabel(result.prizeCategory)}</Text>
     </SmoothResultReveal>
   );
 }
@@ -1299,7 +1303,7 @@ function CommittedBatchSummary({
                   {ticket ? <Text style={styles.committedBatchTicket}>KUJI {ticket}</Text> : null}
                 </View>
                 <Text numberOfLines={2} style={styles.committedBatchName}>{item.prizeName}</Text>
-                <Text style={styles.committedBatchMeta}>{categoryLabel(item.prizeCategory)} · {item.prizeSku}</Text>
+                <Text style={styles.committedBatchMeta}>{categoryLabel(item.prizeCategory)}</Text>
               </View>
             </View>
           );

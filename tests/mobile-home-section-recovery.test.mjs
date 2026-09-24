@@ -5,6 +5,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { mergeFreshHomeCatalogWithCachedSections } from "../apps/mobile/src/features/home/home-catalog-recovery.ts";
+import { isCurrentHomeSectionList } from "../apps/mobile/src/features/home/home-catalog-contract.ts";
 import {
   readHomeCatalogCache,
   writeHomeCatalogCache,
@@ -178,6 +179,35 @@ test("Home section recovery never replaces an available server response with cac
   assert.equal(mergeFreshHomeCatalogWithCachedSections(fresh, cached), fresh);
 });
 
+test("a legacy Home response is rejected instead of silently rendering a blank feed", () => {
+  const currentSection = {
+    id: "operator-section",
+    title: "관리자 지정 진열",
+    subtitle: null,
+    layoutKind: "gacha",
+    sourceKind: "MANUAL",
+    visibleLimit: 8,
+    sortOrder: 10,
+    isActive: true,
+    version: 1,
+    products: [product()],
+  };
+  const response = {
+    configured: true,
+    bestProductId: null,
+    evaluatedAt: "2026-09-14T00:00:00.000Z",
+    items: [currentSection],
+  };
+
+  assert.equal(isCurrentHomeSectionList(response), true);
+  assert.equal(isCurrentHomeSectionList({ ...response, items: [] }), true);
+  assert.equal(isCurrentHomeSectionList({ ...response, items: [{ ...currentSection, layoutKind: undefined }] }), false);
+  assert.equal(isCurrentHomeSectionList({ ...response, items: [{ ...currentSection, sourceKind: undefined }] }), false);
+  assert.equal(isCurrentHomeSectionList({ ...response, items: [{ ...currentSection, products: [product({ category: "kuji" })] }] }), false);
+  assert.equal(isCurrentHomeSectionList({ ...response, configured: false }), false);
+  assert.match(catalogApiSource, /isCurrentHomeSectionList\(homeSectionResult\?\.data\)/);
+});
+
 test("partial Home snapshots cannot overwrite a previously verified section cache", async () => {
   const calls = [];
   const db = { runAsync: async (...args) => { calls.push(args); } };
@@ -206,7 +236,7 @@ test("partial Home snapshots cannot overwrite a previously verified section cach
   assert.equal(calls.length, 1);
 });
 
-test("Home cache keeps at most two recent draw records for partial recovery", async () => {
+test("Home cache never replays stale recent draw records", async () => {
   const recentDrawActivity = [
     { id: "draw-1" },
     { id: "draw-2" },
@@ -231,13 +261,34 @@ test("Home cache keeps at most two recent draw records for partial recovery", as
 
   await writeHomeCatalogCache(writableDb, snapshot);
   const writtenPayload = JSON.parse(writes[0][2]);
-  assert.deepEqual(writtenPayload.recentDrawActivity, recentDrawActivity.slice(0, 2));
+  assert.equal(writtenPayload.recentDrawActivity, null);
 
   const readableDb = {
     getFirstAsync: async () => ({ payload: JSON.stringify(snapshot) }),
   };
   const cached = await readHomeCatalogCache(readableDb);
-  assert.deepEqual(cached?.recentDrawActivity, recentDrawActivity.slice(0, 2));
+  assert.equal(cached?.recentDrawActivity, null);
+});
+
+test("Home cache refuses old mixed sections while preserving usable catalog data", async () => {
+  const cached = await readHomeCatalogCache({
+    getFirstAsync: async () => ({ payload: JSON.stringify({
+      ips: [ip()],
+      products: [product()],
+      notices: [],
+      homeSections: {
+        configured: true,
+        bestProductId: null,
+        evaluatedAt: "2026-09-14T00:00:00.000Z",
+        items: [{ id: "old-mixed-section", title: "예전 진열", products: [product()] }],
+      },
+      recentDrawActivity: [{ id: "stale-draw" }],
+      fetchedAt: "2026-09-14T00:00:00.000Z",
+    }) }),
+  });
+  assert.equal(cached?.products.length, 1);
+  assert.equal(cached?.homeSections, null);
+  assert.equal(cached?.recentDrawActivity, null);
 });
 
 test("Home settles catalog and recent activity independently", () => {
@@ -247,7 +298,7 @@ test("Home settles catalog and recent activity independently", () => {
   assert.match(homeSource, /fetchHomeCatalog\(runtime\.apiBaseUrl\)/);
   assert.match(homeSource, /fetchHomeRecentDrawActivity\(runtime\.apiBaseUrl\)/);
   assert.match(homeSource, /recentResult\.status === "fulfilled"/);
-  assert.match(homeSource, /cached\?\.recentDrawActivity \?\? null/);
+  assert.doesNotMatch(homeSource, /cached\?\.recentDrawActivity \?\? null/);
   assert.match(homeSource, /<RecentDrawActivityPanel[\s\S]*?activity=\{recentDrawActivity\}/);
 });
 

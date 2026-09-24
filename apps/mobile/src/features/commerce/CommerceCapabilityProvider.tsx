@@ -18,6 +18,7 @@ import {
 } from "@/lib/runtime-config";
 
 const PUBLIC_CONFIG_REFRESH_INTERVAL_MS = 30_000;
+const PUBLIC_CONFIG_TIMEOUT_MS = 8_000;
 
 export type RequiredPolicyVersions = {
   terms: string;
@@ -53,9 +54,12 @@ export function CommerceCapabilityProvider({ children }: { children: ReactNode }
   const refresh = useCallback(async () => {
     if (requestActive.current) return;
     requestActive.current = true;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), PUBLIC_CONFIG_TIMEOUT_MS);
     try {
       const response = await fetch(`${runtime.apiBaseUrl}/v1/public/config`, {
         headers: { accept: "application/json" },
+        signal: controller.signal,
       });
       if (!response.ok) throw new Error(`public config ${response.status}`);
       const body: unknown = await response.json();
@@ -63,13 +67,15 @@ export function CommerceCapabilityProvider({ children }: { children: ReactNode }
       setServerCapability(body.commerceMode);
       setRequiredPolicyVersions(body.requiredPolicyVersions);
     } catch (error) {
-      // A missing or invalid response must never unlock commerce.
+      // A missing or invalid response must not retain stale commerce or legal authority.
       setServerCapability(null);
+      setRequiredPolicyVersions(null);
       console.warn(
-        "DABBOBA public config refresh failed; commerce remains unavailable.",
+        "DABBOBA public config refresh failed; commerce and login remain unavailable.",
         error instanceof Error ? error.message : error,
       );
     } finally {
+      clearTimeout(timeout);
       setConfigReady(true);
       requestActive.current = false;
     }

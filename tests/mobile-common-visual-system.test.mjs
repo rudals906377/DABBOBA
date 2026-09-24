@@ -116,7 +116,7 @@ test("fixed discovery cards cap visible copy while retaining complete accessibil
 
   assert.match(catalogSource, /CATALOG_CARD_TEXT_MAX_FONT_SIZE_MULTIPLIER = 2/);
   assert.equal((homeSource.match(/maxFontSizeMultiplier=\{CATALOG_CARD_TEXT_MAX_FONT_SIZE_MULTIPLIER\}/g) ?? []).length >= 4, true);
-  assert.equal((shopSource.match(/maxFontSizeMultiplier=\{CATALOG_CARD_TEXT_MAX_FONT_SIZE_MULTIPLIER\}/g) ?? []).length, 3);
+  assert.equal((shopSource.match(/maxFontSizeMultiplier=\{CATALOG_CARD_TEXT_MAX_FONT_SIZE_MULTIPLIER\}/g) ?? []).length, 4);
   assert.equal((kujiTierSource.match(/maxFontSizeMultiplier=\{CATALOG_CARD_TEXT_MAX_FONT_SIZE_MULTIPLIER\}/g) ?? []).length, 4);
   assert.match(homeSource, /accessibilityLabel=\{homeProductAccessibilityLabel\(product, ipName, badge, commerceEnabled\)\}/);
   assert.match(shopSource, /accessibilityLabel=\{\[[\s\S]*?remainingInventoryLabel\(product\.category\)[\s\S]*?\.join\(", "\)\}/);

@@ -10,14 +10,22 @@ export function productPriceLabel(
   product: CommerceProduct,
   commerceEnabled: boolean,
 ): string {
-  const candidate = product as CommerceProduct;
+  const { qualifier, amount } = productPriceParts(product, commerceEnabled);
+  return qualifier ? `${qualifier} ${amount}` : amount;
+}
+
+export function productPriceParts(
+  product: CommerceProduct,
+  commerceEnabled: boolean,
+): { qualifier: "오픈 예정가" | null; amount: string } {
   if (typeof product.price !== "number" || !Number.isFinite(product.price) || product.price <= 0) {
-    return "가격 공개 예정";
+    return { qualifier: null, amount: "가격 공개 예정" };
   }
-  if (!commerceEnabled || candidate.saleStatus !== undefined && candidate.saleStatus !== "ON_SALE") {
-    return `오픈 예정가 ${product.price.toLocaleString("ko-KR")}원`;
+  const amount = `${product.price.toLocaleString("ko-KR")}원`;
+  if (!commerceEnabled || product.saleStatus !== undefined && product.saleStatus !== "ON_SALE") {
+    return { qualifier: "오픈 예정가", amount };
   }
-  return `${product.price.toLocaleString("ko-KR")}원`;
+  return { qualifier: null, amount };
 }
 
 export function isProductPurchasable(

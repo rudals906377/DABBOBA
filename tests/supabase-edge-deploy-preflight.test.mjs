@@ -150,7 +150,7 @@ test('Supabase Edge release preflight requires a committed source and a passing 
     },
     checkSource() {
       calls.push('source');
-      return { status: 'pass', head: 'a'.repeat(40), latestMigration: '0065_legal_policy_dabboba_net.sql', worktreeClean: true, blockers: [] };
+      return { status: 'pass', head: 'a'.repeat(40), latestMigration: '0066_worker_pgmq_set_vt_dependency.sql', worktreeClean: true, blockers: [] };
     },
     runReleaseCheck({ environment }) {
       calls.push('database');
@@ -200,7 +200,7 @@ test('Supabase Edge release preflight rejects a dirty worktree attestation befor
     checkSource: () => ({
       status: 'pass',
       head: 'a'.repeat(40),
-      latestMigration: '0065_legal_policy_dabboba_net.sql',
+      latestMigration: '0066_worker_pgmq_set_vt_dependency.sql',
       worktreeClean: false,
       blockers: [],
     }),
@@ -214,7 +214,7 @@ test('Supabase Edge release preflight fails before a database connection when Gi
   await assert.rejects(runSupabaseEdgeReleasePreflight({
     edgeProfile,
     sourceEnvironment: { DATABASE_MIGRATION_URL: 'postgresql://fixture' },
-    checkSource: () => ({ status: 'blocked', head: null, latestMigration: null, blockers: ['required_migration_not_committed:0065_legal_policy_dabboba_net.sql'] }),
+    checkSource: () => ({ status: 'blocked', head: null, latestMigration: null, blockers: ['required_migration_not_committed:0066_worker_pgmq_set_vt_dependency.sql'] }),
     runReleaseCheck() { databaseCalled = true; },
   }), /source is not a reviewed Git commit/);
   assert.equal(databaseCalled, false);
@@ -236,10 +236,12 @@ test('Supabase Edge deployment performs both preflights before build, secret, or
     },
     run(command, args) { calls.push(`${command}:${args.join(' ')}`); },
     supabase(...args) { calls.push(`supabase:${args.join(' ')}`); },
+    verifyPublicSurface() { calls.push('public-smoke'); },
   });
   assert.deepEqual(calls.slice(0, 3), ['profile', 'profile-read', 'preflight']);
   assert.equal(calls.some((call) => call.includes('build:supabase')), true);
   assert.equal(calls.some((call) => call.includes('functions deploy dabboba-api')), true);
+  assert.ok(calls.indexOf('public-smoke') > calls.findIndex((call) => call.includes('functions deploy dabboba-worker')));
 });
 
 test('a failed database preflight leaves build, secrets, and functions untouched', async () => {
@@ -250,6 +252,25 @@ test('a failed database preflight leaves build, secrets, and functions untouched
     preflight: async () => { throw new Error('database release blocked'); },
     run: (...args) => commands.push(args),
     supabase: (...args) => commands.push(args),
+    verifyPublicSurface: () => commands.push('public-smoke'),
   }), /database release blocked/);
   assert.deepEqual(commands, []);
+});
+
+test('deployment cannot report success when the mobile public API smoke fails', async () => {
+  const calls = [];
+  await assert.rejects(deploySupabaseEdge({
+    prepareProfile: () => edgeProfile,
+    readEdgeProfile: () => ({}),
+    preflight: async () => ({
+      sourceHead: 'a'.repeat(40),
+      targetHash: 'b'.repeat(64),
+      releaseConfiguration: assertSupabaseEdgeReleaseConfiguration(edgeProfile),
+    }),
+    run: (command, args) => calls.push(`${command}:${args.join(' ')}`),
+    supabase: (...args) => calls.push(`supabase:${args.join(' ')}`),
+    verifyPublicSurface: async () => { throw new Error('Public config returned HTTP 404'); },
+  }), /Public config returned HTTP 404/);
+  assert.ok(calls.some((call) => call.includes('functions deploy dabboba-api')));
+  assert.ok(calls.some((call) => call.includes('functions deploy dabboba-worker')));
 });

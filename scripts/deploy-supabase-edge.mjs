@@ -8,6 +8,7 @@ import {
 } from './prepare-supabase-edge-profile.mjs';
 import { SUPABASE_INTEGRATION_PROJECT_REF } from './supabase-integration-profile.mjs';
 import { runSupabaseEdgeReleasePreflight } from './supabase-edge-release-preflight.mjs';
+import { waitForPublicEdgeSurface } from './verify-public-edge-surface.mjs';
 
 const SUPABASE_CLI_VERSION = '2.117.0';
 
@@ -30,6 +31,7 @@ export async function deploySupabaseEdge({
   preflight = ({ edgeProfile }) => runSupabaseEdgeReleasePreflight({ edgeProfile }),
   run: runCommand = run,
   supabase: runSupabase = supabase,
+  verifyPublicSurface = waitForPublicEdgeSurface,
 } = {}) {
   const profile = prepareProfile();
   if (!profile.DABBOBA_STORAGE_S3_ACCESS_KEY_ID || !profile.DABBOBA_STORAGE_S3_SECRET_ACCESS_KEY) {
@@ -46,9 +48,10 @@ export async function deploySupabaseEdge({
   runSupabase('secrets', 'set', '--env-file', SUPABASE_EDGE_PROFILE_FILE, '--project-ref', SUPABASE_INTEGRATION_PROJECT_REF);
   runSupabase('functions', 'deploy', 'dabboba-api', '--no-verify-jwt', '--project-ref', SUPABASE_INTEGRATION_PROJECT_REF);
   runSupabase('functions', 'deploy', 'dabboba-worker', '--no-verify-jwt', '--project-ref', SUPABASE_INTEGRATION_PROJECT_REF);
+  await verifyPublicSurface();
   process.stdout.write(`Database release ${release.targetHash.slice(0, 12)} and source ${release.sourceHead.slice(0, 12)} passed preflight.\n`);
   process.stdout.write(`Customer auth providers: ${release.releaseConfiguration.customerAuthProviders.join(',')}; Apple revocation: ${release.releaseConfiguration.appleRevocationConfigured ? 'configured' : 'not required'}; remote push: ${release.releaseConfiguration.remotePushConfigured ? 'configured' : 'disabled (in-app notifications remain available)'}.\n`);
-  process.stdout.write('DABBOBA Supabase Edge Functions were deployed with the reviewed profile.\n');
+  process.stdout.write('DABBOBA Supabase Edge Functions were deployed and the public mobile API surface passed verification.\n');
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {

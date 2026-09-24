@@ -335,7 +335,8 @@ test("Expo entry is native-first with typed routes, API contracts, secure tokens
   assert.match(catalogApiSource, /createDabbobaClient/);
   assert.match(catalogApiSource, /\/v1\/catalog\/home-sections/);
   assert.match(catalogApiSource, /\/v1\/catalog\/recent-draws/);
-  assert.match(catalogApiSource, /homeSections:\s*homeSectionResult\?\.data \?\? null/);
+  assert.match(catalogApiSource, /\n\s*homeSections,\n/);
+  assert.match(catalogApiSource, /isCurrentHomeSectionList\(homeSectionResult\?\.data\)/);
   assert.match(catalogApiSource, /homeSectionRequest = client\.GET\("\/v1\/catalog\/home-sections"\)\.catch\(\(\) => null\)/);
   assert.doesNotMatch(catalogApiSource, /recentDrawRequest = client\.GET/);
   assert.match(catalogApiSource, /function fetchHomeRecentDrawActivity/);
@@ -350,8 +351,8 @@ test("Expo entry is native-first with typed routes, API contracts, secure tokens
   assert.doesNotMatch(homeSource, /<SeedChip|PRODUCT_CATEGORY_OPTIONS\.map|<HomeCategoryNavigation/);
   assert.match(seedComponentsSource, /minHeight:\s*seed\.size\.chip,[\s\S]*?paddingHorizontal:\s*14,[\s\S]*?borderWidth:\s*1,[\s\S]*?borderRadius:\s*seed\.radius\.r2,/);
   assert.match(localDatabaseSource, /CREATE TABLE IF NOT EXISTS catalog_cache/);
-  assert.match(localDatabaseSource, /recentDrawActivity:\s*Array\.isArray\(parsed\.recentDrawActivity\)[\s\S]*?parsed\.recentDrawActivity\.slice\(0, 2\)/);
-  assert.match(localDatabaseSource, /recentDrawActivity:\s*snapshot\.recentDrawActivity\?\.slice\(0, 2\) \?\? null/);
+  assert.doesNotMatch(localDatabaseSource, /parsed\.recentDrawActivity\.slice\(0, 2\)/);
+  assert.match(localDatabaseSource, /recentDrawActivity:\s*null/);
   assert.match(localDatabaseSource, /JSON\.stringify\(cacheSnapshot\)/);
   assert.match(localDatabaseSource, /CREATE TABLE IF NOT EXISTS exchange_listing_cache/);
   assert.match(localDatabaseSource, /CREATE TABLE IF NOT EXISTS recent_searches/);
@@ -409,7 +410,7 @@ test("native Home follows the operator-defined editorial structure and layoutKin
   assert.doesNotMatch(homeSource, /다뽀바 인기 작품|다뽀바 덕룸|fetchDukroomHomePreview/);
   assert.match(homeSource, /buildConfiguredHomeCollections\(snapshot\.homeSections\.items\.map/);
   assert.doesNotMatch(homeSource, /seenProductIds/);
-  assert.match(localDatabaseSource, /homeSections:\s*parsed\.homeSections \?\? null/);
+  assert.match(localDatabaseSource, /homeSections:\s*isCurrentHomeSectionList\(parsed\.homeSections\) \? parsed\.homeSections : null/);
   assert.match(announcementTickerSource, /Animated\.timing\(translateX/);
   assert.match(announcementTickerSource, /Animated\.timing\(translateY/);
   assert.match(announcementTickerSource, /AccessibilityInfo\.isReduceMotionEnabled/);
@@ -1451,6 +1452,17 @@ test("native runtime config requires HTTPS in production and derives the Metro h
       development: false,
     }));
   }
+});
+
+test("commerce routes wait for the first LIVE server answer without opening in PRELAUNCH", () => {
+  const access = runtimeConfig.resolveCommerceRouteAccess;
+  assert.equal(access("PRELAUNCH", null, false), "DENY");
+  assert.equal(access("PRELAUNCH", "LIVE", true), "DENY");
+  assert.equal(access("LIVE", null, false), "WAIT");
+  assert.equal(access("LIVE", "LIVE", false), "WAIT");
+  assert.equal(access("LIVE", "LIVE", true), "ALLOW");
+  assert.equal(access("LIVE", "PRELAUNCH", true), "DENY");
+  assert.equal(access("LIVE", null, true), "DENY");
 });
 
 test("legacy WebView compatibility remains bounded while screens migrate", () => {
