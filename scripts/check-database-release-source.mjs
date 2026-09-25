@@ -103,6 +103,11 @@ export const DATABASE_RELEASE_MIGRATIONS = Object.freeze([
     path: 'packages/db/migrations/0067_catalog_media_project_rebase.sql',
     sha256: '0a1bb0922d0052665c79e2158cf10e7048f7e99fe0254c3603ae8993fa731a42',
   }),
+  Object.freeze({
+    file: '0068_worker_account_deletion_privileges.sql',
+    path: 'packages/db/migrations/0068_worker_account_deletion_privileges.sql',
+    sha256: '770dea74cacc6c6db0946c35003d4310fff3c07d2a03affbd04078820c29bd9a',
+  }),
 ]);
 
 export const MINIMUM_DATABASE_RELEASE_VERSION =

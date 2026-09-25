@@ -8,11 +8,13 @@ import {
   verifySupabaseTargetProjectAccess,
 } from '../scripts/deploy-supabase-edge.mjs';
 import {
+  assertProductionWorkerCredential,
   assertSupabaseEdgeReleaseConfiguration,
   edgeExternalValuesFromSource,
   serializeSupabaseEdgeProfile,
   SUPABASE_EDGE_EXTERNAL_OPTIONAL_KEYS,
   SUPABASE_EDGE_EXTERNAL_REQUIRED_KEYS,
+  SUPABASE_EDGE_PROFILE_FILE,
 } from '../scripts/prepare-supabase-edge-profile.mjs';
 
 const edgeProfile = {
@@ -21,7 +23,7 @@ const edgeProfile = {
   DABBOBA_API_PAYMENT_PROVIDER: 'UNCONFIGURED',
   DABBOBA_API_COMMERCE_MODE: 'PRELAUNCH',
   DABBOBA_API_SUPABASE_JWT_AUDIENCE: 'authenticated',
-  DABBOBA_API_CUSTOMER_AUTH_ENABLED_PROVIDERS: 'EMAIL',
+  DABBOBA_API_CUSTOMER_AUTH_ENABLED_PROVIDERS: 'PHONE',
   DABBOBA_WORKER_DATABASE_URL: 'postgresql://worker:secret@worker.example.test/postgres',
   DABBOBA_STORAGE_S3_ACCESS_KEY_ID: 'fixture-access',
   DABBOBA_STORAGE_S3_SECRET_ACCESS_KEY: 'fixture-secret',
@@ -29,7 +31,7 @@ const edgeProfile = {
 
 const completeAppleProfile = {
   ...edgeProfile,
-  DABBOBA_API_CUSTOMER_AUTH_ENABLED_PROVIDERS: 'EMAIL,APPLE',
+  DABBOBA_API_CUSTOMER_AUTH_ENABLED_PROVIDERS: 'PHONE,APPLE',
   DABBOBA_API_APPLE_TOKEN_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString('base64url'),
   DABBOBA_API_APPLE_TOKEN_ENCRYPTION_KEY_VERSION: '1',
   DABBOBA_WORKER_APPLE_CLIENT_ID: 'com.dabboba.app',
@@ -37,6 +39,23 @@ const completeAppleProfile = {
   DABBOBA_WORKER_APPLE_TOKEN_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString('base64url'),
   DABBOBA_WORKER_APPLE_TOKEN_ENCRYPTION_KEY_VERSION: '1',
 };
+
+test('production Edge profile is isolated from historical QA credentials', () => {
+  assert.match(SUPABASE_EDGE_PROFILE_FILE, /supabase-edge-production\.env$/);
+  const source = 'postgresql://dabboba_runtime.rconfxsykttfvznakile:source@aws-0-ap-northeast-2.pooler.supabase.com:5432/postgres';
+  const credential = {
+    DABBOBA_SUPABASE_PROJECT_REF: 'rconfxsykttfvznakile',
+    DABBOBA_WORKER_CREDENTIAL_STATUS: 'VERIFIED',
+    DABBOBA_WORKER_DATABASE_URL: 'postgresql://dabboba_worker.rconfxsykttfvznakile:worker@aws-0-ap-northeast-2.pooler.supabase.com:5432/postgres',
+    DABBOBA_WORKER_INVOKE_SECRET: 'fixture-invoke-secret-longer-than-32-characters',
+  };
+  assert.equal(assertProductionWorkerCredential(credential, source).DABBOBA_WORKER_DATABASE_URL, credential.DABBOBA_WORKER_DATABASE_URL);
+  assert.throws(() => assertProductionWorkerCredential({ ...credential, DABBOBA_WORKER_CREDENTIAL_STATUS: 'PENDING' }, source));
+  assert.throws(() => assertProductionWorkerCredential({
+    ...credential,
+    DABBOBA_WORKER_DATABASE_URL: credential.DABBOBA_WORKER_DATABASE_URL.replace('rconfxsykttfvznakile', 'yxkmvgfruphgghowzvmo'),
+  }, source));
+});
 
 test('database release preflight can execute the installed checker and return a JSON report', () => {
   const result = defaultReleaseCheck({
@@ -95,7 +114,7 @@ test('Supabase Edge release profile distinguishes required auth from optional re
   assert.equal(SUPABASE_EDGE_EXTERNAL_OPTIONAL_KEYS.includes('DABBOBA_WORKER_EXPO_PUSH_ACCESS_TOKEN'), true);
   const result = assertSupabaseEdgeReleaseConfiguration(edgeProfile);
   assert.deepEqual(result, {
-    customerAuthProviders: ['EMAIL'],
+    customerAuthProviders: ['PHONE'],
     appleRevocationConfigured: false,
     remotePushConfigured: false,
   });
@@ -133,7 +152,7 @@ test('generic private auth settings map onto the dedicated Edge allowlist', () =
   const encryptionKey = Buffer.alloc(32, 9).toString('base64url');
   assert.deepEqual(edgeExternalValuesFromSource({
     SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_fixture-key-value',
-    CUSTOMER_AUTH_ENABLED_PROVIDERS: 'EMAIL,APPLE',
+    CUSTOMER_AUTH_ENABLED_PROVIDERS: 'PHONE,APPLE',
     APPLE_TOKEN_ENCRYPTION_KEY: encryptionKey,
     APPLE_TOKEN_ENCRYPTION_KEY_VERSION: '2',
     APPLE_CLIENT_ID: 'com.dabboba.app',
@@ -142,7 +161,7 @@ test('generic private auth settings map onto the dedicated Edge allowlist', () =
     UNREVIEWED_SECRET: 'ignored',
   }), {
     DABBOBA_API_SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_fixture-key-value',
-    DABBOBA_API_CUSTOMER_AUTH_ENABLED_PROVIDERS: 'EMAIL,APPLE',
+    DABBOBA_API_CUSTOMER_AUTH_ENABLED_PROVIDERS: 'PHONE,APPLE',
     DABBOBA_API_APPLE_TOKEN_ENCRYPTION_KEY: encryptionKey,
     DABBOBA_API_APPLE_TOKEN_ENCRYPTION_KEY_VERSION: '2',
     DABBOBA_WORKER_APPLE_CLIENT_ID: 'com.dabboba.app',
@@ -181,7 +200,7 @@ test('APPLE login requires matching API encryption and worker revocation setting
   assert.throws(
     () => assertSupabaseEdgeReleaseConfiguration({
       ...edgeProfile,
-      DABBOBA_API_CUSTOMER_AUTH_ENABLED_PROVIDERS: 'APPLE,EMAIL',
+      DABBOBA_API_CUSTOMER_AUTH_ENABLED_PROVIDERS: 'APPLE,PHONE',
     }),
     /APPLE customer login requires complete API encryption and worker revocation settings/,
   );
@@ -205,7 +224,7 @@ test('Supabase Edge release preflight requires a committed source and a passing 
     },
     checkSource() {
       calls.push('source');
-      return { status: 'pass', head: 'a'.repeat(40), latestMigration: '0067_catalog_media_project_rebase.sql', worktreeClean: true, blockers: [] };
+      return { status: 'pass', head: 'a'.repeat(40), latestMigration: '0068_worker_account_deletion_privileges.sql', worktreeClean: true, blockers: [] };
     },
     runReleaseCheck({ environment }) {
       calls.push('database');
@@ -229,7 +248,7 @@ test('Supabase Edge release preflight requires a committed source and a passing 
   assert.equal(result.targetHash, 'b'.repeat(64));
   assert.equal(result.sourceHead, 'a'.repeat(40));
   assert.deepEqual(result.releaseConfiguration, {
-    customerAuthProviders: ['EMAIL'],
+    customerAuthProviders: ['PHONE'],
     appleRevocationConfigured: false,
     remotePushConfigured: false,
   });

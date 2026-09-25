@@ -81,10 +81,45 @@ test("API and worker database identities are isolated around pgmq", {
     assert.deepEqual(pushSessionColumns.rows.map((row) => row.column_name), [
       "expires_at",
       "id",
+      "revoke_reason",
       "revoked_at",
       "session_kind",
       "user_id",
     ]);
+
+    const deletionEventColumns = await migrationPool.query<{ column_name: string }>(
+      `SELECT column_name
+         FROM information_schema.column_privileges
+        WHERE grantee=$1 AND table_schema='public'
+          AND table_name='account_deletion_request_events'
+          AND privilege_type='SELECT'
+        ORDER BY column_name`,
+      [WORKER_DATABASE_ROLE],
+    );
+    assert.deepEqual(deletionEventColumns.rows.map((row) => row.column_name), [
+      "deletion_request_id",
+      "idempotency_key",
+    ]);
+
+    const sensitiveReadAccess = await migrationPool.query<{
+      can_read_event_table: boolean;
+      can_read_session_table: boolean;
+      can_read_session_token: boolean;
+    }>(
+      `SELECT
+         has_table_privilege($1,'public.account_deletion_request_events','SELECT')
+           AS can_read_event_table,
+         has_table_privilege($1,'public.sessions','SELECT')
+           AS can_read_session_table,
+         has_column_privilege($1,'public.sessions','token_digest','SELECT')
+           AS can_read_session_token`,
+      [WORKER_DATABASE_ROLE],
+    );
+    assert.deepEqual(sensitiveReadAccess.rows, [{
+      can_read_event_table: false,
+      can_read_session_table: false,
+      can_read_session_token: false,
+    }]);
 
     const reverseMembership = await migrationPool.query(
       `SELECT 1

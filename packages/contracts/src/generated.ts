@@ -130,7 +130,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** @description Verifies an asymmetric Supabase access token and the live Auth user for Kakao, Naver, Google, Apple, or email OTP identities, then returns an opaque DABBOBA session. Multiple allowed identities automatically linked by Supabase reuse one DABBOBA account only when they share the exact broker issuer and subject. Matching email strings never merge different broker subjects. */
+        /** @description Verifies an asymmetric Supabase access token and the live Auth user for phone OTP, Kakao, Naver, Google, or Apple identities, then returns an opaque DABBOBA session. Multiple allowed identities automatically linked by Supabase reuse one DABBOBA account only when they share the exact broker issuer and subject. Matching contact strings never merge different broker subjects. */
         post: operations["exchangeCustomerAccessToken"];
         delete?: never;
         options?: never;
@@ -2553,7 +2553,7 @@ export interface components {
             requiredPolicyVersions: components["schemas"]["RequiredPolicyVersions"];
         };
         /** @enum {string} */
-        CustomerAuthProvider: "KAKAO" | "NAVER" | "GOOGLE" | "APPLE" | "EMAIL";
+        CustomerAuthProvider: "PHONE" | "KAKAO" | "NAVER" | "GOOGLE" | "APPLE";
         CustomerLoginProviders: {
             methods: components["schemas"]["CustomerAuthProvider"][];
             brokerExchangeConfigured: boolean;
@@ -2575,7 +2575,7 @@ export interface components {
         AccountDeletionAccessTokenExchangeInput: {
             accessToken: string;
             /** @enum {string} */
-            loginProvider: "KAKAO" | "NAVER" | "GOOGLE" | "APPLE";
+            loginProvider: "PHONE" | "KAKAO" | "NAVER" | "GOOGLE" | "APPLE";
             /** @description Optional fresh Apple provider refresh token. When absent, an existing encrypted revocation credential is required. */
             appleRefreshToken?: string;
             acceptedPolicies: components["schemas"]["RequiredPolicyVersions"];

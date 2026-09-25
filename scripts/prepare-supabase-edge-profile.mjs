@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto';
 import {
   closeSync,
   constants,
+  existsSync,
   openSync,
   readFileSync,
   renameSync,
@@ -21,9 +22,12 @@ const repositoryRoot = fileURLToPath(new URL('../', import.meta.url));
 const launchDirectory = resolve(repositoryRoot, '../.dabboba-launch');
 const sourceFile = resolve(repositoryRoot, '.env');
 const integrationFile = resolve(launchDirectory, 'supabase-integration.env');
-export const SUPABASE_EDGE_PROFILE_FILE = resolve(launchDirectory, 'supabase-edge.env');
+// The historical supabase-edge.env belongs to the retired QA project. Keep it
+// intact, but never read or upload it for the friend-owned production project.
+export const SUPABASE_EDGE_PROFILE_FILE = resolve(launchDirectory, 'supabase-edge-production.env');
+export const SUPABASE_PRODUCTION_WORKER_CREDENTIAL_FILE = resolve(launchDirectory, 'supabase-production-worker.env');
 
-const CUSTOMER_AUTH_PROVIDERS = ['KAKAO', 'NAVER', 'GOOGLE', 'APPLE', 'EMAIL'];
+const CUSTOMER_AUTH_PROVIDERS = ['PHONE', 'KAKAO', 'NAVER', 'GOOGLE', 'APPLE'];
 
 const GENERATED_REQUIRED_KEYS = [
   'DABBOBA_ENVIRONMENT_TIER',
@@ -90,10 +94,6 @@ function parsePrivate(path) {
   return parseEnv(readFileSync(path, 'utf8'));
 }
 
-function randomSecret() {
-  return randomBytes(48).toString('base64url');
-}
-
 function databaseUrl(sourceUrl, role, port, password = null) {
   const url = new URL(sourceUrl);
   url.username = `${role}.${SUPABASE_INTEGRATION_PROJECT_REF}`;
@@ -102,6 +102,28 @@ function databaseUrl(sourceUrl, role, port, password = null) {
   url.search = '';
   url.hash = '';
   return url.toString();
+}
+
+export function assertProductionWorkerCredential(values, sourceDatabaseUrl) {
+  const source = new URL(sourceDatabaseUrl);
+  const worker = new URL(values.DABBOBA_WORKER_DATABASE_URL);
+  if (
+    values.DABBOBA_SUPABASE_PROJECT_REF !== SUPABASE_INTEGRATION_PROJECT_REF
+    || values.DABBOBA_WORKER_CREDENTIAL_STATUS !== 'VERIFIED'
+    || worker.hostname !== source.hostname
+    || worker.port !== '5432'
+    || worker.pathname !== '/postgres'
+    || decodeURIComponent(worker.username) !== `dabboba_worker.${SUPABASE_INTEGRATION_PROJECT_REF}`
+    || !worker.password
+    || worker.search
+    || worker.hash
+    || Buffer.byteLength(values.DABBOBA_WORKER_INVOKE_SECRET ?? '', 'utf8') < 32
+    || values.DABBOBA_WORKER_INVOKE_SECRET === worker.password
+  ) throw new Error('Verified production worker credential is missing or targets another project.');
+  return {
+    DABBOBA_WORKER_DATABASE_URL: worker.toString(),
+    DABBOBA_WORKER_INVOKE_SECRET: values.DABBOBA_WORKER_INVOKE_SECRET,
+  };
 }
 
 export function serializeSupabaseEdgeProfile(values) {
@@ -305,8 +327,19 @@ export function prepareSupabaseEdgeProfile() {
   const source = assertSupabaseIntegrationSource(rawSource);
   const integration = assertSupabaseIntegrationSecrets(parsePrivate(integrationFile));
   const external = edgeExternalValuesFromSource(rawSource);
+  if (!existsSync(SUPABASE_PRODUCTION_WORKER_CREDENTIAL_FILE)) {
+    throw new Error('Verified production worker credential has not been provisioned.');
+  }
+  const workerCredential = assertProductionWorkerCredential(
+    parsePrivate(SUPABASE_PRODUCTION_WORKER_CREDENTIAL_FILE),
+    source.DATABASE_URL,
+  );
   try {
     const existing = parsePrivate(SUPABASE_EDGE_PROFILE_FILE);
+    if (
+      existing.DABBOBA_WORKER_DATABASE_URL !== workerCredential.DABBOBA_WORKER_DATABASE_URL
+      || existing.DABBOBA_WORKER_INVOKE_SECRET !== workerCredential.DABBOBA_WORKER_INVOKE_SECRET
+    ) throw new Error('Production worker credential differs from the release profile.');
     let changed = false;
     if (!existing.DABBOBA_API_WEB_ORIGINS || !existing.DABBOBA_API_CATALOG_MEDIA_BASE_URL) {
       existing.DABBOBA_API_WEB_ORIGINS = `https://${SUPABASE_INTEGRATION_PROJECT_REF}.supabase.co`;
@@ -334,7 +367,6 @@ export function prepareSupabaseEdgeProfile() {
     if (!error || typeof error !== 'object' || error.code !== 'ENOENT') throw error;
   }
 
-  const workerPassword = randomSecret();
   const values = validate({
     DABBOBA_ENVIRONMENT_TIER: 'PRODUCTION',
     DABBOBA_API_DATABASE_URL: databaseUrl(source.DATABASE_URL, 'dabboba_runtime', '6543'),
@@ -345,8 +377,7 @@ export function prepareSupabaseEdgeProfile() {
     DABBOBA_API_SUPABASE_JWT_AUDIENCE: 'authenticated',
     DABBOBA_API_LOG_LEVEL: 'info',
     DABBOBA_API_CATALOG_MEDIA_BASE_URL: `https://${SUPABASE_INTEGRATION_PROJECT_REF}.supabase.co/functions/v1/dabboba-api`,
-    DABBOBA_WORKER_INVOKE_SECRET: randomSecret(),
-    DABBOBA_WORKER_DATABASE_URL: databaseUrl(source.DATABASE_URL, 'dabboba_worker', '5432', workerPassword),
+    ...workerCredential,
     DABBOBA_ENABLE_PRODUCTION_WORKER: 'true',
     DABBOBA_STORAGE_BUCKET: 'dabboba-media',
     DABBOBA_STORAGE_S3_ENDPOINT: `https://${SUPABASE_INTEGRATION_PROJECT_REF}.storage.supabase.co/storage/v1/s3`,

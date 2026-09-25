@@ -223,6 +223,7 @@ test("web account deletion runtime requires an available login method and matchi
     ready: true,
     authMethod: "EMAIL_OTP",
     emailOtpEnabled: true,
+    phoneOtpEnabled: false,
     socialMethods: [],
     requiredPolicyVersions: policyVersions,
     resendAfterSeconds: 60,
@@ -245,6 +246,7 @@ test("web account deletion runtime requires an available login method and matchi
     ready: true,
     authMethod: null,
     emailOtpEnabled: false,
+    phoneOtpEnabled: false,
     socialMethods: ["GOOGLE"],
     requiredPolicyVersions: policyVersions,
     resendAfterSeconds: 60,
@@ -259,6 +261,25 @@ test("web account deletion runtime requires an available login method and matchi
       : json({ commerceMode: "PRELAUNCH", requiredPolicyVersions: policyVersions }),
   );
   assert.equal(noMethods?.status, 503);
+
+  const phoneOnly = await handleAccountDeletionService(
+    new Request("https://dabboba.net/account-deletion/runtime-config.json"),
+    accountDeletionRuntime,
+    async (url) => url.endsWith("/v1/auth/providers")
+      ? json({ methods: ["PHONE"], brokerExchangeConfigured: true, requiredPolicyVersions: policyVersions })
+      : json({ commerceMode: "PRELAUNCH", requiredPolicyVersions: policyVersions }),
+  );
+  assert.equal(phoneOnly?.status, 200);
+  assert.deepEqual(await phoneOnly?.json(), {
+    ready: true,
+    authMethod: "PHONE_OTP",
+    emailOtpEnabled: false,
+    phoneOtpEnabled: true,
+    socialMethods: [],
+    requiredPolicyVersions: policyVersions,
+    resendAfterSeconds: 60,
+    expiresAfterSeconds: 600,
+  });
 
   const mismatched = await handleAccountDeletionService(
     new Request("https://dabboba.net/account-deletion/runtime-config.json"),
@@ -479,6 +500,70 @@ test("email OTP verification exchanges a transient Supabase token for a DABBOBA 
   assert.equal(calls[2].init.headers.authorization, `Bearer ${supabaseToken}`);
 });
 
+test("web phone OTP never creates a new user or reveals account existence", async () => {
+  const responses = [];
+  for (const upstreamStatus of [200, 400]) {
+    const calls = [];
+    const response = await handleAccountDeletionService(
+      new Request("https://dabboba.net/account-deletion/auth/phone-otp", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ phone: "010-1234-5678" }),
+      }),
+      accountDeletionRuntime,
+      async (url, init) => {
+        calls.push({ url, init });
+        if (url.endsWith("/v1/auth/providers")) {
+          return json({ methods: ["PHONE"], brokerExchangeConfigured: true });
+        }
+        return json(upstreamStatus === 200 ? {} : { error: "user_not_found" }, upstreamStatus);
+      },
+    );
+    assert.equal(response?.status, 202);
+    responses.push(await response?.text());
+    assert.equal(calls.length, 2);
+    assert.equal(calls[1].url, "https://project.supabase.co/auth/v1/otp");
+    assert.deepEqual(JSON.parse(calls[1].init.body), { phone: "+821012345678", create_user: false });
+  }
+  assert.equal(responses[0], responses[1]);
+  assert.doesNotMatch(responses[0], /821012345678|user_not_found/i);
+});
+
+test("web phone deletion reauth exchanges only an existing account and revokes the temporary broker token", async () => {
+  const supabaseToken = `supabase.${"a".repeat(80)}.token`;
+  const customerSession = "s".repeat(43);
+  const calls = [];
+  const response = await handleAccountDeletionService(
+    new Request("https://dabboba.net/account-deletion/auth/phone-verify", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ phone: "010-1234-5678", token: "123456", acceptedPolicies: policyVersions }),
+    }),
+    accountDeletionRuntime,
+    async (url, init) => {
+      calls.push({ url, init });
+      if (url.endsWith("/auth/v1/verify")) {
+        assert.deepEqual(JSON.parse(init.body), { phone: "+821012345678", token: "123456", type: "sms" });
+        return json({ access_token: supabaseToken });
+      }
+      if (url.endsWith("/v1/auth/account-deletion-exchange")) {
+        assert.deepEqual(JSON.parse(init.body), {
+          accessToken: supabaseToken,
+          acceptedPolicies: policyVersions,
+          loginProvider: "PHONE",
+        });
+        return json({ token: customerSession, expiresAt: "2026-10-20T00:00:00.000Z", actor: {} }, 201);
+      }
+      if (url.includes("/auth/v1/logout")) return new Response(null, { status: 204 });
+      return json({}, 404);
+    },
+  );
+  assert.equal(response?.status, 201);
+  assert.deepEqual(await response?.json(), { verified: true, sessionToken: customerSession, expiresAt: "2026-10-20T00:00:00.000Z" });
+  assert.equal(calls.length, 3);
+  assert.equal(calls[2].init.headers.authorization, `Bearer ${supabaseToken}`);
+});
+
 test("web deletion proxies only preview, request, session logout, and receipt-status contracts", async () => {
   const customerSession = "c".repeat(43);
   const requestId = "11111111-1111-4111-8111-111111111111";
@@ -589,6 +674,8 @@ test("account deletion page stores only the receipt and presents an accessible r
   const html = await readFile(new URL("../public/legal/account-deletion/index.html", import.meta.url), "utf8");
   const script = await readFile(new URL("../public/legal/account-deletion/app.js", import.meta.url), "utf8");
   assert.match(html, /id="email-form"/);
+  assert.match(html, /id="phone-form"/);
+  assert.match(html, /id="account-phone"/);
   assert.match(html, /data-provider="KAKAO"/);
   assert.match(html, /data-provider="APPLE"/);
   assert.match(html, /autocomplete="one-time-code"/);
@@ -602,6 +689,7 @@ test("account deletion page stores only the receipt and presents an accessible r
   assert.match(script, /window\.addEventListener\("pagehide"/);
   assert.match(script, /\/account-deletion\/auth\/logout/);
   assert.match(script, /\/account-deletion\/auth\/social\/start/);
+  assert.match(script, /\/account-deletion\/auth\/phone-otp/);
   const callback = await readFile(new URL("../public/legal/account-deletion/social-callback.js", import.meta.url), "utf8");
   assert.match(callback, /\/account-deletion\/auth\/social\/verify/);
   assert.doesNotMatch(callback, /localStorage/);

@@ -14,7 +14,7 @@ export * from "./media-storage.js";
 export type RuntimeEnvironment = "development" | "test" | "production";
 export type ApiSurface = "customer" | "admin" | "all";
 export type CommerceLaunchMode = "PRELAUNCH" | "LIVE";
-export const CUSTOMER_LOGIN_PROVIDERS = ["KAKAO", "NAVER", "GOOGLE", "APPLE", "EMAIL"] as const;
+export const CUSTOMER_LOGIN_PROVIDERS = ["PHONE", "KAKAO", "NAVER", "GOOGLE", "APPLE"] as const;
 export type CustomerLoginProvider = (typeof CUSTOMER_LOGIN_PROVIDERS)[number];
 
 export type ApiConfig = {

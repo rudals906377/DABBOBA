@@ -115,7 +115,7 @@ paths:
     post:
       tags: [Auth]
       operationId: exchangeCustomerAccessToken
-      description: Verifies an asymmetric Supabase access token and the live Auth user for Kakao, Naver, Google, Apple, or email OTP identities, then returns an opaque DABBOBA session. Multiple allowed identities automatically linked by Supabase reuse one DABBOBA account only when they share the exact broker issuer and subject. Matching email strings never merge different broker subjects.
+      description: Verifies an asymmetric Supabase access token and the live Auth user for phone OTP, Kakao, Naver, Google, or Apple identities, then returns an opaque DABBOBA session. Multiple allowed identities automatically linked by Supabase reuse one DABBOBA account only when they share the exact broker issuer and subject. Matching contact strings never merge different broker subjects.
       requestBody:
         required: true
         content:
@@ -3834,7 +3834,7 @@ components:
         requiredPolicyVersions: { $ref: "#/components/schemas/RequiredPolicyVersions" }
     CustomerAuthProvider:
       type: string
-      enum: [KAKAO, NAVER, GOOGLE, APPLE, EMAIL]
+      enum: [PHONE, KAKAO, NAVER, GOOGLE, APPLE]
     CustomerLoginProviders:
       type: object
       additionalProperties: false
@@ -3880,7 +3880,7 @@ components:
       required: [accessToken, acceptedPolicies, loginProvider]
       properties:
         accessToken: { type: string, minLength: 64, maxLength: 16384, writeOnly: true }
-        loginProvider: { type: string, enum: [KAKAO, NAVER, GOOGLE, APPLE] }
+        loginProvider: { type: string, enum: [PHONE, KAKAO, NAVER, GOOGLE, APPLE] }
         appleRefreshToken:
           type: string
           minLength: 32

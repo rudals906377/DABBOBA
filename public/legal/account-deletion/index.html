@@ -13,7 +13,7 @@
   <header>
     <div class="brand"><img src="/assets/brand/dabboba-wordmark.png" alt="DABBOBA" width="1170" height="172"></div>
     <h1>계정과 데이터 삭제</h1>
-    <p class="updated">앱을 설치하지 않아도 이메일 본인 확인 후 탈퇴를 요청하고 처리 상태를 확인할 수 있습니다.</p>
+    <p class="updated">앱을 설치하지 않아도 가입한 휴대폰 또는 소셜 계정으로 본인 확인 후 탈퇴를 요청하고 처리 상태를 확인할 수 있습니다.</p>
   </header>
 
   <nav aria-label="정책 및 고객지원">
@@ -24,7 +24,7 @@
 
   <section class="deletion-flow" aria-labelledby="web-deletion-title">
     <h2 id="web-deletion-title">웹에서 바로 탈퇴 요청</h2>
-    <p class="notice">가입 이메일 인증번호 또는 기존 소셜 로그인으로 본인 확인할 수 있습니다. 계정 존재 여부를 보호하기 위해 이메일 인증번호 요청 결과는 항상 같은 문구로 안내합니다.</p>
+    <p class="notice">가입 휴대폰 인증번호 또는 기존 소셜 로그인으로 본인 확인할 수 있습니다. 계정 존재 여부를 보호하기 위해 인증번호 요청 결과는 항상 같은 문구로 안내합니다.</p>
 
     <div id="service-loading" class="flow-status" role="status">안전한 탈퇴 요청 화면을 준비하고 있습니다.</div>
     <div id="service-unavailable" class="flow-status error-panel" role="alert" hidden>
@@ -90,19 +90,30 @@
         <button id="send-otp-button" class="button primary full-width" type="submit">인증번호 받기</button>
       </form>
 
+      <form id="phone-form" class="flow-step" novalidate hidden>
+        <div class="step-heading">
+          <span class="step-number" aria-hidden="true">2</span>
+          <div><h3>휴대폰으로 확인</h3><p class="muted">가입에 사용한 010 휴대폰 번호를 입력해 주세요.</p></div>
+        </div>
+        <label class="field-label" for="account-phone">휴대폰 번호</label>
+        <input id="account-phone" name="phone" type="tel" inputmode="tel" autocomplete="tel" maxlength="16" required aria-describedby="phone-help" placeholder="010-1234-5678">
+        <p id="phone-help" class="field-help">가입 여부와 관계없이 동일한 안내가 표시됩니다.</p>
+        <button id="send-phone-otp-button" class="button primary full-width" type="submit">문자 인증번호 받기</button>
+      </form>
+
       <form id="otp-form" class="flow-step" novalidate hidden>
         <div class="step-heading">
           <span class="step-number" aria-hidden="true">3</span>
           <div><h3>본인 확인</h3><p id="otp-sent-message" class="muted">인증번호를 확인해 주세요.</p></div>
         </div>
-        <label class="field-label" for="account-otp">이메일 인증번호 6자리</label>
+        <label id="otp-field-label" class="field-label" for="account-otp">인증번호 6자리</label>
         <input id="account-otp" name="otp" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required aria-describedby="otp-help">
         <p id="otp-help" class="field-help">인증번호는 10분 동안 사용할 수 있습니다.</p>
 
         <div class="button-row">
           <button id="verify-otp-button" class="button primary" type="submit">본인 확인</button>
           <button id="resend-otp-button" class="button" type="button" disabled>60초 후 다시 받기</button>
-          <button id="change-email-button" class="button" type="button">이메일 다시 입력</button>
+          <button id="change-email-button" class="button" type="button">연락처 다시 입력</button>
         </div>
       </form>
 
@@ -144,7 +155,7 @@
 
   <section>
     <h2>본인 확인이 어려운 경우</h2>
-    <p>가입 이메일을 더 이상 사용할 수 없거나 접수정보를 잃어버린 경우 고객지원으로 문의해 주세요. 문의만으로 계정 존재 여부를 알려드리지 않으며, 안전한 본인 확인을 마친 뒤 처리합니다.</p>
+    <p>가입 휴대폰 또는 소셜 계정을 더 이상 사용할 수 없거나 접수정보를 잃어버린 경우 고객지원으로 문의해 주세요. 문의만으로 계정 존재 여부를 알려드리지 않으며, 안전한 본인 확인을 마친 뒤 처리합니다.</p>
     <p><a class="button" href="mailto:support@dabboba.net?subject=%EB%8B%A4%EB%BD%80%EB%B0%94%20%EA%B3%84%EC%A0%95%20%EC%82%AD%EC%A0%9C%20%EB%AC%B8%EC%9D%98">support@dabboba.net으로 문의</a></p>
   </section>
 

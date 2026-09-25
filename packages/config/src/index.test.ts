@@ -206,14 +206,14 @@ test("Supabase customer auth is optional and defaults to the authenticated audie
     SESSION_TOKEN_PEPPER: "test-pepper",
     SUPABASE_URL: "http://127.0.0.1:54321/",
     SUPABASE_PUBLISHABLE_KEY: "sb_publishable_local_fixture_key",
-    CUSTOMER_AUTH_ENABLED_PROVIDERS: "KAKAO,NAVER,GOOGLE,APPLE,EMAIL",
+    CUSTOMER_AUTH_ENABLED_PROVIDERS: "PHONE,KAKAO,NAVER,GOOGLE,APPLE",
     APPLE_TOKEN_ENCRYPTION_KEY: Buffer.alloc(32, 4).toString("base64url"),
     APPLE_TOKEN_ENCRYPTION_KEY_VERSION: "1",
   });
   assert.equal(config.supabaseUrl, "http://127.0.0.1:54321");
   assert.equal(config.supabaseJwtAudience, "authenticated");
   assert.equal(config.supabasePublishableKey, "sb_publishable_local_fixture_key");
-  assert.deepEqual(config.customerLoginProviders, ["KAKAO", "NAVER", "GOOGLE", "APPLE", "EMAIL"]);
+  assert.deepEqual(config.customerLoginProviders, ["PHONE", "KAKAO", "NAVER", "GOOGLE", "APPLE"]);
   assert.equal(config.appleCredentialEncryption?.keyVersion, 1);
 });
 
@@ -228,11 +228,11 @@ test("customer auth providers are explicit and fail closed", () => {
   assert.deepEqual(loadApiConfig(base).customerLoginProviders, []);
   assert.deepEqual(loadApiConfig({
     ...base,
-    CUSTOMER_AUTH_ENABLED_PROVIDERS: "KAKAO,EMAIL",
-  }).customerLoginProviders, ["KAKAO", "EMAIL"]);
+    CUSTOMER_AUTH_ENABLED_PROVIDERS: "KAKAO,PHONE",
+  }).customerLoginProviders, ["PHONE", "KAKAO"]);
   assert.throws(() => loadApiConfig({
     ...base,
-    CUSTOMER_AUTH_ENABLED_PROVIDERS: "KAKAO,PHONE",
+    CUSTOMER_AUTH_ENABLED_PROVIDERS: "KAKAO,EMAIL",
   }), /CUSTOMER_AUTH_ENABLED_PROVIDERS/);
   assert.throws(() => loadApiConfig({
     ...base,

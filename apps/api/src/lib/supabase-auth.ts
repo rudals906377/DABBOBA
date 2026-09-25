@@ -6,8 +6,9 @@ import {
 } from "jose";
 import { AppError, unauthorized } from "./errors.js";
 
-export const CUSTOMER_AUTH_PROVIDERS = ["KAKAO", "NAVER", "GOOGLE", "APPLE", "EMAIL"] as const;
-export const CUSTOMER_SUBJECT_LOOKUP_PROVIDERS = [...CUSTOMER_AUTH_PROVIDERS, "PHONE"] as const;
+// EMAIL remains recognizable for existing linked identities, but is not a new login option.
+export const CUSTOMER_AUTH_PROVIDERS = ["PHONE", "KAKAO", "NAVER", "GOOGLE", "APPLE", "EMAIL"] as const;
+export const CUSTOMER_SUBJECT_LOOKUP_PROVIDERS = CUSTOMER_AUTH_PROVIDERS;
 
 export type CustomerAuthProvider = (typeof CUSTOMER_AUTH_PROVIDERS)[number];
 
@@ -20,6 +21,7 @@ export type SupabaseCustomerClaims = {
 export type VerifiedSupabaseCustomer = SupabaseCustomerClaims & {
   providers: CustomerAuthProvider[];
   email: string | null;
+  phone?: string | null;
 };
 
 export type SupabaseJwtVerificationOptions = {
@@ -45,9 +47,13 @@ function mappedProvider(value: string): CustomerAuthProvider | null {
   }
 }
 
-function mappedLiveProvider(value: string): CustomerAuthProvider | "PHONE" | null {
+function mappedLiveProvider(value: string): CustomerAuthProvider | null {
   if (value.toLocaleLowerCase("en-US") === "phone") return "PHONE";
   return mappedProvider(value);
+}
+
+function normalizedPhone(value: unknown): string | null {
+  return typeof value === "string" && /^\+[1-9]\d{6,14}$/.test(value) ? value : null;
 }
 
 function normalizedEmail(value: unknown): string | null {
@@ -171,7 +177,7 @@ async function fetchLiveCustomer(
       ) {
         throw unauthorized("지원하지 않는 로그인 방식이 연결되어 있습니다.");
       }
-      if (provider !== "PHONE") providerSet.add(provider);
+      providerSet.add(provider);
     }
     const providers = CUSTOMER_AUTH_PROVIDERS.filter((provider) => providerSet.has(provider));
     if (providers.length < 1) throw unauthorized("지원하는 로그인 방식을 확인해 주세요.");
@@ -184,7 +190,16 @@ async function fetchLiveCustomer(
     if (providers.includes("EMAIL") && !email) {
       throw unauthorized("이메일 인증 정보를 확인해 주세요.");
     }
-    return { ...claims, providers, email };
+    const phoneConfirmedAt = typeof user.phone_confirmed_at === "string"
+      ? Date.parse(user.phone_confirmed_at)
+      : Number.NaN;
+    const phone = Number.isFinite(phoneConfirmedAt) && phoneConfirmedAt <= Date.now()
+      ? normalizedPhone(user.phone)
+      : null;
+    if (providers.includes("PHONE") && !phone) {
+      throw unauthorized("휴대폰 인증 정보를 확인해 주세요.");
+    }
+    return { ...claims, providers, email, phone };
   } catch (error) {
     if (error instanceof AppError) throw error;
     throw unauthorized("로그인 인증 정보를 확인하지 못했습니다.");

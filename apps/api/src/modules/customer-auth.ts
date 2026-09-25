@@ -19,7 +19,7 @@ import {
 import { issueSession } from "../plugins/auth.js";
 import type { ApiContext } from "../types.js";
 
-const CUSTOMER_LOGIN_METHODS = ["KAKAO", "NAVER", "GOOGLE", "APPLE", "EMAIL"] as const;
+const CUSTOMER_LOGIN_METHODS = ["PHONE", "KAKAO", "NAVER", "GOOGLE", "APPLE"] as const;
 export const REQUIRED_CUSTOMER_POLICY_VERSIONS = FALLBACK_REQUIRED_POLICY_VERSIONS;
 
 type CustomerUserRow = {
@@ -116,7 +116,20 @@ async function applyVerifiedContactClaims(
       await client.query("UPDATE users SET email=$2 WHERE id=$1", [user.id, claims.email]);
     }
   }
-
+  if (claims.phone) {
+    await client.query(
+      "SELECT pg_advisory_xact_lock(hashtextextended($1::text,0))",
+      [`customer-auth-phone:${claims.phone}`],
+    );
+    const usedPhone = await client.query(
+      "SELECT 1 FROM users WHERE phone_e164=$1 AND id<>$2 LIMIT 1",
+      [claims.phone, user.id],
+    );
+    if (usedPhone.rowCount) {
+      throw conflict("인증된 휴대폰 번호가 다른 계정에 연결되어 있습니다. 고객센터에 문의해 주세요.");
+    }
+    await client.query("UPDATE users SET phone_e164=$2 WHERE id=$1", [user.id, claims.phone]);
+  }
 }
 
 async function storeAppleRefreshCredential(
@@ -150,7 +163,7 @@ async function storeAppleRefreshCredential(
 async function existingBrokeredCustomerForDeletion(
   client: DatabaseClient,
   claims: VerifiedSupabaseCustomer,
-  loginProvider: Exclude<(typeof CUSTOMER_LOGIN_METHODS)[number], "EMAIL">,
+  loginProvider: (typeof CUSTOMER_LOGIN_METHODS)[number],
 ): Promise<CustomerUserRow> {
   await client.query(
     "SELECT pg_advisory_xact_lock(hashtextextended($1::text,0))",
@@ -335,6 +348,9 @@ export async function registerCustomerAuthRoutes(
       if (!claims.providers.includes(loginProvider)) {
         throw forbidden("로그인 제공자 정보를 확인하지 못했습니다.");
       }
+      if (loginProvider === "PHONE" && !claims.phone) {
+        throw forbidden("인증된 휴대폰 번호를 확인하지 못했습니다.");
+      }
       if (loginProvider === "APPLE" && !context.config.appleCredentialEncryption) {
         throw new AppError(503, "APPLE_AUTH_UNAVAILABLE", "Apple 로그인 삭제 보호 설정이 준비되지 않았습니다.");
       }
@@ -406,7 +422,7 @@ export async function registerCustomerAuthRoutes(
       const policy = await loadRequiredPolicyDocuments(context.pool);
       requiredPolicyAcceptance(input, policy.versions);
       const accessToken = stringInput(input, "accessToken", { min: 64, max: 16_384, trim: false })!;
-      const loginProvider = enumInput(input, "loginProvider", ["KAKAO", "NAVER", "GOOGLE", "APPLE"] as const)!;
+      const loginProvider = enumInput(input, "loginProvider", CUSTOMER_LOGIN_METHODS)!;
       const rawAppleRefreshToken = input.appleRefreshToken === undefined
         ? null
         : validateAppleRefreshToken(stringInput(input, "appleRefreshToken", { min: 32, max: 16_384, trim: false }));
@@ -417,6 +433,9 @@ export async function registerCustomerAuthRoutes(
       const claims = await verifyAccessToken(accessToken, broker);
       if (!claims.providers.includes(loginProvider)) {
         throw forbidden("로그인 제공자 정보를 확인하지 못했습니다.");
+      }
+      if (loginProvider === "PHONE" && !claims.phone) {
+        throw forbidden("인증된 휴대폰 번호를 확인하지 못했습니다.");
       }
       const requestUserAgent = userAgent(request.headers["user-agent"]);
       const { user, session } = await withTransaction(context.pool, async (client) => {

@@ -30,7 +30,7 @@
   const elements = Object.fromEntries([
     "service-loading", "service-unavailable", "receipt-step", "receipt-id",
     "receipt-status", "receipt-updated", "receipt-guidance", "refresh-status-button",
-    "clear-receipt-button", "authentication-flow", "email-form", "account-email",
+    "clear-receipt-button", "authentication-flow", "email-form", "account-email", "phone-form", "account-phone", "send-phone-otp-button", "otp-field-label",
     "consent-step", "social-auth-step", "social-auth-buttons",
     "send-otp-button", "otp-form", "account-otp", "otp-help", "otp-sent-message",
     "accept-terms", "accept-privacy", "verify-otp-button", "resend-otp-button", "change-email-button",
@@ -43,6 +43,8 @@
   let verifiedSessionToken = null;
   let verifiedSessionExpiresAt = 0;
   let requestedEmail = "";
+  let requestedPhone = "";
+  let activeOtpMethod = null;
   let otpExpiresAt = 0;
   let resendAvailableAt = 0;
   let countdownTimer = null;
@@ -54,14 +56,22 @@
     event.preventDefault();
     void requestOtp();
   });
+  elements["phone-form"].addEventListener("submit", function (event) {
+    event.preventDefault();
+    void requestPhoneOtp();
+  });
   elements["otp-form"].addEventListener("submit", function (event) {
     event.preventDefault();
     void verifyOtp();
   });
-  elements["resend-otp-button"].addEventListener("click", function () { void requestOtp(true); });
+  elements["resend-otp-button"].addEventListener("click", function () {
+    if (activeOtpMethod === "PHONE") void requestPhoneOtp(true);
+    else void requestOtp(true);
+  });
   elements["change-email-button"].addEventListener("click", function () {
+    const previousMethod = activeOtpMethod;
     prepareFreshAuthentication();
-    elements["account-email"].focus();
+    elements[previousMethod === "PHONE" ? "account-phone" : "account-email"].focus();
   });
   elements["refresh-preview-button"].addEventListener("click", function () {
     if (!activeVerifiedSession()) {
@@ -107,6 +117,7 @@
 
   function configureAuthenticationMethods(config) {
     elements["email-form"].hidden = !config?.emailOtpEnabled;
+    elements["phone-form"].hidden = !config?.phoneOtpEnabled;
     configureSocialMethods(config?.socialMethods);
   }
 
@@ -193,6 +204,7 @@
     elements["consent-step"].hidden = true;
     elements["social-auth-step"].hidden = true;
     elements["email-form"].hidden = true;
+    elements["phone-form"].hidden = true;
     elements["otp-form"].hidden = true;
     await loadDeletionPreview();
   }
@@ -239,11 +251,14 @@
         || !Number.isSafeInteger(response.resendAfterSeconds)
       ) throw new Error("invalid otp response");
       requestedEmail = email;
+      activeOtpMethod = "EMAIL";
       otpExpiresAt = Date.now() + response.expiresAfterSeconds * 1000;
       resendAvailableAt = Date.now() + response.resendAfterSeconds * 1000;
       elements["account-email"].value = email;
       elements["account-email"].readOnly = true;
       elements["email-form"].hidden = true;
+      elements["phone-form"].hidden = true;
+      elements["otp-field-label"].textContent = "이메일 인증번호 6자리";
       elements["otp-sent-message"].textContent = response.message;
       elements["otp-form"].hidden = false;
       elements["account-otp"].value = "";
@@ -258,9 +273,58 @@
     }
   }
 
+  function normalizePhone(value) {
+    const compact = String(value || "").replace(/[\s-]/g, "");
+    if (/^010\d{8}$/.test(compact)) return "+82" + compact.slice(1);
+    return /^\+8210\d{8}$/.test(compact) ? compact : null;
+  }
+
+  async function requestPhoneOtp(isResend) {
+    clearError();
+    if (!runtimeConfig?.phoneOtpEnabled) return showError("현재 휴대폰 인증을 사용할 수 없습니다.");
+    const phone = normalizePhone(elements["account-phone"].value);
+    if (!phone) return showError("010으로 시작하는 휴대폰 번호를 확인해 주세요.", elements["account-phone"]);
+    if (!elements["accept-terms"].checked || !elements["accept-privacy"].checked) {
+      return showError("이용약관과 개인정보처리방침을 각각 확인하고 동의해 주세요.");
+    }
+    if (Date.now() < resendAvailableAt) return;
+
+    setBusy(elements["send-phone-otp-button"], true, isResend ? "다시 보내는 중" : "보내는 중");
+    setBusy(elements["resend-otp-button"], true, "보내는 중");
+    try {
+      const response = await requestJson("/account-deletion/auth/phone-otp", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ phone }),
+      });
+      if (response.accepted !== true || !Number.isSafeInteger(response.expiresAfterSeconds)
+        || !Number.isSafeInteger(response.resendAfterSeconds)) throw new Error("invalid otp response");
+      requestedPhone = phone;
+      activeOtpMethod = "PHONE";
+      otpExpiresAt = Date.now() + response.expiresAfterSeconds * 1000;
+      resendAvailableAt = Date.now() + response.resendAfterSeconds * 1000;
+      elements["account-phone"].value = phone;
+      elements["account-phone"].readOnly = true;
+      elements["phone-form"].hidden = true;
+      elements["email-form"].hidden = true;
+      elements["otp-field-label"].textContent = "문자 인증번호 6자리";
+      elements["otp-sent-message"].textContent = response.message;
+      elements["otp-form"].hidden = false;
+      elements["account-otp"].value = "";
+      elements["account-otp"].focus();
+      showMessage(response.message);
+      startCountdown();
+    } catch {
+      showError("인증번호를 요청하지 못했습니다. 잠시 후 다시 시도해 주세요.");
+    } finally {
+      setBusy(elements["send-phone-otp-button"], false, "문자 인증번호 받기");
+      updateCountdown();
+    }
+  }
+
   async function verifyOtp() {
     clearError();
-    if (!runtimeConfig || !requestedEmail) return showError("인증번호를 다시 요청해 주세요.");
+    if (!runtimeConfig || (activeOtpMethod === "PHONE" ? !requestedPhone : !requestedEmail)) return showError("인증번호를 다시 요청해 주세요.");
     const token = elements["account-otp"].value.trim();
     if (!/^\d{6}$/.test(token)) return showError("인증번호 6자리를 입력해 주세요.", elements["account-otp"]);
     if (Date.now() >= otpExpiresAt) return showError("인증번호 사용 시간이 지났습니다. 다시 받아 주세요.");
@@ -270,11 +334,11 @@
 
     setBusy(elements["verify-otp-button"], true, "확인 중");
     try {
-      const result = await requestJson("/account-deletion/auth/verify", {
+      const result = await requestJson(activeOtpMethod === "PHONE" ? "/account-deletion/auth/phone-verify" : "/account-deletion/auth/verify", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          email: requestedEmail,
+          ...(activeOtpMethod === "PHONE" ? { phone: requestedPhone } : { email: requestedEmail }),
           token: token,
           acceptedPolicies: runtimeConfig.requiredPolicyVersions,
         }),
@@ -284,6 +348,7 @@
       verifiedSessionExpiresAt = Date.parse(result.expiresAt);
       elements["otp-form"].hidden = true;
       elements["email-form"].hidden = true;
+      elements["phone-form"].hidden = true;
       stopCountdown();
       await loadDeletionPreview();
     } catch (error) {
@@ -467,13 +532,14 @@
     const versions = value && value.requiredPolicyVersions;
     return value && value.ready === true
       && typeof value.emailOtpEnabled === "boolean"
-      && value.authMethod === (value.emailOtpEnabled ? "EMAIL_OTP" : null)
+      && typeof value.phoneOtpEnabled === "boolean"
+      && value.authMethod === (value.phoneOtpEnabled ? "PHONE_OTP" : value.emailOtpEnabled ? "EMAIL_OTP" : null)
       && Array.isArray(value.socialMethods)
       && value.socialMethods.every(function (method, index, methods) {
         return ["KAKAO", "NAVER", "GOOGLE", "APPLE"].includes(method)
           && methods.indexOf(method) === index;
       })
-      && (value.emailOtpEnabled || value.socialMethods.length > 0)
+      && (value.emailOtpEnabled || value.phoneOtpEnabled || value.socialMethods.length > 0)
       && versions && VERSION.test(versions.terms) && VERSION.test(versions.privacy)
       && Number.isSafeInteger(value.resendAfterSeconds) && value.resendAfterSeconds >= 30
       && Number.isSafeInteger(value.expiresAfterSeconds) && value.expiresAfterSeconds >= 300;
@@ -503,6 +569,8 @@
     elements["consent-step"].hidden = false;
     elements["account-email"].readOnly = false;
     elements["account-email"].value = "";
+    elements["account-phone"].readOnly = false;
+    elements["account-phone"].value = "";
     elements["otp-form"].hidden = true;
     elements["preview-step"].hidden = true;
     elements["accept-terms"].checked = false;
@@ -515,6 +583,8 @@
     verifiedSessionToken = null;
     verifiedSessionExpiresAt = 0;
     requestedEmail = "";
+    requestedPhone = "";
+    activeOtpMethod = null;
     otpExpiresAt = 0;
     resendAvailableAt = 0;
     deletionRequestKey = null;

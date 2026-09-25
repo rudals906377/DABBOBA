@@ -57,7 +57,7 @@
     "pretest": "node scripts/check-test-backend-env.mjs",
     "test": "corepack pnpm run test:unit",
     "test:unit": "node --test tests/*.test.mjs && corepack pnpm --filter @dabboba/api exec tsx --test '../../tests/*.test.ts'",
-    "test:integration:required": "node scripts/check-test-backend-env.mjs --require-integration-db && turbo run build && turbo run test --concurrency=4",
+    "test:integration:required": "node scripts/check-test-backend-env.mjs --require-integration-db && turbo run build && turbo run test --concurrency=1",
     "pretest:all": "node scripts/check-test-backend-env.mjs",
     "test:all": "corepack pnpm run workspace:assert && turbo run build && turbo run typecheck && turbo run test --concurrency=4 && corepack pnpm --filter @dabboba/storefront run test:browser && corepack pnpm run test:runtime && corepack pnpm run test:sites"
   },

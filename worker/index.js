@@ -99,6 +99,8 @@ function withPublicPageHeaders(response) {
 
 const ACCOUNT_DELETION_ROUTES = new Set([
   "/account-deletion/runtime-config.json",
+  "/account-deletion/auth/phone-otp",
+  "/account-deletion/auth/phone-verify",
   "/account-deletion/auth/email-otp",
   "/account-deletion/auth/verify",
   "/account-deletion/auth/social/start",
@@ -112,6 +114,13 @@ const ACCOUNT_DELETION_ROUTES = new Set([
 const EMAIL_OTP_RESPONSE = Object.freeze({
   accepted: true,
   message: "입력한 이메일이 가입 계정과 일치하면 인증번호를 보냈습니다.",
+  resendAfterSeconds: 60,
+  expiresAfterSeconds: 600,
+});
+
+const PHONE_OTP_RESPONSE = Object.freeze({
+  accepted: true,
+  message: "입력한 휴대폰 번호가 가입 계정과 일치하면 인증번호를 보냈습니다.",
   resendAfterSeconds: 60,
   expiresAfterSeconds: 600,
 });
@@ -161,6 +170,12 @@ export async function handleAccountDeletionService(
   if (url.pathname === "/account-deletion/auth/email-otp") {
     return handleEmailOtp(request, runtime, externalFetch);
   }
+  if (url.pathname === "/account-deletion/auth/phone-otp") {
+    return handlePhoneOtp(request, runtime, externalFetch);
+  }
+  if (url.pathname === "/account-deletion/auth/phone-verify") {
+    return handlePhoneOtpVerification(request, runtime, externalFetch);
+  }
   if (url.pathname === "/account-deletion/auth/verify") {
     return handleEmailOtpVerification(request, runtime, externalFetch);
   }
@@ -197,13 +212,14 @@ async function handleRuntimeConfig(runtime, externalFetch) {
     const publicVersions = requiredPolicyVersions(publicBody?.requiredPolicyVersions);
     const methods = Array.isArray(providerBody?.methods) ? providerBody.methods : [];
     const emailOtpEnabled = methods.includes("EMAIL");
+    const phoneOtpEnabled = methods.includes("PHONE");
     const socialMethods = [...new Set(methods.filter((method) => Object.hasOwn(SOCIAL_PROVIDER_IDS, method)))];
     if (
       !providers.response.ok
       || !publicConfig.response.ok
       || providerBody?.brokerExchangeConfigured !== true
       || !Array.isArray(providerBody?.methods)
-      || (!emailOtpEnabled && socialMethods.length === 0)
+      || (!emailOtpEnabled && !phoneOtpEnabled && socialMethods.length === 0)
       || !providerVersions
       || !publicVersions
       || providerVersions.terms !== publicVersions.terms
@@ -213,8 +229,9 @@ async function handleRuntimeConfig(runtime, externalFetch) {
     }
     return jsonResponse({
       ready: true,
-      authMethod: emailOtpEnabled ? "EMAIL_OTP" : null,
+      authMethod: phoneOtpEnabled ? "PHONE_OTP" : emailOtpEnabled ? "EMAIL_OTP" : null,
       emailOtpEnabled,
+      phoneOtpEnabled,
       socialMethods,
       requiredPolicyVersions: publicVersions,
       resendAfterSeconds: EMAIL_OTP_RESPONSE.resendAfterSeconds,
@@ -384,6 +401,95 @@ async function handleSocialLoginVerification(request, runtime, externalFetch) {
     if (supabaseAccessToken) {
       await revokeTransientSupabaseSession(runtime, supabaseAccessToken, externalFetch);
     }
+  }
+}
+
+function normalizeKoreanMobileNumber(value) {
+  if (typeof value !== "string") return null;
+  const compact = value.replace(/[\s-]/g, "");
+  if (/^010\d{8}$/.test(compact)) return `+82${compact.slice(1)}`;
+  return /^\+8210\d{8}$/.test(compact) ? compact : null;
+}
+
+async function handlePhoneOtp(request, runtime, externalFetch) {
+  const input = await readJsonObject(request);
+  const phone = normalizeKoreanMobileNumber(input?.phone);
+  if (!phone) return jsonResponse(PHONE_OTP_RESPONSE, 202, { "retry-after": "60" });
+
+  try {
+    const providers = await fetchJson(externalFetch, `${runtime.apiOrigin}/v1/auth/providers`, {
+      headers: { accept: "application/json" },
+      signal: requestTimeoutSignal(),
+    });
+    if (!providers.response.ok || providers.body?.brokerExchangeConfigured !== true
+      || !Array.isArray(providers.body?.methods)) return accountDeletionUnavailable();
+    if (!providers.body.methods.includes("PHONE")) {
+      return jsonResponse(PHONE_OTP_RESPONSE, 202, { "retry-after": "60" });
+    }
+    const result = await fetchJson(externalFetch, `${runtime.supabaseOrigin}/auth/v1/otp`, {
+      method: "POST",
+      headers: supabaseHeaders(runtime.supabasePublishableKey),
+      body: JSON.stringify({ phone, create_user: false }),
+      signal: requestTimeoutSignal(),
+    });
+    if (result.response.status >= 500) return accountDeletionUnavailable();
+  } catch {
+    return accountDeletionUnavailable();
+  }
+  return jsonResponse(PHONE_OTP_RESPONSE, 202, { "retry-after": "60" });
+}
+
+async function handlePhoneOtpVerification(request, runtime, externalFetch) {
+  const input = await readJsonObject(request);
+  const phone = normalizeKoreanMobileNumber(input?.phone);
+  const token = typeof input?.token === "string" && /^\d{6}$/.test(input.token) ? input.token : null;
+  const acceptedPolicies = requiredPolicyVersions(input?.acceptedPolicies);
+  if (!acceptedPolicies) {
+    return jsonResponse({ error: { code: "LEGAL_ACCEPTANCE_REQUIRED", message: "필수 약관을 확인해 주세요." } }, 428);
+  }
+  if (!phone || !token) return invalidOtpResponse();
+
+  let supabaseAccessToken = null;
+  try {
+    const verified = await fetchJson(externalFetch, `${runtime.supabaseOrigin}/auth/v1/verify`, {
+      method: "POST",
+      headers: supabaseHeaders(runtime.supabasePublishableKey),
+      body: JSON.stringify({ phone, token, type: "sms" }),
+      signal: requestTimeoutSignal(),
+    });
+    if (verified.response.status >= 500) return accountDeletionUnavailable();
+    supabaseAccessToken = typeof verified.body?.access_token === "string"
+      && verified.body.access_token.length >= 64
+      && verified.body.access_token.length <= 16_384
+      ? verified.body.access_token
+      : null;
+    if (!verified.response.ok || !supabaseAccessToken) return invalidOtpResponse();
+
+    const exchanged = await fetchJson(externalFetch, `${runtime.apiOrigin}/v1/auth/account-deletion-exchange`, {
+      method: "POST",
+      headers: { accept: "application/json", "content-type": "application/json" },
+      body: JSON.stringify({ accessToken: supabaseAccessToken, acceptedPolicies, loginProvider: "PHONE" }),
+      signal: requestTimeoutSignal(),
+    });
+    if (!exchanged.response.ok) {
+      if (exchanged.response.status === 428) {
+        return jsonResponse({ error: { code: "LEGAL_ACCEPTANCE_REQUIRED", message: "약관 버전이 변경되었습니다. 페이지를 새로고침해 주세요." } }, 428);
+      }
+      if (exchanged.response.status >= 500) return accountDeletionUnavailable();
+      return jsonResponse({ error: { code: "IDENTITY_VERIFICATION_FAILED", message: "본인 확인을 완료하지 못했습니다." } }, exchanged.response.status === 429 ? 429 : 401);
+    }
+    const sessionToken = typeof exchanged.body?.token === "string"
+      && /^[A-Za-z0-9_-]{43}$/.test(exchanged.body.token)
+      ? exchanged.body.token : null;
+    const expiresAt = typeof exchanged.body?.expiresAt === "string"
+      && Number.isFinite(Date.parse(exchanged.body.expiresAt))
+      ? exchanged.body.expiresAt : null;
+    if (!sessionToken || !expiresAt) return accountDeletionUnavailable();
+    return jsonResponse({ verified: true, sessionToken, expiresAt }, 201);
+  } catch {
+    return accountDeletionUnavailable();
+  } finally {
+    if (supabaseAccessToken) await revokeTransientSupabaseSession(runtime, supabaseAccessToken, externalFetch);
   }
 }
 

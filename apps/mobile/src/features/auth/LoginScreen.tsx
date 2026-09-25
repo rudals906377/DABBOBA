@@ -29,17 +29,16 @@ import { resolveAfterLoginPath } from "@/features/auth/login-navigation";
 import { ensureInternalCustomerSession } from "@/features/demo/demo-api";
 import {
   beginSocialLogin,
-  clearPendingEmailOtp,
+  clearPendingPhoneOtp,
   clearBrokerSession,
-  EMAIL_OTP_TTL_MS,
-  readPendingEmailOtp,
-  requestEmailOtp,
+  readPendingPhoneOtp,
+  requestPhoneOtp,
   resolveSupabaseBrokerConfig,
-  verifyEmailOtp,
+  verifyPhoneOtp,
   type DabbobaLoginProvider,
   type DabbobaSocialLoginProvider,
-  type PendingEmailOtp,
 } from "@/features/auth/supabase-broker";
+import { PHONE_OTP_TTL_MS, type PendingPhoneOtp } from "@/features/auth/phone-otp";
 import {
   resolveMobileRuntimeConfig,
   type MobilePlatform,
@@ -60,7 +59,7 @@ function openCurrentPolicy(kind: "terms" | "privacy") {
   void Linking.openURL(url).catch(() => router.push(localRoute));
 }
 
-type EmailStep = "ADDRESS" | "OTP";
+type PhoneStep = "NUMBER" | "OTP";
 type LoginMethod = DabbobaLoginProvider | "SESSION_RECOVERY";
 type InternalSessionState = "checking" | "unavailable" | "failed";
 
@@ -87,14 +86,14 @@ export function LoginScreen() {
   const providerRequestGeneration = useRef(0);
   const [busy, setBusy] = useState<LoginMethod | null>(null);
   const [message, setMessage] = useState("");
-  const [emailStep, setEmailStep] = useState<EmailStep>("ADDRESS");
-  const [emailInput, setEmailInput] = useState("");
-  const [verifiedEmail, setVerifiedEmail] = useState("");
+  const [phoneStep, setPhoneStep] = useState<PhoneStep>("NUMBER");
+  const [phoneInput, setPhoneInput] = useState("");
+  const [verifiedPhone, setVerifiedPhone] = useState("");
   const [otp, setOtp] = useState("");
   const [otpExpiresAt, setOtpExpiresAt] = useState<number | null>(null);
   const [resendAvailableAt, setResendAvailableAt] = useState<number | null>(null);
   const [clockMs, setClockMs] = useState(() => Date.now());
-  const [emailFocused, setEmailFocused] = useState(false);
+  const [phoneFocused, setPhoneFocused] = useState(false);
   const [otpFocused, setOtpFocused] = useState(false);
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [privacyAccepted, setPrivacyAccepted] = useState(false);
@@ -102,20 +101,20 @@ export function LoginScreen() {
     __DEV__ ? "checking" : "unavailable",
   );
 
-  const applyPendingEmailOtp = (pending: PendingEmailOtp) => {
-    setEmailInput(pending.email);
-    setVerifiedEmail(pending.email);
+  const applyPendingPhoneOtp = (pending: PendingPhoneOtp) => {
+    setPhoneInput(pending.phone);
+    setVerifiedPhone(pending.phone);
     setOtpExpiresAt(pending.expiresAt);
     setResendAvailableAt(pending.resendAvailableAt);
-    setEmailStep("OTP");
+    setPhoneStep("OTP");
     setOtp("");
     setClockMs(Date.now());
   };
 
   useEffect(() => {
     let active = true;
-    void readPendingEmailOtp().then((pending) => {
-      if (active && pending) applyPendingEmailOtp(pending);
+    void readPendingPhoneOtp().then((pending) => {
+      if (active && pending) applyPendingPhoneOtp(pending);
     }).catch(() => undefined);
     return () => {
       active = false;
@@ -123,11 +122,11 @@ export function LoginScreen() {
   }, []);
 
   useEffect(() => {
-    if (emailStep !== "OTP" || otpExpiresAt === null) return undefined;
+    if (phoneStep !== "OTP" || otpExpiresAt === null) return undefined;
     setClockMs(Date.now());
     const timer = setInterval(() => setClockMs(Date.now()), 1_000);
     return () => clearInterval(timer);
-  }, [emailStep, otpExpiresAt]);
+  }, [phoneStep, otpExpiresAt]);
 
   const refreshProviderAvailability = useCallback(async () => {
     const generation = ++providerRequestGeneration.current;
@@ -138,10 +137,11 @@ export function LoginScreen() {
       const availability = await fetchAuthProviderAvailability(runtime.apiBaseUrl);
       if (generation !== providerRequestGeneration.current) return;
       const ready = localConfigured && availability.brokerExchangeConfigured;
-      setEnabledProviders(availability.methods);
+      const supportedMethods = availability.methods.filter((provider) => provider !== "APPLE" || Platform.OS === "ios");
+      setEnabledProviders(supportedMethods);
       setBrokerReady(ready);
       setProviderAvailabilityMessage(
-        !ready || availability.methods.length === 0
+        !ready || supportedMethods.length === 0
           ? "사용 가능한 로그인 방식이 아직 설정되지 않았습니다."
           : "",
       );
@@ -183,13 +183,13 @@ export function LoginScreen() {
     };
   }, [db, returnPath, runtime.apiBaseUrl]);
 
-  const finish = async (supabaseAccessToken: string) => {
+  const finishPhone = async (supabaseAccessToken: string) => {
     if (!requiredPolicyVersions || !termsAccepted || !privacyAccepted) {
       throw new Error("필수 약관을 각각 확인하고 동의해 주세요.");
     }
     let exchanged = false;
     try {
-      await exchangeBrokerSession(runtime.apiBaseUrl, supabaseAccessToken, requiredPolicyVersions, "EMAIL", () => clearUserScopedLocalData(db));
+      await exchangeBrokerSession(runtime.apiBaseUrl, supabaseAccessToken, requiredPolicyVersions, "PHONE", () => clearUserScopedLocalData(db));
       exchanged = true;
     } finally {
       await clearBrokerSession();
@@ -215,11 +215,11 @@ export function LoginScreen() {
     }
   };
 
-  const sendOtp = async (address = emailInput) => {
-    setBusy("EMAIL");
+  const sendOtp = async (number = phoneInput) => {
+    setBusy("PHONE");
     setMessage("");
     try {
-      applyPendingEmailOtp(await requestEmailOtp(address));
+      applyPendingPhoneOtp(await requestPhoneOtp(number));
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "인증번호를 보내지 못했습니다.");
     } finally {
@@ -227,13 +227,13 @@ export function LoginScreen() {
     }
   };
 
-  const loginEmail = async () => {
-    setBusy("EMAIL");
+  const loginPhone = async () => {
+    setBusy("PHONE");
     setMessage("");
     try {
-      await finish(await verifyEmailOtp(verifiedEmail, otp));
+      await finishPhone(await verifyPhoneOtp(verifiedPhone, otp));
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "이메일 로그인을 완료하지 못했습니다.");
+      setMessage(error instanceof Error ? error.message : "휴대폰 로그인을 완료하지 못했습니다.");
     } finally {
       setBusy(null);
     }
@@ -265,17 +265,17 @@ export function LoginScreen() {
     || !termsAccepted
     || !privacyAccepted;
   const providerAvailable = (provider: DabbobaLoginProvider) => (
-    brokerReady && enabledProviders.includes(provider)
+    brokerReady && enabledProviders.includes(provider) && (provider !== "APPLE" || Platform.OS === "ios")
   );
   const hasSocialProvider = (["KAKAO", "NAVER", "GOOGLE", "APPLE"] as const).some(providerAvailable);
-  const emailProviderAvailable = providerAvailable("EMAIL");
-  const showLoginActions = hasSocialProvider || emailProviderAvailable || (__DEV__ && internalSessionState === "failed");
+  const phoneProviderAvailable = providerAvailable("PHONE");
+  const showLoginActions = hasSocialProvider || phoneProviderAvailable || (__DEV__ && internalSessionState === "failed");
   const otpExpired = otpExpiresAt !== null && clockMs >= otpExpiresAt;
   const resendSeconds = resendAvailableAt === null
     ? 0
     : Math.max(0, Math.ceil((resendAvailableAt - clockMs) / 1_000));
   const otpSeconds = otpExpiresAt === null
-    ? Math.floor(EMAIL_OTP_TTL_MS / 1_000)
+    ? Math.floor(PHONE_OTP_TTL_MS / 1_000)
     : Math.max(0, Math.ceil((otpExpiresAt - clockMs) / 1_000));
   const connectionRetryVisible = !checking
     && (providerCheckFailed || (configReady && (!requiredPolicyVersions || !brokerReady || enabledProviders.length === 0)));
@@ -364,7 +364,7 @@ export function LoginScreen() {
                 />
               ) : null}
 
-              {hasSocialProvider && emailProviderAvailable ? (
+              {hasSocialProvider && phoneProviderAvailable ? (
                 <View style={styles.dividerRow}>
                   <View style={styles.divider} />
                   <Text style={styles.dividerLabel}>또는</Text>
@@ -372,63 +372,63 @@ export function LoginScreen() {
                 </View>
               ) : null}
 
-              {emailProviderAvailable && (emailStep === "ADDRESS" ? (
+              {phoneProviderAvailable && (phoneStep === "NUMBER" ? (
               <>
-                <Text style={styles.fieldLabel}>이메일</Text>
-                <SeedInputShell focused={emailFocused}>
+                <Text style={styles.fieldLabel}>휴대폰 번호</Text>
+                <SeedInputShell focused={phoneFocused}>
                   <TextInput
-                    accessibilityLabel="이메일 주소"
-                    autoCapitalize="none"
-                    autoCorrect={false}
-                    keyboardType="email-address"
-                    value={emailInput}
-                    onChangeText={setEmailInput}
-                    onFocus={() => setEmailFocused(true)}
-                    onBlur={() => setEmailFocused(false)}
-                    placeholder="name@example.com"
+                    accessibilityLabel="휴대폰 번호"
+                    keyboardType="phone-pad"
+                    textContentType="telephoneNumber"
+                    value={phoneInput}
+                    onChangeText={setPhoneInput}
+                    onFocus={() => setPhoneFocused(true)}
+                    onBlur={() => setPhoneFocused(false)}
+                    placeholder="010-1234-5678"
                     placeholderTextColor={seed.color.foreground.muted}
-                    maxLength={254}
+                    maxLength={16}
                     style={styles.input}
                   />
                 </SeedInputShell>
                 <SeedActionButton
-                  label="이메일 인증번호 받기"
+                  label="문자 인증번호 받기"
                   variant="neutralSolid"
-                  loading={busy === "EMAIL"}
-                  disabled={unavailable || !providerAvailable("EMAIL")}
+                  loading={busy === "PHONE"}
+                  disabled={unavailable || !phoneProviderAvailable}
                   onPress={() => void sendOtp()}
-                  style={styles.emailButton}
+                  style={styles.otpButton}
                 />
               </>
             ) : (
               <>
-                <View style={styles.emailSummaryRow}>
-                  <View style={styles.emailOtpLabel}>
+                <View style={styles.phoneSummaryRow}>
+                  <View style={styles.phoneOtpLabel}>
                     <Text style={styles.fieldLabel}>인증번호</Text>
-                    <Text numberOfLines={1} style={styles.verifiedEmail}>{verifiedEmail}</Text>
+                    <Text numberOfLines={1} style={styles.verifiedPhone}>{verifiedPhone}</Text>
                   </View>
                   <Pressable
                     accessibilityRole="button"
-                    accessibilityLabel="이메일 주소 변경"
+                    accessibilityLabel="휴대폰 번호 변경"
                     accessibilityState={{ disabled: busy !== null }}
                     disabled={busy !== null}
                     onPress={() => {
-                      void clearPendingEmailOtp();
-                      setEmailStep("ADDRESS");
+                      void clearPendingPhoneOtp();
+                      setPhoneStep("NUMBER");
                       setOtp("");
                       setOtpExpiresAt(null);
                       setResendAvailableAt(null);
                       setMessage("");
                     }}
-                    style={({ pressed }) => [styles.changeEmailButton, pressed && styles.pressed, busy !== null && styles.disabled]}
+                    style={({ pressed }) => [styles.changePhoneButton, pressed && styles.pressed, busy !== null && styles.disabled]}
                   >
-                    <Text style={styles.changeEmail}>이메일 변경</Text>
+                    <Text style={styles.changePhone}>번호 변경</Text>
                   </Pressable>
                 </View>
                 <SeedInputShell focused={otpFocused}>
                   <TextInput
-                    accessibilityLabel="이메일 인증번호"
+                    accessibilityLabel="문자 인증번호"
                     keyboardType="number-pad"
+                    textContentType="oneTimeCode"
                     value={otp}
                     onChangeText={(value) => setOtp(value.replace(/\D/g, "").slice(0, 6))}
                     onFocus={() => setOtpFocused(true)}
@@ -449,20 +449,20 @@ export function LoginScreen() {
                   <Pressable
                     accessibilityRole="button"
                     accessibilityLabel={resendSeconds > 0 ? `인증번호 재전송, ${resendSeconds}초 후 가능` : "인증번호 재전송"}
-                    accessibilityState={{ disabled: unavailable || !providerAvailable("EMAIL") || resendSeconds > 0 }}
-                    disabled={unavailable || !providerAvailable("EMAIL") || resendSeconds > 0}
-                    onPress={() => void sendOtp(verifiedEmail)}
+                    accessibilityState={{ disabled: unavailable || !phoneProviderAvailable || resendSeconds > 0 }}
+                    disabled={unavailable || !phoneProviderAvailable || resendSeconds > 0}
+                    onPress={() => void sendOtp(verifiedPhone)}
                     style={({ pressed }) => [styles.resendButton, pressed && styles.pressed, (unavailable || resendSeconds > 0) && styles.disabled]}
                   >
                     <Text style={styles.resendLabel}>{resendSeconds > 0 ? `재전송 ${resendSeconds}초` : "인증번호 재전송"}</Text>
                   </Pressable>
                 </View>
                 <SeedActionButton
-                  label="이메일로 로그인"
-                  loading={busy === "EMAIL"}
-                  disabled={unavailable || !providerAvailable("EMAIL") || otpExpired || otp.length !== 6}
-                  onPress={() => void loginEmail()}
-                  style={styles.emailButton}
+                  label="휴대폰으로 로그인"
+                  loading={busy === "PHONE"}
+                  disabled={unavailable || !phoneProviderAvailable || otpExpired || otp.length !== 6}
+                  onPress={() => void loginPhone()}
+                  style={styles.otpButton}
                 />
               </>
               ))}
@@ -612,18 +612,18 @@ const styles = StyleSheet.create({
   dividerLabel: { color: colors.muted, fontSize: 11 },
   fieldLabel: { color: colors.ink, fontSize: 13, fontWeight: "700" },
   input: { flex: 1, minHeight: 48, color: colors.ink, fontSize: 15, paddingVertical: 0 },
-  emailButton: { marginTop: 2 },
+  otpButton: { marginTop: 2 },
   sessionRecovery: {
     marginTop: 12,
     paddingTop: 20,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: seed.color.stroke.neutral,
   },
-  emailSummaryRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  emailOtpLabel: { flex: 1, minWidth: 0, marginRight: 12 },
-  verifiedEmail: { color: colors.muted, ...seed.typography.finePrint, marginTop: 3 },
-  changeEmailButton: { minHeight: seed.size.touchTarget, paddingHorizontal: seed.spacing.x2, alignItems: "center", justifyContent: "center" },
-  changeEmail: { color: colors.greenInk, fontSize: 12, fontWeight: "700" },
+  phoneSummaryRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  phoneOtpLabel: { flex: 1, minWidth: 0, marginRight: 12 },
+  verifiedPhone: { color: colors.muted, ...seed.typography.finePrint, marginTop: 3 },
+  changePhoneButton: { minHeight: seed.size.touchTarget, paddingHorizontal: seed.spacing.x2, alignItems: "center", justifyContent: "center" },
+  changePhone: { color: colors.greenInk, fontSize: 12, fontWeight: "700" },
   otpStatusRow: { minHeight: seed.size.touchTarget, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: seed.spacing.x2 },
   otpTimer: { flex: 1, color: colors.muted, ...seed.typography.finePrint },
   otpTimerExpired: { color: seed.color.foreground.critical, fontWeight: "700" },

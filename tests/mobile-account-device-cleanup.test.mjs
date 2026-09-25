@@ -58,12 +58,12 @@ test('native logout waits for device cleanup before navigating and reports uncer
   assert.doesNotMatch(logout, /Promise\.all\(/);
 });
 
-test('email and both social callback paths clear previous-customer data before storing new tokens', () => {
+test('phone and both social callback paths clear previous-customer data before storing new tokens', () => {
   const authApi = readFileSync(new URL('../apps/mobile/src/features/auth/auth-api.ts', import.meta.url), 'utf8');
   const login = readFileSync(new URL('../apps/mobile/src/features/auth/LoginScreen.tsx', import.meta.url), 'utf8');
   const callback = readFileSync(new URL('../apps/mobile/app/auth/callback.tsx', import.meta.url), 'utf8');
   assert.match(authApi, /await commitAccountSessionAfterCleanup\(\{[\s\S]*?clearLocalData: clearPreviousCustomerData,[\s\S]*?writeAuthTokens: \(\) => writeAuthTokens\(/);
-  assert.match(login, /exchangeBrokerSession\([^;]*"EMAIL", \(\) => clearUserScopedLocalData\(db\)\)/);
+  assert.match(login, /exchangeBrokerSession\([^;]*"PHONE", \(\) => clearUserScopedLocalData\(db\)\)/);
   assert.match(login, /completeSocialCustomerLogin\([^;]*\(\) => clearUserScopedLocalData\(db\)\)/);
   assert.match(callback, /completeSocialCustomerLogin\([^;]*\(\) => clearUserScopedLocalData\(db\)\)/);
 });

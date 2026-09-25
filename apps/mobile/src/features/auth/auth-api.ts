@@ -39,7 +39,7 @@ export async function exchangeBrokerSession(
   apiBaseUrl: string,
   accessToken: string,
   acceptedPolicies: AcceptedPolicyVersions,
-  loginProvider: "KAKAO" | "NAVER" | "GOOGLE" | "APPLE" | "EMAIL",
+  loginProvider: "PHONE" | "KAKAO" | "NAVER" | "GOOGLE" | "APPLE",
   clearPreviousCustomerData: () => Promise<void>,
   appleRefreshToken?: string,
 ): Promise<void> {

@@ -28,7 +28,7 @@ function loadPureTypeScriptModule(relativePath) {
   return module.exports;
 }
 
-test("native login exposes Kakao, Naver, Google, Apple, and email OTP without phone login", () => {
+test("native login offers phone OTP and Kakao, Naver, Google, with Apple only on iOS", () => {
   const route = "apps/mobile/app/auth/login.tsx";
   assert.equal(existsSync(path.join(root, route)), true);
 
@@ -37,10 +37,13 @@ test("native login exposes Kakao, Naver, Google, Apple, and email OTP without ph
   assert.match(screen, /네이버로 계속하기/);
   assert.match(screen, /구글로 계속하기/);
   assert.match(screen, /애플로 계속하기/);
-  assert.match(screen, /이메일로 로그인/);
+  assert.match(screen, /휴대폰으로 로그인/);
+  assert.match(screen, /문자 인증번호 받기/);
   assert.match(screen, /logo-google/);
   assert.match(screen, /logo-apple/);
-  assert.doesNotMatch(screen, /휴대폰번호|문자 인증번호|loginPhone|requestPhoneOtp/);
+  assert.match(screen, /provider !== "APPLE" \|\| Platform\.OS === "ios"/);
+  assert.match(screen, /supportedMethods = availability\.methods\.filter/);
+  assert.doesNotMatch(screen, /이메일로 로그인/);
   assert.match(screen, /exchangeBrokerSession/);
   assert.match(screen, /resolveAfterLoginPath/);
   assert.match(screen, /enabledProviders/);
@@ -59,9 +62,9 @@ test("native login renders only server-enabled methods and offers retry when non
       `${provider} login button must be gated by server availability`,
     );
   }
-  assert.ok(/\{emailProviderAvailable && \(emailStep === "ADDRESS"/.test(screen), "email form must require availability");
-  assert.ok(/\{hasSocialProvider && emailProviderAvailable \? \(\s*<View style=\{styles\.dividerRow\}>/s.test(screen), "divider needs both method groups");
-  assert.ok(/showLoginActions = hasSocialProvider \|\| emailProviderAvailable/.test(screen), "empty method list must not leave blank actions");
+  assert.ok(/\{phoneProviderAvailable && \(phoneStep === "NUMBER"/.test(screen), "phone form must require availability");
+  assert.ok(/\{hasSocialProvider && phoneProviderAvailable \? \(\s*<View style=\{styles\.dividerRow\}>/s.test(screen), "divider needs both method groups");
+  assert.ok(/showLoginActions = hasSocialProvider \|\| phoneProviderAvailable/.test(screen), "empty method list must not leave blank actions");
   assert.ok(/connectionRetryVisible = !checking[\s\S]*!brokerReady[\s\S]*enabledProviders\.length === 0/.test(screen), "unavailable login needs retry");
 });
 
@@ -125,7 +128,7 @@ test("provider discovery times out and lets the login screen offer retry", async
         createDabbobaClient: () => ({
           GET(_path, options) {
             requestSignal = options?.signal;
-            if (respondNormally) return Promise.resolve({ data: { brokerExchangeConfigured: true, methods: ["EMAIL"] } });
+            if (respondNormally) return Promise.resolve({ data: { brokerExchangeConfigured: true, methods: ["PHONE"] } });
             return new Promise((_resolve, reject) => {
               requestSignal?.addEventListener("abort", () => reject(new Error("aborted")));
             });
@@ -151,7 +154,7 @@ test("provider discovery times out and lets the login screen offer retry", async
   clearedTimeout = false;
   assert.deepEqual(await module.exports.fetchAuthProviderAvailability("https://api.dabboba.net"), {
     brokerExchangeConfigured: true,
-    methods: ["EMAIL"],
+    methods: ["PHONE"],
   });
   assert.equal(requestSignal.aborted, false);
   assert.equal(clearedTimeout, true);
@@ -268,30 +271,24 @@ test("social callback state accepts one fresh matching code and rejects mismatch
   );
 });
 
-test("email OTP uses the broker email flow and never enables phone login", () => {
+test("phone OTP uses the broker SMS flow and survives an app restart", () => {
   const broker = read("apps/mobile/src/features/auth/supabase-broker.ts");
-  const supabaseConfig = read("supabase/config.toml");
-  const confirmationTemplate = read("supabase/templates/confirmation.html");
-  const magicLinkTemplate = read("supabase/templates/magic-link.html");
-  assert.match(broker, /normalizeEmailAddress/);
+  const phone = loadPureTypeScriptModule("apps/mobile/src/features/auth/phone-otp.ts");
+  assert.equal(phone.normalizeKoreanMobileNumber("010-1234-5678"), "+821012345678");
+  assert.equal(phone.normalizeKoreanMobileNumber("+821012345678"), "+821012345678");
+  assert.throws(() => phone.normalizeKoreanMobileNumber("0212345678"), /010/);
+  const now = Date.now();
+  const pending = { phone: "+821012345678", requestedAt: now, expiresAt: now + 600_000, resendAvailableAt: now + 60_000 };
+  assert.equal(phone.parsePendingPhoneOtp(JSON.stringify(pending), now + 5_000).phone, pending.phone);
+  assert.equal(phone.parsePendingPhoneOtp(JSON.stringify(pending), now + 600_000), null);
+  assert.equal(phone.parsePendingPhoneOtp(JSON.stringify({ ...pending, phone: "+821099999999" }), now + 5_000)?.phone, "+821099999999");
   assert.match(broker, /signInWithOtp/);
   assert.match(broker, /verifyOtp/);
   assert.match(broker, /shouldCreateUser:\s*true/);
-  assert.match(broker, /type:\s*"email"/);
-  assert.match(broker, /EMAIL_OTP_TTL_MS\s*=\s*10 \* 60_000/);
-  assert.match(broker, /EMAIL_OTP_RESEND_COOLDOWN_MS\s*=\s*60_000/);
-  assert.match(broker, /SecureStore\.setItemAsync\(PENDING_EMAIL_OTP_KEY/);
-  assert.match(broker, /readPendingEmailOtp/);
-  assert.doesNotMatch(broker, /type:\s*"sms"|channel:\s*"sms"|normalizeKoreanMobileNumber/);
-  assert.match(supabaseConfig, /\[auth\.email\][\s\S]*?otp_length\s*=\s*6/);
-  assert.match(supabaseConfig, /\[auth\.email\][\s\S]*?otp_expiry\s*=\s*600/);
-  assert.match(supabaseConfig, /\[auth\.email\][\s\S]*?max_frequency\s*=\s*"60s"/);
-  assert.match(supabaseConfig, /\[auth\.email\.template\.confirmation\]/);
-  assert.match(supabaseConfig, /\[auth\.email\.template\.magic_link\]/);
-  for (const template of [confirmationTemplate, magicLinkTemplate]) {
-    assert.match(template, /\{\{ \.Token \}\}/);
-    assert.doesNotMatch(template, /ConfirmationURL|TokenHash/);
-  }
+  assert.match(broker, /type:\s*"sms"/);
+  assert.match(broker, /PENDING_PHONE_OTP_KEY/);
+  assert.match(broker, /readPendingPhoneOtp/);
+  assert.match(broker, /clearPendingPhoneOtp/);
 });
 
 test("expired DABBOBA sessions rely on token-matched cleanup and become an explicit re-login state", () => {
