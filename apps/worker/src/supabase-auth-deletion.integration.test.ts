@@ -22,7 +22,8 @@ test("Auth deletion retries external failure without erasing identity, then fina
   assertDatabaseUrlForTier(migrationDatabaseUrl!, "DATABASE_MIGRATION_URL", "TEST");
   assertDatabaseUrlForTier(workerDatabaseUrl!, "DABBOBA_WORKER_TEST_DATABASE_URL", "TEST");
   const databaseName = new URL(migrationDatabaseUrl!).pathname.slice(1);
-  assert.match(databaseName, /^dabboba_(?:integration|auth_goal_\d{8})$/);
+  // CI provisions dabboba_ci; all allowed fixtures must still pass the TEST loopback guard above.
+  assert.match(databaseName, /^dabboba_(?:ci|integration|auth_goal_\d{8})$/);
   assert.equal(new URL(workerDatabaseUrl!).pathname.slice(1), databaseName);
 
   const fixturePool = createMigrationDatabasePool(migrationDatabaseUrl!, "auth-deletion-fixture");
