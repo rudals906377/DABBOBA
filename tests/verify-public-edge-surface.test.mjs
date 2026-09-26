@@ -145,10 +145,78 @@ test('mobile release smoke rejects a prelaunch catalog that exposes invented sto
   }), /Products expose inventory during PRELAUNCH/);
 });
 
+test('LIVE mobile release requires configured login and purchasable gacha and kuji catalogs', async () => {
+  const liveResponses = {
+    ...responses,
+    '/v1/public/config': { ...responses['/v1/public/config'], commerceMode: 'LIVE' },
+    '/v1/auth/providers': {
+      methods: ['PHONE', 'KAKAO', 'NAVER', 'GOOGLE', 'APPLE'],
+      brokerExchangeConfigured: true,
+    },
+  };
+  const product = (category) => ({
+    id: `${category}-1`, category, saleStatus: 'ON_SALE', purchasable: true,
+    price: 5500, availableQuantity: 80, imageUrl: `https://cdn.dabboba.net/${category}.jpg`,
+  });
+  const fetchLive = (overrides = {}) => {
+    const calls = [];
+    const fetchImpl = async (url, init) => {
+      const parsed = new URL(url);
+      calls.push({ path: parsed.pathname, search: parsed.search, method: init.method });
+      const body = overrides[`${parsed.pathname}${parsed.search}`]
+        ?? overrides[parsed.pathname]
+        ?? (parsed.pathname === '/v1/catalog/products'
+          ? { items: [product(parsed.searchParams.get('category'))], nextCursor: null }
+          : parsed.pathname === '/v1/catalog/ips'
+            ? { items: [], nextCursor: null }
+            : liveResponses[parsed.pathname]);
+      return new Response(JSON.stringify(body), { status: 200 });
+    };
+    return { calls, fetchImpl };
+  };
+
+  const valid = fetchLive();
+  const result = await publicApiSmoke.verifyMobilePublicApiSurface({
+    apiBaseUrl: 'https://api.dabboba.net', expectedCommerceMode: 'LIVE', fetchImpl: valid.fetchImpl,
+  });
+  assert.equal(result.commerceMode, 'LIVE');
+  assert.equal(valid.calls.length, 8);
+  assert.equal(valid.calls.every((call) => call.method === 'GET'), true);
+  assert.deepEqual(valid.calls.slice(-3).map(({ path, search }) => `${path}${search}`), [
+    '/v1/auth/providers',
+    '/v1/catalog/products?category=gacha&saleStatus=ON_SALE&excludeSoldOut=true&limit=1',
+    '/v1/catalog/products?category=kuji&saleStatus=ON_SALE&excludeSoldOut=true&limit=1',
+  ]);
+
+  const missingLogin = fetchLive({
+    '/v1/auth/providers': { methods: [], brokerExchangeConfigured: true },
+  });
+  await assert.rejects(publicApiSmoke.verifyMobilePublicApiSurface({
+    apiBaseUrl: 'https://api.dabboba.net', expectedCommerceMode: 'LIVE', fetchImpl: missingLogin.fetchImpl,
+  }), /LIVE customer login providers are incomplete/);
+
+  const unsellableGacha = fetchLive({
+    '/v1/catalog/products?category=gacha&saleStatus=ON_SALE&excludeSoldOut=true&limit=1': {
+      items: [{ ...product('gacha'), price: null, purchasable: false }], nextCursor: null,
+    },
+  });
+  await assert.rejects(publicApiSmoke.verifyMobilePublicApiSurface({
+    apiBaseUrl: 'https://api.dabboba.net', expectedCommerceMode: 'LIVE', fetchImpl: unsellableGacha.fetchImpl,
+  }), /LIVE gacha catalog has no purchasable product/);
+
+  const missingKuji = fetchLive({
+    '/v1/catalog/products?category=kuji&saleStatus=ON_SALE&excludeSoldOut=true&limit=1': { items: [], nextCursor: null },
+  });
+  await assert.rejects(publicApiSmoke.verifyMobilePublicApiSurface({
+    apiBaseUrl: 'https://api.dabboba.net', expectedCommerceMode: 'LIVE', fetchImpl: missingKuji.fetchImpl,
+  }), /LIVE kuji catalog has no purchasable product/);
+});
+
 test('the release workflow checks the customer API after configuration and before bundling', () => {
   const workflow = readFileSync(new URL('../.github/workflows/mobile-release-readiness.yml', import.meta.url), 'utf8');
   const configuration = workflow.indexOf('run: pnpm run release:mobile:check');
   const publicApi = workflow.indexOf('run: pnpm run release:mobile:api:verify');
+  const worker = workflow.indexOf('run: pnpm run release:edge:worker:verify');
   const bundle = workflow.indexOf('run: pnpm run release:mobile:bundle:check');
-  assert.ok(configuration >= 0 && publicApi > configuration && bundle > publicApi);
+  assert.ok(configuration >= 0 && publicApi > configuration && worker > publicApi && bundle > worker);
 });

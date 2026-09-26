@@ -58,10 +58,17 @@ test("runtime database role can operate app data but cannot administer the schem
        ORDER BY relation.relname`,
       [RUNTIME_DATABASE_ROLE],
     );
-    assert.equal(tableAccess.rows.filter((row) => row.can_select).length, 80);
-    assert.equal(tableAccess.rows.filter((row) => row.can_insert).length, 80);
-    assert.equal(tableAccess.rows.filter((row) => row.can_update).length, 45);
+    assert.equal(tableAccess.rows.filter((row) => row.can_select).length, 81);
+    assert.equal(tableAccess.rows.filter((row) => row.can_insert).length, 81);
+    assert.equal(tableAccess.rows.filter((row) => row.can_update).length, 46);
     assert.equal(tableAccess.rows.filter((row) => row.can_delete).length, 8);
+    assert.deepEqual(tableAccess.rows.find((row) => row.relname === "portone_refund_cancellation_attempts"), {
+      relname: "portone_refund_cancellation_attempts",
+      can_select: true,
+      can_insert: true,
+      can_update: true,
+      can_delete: false,
+    });
     assert.deepEqual(tableAccess.rows.find((row) => row.relname === "home_catalog_sections"), {
       relname: "home_catalog_sections",
       can_select: true,

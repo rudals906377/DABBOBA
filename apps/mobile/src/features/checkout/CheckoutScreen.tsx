@@ -60,6 +60,7 @@ import {
   type GachaCheckoutOrderIntent,
 } from "@/features/checkout/gacha-checkout-intent";
 import { DemoPaymentControls } from "@/features/demo/DemoPaymentControls";
+import { developmentPaymentCopy } from "@/features/demo/development-payment-copy";
 import {
   ensureInternalCustomerSession,
   sessionStillCurrent,
@@ -1021,7 +1022,7 @@ export function CheckoutScreen() {
       }
       const unit = product.category === "kuji" ? "장" : "개";
       const paymentLabel = paymentAvailability === "demo"
-        ? `${selectedPaymentLabel} · TEST_PG 결제 후 뽑기로 이동`
+        ? developmentPaymentCopy.confirmation(selectedPaymentLabel)
         : paymentAvailability === "live"
           ? `${selectedPaymentLabel} 결제 후 뽑기로 이동`
           : "포인트 전액 결제";
@@ -1235,10 +1236,7 @@ export function CheckoutScreen() {
               <Text style={styles.sectionTitle}>결제 수단</Text>
               {testPaymentsEnabled ? (
                 <SeedInlineGuidance
-                  paragraphs={[
-                    "TEST_PG · 실제 과금 없음",
-                    "아래 수단은 모두 동일한 테스트 결제로 처리하며 카드나 간편결제 정보는 입력하지 않아요.",
-                  ]}
+                  paragraphs={developmentPaymentCopy.guidance}
                 />
               ) : livePaymentsEnabled && paymentTotal > 0 ? (
                 <Text style={styles.sectionCaption}>
@@ -1259,8 +1257,8 @@ export function CheckoutScreen() {
                   const selected = paymentMethodsEnabled && selectedPaymentMethod === method.id;
                   const caption = testPaymentsEnabled
                     ? selected
-                      ? "선택됨 · 공통 TEST_PG"
-                      : "테스트용 선택 가능 · 공통 TEST_PG"
+                      ? developmentPaymentCopy.selectedCaption
+                      : developmentPaymentCopy.availableCaption
                     : livePaymentsEnabled
                       ? "KG이니시스 카드 결제"
                       : method.unavailableCaption;

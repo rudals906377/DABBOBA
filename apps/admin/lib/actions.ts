@@ -616,6 +616,63 @@ export async function updateRefundReview(form: FormData) {
   }, "환불 운영 검토 메모를 기록했습니다. PG 환불은 실행되지 않았습니다.");
 }
 
+export async function reconcilePortOneRefundCancellation(form: FormData) {
+  await mutate("refunds.reconcile", form, async (session, operationReason) => {
+    await adminApi(`/v1/admin/commerce/refund-reviews/${id(form, "paymentId")}/cancellation/reconcile`, {
+      method: "POST",
+      token: session.token,
+      reason: operationReason,
+      headers: mutationHeaders(form),
+      body: { reason: operationReason },
+    });
+  }, "포트원 결제 상태를 다시 조회했습니다. 새 취소 요청은 보내지 않았습니다.");
+}
+
+export async function reconcilePortOnePayment(form: FormData) {
+  await mutate("payments.reconcile", form, async (session, operationReason) => {
+    if (operationReason.length > 500) throw new Error("재조회 사유는 500자 이내로 입력하세요.");
+    await adminApi(`/v1/admin/commerce/payments/${id(form, "paymentId")}/reconcile`, {
+      method: "POST",
+      token: session.token,
+      reason: operationReason,
+      headers: mutationHeaders(form),
+      body: { reason: operationReason },
+    });
+  }, "포트원 결제 상태를 다시 확인했습니다. 결제 요청이나 취소 요청은 보내지 않았습니다.");
+}
+
+export async function requestPortOneFullDrawRefund(form: FormData) {
+  await mutate("refunds.cancel", form, async (session, operationReason) => {
+    if (operationReason.length > 500) throw new Error("환불 사유는 500자 이내로 입력하세요.");
+    if (String(form.get("confirmFullRefund") || "") !== "yes") {
+      throw new Error("결제 전액 환불 확인에 동의해 주세요.");
+    }
+    await adminApi(`/v1/admin/commerce/payments/${id(form, "paymentId")}/refund`, {
+      method: "POST",
+      token: session.token,
+      reason: operationReason,
+      headers: mutationHeaders(form),
+      body: { reason: operationReason },
+    });
+  }, "전액 환불 요청을 기록했습니다. 공급자 확인 전에는 최종 환불로 표시하지 않습니다.");
+}
+
+export async function requestPortOneLateRefund(form: FormData) {
+  await mutate("refunds.cancel", form, async (session, operationReason) => {
+    if (operationReason.length > 500) throw new Error("환불 사유는 500자 이내로 입력하세요.");
+    if (String(form.get("confirmFullRefund") || "") !== "yes") {
+      throw new Error("결제 전액 취소 요청을 확인해 주세요.");
+    }
+    await adminApi(`/v1/admin/commerce/refund-reviews/${id(form, "paymentId")}/cancel`, {
+      method: "POST",
+      token: session.token,
+      reason: operationReason,
+      headers: mutationHeaders(form),
+      body: { reason: operationReason },
+    });
+  }, "결제 지연 전액 환불 요청을 기록했습니다. 포트원 최종 상태를 대조해 주세요.");
+}
+
 export async function adjustInventory(form: FormData) {
   await mutate("inventory.adjust", form, async (session, operationReason) => {
     const deltaOnHand = signedInteger(form, "deltaOnHand");

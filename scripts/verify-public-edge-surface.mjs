@@ -13,6 +13,12 @@ const MOBILE_CATALOG_ROUTES = Object.freeze([
   ['/v1/catalog/products?category=gacha&limit=1', 'Products'],
   ['/v1/catalog/ips', 'IPs'],
 ]);
+const LIVE_MOBILE_ROUTES = Object.freeze([
+  ['/v1/auth/providers', 'Auth providers'],
+  ['/v1/catalog/products?category=gacha&saleStatus=ON_SALE&excludeSoldOut=true&limit=1', 'Gacha products'],
+  ['/v1/catalog/products?category=kuji&saleStatus=ON_SALE&excludeSoldOut=true&limit=1', 'Kuji products'],
+]);
+const REQUIRED_LIVE_LOGIN_METHODS = Object.freeze(['PHONE', 'KAKAO', 'NAVER', 'GOOGLE', 'APPLE']);
 const POLICY_VERSION = /^\d{4}-\d{2}-\d{2}$/;
 const SECTION_LAYOUTS = new Set(['gacha', 'kuji']);
 const SECTION_SOURCES = new Set(['MANUAL', 'IP', 'NEW', 'POPULAR']);
@@ -68,7 +74,32 @@ function assertBody(route, body, expectedCommerceMode) {
       && body.items.some(exposesPrelaunchInventory)) {
       throw new Error('Products expose inventory during PRELAUNCH.');
     }
+  } else if (route === 'Gacha products' || route === 'Kuji products') {
+    const category = route === 'Gacha products' ? 'gacha' : 'kuji';
+    if (!Array.isArray(body.items)
+      || !(body.nextCursor === null || typeof body.nextCursor === 'string')
+      || !body.items.some((product) => isLiveProduct(product, category))) {
+      throw new Error(`LIVE ${category} catalog has no purchasable product.`);
+    }
+  } else if (route === 'Auth providers') {
+    if (!Array.isArray(body.methods) || body.brokerExchangeConfigured !== true
+      || REQUIRED_LIVE_LOGIN_METHODS.some((method) => !body.methods.includes(method))) {
+      throw new Error('LIVE customer login providers are incomplete.');
+    }
   }
+}
+
+function isLiveProduct(product, category) {
+  return isRecord(product)
+    && product.category === category
+    && product.saleStatus === 'ON_SALE'
+    && product.purchasable === true
+    && Number.isSafeInteger(product.price)
+    && product.price > 0
+    && Number.isSafeInteger(product.availableQuantity)
+    && product.availableQuantity > 0
+    && typeof (product.storefrontImageUrl || product.imageUrl) === 'string'
+    && Boolean((product.storefrontImageUrl || product.imageUrl).trim());
 }
 
 function assertMobileApiBaseUrl(value) {
@@ -123,7 +154,10 @@ export async function verifyMobilePublicApiSurface({
   expectedCommerceMode = 'PRELAUNCH',
 } = {}) {
   const baseUrl = assertMobileApiBaseUrl(apiBaseUrl);
-  return verifyRoutes(baseUrl, [...ROUTES, ...MOBILE_CATALOG_ROUTES], fetchImpl, expectedCommerceMode);
+  const routes = expectedCommerceMode === 'LIVE'
+    ? [...ROUTES, ...MOBILE_CATALOG_ROUTES, ...LIVE_MOBILE_ROUTES]
+    : [...ROUTES, ...MOBILE_CATALOG_ROUTES];
+  return verifyRoutes(baseUrl, routes, fetchImpl, expectedCommerceMode);
 }
 
 export async function waitForPublicEdgeSurface({

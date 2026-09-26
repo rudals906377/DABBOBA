@@ -16,6 +16,7 @@ export {
   lockLinkedKujiRoomForOrder,
   promoteNextKujiRoomEntryLocked,
   releaseLockedKujiOrderRoom,
+  releaseRefundedKujiOrderRoom,
   startLockedKujiOrderDrawing,
   type KujiRoomEntryState,
   type LockedKujiOrderRoom,

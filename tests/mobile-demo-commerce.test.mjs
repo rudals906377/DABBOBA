@@ -221,7 +221,11 @@ test("demo payment uses authenticated real orders and the server-refreshed trans
 });
 
 test("checkout keeps durable gacha intent and navigates only after refreshed paid entitlements", async () => {
-  const checkout = await read("apps/mobile/src/features/checkout/CheckoutScreen.tsx");
+  const [checkout, developmentCopy, productionCopy] = await Promise.all([
+    read("apps/mobile/src/features/checkout/CheckoutScreen.tsx"),
+    read("apps/mobile/src/features/demo/development-payment-copy.ts"),
+    read("apps/mobile/src/features/demo/production-payment-copy.ts"),
+  ]);
   assert.match(checkout, /order\.status === "PENDING_PAYMENT"[\s\S]{0,100}?setDemoOrder\(order\)/);
   assert.match(checkout, /testPaymentsEnabled && demoOrder[\s\S]*?<DemoPaymentControls[\s\S]*?surface="internal-commerce"[\s\S]*?orderId=\{demoOrder\.id\}[\s\S]*?onOrderChanged=\{handleDemoOrderChanged\}/);
   assert.match(checkout, /recordPendingGachaCheckoutOrder\([\s\S]*?pendingGachaIntent,[\s\S]*?order/);
@@ -273,7 +277,8 @@ test("checkout keeps durable gacha intent and navigates only after refreshed pai
   );
   assert.match(checkout, /checkoutPaymentAvailability\([\s\S]*?paymentTotal,[\s\S]*?testPaymentsEnabled/);
   assert.doesNotMatch(checkout, /openGachaPreview|\/draw\/preview|text: "체험하기"/);
-  assert.match(checkout, /paymentAvailability === "demo"[\s\S]{0,180}?TEST_PG 결제 후 뽑기로 이동/);
+  assert.match(checkout, /paymentAvailability === "demo"[\s\S]{0,180}?developmentPaymentCopy\.confirmation\(selectedPaymentLabel\)/);
+  assert.match(developmentCopy, /TEST_PG 결제 후 뽑기로 이동/);
   assert.match(checkout, /useState<PaymentMethodId>\("card"\)/);
   assert.match(checkout, /accessibilityRole="radio"/);
   assert.match(checkout, /onPress=\{\(\) => setSelectedPaymentMethod\(method\.id\)\}/);
@@ -283,8 +288,10 @@ test("checkout keeps durable gacha intent and navigates only after refreshed pai
   ]) {
     assert.match(checkout, new RegExp(label));
   }
-  assert.match(checkout, /TEST_PG · 실제 과금 없음/);
-  assert.match(checkout, /아래 수단은 모두 동일한 테스트 결제로 처리하며 카드나 간편결제 정보는 입력하지 않아요/);
+  assert.match(checkout, /paragraphs=\{developmentPaymentCopy\.guidance\}/);
+  assert.match(developmentCopy, /TEST_PG · 실제 과금 없음/);
+  assert.match(developmentCopy, /아래 수단은 모두 동일한 테스트 결제로 처리하며 카드나 간편결제 정보는 입력하지 않아요/);
+  assert.doesNotMatch(productionCopy, /TEST_PG|\/v1\/demo\//);
   assert.doesNotMatch(checkout, /테스트 계정|데모 계정|계정 A|계정 B/);
 });
 

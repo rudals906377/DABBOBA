@@ -414,6 +414,9 @@ export async function registerCatalogRoutes(app: FastifyInstance, context: ApiCo
     const { limit, cursor } = pagination(query);
     const search = queryString(query.q);
     const category = query.category === undefined ? undefined : enumInput(query, "category", PRODUCT_CATEGORIES);
+    const saleStatus = query.saleStatus === undefined
+      ? undefined
+      : enumInput(query, "saleStatus", ["COMING_SOON", "ON_SALE"] as const);
     const ipId = query.ipId === undefined ? undefined : slugIdInput(query.ipId, "ipId");
     const characterId = query.characterId === undefined ? undefined : uuidInput(query.characterId, "characterId");
     const sort = enumInput(query, "sort", CATALOG_PRODUCT_SORTS, true) ?? "latest";
@@ -443,6 +446,7 @@ export async function registerCatalogRoutes(app: FastifyInstance, context: ApiCo
         OR array_to_string(i.aliases,' ') ILIKE $${values.length})`);
     }
     if (category) { values.push(category); filters.push(`p.category = $${values.length}`); }
+    if (saleStatus) { values.push(saleStatus); filters.push(`p.sale_status = $${values.length}`); }
     if (ipId) { values.push(ipId); filters.push(`p.ip_id = $${values.length}`); }
     if (characterId) { values.push(characterId); filters.push(`EXISTS (SELECT 1 FROM product_characters pc_filter WHERE pc_filter.product_id=p.id AND pc_filter.character_id=$${values.length})`); }
     if (excludeSoldOut) filters.push("COALESCE(s.on_hand-s.reserved,0) > 0");

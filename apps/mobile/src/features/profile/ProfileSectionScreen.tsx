@@ -721,9 +721,7 @@ function PointReturn({
   );
   const estimatedPointAmount = useMemo(
     () => selectedItems.reduce((total, item) => (
-      total + (typeof item.product.price === "number" && item.product.price > 0
-        ? Math.floor(item.product.price / 2)
-        : 0)
+      total + (item.pointReturnAmount ?? 0)
     ), 0),
     [selectedItems],
   );
@@ -790,7 +788,7 @@ function PointReturn({
           <Text style={styles.shippingPolicyAmount}>{selectedInventoryUnitIds.length}개</Text>
         </View>
         <View style={styles.shippingPolicyResultBlock}>
-          <Text style={styles.shippingPolicyCaption}>예상 환급 포인트 · 기준가의 50%</Text>
+          <Text style={styles.shippingPolicyCaption}>예상 환급 포인트 · 구매가의 50%</Text>
           <Text style={[styles.shippingPolicyResult, styles.shippingPolicyResultFree]}>{estimatedPointAmount.toLocaleString("ko-KR")}P</Text>
         </View>
       </View> : null}
@@ -807,11 +805,9 @@ function PointReturn({
             ipName={ipName}
             assetBaseUrl={assetBaseUrl}
             selected={selected.includes(item.id)}
-            caption={typeof item.product.price === "number" && item.product.price > 0
-              ? `예상 ${Math.floor(item.product.price / 2).toLocaleString("ko-KR")}P`
-              : "가격 공개 후 환급 가능"}
+            caption={`예상 ${item.pointReturnAmount!.toLocaleString("ko-KR")}P`}
             storageExpiresAt={item.storageExpiresAt}
-            selectable={commerceEnabled && typeof item.product.price === "number" && item.product.price > 0}
+            selectable={commerceEnabled}
             onSelect={() => toggle(item.id)}
           />
         );

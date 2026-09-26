@@ -153,6 +153,9 @@ test("Edge normalization maps only DABBOBA storage/database secrets after auth",
     DABBOBA_WORKER_APPLE_TOKEN_ENCRYPTION_KEY: Buffer.alloc(32, 4).toString("base64url"),
     DABBOBA_WORKER_APPLE_TOKEN_ENCRYPTION_KEY_VERSION: "1",
     DABBOBA_WORKER_EXPO_PUSH_ACCESS_TOKEN: "expo-server-access-token-for-tests",
+    PAYMENT_RECONCILIATION_PROVIDER: "PORTONE_API",
+    PORTONE_RECONCILIATION_API_BASE_URL: "https://api.example.test/functions/v1/dabboba-api",
+    PAYMENT_RECONCILIATION_WORKER_SECRET: "worker-requery-secret-for-tests",
   });
   const normalized = normalizeSupabaseEdgeWorkerEnvironment(source);
   assert.equal(normalized.NODE_ENV, "production");
@@ -165,6 +168,8 @@ test("Edge normalization maps only DABBOBA storage/database secrets after auth",
   assert.equal(normalized.APPLE_CLIENT_ID, "com.dabboba.app");
   assert.equal(normalized.APPLE_TOKEN_ENCRYPTION_KEY_VERSION, "1");
   assert.equal(normalized.EXPO_PUSH_ACCESS_TOKEN, "expo-server-access-token-for-tests");
+  assert.equal(normalized.PAYMENT_RECONCILIATION_PROVIDER, "PORTONE_API");
+  assert.equal(normalized.PAYMENT_RECONCILIATION_WORKER_SECRET, "worker-requery-secret-for-tests");
   assert.equal(normalized.DABBOBA_WORKER_INVOKE_SECRET, undefined);
   assert.equal(normalized.SUPABASE_DB_URL, undefined);
 

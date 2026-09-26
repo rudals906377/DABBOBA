@@ -85,8 +85,8 @@ export type PortOneCardPayment = {
     key: string;
     environment: PortOneChannelEnvironment;
     pgProvider: "INICIS_V2";
-  };
-  method: "CARD";
+  } | null;
+  method: "CARD" | null;
   amount: {
     total: number;
     paid: number;
@@ -316,7 +316,19 @@ function normalizePayment(
   const amount = raw ? record(raw.amount) : null;
   const channel = raw ? record(raw.channel) : null;
   const method = raw ? record(raw.method) : null;
-  if (!raw || !amount || !channel || !method) {
+  if (!raw || !amount) {
+    throw new PortOneV2Error("UNEXPECTED_RESPONSE", "PortOne returned an incomplete payment.");
+  }
+
+  const status = paymentStatus(raw.status);
+  const paid = nonNegativeSafeInteger(amount.paid, "payment.amount.paid");
+  const cancelled = nonNegativeSafeInteger(amount.cancelled, "payment.amount.cancelled");
+  // PortOne may omit channel/method while a payment is still READY. A
+  // PAY_PENDING payment may also omit method. Neither state can be treated as
+  // a paid card payment, and any positive payment amount still fails closed.
+  const awaitingPg = paid === 0 && cancelled === 0;
+  if ((!channel && !(status === "READY" && awaitingPg))
+    || (!method && !(["READY", "PAY_PENDING"].includes(status) && awaitingPg))) {
     throw new PortOneV2Error("UNEXPECTED_RESPONSE", "PortOne returned an incomplete payment.");
   }
 
@@ -325,10 +337,10 @@ function normalizePayment(
     || raw.version !== "V2"
     || raw.merchantId !== expected.merchantId
     || raw.storeId !== expected.storeId
-    || channel.key !== expected.channelKey
-    || channel.type !== expected.channelEnvironment
-    || channel.pgProvider !== "INICIS_V2"
-    || method.type !== "PaymentMethodCard"
+    || (channel && (channel.key !== expected.channelKey
+      || channel.type !== expected.channelEnvironment
+      || channel.pgProvider !== "INICIS_V2"))
+    || (method && method.type !== "PaymentMethodCard")
     || raw.currency !== "KRW"
     || amount.total !== expected.totalAmount
   );
@@ -344,20 +356,20 @@ function normalizePayment(
     paymentId: requiredString(raw.id, "payment.id"),
     portOneTransactionId: requiredString(raw.transactionId, "payment.transactionId"),
     pgTransactionId: optionalString(raw.pgTxId, "payment.pgTxId"),
-    status: paymentStatus(raw.status),
+    status,
     version: "V2",
     merchantId: requiredString(raw.merchantId, "payment.merchantId"),
     storeId: requiredString(raw.storeId, "payment.storeId"),
-    channel: {
+    channel: channel ? {
       key: requiredString(channel.key, "payment.channel.key"),
       environment: channel.type as PortOneChannelEnvironment,
       pgProvider: "INICIS_V2",
-    },
-    method: "CARD",
+    } : null,
+    method: method ? "CARD" : null,
     amount: {
       total: nonNegativeSafeInteger(amount.total, "payment.amount.total"),
-      paid: nonNegativeSafeInteger(amount.paid, "payment.amount.paid"),
-      cancelled: nonNegativeSafeInteger(amount.cancelled, "payment.amount.cancelled"),
+      paid,
+      cancelled,
     },
     currency: "KRW",
     requestedAt: timestamp(raw.requestedAt, "payment.requestedAt"),

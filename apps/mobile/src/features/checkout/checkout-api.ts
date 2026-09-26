@@ -119,6 +119,25 @@ export async function fetchCheckoutOrder(
   return result.data;
 }
 
+export async function fetchPaidKujiDrawRecovery(
+  apiBaseUrl: string,
+  accessToken: string,
+  orderId: string,
+): Promise<components["schemas"]["PaidKujiDrawRecovery"]> {
+  const client = authorizedCheckoutClient(apiBaseUrl, accessToken);
+  const result = await client.GET("/v1/orders/{orderId}/draw-recovery", {
+    params: { path: { orderId } },
+  });
+  if (!result.data) {
+    throw new CheckoutOrderApiError(
+      errorMessage(result.error, "결제한 쿠지 뽑기방을 확인하지 못했습니다."),
+      result.response.status,
+      apiErrorCode(result.error),
+    );
+  }
+  return result.data;
+}
+
 export async function confirmPortOnePayment(
   apiBaseUrl: string,
   accessToken: string,
@@ -168,6 +187,41 @@ export async function confirmPortOnePayment(
     providerStatus: body.providerStatus,
     outcome: body.outcome,
   };
+}
+
+export async function claimPortOnePaymentAttempt(
+  apiBaseUrl: string,
+  accessToken: string,
+  paymentId: string,
+): Promise<{ paymentId: string; orderId: string; startedAt: string }> {
+  const response = await fetch(
+    `${apiBaseUrl.replace(/\/$/, "")}/v1/payments/${encodeURIComponent(paymentId)}/attempt`,
+    {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${accessToken}`,
+        "content-type": "application/json",
+        "x-request-id": randomUUID(),
+      },
+      body: "{}",
+    },
+  );
+  const body = await response.json().catch(() => null) as {
+    accepted?: unknown; paymentId?: unknown; orderId?: unknown; startedAt?: unknown;
+    error?: { code?: unknown; message?: unknown };
+  } | null;
+  if (!response.ok || !body || body.accepted !== true) {
+    throw new CheckoutOrderApiError(
+      typeof body?.error?.message === "string" ? body.error.message : "결제 시도를 확인하지 못했습니다.",
+      response.status,
+      typeof body?.error?.code === "string" ? body.error.code : null,
+    );
+  }
+  if (typeof body.paymentId !== "string" || typeof body.orderId !== "string"
+    || typeof body.startedAt !== "string" || !Number.isFinite(Date.parse(body.startedAt))) {
+    throw new CheckoutOrderApiError("결제 시도 응답 형식을 확인하지 못했습니다.", 502);
+  }
+  return { paymentId: body.paymentId, orderId: body.orderId, startedAt: body.startedAt };
 }
 
 export async function createKujiCheckoutOrder(

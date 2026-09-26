@@ -18,6 +18,8 @@ export type PaymentObservation = {
   state: "UNKNOWN" | "PENDING" | "AUTHORIZED" | "PAID" | "FAILED" | "CANCELLED" | "REFUNDED";
   providerEventId?: string;
   observedAt: string;
+  /** API state after a verified provider requery and canonical event dispatch. */
+  canonicalStatus?: string;
 };
 
 export type PaymentReconciliationProvider = {
@@ -38,7 +40,7 @@ type PaymentRow = {
   reconciliation_attempts?: number | null;
 };
 
-type PaymentReconciliationOutcome = "UNKNOWN" | "MANUAL_REVIEW" | "ERROR";
+type PaymentReconciliationOutcome = "UNKNOWN" | "MANUAL_REVIEW" | "RECONCILED" | "ERROR";
 
 export function requiresManualPaymentAction(currentStatus: string, observedState: PaymentObservation["state"]): boolean {
   if (observedState === "UNKNOWN" || observedState === currentStatus) return false;
@@ -68,8 +70,19 @@ async function observePayment(
   payment: PaymentRecord,
   provider: PaymentReconciliationProvider,
   logger: Logger,
-): Promise<{ outcome: "unknown" | "manual_review"; observation: PaymentObservation }> {
+): Promise<{ outcome: "unknown" | "manual_review" | "reconciled"; observation: PaymentObservation }> {
   const observation = await provider.observe(payment);
+  if (observation.canonicalStatus && observation.canonicalStatus !== payment.status
+    && ["PAID", "FAILED", "CANCELLED", "REFUNDED"].includes(observation.canonicalStatus)) {
+    return { outcome: "reconciled", observation };
+  }
+  // A reservation can expire after the customer opened PortOne. The local
+  // cancellation is not evidence that PortOne took no money; keep querying
+  // until the provider confirms a terminal no-charge state or reports a charge.
+  if (payment.status === "CANCELLED" && observation.canonicalStatus === "CANCELLED"
+    && (observation.state === "FAILED" || observation.state === "CANCELLED")) {
+    return { outcome: "reconciled", observation };
+  }
   if (!requiresManualPaymentAction(payment.status, observation.state)) {
     logger.warn(
       { paymentId: payment.id, orderId: payment.orderId, provider: payment.provider, status: payment.status },
@@ -89,6 +102,22 @@ async function observePayment(
     "Provider observation differs from the ledger; state was not mutated without a verified webhook",
   );
   return { outcome: "manual_review", observation };
+}
+
+async function verifyCanonicalPaymentTransition(
+  pool: DatabasePool,
+  payment: PaymentRecord,
+  observation: PaymentObservation,
+  logger: Logger,
+): Promise<void> {
+  const current = await pool.query<{ status: string }>("SELECT status FROM payments WHERE id=$1", [payment.id]);
+  if (current.rows[0]?.status !== observation.canonicalStatus) {
+    throw new Error("Canonical payment status did not match the verified API response");
+  }
+  logger.info(
+    { paymentId: payment.id, orderId: payment.orderId, before: payment.status, after: observation.canonicalStatus },
+    "API reconciled the payment from a verified PortOne provider read",
+  );
 }
 
 export function paymentReconciliationDelayMs(attempt: number, baseMinutes: number): number {
@@ -141,7 +170,7 @@ export async function reconcilePayment(
   paymentId: string,
   provider: PaymentReconciliationProvider,
   logger: Logger,
-): Promise<"missing" | "unknown" | "manual_review"> {
+): Promise<"missing" | "unknown" | "manual_review" | "reconciled"> {
   const result = await pool.query<PaymentRow>(
     `SELECT id,order_id,provider,provider_payment_id,status,amount,currency,version,updated_at
        FROM payments
@@ -149,7 +178,12 @@ export async function reconcilePayment(
     [paymentId],
   );
   if (!result.rowCount) return "missing";
-  return (await observePayment(mapPayment(result.rows[0]!), provider, logger)).outcome;
+  const payment = mapPayment(result.rows[0]!);
+  const observed = await observePayment(payment, provider, logger);
+  if (observed.outcome === "reconciled") {
+    await verifyCanonicalPaymentTransition(pool, payment, observed.observation, logger);
+  }
+  return observed.outcome;
 }
 
 export async function reconcilePaymentBatch(
@@ -159,8 +193,8 @@ export async function reconcilePaymentBatch(
   logger: Logger,
   now = new Date(),
   shouldContinue: () => boolean = () => true,
-): Promise<{ examined: number; unknown: number; manualReview: number; failed: number }> {
-  if (!shouldContinue()) return { examined: 0, unknown: 0, manualReview: 0, failed: 0 };
+): Promise<{ examined: number; unknown: number; manualReview: number; reconciled: number; failed: number }> {
+  if (!shouldContinue()) return { examined: 0, unknown: 0, manualReview: 0, reconciled: 0, failed: 0 };
   const staleBefore = new Date(now.getTime() - options.staleMinutes * 60_000);
   const rows = await pool.query<PaymentRow>(
     `SELECT p.id,p.order_id,p.provider,p.provider_payment_id,p.status,p.amount,p.currency,
@@ -168,8 +202,15 @@ export async function reconcilePaymentBatch(
             r.attempts AS reconciliation_attempts
        FROM payments p
        LEFT JOIN worker_payment_reconciliations r ON r.payment_id=p.id
-      WHERE p.status IN ('PENDING','AUTHORIZED','REFUND_REVIEW')
+      WHERE (
+          p.status IN ('PENDING','AUTHORIZED','REFUND_REVIEW')
+          OR (p.status='CANCELLED' AND p.provider='PORTONE_V2_INICIS'
+              AND p.pg_attempt_started_at IS NOT NULL)
+        )
         AND p.updated_at <= $1
+        AND (p.status <> 'CANCELLED' OR r.payment_id IS NULL
+          OR r.payment_version IS DISTINCT FROM p.version
+          OR r.last_outcome IS DISTINCT FROM 'RECONCILED')
         AND (
           r.payment_id IS NULL
           OR r.payment_version <> p.version
@@ -185,7 +226,7 @@ export async function reconcilePaymentBatch(
     [staleBefore, now, options.batchSize],
   );
 
-  const summary = { examined: 0, unknown: 0, manualReview: 0, failed: 0 };
+  const summary = { examined: 0, unknown: 0, manualReview: 0, reconciled: 0, failed: 0 };
   for (const row of rows.rows) {
     if (!shouldContinue()) break;
     summary.examined += 1;
@@ -199,18 +240,22 @@ export async function reconcilePaymentBatch(
     );
     try {
       const result = await observePayment(payment, provider, logger);
+      if (result.outcome === "reconciled") {
+        await verifyCanonicalPaymentTransition(pool, payment, result.observation, logger);
+      }
       if (!shouldContinue()) throw new Error("Worker run deadline reached after payment observation");
       await recordPaymentReconciliation(pool, {
         paymentId: row.id,
         paymentVersion: row.version,
         attempt,
-        outcome: result.outcome === "unknown" ? "UNKNOWN" : "MANUAL_REVIEW",
+        outcome: result.outcome === "unknown" ? "UNKNOWN" : result.outcome === "reconciled" ? "RECONCILED" : "MANUAL_REVIEW",
         observedState: result.observation.state,
         errorMessage: null,
         attemptedAt: now,
         nextAttemptAt,
       });
       if (result.outcome === "unknown") summary.unknown += 1;
+      else if (result.outcome === "reconciled") summary.reconciled += 1;
       else summary.manualReview += 1;
     } catch (error) {
       if (!shouldContinue()) throw error;

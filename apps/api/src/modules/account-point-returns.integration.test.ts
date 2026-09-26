@@ -68,7 +68,7 @@ test(
        VALUES
          ($1,$2,$7,'figure','홀수 기준가 경품',9999,true),
          ($3,$4,$7,'figure','짝수 기준가 경품',2000,true),
-         ($5,$6,$7,'figure','0P 환급 경품',1,true),
+         ($5,$6,$7,'figure','0원 등록 경품',0,true),
          ($8,$9,$7,'gacha','환급 테스트 가챠',1000,false),
          ($10,$11,$7,'kuji','환급 테스트 쿠지',1000,false)`,
       [
@@ -107,7 +107,7 @@ test(
       for (const [prizeId, prizeName, prizeSku] of [
         [prizeOddId, "홀수 기준가 경품", `POINT-ODD-${suffix.toUpperCase()}`],
         [prizeEvenId, "짝수 기준가 경품", `POINT-EVEN-${suffix.toUpperCase()}`],
-        [prizeZeroId, "0P 환급 경품", `POINT-ZERO-${suffix.toUpperCase()}`],
+        [prizeZeroId, "0원 등록 경품", `POINT-ZERO-${suffix.toUpperCase()}`],
       ] as const) {
         const entry = await pool.query<{ id: string }>(
           `INSERT INTO draw_pool_entries(
@@ -145,25 +145,28 @@ test(
       sourceType: "GACHA";
       prizeProductId?: string;
       status?: InventoryStatus;
+      unitPrice?: number;
     }) => {
       const definition = drawDefinition.get(input.sourceType)!;
       const prizeProductId = input.prizeProductId ?? prizeEvenId;
+      const unitPrice = input.unitPrice ?? 1000;
       const order = await pool.query<{ id: string }>(
         `INSERT INTO orders(user_id,status,subtotal,total,paid_at)
-         VALUES($1,'PAID',1000,1000,now()) RETURNING id`,
-        [input.drawUserId],
+         VALUES($1,'PAID',$2,$2,now()) RETURNING id`,
+        [input.drawUserId, unitPrice],
       );
       const line = await pool.query<{ id: string }>(
         `INSERT INTO order_lines(
            order_id,product_id,product_name_snapshot,category_snapshot,probability_version_id,
            unit_price,quantity,line_total
-         ) VALUES($1,$2,$3,$4,$5,1000,1,1000) RETURNING id`,
+         ) VALUES($1,$2,$3,$4,$5,$6,1,$6) RETURNING id`,
         [
           order.rows[0]!.id,
           definition.productId,
           `환급 테스트 ${input.sourceType === "GACHA" ? "가챠" : "쿠지"}`,
           input.sourceType === "GACHA" ? "gacha" : "kuji",
           definition.versionId,
+          unitPrice,
         ],
       );
       const entitlement = await pool.query<{ id: string }>(
@@ -240,6 +243,21 @@ test(
       sourceType: "GACHA",
       prizeProductId: prizeEvenId,
     });
+    const inventoryBeforeReturn = await app.inject({
+      method: "GET",
+      url: "/v1/account/inventory?limit=50",
+      headers: { authorization: `Bearer ${owner.token}` },
+    });
+    assert.equal(inventoryBeforeReturn.statusCode, 200, inventoryBeforeReturn.body);
+    const storedDraws = (inventoryBeforeReturn.json() as {
+      items: Array<{ id: string; pointReturnEligible: boolean; pointReturnAmount?: number; product: { price: number } }>;
+    }).items;
+    for (const inventoryId of [oddInventoryId, evenInventoryId]) {
+      const storedDraw = storedDraws.find((item) => item.id === inventoryId);
+      assert.equal(storedDraw?.pointReturnEligible, true);
+      assert.equal(storedDraw.pointReturnAmount, 500);
+    }
+    assert.equal(storedDraws.find((item) => item.id === oddInventoryId)?.product.price, 9_999);
     const inventoryUnitIds = [oddInventoryId, evenInventoryId].sort((left, right) => left.localeCompare(right, "en-US"));
     const idempotencyKey = `point-return-success-${randomUUID()}`;
     const response = await returnPoints(owner.token, [oddInventoryId, evenInventoryId], idempotencyKey);
@@ -252,8 +270,8 @@ test(
       returnedAt: string;
     };
     assert.deepEqual(result.inventoryUnitIds, inventoryUnitIds);
-    assert.equal(result.totalPointAmount, 5_999);
-    assert.equal(result.balance, 5_999);
+    assert.equal(result.totalPointAmount, 1_000);
+    assert.equal(result.balance, 1_000);
     assert.equal(Number.isNaN(Date.parse(result.returnedAt)), false);
 
     const inventory = await pool.query<{ id: string; status: string }>(
@@ -265,7 +283,7 @@ test(
       "SELECT user_id,total_point_amount FROM inventory_point_returns WHERE id=$1",
       [result.id],
     );
-    assert.deepEqual(header.rows, [{ user_id: owner.actor.userId, total_point_amount: 5_999 }]);
+    assert.deepEqual(header.rows, [{ user_id: owner.actor.userId, total_point_amount: 1_000 }]);
     const items = await pool.query<{
       inventory_unit_id: string;
       reference_amount: number;
@@ -277,7 +295,7 @@ test(
     );
     assert.deepEqual(
       items.rows.map((item) => [item.inventory_unit_id, item.reference_amount, item.point_amount]),
-      inventoryUnitIds.map((id) => id === oddInventoryId ? [id, 9_999, 4_999] : [id, 2_000, 1_000]),
+      inventoryUnitIds.map((id) => [id, 1_000, 500]),
     );
     const ledger = await pool.query<{ entry_type: string; amount: number; reference_type: string; reference_id: string }>(
       `SELECT entry_type,amount,reference_type,reference_id FROM point_ledger_entries
@@ -286,7 +304,7 @@ test(
     );
     assert.deepEqual(ledger.rows, [{
       entry_type: "EARN",
-      amount: 5_999,
+      amount: 1_000,
       reference_type: "INVENTORY_POINT_RETURN",
       reference_id: result.id,
     }]);
@@ -294,7 +312,7 @@ test(
       "SELECT balance FROM point_accounts WHERE user_id=$1",
       [owner.actor.userId],
     );
-    assert.deepEqual(account.rows, [{ balance: 5_999 }]);
+    assert.deepEqual(account.rows, [{ balance: 1_000 }]);
     const outbox = await pool.query<{ count: number }>(
       `SELECT count(*)::integer AS count FROM outbox_events
        WHERE aggregate_type='INVENTORY_POINT_RETURN' AND aggregate_id=$1 AND event_type='inventory.point_returned'`,
@@ -384,6 +402,7 @@ test(
       drawUserId: owner.actor.userId,
       sourceType: "GACHA",
       prizeProductId: prizeZeroId,
+      unitPrice: 1,
     });
     const zeroPointBatch = await returnPoints(owner.token, [validRollbackInventoryId, zeroInventoryId]);
     assert.equal(zeroPointBatch.statusCode, 409, zeroPointBatch.body);
@@ -394,13 +413,34 @@ test(
     );
     assert.deepEqual(rolledBackInventory.rows.map((row) => row.status), ["OWNED", "OWNED"]);
 
+    const zeroPricedPrizeInventoryId = await addDrawInventory({
+      drawUserId: owner.actor.userId,
+      sourceType: "GACHA",
+      prizeProductId: prizeZeroId,
+    });
+    const zeroPricedPrizeInventory = await app.inject({
+      method: "GET",
+      url: "/v1/account/inventory?limit=50",
+      headers: { authorization: `Bearer ${owner.token}` },
+    });
+    assert.equal(zeroPricedPrizeInventory.statusCode, 200, zeroPricedPrizeInventory.body);
+    const zeroPricedPrizeItem = (zeroPricedPrizeInventory.json() as {
+      items: Array<{ id: string; pointReturnEligible: boolean; pointReturnAmount?: number; product: { price: number } }>;
+    }).items.find((item) => item.id === zeroPricedPrizeInventoryId);
+    assert.equal(zeroPricedPrizeItem?.product.price, 0);
+    assert.equal(zeroPricedPrizeItem?.pointReturnEligible, true);
+    assert.equal(zeroPricedPrizeItem?.pointReturnAmount, 500);
+    const zeroPricedPrizeReturn = await returnPoints(owner.token, [zeroPricedPrizeInventoryId]);
+    assert.equal(zeroPricedPrizeReturn.statusCode, 201, zeroPricedPrizeReturn.body);
+    assert.equal((zeroPricedPrizeReturn.json() as { totalPointAmount: number }).totalPointAmount, 500);
+
     const overflowInventoryId = await addDrawInventory({
       drawUserId: overflowOwner.actor.userId,
       sourceType: "GACHA",
       prizeProductId: prizeEvenId,
     });
     await pool.query(
-      "INSERT INTO point_accounts(user_id,balance) VALUES($1,2147483147)",
+      "INSERT INTO point_accounts(user_id,balance) VALUES($1,2147483148)",
       [overflowOwner.actor.userId],
     );
     const balanceOverflow = await returnPoints(overflowOwner.token, [overflowInventoryId]);
@@ -414,6 +454,6 @@ test(
        WHERE inventory.id=$1`,
       [overflowInventoryId],
     );
-    assert.deepEqual(overflowState.rows, [{ status: "OWNED", balance: 2_147_483_147, return_count: 0 }]);
+    assert.deepEqual(overflowState.rows, [{ status: "OWNED", balance: 2_147_483_148, return_count: 0 }]);
   },
 );

@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
 import {
-  createDatabasePool,
   createMigrationDatabasePool,
+  type DatabasePool,
   WORKER_DATABASE_ROLE,
 } from "@dabboba/db";
 import { InicisInquiryPaymentProvider } from "./inicis-inquiry.js";
@@ -11,21 +11,41 @@ import type { Logger } from "./logger.js";
 import { reconcilePaymentBatch } from "./payments.js";
 
 const migrationDatabaseUrl = process.env.DATABASE_MIGRATION_URL;
-const workerDatabaseUrl = process.env.DABBOBA_WORKER_TEST_DATABASE_URL;
+
+async function workerRoleSession(databaseUrl: string, applicationName: string) {
+  // The production worker role is deliberately NOLOGIN. Exercise its actual
+  // privileges through SET ROLE instead of making it login-capable for tests.
+  const pool = createMigrationDatabasePool(databaseUrl, applicationName);
+  const client = await pool.connect();
+  try {
+    await client.query(`SET ROLE ${WORKER_DATABASE_ROLE}`);
+  } catch (error) {
+    client.release();
+    await pool.end();
+    throw error;
+  }
+  return {
+    workerPool: { query(sql: string, values?: unknown[]) {
+      return client.query(sql, values);
+    } } as unknown as DatabasePool,
+    async close() {
+      await client.query("RESET ROLE").catch(() => undefined);
+      client.release();
+      await pool.end();
+    },
+  };
+}
 
 test("payment reconciliation scheduling rotates a batch-full persistent set", {
-  skip: !migrationDatabaseUrl || !workerDatabaseUrl,
+  skip: !migrationDatabaseUrl,
   timeout: 30_000,
 }, async (t) => {
   const fixturePool = createMigrationDatabasePool(
     migrationDatabaseUrl!,
     "dabboba-worker-payment-fixture-integration",
   );
-  const workerPool = createDatabasePool(
-    workerDatabaseUrl!,
-    "dabboba-worker-payment-integration",
-    { expectedRole: WORKER_DATABASE_ROLE },
-  );
+  const workerSession = await workerRoleSession(migrationDatabaseUrl!, "dabboba-worker-payment-integration");
+  const workerPool = workerSession.workerPool;
   const userId = randomUUID();
   const orderIds = [randomUUID(), randomUUID(), randomUUID(), randomUUID()];
   const paymentIds = [randomUUID(), randomUUID(), randomUUID(), randomUUID()];
@@ -37,7 +57,7 @@ test("payment reconciliation scheduling rotates a batch-full persistent set", {
     await fixturePool.query("DELETE FROM payments WHERE id=ANY($1::uuid[])", [paymentIds]).catch(() => undefined);
     await fixturePool.query("DELETE FROM orders WHERE id=ANY($1::uuid[])", [orderIds]).catch(() => undefined);
     await fixturePool.query("DELETE FROM users WHERE id=$1", [userId]).catch(() => undefined);
-    await Promise.all([fixturePool.end(), workerPool.end()]);
+    await Promise.all([fixturePool.end(), workerSession.close()]);
   });
 
   const identity = await workerPool.query<{ current_user: string }>("SELECT current_user");
@@ -78,7 +98,7 @@ test("payment reconciliation scheduling rotates a batch-full persistent set", {
     logger,
     now,
   );
-  assert.deepEqual(first, { examined: 2, unknown: 2, manualReview: 0, failed: 0 });
+  assert.deepEqual(first, { examined: 2, unknown: 2, manualReview: 0, reconciled: 0, failed: 0 });
 
   const second = await reconcilePaymentBatch(
     workerPool,
@@ -87,7 +107,7 @@ test("payment reconciliation scheduling rotates a batch-full persistent set", {
     logger,
     now,
   );
-  assert.deepEqual(second, { examined: 2, unknown: 2, manualReview: 0, failed: 0 });
+  assert.deepEqual(second, { examined: 2, unknown: 2, manualReview: 0, reconciled: 0, failed: 0 });
   assert.deepEqual(new Set(observed), new Set(paymentIds));
 
   const schedules = await fixturePool.query<{
@@ -120,7 +140,7 @@ test("payment reconciliation scheduling rotates a batch-full persistent set", {
     logger,
     now,
   );
-  assert.deepEqual(afterVersionChange, { examined: 1, unknown: 1, manualReview: 0, failed: 0 });
+  assert.deepEqual(afterVersionChange, { examined: 1, unknown: 1, manualReview: 0, reconciled: 0, failed: 0 });
   assert.equal(observed.at(-1), resetPaymentId);
   const resetSchedule = await fixturePool.query<{ payment_version: number; attempts: number }>(
     `SELECT payment_version,attempts
@@ -132,18 +152,15 @@ test("payment reconciliation scheduling rotates a batch-full persistent set", {
 });
 
 test("read-only KG INICIS observations create review/error records without mutating payment or order ledgers", {
-  skip: !migrationDatabaseUrl || !workerDatabaseUrl,
+  skip: !migrationDatabaseUrl,
   timeout: 30_000,
 }, async (t) => {
   const fixturePool = createMigrationDatabasePool(
     migrationDatabaseUrl!,
     "dabboba-worker-inicis-fixture-integration",
   );
-  const workerPool = createDatabasePool(
-    workerDatabaseUrl!,
-    "dabboba-worker-inicis-integration",
-    { expectedRole: WORKER_DATABASE_ROLE },
-  );
+  const workerSession = await workerRoleSession(migrationDatabaseUrl!, "dabboba-worker-inicis-integration");
+  const workerPool = workerSession.workerPool;
   const userId = randomUUID();
   const orderIds = [randomUUID(), randomUUID()];
   const paymentIds = [randomUUID(), randomUUID()] as const;
@@ -156,7 +173,7 @@ test("read-only KG INICIS observations create review/error records without mutat
     await fixturePool.query("DELETE FROM payments WHERE id=ANY($1::uuid[])", [paymentIds]).catch(() => undefined);
     await fixturePool.query("DELETE FROM orders WHERE id=ANY($1::uuid[])", [orderIds]).catch(() => undefined);
     await fixturePool.query("DELETE FROM users WHERE id=$1", [userId]).catch(() => undefined);
-    await Promise.all([fixturePool.end(), workerPool.end()]);
+    await Promise.all([fixturePool.end(), workerSession.close()]);
   });
 
   const identity = await workerPool.query<{ current_user: string }>("SELECT current_user");
@@ -217,7 +234,7 @@ test("read-only KG INICIS observations create review/error records without mutat
     logger,
     now,
   );
-  assert.deepEqual(approved, { examined: 1, unknown: 0, manualReview: 1, failed: 0 });
+  assert.deepEqual(approved, { examined: 1, unknown: 0, manualReview: 1, reconciled: 0, failed: 0 });
 
   const mismatch = await reconcilePaymentBatch(
     workerPool,
@@ -226,7 +243,7 @@ test("read-only KG INICIS observations create review/error records without mutat
     logger,
     now,
   );
-  assert.deepEqual(mismatch, { examined: 1, unknown: 0, manualReview: 0, failed: 1 });
+  assert.deepEqual(mismatch, { examined: 1, unknown: 0, manualReview: 0, reconciled: 0, failed: 1 });
   assert.deepEqual(requestedTids, tids);
 
   const reconciliation = await fixturePool.query<{
@@ -268,4 +285,125 @@ test("read-only KG INICIS observations create review/error records without mutat
   );
   assert.equal(ledgers.rows.every((row) => row.payment_status === "PENDING"), true);
   assert.equal(ledgers.rows.every((row) => row.order_status === "PENDING_PAYMENT"), true);
+});
+
+test("restricted worker records a verified API transition but cannot directly update payments", {
+  skip: !migrationDatabaseUrl,
+  timeout: 30_000,
+}, async (t) => {
+  const pool = createMigrationDatabasePool(migrationDatabaseUrl!, "dabboba-worker-portone-requery-fixture");
+  const client = await pool.connect();
+  const userId = randomUUID();
+  const orderId = randomUUID();
+  const paymentId = randomUUID();
+  t.after(async () => {
+    await client.query("RESET ROLE").catch(() => undefined);
+    client.release();
+    await pool.query("DELETE FROM worker_payment_reconciliations WHERE payment_id=$1", [paymentId]).catch(() => undefined);
+    await pool.query("DELETE FROM payments WHERE id=$1", [paymentId]).catch(() => undefined);
+    await pool.query("DELETE FROM orders WHERE id=$1", [orderId]).catch(() => undefined);
+    await pool.query("DELETE FROM users WHERE id=$1", [userId]).catch(() => undefined);
+    await pool.end();
+  });
+  await pool.query("INSERT INTO users(id,email,nickname) VALUES($1,$2,$3)", [
+    userId, `portone-worker-${userId}@example.test`, `재조회${userId.slice(0, 8)}`,
+  ]);
+  await pool.query("INSERT INTO orders(id,user_id,subtotal,total,created_at,updated_at) VALUES($1,$2,10000,10000,'2000-01-01','2000-01-01')", [orderId, userId]);
+  await pool.query("INSERT INTO payments(id,order_id,provider,amount,created_at,updated_at) VALUES($1,$2,'PORTONE_V2_INICIS',10000,'2000-01-01','2000-01-01')", [paymentId, orderId]);
+  await client.query("SET ROLE dabboba_worker");
+  const role = await client.query<{ current_user: string }>("SELECT current_user");
+  assert.equal(role.rows[0]?.current_user, WORKER_DATABASE_ROLE);
+  await assert.rejects(client.query("UPDATE payments SET status='PAID' WHERE id=$1", [paymentId]), /worker cannot perform this payment transition/);
+  const allowed = await client.query<{ status: string }>(
+    "UPDATE payments SET status='CANCELLED',version=version+1 WHERE id=$1 AND status='PENDING' RETURNING status", [paymentId],
+  );
+  assert.equal(allowed.rows[0]?.status, "CANCELLED");
+  await pool.query("UPDATE payments SET status='PENDING',version=version+1 WHERE id=$1", [paymentId]);
+  const restrictedPool = { query(sql: string, values?: unknown[]) {
+    // This local database can contain unrelated test fixtures; scope the batch
+    // to the payment whose transition is being verified.
+    if (sql.includes("FROM payments p") && sql.includes("ORDER BY")) {
+      return client.query(sql.replace("ORDER BY", "AND p.id=$4 ORDER BY"), [...(values ?? []), paymentId]);
+    }
+    return client.query(sql, values);
+  } } as unknown as Parameters<typeof reconcilePaymentBatch>[0];
+  const logger = { debug() {}, info() {}, warn() {}, error() {} } as Logger;
+  const summary = await reconcilePaymentBatch(restrictedPool, {
+    async observe(payment) {
+      assert.equal(payment.id, paymentId);
+      // Represents the separately tested API's verified PortOne/ledger transition.
+      const updated = await pool.query<{ status: string }>(
+        "UPDATE payments SET status='PAID',version=version+1 WHERE id=$1 RETURNING status", [paymentId],
+      );
+      assert.equal(updated.rows[0]?.status, "PAID");
+      const visible = await client.query<{ status: string }>("SELECT status FROM payments WHERE id=$1", [paymentId]);
+      assert.equal(visible.rows[0]?.status, "PAID");
+      return { state: "PAID", canonicalStatus: "PAID", observedAt: new Date().toISOString() };
+    },
+  }, { batchSize: 1, staleMinutes: 10 }, logger, new Date(Date.now() + 11 * 60_000));
+  assert.deepEqual(summary, { examined: 1, unknown: 0, manualReview: 0, reconciled: 1, failed: 0 });
+  const record = await client.query<{ last_outcome: string; last_observed_state: string }>(
+    "SELECT last_outcome,last_observed_state FROM worker_payment_reconciliations WHERE payment_id=$1", [paymentId],
+  );
+  assert.deepEqual(record.rows, [{ last_outcome: "RECONCILED", last_observed_state: "PAID" }]);
+});
+
+test("restricted worker retries only claimed cancelled PortOne payments until a verified no-charge result", {
+  skip: !migrationDatabaseUrl,
+  timeout: 30_000,
+}, async (t) => {
+  const fixturePool = createMigrationDatabasePool(migrationDatabaseUrl!, "dabboba-cancelled-requery-fixture");
+  const workerSession = await workerRoleSession(migrationDatabaseUrl!, "dabboba-cancelled-requery-worker");
+  const userId = randomUUID();
+  const orderIds = [randomUUID(), randomUUID()];
+  const paymentIds = [randomUUID(), randomUUID()];
+  t.after(async () => {
+    await fixturePool.query("DELETE FROM worker_payment_reconciliations WHERE payment_id=ANY($1::uuid[])", [paymentIds]).catch(() => undefined);
+    await fixturePool.query("DELETE FROM payments WHERE id=ANY($1::uuid[])", [paymentIds]).catch(() => undefined);
+    await fixturePool.query("DELETE FROM orders WHERE id=ANY($1::uuid[])", [orderIds]).catch(() => undefined);
+    await fixturePool.query("DELETE FROM users WHERE id=$1", [userId]).catch(() => undefined);
+    await Promise.all([fixturePool.end(), workerSession.close()]);
+  });
+  await fixturePool.query("INSERT INTO users(id,email,nickname) VALUES($1,$2,$3)", [
+    userId, `cancelled-requery-${userId}@example.test`, `만료 결제 ${userId.slice(0, 8)}`,
+  ]);
+  for (let index = 0; index < orderIds.length; index += 1) {
+    await fixturePool.query(
+      "INSERT INTO orders(id,user_id,status,subtotal,total,cancelled_at,created_at,updated_at) VALUES($1,$2,'CANCELLED',10000,10000,'2000-01-01','2000-01-01','2000-01-01')",
+      [orderIds[index], userId],
+    );
+    await fixturePool.query(
+      `INSERT INTO payments(id,order_id,provider,status,amount,pg_attempt_started_at,created_at,updated_at)
+       VALUES($1,$2,'PORTONE_V2_INICIS','CANCELLED',10000,$3,'2000-01-01','2000-01-01')`,
+      [paymentIds[index], orderIds[index], index === 0 ? new Date("2000-01-01T00:00:00.000Z") : null],
+    );
+  }
+  const scopedPool = { query(sql: string, values?: unknown[]) {
+    if (sql.includes("FROM payments p") && sql.includes("ORDER BY")) {
+      return workerSession.workerPool.query(sql.replace("ORDER BY", "AND p.id=ANY($4::uuid[]) ORDER BY"), [
+        ...(values ?? []), paymentIds,
+      ]);
+    }
+    return workerSession.workerPool.query(sql, values);
+  } } as unknown as DatabasePool;
+  const observed: string[] = [];
+  const logger = { debug() {}, info() {}, warn() {}, error() {} } as Logger;
+  const provider = { async observe(payment: { id: string }) {
+    observed.push(payment.id);
+    return { state: "CANCELLED" as const, canonicalStatus: "CANCELLED", observedAt: new Date().toISOString() };
+  } };
+  const now = new Date();
+  const first = await reconcilePaymentBatch(scopedPool, provider, { batchSize: 2, staleMinutes: 10 }, logger, now);
+  assert.deepEqual(first, { examined: 1, unknown: 0, manualReview: 0, reconciled: 1, failed: 0 });
+  assert.deepEqual(observed, [paymentIds[0]]);
+  const second = await reconcilePaymentBatch(scopedPool, provider, { batchSize: 2, staleMinutes: 10 }, logger, new Date(now.getTime() + 24 * 60 * 60_000));
+  assert.deepEqual(second, { examined: 0, unknown: 0, manualReview: 0, reconciled: 0, failed: 0 });
+  const ledger = await fixturePool.query<{ id: string; status: string; last_outcome: string | null }>(
+    `SELECT p.id,p.status,r.last_outcome FROM payments p
+     LEFT JOIN worker_payment_reconciliations r ON r.payment_id=p.id
+     WHERE p.id=ANY($1::uuid[]) ORDER BY p.id`, [paymentIds],
+  );
+  assert.equal(ledger.rows.every((row) => row.status === "CANCELLED"), true);
+  assert.equal(ledger.rows.find((row) => row.id === paymentIds[0])?.last_outcome, "RECONCILED");
+  assert.equal(ledger.rows.find((row) => row.id === paymentIds[1])?.last_outcome, null);
 });

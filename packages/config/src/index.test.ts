@@ -616,6 +616,17 @@ test("PortOne KG INICIS requires a complete environment-specific credential set"
 
   const config = loadApiConfig(base);
   assert.equal(config.paymentProvider, "PORTONE_V2_INICIS");
+  assert.equal(config.paymentReconciliationWorkerSecret, null);
+  const workerSecret = "separate-portone-worker-requery-secret";
+  assert.equal(loadApiConfig({
+    ...base, PAYMENT_RECONCILIATION_WORKER_SECRET: workerSecret,
+  }).paymentReconciliationWorkerSecret, workerSecret);
+  assert.throws(() => loadApiConfig({
+    ...base, PAYMENT_RECONCILIATION_WORKER_SECRET: base.PAYMENT_WEBHOOK_SECRET,
+  }), /distinct/);
+  assert.throws(() => loadApiConfig({
+    ...base, DABBOBA_COMMERCE_MODE: "PRELAUNCH", PAYMENT_RECONCILIATION_WORKER_SECRET: workerSecret,
+  }), /requires LIVE PortOne/);
   assert.deepEqual(config.portOne, {
     apiSecret: base.PORTONE_API_SECRET,
     merchantId: base.PORTONE_MERCHANT_ID,
@@ -632,6 +643,25 @@ test("PortOne KG INICIS requires a complete environment-specific credential set"
     PAYMENT_PROVIDER: "UNCONFIGURED",
     PAYMENT_WEBHOOK_SECRET: "",
   }), /require PAYMENT_PROVIDER/);
+});
+
+test("production LIVE PortOne refuses to start without the worker requery key", () => {
+  const live = {
+    NODE_ENV: "production", DABBOBA_COMMERCE_MODE: "LIVE",
+    DATABASE_URL: "postgresql://dabboba_runtime:secret@db.example.test/postgres",
+    SESSION_TOKEN_PEPPER: "session-pepper-that-is-long-and-production-only",
+    SUPABASE_URL: "https://project.supabase.co", WEB_ORIGINS: "https://www.example.test",
+    PAYMENT_PROVIDER: "PORTONE_V2_INICIS",
+    PAYMENT_WEBHOOK_SECRET: "normalized-payment-secret-unique-value",
+    PORTONE_API_SECRET: "portone-api-secret-unique-value",
+    PORTONE_MERCHANT_ID: "merchant-live", PORTONE_STORE_ID: "store-live",
+    PORTONE_CHANNEL_KEY: "channel-live", PORTONE_CHANNEL_ENVIRONMENT: "LIVE",
+    PORTONE_WEBHOOK_SECRET: "portone-webhook-secret-unique-value",
+  };
+  assert.throws(() => loadApiConfig(live), /LIVE PortOne commerce requires PAYMENT_RECONCILIATION_WORKER_SECRET/);
+  assert.equal(loadApiConfig({
+    ...live, PAYMENT_RECONCILIATION_WORKER_SECRET: "distinct-portone-worker-secret-for-production",
+  }).commerceMode, "LIVE");
 });
 
 test("signed admin proxy identity normalizes addresses and rejects tampering or stale timestamps", () => {

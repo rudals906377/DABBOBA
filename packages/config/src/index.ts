@@ -47,6 +47,8 @@ export type ApiConfig = {
   sessionTtlDays: number;
   paymentProvider: string;
   paymentWebhookSecret: string | null;
+  /** Separate server-to-server key for the worker's bounded PortOne requery. */
+  paymentReconciliationWorkerSecret?: string | null;
   /** Server-only PortOne V2/KG INICIS credentials. Null unless the rail is fully configured. */
   portOne?: {
     apiSecret: string;
@@ -518,6 +520,27 @@ export function loadApiConfig(env: Environment = process.env): ApiConfig {
     }
   }
   const payment = paymentConfig(env, runtime, pepper, proxyIdentitySecret);
+  const paymentReconciliationWorkerSecret = optional(env, "PAYMENT_RECONCILIATION_WORKER_SECRET");
+  if (paymentReconciliationWorkerSecret) {
+    const size = Buffer.byteLength(paymentReconciliationWorkerSecret, "utf8");
+    if (size < 32 || size > 512 || /[\r\n]/.test(paymentReconciliationWorkerSecret)
+      || /(?:change-me|local-development)/i.test(paymentReconciliationWorkerSecret)
+      || paymentReconciliationWorkerSecret === pepper
+      || paymentReconciliationWorkerSecret === proxyIdentitySecret
+      || paymentReconciliationWorkerSecret === payment.paymentWebhookSecret
+      || paymentReconciliationWorkerSecret === payment.portOne?.apiSecret
+      || paymentReconciliationWorkerSecret === payment.portOne?.webhookSecret) {
+      throw new Error("PAYMENT_RECONCILIATION_WORKER_SECRET must be a distinct 32-512 byte server-only secret");
+    }
+    if (payment.paymentProvider !== "PORTONE_V2_INICIS" || commerceMode !== "LIVE") {
+      throw new Error("PAYMENT_RECONCILIATION_WORKER_SECRET requires LIVE PortOne commerce");
+    }
+  }
+  if (runtime === "production" && commerceMode === "LIVE"
+    && payment.paymentProvider === "PORTONE_V2_INICIS"
+    && !paymentReconciliationWorkerSecret) {
+    throw new Error("LIVE PortOne commerce requires PAYMENT_RECONCILIATION_WORKER_SECRET");
+  }
   if (runtime === "production" && commerceMode === "PRELAUNCH" && payment.paymentProvider !== "UNCONFIGURED") {
     throw new Error("PRELAUNCH requires PAYMENT_PROVIDER=UNCONFIGURED in production");
   }
@@ -545,6 +568,7 @@ export function loadApiConfig(env: Environment = process.env): ApiConfig {
     commerceMode,
     sessionTtlDays: integer(env, "SESSION_TTL_DAYS", 30, 1, 365),
     ...payment,
+    paymentReconciliationWorkerSecret,
     gcsBucket: optional(env, "GCS_BUCKET"),
     gcsProjectId: optional(env, "GCS_PROJECT_ID"),
     ...loadMediaStorageConfig(env, runtime),
