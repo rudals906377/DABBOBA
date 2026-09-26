@@ -1,6 +1,7 @@
 import "server-only";
 
 import { errorMessage } from "@dabboba/api-client";
+import { signAdminServiceRequest } from "@dabboba/config";
 import { getAdminConfig } from "./config";
 
 export class AdminApiError extends Error {
@@ -30,6 +31,7 @@ function assertAdminPath(path: string) {
 export async function adminApi<T>(path: string, options: ApiRequestOptions = {}): Promise<T> {
   assertAdminPath(path);
   const config = getAdminConfig();
+  const canonicalUrl = new URL(path, "https://admin.invalid");
   const url = new URL(path.slice(1), `${config.apiBaseUrl.replace(/\/+$/, "")}/`);
   const headers = new Headers(options.headers);
   headers.set("accept", "application/json");
@@ -45,17 +47,39 @@ export async function adminApi<T>(path: string, options: ApiRequestOptions = {})
     }
   }
   if (options.body !== undefined) headers.set("content-type", "application/json");
+  const body = options.body === undefined ? undefined : JSON.stringify(options.body);
+  const serviceSecret = process.env.DABBOBA_ADMIN_SERVICE_SECRET?.trim();
+  if (config.environment === "production" && (!serviceSecret || Buffer.byteLength(serviceSecret, "utf8") < 32)) {
+    throw new Error("Production admin BFF requires DABBOBA_ADMIN_SERVICE_SECRET");
+  }
+  if (serviceSecret) {
+    const signatureHeaders = signAdminServiceRequest({
+      secret: serviceSecret,
+      method: options.method || "GET",
+      path: `${canonicalUrl.pathname}${canonicalUrl.search}`,
+      requestId: headers.get("x-request-id")!,
+      authorization: headers.get("authorization"),
+      reason: headers.get("x-admin-reason"),
+      reasonEncoding: headers.get("x-admin-reason-encoding"),
+      contentType: headers.get("content-type"),
+      body: body ?? null,
+    });
+    for (const [name, value] of Object.entries(signatureHeaders)) headers.set(name, value);
+  }
 
   const response = await fetch(url, {
     ...options,
     headers,
-    body: options.body === undefined ? undefined : JSON.stringify(options.body),
+    body,
     cache: "no-store",
     credentials: "omit",
-    redirect: "error",
+    redirect: "manual",
     signal: options.signal ?? AbortSignal.timeout(15_000),
   });
 
+  if (response.status >= 300 && response.status < 400) {
+    throw new AdminApiError(502, "관리 API가 예상치 못한 이동 응답을 반환했습니다.");
+  }
   if (response.status === 204) return undefined as T;
 
   const contentType = response.headers.get("content-type") || "";

@@ -75,6 +75,20 @@ test("API surface registration keeps customer and admin routes out of each other
   }
 });
 
+test("production admin surface keeps notice and moderation routes when public community is disabled", async () => {
+  const config = { ...testConfig("admin"), environment: "production" as const, communityEnabled: false };
+  const { app } = await buildApp({ config, pool: unusedPool });
+  try {
+    for (const path of ["/v1/admin/notices", "/v1/admin/posts", "/v1/admin/comments", "/v1/admin/reports"]) {
+      assert.equal(app.hasRoute({ method: "GET", url: path }), true, path);
+    }
+    assert.equal(app.hasRoute({ method: "GET", url: "/v1/notices" }), false);
+    assert.equal(app.hasRoute({ method: "GET", url: "/v1/posts" }), false);
+  } finally {
+    await app.close();
+  }
+});
+
 test("Cloud Run health endpoints are not consumed by the global request limiter", async () => {
   const { app } = await buildApp({ config: testConfig("customer"), pool: unusedPool });
   try {

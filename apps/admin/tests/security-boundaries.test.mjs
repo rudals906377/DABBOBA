@@ -32,6 +32,22 @@ test("admin session cookie is hardened and opaque token is not returned", async 
   assert.doesNotMatch(login, /NextResponse\.json\(session/);
 });
 
+test("active admin sessions renew a persistent cookie without exposing the token", async () => {
+  const route = await readFile(join(adminRoot, "app/api/auth/keepalive/route.ts"), "utf8");
+  const client = await readFile(join(adminRoot, "components/admin-session-keepalive.tsx"), "utf8");
+  assert.match(route, /isSameOriginRequest\(request\)/);
+  assert.match(route, /\/v1\/admin\/auth\/keepalive/);
+  assert.match(route, /httpOnly:\s*true/);
+  assert.match(route, /secure:\s*true/);
+  assert.match(route, /sameSite:\s*["']strict["']/);
+  assert.match(route, /error\.status === 401 \|\| error\.status === 403/);
+  assert.match(route, /response\(503\)/);
+  assert.doesNotMatch(route, /NextResponse\.json\([^)]*token/);
+  assert.match(client, /visibilitychange/);
+  assert.match(client, /KEEPALIVE_INTERVAL_MS = 5 \* 60 \* 1_000/);
+  assert.doesNotMatch(client, /localStorage|sessionStorage/);
+});
+
 test("auth redirects stay relative to the browser-visible host", async () => {
   const login = await readFile(join(adminRoot, "app/api/auth/login/route.ts"), "utf8");
   const logout = await readFile(join(adminRoot, "app/api/auth/logout/route.ts"), "utf8");

@@ -216,7 +216,9 @@ export async function buildAppCore(options: BuildAppCoreOptions) {
   await registerStorefrontCategoryRoutes(routeApp, context);
   const communityEnabled = options.config.communityEnabled
     ?? options.config.environment !== "production";
-  if (communityEnabled) await registerCommunityRoutes(routeApp, context);
+  // The public community can be disabled at launch while its privileged
+  // moderation and notice-management routes remain available to operators.
+  if (communityEnabled || surface === "admin") await registerCommunityRoutes(routeApp, context);
   await registerWantedRoutes(routeApp, context);
   await registerExchangeRoutes(routeApp, context);
   await registerCommerceRoutes(routeApp, context);

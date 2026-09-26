@@ -399,4 +399,20 @@ export async function registerAuthRoutes(app: FastifyInstance, context: ApiConte
     );
     return reply.code(204).send();
   });
+
+  app.post("/v1/admin/auth/keepalive", { preHandler: context.auth.requireAdmin }, async (request) => {
+    const actor = request.actor!;
+    const result = await context.pool.query<{ expires_at: Date }>(
+      `UPDATE sessions
+          SET expires_at = GREATEST(expires_at, now() + ($3::integer * interval '1 day')),
+              last_seen_at = now()
+        WHERE id = $1 AND user_id = $2 AND session_kind = 'ADMIN'
+          AND revoked_at IS NULL AND expires_at > now()
+        RETURNING expires_at`,
+      [actor.sessionId, actor.userId, context.config.sessionTtlDays],
+    );
+    const session = result.rows[0];
+    if (!session) throw unauthorized("세션이 만료되었거나 유효하지 않습니다.");
+    return { expiresAt: session.expires_at.toISOString() };
+  });
 }

@@ -177,6 +177,32 @@ test(
     assert.equal(issuedSession.rows[0]!.ip_address, "2001:db8::7");
     assert.equal(issuedSession.rows[0]!.user_agent, "Dabboba Signed Admin/1.0");
 
+    const adminToken = (successfulAfterExpiry.json() as { token: string }).token;
+    await pool.query(
+      "UPDATE sessions SET expires_at = now() + interval '10 minutes' WHERE user_id = $1 AND session_kind = 'ADMIN' AND revoked_at IS NULL",
+      [userId],
+    );
+    const renewed = await app.inject({
+      method: "POST",
+      url: "/v1/admin/auth/keepalive",
+      headers: { authorization: `Bearer ${adminToken}` },
+    });
+    assert.equal(renewed.statusCode, 200, renewed.body);
+    assert.ok(new Date((renewed.json() as { expiresAt: string }).expiresAt).getTime() > Date.now() + 23 * 60 * 60_000);
+
+    const loggedOut = await app.inject({
+      method: "POST",
+      url: "/v1/admin/auth/logout",
+      headers: { authorization: `Bearer ${adminToken}` },
+    });
+    assert.equal(loggedOut.statusCode, 204, loggedOut.body);
+    const renewalAfterLogout = await app.inject({
+      method: "POST",
+      url: "/v1/admin/auth/keepalive",
+      headers: { authorization: `Bearer ${adminToken}` },
+    });
+    assert.equal(renewalAfterLogout.statusCode, 401, renewalAfterLogout.body);
+
     const spoofedEmail = `xff-spoof-${suffix}@example.test`;
     const arbitraryForwardedFor = await app.inject({
       method: "POST",

@@ -8,6 +8,7 @@
     "dev": "node ../../scripts/run-local-backend.mjs api",
     "build": "tsc -p tsconfig.json",
     "build:supabase": "node ../../scripts/build-supabase-api.mjs",
+    "build:supabase:admin": "node ../../scripts/build-supabase-api.mjs --admin",
     "build:supabase:integration": "node ../../scripts/build-supabase-api.mjs --integration-smoke",
     "start": "node dist/index.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",

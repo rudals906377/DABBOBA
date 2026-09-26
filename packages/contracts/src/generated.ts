@@ -285,6 +285,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/auth/keepalive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["keepAdminSessionAlive"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/notices": {
         parameters: {
             query?: never;
@@ -5327,6 +5343,31 @@ export interface operations {
                     "application/json": components["schemas"]["Actor"];
                 };
             };
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    keepAdminSessionAlive: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Extends an active administrator session after authenticated activity. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Format: date-time */
+                        expiresAt: string;
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
         };
     };
