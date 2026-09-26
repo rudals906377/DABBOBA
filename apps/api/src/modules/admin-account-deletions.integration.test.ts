@@ -23,6 +23,7 @@ test(
       adminOrigins: ["http://127.0.0.1:4180"],
       sessionTokenPepper: "admin-account-deletion-integration-pepper",
       adminProxyIdentitySecret: null,
+      supabaseUrl: "https://account-deletion-test.supabase.co",
       sessionTtlDays: 1,
       paymentProvider: "UNCONFIGURED",
       paymentWebhookSecret: null,
@@ -322,5 +323,53 @@ test(
     });
     assert.equal(rejected.statusCode, 200, rejected.body);
     assert.equal((rejected.json() as { status: string }).status, "REJECTED");
+
+    const phoneOwner = await createActor("USER", "deletion-phone-owner");
+    const supabasePhoneUserId = randomUUID();
+    await pool.query(
+      `INSERT INTO auth_identities(user_id,provider,provider_subject,verified_at)
+       VALUES($1,'PHONE',$2,now())`,
+      [phoneOwner.id, `${config.supabaseUrl}/auth/v1#${supabasePhoneUserId}`],
+    );
+    const phoneDeletion = await app.inject({
+      method: "POST",
+      url: "/v1/account/deletion-request",
+      headers: { ...auth(phoneOwner.token), "idempotency-key": `phone-deletion-${randomUUID()}` },
+      payload: {},
+    });
+    assert.equal(phoneDeletion.statusCode, 202, phoneDeletion.body);
+    const phoneReceipt = phoneDeletion.json() as { id: string; status: string; authDeletionStatus: string };
+    assert.equal(phoneReceipt.status, "PROCESSING");
+    assert.equal(phoneReceipt.authDeletionStatus, "PENDING");
+    const phoneJob = await pool.query<{ supabase_user_id: string | null }>(
+      "SELECT supabase_user_id FROM account_auth_deletion_jobs WHERE deletion_request_id=$1",
+      [phoneReceipt.id],
+    );
+    assert.equal(phoneJob.rows[0]?.supabase_user_id, supabasePhoneUserId);
+
+    const legacyPhoneOwner = await createActor("USER", "deletion-legacy-phone-owner");
+    // Keep a realistic E.164 legacy subject without colliding with earlier
+    // integration runs against the same disposable database.
+    const legacyPhoneSubject = `+8210${String(Number.parseInt(suffix.slice(0, 8), 16) % 100_000_000).padStart(8, "0")}`;
+    await pool.query(
+      `INSERT INTO auth_identities(user_id,provider,provider_subject,verified_at)
+       VALUES($1,'PHONE',$2,now())`,
+      [legacyPhoneOwner.id, legacyPhoneSubject],
+    );
+    const legacyPhoneDeletion = await app.inject({
+      method: "POST",
+      url: "/v1/account/deletion-request",
+      headers: { ...auth(legacyPhoneOwner.token), "idempotency-key": `legacy-phone-deletion-${randomUUID()}` },
+      payload: {},
+    });
+    assert.equal(legacyPhoneDeletion.statusCode, 202, legacyPhoneDeletion.body);
+    const legacyPhoneReceipt = legacyPhoneDeletion.json() as { id: string; status: string; authDeletionStatus: string };
+    assert.equal(legacyPhoneReceipt.status, "PROCESSING");
+    assert.equal(legacyPhoneReceipt.authDeletionStatus, "NOT_REQUIRED");
+    const legacyPhoneJob = await pool.query<{ supabase_user_id: string | null }>(
+      "SELECT supabase_user_id FROM account_auth_deletion_jobs WHERE deletion_request_id=$1",
+      [legacyPhoneReceipt.id],
+    );
+    assert.equal(legacyPhoneJob.rows[0]?.supabase_user_id, null);
   },
 );

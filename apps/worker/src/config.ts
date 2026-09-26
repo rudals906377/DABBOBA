@@ -11,6 +11,7 @@ import {
   assertInicisInquiryConfig,
   type InicisInquiryConfig,
 } from "./inicis-inquiry.js";
+import type { PortOneApiRequeryConfig } from "./portone-api-requery.js";
 
 export type RuntimeEnvironment = "development" | "test" | "production";
 
@@ -62,7 +63,8 @@ export type WorkerConfig = {
   /** Optional only for backwards-compatible programmatic fixtures; loaded configs always set it. */
   paymentReconciliation?:
     | { provider: "MANUAL_REVIEW" }
-    | ({ provider: "KG_INICIS" } & InicisInquiryConfig);
+    | ({ provider: "KG_INICIS" } & InicisInquiryConfig)
+    | ({ provider: "PORTONE_API" } & PortOneApiRequeryConfig);
   logLevel: "debug" | "info" | "warn" | "error";
 };
 
@@ -118,8 +120,8 @@ function paymentReconciliationConfig(
   environmentTier: BackendEnvironmentTier,
 ): NonNullable<WorkerConfig["paymentReconciliation"]> {
   const provider = env.PAYMENT_RECONCILIATION_PROVIDER?.trim() || "MANUAL_REVIEW";
-  if (provider !== "MANUAL_REVIEW" && provider !== "KG_INICIS") {
-    throw new Error("PAYMENT_RECONCILIATION_PROVIDER must be MANUAL_REVIEW or KG_INICIS");
+  if (provider !== "MANUAL_REVIEW" && provider !== "KG_INICIS" && provider !== "PORTONE_API") {
+    throw new Error("PAYMENT_RECONCILIATION_PROVIDER must be MANUAL_REVIEW, KG_INICIS, or PORTONE_API");
   }
 
   const environment = optional(env, "KG_INICIS_ENVIRONMENT");
@@ -127,11 +129,41 @@ function paymentReconciliationConfig(
   const iniApiKey = optional(env, "KG_INICIS_INIAPI_KEY");
   const clientIp = optional(env, "KG_INICIS_CLIENT_IP");
   const hasInicisConfig = Boolean(environment || mid || iniApiKey || clientIp);
+  const apiBaseUrl = optional(env, "PORTONE_RECONCILIATION_API_BASE_URL");
+  const workerSecret = optional(env, "PAYMENT_RECONCILIATION_WORKER_SECRET");
   if (provider === "MANUAL_REVIEW") {
-    if (hasInicisConfig) {
-      throw new Error("KG INICIS inquiry settings must be unset when reconciliation uses MANUAL_REVIEW");
+    if (hasInicisConfig || apiBaseUrl || workerSecret) {
+      throw new Error("Payment reconciliation settings must be unset when using MANUAL_REVIEW");
     }
     return { provider };
+  }
+
+  if (provider === "PORTONE_API") {
+    if (hasInicisConfig) throw new Error("KG INICIS inquiry settings must be unset when using PORTONE_API");
+    if (!env.DABBOBA_ENVIRONMENT_TIER?.trim()
+      || (environmentTier !== "STAGING" && environmentTier !== "PRODUCTION")) {
+      throw new Error("PortOne API reconciliation requires an explicit STAGING or PRODUCTION worker tier");
+    }
+    if (!apiBaseUrl || !workerSecret) {
+      throw new Error("PortOne API reconciliation requires a base URL and worker secret");
+    }
+    const parsed = new URL(apiBaseUrl);
+    if ((env.NODE_ENV === "production" && parsed.protocol !== "https:")
+      || !["https:", "http:"].includes(parsed.protocol)
+      || parsed.username || parsed.password || parsed.search || parsed.hash
+      || !["/", "/functions/v1/dabboba-api"].includes(parsed.pathname)) {
+      throw new Error("PORTONE_RECONCILIATION_API_BASE_URL must identify the dedicated API origin or Supabase function");
+    }
+    const secretSize = Buffer.byteLength(workerSecret, "utf8");
+    if (secretSize < 32 || secretSize > 512 || /[\r\n]/.test(workerSecret)
+      || /(?:change-me|local-development)/i.test(workerSecret)) {
+      throw new Error("PAYMENT_RECONCILIATION_WORKER_SECRET must be a 32-512 byte server-only secret");
+    }
+    return { provider, apiBaseUrl: parsed.href.replace(/\/$/, ""), secret: workerSecret };
+  }
+
+  if (apiBaseUrl || workerSecret) {
+    throw new Error("PortOne API reconciliation settings must be unset when using KG_INICIS");
   }
 
   if (!env.DABBOBA_ENVIRONMENT_TIER?.trim()) {

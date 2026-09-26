@@ -7,6 +7,157 @@ physical devices. A green local check is not App Store or Google Play approval.
 The authoritative external ownership checklist is
 [friend-owned-release-accounts.md](friend-owned-release-accounts.md).
 
+## 2026-09-26 launch decision — LIVE first
+
+The owner changed the public-release target: the first public app must support
+verified PortOne V2 → KG INICIS payment followed by server-authoritative gacha
+and kuji draws. The older PRELAUNCH-first instructions below are historical
+context, not permission to submit a payment-disabled catalog as the final app.
+Keep the current PRELAUNCH server/binary fail-closed until LIVE is actually
+approved and tested; changing a flag or shipping a payment-screen mock is not
+completion.
+
+The production API checked again on 2026-09-26 still returned `PRELAUNCH` and an
+empty list of customer login methods (`methods: []`). Its filtered public catalog
+returned one gacha item and no Kuji item; this is not evidence that either can
+currently be purchased. The new read-only LIVE mobile API gate
+requires all requested login methods (`PHONE`, `KAKAO`, `NAVER`, `GOOGLE`,
+`APPLE`) and at least one genuinely purchasable, in-stock gacha and kuji
+product each. It is a candidate-screening check, not proof that a real account
+can sign in, a card can be charged/refunded, or a draw can complete.
+The production release workflow also checks the deployed worker's public
+boundary before bundling: `GET` must return the expected 405 handler response,
+and an anonymous `POST` with no body or secret must return its 401 denial. It
+does not execute a worker job, validate the real invoke secret, prove that Cron
+runs, or verify reconciliation. The 2026-09-26 public check failed because the
+production worker handler was not deployed; this remains a LIVE blocker. The
+local workspace's Expo SDK 57 patch dependencies now pass `expo install --check`
+and Expo Doctor's 21 checks, but those checks do not prove a signed binary or a
+physical-device payment return.
+
+Migration `0069` and the super-admin API provide one durable, full-amount
+PortOne cancellation attempt for two narrow cases: a cancelled late payment
+with no issued assets, and a paid gacha/kuji-only order whose draw entitlements
+are all still available. In the latter case the order is frozen in
+`REFUND_REVIEW` before the external cancellation call, so a concurrent draw
+cannot consume an entitlement. On verified full cancellation, the local
+entitlements are cancelled and stock is restored. A repeated key reads the
+original attempt; a different key cannot send a second cancellation. Unknown
+outcomes require a fresh provider lookup through the separate reconciliation
+route, never a cancellation retry. The admin UI exposes the full-refund action
+only for eligible payments to a `refunds.cancel` super-admin while LIVE is
+configured, and preserves the attempt in the audit list after reconciliation.
+If the initial PortOne read fails before any cancellation call, no attempt or
+order freeze is created; the operator can retry once provider access returns.
+Local disposable-PostgreSQL integration tests covered both cases, the one-attempt
+rule, role denial, PRELAUNCH denial, draw/refund race, and eventual
+reconciliation, plus a failed precheck followed by one successful retry. These
+are mocked PortOne responses, not a real PG refund test.
+Customer self-service refunds, partial/used-draw refund policy, and real
+test-channel cancellation remain unfinished. A local-only scheduled
+reconciliation path now signs a short-lived worker request to the API; the API
+re-reads PortOne and applies the canonical payment handler before the worker
+records recovery. Migration `0071` records that outcome, while `0072` limits
+the worker's existing payment-table update grant to cancelling an unpaid
+reservation. This path passed disposable-database and mocked-provider tests,
+but its production schedule, separate secret, network route, and real payment
+recovery have not been configured or verified. Do not enable the LIVE rail on
+this evidence.
+
+A claimed PortOne window remains on the worker's requery schedule even if its
+stock reservation later expires and the local order/payment become CANCELLED.
+Migration `0074` indexes this narrow candidate set. A verified late PAID
+observation enters REFUND_REVIEW without issuing draw entitlements; a verified
+terminal no-charge observation closes the reconciliation schedule. Unclaimed
+cancelled payments are not sent to PortOne. This is covered by local
+disposable-DB and mocked-provider tests only; provider delay, webhook loss,
+real refund, and production scheduling remain launch blockers.
+The local API integration test now also exercises that same claimed-and-expired
+payment through verified late success, super-admin full cancellation, one paid
+ledger entry, one refund ledger entry, no draw entitlement, and idempotent
+cancel replay. This links recovery to refund without treating mocked PortOne
+responses as a real card refund.
+
+The same late-charge recovery now covers a shipping-fee order only when its
+linked delivery request is CANCELLED, still belongs to the payer, contains
+items, and has no product order lines. The super-admin refund-review page
+exposes the one-time full-cancellation action only after these server checks;
+it does not revoke the customer's owned product. Migration `0075` keeps
+cancelled shipping-item snapshots for history but permits that item to be
+requested again, while a row-serialized trigger rejects overlapping active
+requests and a request for another owner's item. Focused tests passed on a
+disposable PostgreSQL database with mocked PortOne replies and the runtime DB
+role. This is not production migration, real-PG refund, or signed-device proof.
+
+The disposable-PostgreSQL PortOne requery test also follows the resulting
+customer entitlement through one server-committed gacha draw, idempotent replay,
+and owned inventory visibility. A separate local PortOne-to-kuji integration
+test covers paid-order confirmation, two sealed slot selections, immutable
+draw results, replay, and owned inventory. It also covers an approval timestamp
+outside the kuji checkout lease: no entitlement is issued, the room and stock
+reservation are released, and a super-admin's verified full cancellation
+reconciles exactly one payment and one refund ledger entry. PortOne GET and
+cancel responses are mocked in both tests; these prove local contracts and
+persistence, not a real card charge/refund or signed-device payment return.
+The PortOne-to-kuji signed-device path still requires separate verification.
+The shipping-fee refund regression also now checks that restoration of multiple
+inventory units is atomic: if one unit cannot return from `SHIPPING` to `OWNED`,
+none may be partially restored before the payment enters `REFUND_REVIEW`.
+After an operator resolves the local conflict, an audited admin requery can
+reconcile the verified provider refund without creating a second refund ledger
+entry; ordinary customer confirmation remains a duplicate replay. This passed
+only against disposable PostgreSQL with mocked PortOne responses.
+Before opening a new Kuji PG window, the native app now reads the server-bound
+room entry ID from the owned order, fetches that exact room snapshot, and
+requires CHECKOUT_PENDING with an unexpired absolute server deadline.
+An expired lease returns to the product; a mismatched or unavailable room
+fails closed. This guard is repeated after the purchaser enters their name,
+so time spent on that form cannot silently restart the three-minute lease.
+An already-started payment still goes to provider/server reconciliation even
+after lease expiry. The focused lease tests and local disposable-database
+PortOne/Kuji integration test pass, but a PG flow can still finish after the
+lease; the server's late-success/refund-review path and signed-device callback
+must be exercised with a real KG test channel before LIVE.
+
+`corepack pnpm run supabase:edge:live:check` is a read-only LIVE candidate
+preflight. It reads only the separate private
+`../.dabboba-launch/supabase-edge-live.env` (mode `0600`, current-user owned),
+requires the five requested login methods, a LIVE PortOne channel, distinct API
+payment/webhook secrets, the same dedicated API/worker requery secret, a worker
+configured for `PORTONE_API` against this project's API route, production
+storage and database roles, and a clean reviewed commit containing migration
+`0075` or later. It then runs the target database's read-only release check.
+It does not create the profile, apply migrations, upload secrets, deploy a
+function, enable Cron, charge a card, or establish provider/store approval.
+The existing `supabase:edge:deploy` command remains PRELAUNCH-only; do not
+point it at a LIVE profile or treat this preflight as authorization to switch
+shared production secrets before a reviewed cutover and rollback sequence is
+ready.
+
+The 2026-09-26 read-only recheck still blocks LIVE: the source release check
+finds uncommitted migrations `0069`–`0075` and a dirty worktree; the separate
+private LIVE candidate profile is absent; the hosted API reports `PRELAUNCH`
+with zero public login methods; and the hosted worker does not expose the
+expected deployed/anonymous-denial boundary. Local unit tests pass
+(`891` passed, `3` skipped in the root suite plus `6` API-client tests), all
+`20` workspace typecheck tasks pass, and `git diff --check` passes. These
+checks do not establish production migration, provider approval, real payment,
+or store eligibility.
+
+Release-critical external evidence remains: friend-owned merchant and identity
+provider approvals, test/live channels and webhook secrets, successful signed
+iOS/Android payment return and failure/duplicate/refund tests, production
+worker/reconciliation checks, domestic legal review, and store review. Google
+Play's [real-money games policy](https://support.google.com/googleplay/android-developer/answer/9877032/)
+explicitly gives paid games offering a chance at a physical prize as a violation
+example. Obtain a written classification from Google and a qualified Korean
+legal review before treating the Android paid-draw design as distributable; a
+physical-goods payment exception alone does not resolve that policy question.
+Showing the selected prize only after payment or draw consumption does not make
+the current flow a fixed-product sale. A fixed-product claim would require the
+exact item to be determined and disclosed before the customer commits payment,
+and a corresponding implemented and tested purchase flow.
+
 ## Release ownership boundary — 2026-09-23
 
 The final publisher and operator is the user's designated friend. Apple
@@ -61,7 +212,7 @@ dated verification evidence.
 - `preview` is not a store artifact. Expo documents preview builds as internal,
   production-like testing builds, while the production profile is the store
   path: <https://docs.expo.dev/build/eas-json/>.
-- The first public `1.0.0` release is the payment-disabled PRELAUNCH catalog.
+- The earlier `1.0.0` PRELAUNCH catalog plan has been superseded for public release.
   It uses `production-prelaunch`, a production server reporting commerce mode
   `PRELAUNCH`, and `PAYMENT_PROVIDER=UNCONFIGURED`. Product discovery, search,
   wishlists, notices, and account controls must be complete, while order,
@@ -69,7 +220,7 @@ dated verification evidence.
   inaccessible in both the app and API. It must never expose development
   TEST_PG controls, fabricate payment success, issue a draw entitlement, or
   create shippable inventory.
-- `production-live` is a later release gate. It requires a reviewed PortOne V2
+- `production-live` is the target public release gate. It requires a reviewed PortOne V2
   → KG INICIS LIVE channel, production webhooks, cancellation/refund and
   reconciliation evidence, and a production server reporting commerce mode
   `LIVE`. Changing only the server can never upgrade a PRELAUNCH binary.
@@ -249,7 +400,7 @@ device/OS, date, and result. At minimum verify both platforms for:
   status/navigation safe areas, and cold/warm start;
 - production API and asset origins, TLS failures, offline launch, slow or lost
   network, retry behavior, and no local/development host fallback;
-- Kakao, Naver, Google, Apple, and email OTP callback into `dabboba://`, app
+- phone OTP, Kakao, Naver, Google, and iOS Apple callback into `dabboba://`, app
   termination during login, token restoration after restart, logout, and
   account deletion with real non-admin customer accounts;
 - guest browsing and login gates, background/foreground transitions, push
@@ -260,6 +411,32 @@ device/OS, date, and result. At minimum verify both platforms for:
   reservation expiry, and network loss. Failed or uncertain states must leave no
   paid order, entitlement, inventory, point debit, shipping request, or
   misleading success UI;
+- A native payment screen durably marks a pre-claim intent, then asks the LIVE
+  API to atomically claim the first PG window for that owned payment before
+  mounting the SDK. The server records `pg_attempt_started_at` (migration 0073)
+  and increments the payment version so a worker requery deferred before the
+  claim becomes due again after the normal stale window. It rejects another
+  window from the same or a different device. A restart
+  checks the fresh order and PortOne state; a pre-claim crash with no server
+  claim can safely resume. The payment screen's status-refresh action also
+  returns to the name/PG-start step only after a fresh owned-order read shows
+  no server claim and the Kuji lease remains valid; a claimed or uncertain
+  attempt cannot open a second window. The local, database, and reconciliation
+  tests are not proof of a real KG/card-app return; this one-window rule can also
+  leave an abandoned order waiting for reservation expiry or operator reconciliation;
+  verify paid, cancelled, provider-unavailable, and killed-app cases in signed
+  iOS/Android builds before enabling LIVE payments;
+- The installed `@portone/react-native-sdk` 0.7.0 handles its own internal
+  `portone://` result redirect and calls `onComplete`; the app's server requery
+  remains authoritative. The merchant `appScheme` is passed as `dabboba://`
+  (matching the Expo scheme), but native card-app return still needs signed
+  device proof. Do not treat the supplied external `redirectUrl` field alone as
+  evidence that the SDK uses that exact URL;
+- KG INICIS requires a purchaser name for normal card payment. The native
+  screen now asks the customer for that name and rechecks the owned order before
+  opening the PG window; it never substitutes a profile nickname or treats this
+  entry as identity verification. Check the final privacy disclosures for this
+  provider-bound field and confirm acceptance with the actual KG test channel;
 - VoiceOver/TalkBack, Dynamic Type/font scaling, reduced motion, contrast,
   target sizes, keyboard avoidance, and screen-reader order;
 - crash-free smoke passes and symbol/source-map upload in the chosen crash

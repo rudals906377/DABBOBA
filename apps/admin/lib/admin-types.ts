@@ -125,6 +125,9 @@ export type AdminPayment = {
 };
 
 export type AdminPaymentDetail = AdminPayment & {
+  providerReconciliationAvailable: boolean;
+  refundActionAvailable: boolean;
+  refundActionBlocker: string | null;
   ledger: Array<{
     id: string; entryType: string; amount: number; currency: string; referenceId: string;
     reason: string | null; createdAt: string;
@@ -132,10 +135,14 @@ export type AdminPaymentDetail = AdminPayment & {
   providerEvents: Array<{
     id: string; providerEventId: string; eventType: string; occurredAt: string;
     processedAt: string | null; processingError: string | null; createdAt: string;
+    providerObservation: null | {
+      status: string; paidAmount: number; cancelledAmount: number;
+    };
   }>;
 };
 
 export type RefundReview = AdminPayment & {
+  providerCancellationStatus: string | null;
   review: null | {
     id: string; status: string; assignedAdminId: string | null; version: number;
     updatedAt: string | null; closedAt: string | null;
@@ -150,7 +157,13 @@ export type RefundReviewDetail = RefundReview & {
   notes: Array<{
     id: string; adminId: string; adminNickname: string; status: string; note: string; createdAt: string;
   }>;
-  providerActionAvailable: false;
+  providerCancellation: null | {
+    status: string; providerCancellationId: string | null; providerStatus: string | null;
+    lastErrorCode: string | null; createdAt: string; updatedAt: string;
+  };
+  providerActionAvailable: boolean;
+  providerActionBlocker: string | null;
+  providerReconciliationAvailable: boolean;
 };
 
 export type AdminInventory = {

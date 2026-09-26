@@ -113,6 +113,74 @@ test("payment lookup uses the fixed PortOne endpoint and returns only ledger-saf
   assert.equal(new Headers(requests[0]!.init?.headers).get("authorization"), "PortOne synthetic-portone-secret");
 });
 
+test("an uncharged READY payment can omit the channel and method while awaiting the PG", async () => {
+  const { channel: _channel, method: _method, paidAt: _paidAt, ...ready } = payment({
+    status: "READY",
+    amount: { ...payment().amount, paid: 0 },
+  });
+  const adapter = createPortOneV2Adapter({
+    ...contract,
+    fetchImpl: async () => jsonResponse(ready),
+  });
+
+  const result = await adapter.getPayment({ paymentId: "payment-test", expectedTotalAmount: 12_000 });
+  assert.equal(result.status, "READY");
+  assert.equal(result.channel, null);
+  assert.equal(result.method, null);
+  assert.equal(result.amount.paid, 0);
+});
+
+test("an uncharged PAY_PENDING payment can omit its method, but not its channel", async () => {
+  const { method: _method, paidAt: _paidAt, ...pending } = payment({
+    status: "PAY_PENDING",
+    amount: { ...payment().amount, paid: 0 },
+  });
+  const adapter = createPortOneV2Adapter({ ...contract, fetchImpl: async () => jsonResponse(pending) });
+  const result = await adapter.getPayment({ paymentId: "payment-test", expectedTotalAmount: 12_000 });
+  assert.equal(result.status, "PAY_PENDING");
+  assert.equal(result.method, null);
+  assert.equal(result.channel?.key, contract.channelKey);
+
+  const { channel: _channel, ...withoutChannel } = pending;
+  const missingChannel = createPortOneV2Adapter({
+    ...contract,
+    fetchImpl: async () => jsonResponse(withoutChannel),
+  });
+  await assert.rejects(
+    missingChannel.getPayment({ paymentId: "payment-test", expectedTotalAmount: 12_000 }),
+    errorCode("UNEXPECTED_RESPONSE"),
+  );
+});
+
+test("a paid payment still rejects a missing method or channel", async () => {
+  for (const omitted of ["method", "channel"] as const) {
+    const response = payment();
+    delete (response as Record<string, unknown>)[omitted];
+    const adapter = createPortOneV2Adapter({
+      ...contract,
+      fetchImpl: async () => jsonResponse(response),
+    });
+    await assert.rejects(
+      adapter.getPayment({ paymentId: "payment-test", expectedTotalAmount: 12_000 }),
+      errorCode("UNEXPECTED_RESPONSE"),
+    );
+  }
+});
+
+test("READY cannot hide a charged amount behind missing card or channel data", async () => {
+  const { channel: _channel, method: _method, paidAt: _paidAt, ...chargedReady } = payment({
+    status: "READY",
+  });
+  const adapter = createPortOneV2Adapter({
+    ...contract,
+    fetchImpl: async () => jsonResponse(chargedReady),
+  });
+  await assert.rejects(
+    adapter.getPayment({ paymentId: "payment-test", expectedTotalAmount: 12_000 }),
+    errorCode("UNEXPECTED_RESPONSE"),
+  );
+});
+
 test("payment lookup fails closed on identity, environment, provider, method, currency, or amount mismatch", async () => {
   const mismatches: unknown[] = [
     payment({ id: "another-payment" }),

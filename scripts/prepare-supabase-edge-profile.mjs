@@ -28,6 +28,18 @@ export const SUPABASE_EDGE_PROFILE_FILE = resolve(launchDirectory, 'supabase-edg
 export const SUPABASE_PRODUCTION_WORKER_CREDENTIAL_FILE = resolve(launchDirectory, 'supabase-production-worker.env');
 
 const CUSTOMER_AUTH_PROVIDERS = ['PHONE', 'KAKAO', 'NAVER', 'GOOGLE', 'APPLE'];
+const LIVE_API_BASE_URL = `https://${SUPABASE_INTEGRATION_PROJECT_REF}.supabase.co/functions/v1/dabboba-api`;
+const LIVE_PAYMENT_SECRETS = [
+  'DABBOBA_API_PAYMENT_WEBHOOK_SECRET',
+  'DABBOBA_API_PAYMENT_RECONCILIATION_WORKER_SECRET',
+  'DABBOBA_API_PORTONE_API_SECRET',
+  'DABBOBA_API_PORTONE_WEBHOOK_SECRET',
+];
+const LIVE_PAYMENT_IDENTIFIERS = [
+  'DABBOBA_API_PORTONE_MERCHANT_ID',
+  'DABBOBA_API_PORTONE_STORE_ID',
+  'DABBOBA_API_PORTONE_CHANNEL_KEY',
+];
 
 const GENERATED_REQUIRED_KEYS = [
   'DABBOBA_ENVIRONMENT_TIER',
@@ -171,22 +183,88 @@ function validEncryptionKey(value) {
   return Buffer.from(value, encoding).length === 32;
 }
 
-export function assertSupabaseEdgeReleaseConfiguration(values) {
+function requiredLiveValue(values, key, minimumBytes) {
+  const value = values[key];
+  if (typeof value !== 'string' || value !== value.trim()
+    || Buffer.byteLength(value, 'utf8') < minimumBytes
+    || Buffer.byteLength(value, 'utf8') > 512
+    || /[\r\n\u0000]/.test(value)
+    || /(?:change-me|local-development)/i.test(value)) {
+    throw new Error(`LIVE Edge profile requires valid ${key}.`);
+  }
+  return value;
+}
+
+function assertLivePaymentConfiguration(values, providers) {
+  if (providers.length !== CUSTOMER_AUTH_PROVIDERS.length
+    || CUSTOMER_AUTH_PROVIDERS.some((provider) => !providers.includes(provider))) {
+    throw new Error('LIVE Edge profile requires all requested customer login methods.');
+  }
+  if (values.DABBOBA_API_PORTONE_CHANNEL_ENVIRONMENT !== 'LIVE') {
+    throw new Error('LIVE Edge profile requires a PortOne LIVE channel.');
+  }
+  if (values.PAYMENT_RECONCILIATION_PROVIDER !== 'PORTONE_API') {
+    throw new Error('LIVE Edge profile requires PORTONE_API worker reconciliation.');
+  }
+  for (const key of LIVE_PAYMENT_IDENTIFIERS) requiredLiveValue(values, key, 1);
+  const secrets = LIVE_PAYMENT_SECRETS.map((key) => requiredLiveValue(
+    values, key, key.includes('PAYMENT_') ? 32 : 20,
+  ));
+  const workerSecret = requiredLiveValue(values, 'PAYMENT_RECONCILIATION_WORKER_SECRET', 32);
+  if (workerSecret !== values.DABBOBA_API_PAYMENT_RECONCILIATION_WORKER_SECRET) {
+    throw new Error('LIVE Edge API and worker require a matching worker requery secret.');
+  }
+  const separateSecrets = [
+    ...secrets,
+    values.DABBOBA_API_SESSION_TOKEN_PEPPER,
+    values.DABBOBA_WORKER_INVOKE_SECRET,
+  ].filter(Boolean);
+  if (new Set(separateSecrets).size !== separateSecrets.length) {
+    throw new Error('LIVE Edge payment secrets must be distinct from other server secrets.');
+  }
+  if (values.PORTONE_RECONCILIATION_API_BASE_URL !== LIVE_API_BASE_URL) {
+    throw new Error('LIVE Edge worker must requery the pinned production API route.');
+  }
+  for (const key of ['KG_INICIS_ENVIRONMENT', 'KG_INICIS_MID', 'KG_INICIS_INIAPI_KEY', 'KG_INICIS_CLIENT_IP']) {
+    if (values[key]?.trim()) throw new Error('LIVE Edge PortOne API requery cannot use the legacy KG INICIS inquiry rail.');
+  }
+}
+
+export function assertSupabaseEdgeReleaseConfiguration(values, { expectedCommerceMode = 'PRELAUNCH' } = {}) {
   for (const key of SUPABASE_EDGE_EXTERNAL_REQUIRED_KEYS) {
     if (!values?.[key]?.trim()) {
       throw new Error(`Supabase Edge release profile is missing externally verified ${key}.`);
     }
   }
-  if (
-    values.DABBOBA_ENVIRONMENT_TIER !== 'PRODUCTION'
-    || values.DABBOBA_API_COMMERCE_MODE !== 'PRELAUNCH'
-    || values.DABBOBA_API_PAYMENT_PROVIDER !== 'UNCONFIGURED'
-    || values.DABBOBA_API_SUPABASE_JWT_AUDIENCE !== 'authenticated'
-  ) {
-    throw new Error('Supabase Edge release profile must use the reviewed PRELAUNCH authentication and payment boundary.');
+  if (expectedCommerceMode !== 'PRELAUNCH' && expectedCommerceMode !== 'LIVE') {
+    throw new Error('Supabase Edge release commerce mode is invalid.');
+  }
+  if (values.DABBOBA_ENVIRONMENT_TIER !== 'PRODUCTION'
+    || values.DABBOBA_API_SUPABASE_JWT_AUDIENCE !== 'authenticated') {
+    throw new Error('Supabase Edge release profile must use the reviewed production authentication boundary.');
+  }
+  if (expectedCommerceMode === 'PRELAUNCH') {
+    if (values.DABBOBA_API_COMMERCE_MODE !== 'PRELAUNCH'
+      || values.DABBOBA_API_PAYMENT_PROVIDER !== 'UNCONFIGURED') {
+      throw new Error('Supabase Edge release profile must use the reviewed PRELAUNCH authentication and payment boundary.');
+    }
+    if ([
+      ...LIVE_PAYMENT_SECRETS,
+      ...LIVE_PAYMENT_IDENTIFIERS,
+      'DABBOBA_API_PORTONE_CHANNEL_ENVIRONMENT',
+      'PAYMENT_RECONCILIATION_PROVIDER',
+      'PORTONE_RECONCILIATION_API_BASE_URL',
+      'PAYMENT_RECONCILIATION_WORKER_SECRET',
+    ].some((key) => values[key]?.trim())) {
+      throw new Error('PRELAUNCH Edge profile must not contain LIVE payment or requery settings.');
+    }
+  } else if (values.DABBOBA_API_COMMERCE_MODE !== 'LIVE'
+    || values.DABBOBA_API_PAYMENT_PROVIDER !== 'PORTONE_V2_INICIS') {
+    throw new Error('LIVE Edge profile requires LIVE commerce and PORTONE_V2_INICIS.');
   }
 
   const providers = parseCustomerAuthProviders(values.DABBOBA_API_CUSTOMER_AUTH_ENABLED_PROVIDERS);
+  if (expectedCommerceMode === 'LIVE') assertLivePaymentConfiguration(values, providers);
   const publishableKey = values.DABBOBA_API_SUPABASE_PUBLISHABLE_KEY?.trim();
   if (publishableKey && (
     publishableKey.length < 20
@@ -271,13 +349,13 @@ export function edgeExternalValuesFromSource(source) {
   return values;
 }
 
-function validate(values) {
+function validate(values, expectedCommerceMode = 'PRELAUNCH') {
   for (const key of REQUIRED_KEYS) {
     if (!values[key]?.trim()) throw new Error(`Supabase Edge profile is missing ${key}.`);
   }
   if (
     values.DABBOBA_ENVIRONMENT_TIER !== 'PRODUCTION'
-    || values.DABBOBA_API_PAYMENT_PROVIDER !== 'UNCONFIGURED'
+    || values.DABBOBA_API_PAYMENT_PROVIDER !== (expectedCommerceMode === 'LIVE' ? 'PORTONE_V2_INICIS' : 'UNCONFIGURED')
     || values.DABBOBA_ENABLE_PRODUCTION_WORKER !== 'true'
     || values.DABBOBA_STORAGE_BUCKET !== 'dabboba-media'
     || values.DABBOBA_API_CATALOG_MEDIA_BASE_URL !== `https://${SUPABASE_INTEGRATION_PROJECT_REF}.supabase.co/functions/v1/dabboba-api`
@@ -303,8 +381,17 @@ function validate(values) {
   for (const key of ['DABBOBA_STORAGE_S3_ACCESS_KEY_ID', 'DABBOBA_STORAGE_S3_SECRET_ACCESS_KEY']) {
     if (key in values && !values[key]?.trim()) throw new Error(`Supabase Edge profile has an empty ${key}.`);
   }
-  assertSupabaseEdgeReleaseConfiguration(values);
+  assertSupabaseEdgeReleaseConfiguration(values, { expectedCommerceMode });
   return values;
+}
+
+export function assertSupabaseLiveEdgeProfile(values) {
+  const releaseConfiguration = assertSupabaseEdgeReleaseConfiguration(values, { expectedCommerceMode: 'LIVE' });
+  validate(values, 'LIVE');
+  for (const key of ['DABBOBA_STORAGE_S3_ACCESS_KEY_ID', 'DABBOBA_STORAGE_S3_SECRET_ACCESS_KEY']) {
+    requiredLiveValue(values, key, 1);
+  }
+  return releaseConfiguration;
 }
 
 function atomicWrite(path, text) {

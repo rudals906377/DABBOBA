@@ -16,12 +16,13 @@ const profilePolicySource = readFileSync(
   "utf8",
 );
 
-function inventory({ sourceType, status = "OWNED", category = "gacha", pointReturnEligible = true }) {
+function inventory({ sourceType, status = "OWNED", category = "gacha", pointReturnEligible = true, pointReturnAmount = 500 }) {
   return {
     id: `${sourceType}-${status}-${category}`,
     sourceType,
     status,
     pointReturnEligible,
+    pointReturnAmount,
     product: { category },
   };
 }
@@ -39,6 +40,8 @@ test("point return admits only owned inventory whose source is a gacha draw", ()
     sourceType: "GACHA",
     pointReturnEligible: false,
   })), false);
+  assert.equal(isPointReturnEligibleInventory(inventory({ sourceType: "GACHA", pointReturnAmount: 0 })), false);
+  assert.equal(isPointReturnEligibleInventory(inventory({ sourceType: "GACHA", pointReturnAmount: null })), false);
 
   for (const status of [
     "EXCHANGE_LISTED",

@@ -207,7 +207,7 @@ test("the public English home deep link resolves to the native Home tab", () => 
 });
 
 test("Expo entry is native-first with typed routes, API contracts, secure tokens, and disposable cache", () => {
-  assert.equal(mobilePackage.dependencies.expo, "~57.0.24");
+  assert.equal(mobilePackage.dependencies.expo, "~57.0.25");
   assert.equal(mobilePackage.dependencies.react, "19.2.3");
   assert.equal(mobilePackage.dependencies["react-dom"], "19.2.3");
   assert.equal(mobilePackage.dependencies["expo-splash-screen"], "~57.0.9");
@@ -218,12 +218,13 @@ test("Expo entry is native-first with typed routes, API contracts, secure tokens
   assert.equal(mobilePackage.dependencies["@dabboba/api-client"], "workspace:*");
   assert.equal(mobilePackage.dependencies["expo-secure-store"], "~57.0.4");
   assert.equal(mobilePackage.dependencies["expo-sqlite"], "~57.0.3");
-  assert.equal(mobilePackage.dependencies["expo-image-picker"], "~57.0.19");
-  assert.equal(mobilePackage.dependencies["expo-image-manipulator"], "~57.0.19");
-  assert.equal(mobilePackage.dependencies["expo-notifications"], "~57.0.20");
-  assert.equal(mobilePackage.dependencies["expo-auth-session"], "~57.0.12");
+  assert.equal(mobilePackage.dependencies["expo-image-picker"], "~57.0.20");
+  assert.equal(mobilePackage.dependencies["expo-image-manipulator"], "~57.0.20");
+  assert.equal(mobilePackage.dependencies["expo-notifications"], "~57.0.21");
+  assert.equal(mobilePackage.dependencies["expo-auth-session"], "~57.0.13");
+  assert.equal(mobilePackage.dependencies["expo-linking"], "~57.0.11");
   assert.equal(mobilePackage.dependencies["expo-web-browser"], "~57.0.3");
-  assert.equal(mobilePackage.dependencies["expo-router"], "~57.0.22");
+  assert.equal(mobilePackage.dependencies["expo-router"], "~57.0.23");
   assert.equal(mobilePackage.dependencies["@react-navigation/bottom-tabs"], undefined);
   assert.ok(mobilePackage.dependencies["@supabase/supabase-js"]);
   assert.equal(mobilePackage.scripts.start, "node ../../scripts/dabboba-mobile-launch.mjs");
@@ -980,7 +981,7 @@ test("native customer screens omit repeated reference-price disclaimers", () => 
   assert.doesNotMatch(customerSource, /표시 금액은 판매가가 아닌 앱 기준가예요/);
   assert.doesNotMatch(customerSource, /사용자가 정한 판매가가 아니라 앱에 등록된 상품 기준가예요/);
   assert.doesNotMatch(customerSource, /판매 상태와 가챠샵 기준가를 확인/);
-  assert.match(profileSectionSource, /예상 환급 포인트 · 기준가의 50%/);
+  assert.match(profileSectionSource, /예상 환급 포인트 · 구매가의 50%/);
 });
 
 test("native gacha and kuji shops coexist with the shared drawn-product storage root", () => {
@@ -1313,7 +1314,8 @@ test("native my-info hub opens every account utility and nested member detail ou
   assert.match(profileSectionSource, /배송 신청/);
   assert.match(profileSectionSource, /포인트 환급/);
   assert.match(profileSectionSource, /createPointReturn/);
-  assert.match(profileSectionSource, /Math\.floor\(item\.product\.price \/ 2\)/);
+  assert.match(profileSectionSource, /item\.pointReturnAmount/);
+  assert.doesNotMatch(profileSectionSource, /Math\.floor\(item\.product\.price \/ 2\)/);
   assert.match(profileSectionSource, /if \(section === "storage"\)[\s\S]*?<StorageHubContent/);
   assert.match(profileSectionSource, /if \(section === "shipping"\) return <ShippingHistory/);
   assert.match(profileSectionSource, /<StorageModeTab label="보관 중"/);

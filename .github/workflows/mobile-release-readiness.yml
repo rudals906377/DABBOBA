@@ -49,5 +49,8 @@ jobs:
       - name: Verify the exact public API used by the mobile build
         run: pnpm run release:mobile:api:verify
 
+      - name: Verify the deployed LIVE worker denies anonymous execution
+        run: pnpm run release:edge:worker:verify
+
       - name: Export and inspect iOS and Android production JavaScript bundles
         run: pnpm run release:mobile:bundle:check

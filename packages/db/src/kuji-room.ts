@@ -181,6 +181,25 @@ export async function releaseLockedKujiOrderRoom(
   return true;
 }
 
+/** Release a paid kuji room only after its full refund has been committed. */
+export async function releaseRefundedKujiOrderRoom(
+  client: DatabaseClient,
+  input: { orderId: string; serverNow: Date },
+): Promise<boolean> {
+  const transitioned = await client.query<{ product_id: string }>(
+    `UPDATE kuji_room_entries
+        SET state='CANCELLED',resolved_at=$2
+      WHERE order_id=$1 AND state IN ('CHECKOUT_PENDING','DRAWING')
+      RETURNING product_id`,
+    [input.orderId, input.serverNow],
+  );
+  if (!transitioned.rowCount) return false;
+  const productId = transitioned.rows[0]!.product_id;
+  await promoteNextKujiRoomEntryLocked(client, { productId, serverNow: input.serverNow });
+  await bumpKujiRoomVersion(client, productId);
+  return true;
+}
+
 export async function expireLockedKujiOrderDrawing(
   client: DatabaseClient,
   input: { orderId: string; serverNow: Date },

@@ -108,6 +108,41 @@ export const DATABASE_RELEASE_MIGRATIONS = Object.freeze([
     path: 'packages/db/migrations/0068_worker_account_deletion_privileges.sql',
     sha256: '770dea74cacc6c6db0946c35003d4310fff3c07d2a03affbd04078820c29bd9a',
   }),
+  Object.freeze({
+    file: '0069_portone_refund_cancellation_attempts.sql',
+    path: 'packages/db/migrations/0069_portone_refund_cancellation_attempts.sql',
+    sha256: '798772fddd50e9a7384de493ddc5637522904487a1ec5327cfbd0258552d06dc',
+  }),
+  Object.freeze({
+    file: '0070_admin_payment_reconciliation_permission.sql',
+    path: 'packages/db/migrations/0070_admin_payment_reconciliation_permission.sql',
+    sha256: 'd4d553b5be97f849f3cb576ac51a731878e6ff004453025a2ceaa9be7ddeee70',
+  }),
+  Object.freeze({
+    file: '0071_worker_verified_portone_reconciliation.sql',
+    path: 'packages/db/migrations/0071_worker_verified_portone_reconciliation.sql',
+    sha256: '0d81599b7c8f01fe4072347fe825fc6d95b55eb1a0791ed7288df017fc4e0434',
+  }),
+  Object.freeze({
+    file: '0072_guard_worker_payment_transitions.sql',
+    path: 'packages/db/migrations/0072_guard_worker_payment_transitions.sql',
+    sha256: '281321415e20688e0670999290f1de960c36b81c46f8b620fed3a07620ea99da',
+  }),
+  Object.freeze({
+    file: '0073_portone_payment_window_claim.sql',
+    path: 'packages/db/migrations/0073_portone_payment_window_claim.sql',
+    sha256: '62a2a7ee195046a747a747c0723dbbcae1fbd225e59aa6ae9f3f1bb88ad9807e',
+  }),
+  Object.freeze({
+    file: '0074_claimed_cancelled_payment_reconciliation_index.sql',
+    path: 'packages/db/migrations/0074_claimed_cancelled_payment_reconciliation_index.sql',
+    sha256: 'c710d7b81a83f1e89e47638fb773d1be81e9906e8b547844cfa8e9e01949cb3c',
+  }),
+  Object.freeze({
+    file: '0075_shipping_request_retry_after_cancellation.sql',
+    path: 'packages/db/migrations/0075_shipping_request_retry_after_cancellation.sql',
+    sha256: 'b2cceb7a6b01e9e9f4a399420a560f2cd7c2d445fcf813760b451e04f95a4494',
+  }),
 ]);
 
 export const MINIMUM_DATABASE_RELEASE_VERSION =

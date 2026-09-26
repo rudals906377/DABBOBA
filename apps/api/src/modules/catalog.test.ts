@@ -297,6 +297,28 @@ test("public product discovery applies server search, stock filter, stable popul
   assert.deepEqual(capturedValues, [2, 14, "2026-08-25T00:00:00.000Z", "popular-a"]);
 });
 
+test("public product discovery filters only public sale statuses for LIVE readiness", async () => {
+  const { app, routes } = routeHarness();
+  let capturedSql = "";
+  let capturedValues: unknown[] = [];
+  await registerCatalogRoutes(app, contextWithPool({
+    async query(sql: string, values: unknown[] = []) {
+      capturedSql = sql;
+      capturedValues = values;
+      return { rowCount: 0, rows: [] };
+    },
+  }));
+  const handler = routes.get("GET /v1/catalog/products");
+  assert.ok(handler);
+  await handler({ query: {
+    category: "gacha", saleStatus: "ON_SALE", excludeSoldOut: "true", limit: 1,
+  } }, readReply);
+  assert.match(capturedSql, /p\.sale_status = \$3/);
+  assert.match(capturedSql, /COALESCE\(s\.on_hand-s\.reserved,0\) > 0/);
+  assert.deepEqual(capturedValues, [2, "gacha", "ON_SALE"]);
+  await assert.rejects(handler({ query: { saleStatus: "DRAFT" } }, readReply), /saleStatus/);
+});
+
 test("public product detail resolves one active sellable product by canonical id", async () => {
   const { app, routes } = routeHarness();
   let capturedSql = "";

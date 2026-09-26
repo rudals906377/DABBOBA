@@ -99,6 +99,25 @@ test("loadWorkerConfig rejects dormant, partial, and local-test KG INICIS settin
   }), /STAGING\+TEST or PRODUCTION\+LIVE/);
 });
 
+test("PortOne API reconciliation requires a separate secret, HTTPS in deployed tiers, and an explicit mode", () => {
+  const portone = {
+    NODE_ENV: "production",
+    DABBOBA_ENVIRONMENT_TIER: "STAGING",
+    GCS_BUCKET: "staging-media",
+    PAYMENT_RECONCILIATION_PROVIDER: "PORTONE_API",
+    PORTONE_RECONCILIATION_API_BASE_URL: "https://api.example.test/functions/v1/dabboba-api",
+    PAYMENT_RECONCILIATION_WORKER_SECRET: "separate-worker-requery-secret-for-tests",
+  };
+  assert.deepEqual(loadWorkerConfig({ ...base, ...portone }).paymentReconciliation, {
+    provider: "PORTONE_API",
+    apiBaseUrl: portone.PORTONE_RECONCILIATION_API_BASE_URL,
+    secret: portone.PAYMENT_RECONCILIATION_WORKER_SECRET,
+  });
+  assert.throws(() => loadWorkerConfig({ ...base, ...portone, PORTONE_RECONCILIATION_API_BASE_URL: "http://api.example.test" }), /dedicated API origin/);
+  assert.throws(() => loadWorkerConfig({ ...base, ...portone, PAYMENT_RECONCILIATION_WORKER_SECRET: "weak" }), /32-512 byte/);
+  assert.throws(() => loadWorkerConfig({ ...base, ...portone, PAYMENT_RECONCILIATION_PROVIDER: "MANUAL_REVIEW" }), /must be unset/);
+});
+
 test("loadWorkerConfig requires explicit matching tiers for KG INICIS inquiry", () => {
   const kg = {
     PAYMENT_RECONCILIATION_PROVIDER: "KG_INICIS",

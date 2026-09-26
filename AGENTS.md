@@ -289,6 +289,7 @@ When any text-entry control loses focus, dismiss the simulated keyboard. If the 
 ## Product Review Stance — 2026-09-11
 
 - Do not automatically agree with proposed DABBOBA product or UI changes. Evaluate each proposal against established patterns in current successful commerce, marketplace, lottery/draw, and mobile apps; challenge choices that would reduce clarity, trust, accessibility, conversion, consistency, or operational safety. State the concrete tradeoff and recommend a better alternative before implementation. When the comparison depends on current market behavior, verify representative live apps or official design guidance instead of relying on a vague appeal to convention. The user retains the final product decision.
+- The user's 2026-09-26 correction limits Pick&Pop/Pickuri comparison to publicly verifiable commerce-system rules, such as payment, draw/result disclosure, storage, point return, and shipping. Preserve DABBOBA's own information architecture, layout, illustrations, typography, and visual identity; do not copy either competitor's screen structure or styling. Separate public claims from unverified internal timing, provider behavior, odds implementation, and refund rules. A rule observed elsewhere becomes DABBOBA policy only after it is explicitly approved and implemented; never describe a paid random-result flow as non-random to a store reviewer.
 
 ## Readable Typography Scale — 2026-09-11
 

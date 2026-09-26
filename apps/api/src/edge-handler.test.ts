@@ -379,6 +379,22 @@ test("Edge API maps only the dedicated customer Auth key and supports the built-
   })), /forbidden legacy/);
 });
 
+test("Edge API maps PortOne credentials and the distinct worker requery secret only from dedicated names", () => {
+  const normalized = normalizeSupabaseEdgeApiEnvironment(edgeEnvironment({
+    DABBOBA_API_PAYMENT_RECONCILIATION_WORKER_SECRET: "worker-requery-secret-for-tests",
+    DABBOBA_API_PORTONE_API_SECRET: "provider-api-secret-for-tests",
+    DABBOBA_API_PORTONE_MERCHANT_ID: "merchant-fixture",
+    DABBOBA_API_PORTONE_STORE_ID: "store-fixture",
+    DABBOBA_API_PORTONE_CHANNEL_KEY: "channel-fixture",
+    DABBOBA_API_PORTONE_CHANNEL_ENVIRONMENT: "TEST",
+    DABBOBA_API_PORTONE_WEBHOOK_SECRET: "provider-webhook-secret-for-tests",
+  }));
+  assert.equal(normalized.PAYMENT_RECONCILIATION_WORKER_SECRET, "worker-requery-secret-for-tests");
+  assert.equal(normalized.PORTONE_API_SECRET, "provider-api-secret-for-tests");
+  assert.equal(normalized.PORTONE_CHANNEL_ENVIRONMENT, "TEST");
+  assert.equal(normalized.DABBOBA_API_PORTONE_API_SECRET, undefined);
+});
+
 test("Edge API uses the real customer Fastify surface without bypassing auth and preserves raw JSON bytes", async (t) => {
   const unusedPool = {
     query: async () => ({ rows: [{ ok: 1 }], rowCount: 1 }),

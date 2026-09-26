@@ -7,7 +7,7 @@ import {
   checkDatabaseReleaseSource,
   MINIMUM_DATABASE_RELEASE_VERSION,
 } from './check-database-release-source.mjs';
-import { assertSupabaseEdgeReleaseConfiguration } from './prepare-supabase-edge-profile.mjs';
+import { assertSupabaseEdgeReleaseConfiguration, assertSupabaseLiveEdgeProfile } from './prepare-supabase-edge-profile.mjs';
 
 const defaultRepositoryRoot = fileURLToPath(new URL('../', import.meta.url));
 
@@ -33,22 +33,26 @@ function required(value, name) {
 
 export async function runSupabaseEdgeReleasePreflight({
   edgeProfile,
+  expectedCommerceMode = 'PRELAUNCH',
   repositoryRoot = defaultRepositoryRoot,
   sourceEnvironment = null,
   checkSource = checkDatabaseReleaseSource,
   runReleaseCheck = defaultReleaseCheck,
 } = {}) {
-  const releaseConfiguration = assertSupabaseEdgeReleaseConfiguration(edgeProfile ?? {});
+  const releaseConfiguration = expectedCommerceMode === 'LIVE'
+    ? assertSupabaseLiveEdgeProfile(edgeProfile ?? {})
+    : assertSupabaseEdgeReleaseConfiguration(edgeProfile ?? {}, { expectedCommerceMode });
+  const minimumMigration = MINIMUM_DATABASE_RELEASE_VERSION;
   const sourceReport = await checkSource({ repositoryRoot });
   if (
     !sourceReport
     || sourceReport.status !== 'pass'
     || !/^[0-9a-f]{40,64}$/.test(sourceReport.head ?? '')
-    || sourceReport.latestMigration?.slice(0, 4) < MINIMUM_DATABASE_RELEASE_VERSION
+    || sourceReport.latestMigration?.slice(0, 4) < minimumMigration
     || sourceReport.worktreeClean !== true
   ) {
     throw new Error(
-      `Supabase Edge source is not a reviewed Git commit with migration ${MINIMUM_DATABASE_RELEASE_VERSION}.`,
+      `Supabase Edge source is not a reviewed Git commit with migration ${minimumMigration}.`,
     );
   }
 

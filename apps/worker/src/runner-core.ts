@@ -18,6 +18,7 @@ import {
   ManualReviewPaymentProvider,
   type PaymentReconciliationProvider,
 } from "./payments.js";
+import { PortOneApiReconciliationProvider } from "./portone-api-requery.js";
 import {
   assertPgmqRuntime,
   createPgmqOutboxPublisher,
@@ -82,6 +83,12 @@ export function createPaymentReconciliationProvider(
   const reconciliation = config.paymentReconciliation;
   if (!reconciliation || reconciliation.provider === "MANUAL_REVIEW") {
     return new ManualReviewPaymentProvider();
+  }
+  if (reconciliation.provider === "PORTONE_API") {
+    if (config.environmentTier !== "STAGING" && config.environmentTier !== "PRODUCTION") {
+      throw new Error("PortOne API reconciliation requires a matching STAGING or PRODUCTION worker tier");
+    }
+    return new PortOneApiReconciliationProvider(reconciliation);
   }
   if (
     (config.environmentTier === "STAGING" && reconciliation.environment !== "TEST")
