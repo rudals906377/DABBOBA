@@ -44,7 +44,7 @@ test("business information keeps the six approved values in one typed source", a
     representativeName: "김정미",
     businessRegistrationNumber: "508-33-01724",
     businessAddress: "경기도 파주시 한빛로 67, 208-501",
-    representativePhone: "010-6374-4900",
+    representativePhone: "031-947-9996",
     mailOrderRegistrationNumber: "2026-경기파주-3579",
   });
 });
@@ -71,7 +71,7 @@ test("public business screen renders every labeled value without auth or API dep
     "@/theme": { colors: { ink: "black", muted: "gray" } },
   });
   const html = renderToStaticMarkup(React.createElement(screen.BusinessInfoScreen));
-  for (const value of ["상호", "다뽀바", "대표자명", "김정미", "사업자등록번호", "508-33-01724", "사업장 주소", "경기도 파주시 한빛로 67, 208-501", "대표전화", "010-6374-4900", "통신판매업 신고번호", "2026-경기파주-3579"]) assert.ok(html.includes(value), "missing " + value);
+  for (const value of ["상호", "다뽀바", "대표자명", "김정미", "사업자등록번호", "508-33-01724", "사업장 주소", "경기도 파주시 한빛로 67, 208-501", "대표전화", "031-947-9996", "통신판매업 신고번호", "2026-경기파주-3579"]) assert.ok(html.includes(value), "missing " + value);
   assert.doesNotMatch(html, /유선전화|전화번호/);
   pressHandlers[0]();
   assert.deepEqual(replaced, ["/(tabs)/profile"]);
