@@ -18,7 +18,17 @@ export default async function DashboardPage() {
 
   return (
     <>
-      <PageHeader eyebrow="OPERATIONS OVERVIEW" title="대시보드" description={`API 집계 기준 ${formatDate(dashboard.generatedAt)} · 수치는 서버 원장을 기준으로 표시됩니다.`} />
+      <PageHeader eyebrow="오늘 할 일" title="관리자 홈" description={`운영 현황을 한눈에 확인하세요. 마지막 갱신 ${formatDate(dashboard.generatedAt)}`} />
+      <section className="panel admin-start-panel">
+        <div className="panel-heading"><div><h2>자주 하는 작업</h2><p>원하는 작업을 누르면 바로 이동합니다.</p></div></div>
+        <div className="quick-links">
+          <Link className="button-link primary" href="/catalog/products">상품 등록·수정</Link>
+          <Link className="button-link" href="/catalog/home-sections">홈 화면 꾸미기</Link>
+          <Link className="button-link" href="/commerce/orders">주문 확인</Link>
+          <Link className="button-link" href="/commerce/shipping">배송 처리</Link>
+          <Link className="button-link" href="/notices">공지 쓰기</Link>
+        </div>
+      </section>
       <section className="metric-grid">
         {metrics.map(([label, value, href, note]) => <Link className="metric-card" href={href} key={label}><span>{label}</span><strong>{value.toLocaleString("ko-KR")}</strong><em>{note}</em></Link>)}
       </section>

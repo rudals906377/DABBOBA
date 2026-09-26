@@ -1,5 +1,6 @@
 import type { ApiConfig } from "@dabboba/config";
-import { loadApiConfig } from "@dabboba/config";
+import { createHash } from "node:crypto";
+import { ADMIN_SERVICE_HEADERS, loadApiConfig, verifyAdminServiceRequest } from "@dabboba/config";
 import {
   assertProductionRuntimeDatabaseRole,
   createDatabasePool,
@@ -31,6 +32,8 @@ type InjectableApi = {
 
 export type EdgeApiHandlerDependencies = {
   readEnvironment(): EdgeApiEnvironment;
+  /** Separate hosted function. Customer remains the default and can never route admin paths. */
+  surface?: "customer" | "admin";
   buildApp?: (config: ApiConfig, sanitizeImage?: ApiMediaRuntime["sanitizeImage"]) => Promise<InjectableApi>;
   sanitizeImage?: ApiMediaRuntime["sanitizeImage"];
   /** Unit-test only. Production callers always use EDGE_REQUEST_BODY_TIMEOUT_MS. */
@@ -44,7 +47,6 @@ export type EdgeServeInfo = {
 const MAX_BODY_BYTES = 1_048_576;
 export const EDGE_REQUEST_BODY_TIMEOUT_MS = 10_000;
 const MAX_TEST_BODY_TIMEOUT_MS = 1_000;
-const FUNCTION_PATHS = ["/dabboba-api", "/functions/v1/dabboba-api"] as const;
 const HOP_BY_HOP_HEADERS = new Set([
   "connection",
   "keep-alive",
@@ -161,9 +163,11 @@ function edgeFailureCode(error: unknown): string {
   return "UNKNOWN";
 }
 
-function apiPath(url: URL): string | null {
+function apiPath(url: URL, surface: "customer" | "admin"): string | null {
   if (/%2f/i.test(url.pathname)) return null;
-  for (const prefix of FUNCTION_PATHS) {
+  const name = surface === "admin" ? "dabboba-admin-api" : "dabboba-api";
+  const functionPaths = [`/${name}`, `/functions/v1/${name}`];
+  for (const prefix of functionPaths) {
     if (url.pathname === prefix) return `/${url.search}`;
     if (url.pathname.startsWith(`${prefix}/`)) return `${url.pathname.slice(prefix.length)}${url.search}`;
   }
@@ -178,7 +182,8 @@ function requestHeaders(headers: Headers): Record<string, string> {
     .filter(Boolean));
   for (const [rawName, value] of headers) {
     const name = rawName.toLowerCase();
-    if (HOP_BY_HOP_HEADERS.has(name) || nominated.has(name) || SPOOFABLE_FORWARDING_HEADERS.has(name) || name === "host") continue;
+    if (HOP_BY_HOP_HEADERS.has(name) || nominated.has(name) || SPOOFABLE_FORWARDING_HEADERS.has(name)
+      || name === "host" || name === ADMIN_SERVICE_HEADERS.timestamp || name === ADMIN_SERVICE_HEADERS.signature) continue;
     result[name] = value;
   }
   return result;
@@ -257,7 +262,7 @@ function webResponse(result: InjectResult, requestMethod: string): Response {
   return new Response(bodyless ? null : result.rawPayload, { status: result.statusCode, headers });
 }
 
-export function normalizeSupabaseEdgeApiEnvironment(source: EdgeApiEnvironment): EdgeApiEnvironment {
+function normalizeEdgeEnvironment(source: EdgeApiEnvironment, surface: "customer" | "admin"): EdgeApiEnvironment {
   if (source.NODE_ENV && source.NODE_ENV !== "production") {
     throw new Error("Supabase Edge API requires production runtime semantics");
   }
@@ -268,8 +273,8 @@ export function normalizeSupabaseEdgeApiEnvironment(source: EdgeApiEnvironment):
   for (const key of FORBIDDEN_EDGE_KEYS) {
     if (present(source[key])) throw new Error("Supabase Edge API received a forbidden legacy setting");
   }
-  if (source.API_SURFACE?.trim() && source.API_SURFACE.trim() !== "customer") {
-    throw new Error("Supabase Edge API serves the customer surface only");
+  if (source.API_SURFACE?.trim() && source.API_SURFACE.trim() !== surface) {
+    throw new Error(`Supabase Edge API serves the ${surface} surface only`);
   }
   if (source.MEDIA_STORAGE_PROVIDER?.trim() && source.MEDIA_STORAGE_PROVIDER.trim() !== "supabase") {
     throw new Error("Supabase Edge API requires Supabase-only media storage");
@@ -278,12 +283,17 @@ export function normalizeSupabaseEdgeApiEnvironment(source: EdgeApiEnvironment):
   const normalized: EdgeApiEnvironment = {
     NODE_ENV: "production",
     DABBOBA_ENVIRONMENT_TIER: tier,
-    API_SURFACE: "customer",
+    API_SURFACE: surface,
     MEDIA_STORAGE_PROVIDER: "supabase",
     SUPABASE_URL: source.SUPABASE_URL,
   };
   for (const [edgeKey, apiKey] of Object.entries(API_ENVIRONMENT_MAPPING)) {
     normalized[apiKey] = source[edgeKey];
+  }
+  if (surface === "admin") {
+    normalized.ADMIN_ORIGINS = source.DABBOBA_ADMIN_ORIGINS;
+    normalized.ADMIN_PROXY_IDENTITY_SECRET = source.DABBOBA_ADMIN_PROXY_IDENTITY_SECRET;
+    normalized.ADMIN_EDGE_CLIENT_IP_HEADER = source.DABBOBA_ADMIN_EDGE_CLIENT_IP_HEADER;
   }
   // Supabase injects this server-only key into every Edge Function. Reuse the
   // managed value instead of asking operators to copy the same secret into a
@@ -298,11 +308,19 @@ export function normalizeSupabaseEdgeApiEnvironment(source: EdgeApiEnvironment):
   return normalized;
 }
 
-export function assertSupabaseEdgeApiConfig(config: ApiConfig): void {
+export function normalizeSupabaseEdgeApiEnvironment(source: EdgeApiEnvironment): EdgeApiEnvironment {
+  return normalizeEdgeEnvironment(source, "customer");
+}
+
+export function normalizeSupabaseEdgeAdminEnvironment(source: EdgeApiEnvironment): EdgeApiEnvironment {
+  return normalizeEdgeEnvironment(source, "admin");
+}
+
+export function assertSupabaseEdgeApiConfig(config: ApiConfig, surface: "customer" | "admin" = "customer"): void {
   if (
     config.environment !== "production"
     || (config.environmentTier !== "STAGING" && config.environmentTier !== "PRODUCTION")
-    || config.surface !== "customer"
+    || config.surface !== surface
     || config.redisUrl !== null
   ) {
     throw new Error("Supabase Edge API environment is invalid");
@@ -380,6 +398,7 @@ async function defaultBuildApp(
 export function createSupabaseEdgeApiHandler(
   dependencies: EdgeApiHandlerDependencies,
 ): (request: Request, info?: EdgeServeInfo) => Promise<Response> {
+  const surface = dependencies.surface ?? "customer";
   const bodyTimeoutMs = dependencies.testOnlyBodyTimeoutMs ?? EDGE_REQUEST_BODY_TIMEOUT_MS;
   if (dependencies.testOnlyBodyTimeoutMs !== undefined) {
     if (
@@ -397,8 +416,8 @@ export function createSupabaseEdgeApiHandler(
   const app = () => {
     if (!appPromise) {
       appPromise = Promise.resolve().then(() => {
-        const config = loadApiConfig(normalizeSupabaseEdgeApiEnvironment(dependencies.readEnvironment()));
-        assertSupabaseEdgeApiConfig(config);
+        const config = loadApiConfig(normalizeEdgeEnvironment(dependencies.readEnvironment(), surface));
+        assertSupabaseEdgeApiConfig(config, surface);
         return build(config, dependencies.sanitizeImage);
       });
     }
@@ -407,14 +426,55 @@ export function createSupabaseEdgeApiHandler(
 
   return async (request, info) => {
     const url = new URL(request.url);
-    const path = apiPath(url);
-    if (!path) {
+    const path = apiPath(url, surface);
+    if (!path || (surface === "admin" && !path.startsWith("/v1/admin/"))) {
       await request.body?.cancel().catch(() => undefined);
       return fixedJson(404, "NOT_FOUND");
     }
 
     const body = await boundedBody(request, bodyTimeoutMs);
     if (body.kind === "error") return body.response;
+
+    if (surface === "admin") {
+      const environment = dependencies.readEnvironment();
+      const secret = environment.DABBOBA_ADMIN_SERVICE_SECRET?.trim();
+      if (!secret || Buffer.byteLength(secret, "utf8") < 32 || Buffer.byteLength(secret, "utf8") > 512
+        || secret === environment.DABBOBA_API_SESSION_TOKEN_PEPPER
+        || secret === environment.DABBOBA_ADMIN_PROXY_IDENTITY_SECRET) {
+        return fixedJson(503, "ADMIN_SERVICE_UNAVAILABLE");
+      }
+      const authorized = verifyAdminServiceRequest({
+        secret,
+        method: request.method,
+        path,
+        requestId: request.headers.get("x-request-id") ?? "",
+        authorization: request.headers.get("authorization"),
+        reason: request.headers.get("x-admin-reason"),
+        reasonEncoding: request.headers.get("x-admin-reason-encoding"),
+        contentType: request.headers.get("content-type"),
+        body: body.body ?? null,
+        timestamp: request.headers.get(ADMIN_SERVICE_HEADERS.timestamp),
+        signature: request.headers.get(ADMIN_SERVICE_HEADERS.signature),
+      });
+      if (!authorized) {
+        if (request.headers.has(ADMIN_SERVICE_HEADERS.signature)) {
+          const timestamp = Number(request.headers.get(ADMIN_SERVICE_HEADERS.timestamp));
+          console.error(JSON.stringify({
+            level: "warn",
+            service: "dabboba-admin-api-edge",
+            event: "admin_service_signature_rejected",
+            keyId: createHash("sha256").update(secret).digest("hex").slice(0, 12),
+            requestId: request.headers.get("x-request-id"),
+            method: request.method,
+            path: url.pathname,
+            contentType: request.headers.get("content-type"),
+            bodyBytes: body.body?.byteLength ?? 0,
+            timestampSkewSeconds: Number.isFinite(timestamp) ? Math.floor(Date.now() / 1000) - timestamp : null,
+          }));
+        }
+        return fixedJson(403, "ADMIN_SERVICE_FORBIDDEN");
+      }
+    }
 
     try {
       const response = await (await app()).inject({
@@ -428,7 +488,7 @@ export function createSupabaseEdgeApiHandler(
     } catch (error) {
       console.error(JSON.stringify({
         level: "error",
-        service: "dabboba-api-edge",
+        service: surface === "admin" ? "dabboba-admin-api-edge" : "dabboba-api-edge",
         event: "bootstrap_or_request_failed",
         code: edgeFailureCode(error),
       }));

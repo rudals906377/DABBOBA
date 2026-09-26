@@ -1,0 +1,21 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "dabboba-admin",
+  "main": ".open-next/worker.js",
+  "compatibility_date": "2026-09-26",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS"
+  },
+  "routes": [
+    { "pattern": "admin.dabboba.net", "custom_domain": true }
+  ],
+  "vars": {
+    "DABBOBA_ENVIRONMENT_TIER": "PRODUCTION",
+    "DABBOBA_API_URL": "https://rconfxsykttfvznakile.supabase.co/functions/v1/dabboba-admin-api",
+    "ADMIN_EDGE_CLIENT_IP_HEADER": "cf-connecting-ip",
+    "ADMIN_SESSION_COOKIE_NAME": "dabboba_admin_session"
+  },
+  "observability": { "enabled": true }
+}

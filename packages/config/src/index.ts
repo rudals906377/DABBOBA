@@ -8,6 +8,7 @@ import {
 } from "./backend-environment.js";
 
 export * from "./admin-proxy-identity.js";
+export * from "./admin-service-signature.js";
 export * from "./backend-environment.js";
 export * from "./media-storage.js";
 

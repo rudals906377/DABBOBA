@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import type { SessionCreated } from "../../../../lib/admin-types";
-import { adminApi } from "../../../../lib/api";
+import { AdminApiError, adminApi } from "../../../../lib/api";
 import { isAdminActor } from "../../../../lib/capabilities";
 import { getAdminConfig } from "../../../../lib/config";
 import { internalRedirect, isSameOriginRequest, safeInternalPath, signedAdminLoginClientHeaders } from "../../../../lib/request-security";
@@ -41,7 +41,13 @@ export async function POST(request: NextRequest) {
       headers: clientIdentityHeaders,
       body: { email, password },
     });
-  } catch {
+  } catch (error) {
+    console.error(JSON.stringify({
+      event: "admin_login_proxy_failed",
+      status: error instanceof AdminApiError ? error.status : null,
+      errorName: error instanceof Error ? error.name : "unknown",
+      detail: error instanceof Error ? error.message.slice(0, 180) : null,
+    }));
     return loginError("login-failed", next);
   }
 

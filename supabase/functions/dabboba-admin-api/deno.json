@@ -1,0 +1,7 @@
+{
+  "compilerOptions": {
+    "lib": ["deno.ns", "dom", "dom.iterable", "es2022"],
+    "strict": true
+  },
+  "nodeModulesDir": "none"
+}

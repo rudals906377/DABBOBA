@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ApiConfig } from "@dabboba/config";
+import { signAdminServiceRequest } from "@dabboba/config";
 import type { DatabasePool } from "@dabboba/db";
 import { buildAppCore } from "./app-core.js";
 import {
@@ -8,6 +9,7 @@ import {
   createSupabaseEdgeApiHandler,
   EDGE_REQUEST_BODY_TIMEOUT_MS,
   normalizeSupabaseEdgeApiEnvironment,
+  normalizeSupabaseEdgeAdminEnvironment,
   type EdgeApiEnvironment,
 } from "./edge-handler.js";
 import { createEdgeApiLogger } from "./lib/edge-logger.js";
@@ -35,6 +37,59 @@ function edgeEnvironment(overrides: EdgeApiEnvironment = {}): EdgeApiEnvironment
     ...overrides,
   };
 }
+
+test("admin Edge function rejects direct requests, customer paths, and mutated signed content before app creation", async () => {
+  const captured: InjectOptions[] = [];
+  let builds = 0;
+  const serviceSecret = "fixture-admin-service-secret-1234567890";
+  const environment = edgeEnvironment({
+    DABBOBA_ADMIN_ORIGINS: "https://admin.example.test",
+    DABBOBA_ADMIN_PROXY_IDENTITY_SECRET: "fixture-admin-proxy-secret-1234567890",
+    DABBOBA_ADMIN_EDGE_CLIENT_IP_HEADER: "cf-connecting-ip",
+    DABBOBA_ADMIN_SERVICE_SECRET: serviceSecret,
+  });
+  const handler = createSupabaseEdgeApiHandler({
+    surface: "admin",
+    readEnvironment: () => environment,
+    buildApp: async (config) => {
+      builds += 1;
+      assert.equal(config.surface, "admin");
+      return fakeApp(captured);
+    },
+  });
+  const base = "https://example.test/functions/v1/dabboba-admin-api";
+  assert.equal((await handler(new Request(`${base}/v1/admin/dashboard`))).status, 403);
+  assert.equal((await handler(new Request(`${base}/v1/catalog/products`))).status, 404);
+  assert.equal((await handler(new Request("https://example.test/functions/v1/dabboba-api/v1/admin/dashboard"))).status, 404);
+  assert.equal(builds, 0);
+
+  const path = "/functions/v1/dabboba-admin-api/v1/admin/products?limit=30";
+  const canonicalPath = "/v1/admin/products?limit=30";
+  const requestId = "ef0a189b-0435-497f-b36a-e8e2f8f390e4";
+  const body = JSON.stringify({ name: "예시" });
+  const signature = signAdminServiceRequest({
+    secret: serviceSecret, method: "POST", path: canonicalPath, requestId,
+    authorization: "Bearer opaque-admin", reason: encodeURIComponent("상품 등록"), reasonEncoding: "utf-8-percent",
+    contentType: "application/json", body,
+  });
+  const headers = {
+    ...signature,
+    "x-request-id": requestId,
+    authorization: "Bearer opaque-admin",
+    "x-admin-reason": encodeURIComponent("상품 등록"),
+    "x-admin-reason-encoding": "utf-8-percent",
+    "content-type": "application/json",
+  };
+  assert.equal((await handler(new Request(`https://example.test${path}`, { method: "POST", headers, body: `${body} ` }))).status, 403);
+  assert.equal(builds, 0);
+  assert.equal((await handler(new Request(`https://example.test${path}`, { method: "POST", headers, body }))).status, 207);
+  assert.equal((await handler(new Request(`https://example.test/dabboba-admin-api${canonicalPath}`, { method: "POST", headers, body }))).status, 207);
+  assert.equal(builds, 1);
+  assert.equal(captured[0]?.url, "/v1/admin/products?limit=30");
+  assert.equal(captured[0]?.headers["x-dabboba-admin-service-signature"], undefined);
+  assert.equal(captured[0]?.headers.authorization, "Bearer opaque-admin");
+  assert.equal(normalizeSupabaseEdgeAdminEnvironment(environment).API_SURFACE, "admin");
+});
 
 type InjectOptions = {
   method: string;

@@ -283,6 +283,24 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Actor" }
         "403": { $ref: "#/components/responses/Forbidden" }
+  /v1/admin/auth/keepalive:
+    post:
+      tags: [Admin]
+      operationId: keepAdminSessionAlive
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Extends an active administrator session after authenticated activity.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [expiresAt]
+                properties:
+                  expiresAt: { type: string, format: date-time }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
   /v1/notices:
     get:
       tags: [Community]

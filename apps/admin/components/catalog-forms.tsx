@@ -48,16 +48,16 @@ export function ProductForm({ item, returnTo, initialName, initialIpId, initialP
   return <form className="stack-form" action={action}>
     {item ? <><input type="hidden" name="productId" value={item.id} /><input type="hidden" name="expectedVersion" value={item.version} /></> : null}<ReturnTo value={returnTo} />
     <div className="field-grid">
-      <label>SKU<input name="sku" defaultValue={item?.sku} maxLength={80} required /></label><label>IP ID<input name="ipId" defaultValue={item?.ipId || initialIpId} maxLength={120} required /></label>
+      <label>관리 코드 (SKU)<input name="sku" defaultValue={item?.sku} maxLength={80} placeholder="예: gacha-kimetsu-001" required /><small>상품마다 다른 영문·숫자 코드입니다.</small></label><label>작품 ID<input name="ipId" defaultValue={item?.ipId || initialIpId} maxLength={120} placeholder="작품 메뉴에서 확인" required /></label>
       {item ? <>
-        <label>카테고리<input value={item.category} readOnly aria-readonly="true" title="카테고리 변경은 새 SKU 등록으로 처리합니다." /></label>
+        <label>상품 종류<input value={item.category === "gacha" ? "가챠" : item.category === "kuji" ? "쿠지" : item.category} readOnly aria-readonly="true" title="종류 변경은 새 SKU 등록으로 처리합니다." /></label>
         <input type="hidden" name="category" value={item.category} />
-      </> : <label>카테고리<select name="category" defaultValue="figure">{["gacha", "figure", "kuji", "tcg"].map((v) => <option key={v}>{v}</option>)}</select></label>}
-      <label>상품명<input name="name" defaultValue={item?.name || initialName} maxLength={240} required /></label>
+      </> : <label>상품 종류<select name="category" defaultValue="gacha"><option value="gacha">가챠</option><option value="kuji">쿠지</option><option value="figure">피규어 (내부 전용)</option><option value="tcg">카드 (내부 전용)</option></select></label>}
+      <label>상품명<input name="name" defaultValue={item?.name || initialName} maxLength={240} placeholder="고객에게 보일 상품 이름" required /></label>
       <label>제조사<input name="manufacturer" defaultValue={item?.manufacturer || ""} maxLength={160} /></label><label>출시일<input type="date" name="releaseDate" defaultValue={item?.releaseDate || ""} /></label>
-      <label>서버 기준 가격 (원)<input type="number" name="price" min={0} max={2147483647} defaultValue={item?.price ?? 0} required /></label>
+      <label>가격 (원)<input type="number" name="price" min={0} max={2147483647} defaultValue={item?.price ?? 0} required /></label>
       {item ? <label>가용 수량 (재고 운영에서 조정)<input type="number" name="availableQuantity" value={item.availableQuantity} readOnly aria-readonly="true" /></label>
-        : <label>초기 가용 수량<input type="number" name="availableQuantity" min={0} max={2147483647} defaultValue={0} required /></label>}
+        : <label>처음 등록할 재고 수<input type="number" name="availableQuantity" min={0} max={2147483647} defaultValue={0} required /></label>}
       <label className="span-2">캐릭터 UUID (쉼표 또는 줄바꿈)<textarea name="characterIds" defaultValue={item?.characterIds.join(", ")} placeholder="비워 저장하면 연결을 모두 해제합니다." /></label>
       <label className="span-2">메타데이터 JSON<textarea name="metadata" defaultValue={JSON.stringify(item?.metadata || {}, null, 2)} required /></label>
       <label className="span-2">이미지 URL<input type="url" name="imageUrl" defaultValue={item?.imageUrl || ""} maxLength={2000} /></label>
