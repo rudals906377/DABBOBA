@@ -43,7 +43,7 @@ test("mobile release structure is store-shaped without external credentials", ()
 
   assert.deepEqual(report.errors, []);
   assert.equal(report.warnings.some((issue) => issue.code === "ANDROID_ADAPTIVE_ICON_REQUIRED"), false);
-  assert.equal(report.warnings.some((issue) => issue.code === "PG_REVIEW_BUSINESS_PHONE_MOBILE"), true);
+  assert.equal(report.warnings.some((issue) => issue.code === "PG_REVIEW_BUSINESS_PHONE_MOBILE"), false);
   assert.equal(report.errors.some((issue) => issue.code === "IOS_APPLE_SIGN_IN_CAPABILITY_MISSING"), false);
   assert.equal(report.errors.some((issue) => issue.code === "IOS_RELEASE_TEAM_MISMATCH"), false);
   assert.equal(report.errors.some((issue) => issue.code === "EAS_PG_REVIEW_PROFILE_INVALID"), false);
@@ -74,7 +74,7 @@ test("production mobile release gate fails closed when public endpoints are abse
   assert.ok(codes.has("PORTONE_LIVE_CHANNEL_REQUIRED"));
   assert.ok(codes.has("SERVER_COMMERCE_LIVE_REQUIRED"));
   assert.ok(codes.has("MOBILE_COMMERCE_LIVE_REQUIRED"));
-  assert.ok(codes.has("PG_REVIEW_BUSINESS_PHONE_MOBILE"));
+  assert.equal(codes.has("PG_REVIEW_BUSINESS_PHONE_MOBILE"), false);
   assert.equal(codes.has("PAYMENT_CONNECTION_PLACEHOLDER_PRESENT"), false);
   assert.equal(codes.has("CHECKOUT_PAYMENT_PLACEHOLDER_PRESENT"), false);
 });
@@ -107,7 +107,7 @@ test("PG-review gate requires payment client values without requiring public leg
   }
   assert.equal(codes.has("LIVE_LEGAL_DOCUMENTS_PRELAUNCH_COPY"), false);
   assert.equal(codes.has("CHECKOUT_PAYMENT_PLACEHOLDER_PRESENT"), false);
-  assert.equal(codes.has("PG_REVIEW_BUSINESS_PHONE_MOBILE"), true);
+  assert.equal(codes.has("PG_REVIEW_BUSINESS_PHONE_MOBILE"), false);
 });
 
 test("PG-review gate fails closed when PortOne client identifiers are absent", () => {
@@ -147,7 +147,7 @@ test("production mobile release gate accepts a payment-disabled public prelaunch
   assert.equal(codes.has("PG_REVIEW_BUSINESS_PHONE_MOBILE"), false);
   assert.equal(
     report.warnings.some((issue) => issue.code === "PG_REVIEW_BUSINESS_PHONE_MOBILE"),
-    true,
+    false,
   );
 });
 
@@ -165,7 +165,7 @@ test("production mobile release gate accepts the wired PortOne boundary but bloc
   assert.equal(codes.has("PORTONE_LIVE_CHANNEL_REQUIRED"), false);
   assert.equal(codes.has("SERVER_COMMERCE_LIVE_REQUIRED"), false);
   assert.equal(codes.has("MOBILE_COMMERCE_LIVE_REQUIRED"), false);
-  assert.equal(codes.has("PG_REVIEW_BUSINESS_PHONE_MOBILE"), true);
+  assert.equal(codes.has("PG_REVIEW_BUSINESS_PHONE_MOBILE"), false);
   assert.equal(codes.has("LIVE_LEGAL_DOCUMENTS_PRELAUNCH_COPY"), true);
 });
 
