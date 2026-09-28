@@ -477,7 +477,7 @@ function DrawHighlights({ category, prelaunch }: { category: "gacha" | "kuji"; p
     <View style={styles.highlights}>
       {prelaunch ? <View style={styles.highlightRow}>
         <DecorativeIonicon name="shield-checkmark-outline" size={21} color={colors.ink} />
-        <Text style={styles.highlightText}>사전오픈 중 · 결제와 뽑기는 아직 이용할 수 없어요.</Text>
+        <Text style={styles.highlightText}>정식 오픈 준비 중 · 결제와 뽑기는 아직 이용할 수 없어요.</Text>
       </View> : null}
       <View style={styles.highlightRow}>
         <DecorativeIonicon name="videocam-outline" size={21} color={colors.ink} />
@@ -667,7 +667,7 @@ function CommerceGuidance({
   const drawCategory = isDrawCategory(category);
   const title = ownedCollectible || exchangeReference
     ? "보관·교환 안내"
-    : prelaunch ? "사전오픈 안내" : "구매·보관 안내";
+    : prelaunch ? "정식 오픈 준비 안내" : "구매·보관 안내";
   const facts = ownedCollectible
     ? [
         { icon: "shield-checkmark-outline" as const, text: "로그인한 계정의 보유 기록으로 확인된 상품이에요." },
