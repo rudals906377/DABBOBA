@@ -773,7 +773,7 @@ export function CheckoutScreen() {
       }
       const expectedDrawVersion = snapshot?.drawOdds?.version;
       if (!expectedDrawVersion) {
-        throw new Error("결제 전 확인한 최신 확률표가 없어 주문을 접수하지 않았어요.");
+        throw new Error("결제 전 확인할 최신 가챠 구성 정보가 없어 주문을 접수하지 않았어요.");
       }
       const claim = await claimPendingGachaCheckoutOrderIntent(db, {
         actorId,
@@ -1018,7 +1018,7 @@ export function CheckoutScreen() {
             ? "남은 수량이 없어 구매할 수 없어요."
             : product.category === "kuji"
               ? "쿠지 구성과 등급별 남은 수량이 공개된 뒤 구매할 수 있어요."
-              : "가챠 구성과 확률이 공개된 뒤 구매할 수 있어요.",
+              : "가챠 상품 구성이 공개된 뒤 구매할 수 있어요.",
         );
         return;
       }

@@ -50,6 +50,9 @@ test("customer and store-review copy distinguish prepayment disclosure from the 
   assert.doesNotMatch(detailSource, /결제 후 서버가 확정한 결과로 추첨/);
   assert.match(detailSource, /쿠지 구성과 등급별 남은 수량이 공개된 뒤 구매할 수 있어요/);
   assert.match(checkoutSource, /결제 전 확인한 최신 쿠지 구성 정보가 없어 주문을 접수하지 않았어요/);
+  assert.match(checkoutSource, /결제 전 확인할 최신 가챠 구성 정보가 없어 주문을 접수하지 않았어요/);
+  assert.match(checkoutSource, /가챠 상품 구성이 공개된 뒤 구매할 수 있어요/);
+  assert.doesNotMatch(checkoutSource, /확률표가 없어|확률이 공개된 뒤/);
 });
 
 test("draw detail exposes the referenced hierarchy without inventing odds or recent results", () => {
