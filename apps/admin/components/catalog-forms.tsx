@@ -32,7 +32,7 @@ export function CharacterForm({ item, returnTo }: { item?: Character; returnTo: 
       <label>IP ID<input name="ipId" defaultValue={item?.ipId} maxLength={120} required /></label><label>캐릭터 이름<input name="name" defaultValue={item?.name} maxLength={160} required /></label>
       <label className="span-2">별칭 (쉼표 또는 줄바꿈)<textarea name="aliases" defaultValue={item?.aliases.join(", ")} maxLength={4000} /></label>
       <label className="span-2">외부 이미지 URL (선택)<input type="url" name="imageUrl" defaultValue={item?.imageUrl || ""} maxLength={2000} />
-        <small>컴퓨터에 있는 사진은 상품을 등록한 뒤 ‘사진 자르기·업로드’에서 선택하고 직접 잘라 올려주세요. 외부 URL은 자르기 기능을 거치지 않습니다.</small>
+        <small>캐릭터 이미지는 외부 URL만 연결할 수 있습니다. 이 화면에서는 파일 업로드와 자르기를 지원하지 않습니다.</small>
       </label>
       <label className="check-field"><input type="checkbox" name="isActive" defaultChecked={item?.isActive ?? true} /> 활성</label>
     </div>
@@ -63,7 +63,9 @@ export function ProductForm({ item, returnTo, initialName, initialIpId, initialP
         : <label>처음 등록할 재고 수<input type="number" name="availableQuantity" min={0} max={2147483647} defaultValue={0} required /></label>}
       <label className="span-2">캐릭터 UUID (쉼표 또는 줄바꿈)<textarea name="characterIds" defaultValue={item?.characterIds.join(", ")} placeholder="비워 저장하면 연결을 모두 해제합니다." /></label>
       <label className="span-2">메타데이터 JSON<textarea name="metadata" defaultValue={JSON.stringify(item?.metadata || {}, null, 2)} required /></label>
-      <label className="span-2">이미지 URL<input type="url" name="imageUrl" defaultValue={item?.imageUrl || ""} maxLength={2000} /></label>
+      <label className="span-2">외부 이미지 URL (선택)<input type="url" name="imageUrl" defaultValue={item?.imageUrl || ""} maxLength={2000} />
+        <small>컴퓨터에 있는 사진은 상품 등록 후 목록의 ‘사진 자르기·업로드’에서 직접 잘라 올려주세요. 외부 URL은 자르기를 거치지 않습니다.</small>
+      </label>
       <label className="check-field"><input type="checkbox" name="isActive" defaultChecked={item?.isActive ?? true} /> 활성</label>
       {item?.isPrizeOnly || (!item && initialPrizeOnly) ? <>
         <input type="hidden" name="saleStatus" value="DRAFT" />

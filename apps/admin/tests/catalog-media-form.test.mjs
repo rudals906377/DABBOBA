@@ -332,7 +332,7 @@ test("product image form hides the clear action when no storefront image exists 
   assert.doesNotMatch(html, /class="danger"/);
 });
 
-test("IP form identifies its image as the Home popular-work square artwork", async () => {
+test("catalog forms distinguish direct URLs from the product photo crop flow", async () => {
   const module = await loadModule(join(adminRoot, "components/catalog-forms.tsx"), {
     "./image-crop-picker": await loadCropPicker(),
     "../lib/actions": {
@@ -347,6 +347,12 @@ test("IP form identifies its image as the Home popular-work square artwork", asy
   const html = renderToStaticMarkup(React.createElement(module.IpForm, { returnTo: "/catalog/ips" }));
   assert.match(html, /홈 인기 작품용 1:1 대표 이미지 URL/);
   assert.match(html, /정사각형 IP 이미지/);
+  const productHtml = renderToStaticMarkup(React.createElement(module.ProductForm, { returnTo: "/catalog/products" }));
+  assert.match(productHtml, /상품 등록 후 목록의 ‘사진 자르기·업로드’/);
+  assert.match(productHtml, /외부 URL은 자르기를 거치지 않습니다/);
+  const characterHtml = renderToStaticMarkup(React.createElement(module.CharacterForm, { returnTo: "/catalog/characters" }));
+  assert.match(characterHtml, /캐릭터 이미지는 외부 URL만 연결할 수 있습니다/);
+  assert.doesNotMatch(characterHtml, /상품을 등록한 뒤/);
 });
 
 test("crop geometry keeps the selected aspect ratio and shifts within the original image", async () => {
