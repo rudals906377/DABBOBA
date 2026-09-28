@@ -145,6 +145,8 @@ import {
   type ApiAccountDeletionRequest,
   type ApiAccountProfile,
   type ApiCatalogCharacter,
+  type ApiCatalogIncludedProduct,
+  type ApiCatalogIncludedProductPage,
   type ApiCatalogRequest,
   type ApiDefaultShippingAddress,
   type ApiDrawOdds,
@@ -407,6 +409,7 @@ function formatDrawOddsCalculatedAt(value: string) {
 }
 
 function drawOddsPoolKind(odds: ApiDrawOdds) {
+  if (odds.calculation === "REMAINING_QUANTITY_RATIO") return "수량 비례형";
   const finiteEntryCount = odds.entries.filter((entry) => entry.remainingQuantity !== null).length;
   if (finiteEntryCount === 0) return "고정 가중치";
   if (finiteEntryCount === odds.entries.length) return "수량 제한형";
@@ -436,7 +439,7 @@ function ServerDrawOddsTable({ odds, compact = false, label }: { odds: ApiDrawOd
                 {` · 현재 산식 ${entry.probabilityNumerator.toLocaleString("ko-KR")} / ${entry.probabilityDenominator.toLocaleString("ko-KR")}`}
               </small>
             </td>
-            <td><em>{entry.probabilityPercent.toLocaleString("ko-KR", { maximumFractionDigits: 6 })}%</em></td>
+            <td><em>{entry.probabilityPercent.toFixed(2)}%</em></td>
           </tr>
         ))}
       </tbody>
@@ -446,7 +449,9 @@ function ServerDrawOddsTable({ odds, compact = false, label }: { odds: ApiDrawOd
 
 function DrawOddsDisclosure({ odds, compact = false }: { odds: ApiDrawOdds; compact?: boolean }) {
   const finiteEntryCount = odds.entries.filter((entry) => entry.remainingQuantity !== null).length;
-  const poolDescription = finiteEntryCount === 0
+  const poolDescription = odds.calculation === "REMAINING_QUANTITY_RATIO"
+    ? "각 상세상품의 남은 수량이 정해진 구성입니다. 하나가 뽑히면 그 상품의 수량과 이후 확률이 바뀝니다."
+    : finiteEntryCount === 0
     ? "남은 수량을 차감하지 않는 고정 가중치 구성입니다. 이전 결과는 다음 회차의 확률을 바꾸지 않습니다."
     : finiteEntryCount === odds.entries.length
       ? "경품별 수량이 정해진 구성입니다. 당첨된 경품의 수량이 차감되면 이후 확률이 달라집니다."
@@ -464,7 +469,7 @@ function DrawOddsDisclosure({ odds, compact = false }: { odds: ApiDrawOdds; comp
       <div className="draw-odds-meta" aria-label="확률표 계산 정보">
         <span>{drawOddsPoolKind(odds)}</span>
         <span>확률표 v{odds.version}</span>
-        <span>총 유효 가중치 {odds.totalEffectiveWeight.toLocaleString("ko-KR")}</span>
+        <span>{odds.calculation === "REMAINING_QUANTITY_RATIO" ? "전체 남은 수량" : "총 유효 가중치"} {odds.totalEffectiveWeight.toLocaleString("ko-KR")}</span>
       </div>
       {compact ? (
         <ul>
@@ -475,7 +480,9 @@ function DrawOddsDisclosure({ odds, compact = false }: { odds: ApiDrawOdds; comp
         <>
           <p>{poolDescription}</p>
           <ul>
-            <li>현재 확률은 수량 제한 경품의 설정 가중치 × 남은 수량을 전체 유효 가중치로 나눠 계산합니다. 수량 제한이 없으면 설정 가중치를 그대로 반영하며, 단순 1/n 균등 확률이 아닐 수 있습니다.</li>
+            <li>{odds.calculation === "REMAINING_QUANTITY_RATIO"
+              ? "현재 확률은 각 상세상품의 남은 수량을 모든 상세상품의 남은 수량 합계로 나눠 계산합니다. 수량이 같을 때만 종류별 1/n이 됩니다."
+              : "기존 확률표의 현재 확률은 설정 가중치와 남은 수량으로 계산됩니다. 상세상품별 수량 비례 방식으로 새 확률표를 구성해야 합니다."}</li>
             <li>표시된 수량과 확률은 조회 시점 기준입니다. 여러 추첨이 동시에 진행되면 서버 처리 순서에 따라 실제 추첨 직전 값이 달라질 수 있습니다.</li>
             <li>시크릿·희귀 경품은 위 표에 개별 항목과 정확한 확률이 표시된 경우에만 추첨 대상입니다.</li>
             <li>중복 방지나 확정 보상이 별도로 표시되지 않은 경우, 남은 수량이 있는 같은 경품을 다시 받을 수 있습니다.</li>
@@ -549,6 +556,8 @@ function mapApiProduct(item: ApiCatalogProduct): Product {
     description: metadataText(item.metadata, "description", "상품 상세 정보는 운영자가 준비 중입니다."),
     price: item.price,
     stock: item.availableQuantity,
+    totalQuantity: item.totalQuantity ?? null,
+    openedQuantity: item.openedQuantity ?? null,
     asset: item.imageUrl ?? EMPTY_PRODUCT_IMAGE_SRC,
     edition: metadataText(item.metadata, "edition", "DABBOBA"),
     reward: metadataText(item.metadata, "reward", item.name),
@@ -960,6 +969,7 @@ type DabbobaContextValue = {
   drawOddsByProductId: Record<string, ApiDrawOdds>;
   drawOddsStateByProductId: Record<string, DrawOddsLoadState>;
   loadDrawOdds: (productId: string, force?: boolean) => Promise<UserMutationResult<ApiDrawOdds>>;
+  loadCatalogIncludedProducts: (productId: string, signal?: AbortSignal) => Promise<ApiCatalogIncludedProductPage>;
   catalogIps: IpRecord[];
   notices: SettingsNotice[];
   duckroomShowcases: UiDuckroomShowcase[];
@@ -2885,6 +2895,10 @@ export default function Prototype() {
     }
   }, [apiRuntime.client, drawOddsByProductId]);
 
+  const loadCatalogIncludedProducts = useCallback((productId: string, signal?: AbortSignal) => (
+    apiRuntime.client.getCatalogIncludedProducts(productId, signal)
+  ), [apiRuntime.client]);
+
   const submitOrder = useCallback(async (input: { productId: string; quantity: number; pointAmount: number; expectedDrawVersion?: number; idempotencyKey?: string }): Promise<UserMutationResult<ApiOrder>> => {
     if (!apiRuntime.client.remoteEnabled) {
       return { ok: true, source: "prototype", message: "프로토타입 주문 흐름을 계속합니다." };
@@ -2948,6 +2962,7 @@ export default function Prototype() {
     drawOddsByProductId,
     drawOddsStateByProductId,
     loadDrawOdds,
+    loadCatalogIncludedProducts,
     catalogIps,
     notices,
     duckroomShowcases,
@@ -9203,18 +9218,45 @@ function IpTabContent({ flow, ip, tab }: { flow: FlowControls; ip: IpRecord; tab
 }
 
 function ProductDetail({ product }: { product: Product }) {
-  const { apiMode, drawOddsByProductId, drawOddsStateByProductId, loadDrawOdds } = useDabboba();
+  const { apiMode, drawOddsByProductId, drawOddsStateByProductId, loadDrawOdds, loadCatalogIncludedProducts } = useDabboba();
   const screenFocusRef = useScreenEntryFocus();
   const drawMode = isRandomDrawCategory(product.categoryId);
-  const prizeGuide = prizeGuideFor(product.categoryId);
   const purchaseGuide = purchaseGuideFor(product);
   const drawOdds = drawOddsByProductId[product.id];
   const drawOddsState = drawOddsStateByProductId[product.id];
+  const [includedResult, setIncludedResult] = useState<{
+    productId: string;
+    items: ApiCatalogIncludedProduct[];
+    error: boolean;
+  } | null>(null);
+  const [includedReloadKey, setIncludedReloadKey] = useState(0);
+  const includedProducts = includedResult?.productId === product.id ? includedResult.items : null;
+  const includedError = includedResult?.productId === product.id && includedResult.error;
+  const openQuantityLabel = typeof product.totalQuantity === "number"
+    && Number.isSafeInteger(product.totalQuantity)
+    && product.totalQuantity > 0
+    && typeof product.openedQuantity === "number"
+    && Number.isSafeInteger(product.openedQuantity)
+    && product.openedQuantity >= 0
+    && product.openedQuantity <= product.totalQuantity
+      ? `${product.totalQuantity.toLocaleString("ko-KR")}개 중 ${product.openedQuantity.toLocaleString("ko-KR")}개 오픈`
+      : null;
 
   useEffect(() => {
     if (apiMode !== "remote" || !drawMode || drawOdds || drawOddsState !== undefined) return;
     void loadDrawOdds(product.id);
   }, [apiMode, drawMode, drawOdds, drawOddsState, loadDrawOdds, product.id]);
+
+  useEffect(() => {
+    if (apiMode !== "remote" || !drawMode) return;
+    const controller = new AbortController();
+    void loadCatalogIncludedProducts(product.id, controller.signal).then((page) => {
+      if (!controller.signal.aborted) setIncludedResult({ productId: product.id, items: page.items, error: false });
+    }).catch(() => {
+      if (!controller.signal.aborted) setIncludedResult({ productId: product.id, items: [], error: true });
+    });
+    return () => controller.abort();
+  }, [apiMode, drawMode, includedReloadKey, loadCatalogIncludedProducts, product.id]);
 
   return (
     <MobileScroll className="app-screen dabboba-screen">
@@ -9254,32 +9296,45 @@ function ProductDetail({ product }: { product: Product }) {
 
           {drawMode ? (
             <section className="detail-section" aria-labelledby="prize-guide">
-              <h2 id="prize-guide">현재 경품·확률</h2>
+              <div className="detail-prize-heading">
+                <h2 id="prize-guide">상품 목록</h2>
+                {openQuantityLabel ? <span>{openQuantityLabel}</span> : includedProducts?.length ? <span>{includedProducts.length}종</span> : null}
+              </div>
               {apiMode === "remote" ? (
-                drawOdds ? (
+                includedProducts?.length ? (
                   <>
-                    <ServerDrawOddsTable odds={drawOdds} label={`확률표 버전 ${drawOdds.version}`} />
-                    <DrawOddsDisclosure odds={drawOdds} />
+                    <div className="detail-prize-grid">
+                      {includedProducts.map((item) => (
+                        <div className="detail-prize-card" key={item.id}>
+                          {item.imageUrl ? <img src={item.imageUrl} alt="" loading="lazy" /> : <IconBoxFlapLine size={32} aria-hidden="true" />}
+                          <strong>{item.name}</strong>
+                        </div>
+                      ))}
+                    </div>
+                    {drawOdds?.calculation === "REMAINING_QUANTITY_RATIO" ? (
+                      <p className="detail-probability-example">
+                        상품별 결과는 현재 남은 수량에 비례해 정해집니다. 예를 들어 A~D가 각 50개,
+                        시크릿이 2개로 총 202개라면 A의 확률은 50/202입니다.
+                        이 숫자는 설명용 예시이며 현재 판매 상품의 수량이나 확률이 아닙니다.
+                      </p>
+                    ) : null}
                   </>
                 ) : (
                   <div className="ip-empty-state ip-tab-empty" role="status">
                     <IconLockLine size={28} aria-hidden="true" />
-                    <strong>{drawOddsState === "unavailable" ? "공개된 확률표가 없습니다" : drawOddsState === "error" ? "확률표를 불러오지 못했습니다" : "서버 확률표 확인 중"}</strong>
-                    <span>활성 경품·확률표를 확인하기 전에는 주문할 수 없습니다.</span>
-                    {drawOddsState === "unavailable" || drawOddsState === "error" ? (
-                      <button type="button" onClick={() => { void loadDrawOdds(product.id); }}>다시 확인</button>
+                    <strong>{includedError ? "상품 구성을 불러오지 못했습니다" : includedProducts ? "판매할 상품 구성을 준비 중입니다" : "상품 구성 확인 중"}</strong>
+                    <span>구성과 결제 조건이 확인되기 전에는 주문할 수 없습니다.</span>
+                    {includedError ? (
+                      <button type="button" onClick={() => { setIncludedResult(null); setIncludedReloadKey((current) => current + 1); }}>다시 확인</button>
                     ) : null}
                   </div>
                 )
               ) : (
-                <>
-                  <div className="grade-table">
-                    <div><span>S</span><b>{prizeGuide[0]}</b><em>2%</em></div>
-                    <div><span>A</span><b>{prizeGuide[1]}</b><em>18%</em></div>
-                    <div><span>B</span><b>{prizeGuide[2]}</b><em>80%</em></div>
-                  </div>
-                  <p>개발 프리뷰용 등급표이며 실제 판매 확률이 아닙니다.</p>
-                </>
+                <div className="ip-empty-state ip-tab-empty" role="status">
+                  <IconBoxFlapLine size={28} aria-hidden="true" />
+                  <strong>상품 구성은 서버 연결 후 표시됩니다</strong>
+                  <span>개발 프리뷰에는 실제 상품 목록이나 확률을 표시하지 않습니다.</span>
+                </div>
               )}
             </section>
           ) : (

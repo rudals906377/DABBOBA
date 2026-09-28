@@ -8,6 +8,7 @@ import type { ApiContext } from "../types.js";
 import { AppError } from "../lib/errors.js";
 import {
   assertDirectPurchaseAllowed,
+  assertDrawVersionCategoryConfiguration,
   assertDrawPrizeSnapshotsCurrent,
   assertLatestDrawDraft,
   assertNoUnfinishedKujiVersion,
@@ -18,6 +19,7 @@ import {
   DRAW_SELECTION_ALGORITHM,
   drawPrizeSnapshotFields,
   drawRollFromEntropy,
+  gachaRemainingQuantityWeights,
   loadValidatedDrawPrizeSnapshots,
   refundRequiresReview,
   registerCommerceRoutes,
@@ -101,6 +103,33 @@ test("weighted selection uses the original evidence roll at exact range boundari
   assert.equal(weightedSelectionIndex([2, 3, 5], 4), 1);
   assert.equal(weightedSelectionIndex([2, 3, 5], 5), 2);
   assert.throws(() => weightedSelectionIndex([2, 3, 5], 10), RangeError);
+});
+
+test("gacha probability uses each remaining quantity over the whole remaining pool", () => {
+  const firstOnemutanPool = gachaRemainingQuantityWeights(
+    Array.from({ length: 5 }, () => ({ weight: 1, remaining_quantity: 10 })),
+  );
+  assert.equal(firstOnemutanPool.total, 50);
+  assert.equal((firstOnemutanPool.weights[0]! / firstOnemutanPool.total * 100).toFixed(2), "20.00");
+  const initial = gachaRemainingQuantityWeights([
+    ...Array.from({ length: 4 }, () => ({ weight: 1, remaining_quantity: 50 })),
+    { weight: 1, remaining_quantity: 2 },
+  ]);
+  assert.deepEqual(initial, { weights: [50, 50, 50, 50, 2], total: 202 });
+  assert.equal((initial.weights[0]! / initial.total * 100).toFixed(2), "24.75");
+  assert.equal((initial.weights[4]! / initial.total * 100).toFixed(2), "0.99");
+  const afterDraw = gachaRemainingQuantityWeights([
+    { weight: 1, remaining_quantity: 49 },
+    { weight: 1, remaining_quantity: 50 },
+    { weight: 1, remaining_quantity: 50 },
+    { weight: 1, remaining_quantity: 50 },
+    { weight: 1, remaining_quantity: 2 },
+  ]);
+  assert.equal(afterDraw.total, 201);
+  assert.equal((afterDraw.weights[0]! / afterDraw.total * 100).toFixed(2), "24.38");
+  assert.throws(() => gachaRemainingQuantityWeights([{ weight: 2, remaining_quantity: 50 }]), (error: unknown) => error instanceof AppError && error.statusCode === 409);
+  assert.throws(() => gachaRemainingQuantityWeights([{ weight: 1, remaining_quantity: null }]), (error: unknown) => error instanceof AppError && error.statusCode === 409);
+  assert.throws(() => assertDrawVersionCategoryConfiguration("gacha", null, [{ prizeProductId: "prize-a", rarity: "A", weight: 2, quantity: 50, tierCode: null, tierRank: null }]), (error: unknown) => error instanceof AppError && error.statusCode === 400);
 });
 
 test("refunds require review when a purchased unit moved owners or fulfillment is incomplete", () => {
@@ -361,6 +390,7 @@ test("public draw odds are no-store and disclose exact finite-pool probability c
             id: "11111111-1111-4111-8111-111111111111",
             product_id: "draw-product",
             version: 7,
+            category: "gacha",
             published_at: new Date("2026-08-24T00:00:00.000Z"),
           }],
         };
@@ -377,7 +407,7 @@ test("public draw odds are no-store and disclose exact finite-pool probability c
             prize_ip_id_snapshot: "snapshot-ip",
             prize_category_snapshot: "figure",
             rarity: "A",
-            weight: 3,
+            weight: 1,
             initial_quantity: 10,
             remaining_quantity: 5,
           },
@@ -408,6 +438,7 @@ test("public draw odds are no-store and disclose exact finite-pool probability c
     { header(name: string, value: string) { headers.set(name, value); } },
   ) as {
     version: number;
+    calculation: string;
     totalEffectiveWeight: number;
     entries: Array<{ prizeName: string; prizeImageUrl: string | null; prizeSku: string; prizeIpId: string; prizeCategory: string; effectiveWeight: number; probabilityNumerator: number; probabilityDenominator: number; probabilityPercent: number }>;
   };
@@ -416,7 +447,8 @@ test("public draw odds are no-store and disclose exact finite-pool probability c
   assert.match(queries[1]!, /e\.prize_name_snapshot/);
   assert.doesNotMatch(queries[1]!, /JOIN catalog_products/);
   assert.equal(result.version, 7);
-  assert.equal(result.totalEffectiveWeight, 20);
+  assert.equal(result.totalEffectiveWeight, 10);
+  assert.equal(result.calculation, "REMAINING_QUANTITY_RATIO");
   assert.deepEqual(result.entries[0] && {
     prizeName: result.entries[0].prizeName,
     prizeImageUrl: result.entries[0].prizeImageUrl,
@@ -436,8 +468,8 @@ test("public draw odds are no-store and disclose exact finite-pool probability c
     denominator: entry.probabilityDenominator,
     percent: entry.probabilityPercent,
   })), [
-    { effectiveWeight: 15, numerator: 15, denominator: 20, percent: 75 },
-    { effectiveWeight: 5, numerator: 5, denominator: 20, percent: 25 },
+    { effectiveWeight: 5, numerator: 5, denominator: 10, percent: 50 },
+    { effectiveWeight: 5, numerator: 5, denominator: 10, percent: 50 },
   ]);
 });
 
@@ -547,7 +579,7 @@ test("creating a draw draft allows an inactive selling product and stores the ca
   };
   await handler({
     params: { productId: "draw-product" },
-    body: { entries: [{ prizeProductId: "prize-a", rarity: "A", weight: 3, quantity: 10 }] },
+    body: { entries: [{ prizeProductId: "prize-a", rarity: "A", weight: 1, quantity: 10 }] },
     headers: { "idempotency-key": "create-draw-draft-0001", "x-admin-reason": "확률표 생성" },
     actor: { userId: "admin-1", sessionId: "session-1" },
     id: "request-create-draft",
@@ -567,7 +599,7 @@ test("creating a draw draft allows an inactive selling product and stores the ca
     "ip-1",
     "figure",
     "A",
-    3,
+    1,
     10,
   ]);
   const responseEntry = (responseBody as { entries: Array<Record<string, unknown>> }).entries[0];
@@ -643,6 +675,8 @@ test("publishing revalidates prize-only active same-IP catalog state before acti
         prize_sku_snapshot: "PRIZE-A",
         prize_ip_id_snapshot: "ip-1",
         prize_category_snapshot: "figure",
+        weight: 1,
+        remaining_quantity: 1,
       }] };
       if (sql.includes("SELECT p.id,p.name,p.image_url,p.sku")) return { rowCount: 1, rows: [{
         id: "prize-a",
@@ -781,10 +815,11 @@ test("a newly consumed draw returns the selected pool entry snapshot", async () 
         prize_category_snapshot: "tcg",
         rarity: "B",
         weight: 1,
-        remaining_quantity: null,
+        remaining_quantity: 1,
       }] };
       if (sql === "SELECT category FROM catalog_products WHERE id=$1") return { rowCount: 1, rows: [{ category: "gacha" }] };
       if (sql.startsWith("INSERT INTO inventory_units")) return { rowCount: 1, rows: [{ id: "99999999-9999-4999-8999-999999999999" }] };
+      if (sql.startsWith("UPDATE draw_pool_entries SET remaining_quantity")) return { rowCount: 1, rows: [{ id: "88888888-8888-4888-8888-888888888888" }] };
       if (sql.startsWith("INSERT INTO draw_results")) return { rowCount: 1, rows: [{ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", committed_at: new Date("2026-08-24T00:00:00.000Z") }] };
       if (sql.startsWith("UPDATE draw_entitlements SET status='CONSUMED'")) return { rowCount: 1, rows: [] };
       if (sql.startsWith("INSERT INTO outbox_events")) return { rowCount: 1, rows: [] };

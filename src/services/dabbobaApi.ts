@@ -127,6 +127,8 @@ export type ApiCatalogProduct = {
   releaseDate: string | null;
   price: number;
   availableQuantity: number;
+  totalQuantity?: number | null;
+  openedQuantity?: number | null;
   metadata: Record<string, unknown>;
   imageUrl: string | null;
   isActive: boolean;
@@ -134,6 +136,16 @@ export type ApiCatalogProduct = {
   version: number;
   createdAt: string;
   updatedAt: string;
+};
+
+export type ApiCatalogIncludedProduct = {
+  id: string;
+  name: string;
+  imageUrl: string | null;
+};
+
+export type ApiCatalogIncludedProductPage = {
+  items: ApiCatalogIncludedProduct[];
 };
 
 export type ApiCatalogRequest = {
@@ -419,7 +431,7 @@ export type ApiDrawOdds = {
   version: number;
   publishedAt: string;
   calculatedAt: string;
-  calculation: "WEIGHT_X_REMAINING_QUANTITY";
+  calculation: "REMAINING_QUANTITY_RATIO" | "WEIGHT_X_REMAINING_QUANTITY";
   totalEffectiveWeight: number;
   entries: Array<{
     id: string;
@@ -1458,6 +1470,12 @@ export class DabbobaApiClient {
 
   getActiveDrawOdds(productId: string, signal?: AbortSignal) {
     return this.request<ApiDrawOdds>(`/v1/catalog/products/${encodeURIComponent(productId)}/draw-odds`, {
+      signal,
+    });
+  }
+
+  getCatalogIncludedProducts(productId: string, signal?: AbortSignal) {
+    return this.request<ApiCatalogIncludedProductPage>(`/v1/catalog/products/${encodeURIComponent(productId)}/included-products`, {
       signal,
     });
   }

@@ -7,6 +7,7 @@ import {
   COMPACT_INVENTORY_INLINE_MAX_FONT_SCALE,
   COMPACT_INVENTORY_MAX_FONT_SIZE_MULTIPLIER,
   catalogQuantityLabel,
+  includedProductOpenQuantityLabel,
   remainingInventoryLabel,
   remainingInventoryRatio,
   shouldShowCatalogInventory,
@@ -46,6 +47,18 @@ test("catalog quantity and meter ratio share the same inventory source", () => {
   assert.equal(visibleInventoryQuantityLabel("gacha", { availableQuantity: 154, totalQuantity: null }), "154개 남음");
   assert.equal(visibleInventoryQuantityLabel("kuji", { availableQuantity: 80, totalQuantity: null }), "80장 남음");
   assert.equal(visibleInventoryQuantityLabel("kuji", { availableQuantity: 80, totalQuantity: 80 }), "80/80");
+});
+
+test("product detail shows only verified aggregate open counts, never a clipped or invented total", () => {
+  assert.equal(includedProductOpenQuantityLabel({ totalQuantity: 202, openedQuantity: 42, availableQuantity: 130 }, 5), "202개 중 42개 오픈");
+  assert.equal(includedProductOpenQuantityLabel({ totalQuantity: 12_345, openedQuantity: 1_234 }, 8), "12,345개 중 1,234개 오픈");
+  assert.equal(includedProductOpenQuantityLabel({ totalQuantity: 202, openedQuantity: 0 }, 5), "202개 중 0개 오픈");
+  assert.equal(includedProductOpenQuantityLabel({ totalQuantity: null, openedQuantity: null }, 5), "5종");
+  assert.equal(includedProductOpenQuantityLabel({ totalQuantity: 100, openedQuantity: undefined }, 5), "5종");
+  assert.equal(includedProductOpenQuantityLabel({ totalQuantity: 100, openedQuantity: 101 }, 5), "5종");
+  assert.equal(includedProductOpenQuantityLabel({ totalQuantity: 100, openedQuantity: -1 }, 5), "5종");
+  assert.equal(includedProductOpenQuantityLabel({ totalQuantity: 0, openedQuantity: 0 }, 5), "5종");
+  assert.equal(includedProductOpenQuantityLabel({ totalQuantity: 202, openedQuantity: 42 }, 0), null);
 });
 
 test("compact inventory meters keep 1, 2, and 3 digit quantities stable as text grows", () => {

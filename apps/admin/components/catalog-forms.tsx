@@ -1,6 +1,7 @@
 import type { CatalogIp, CatalogProduct, Character } from "../lib/admin-types";
-import { clearStorefrontProductImage, createCharacter, createIp, createProduct, updateCharacter, updateIp, updateProduct, uploadProductImage } from "../lib/actions";
+import { clearStorefrontProductImage, createCharacter, createIp, createProduct, updateCharacter, updateIp, updateProduct } from "../lib/actions";
 import { ReasonField, ReturnTo, safeExternalUrl } from "./operations";
+import { ImageCropPicker } from "./image-crop-picker";
 
 export function IpForm({ item, returnTo, initialName }: { item?: CatalogIp; returnTo: string; initialName?: string }) {
   const action = item ? updateIp : createIp;
@@ -104,20 +105,21 @@ function ProductImageUploadForm({
   guidance: string;
   buttonLabel: string;
 }) {
-  return <form className="stack-form catalog-image-form" action={uploadProductImage}>
-    <input type="hidden" name="productId" value={item.id} />
-    <input type="hidden" name="expectedVersion" value={item.version} />
-    <input type="hidden" name="role" value={role} />
-    <ReturnTo value={returnTo} />
-    <input type="hidden" name="completeIdempotencyKey" value={crypto.randomUUID()} />
-    <input type="hidden" name="attachIdempotencyKey" value={crypto.randomUUID()} />
-    <label>{label}
-      <input type="file" name="image" accept="image/jpeg,image/png,image/webp,image/gif" required />
-      <small>{guidance}</small>
-    </label>
-    <ReasonField label={`${label} 변경 사유`} />
-    <div className="form-actions"><button className="primary">{buttonLabel}</button></div>
-  </form>;
+  return <ImageCropPicker
+    productId={item.id}
+    expectedVersion={item.version}
+    returnTo={returnTo}
+    role={role}
+    idempotencyKeys={{ intent: crypto.randomUUID(), complete: crypto.randomUUID(), attach: crypto.randomUUID() }}
+    label={label}
+    guidance={guidance}
+    buttonLabel={buttonLabel}
+    ratios={role === "storefront"
+      ? [{ label: item.category === "kuji" ? "16:9" : "1:1", value: item.category === "kuji" ? 16 / 9 : 1 }]
+      : [{ label: "6:5 · 상세 추천", value: 6 / 5 }, { label: "4:3", value: 4 / 3 }, { label: "1:1", value: 1 }]}
+    minimumWidth={role === "storefront" ? item.category === "kuji" ? 1200 : 1080 : 0}
+    minimumHeight={role === "storefront" ? item.category === "kuji" ? 675 : 1080 : 0}
+  />;
 }
 
 function safeProductImageUrl(value: string | null) {
@@ -188,7 +190,7 @@ export function ProductImageForm({ item, returnTo }: { item: CatalogProduct; ret
       returnTo={returnTo}
       role="primary"
       label="새 대표 사진"
-      guidance="상품 상세와 기존 화면에 사용하는 기본 사진 · JPG, PNG, WEBP, GIF · 최대 10MB"
+      guidance="상품 상세와 기존 화면에 사용하는 기본 사진 · 업로드 전에 6:5·4:3·1:1 중 골라 자르기 · JPG, PNG, WEBP, GIF · 최대 10MB"
       buttonLabel="대표 사진 업로드 및 연결"
     />
     {storefront ? <ProductImageUploadForm

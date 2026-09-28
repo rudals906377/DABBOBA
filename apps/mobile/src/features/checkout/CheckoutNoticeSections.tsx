@@ -5,17 +5,18 @@ import { AppText as Text } from "@/components/Typography";
 import { seed } from "@/design-system/seed";
 import { toggleCheckoutNoticeState } from "@/features/checkout/checkout-payment-ui";
 import {
-  CHECKOUT_NOTICE_SECTIONS,
-  type CheckoutNoticeSection,
+  checkoutNoticeSections,
+  type DrawCheckoutCategory,
 } from "@/features/checkout/checkout-reference-notices";
 import { colors } from "@/theme";
 
 export function CheckoutNoticeSections({
-  sections = CHECKOUT_NOTICE_SECTIONS,
+  category,
 }: {
-  sections?: readonly CheckoutNoticeSection[];
+  category: DrawCheckoutCategory;
 }) {
-  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({ "payment-refund": true });
+  const sections = checkoutNoticeSections(category);
 
   return (
     <View style={styles.list}>

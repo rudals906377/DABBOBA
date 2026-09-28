@@ -70,19 +70,47 @@ test("remote draw UI is server-owned while prototype random remains isolated to 
   );
   assert.match(prototypeSource, /getActiveDrawOdds/);
   assert.match(prototypeSource, /expectedDrawVersion: confirmedDrawOdds\.version/);
-  assert.match(prototypeSource, /활성 경품·확률표를 확인하기 전에는 주문할 수 없습니다/);
+  assert.match(prototypeSource, /구성과 결제 조건이 확인되기 전에는 주문할 수 없습니다/);
 });
 
 test("draw odds disclosure explains the live finite-pool calculation without unsupported sales claims", () => {
-  assert.equal(prototypeSource.match(/<DrawOddsDisclosure odds=\{drawOdds\}/g)?.length, 3);
+  assert.equal(prototypeSource.match(/<DrawOddsDisclosure odds=\{drawOdds\}/g)?.length, 2);
   assert.match(prototypeSource, /<th scope="col">현재 확률<\/th>/);
-  assert.match(prototypeSource, /설정 가중치 × 남은 수량/);
-  assert.match(prototypeSource, /단순 1\/n 균등 확률이 아닐 수 있습니다/);
+  assert.match(prototypeSource, /각 상세상품의 남은 수량을 모든 상세상품의 남은 수량 합계로 나눠 계산/);
+  assert.match(prototypeSource, /수량이 같을 때만 종류별 1\/n/);
   assert.match(prototypeSource, /같은 경품을 다시 받을 수 있습니다/);
   assert.match(prototypeSource, /probabilityNumerator\.toLocaleString/);
   assert.match(prototypeSource, /probabilityDenominator\.toLocaleString/);
   assert.match(prototypeSource, /dateTime=\{odds\.calculatedAt\}/);
   assert.doesNotMatch(prototypeSource, /정식 라이선스 정품/);
+});
+
+test("legacy product detail shows aggregate opening and prize names without detailed odds", () => {
+  const detail = prototypeSource.split("function ProductDetail(")[1]?.split("function DetailFooter(")[0];
+  assert.ok(detail);
+  assert.match(detail, /상품 목록/);
+  assert.match(detail, /openQuantityLabel/);
+  assert.match(detail, /includedProducts\.map/);
+  assert.match(detail, /loadCatalogIncludedProducts/);
+  assert.match(detail, /50\/202/);
+  assert.doesNotMatch(detail, /ServerDrawOddsTable|DrawOddsDisclosure|grade-table|probabilityPercent/);
+});
+
+test("included product list uses the public catalog contract without requesting odds", async () => {
+  const calls = [];
+  const client = new DabbobaApiClient({
+    configuration: { mode: "remote", baseUrl: "https://api.dabboba.test", token: null },
+    fetch: async (url, init) => {
+      calls.push({ url, init });
+      return Response.json({ items: [{ id: "prize-1", name: "상세 상품", imageUrl: null }] });
+    },
+  });
+  assert.deepEqual(await client.getCatalogIncludedProducts("draw-product"), {
+    items: [{ id: "prize-1", name: "상세 상품", imageUrl: null }],
+  });
+  assert.equal(calls[0].url, "https://api.dabboba.test/v1/catalog/products/draw-product/included-products");
+  assert.equal(calls[0].init.method, "GET");
+  assert.equal(calls[0].init.headers.get("authorization"), null);
 });
 
 test("public draw odds are fetched before checkout and the confirmed version is sent with the order", async () => {
@@ -93,7 +121,7 @@ test("public draw odds are fetched before checkout and the confirmed version is 
     version: 4,
     publishedAt: "2026-08-24T00:00:00.000Z",
     calculatedAt: "2026-08-24T00:01:00.000Z",
-    calculation: "WEIGHT_X_REMAINING_QUANTITY",
+    calculation: "REMAINING_QUANTITY_RATIO",
     totalEffectiveWeight: 100,
     entries: [{
       id: "88888888-8888-4888-8888-888888888888",

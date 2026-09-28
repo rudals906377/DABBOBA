@@ -496,6 +496,7 @@ export async function uploadProductImage(form: FormData) {
     const file = catalogImageFile(form.get("image"));
     const checksumSha256 = createHash("sha256").update(Buffer.from(await file.arrayBuffer())).digest("hex");
     let intent: MediaUploadIntent;
+    let uploadStage = "intent";
     try {
       const uploadInput: CreateCatalogMediaUploadInput = {
         filename: file.name,
@@ -511,13 +512,16 @@ export async function uploadProductImage(form: FormData) {
         headers: mutationHeaders(form),
         body: uploadInput,
       });
+      uploadStage = "storage";
       await uploadCatalogImage(intent, file);
+      uploadStage = "complete";
       await adminApi<MediaReady>(`/v1/admin/catalog-media/${encodeURIComponent(intent.mediaId)}/complete`, {
         method: "POST",
         token: session.token,
         reason: operationReason,
         headers: idempotencyHeaders(form, "completeIdempotencyKey"),
       });
+      uploadStage = "attach";
       const attachInput: ProductImageAttachInput = { mediaId: intent.mediaId, expectedVersion, role };
       await adminApi<ProductImageAttachment>(`/v1/admin/products/${productId}/image`, {
         method: "PATCH",
@@ -527,6 +531,7 @@ export async function uploadProductImage(form: FormData) {
         body: attachInput,
       });
     } catch (error) {
+      console.error("catalog-media-admin-flow", uploadStage, error instanceof AdminApiError ? error.status : "local");
       if (error instanceof AdminApiError && error.status === 503) {
         throw new Error("현재 상품 이미지 저장을 사용할 수 없습니다. 운영 환경의 미디어 구성을 확인한 뒤 다시 시도해 주세요.");
       }

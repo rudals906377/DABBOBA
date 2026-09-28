@@ -4,20 +4,19 @@ import Link from "next/link";
 import { useMemo, useRef, useState } from "react";
 import type { CatalogProduct } from "../lib/admin-types";
 import { createDrawVersion } from "../lib/actions";
-import { buildDrawVersionDraftPayload } from "../lib/draw-version-draft";
+import { allocateGachaDrawQuantities, buildDrawVersionDraftPayload } from "../lib/draw-version-draft";
 
 type DraftEntry = {
   key: string;
   prizeProductId: string;
   rarity: string;
-  weight: string;
   quantity: string;
   tierCode: string;
   tierRank: string;
 };
 
 function emptyEntry(key: string): DraftEntry {
-  return { key, prizeProductId: "", rarity: "", weight: "", quantity: "", tierCode: "", tierRank: "" };
+  return { key, prizeProductId: "", rarity: "", quantity: "", tierCode: "", tierRank: "" };
 }
 
 function positiveInteger(value: string, maximum: number) {
@@ -48,24 +47,24 @@ export function DrawVersionForm({
   const isKuji = category === "kuji";
 
   const calculation = useMemo(() => {
+    const automaticGachaQuantities = isKuji ? null : allocateGachaDrawQuantities(product.availableQuantity, entries.length);
     const candidateIds = new Set(prizeProducts.map((candidate) => candidate.id));
     const selectedIds = entries.map((entry) => entry.prizeProductId).filter(Boolean);
     const duplicateIds = new Set(selectedIds.filter((id, index) => selectedIds.indexOf(id) !== index));
     const tierCodes = entries.map((entry) => entry.tierCode.trim()).filter(Boolean);
     const duplicateTierCodes = new Set(tierCodes.filter((code, index) => tierCodes.indexOf(code) !== index));
-    const parsed = entries.map((entry) => {
-      const weight = positiveInteger(entry.weight, 1_000_000);
-      const quantity = positiveInteger(entry.quantity, 10_000);
+    const parsed = entries.map((entry, index) => {
+      const quantity = isKuji ? positiveInteger(entry.quantity, 10_000) : automaticGachaQuantities?.[index] ?? null;
       const tierCode = entry.tierCode.trim();
       const tierRank = nonNegativeInteger(entry.tierRank);
       return {
         prizeProductId: entry.prizeProductId,
         rarity: entry.rarity.trim(),
-        weight,
+        weight: isKuji ? null : 1,
         quantity,
         tierCode,
         tierRank,
-        effectiveWeight: !isKuji && weight && quantity ? weight * quantity : 0,
+        effectiveWeight: !isKuji && quantity ? quantity : 0,
       };
     });
     const tierRanks = parsed.map((entry) => entry.tierRank).filter((rank): rank is number => rank !== null);
@@ -83,8 +82,7 @@ export function DrawVersionForm({
         && duplicateTierCodes.size === 0
         && duplicateTierRanks.size === 0
         && parsed.every((entry) => /^[A-Za-z0-9][A-Za-z0-9_-]{0,39}$/.test(entry.tierCode) && entry.tierRank !== null)
-      : parsed.every((entry) => entry.weight)
-        && Number.isSafeInteger(totalEffectiveWeight)
+      : Number.isSafeInteger(totalEffectiveWeight)
         && totalEffectiveWeight > 0;
     let complete = commonComplete && categoryComplete;
     let serialized = "[]";
@@ -100,7 +98,7 @@ export function DrawVersionForm({
       parsed, duplicateIds, duplicateTierCodes, duplicateTierRanks, totalEffectiveWeight,
       totalQuantity, parsedTotalSlots, complete, serialized,
     };
-  }, [category, entries, isKuji, prizeProducts, totalSlots]);
+  }, [category, entries, isKuji, prizeProducts, product.availableQuantity, totalSlots]);
 
   function updateEntry(key: string, patch: Partial<DraftEntry>) {
     setEntries((current) => current.map((entry) => entry.key === key ? { ...entry, ...patch } : entry));
@@ -138,7 +136,7 @@ export function DrawVersionForm({
       <strong>물리 재고 lot 대조 필수</strong>
       <p>{isKuji
         ? "전체 쿠지 장수와 등급별 수량은 실제 봉인 덱과 정확히 같아야 합니다. 공개 전 tier 순서와 입고·검수 원장을 직접 대조하세요."
-        : "새 버전 수량에는 이전 버전이나 다른 초안과 중복되지 않는 별도 검수 재고(물리 lot)만 입력하세요. 현재 시스템에는 lot 원장이 없어 중복 투입을 자동으로 확인하지 못하므로, 공개 전 입고·검수 원장과 직접 대조해야 합니다."}</p>
+        : "전체 판매 가용 수량을 선택한 경품 종류에 자동 배분합니다. 이는 추첨용 내부 배정량이며 상세 SKU의 실제 실물 재고를 확인했다는 뜻이 아닙니다. 기존 버전과 물리 lot이 중복되지 않는지 공개 전에 대조하세요."}</p>
     </aside>
 
     {isKuji ? <label>전체 쿠지 장수
@@ -215,18 +213,8 @@ export function DrawVersionForm({
                 required
               />
             </label>
-          </> : <label>기본 가중치
-            <input
-              type="number"
-              value={entry.weight}
-              onChange={(event) => updateEntry(entry.key, { weight: event.target.value })}
-              min={1}
-              max={1_000_000}
-              inputMode="numeric"
-              required
-            />
-          </label>}
-          <label>유한 수량
+          </> : null}
+          {isKuji ? <label>유한 수량
             <input
               type="number"
               value={entry.quantity}
@@ -236,14 +224,14 @@ export function DrawVersionForm({
               inputMode="numeric"
               required
             />
-          </label>
+          </label> : null}
           <div className="draw-entry-result" aria-live="polite">
             {isKuji ? <>
               <span>배정 수량 <b>{(parsed.quantity ?? 0).toLocaleString("ko-KR")}</b></span>
               <span>전체 구성 비율 <b>{(calculation.parsedTotalSlots ? (parsed.quantity ?? 0) / calculation.parsedTotalSlots * 100 : 0).toLocaleString("ko-KR", { maximumFractionDigits: 6 })}%</b></span>
             </> : <>
-              <span>유효 가중치 <b>{parsed.effectiveWeight.toLocaleString("ko-KR")}</b></span>
-              <span>현재 예상 확률 <b>{probability.toLocaleString("ko-KR", { maximumFractionDigits: 6 })}%</b></span>
+              <span>자동 배정 수량 <b>{parsed.effectiveWeight.toLocaleString("ko-KR")}개</b></span>
+              <span>초기 예상 확률 <b>{probability.toFixed(2)}%</b></span>
             </>}
           </div>
           <button type="button" className="draw-entry-remove" onClick={() => removeEntry(entry.key)} disabled={entries.length === 1}>경품 삭제</button>
@@ -260,7 +248,7 @@ export function DrawVersionForm({
       <div><dt>판매 가용 수량</dt><dd>{product.availableQuantity.toLocaleString("ko-KR")}</dd></div>
       {isKuji ? <div><dt>전체 쿠지 장수</dt><dd>{calculation.parsedTotalSlots?.toLocaleString("ko-KR") ?? "-"}</dd></div> : null}
       <div><dt>입력한 경품 수량</dt><dd>{calculation.totalQuantity.toLocaleString("ko-KR")}</dd></div>
-      {!isKuji ? <div><dt>총 유효 가중치</dt><dd>{calculation.totalEffectiveWeight.toLocaleString("ko-KR")}</dd></div> : null}
+      {!isKuji ? <div><dt>확률 계산용 전체 수량</dt><dd>{calculation.totalEffectiveWeight.toLocaleString("ko-KR")}개</dd></div> : null}
     </dl>
 
     {calculation.duplicateIds.size > 0 ? <p className="draw-capacity-message" data-kind="error" role="alert">같은 경품 SKU가 중복 선택되었습니다. 각 SKU는 한 행에만 배치하세요.</p>
@@ -271,7 +259,7 @@ export function DrawVersionForm({
       : calculation.totalQuantity > 0 && quantityDifference < 0 ? <p className="draw-capacity-message" data-kind="error" role="alert">경품 수량이 현재 판매 가용 수량보다 {Math.abs(quantityDifference).toLocaleString("ko-KR")}개 부족합니다. 초안은 저장할 수 있지만 공개 전 판매 재고와 물리 lot을 맞춰야 합니다.</p>
         : calculation.totalQuantity > 0 && quantityDifference > 0 ? <p className="draw-capacity-message" data-kind="warning">경품 수량이 현재 판매 가용 수량보다 {quantityDifference.toLocaleString("ko-KR")}개 많습니다. 실제 입고·판매 계획과 일치하는지 확인하세요.</p>
           : calculation.totalQuantity > 0 && quantityDifference === 0 ? <p className="draw-capacity-message" data-kind="success">{isKuji ? "전체 쿠지 장수, 경품 수량, 판매 가용 수량이 모두 일치합니다." : "경품 수량과 현재 판매 가용 수량이 일치합니다."}</p>
-            : hasIncompleteEntry ? <p className="draw-capacity-message" data-kind="neutral">{isKuji ? "경품, 등급, tierCode, tierRank, 유한 수량을 모두 입력하세요." : "경품, 등급, 가중치, 유한 수량을 모두 입력하면 예상 확률이 계산됩니다."}</p> : null}
+            : hasIncompleteEntry ? <p className="draw-capacity-message" data-kind="neutral">{isKuji ? "경품, 등급, tierCode, tierRank, 유한 수량을 모두 입력하세요." : "경품과 등급을 선택하세요. 전체 판매 가용 수량은 경품 종류 수 이상이어야 합니다."}</p> : null}
 
     <label className="reason-field"><span>초안 생성 사유<b>필수</b></span><textarea name="reason" minLength={2} maxLength={1000} required placeholder="감사 로그에 남길 구체적인 사유를 입력하세요." /></label>
     <div className="form-actions"><button className="primary" disabled={!calculation.complete}>{isKuji ? "쿠지 상 구성 초안 생성" : "확률표 초안 생성"}</button></div>
