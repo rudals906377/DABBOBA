@@ -66,7 +66,7 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
         <td>
           {!item.isPrizeOnly && (item.category === "gacha" || item.category === "kuji") ? <Link className="button-link" href={`/catalog/products/${encodeURIComponent(item.id)}/draws`}>{item.category === "kuji" ? "쿠지 상 구성" : "확률표"}</Link> : null}
           <details className="inline-details"><summary>수정</summary><ProductForm item={item} returnTo={returnTo} /></details>
-          <details className="inline-details"><summary>사진</summary><ProductImageForm item={item} returnTo={returnTo} /></details>
+          <details className="inline-details"><summary>사진 자르기·업로드</summary><ProductImageForm item={item} returnTo={returnTo} /></details>
         </td>
       </tr>)}</tbody>
     </table>}</section>

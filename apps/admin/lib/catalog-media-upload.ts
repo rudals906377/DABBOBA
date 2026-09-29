@@ -73,13 +73,23 @@ export async function uploadCatalogImage(intent: MediaUploadIntent, file: Catalo
       }
       body.append(intent.fileFieldName, file, file.name);
       response = await fetch(url, {
-        method: "POST", body, cache: "no-store", credentials: "omit", redirect: "error",
+        method: "POST", body, cache: "no-store", credentials: "omit", redirect: "manual",
         signal: AbortSignal.timeout(120_000),
       });
     } else {
+      // A fixed-length byte body preserves the signed Content-Length on Workers.
+      // Passing File can be sent as a streamed/chunked body instead.
+      const body = new Uint8Array(await file.arrayBuffer());
+      const headers = stringRecord(intent.headers, "상품 사진 업로드");
+      if (headers["content-length"] !== String(body.byteLength)) {
+        throw new Error("상품 사진 업로드 응답이 파일 정보와 일치하지 않습니다.");
+      }
+      // Workers derives Content-Length from a fixed-length body; setting it
+      // directly in fetch is rejected by the runtime.
+      delete headers["content-length"];
       response = await fetch(url, {
-        method: "PUT", headers: stringRecord(intent.headers, "상품 사진 업로드"), body: file,
-        cache: "no-store", credentials: "omit", redirect: "error", signal: AbortSignal.timeout(120_000),
+        method: "PUT", headers, body,
+        cache: "no-store", credentials: "omit", redirect: "manual", signal: AbortSignal.timeout(120_000),
       });
     }
   } catch {

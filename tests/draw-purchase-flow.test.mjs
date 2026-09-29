@@ -46,9 +46,10 @@ test("gacha opens checkout while kuji claims its one-person room before checkout
   assert.match(productDetail, /product\.category === "kuji"[\s\S]*?buildKujiRoomGatePath\(product\.id\)[\s\S]*?`\/checkout\/\$\{encodeURIComponent\(product\.id\)\}`/);
   assert.match(productDetail, /isDrawCategory\(product\.category\) \? "뽑으러 가기" : "구매 준비"/);
   assert.match(productDetail, /const drawUnavailable = Boolean/);
-  assert.match(productDetail, /!__DEV__ && \(snapshot\?\.drawOdds\?\.entries\.length \?\? 0\) === 0/);
-  assert.match(productDetail, /disabled=\{commerceEnabled \? drawUnavailable : wishlistPending\}/);
-  assert.match(productDetail, /if \(!commerceEnabled\) \{[\s\S]*?void toggleWishlist\(\);[\s\S]*?return;/);
+  assert.match(productDetail, /snapshot\?\.includedProductsLoaded !== true/);
+  assert.match(productDetail, /snapshot\.includedProducts\.length === 0/);
+  assert.match(productDetail, /disabled=\{!commerceEnabled \|\| drawUnavailable\}/);
+  assert.match(productDetail, /if \(!commerceEnabled\) return;/);
   assert.match(productDetail, /buildKujiRoomGatePath/);
   assert.doesNotMatch(productDetail, /buildGachaPreviewParams|resolveKujiEntryPath|결제 금액 확인/);
 

@@ -773,7 +773,7 @@ export function CheckoutScreen() {
       }
       const expectedDrawVersion = snapshot?.drawOdds?.version;
       if (!expectedDrawVersion) {
-        throw new Error("결제 전 확인한 최신 확률표가 없어 주문을 접수하지 않았어요.");
+        throw new Error("결제 전 확인할 최신 가챠 구성 정보가 없어 주문을 접수하지 않았어요.");
       }
       const claim = await claimPendingGachaCheckoutOrderIntent(db, {
         actorId,
@@ -824,8 +824,8 @@ export function CheckoutScreen() {
     const expectedDrawVersion = snapshot?.drawOdds?.version;
     if (!expectedDrawVersion) {
       Alert.alert(
-        "확률표를 다시 확인해 주세요",
-        "결제 전 확인한 최신 확률표가 없어 주문을 접수하지 않았어요.",
+        "쿠지 구성을 다시 확인해 주세요",
+        "결제 전 확인한 최신 쿠지 구성 정보가 없어 주문을 접수하지 않았어요.",
       );
       return;
     }
@@ -1016,7 +1016,9 @@ export function CheckoutScreen() {
           "지금은 구매할 수 없어요",
           product.availableQuantity <= 0
             ? "남은 수량이 없어 구매할 수 없어요."
-            : "확률표가 공개된 뒤 구매할 수 있어요.",
+            : product.category === "kuji"
+              ? "쿠지 구성과 등급별 남은 수량이 공개된 뒤 구매할 수 있어요."
+              : "가챠 상품 구성이 공개된 뒤 구매할 수 있어요.",
         );
         return;
       }
@@ -1325,7 +1327,9 @@ export function CheckoutScreen() {
                 </View>
                 <Text style={styles.agreementLabel}>주문내용 확인 및 결제 동의</Text>
               </Pressable>
-              <CheckoutNoticeSections />
+              {product.category === "gacha" || product.category === "kuji"
+                ? <CheckoutNoticeSections category={product.category} />
+                : null}
             </View>
 
           </ScrollView>

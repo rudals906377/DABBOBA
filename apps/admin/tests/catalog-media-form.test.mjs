@@ -34,6 +34,13 @@ async function loadModule(path, mocks = {}, context = {}) {
   return module.exports;
 }
 
+async function loadCropPicker() {
+  return loadModule(join(adminRoot, "components/image-crop-picker.tsx"), {
+    "../lib/actions": { uploadProductImage() {} },
+    "../lib/image-crop-geometry": { imageCropRect() { throw new Error("rendering must not crop before selection"); } },
+  });
+}
+
 function form(file, overrides = {}) {
   const data = new FormData();
   const values = {
@@ -80,7 +87,7 @@ async function loadActions({ apiFailure, deny = false } = {}) {
           uploadUrl: "https://storage.example.test/catalog-object",
           method: "PUT",
           bodyEncoding: "raw",
-          headers: { "content-type": "image/png", "x-upload-token": "signed" },
+          headers: { "content-type": "image/png", "content-length": "4", "x-upload-token": "signed" },
           expiresAt: "2099-01-01T00:00:00.000Z",
           maxBytes: 4,
         };
@@ -121,7 +128,9 @@ test("product image action uploads, completes, and attaches only the image with 
   assert.equal(run.uploads.length, 1);
   assert.equal(run.uploads[0][0], "https://storage.example.test/catalog-object");
   assert.equal(run.uploads[0][1].method, "PUT");
-  assert.equal(run.uploads[0][1].body, file);
+  assert.equal(run.uploads[0][1].body.constructor.name, "Uint8Array");
+  assert.deepEqual(Array.from(run.uploads[0][1].body), Array.from(bytes));
+  assert.equal(run.uploads[0][1].redirect, "manual");
   assert.equal(run.uploads[0][1].credentials, "omit");
 
   assert.equal(run.apiCalls[1][0], "/v1/admin/catalog-media/123e4567-e89b-42d3-a456-426614174001/complete");
@@ -197,11 +206,21 @@ test("catalog image transport follows multipart POST fields and rejects mismatch
     expiresAt: "2099-01-01T00:00:00.000Z", maxBytes: 2,
   }, file);
   assert.equal(uploads[0][1].method, "POST");
+  assert.equal(uploads[0][1].redirect, "manual");
   assert.equal(uploads[0][1].body.get("policy"), "signed-policy");
   const postedFile = uploads[0][1].body.get("file");
   assert.equal(postedFile.name, file.name);
   assert.equal(postedFile.size, file.size);
   assert.equal(postedFile.type, file.type);
+  await helper.uploadCatalogImage({
+    mediaId: "123e4567-e89b-42d3-a456-426614174002", uploadUrl: "https://storage.example.test/put",
+    method: "PUT", bodyEncoding: "raw", headers: { "content-length": "2" },
+    expiresAt: "2099-01-01T00:00:00.000Z", maxBytes: 2,
+  }, file);
+  assert.equal(uploads[1][1].method, "PUT");
+  assert.equal(uploads[1][1].headers["content-length"], undefined);
+  assert.equal(uploads[1][1].body.constructor.name, "Uint8Array");
+  assert.deepEqual(Array.from(uploads[1][1].body), [1, 2]);
   assert.throws(() => helper.catalogImageFile(new File([], "empty.png", { type: "image/png" })), /10MB 이하/);
   assert.throws(() => helper.catalogImageFile(new File(["x"], "script.svg", { type: "image/svg+xml" })), /JPG, PNG/);
   await assert.rejects(() => helper.uploadCatalogImage({
@@ -238,6 +257,7 @@ test("product image action cannot fake success on capability, storage, or stale 
 
 test("product image form renders a same-origin server action without editable image URL", async () => {
   const module = await loadModule(join(adminRoot, "components/catalog-forms.tsx"), {
+    "./image-crop-picker": await loadCropPicker(),
     "../lib/actions": {
       clearStorefrontProductImage() {}, createCharacter() {}, createIp() {}, createProduct() {}, updateCharacter() {}, updateIp() {}, updateProduct() {}, uploadProductImage() {},
     },
@@ -266,6 +286,9 @@ test("product image form renders a same-origin server action without editable im
   assert.match(html, /name="role" value="storefront"/);
   assert.match(html, /정확한 1:1 비율/);
   assert.match(html, /최소 1080×1080px/);
+  assert.match(html, /6:5·4:3·1:1 중 골라 자르기/);
+  assert.match(html, /data-crop-confirmed="false"/);
+  assert.match(html, /class="primary" disabled=""/);
   assert.match(html, /현재 대표 사진/);
   assert.match(html, /현재 목록 사진/);
   assert.equal((html.match(/data-image-status="populated"/g) || []).length, 2);
@@ -280,6 +303,7 @@ test("product image form renders a same-origin server action without editable im
 
 test("product image form hides the clear action when no storefront image exists and never links unsafe URLs", async () => {
   const module = await loadModule(join(adminRoot, "components/catalog-forms.tsx"), {
+    "./image-crop-picker": await loadCropPicker(),
     "../lib/actions": {
       clearStorefrontProductImage() {}, createCharacter() {}, createIp() {}, createProduct() {}, updateCharacter() {}, updateIp() {}, updateProduct() {}, uploadProductImage() {},
     },
@@ -308,8 +332,9 @@ test("product image form hides the clear action when no storefront image exists 
   assert.doesNotMatch(html, /class="danger"/);
 });
 
-test("IP form identifies its image as the Home popular-work square artwork", async () => {
+test("catalog forms distinguish direct URLs from the product photo crop flow", async () => {
   const module = await loadModule(join(adminRoot, "components/catalog-forms.tsx"), {
+    "./image-crop-picker": await loadCropPicker(),
     "../lib/actions": {
       clearStorefrontProductImage() {}, createCharacter() {}, createIp() {}, createProduct() {}, updateCharacter() {}, updateIp() {}, updateProduct() {}, uploadProductImage() {},
     },
@@ -322,4 +347,25 @@ test("IP form identifies its image as the Home popular-work square artwork", asy
   const html = renderToStaticMarkup(React.createElement(module.IpForm, { returnTo: "/catalog/ips" }));
   assert.match(html, /홈 인기 작품용 1:1 대표 이미지 URL/);
   assert.match(html, /정사각형 IP 이미지/);
+  const productHtml = renderToStaticMarkup(React.createElement(module.ProductForm, { returnTo: "/catalog/products" }));
+  assert.match(productHtml, /상품 등록 후 목록의 ‘사진 자르기·업로드’/);
+  assert.match(productHtml, /외부 URL은 자르기를 거치지 않습니다/);
+  const characterHtml = renderToStaticMarkup(React.createElement(module.CharacterForm, { returnTo: "/catalog/characters" }));
+  assert.match(characterHtml, /캐릭터 이미지는 외부 URL만 연결할 수 있습니다/);
+  assert.doesNotMatch(characterHtml, /상품을 등록한 뒤/);
+});
+
+test("crop geometry keeps the selected aspect ratio and shifts within the original image", async () => {
+  const { imageCropRect } = await loadModule(join(adminRoot, "lib/image-crop-geometry.ts"));
+  assert.deepEqual(JSON.parse(JSON.stringify(imageCropRect(1200, 1000, 6 / 5, 1, 50, 50))), {
+    x: 0, y: 0, width: 1200, height: 1000,
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(imageCropRect(2000, 1000, 1, 2, 100, 0))), {
+    x: 1500, y: 0, width: 500, height: 500,
+  });
+  const portrait = imageCropRect(1000, 2000, 16 / 9, 1, 50, 100);
+  assert.equal(Math.round(portrait.width / portrait.height * 100), Math.round(16 / 9 * 100));
+  assert.equal(portrait.y + portrait.height, 2000);
+  assert.throws(() => imageCropRect(0, 1000, 1, 1, 50, 50), /올바르지/);
+  assert.throws(() => imageCropRect(1000, 1000, 1, 0.5, 50, 50), /올바르지/);
 });

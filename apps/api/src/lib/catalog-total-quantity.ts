@@ -20,3 +20,19 @@ export const CATALOG_TOTAL_QUANTITY_SQL = `CASE
   )
   ELSE NULL
 END`;
+
+// Count committed opens for the currently published draw version. Available
+// parent stock may also include reservations or payment state and must never be
+// presented to customers as a count of prizes already opened.
+export const CATALOG_OPENED_QUANTITY_SQL = `(
+  SELECT count(*)
+    FROM draw_results result
+   WHERE result.product_id=p.id
+     AND EXISTS (
+       SELECT 1
+         FROM draw_probability_versions version
+        WHERE version.product_id=p.id
+          AND version.status='ACTIVE'
+          AND version.version=result.probability_version
+     )
+)`;

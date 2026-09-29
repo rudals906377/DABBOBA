@@ -1027,11 +1027,11 @@ test("native gacha and kuji shops coexist with the shared drawn-product storage 
   assert.match(shopSource, /\.\.\.catalogProductCardSurface/);
   assert.doesNotMatch(productDetailSource, /Image\.getSize\(|setImageAspectRatio/);
   assert.match(productDetailSource, /<CatalogProductImage/);
-  assert.match(productDetailSource, /product\.category === "kuji" \? styles\.heroKuji : styles\.heroGacha/);
-  assert.match(productDetailSource, /heroGacha:\s*\{[^}]*aspectRatio:\s*4\s*\/\s*3/);
-  assert.match(productDetailSource, /heroKuji:\s*\{[^}]*aspectRatio:\s*16\s*\/\s*9/);
+  assert.match(productDetailSource, /onDimensions=\{\(width, height\) => setAspectRatio/);
+  assert.match(productDetailSource, /snapshot\.product\.category === "kuji" \? 16 \/ 9 : 4 \/ 3/);
+  assert.match(productDetailSource, /Math\.max\(0\.85, Math\.min\(width \/ height, 2\)\)/);
   assert.match(productDetailSource, /resizeMode="contain"/);
-  assert.match(productDetailSource, /heroContainer:\s*\{[^}]*marginHorizontal:\s*seed\.spacing\.x2/);
+  assert.match(productDetailSource, /heroContainer:\s*\{[^}]*marginBottom:\s*seed\.spacing\.x2_5/);
   assert.match(productDetailSource, /hero:\s*\{[^}]*width:\s*"100%"/);
   assert.match(homeSource, /\/product\//);
   assert.doesNotMatch(homeSource, /router\.push\("\/events" as Href\)/);
