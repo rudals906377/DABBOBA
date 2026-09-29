@@ -119,7 +119,7 @@ export async function beginSocialLogin(
     state,
   );
   const providerMap: Record<DabbobaSocialLoginProvider, Provider> = {
-    KAKAO: "kakao",
+    KAKAO: "custom:kakao",
     NAVER: "custom:naver",
     GOOGLE: "google",
     APPLE: "apple",

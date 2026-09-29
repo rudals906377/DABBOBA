@@ -38,7 +38,8 @@ const remoteKeySets = new Map<string, ReturnType<typeof createRemoteJWKSet>>();
 
 function mappedProvider(value: string): CustomerAuthProvider | null {
   switch (value.toLocaleLowerCase("en-US")) {
-    case "kakao": return "KAKAO";
+    case "kakao":
+    case "custom:kakao": return "KAKAO";
     case "custom:naver": return "NAVER";
     case "google": return "GOOGLE";
     case "apple": return "APPLE";

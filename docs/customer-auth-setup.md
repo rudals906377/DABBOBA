@@ -1,5 +1,13 @@
 # DABBOBA 고객 로그인 연결 안내
 
+## 2026-09-29 카카오 로그인 진행 현황
+
+친구 명의 Kakao Developers 앱 `1591356`의 Owner는 친구 계정이고 개발자 계정은 Editor다. 비즈앱 등록은 운영자가 나중에 진행하기로 했다. REST API 키에는 운영 Supabase callback `https://rconfxsykttfvznakile.supabase.co/auth/v1/callback`을 등록하고 카카오 로그인 및 OpenID Connect를 켰다. 키와 시크릿 값은 이 문서·Git·앱 번들에 기록하지 않는다.
+
+운영 Supabase의 기본 Kakao 제공자는 `account_email`을 요청해, 비즈앱 권한이 없는 현재 카카오 앱에서 `KOE205`가 재현됐다. `Allow users without an email`만 켜서는 요청 scope가 바뀌지 않는다. 따라서 기본 Kakao 제공자는 다시 **Disabled**로 두고, `openid` scope와 `email_optional` 설정을 가진 별도 OIDC 제공자 `custom:kakao`를 **Enabled**로 만들었다. 브라우저에서 회원번호 제공에 동의한 뒤 운영 Supabase가 토큰을 발급하고 `dabboba.net`으로 복귀한 것까지 확인했다. 이는 웹 OAuth 교환 증거이며, Auth 고객 계정 생성·앱 딥링크 복귀·DABBOBA API 세션·로그아웃·탈퇴의 증거는 아니다. 테스트 복귀 URL에 토큰이 포함돼 브라우저 주소에서는 제거했지만, 해당 세션과 공급자 토큰의 서버 측 무효화는 아직 확인되지 않았다. 토큰 값은 이 문서·Git에 보관하지 않는다. 앱은 `KAKAO` 버튼이 허용될 때 `custom:kakao`를 사용하고, API는 해당 Supabase identity를 기존 `KAKAO` 도메인 제공자로 해석한다. 운영 API의 `KAKAO` 공개 플래그는 실기기 검증 전까지 켜지 않는다.
+
+카카오 로그인 사용 전에는 계정 연결 해제 웹훅과 회원탈퇴 처리 경계도 확인해야 한다. 향후 비즈앱 등록 후 기본 제공자로 전환하려면 동일 카카오 회원번호가 새 Supabase identity로 생길 수 있으므로 기존 고객 계정 자동 병합을 가정하지 말고 별도 마이그레이션·재로그인 검증을 먼저 한다.
+
 ## 최신 승인 방향 · 2026-09-25
 
 첫 공개판의 고객 로그인 선택지는 **휴대폰 문자 인증, 카카오, 네이버, 구글**이며 **iPhone에는 Apple 로그인도 추가**한다. 이메일 OTP는 새 로그인 화면에서 제외한다. 기존 EMAIL/PHONE identity와 연결된 계정·거래 기록은 삭제하거나 임의 병합하지 않는다. 휴대폰 번호는 한국 010 형식을 E.164로 정규화하고 Supabase Auth의 실제 인증 완료 시각을 확인한다. 문자 인증은 CI/DI 본인확인이 아니다.

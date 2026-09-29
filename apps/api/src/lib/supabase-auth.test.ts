@@ -161,6 +161,12 @@ test("live Auth user verification accepts confirmed phone only, rejecting unconf
   });
   assert.deepEqual(verifiedPhone.providers, ["PHONE"]);
   assert.equal(verifiedPhone.phone, "+821012345678");
+  const verifiedKakaoOidc = await verifyWith({
+    id: subject, role: "authenticated", is_anonymous: false,
+    identities: [{ identity_id: "kakao-oidc", user_id: subject, provider: "custom:kakao" }],
+  });
+  assert.deepEqual(verifiedKakaoOidc.providers, ["KAKAO"]);
+  assert.equal(verifiedKakaoOidc.email, null);
   await rejectsUnauthorized(() => verifyWith({
     id: subject, role: "authenticated", is_anonymous: false,
     phone: "01012345678", phone_confirmed_at: new Date(Date.now() - 1_000).toISOString(),
