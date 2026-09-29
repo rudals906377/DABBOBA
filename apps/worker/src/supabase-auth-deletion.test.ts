@@ -39,6 +39,31 @@ test("Supabase Auth deletion uses only the server Admin endpoint and treats an a
   await assert.rejects(() => client.deleteUser("not-a-uuid"), /user ID is invalid/);
 });
 
+test("targeted cleanup can claim only one exact request and rejects an invalid selector", async () => {
+  const targetId = "ff738498-3f08-4caf-bb0a-1436bfb403b4";
+  const claims: Array<{ sql: string; params: unknown[] }> = [];
+  const pool = {
+    async query(sql: string, params: unknown[] = []) {
+      claims.push({ sql, params });
+      return { rowCount: 0, rows: [] };
+    },
+  } as unknown as DatabasePool;
+  const config = { outboxBatchSize: 20, jobBackoffMs: 1_000 } as WorkerConfig;
+  await assert.rejects(
+    () => cleanupSupabaseAuthUsers(pool, config, logger, () => true, null, null, null, "not-a-uuid"),
+    /request ID is invalid/,
+  );
+  assert.equal(claims.length, 0);
+
+  const result = await cleanupSupabaseAuthUsers(
+    pool, config, logger, () => true, null, null, null, targetId,
+  );
+  assert.deepEqual(result, { completed: 0, deferred: 0 });
+  assert.equal(claims.length, 1);
+  assert.match(claims[0]!.sql, /AND deletion_request_id=\$1::uuid/);
+  assert.deepEqual(claims[0]!.params, [targetId]);
+});
+
 test("Apple token revocation posts the refresh token only to Apple's fixed endpoint", async () => {
   const calls: Array<{ url: string; init: RequestInit }> = [];
   const client = new HttpAppleTokenRevocationClient(

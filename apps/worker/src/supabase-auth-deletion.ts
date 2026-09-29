@@ -390,15 +390,22 @@ export async function cleanupSupabaseAuthUsers(
   appleClient: AppleTokenRevocationClient | null = config.appleRevocation
     ? new HttpAppleTokenRevocationClient(config.appleRevocation.clientId, config.appleRevocation.clientSecret)
     : null,
+  targetDeletionRequestId: string | null = null,
 ): Promise<{ completed: number; deferred: number }> {
+  if (targetDeletionRequestId !== null
+    && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(targetDeletionRequestId)) {
+    throw new Error("Target account deletion request ID is invalid");
+  }
   const result = { completed: 0, deferred: 0 };
 
-  for (let index = 0; index < config.outboxBatchSize && shouldContinue(); index += 1) {
+  const batchSize = targetDeletionRequestId ? 1 : config.outboxBatchSize;
+  for (let index = 0; index < batchSize && shouldContinue(); index += 1) {
     const claimed = await pool.query<AuthDeletionJob>(
       `WITH candidate AS (
          SELECT id
            FROM account_auth_deletion_jobs
           WHERE available_at<=now()
+            ${targetDeletionRequestId ? "AND deletion_request_id=$1::uuid" : ""}
             AND (status='PENDING' OR (status='PROCESSING' AND lease_expires_at<=now()))
           ORDER BY available_at,created_at,id
           FOR UPDATE SKIP LOCKED
@@ -413,6 +420,7 @@ export async function cleanupSupabaseAuthUsers(
                  job.external_deleted_at,job.apple_revoked_at,job.attempts,
                  EXISTS(SELECT 1 FROM auth_identities identity
                          WHERE identity.user_id=job.user_id AND identity.provider='APPLE') AS has_apple_identity`,
+      targetDeletionRequestId ? [targetDeletionRequestId] : [],
     );
     const job = claimed.rows[0];
     if (!job) break;

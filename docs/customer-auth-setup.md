@@ -1,11 +1,17 @@
 # DABBOBA 고객 로그인 연결 안내
 
+## 2026-09-30 Google 테스트 계정 탈퇴 완료 · Apple 탈퇴 미검증
+
+- 사용자가 2026-09-29 실기기에서 탈퇴 요청·삭제를 승인한 Google 테스트 계정은 운영 DB에서 유일한 `PROCESSING`/`PENDING` 탈퇴 건이었다. 2026-09-30 로컬에서 제한 역할을 사용해 **해당 요청 ID만** 선택·처리했다. 사전 점검에서 Google identity 1개, 작성 미디어 0개, 다른 탈퇴 작업 0개를 확인했고, 실행 후 탈퇴 요청 `COMPLETED`, Auth 삭제 `COMPLETED`, 로컬 사용자 `DELETED`, 이메일 제거, identity 0개, 대기 작업 0개, Supabase Auth 관리자 조회 404를 확인했다. 일반 예약·결제·재고·미디어 worker 작업은 실행하지 않았고 운영 자동 실행 플래그·Cron도 켜지 않았다.
+- Apple 로그인 계정은 현재 1개이며 암호화된 refresh token도 1개 저장돼 있다. nonce 12바이트·인증 태그 16바이트·키 버전 1의 저장 형식은 확인했지만, **Apple 계정 탈퇴 요청과 Apple `/auth/revoke` 실제 응답은 시험하지 않았다.** Apple 로그인·유지·로그아웃·재로그인 성공은 이 검증을 대신하지 않는다.
+- Git 밖의 옛 `../.dabboba-launch/supabase-edge.env`에는 다른 프로젝트의 Storage endpoint와 S3 키가 남아 있어 이번 탈퇴 실행에 사용하지 않았다. 현재 운영 Edge 비밀 설정의 Storage endpoint는 운영 프로젝트와 일치함을 digest로 확인했지만, 로컬 보관 파일은 그대로 두었다. 향후 미디어가 있는 계정 탈퇴를 실행하기 전에 운영 Storage 키와 버킷을 별도 검증해야 한다.
+
 ## 2026-09-30 네이버·Apple 준비 현황
 
 - 대상은 친구 명의 운영 Supabase `dabboba-production` (`rconfxsykttfvznakile`)이다. 네이버 개발자 앱 `DABBOBA`는 아직 **개발 중**이며, 테스터 ID `dhrudals9917`은 멤버관리 저장 후 재방문해도 남았다. Supabase `custom:naver` OIDC 제공자의 callback·Client ID를 맞췄지만, WD iPhone의 초기 세 차례 시도에서는 "로그인 응답 주소를 확인하지 못했습니다"가 보였고 운영 Auth `/callback` 로그는 토큰 교환 `invalid_client`였다. 당시 브라우저 복사 명령은 Mac 클립보드가 비어 있거나 키가 아닌 문장이어서 Client Secret이 제대로 갱신되지 않은 것으로 판단했다. 운영자가 Naver Developers의 실제 Client Secret을 직접 복사해 Supabase 제공자 설정에 저장한 뒤, 2026-09-30 01:47 KST WD iPhone 네이버 로그인이 성공했다고 보고했다. 같은 시각 운영 Auth 로그에서 `Login`, `/callback`, `/token`, `/user` 완료가 확인됐다. 고객 API의 `NAVER` 공개 플래그를 다시 켰다. 앱 재실행 후 로그인 유지와 이후 로그아웃도 사용자가 확인했다. **네이버 계정의 회원탈퇴는 별도 검증이 필요하다.**
 - 친구 Apple 팀의 `com.dabboba.mobile` App ID에 Sign in with Apple을 켜고 Services ID `com.dabboba.mobile.web` 및 운영 Supabase callback을 연결했다. 새 서명 키 `659HA2ZNGL`의 개인 키 파일은 Git 밖 `../.dabboba-launch/apple/AuthKey_659HA2ZNGL.p8`에 권한 0600으로 보관한다. 다운로드 폴더 원본도 아직 남아 있으며 별도 안전 보관·복구 검증 전에는 삭제하지 않는다. 파일 내용이나 Client Secret JWT는 이 문서에 기록하지 않는다. 앞서 파일을 확보하지 못한 키 `9XP2BCSRQT`는 폐기했다.
 - 운영 Supabase Apple 제공자는 Services ID 우선 Client IDs, 유효한 OAuth JWT, 이메일 없는 사용자 허용으로 저장·재조회했다. 같은 32바이트 암호화 키가 API와 worker 비밀 설정에 등록됐고, worker의 Apple 폐기용 Client ID/Secret도 등록됐다. 새 개인 키로 만든 JWT는 약 2027-02-26에 만료되므로 그 전에 교체해야 한다. 새 키와 API/worker 비밀의 로컬 원본은 Git 밖 `../.dabboba-launch/apple/`에 권한 0600으로 있다. 친구 명의 비밀번호 관리자에 별도 보관하고 실제 복원 확인하는 작업은 남아 있다.
-- 제한 역할의 운영 worker DB URL과 전용 호출 비밀을 Supabase Edge 비밀 설정에 등록했다. `dabboba-worker` v1을 배포했고, 무권한 POST는 401·GET은 405를 확인했다. **운영 실행 허용 플래그와 Cron은 켜지 않았으며 인증된 작업 실행·Apple 토큰 폐기·회원탈퇴 완료를 검증한 것이 아니다.** 결제·뽑기 PRELAUNCH 차단은 그대로다.
+- 제한 역할의 운영 worker DB URL과 전용 호출 비밀을 Supabase Edge 비밀 설정에 등록했다. `dabboba-worker` v1을 배포했고, 무권한 POST는 401·GET은 405를 확인했다. **운영 실행 허용 플래그와 Cron은 켜지 않았으며 인증된 Edge worker 전체 실행·Apple 토큰 폐기는 검증하지 않았다.** Google 테스트 계정 한 건의 별도 제한 실행 결과는 위의 최신 기록에 있다. 결제·뽑기 PRELAUNCH 차단은 그대로다.
 - Apple capability 추가 후 기존 iOS Ad Hoc·App Store 서명 프로필이 Apple Developer에서 Invalid로 보였다. 2026-09-30 두 프로필을 같은 팀·App ID·배포 인증서로 재발급했고 Apple Developer에서 Active를 확인했다. EAS의 Ad Hoc 프로필도 App Store Connect API 키로 갱신했고 WD iPhone이 포함됐다. Expo 무료 계정의 이번 달 원격 iOS 빌드 한도 때문에 원격 빌드는 시작되지 않았지만, Mac에서 PRELAUNCH 내부 IPA `../.dabboba-launch/builds/dabboba-apple-login-20260930.ipa`를 로컬 빌드해 친구 팀 `MCZ4884P7F` 서명 검증 후 WD iPhone의 다뽀바 앱 위에 설치했다. 운영 API의 `APPLE` 플래그를 켠 뒤 공개 로그인 목록은 `KAKAO,NAVER,GOOGLE,APPLE`을 반환했다. 2026-09-30 02:02 KST 사용자가 WD iPhone Apple 로그인과 앱 재실행 후 세션 유지를 확인했고, 로그아웃 후 같은 계정 재로그인도 02:06 KST 완료했다고 보고했다. 운영 Auth 로그에는 두 시도의 `Login`, `/callback`, `/token`, `/user` 완료가 있다. **Apple 계정 탈퇴와 공급자 토큰 폐기 worker의 실제 완료는 아직 별개로 검증해야 한다.** 결제·뽑기 PRELAUNCH 차단은 유지된다.
 
 ## 2026-09-29 카카오 로그인 진행 현황
