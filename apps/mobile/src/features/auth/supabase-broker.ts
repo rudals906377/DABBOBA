@@ -10,6 +10,7 @@ import {
   type SupabaseClient,
 } from "@supabase/supabase-js";
 import { resolveAfterLoginPath } from "@/features/auth/login-navigation";
+import { createPkceOnlyStorage } from "@/features/auth/broker-pkce-storage";
 import {
   createPendingSocialLogin,
   parsePendingSocialLogin,
@@ -394,7 +395,9 @@ function requireBrokerClient(): SupabaseClient {
         storage: brokerSecureStorage,
         flowType: "pkce",
         autoRefreshToken: false,
-        persistSession: false,
+        // auth-js only uses a custom storage adapter when this is true. The
+        // adapter below keeps PKCE verifiers but never stores broker sessions.
+        persistSession: true,
         detectSessionInUrl: false,
         experimental: { appendPkceFlowIdToRedirects: true },
       },
@@ -404,11 +407,11 @@ function requireBrokerClient(): SupabaseClient {
   return brokerClient;
 }
 
-const brokerSecureStorage = {
+const brokerSecureStorage = createPkceOnlyStorage(BROKER_STORAGE_KEY, {
   getItem: (key: string) => SecureStore.getItemAsync(key),
   setItem: (key: string, value: string) => SecureStore.setItemAsync(key, value),
   removeItem: (key: string) => SecureStore.deleteItemAsync(key),
-};
+});
 
 async function clearPendingSocialLogin(pending: PendingSocialLogin): Promise<void> {
   const current = parsePendingSocialLogin(await SecureStore.getItemAsync(PENDING_SOCIAL_LOGIN_KEY));

@@ -201,7 +201,8 @@ test("mobile auth keeps provider credentials public-only and stores only the DAB
   assert.match(broker, /withSecurePkceRuntime/);
   assert.match(broker, /ExpoCrypto\.getRandomValues/);
   assert.match(broker, /CryptoDigestAlgorithm\.SHA256/);
-  assert.match(broker, /persistSession:\s*false/);
+  assert.match(broker, /persistSession:\s*true/);
+  assert.match(broker, /createPkceOnlyStorage\(BROKER_STORAGE_KEY/);
   assert.match(broker, /sb_secret_/);
   assert.match(broker, /dabboba["],\s*path:\s*"auth\/callback"/);
   assert.match(broker, /callback\.protocol !== expected\.protocol/);
