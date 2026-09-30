@@ -39,7 +39,7 @@ const CATEGORY_OPTIONS: ReadonlyArray<{ value: InquiryCategory; label: string }>
 
 export function InquiryCreateScreen() {
   const router = useRouter();
-  const profileState = useProfileSnapshot();
+  const profileState = useProfileSnapshot("account");
   const hasFocusedOnce = useRef(false);
   const [category, setCategory] = useState<InquiryCategory>("ORDER");
   const [title, setTitle] = useState("");

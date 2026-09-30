@@ -23,7 +23,7 @@ import { ProfileSessionGate, isProfileSessionBlocked } from "@/features/profile/
 import { colors } from "@/theme";
 
 export function AddressEditScreen() {
-  const profileState = useProfileSnapshot();
+  const profileState = useProfileSnapshot("address");
   const address = profileState.snapshot?.defaultAddress;
   // Editing over an unknown address could overwrite it without its version; require a successful load first.
   const addressFailure = profileState.snapshot ? profileSectionFailure(profileState.snapshot, "address") : null;

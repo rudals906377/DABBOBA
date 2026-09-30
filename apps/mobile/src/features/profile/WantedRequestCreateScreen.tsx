@@ -39,7 +39,7 @@ import { colors } from "@/theme";
 
 export function WantedRequestCreateScreen() {
   const categoryOptions = useStorefrontCategoryOptions("wanted");
-  const profileState = useProfileSnapshot();
+  const profileState = useProfileSnapshot("request-compose");
   const snapshot = profileState.snapshot;
   const ipOptions = useMemo(
     () => Object.entries(snapshot?.ipNames ?? {}).map(([id, nameKo]): WantedIpOption => ({

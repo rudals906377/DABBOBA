@@ -69,7 +69,7 @@ const SUPPORT_MENU: ReadonlyArray<ProfileMenuItem> = [
 export function ProfileHomeScreen() {
   const rootNavigationScroll = useRootNavigationScroll();
   const { commerceEnabled } = useCommerceCapability();
-  const profileState = useProfileSnapshot();
+  const profileState = useProfileSnapshot("home");
   const { status, snapshot, message, refreshing, reload } = profileState;
   const hasFocusedOnce = useRef(false);
   const summary = status === "authenticated" && snapshot ? authenticatedSummary(snapshot) : null;
@@ -207,7 +207,8 @@ export function ProfileHomeScreen() {
 type AuthenticatedSummary = {
   pointBalanceLabel: string | null;
   wishlistCount: number | null;
-  inventoryCount: number | null;
+  /** A string such as `100+` when only the first inventory page was loaded. */
+  inventoryCount: number | string | null;
   orderCount: number | null;
   failure: string | null;
 };
@@ -225,14 +226,18 @@ function authenticatedSummary(snapshot: NonNullable<ReturnType<typeof useProfile
   return {
     pointBalanceLabel: pointsFailed || snapshot.pointBalance === null ? null : `${snapshot.pointBalance.toLocaleString("ko-KR")}P`,
     wishlistCount: count("wishlist", snapshot.wishlist),
-    inventoryCount: count("inventory", snapshot.inventory),
+    inventoryCount: inventoryCountValue(count("inventory", snapshot.inventory), snapshot.inventoryHasMore === true),
     orderCount: count("orders", snapshot.orders),
     failure: profileSectionsFailure(snapshot, ["points", "wishlist", "inventory", "orders"]),
   };
 }
 
-function statLabel(value: number | null | undefined, unit: string): string {
-  return typeof value === "number" ? `${value}${unit}` : "불러오지 못했어요";
+function inventoryCountValue(count: number | null, hasMore: boolean): number | string | null {
+  return count !== null && hasMore ? `${count}+` : count;
+}
+
+function statLabel(value: number | string | null | undefined, unit: string): string {
+  return typeof value === "number" || typeof value === "string" ? `${value}${unit}` : "불러오지 못했어요";
 }
 
 function Stat({ value, label }: { value: number | string; label: string }) {

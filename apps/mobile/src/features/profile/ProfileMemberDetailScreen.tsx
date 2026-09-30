@@ -114,7 +114,7 @@ function ProfileBackedMemberDetailScreen({
   section: ProfileBackedMemberSection;
   title: string;
 }) {
-  const profileState = useProfileSnapshot();
+  const profileState = useProfileSnapshot("member");
   const hasFocusedOnce = useRef(false);
 
   useFocusEffect(

@@ -40,6 +40,7 @@ import {
   formatDate,
   removeWishlistItem,
   setWantedRequestLike,
+  type ProfileSnapshotScope,
   type ShippingQuote,
   updateAccountProfile,
 } from "@/features/profile/profile-api";
@@ -80,11 +81,25 @@ const SECTION_META = {
 
 type ProfileSection = keyof typeof SECTION_META;
 
+/** Each section requests only the snapshot sections it renders. */
+const SECTION_SCOPE: Record<ProfileSection, ProfileSnapshotScope> = {
+  edit: "account",
+  wishlist: "wishlist",
+  storage: "storage",
+  shipping: "shipping",
+  orders: "orders",
+  points: "points",
+  requests: "requests",
+  support: "support",
+  "member-info": "account",
+  settings: "account",
+};
+
 export function ProfileSectionScreen() {
   const { section: rawSection } = useLocalSearchParams<{ section?: string }>();
   const section: ProfileSection = rawSection && rawSection in SECTION_META ? rawSection as ProfileSection : "edit";
   const meta = SECTION_META[section];
-  const profileState = useProfileSnapshot();
+  const profileState = useProfileSnapshot(SECTION_SCOPE[section]);
   const hasFocusedOnce = useRef(false);
   const assetBaseUrl = profileState.runtime.assetBaseUrl
     ?? (__DEV__ ? profileState.runtime.apiBaseUrl.replace(/:8788$/, ":4174") : null);

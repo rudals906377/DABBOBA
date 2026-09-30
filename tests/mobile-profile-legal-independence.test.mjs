@@ -22,6 +22,18 @@ test("static member legal route does not wait for or render profile snapshot sta
   assert.doesNotMatch(staticScreen, /useProfileSnapshot|ErrorState|Loading|RefreshControl/);
 
   const profileScreen = source.slice(profileStart, source.indexOf("\nfunction MemberContent(", profileStart));
-  assert.match(profileScreen, /useProfileSnapshot\(\)/);
+  assert.match(profileScreen, /useProfileSnapshot\("member"\)/);
   assert.match(profileScreen, /profileState\.status === "error"/);
+});
+
+test("every profile snapshot consumer declares a section scope", async () => {
+  const { readdirSync, readFileSync: read } = await import("node:fs");
+  const dirs = ["apps/mobile/src/features/profile", "apps/mobile/src/features/history"];
+  for (const dir of dirs) {
+    for (const file of readdirSync(new URL(`../${dir}`, import.meta.url))) {
+      if (!file.endsWith(".tsx")) continue;
+      const source = read(new URL(`../${dir}/${file}`, import.meta.url), "utf8");
+      assert.doesNotMatch(source, /useProfileSnapshot\(\)/, `${dir}/${file}`);
+    }
+  }
 });
