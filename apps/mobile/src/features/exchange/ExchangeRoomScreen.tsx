@@ -496,7 +496,7 @@ function ListingCard({
         <View style={styles.exchangePanel}>
           <View style={styles.bundleImages}>
             {productDetails.map(({ product }, index) => {
-              const uri = resolveCatalogImageUrl(product.imageUrl, assetBaseUrl, product.version);
+              const uri = resolveCatalogImageUrl(product.imageUrl, assetBaseUrl, product.version, __DEV__);
               return (
                 <View
                   key={`${product.id}-${index}`}

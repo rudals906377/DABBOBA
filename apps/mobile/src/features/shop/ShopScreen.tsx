@@ -581,8 +581,8 @@ function ProductCard({
   commerceEnabled: boolean;
   onPress: () => void;
 }) {
-  const storefrontUri = resolveCatalogImageUrl(product.storefrontImageUrl, assetBaseUrl, product.version);
-  const primaryUri = resolveCatalogImageUrl(product.imageUrl, assetBaseUrl, product.version);
+  const storefrontUri = resolveCatalogImageUrl(product.storefrontImageUrl, assetBaseUrl, product.version, __DEV__);
+  const primaryUri = resolveCatalogImageUrl(product.imageUrl, assetBaseUrl, product.version, __DEV__);
   const tierAccessibilityLabel = product.category === "kuji"
     ? remainingKujiTierAccessibilityLabel(product.remainingKujiTiers)
     : null;

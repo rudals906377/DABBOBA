@@ -1220,7 +1220,7 @@ function OrderProductLine({ line, catalogProducts, ipNames }: { line: components
 }
 
 function ProductThumb({ product, assetBaseUrl, catalogFrameCategory }: { product: { name: string; imageUrl: string | null; version?: number }; assetBaseUrl: string | null; catalogFrameCategory?: CatalogProduct["category"] }) {
-  const uri = resolveCatalogImageUrl(product.imageUrl, assetBaseUrl, product.version ?? 1);
+  const uri = resolveCatalogImageUrl(product.imageUrl, assetBaseUrl, product.version ?? 1, __DEV__);
   const thumb = <View style={styles.thumb}>{uri ? <Image accessible={false} source={{ uri }} resizeMode={catalogFrameCategory === "kuji" ? "contain" : "cover"} style={styles.thumbImage} /> : <DecorativeIonicon name="image-outline" size={24} color={colors.muted} />}</View>;
   return catalogFrameCategory ? <GachaMachineFrame category={catalogFrameCategory} clean><KujiProductFrame category={catalogFrameCategory} clean>{thumb}</KujiProductFrame></GachaMachineFrame> : thumb;
 }

@@ -505,7 +505,7 @@ function RecentDrawReelRow({
   expanded?: boolean;
 }) {
   const current = position === "current";
-  const uri = resolveCatalogImageUrl(activity.prizeImageUrl, assetBaseUrl);
+  const uri = resolveCatalogImageUrl(activity.prizeImageUrl, assetBaseUrl, undefined, __DEV__);
   const [imageFailed, setImageFailed] = useState(false);
   useEffect(() => setImageFailed(false), [uri]);
   return (
@@ -633,8 +633,8 @@ function CollectionProductCard({
   commerceEnabled: boolean;
   onPress: () => void;
 }) {
-  const storefrontUri = resolveCatalogImageUrl(product.storefrontImageUrl, assetBaseUrl, product.version);
-  const primaryUri = resolveCatalogImageUrl(product.imageUrl, assetBaseUrl, product.version);
+  const storefrontUri = resolveCatalogImageUrl(product.storefrontImageUrl, assetBaseUrl, product.version, __DEV__);
+  const primaryUri = resolveCatalogImageUrl(product.imageUrl, assetBaseUrl, product.version, __DEV__);
   const cardWidth = getHomeProductCardWidth(layoutKind);
   const price = productPriceParts(product, commerceEnabled);
   return (

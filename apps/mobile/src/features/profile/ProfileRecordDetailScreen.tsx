@@ -426,7 +426,7 @@ function ShippingDetail({
       {"items" in shippingRequest ? (
         <Section title="배송 상품">
           {shippingRequest.items.map((item, index) => {
-            const imageUri = resolveCatalogImageUrl(item.imageUrl, assetBaseUrl, item.productVersion);
+            const imageUri = resolveCatalogImageUrl(item.imageUrl, assetBaseUrl, item.productVersion, __DEV__);
             const media = (
               <View style={styles.shippingProductImageFrame}>
                 {imageUri ? (
