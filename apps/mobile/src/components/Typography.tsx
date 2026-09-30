@@ -1,5 +1,6 @@
 import { Children, isValidElement, type ReactNode } from "react";
 import {
+  Platform,
   StyleSheet,
   Text as NativeText,
   TextInput as NativeTextInput,
@@ -192,5 +193,10 @@ export function BalancedParagraphText({
 
 export function AppTextInput({ style, ...props }: TextInputProps) {
   const metrics = readableMetrics(style, "input");
-  return <NativeTextInput {...props} style={[style, metrics, fontStyle([style, metrics], "korean")]} />;
+  // Android clips Korean placeholder glyphs when a single-line TextInput uses
+  // the fixed text line height with the Noto Sans KR font.
+  const nativeLineHeight = Platform.OS === "android" && !props.multiline
+    ? { lineHeight: undefined }
+    : undefined;
+  return <NativeTextInput {...props} style={[style, metrics, nativeLineHeight, fontStyle([style, metrics], "korean")]} />;
 }

@@ -30,8 +30,8 @@ test("profile record details preserve native framing and list-backed fallback da
   assert.match(source, /KoreanPixelTitle/);
   assert.match(source, /seed\.spacing\.globalGutter/);
   assert.match(source, /edges=\{\["top", "bottom", "left", "right"\]\}/);
-  assert.match(source, /snapshot\?\.orders\.find/);
-  assert.match(source, /snapshot\?\.shippingRequests\.find/);
+  assert.match(source, /snapshot\?\.orders\?\.find/);
+  assert.match(source, /snapshot\?\.shippingRequests\?\.find/);
   assert.match(source, /snapshot\?\.notices\.find/);
   assert.match(source, /notice\.content/);
   assert.doesNotMatch(source, /RootFloatingTabBar/);

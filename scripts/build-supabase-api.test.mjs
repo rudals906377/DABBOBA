@@ -36,3 +36,16 @@ test("Supabase API integration artifact is explicit and cannot replace the produ
     await rm(output, { force: true });
   }
 });
+
+test("Supabase admin artifact exports the runtime handler and excludes the integration harness", async () => {
+  const output = join(tmpdir(), `dabboba-admin-api-artifact-${process.pid}-${Date.now()}.js`);
+  try {
+    const result = await buildSupabaseApi(output, { mode: "admin" });
+    const code = await readFile(output, "utf8");
+    assert.ok(result.bytes > 0 && result.bytes <= 5 * 1024 * 1024);
+    assert.match(code, /export\{[^}]*createSupabaseEdgeApiHandler/);
+    assert.doesNotMatch(code, /createLocalEdgeApiIntegrationHarness|dabboba_edge_test|DABBOBA_EDGE_SMOKE_DATABASE_URL/);
+  } finally {
+    await rm(output, { force: true });
+  }
+});

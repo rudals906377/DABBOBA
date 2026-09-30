@@ -9,28 +9,16 @@ export const DEMO = Object.freeze({
   projectRef: "yxkmvgfruphgghowzvmo",
   baseUrl: "http://127.0.0.1:8788",
   gacha: Object.freeze({
-    id: "demo-test-gacha",
+    id: "gacha-demon-slayer-onemutan-13",
     sku: "DEMO-TEST-GACHA",
+    name: "예시상품 A (가챠)",
     category: "gacha",
-    prizeIds: Object.freeze([
-      "demo-test-gacha-prize-a",
-      "demo-test-gacha-prize-b",
-      "demo-test-gacha-prize-c",
-      "demo-test-gacha-prize-d",
-      "demo-test-gacha-prize-e",
-    ]),
   }),
   kuji: Object.freeze({
-    id: "demo-test-kuji",
+    id: "kuji-sylvanian-adventure",
     sku: "DEMO-TEST-KUJI",
+    name: "예시상품 B (쿠지)",
     category: "kuji",
-    prizeIds: Object.freeze([
-      "demo-test-kuji-prize-a",
-      "demo-test-kuji-prize-b",
-      "demo-test-kuji-prize-c",
-      "demo-test-kuji-prize-d",
-      "demo-test-kuji-prize-e",
-    ]),
   }),
   account: Object.freeze({
     id: "da000000-0000-4000-8000-00000000000a",
@@ -52,9 +40,13 @@ const REQUEST_TIMEOUT_MS = 15_000;
 const SAFE_ROUTES = Object.freeze([
   ["GET", /^\/v1\/demo\/capabilities$/],
   ["POST", /^\/v1\/demo\/session$/],
-  ["GET", /^\/v1\/catalog\/products\/(?:demo-test-gacha|demo-test-kuji)$/],
-  ["GET", /^\/v1\/catalog\/products\/demo-test-gacha\/draw-odds$/],
-  ["GET", /^\/v1\/catalog\/products\/demo-test-kuji\/kuji-slots$/],
+  ["GET", /^\/v1\/account\/policy-acceptances$/],
+  ["POST", /^\/v1\/account\/policy-acceptances$/],
+  ["GET", /^\/v1\/catalog\/products$/],
+  ["GET", /^\/v1\/catalog\/home-sections$/],
+  ["GET", /^\/v1\/catalog\/products\/(?:gacha-demon-slayer-onemutan-13|kuji-sylvanian-adventure)$/],
+  ["GET", /^\/v1\/catalog\/products\/(?:gacha-demon-slayer-onemutan-13|kuji-sylvanian-adventure)\/draw-odds$/],
+  ["GET", /^\/v1\/catalog\/products\/kuji-sylvanian-adventure\/kuji-slots$/],
   ["POST", /^\/v1\/orders$/],
   ["GET", /^\/v1\/orders\/[0-9a-f-]{36}$/i],
   ["GET", /^\/v1\/orders\/[0-9a-f-]{36}\/draw-completion$/i],
@@ -64,8 +56,8 @@ const SAFE_ROUTES = Object.freeze([
   ["GET", /^\/v1\/account\/draw-entitlements$/],
   ["GET", /^\/v1\/account\/points$/],
   ["POST", /^\/v1\/account\/point-returns$/],
-  ["POST", /^\/v1\/kuji\/rooms\/demo-test-kuji\/entries$/],
-  ["POST", /^\/v1\/kuji\/rooms\/demo-test-kuji\/entries\/[0-9a-f-]{36}\/slots$/i],
+  ["POST", /^\/v1\/kuji\/rooms\/kuji-sylvanian-adventure\/entries$/],
+  ["POST", /^\/v1\/kuji\/rooms\/kuji-sylvanian-adventure\/entries\/[0-9a-f-]{36}\/slots$/i],
 ]);
 
 export class DemoSmokeError extends Error {
@@ -173,10 +165,13 @@ export function assertFixedDemoProduct(value, expectedProduct) {
   const product = object(value, "Catalog product");
   expect(product.id === expectedProduct.id, "FIXTURE_MISMATCH", "Catalog product ID did not match the fixed demo seed.");
   expect(product.sku === expectedProduct.sku, "FIXTURE_MISMATCH", "Catalog product SKU did not match the fixed demo seed.");
+  expect(product.name === expectedProduct.name, "FIXTURE_MISMATCH", "Catalog product name did not match the fixed local example.");
   expect(product.ipId === "demo-test-ip", "FIXTURE_MISMATCH", "Catalog product IP did not match the fixed demo seed.");
   expect(product.category === expectedProduct.category, "FIXTURE_MISMATCH", "Catalog product category did not match the fixed demo seed.");
   expect(product.isActive === true && product.isPrizeOnly === false, "FIXTURE_MISMATCH", "Catalog product was not an active sellable demo product.");
   expect(product.metadata?.dabbobaFixture === DEMO.fixtureTag, "FIXTURE_MISMATCH", "Catalog product did not carry the exact demo fixture tag.");
+  expect(product.metadata?.catalogGeneration === "product-photos-2026-09-10" && product.metadata?.internalTestOnly === true, "FIXTURE_MISMATCH", "Catalog product did not carry the isolated test generation.");
+  expect(product.saleStatus === "ON_SALE" && Number.isSafeInteger(product.price) && product.price > 0, "FIXTURE_MISMATCH", "Catalog product was not safely priced for the local commerce exercise.");
   integer(product.availableQuantity, "Catalog availableQuantity");
   return product;
 }
@@ -221,8 +216,7 @@ function assertDrawResult(value, expected) {
   uuid(result.id, `${expected.label}.id`);
   expect(result.entitlementId === expected.entitlementId, "DRAW_MISMATCH", `${expected.label} entitlement did not match.`);
   expect(result.productId === expected.productId, "DRAW_MISMATCH", `${expected.label} product did not match.`);
-  const prizeIds = expected.productId === DEMO.gacha.id ? DEMO.gacha.prizeIds : DEMO.kuji.prizeIds;
-  expect(prizeIds.includes(result.prizeProductId), "DRAW_MISMATCH", `${expected.label} prize was outside the product's demo seed pool.`);
+  expect(expected.prizeIds.includes(result.prizeProductId), "DRAW_MISMATCH", `${expected.label} prize was outside the published product pool.`);
   uuid(result.prizeInventoryUnitId, `${expected.label}.prizeInventoryUnitId`);
   if (expected.slotNumber !== undefined) {
     expect(result.kujiSlotNumber === expected.slotNumber, "DRAW_MISMATCH", `${expected.label} kuji slot did not match.`);
@@ -257,6 +251,7 @@ class ApiClient {
       fail("API_UNREACHABLE", `${label} could not reach the loopback API.`);
     }
     expect(expected.includes(response.status), "API_STATUS", `${label} returned HTTP ${response.status}.`);
+    if (response.status === 204) return { data: null, status: response.status, headers: response.headers };
     let data;
     try {
       data = JSON.parse(await response.text());
@@ -352,7 +347,7 @@ async function transition(client, { session, order, product, quantity, action, r
   return transitioned;
 }
 
-async function consume(client, { session, entitlementId, productId, runId, name, slotNumber, replay = false }) {
+async function consume(client, { session, entitlementId, productId, prizeIds, runId, name, slotNumber, replay = false }) {
   const idempotencyKey = key(runId, `draw-${name}`);
   const request = () => client.request("POST", `/v1/draws/${entitlementId}/consume`, {
     token: session.token,
@@ -361,7 +356,7 @@ async function consume(client, { session, entitlementId, productId, runId, name,
     label: `${name} draw consume`,
   });
   const first = await request();
-  const result = assertDrawResult(first.data, { label: `${name} draw`, entitlementId, productId, slotNumber });
+  const result = assertDrawResult(first.data, { label: `${name} draw`, entitlementId, productId, prizeIds, slotNumber });
   if (replay) {
     const second = await request();
     expect(isDeepStrictEqual(second.data, first.data), "IDEMPOTENCY_FAILURE", `${name} draw replay changed the committed result.`);
@@ -369,11 +364,14 @@ async function consume(client, { session, entitlementId, productId, runId, name,
   return result;
 }
 
-async function getGachaVersion(client) {
-  const { data } = await client.request("GET", `/v1/catalog/products/${DEMO.gacha.id}/draw-odds`, { label: "Gacha odds" });
-  const odds = object(data, "Gacha odds");
-  expect(odds.productId === DEMO.gacha.id, "FIXTURE_MISMATCH", "Gacha odds product did not match the demo seed.");
-  return positiveInteger(odds.version, "Gacha odds version");
+async function getPublishedOdds(client, product) {
+  const { data } = await client.request("GET", `/v1/catalog/products/${product.id}/draw-odds`, { label: `${product.category} odds` });
+  const odds = object(data, `${product.category} odds`);
+  expect(odds.productId === product.id, "FIXTURE_MISMATCH", "Published odds product did not match the fixed catalog product.");
+  expect(Array.isArray(odds.entries) && odds.entries.length > 0, "FIXTURE_MISMATCH", "Published odds did not include a prize pool.");
+  const prizeIds = odds.entries.map((entry) => string(object(entry, "Odds entry").prizeProductId, "Odds prizeProductId"));
+  expect(new Set(prizeIds).size === prizeIds.length, "FIXTURE_MISMATCH", "Published odds repeated a prize product.");
+  return { version: positiveInteger(odds.version, "Published odds version"), prizeIds };
 }
 
 async function assertCommittedGachaConsumption(client, { session, order, product, version, results, label }) {
@@ -411,7 +409,8 @@ async function assertCommittedGachaConsumption(client, { session, order, product
   }
 }
 
-async function coreGachaScenario(client, session, product, version, runId) {
+async function coreGachaScenario(client, session, product, odds, runId) {
+  const { version, prizeIds } = odds;
   const inventoryBefore = await listAll(client, "/v1/account/inventory", session.token);
   const order = await createOrder(client, { session, product, version, quantity: 1, runId, name: "core-gacha" });
   const paid = await transition(client, {
@@ -419,7 +418,7 @@ async function coreGachaScenario(client, session, product, version, runId) {
   });
   const entitlementId = paid.drawEntitlementIds[0];
   const result = await consume(client, {
-    session, entitlementId, productId: product.id, runId, name: "core-gacha", replay: true,
+    session, entitlementId, productId: product.id, prizeIds, runId, name: "core-gacha", replay: true,
   });
   const currentOrder = await client.request("GET", `/v1/orders/${order.id}`, { token: session.token, label: "Consumed gacha order" });
   assertOrder(currentOrder.data, {
@@ -464,12 +463,13 @@ async function refundScenario(client, session, product, version, runId) {
   expect(cancelled.some((item) => item.id === paid.drawEntitlementIds[0] && item.status === "CANCELLED"), "REFUND_MISMATCH", "Refunded entitlement was not durably cancelled.");
 }
 
-async function createGachaInventory(client, session, product, version, quantity, runId, name) {
+async function createGachaInventory(client, session, product, odds, quantity, runId, name) {
+  const { version, prizeIds } = odds;
   const order = await createOrder(client, { session, product, version, quantity, runId, name });
   const paid = await transition(client, { session, order, product, quantity, action: "approve", runId, name, status: "PAID" });
   const results = [];
   for (const [index, entitlementId] of paid.drawEntitlementIds.entries()) {
-    results.push(await consume(client, { session, entitlementId, productId: product.id, runId, name: `${name}-${index + 1}` }));
+    results.push(await consume(client, { session, entitlementId, productId: product.id, prizeIds, runId, name: `${name}-${index + 1}` }));
   }
   const currentOrder = await client.request("GET", `/v1/orders/${order.id}`, { token: session.token, label: `${name} consumed order` });
   assertOrder(currentOrder.data, {
@@ -508,10 +508,12 @@ async function pointReturnScenario(client, session, inventoryUnitId, runId) {
 }
 
 async function kujiScenario(client, session, product, runId) {
+  const odds = await getPublishedOdds(client, product);
   const beforeResponse = await client.request("GET", `/v1/catalog/products/${product.id}/kuji-slots`, { label: "Kuji deck before" });
   const before = object(beforeResponse.data, "Kuji deck before");
   expect(before.productId === product.id && Array.isArray(before.slots), "KUJI_MISMATCH", "Kuji deck did not match the demo product.");
   const version = positiveInteger(before.probabilityVersion, "Kuji probabilityVersion");
+  expect(version === odds.version, "KUJI_MISMATCH", "Kuji board and published odds did not agree on the active version.");
   const available = before.slots.find((slot) => slot.available === true);
   expect(available && Number.isSafeInteger(available.slotNumber), "KUJI_MISMATCH", "Kuji deck had no available finite slot.");
   const remainingBefore = before.tiers.reduce((sum, tier) => sum + integer(tier.remainingQuantity, "Kuji tier remainingQuantity"), 0);
@@ -539,7 +541,7 @@ async function kujiScenario(client, session, product, runId) {
   const bound = object(boundResponse.data, "Kuji slot binding");
   expect(bound.productId === product.id && bound.roomEntryId === viewer.entryId && bound.probabilityVersion === version, "KUJI_MISMATCH", "Kuji binding identity did not match.");
   expect(bound.bindings?.length === 1 && bound.bindings[0].entitlementId === entitlementId && bound.bindings[0].slotNumber === available.slotNumber && bound.bindings[0].state === "RESERVED", "KUJI_MISMATCH", "Kuji binding did not reserve the selected slot.");
-  await consume(client, { session, entitlementId, productId: product.id, runId, name: "kuji", slotNumber: available.slotNumber });
+  await consume(client, { session, entitlementId, productId: product.id, prizeIds: odds.prizeIds, runId, name: "kuji", slotNumber: available.slotNumber });
   const after = object((await client.request("GET", `/v1/catalog/products/${product.id}/kuji-slots`, { label: "Kuji deck after" })).data, "Kuji deck after");
   const selectedAfter = after.slots.find((slot) => slot.slotNumber === available.slotNumber);
   expect(selectedAfter?.available === false, "KUJI_MISMATCH", "Consumed kuji slot remained available.");
@@ -573,21 +575,62 @@ export async function runDemoCommerce({ argv = [], fetchImpl = globalThis.fetch,
     expected: [201], label: "Internal customer session",
   })).data);
 
+  const policyStatus = object((await client.request("GET", "/v1/account/policy-acceptances", {
+    token: session.token,
+    label: "Local customer policy status",
+  })).data, "Local customer policy status");
+  const documents = policyStatus.documents;
+  expect(Array.isArray(documents) && documents.length === 2, "POLICY_MISMATCH", "Exactly two current policy documents are required.");
+  const policyByKey = new Map(documents.map((document) => [document.key, document]));
+  const terms = policyByKey.get("TERMS");
+  const privacy = policyByKey.get("PRIVACY");
+  for (const document of [terms, privacy]) {
+    expect(document && typeof document.version === "string" && /^\d{4}-\d{2}-\d{2}$/.test(document.version)
+      && typeof document.contentSha256 === "string" && /^[0-9a-f]{64}$/i.test(document.contentSha256)
+      && typeof document.publicUrl === "string" && document.publicUrl.startsWith("https://dabboba.net/"),
+    "POLICY_MISMATCH", "The current local policy document did not match the published test contract.");
+  }
+  if (!terms.accepted || !privacy.accepted) {
+    await client.request("POST", "/v1/account/policy-acceptances", {
+      token: session.token,
+      body: { acceptedPolicies: { terms: terms.version, privacy: privacy.version } },
+      expected: [204],
+      label: "Automated local customer policy acceptance",
+    });
+  }
+
   const gacha = await productSnapshot(client, DEMO.gacha);
   const kuji = await productSnapshot(client, DEMO.kuji);
-  const gachaVersion = await getGachaVersion(client);
+  const catalog = await listAll(client, "/v1/catalog/products", undefined);
+  for (const product of [gacha, kuji]) {
+    const listed = catalog.find((item) => item.id === product.id);
+    expect(listed?.name === product.name && listed.saleStatus === "ON_SALE", "FIXTURE_MISMATCH", `${product.name} was not visible in the internal catalog.`);
+  }
+  const home = object((await client.request("GET", "/v1/catalog/home-sections", {
+    label: "Internal Home sections",
+  })).data, "Internal Home sections");
+  expect(home.configured === true && Array.isArray(home.items), "FIXTURE_MISMATCH", "Internal Home sections were not configured.");
+  for (const [id, layoutKind, product] of [
+    ["local-example-gacha", "gacha", gacha],
+    ["local-example-kuji", "kuji", kuji],
+  ]) {
+    const section = home.items.find((item) => item.id === id);
+    expect(section?.layoutKind === layoutKind && section.products?.some((item) => item.id === product.id),
+      "FIXTURE_MISMATCH", `${product.name} was not visible on the internal Home screen.`);
+  }
+  const gachaOdds = await getPublishedOdds(client, gacha);
   const scenarios = [];
 
-  await coreGachaScenario(client, session, gacha, gachaVersion, runId);
+  await coreGachaScenario(client, session, gacha, gachaOdds, runId);
   scenarios.push("gacha-approve-consume-idempotency-persistence");
-  await stockReleaseScenario(client, session, gacha, gachaVersion, runId, "fail");
+  await stockReleaseScenario(client, session, gacha, gachaOdds.version, runId, "fail");
   scenarios.push("failed-payment-stock-release");
-  await stockReleaseScenario(client, session, gacha, gachaVersion, runId, "cancel");
+  await stockReleaseScenario(client, session, gacha, gachaOdds.version, runId, "cancel");
   scenarios.push("cancelled-payment-stock-release");
-  await refundScenario(client, session, gacha, gachaVersion, runId);
+  await refundScenario(client, session, gacha, gachaOdds.version, runId);
   scenarios.push("paid-unconsumed-refund");
 
-  const assets = await createGachaInventory(client, session, gacha, gachaVersion, 1, runId, "customer-assets");
+  const assets = await createGachaInventory(client, session, gacha, gachaOdds, 1, runId, "customer-assets");
   await pointReturnScenario(client, session, assets[0].prizeInventoryUnitId, runId);
   scenarios.push("gacha-point-return");
   await kujiScenario(client, session, kuji, runId);

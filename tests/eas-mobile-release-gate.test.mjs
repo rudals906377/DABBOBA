@@ -10,15 +10,15 @@ import {
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
-test("EAS profiles inherit pinned tools, select an Expo environment, and install the lifecycle gate", () => {
+test("EAS profiles use the repository package manager pin, select an Expo environment, and install the lifecycle gate", () => {
   const eas = JSON.parse(readFileSync(path.join(repositoryRoot, "apps/mobile/eas.json"), "utf8"));
+  const rootPackage = JSON.parse(readFileSync(path.join(repositoryRoot, "package.json"), "utf8"));
   const mobilePackage = JSON.parse(readFileSync(path.join(repositoryRoot, "apps/mobile/package.json"), "utf8"));
 
   assert.deepEqual(eas.build.base, {
     node: "24.21.0",
-    corepack: true,
-    pnpm: "11.22.0",
   });
+  assert.equal(rootPackage.packageManager, "pnpm@11.22.0");
   for (const [profile, environment, capability] of [
     ["preview", "preview", "PRELAUNCH"],
     ["pg-review", "preview", "LIVE"],
@@ -31,7 +31,7 @@ test("EAS profiles inherit pinned tools, select an Expo environment, and install
   }
   assert.equal(
     mobilePackage.scripts["eas-build-post-install"],
-    "node ../../scripts/eas-mobile-release-gate.mjs",
+    "corepack pnpm run prepare:workspace && node ../../scripts/eas-mobile-release-gate.mjs",
   );
 });
 
@@ -54,12 +54,12 @@ test("release gate is inert outside an EAS Build", () => {
   assert.deepEqual(calls, []);
 });
 
-for (const [profile, capability, structureOnly] of [
+for (const [profile, capability, pgReview] of [
   ["production-prelaunch", "PRELAUNCH", false],
   ["production-live", "LIVE", false],
   ["pg-review", "LIVE", true],
 ]) {
-  test(`${profile} maps to ${capability} and runs both release gates from the repository root`, () => {
+  test(`${profile} maps to ${capability} and runs its release gates from the repository root`, () => {
     const calls = [];
     const rootDir = "/workspace/dabboba-app";
     const environment = {
@@ -84,8 +84,9 @@ for (const [profile, capability, structureOnly] of [
     assert.deepEqual(calls.map(({ args }) => args), [
       [
         "scripts/check-mobile-release-config.mjs",
-        ...(structureOnly ? ["--pg-review"] : []),
+        ...(pgReview ? ["--pg-review"] : []),
       ],
+      ...(!pgReview ? [["scripts/verify-mobile-public-api.mjs"]] : []),
       ["scripts/check-mobile-production-bundle.mjs"],
     ]);
     assert.ok(calls.every(({ command }) => command === process.execPath));
@@ -133,6 +134,30 @@ test("release gate rejects unapproved EAS build profiles and fails closed on a g
     }),
     /gate failed with exit code 1/,
   );
+});
+
+test("production EAS build stops before bundling when its public API is unavailable", () => {
+  const calls = [];
+  assert.throws(
+    () => runEasMobileReleaseGate({
+      environment: {
+        EAS_BUILD: "true",
+        EAS_BUILD_ID: "build-id",
+        EAS_BUILD_PROFILE: "production-prelaunch",
+        EXPO_PUBLIC_COMMERCE_CAPABILITY: "PRELAUNCH",
+      },
+      runner: (_command, args) => {
+        calls.push(args[0]);
+        return { status: args[0] === "scripts/verify-mobile-public-api.mjs" ? 1 : 0 };
+      },
+      log: () => {},
+    }),
+    /mobile public API gate failed with exit code 1/,
+  );
+  assert.deepEqual(calls, [
+    "scripts/check-mobile-release-config.mjs",
+    "scripts/verify-mobile-public-api.mjs",
+  ]);
 });
 
 test("preview remains an internal non-release profile", () => {

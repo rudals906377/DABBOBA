@@ -23,7 +23,7 @@ const centerAt = (particle, progress, { width, height }) => {
 };
 const fractional = (value) => value - Math.floor(value);
 const screen = readFileSync(new URL("../apps/mobile/src/features/draw/DrawRevealScreen.tsx", import.meta.url), "utf8");
-const fieldSource = screen.slice(screen.indexOf("function DrawEmbers("), screen.indexOf("function SealedCapsule("));
+const fieldSource = screen.slice(screen.indexOf("function DrawEmbers("), screen.indexOf("function SealedDraw("));
 const ambientSource = screen.slice(screen.indexOf("function StageAmbient("), screen.indexOf("function DrawEmbers("));
 
 // Execute the actual native component functions. Native hooks/animation scheduling
@@ -154,25 +154,10 @@ test("gacha spreads 36 deterministic embers evenly across twelve three-particle 
   }
 });
 
-test("the legacy twelve-particle kuji helper is preserved as a reference, not the production field", () => {
-  // V8 may differ below machine precision for trigonometric functions across
-  // supported Node releases. Quantize motion frames before hashing so this
-  // reference guards visible behavior instead of a runtime-specific last bit.
-  const stableFrame = (frame) => Object.fromEntries(
-    Object.entries(frame).map(([key, value]) => [key, Math.round(value * 1e9) / 1e9]),
-  );
-  const baseline = ["product-1:ticket-13", "product-1:ticket-14", "preview:gacha"].map((seed) => {
-    const particles = motion.createKujiFireflyConfigs(seed);
-    return {
-      seed,
-      particles,
-      frames: particles.map((particle) => [0, 0.15, 0.5, 0.85, 1]
-        .map((p) => stableFrame(motion.sampleKujiFireflyMotion(particle, p)))),
-    };
-  });
-  assert.equal(motion.KUJI_FIREFLY_COUNT, 12);
-  assert.equal(createHash("sha256").update(JSON.stringify(baseline)).digest("hex"),
-    "e3703faf887909e9e1643efc25857d9ae0c284e9d494e3ab6ffc9d13e13a3104");
+test("the retired twelve-particle kuji helper is removed; only the dispersed field remains", () => {
+  assert.equal(motion.createKujiFireflyConfigs, undefined);
+  assert.equal(motion.KUJI_FIREFLY_COUNT, undefined);
+  assert.equal(typeof motion.createGachaFireflyConfigs, "function");
 });
 
 test("complete gacha paths fit narrow and tall stages with separate horizontal lanes", () => {

@@ -25,6 +25,7 @@ import {
   loadRequiredPolicyDocuments,
   recordRequiredPolicyAcceptanceEvents,
 } from "../lib/legal-policy.js";
+import { CUSTOMER_SUBJECT_LOOKUP_PROVIDERS } from "../lib/supabase-auth.js";
 import { requiredPolicyAcceptance } from "./customer-auth.js";
 import type { ApiContext } from "../types.js";
 
@@ -116,6 +117,7 @@ type AccountInventoryRow = {
   acquired_at: Date;
   storage_expires_at?: Date;
   point_return_eligible: boolean;
+  point_return_reference_amount: number | string | null;
   sku: string;
   ip_id: string;
   character_ids: string[];
@@ -209,7 +211,13 @@ type PointReturnInventoryRow = {
   source_type: PointReturnInventorySourceType;
   source_id: string | null;
   status: PointReturnInventoryStatus;
-  price: number | string;
+  reference_amount: number | string | null;
+  purchase_order_status: string | null;
+  purchase_order_user_id: string | null;
+  purchase_category: string | null;
+  purchase_product_id: string | null;
+  original_entitlement_user_id: string | null;
+  original_entitlement_product_id: string | null;
   draw_user_id: string | null;
   draw_entitlement_id: string | null;
   draw_prize_product_id: string | null;
@@ -557,6 +565,9 @@ const mapAccountInventory = (row: AccountInventoryRow) => ({
   status: row.inventory_status,
   acquiredAt: iso(row.acquired_at),
   pointReturnEligible: row.point_return_eligible,
+  ...(row.point_return_eligible && row.point_return_reference_amount !== null
+    ? { pointReturnAmount: pointReturnAmount(numberValue(row.point_return_reference_amount)) }
+    : {}),
   ...(row.storage_expires_at ? { storageExpiresAt: iso(row.storage_expires_at) } : {}),
 });
 
@@ -634,12 +645,40 @@ export function accountNotificationDestination(
   return { route: "home", detail: null };
 }
 
+/**
+ * Stored notification data is written by many server modules and may carry
+ * internal fields (actor ids, amounts, reasons, provider state). Customer
+ * clients only need the identifiers already covered by the destination
+ * contract, so every other key is withheld and each value is re-validated.
+ */
+const PUBLIC_NOTIFICATION_DATA_FIELDS: Readonly<Record<string, RegExp>> = {
+  orderId: UUID_PATTERN,
+  shippingRequestId: UUID_PATTERN,
+  inquiryId: UUID_PATTERN,
+  listingId: UUID_PATTERN,
+  exchangeListingId: UUID_PATTERN,
+  requestId: UUID_PATTERN,
+  wantedRequestId: UUID_PATTERN,
+  aggregateId: UUID_PATTERN,
+  productId: SLUG_PATTERN,
+  category: /^[A-Za-z]{1,20}$/,
+};
+
+export function publicNotificationData(data: Record<string, unknown>): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const [key, pattern] of Object.entries(PUBLIC_NOTIFICATION_DATA_FIELDS)) {
+    const value = data[key];
+    if (typeof value === "string" && pattern.test(value)) result[key] = value;
+  }
+  return result;
+}
+
 const mapNotification = (row: NotificationRow) => ({
   id: row.id,
   kind: row.kind,
   title: row.title,
   body: row.body,
-  data: row.data,
+  data: publicNotificationData(row.data),
   destination: accountNotificationDestination(row.kind, row.data),
   readAt: nullableIso(row.read_at),
   createdAt: iso(row.created_at),
@@ -903,19 +942,13 @@ const wishlistSelect = `SELECT w.id,w.product_id,p.name AS product_name,p.ip_id,
 
 const accountInventorySelect = `SELECT
   iu.id,iu.owner_id,iu.product_id,iu.source_type,iu.status AS inventory_status,iu.acquired_at,iu.storage_expires_at,
-  EXISTS (
-    SELECT 1 FROM draw_results point_return_draw
-    WHERE point_return_draw.prize_inventory_unit_id=iu.id
-      AND point_return_draw.user_id=iu.owner_id
-      AND point_return_draw.entitlement_id=iu.source_id
-      AND point_return_draw.prize_product_id=iu.product_id
-      AND iu.source_type='GACHA'
-      AND iu.status='OWNED'
-      AND NOT EXISTS (
-        SELECT 1 FROM inventory_ownership_transfers point_return_transfer
-        WHERE point_return_transfer.inventory_unit_id=iu.id
-      )
-  ) AS point_return_eligible,
+  (iu.source_type='GACHA' AND iu.status='OWNED'
+    AND point_purchase.reference_amount >= 2
+    AND NOT EXISTS (
+      SELECT 1 FROM inventory_ownership_transfers point_return_transfer
+      WHERE point_return_transfer.inventory_unit_id=iu.id
+    )) AS point_return_eligible,
+  point_purchase.reference_amount AS point_return_reference_amount,
   p.sku,p.ip_id,
   COALESCE((SELECT array_agg(pc.character_id::text ORDER BY pc.character_id)
     FROM product_characters pc WHERE pc.product_id=p.id),'{}'::text[]) AS character_ids,
@@ -926,7 +959,25 @@ const accountInventorySelect = `SELECT
   iu.acquired_at AS created_at
   FROM inventory_units iu
   JOIN catalog_products p ON p.id=iu.product_id
-  LEFT JOIN product_stock s ON s.product_id=p.id`;
+  LEFT JOIN product_stock s ON s.product_id=p.id
+  LEFT JOIN LATERAL (
+    SELECT purchase_line.unit_price AS reference_amount
+    FROM draw_results point_draw
+    JOIN draw_entitlements point_entitlement ON point_entitlement.id=point_draw.entitlement_id
+    JOIN order_lines purchase_line ON purchase_line.id=point_entitlement.order_line_id
+    JOIN orders purchase_order ON purchase_order.id=purchase_line.order_id
+    WHERE point_draw.prize_inventory_unit_id=iu.id
+      AND point_draw.user_id=iu.owner_id
+      AND point_draw.entitlement_id=iu.source_id
+      AND point_draw.prize_product_id=iu.product_id
+      AND point_entitlement.user_id=iu.owner_id
+      AND point_entitlement.product_id=purchase_line.product_id
+      AND point_draw.product_id=point_entitlement.product_id
+      AND purchase_line.category_snapshot='gacha'
+      AND purchase_order.user_id=iu.owner_id
+      AND purchase_order.status IN ('PAID','FULFILLED')
+    LIMIT 1
+  ) point_purchase ON true`;
 
 const shippingRequestSelect = `SELECT s.id,s.status,s.version,s.address_snapshot,s.requested_at,s.updated_at,
   s.shipped_at,s.tracking_carrier,s.tracking_number,s.requested_at AS created_at,
@@ -1117,7 +1168,7 @@ export async function registerAccountRoutes(app: FastifyInstance, context: ApiCo
   });
 
   app.get("/v1/account/wishlist", { preHandler: context.auth.requireUser }, async (request) => {
-    const { limit, cursor } = pagination(queryOf(request));
+    const { limit, cursor } = pagination(queryOf(request), "uuid");
     const values: unknown[] = [request.actor!.userId, limit + 1];
     const filters = ["w.user_id=$1", "p.is_prize_only=false"];
     if (cursor) {
@@ -1181,7 +1232,7 @@ export async function registerAccountRoutes(app: FastifyInstance, context: ApiCo
   });
 
   app.get("/v1/account/inventory", { preHandler: context.auth.requireUser }, async (request) => {
-    const { limit, cursor } = pagination(queryOf(request));
+    const { limit, cursor } = pagination(queryOf(request), "uuid");
     const values: unknown[] = [request.actor!.userId, limit + 1];
     const filters = [
       "iu.owner_id=$1",
@@ -1218,7 +1269,7 @@ export async function registerAccountRoutes(app: FastifyInstance, context: ApiCo
   });
 
   app.get("/v1/account/orders", { preHandler: context.auth.requireUser }, async (request) => {
-    const { limit, cursor } = pagination(queryOf(request));
+    const { limit, cursor } = pagination(queryOf(request), "uuid");
     return withTransaction(context.pool, async (client) => {
       await client.query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY");
       const values: unknown[] = [request.actor!.userId, limit + 1];
@@ -1272,7 +1323,7 @@ export async function registerAccountRoutes(app: FastifyInstance, context: ApiCo
 
   app.get("/v1/account/draw-entitlements", { preHandler: context.auth.requireUser }, async (request) => {
     const query = queryOf(request);
-    const { limit, cursor } = pagination(query);
+    const { limit, cursor } = pagination(query, "uuid");
     const status = query.status === undefined
       ? "AVAILABLE"
       : enumInput(query, "status", DRAW_ENTITLEMENT_STATUSES)!;
@@ -1299,7 +1350,7 @@ export async function registerAccountRoutes(app: FastifyInstance, context: ApiCo
   });
 
   app.get("/v1/account/points", { preHandler: context.auth.requireUser }, async (request) => {
-    const { limit, cursor } = pagination(queryOf(request));
+    const { limit, cursor } = pagination(queryOf(request), "uuid");
     const actorId = request.actor!.userId;
     const values: unknown[] = [actorId, limit + 1];
     const filters = ["user_id=$1"];
@@ -1339,10 +1390,17 @@ export async function registerAccountRoutes(app: FastifyInstance, context: ApiCo
       payload: { inventoryUnitIds },
       work: async (client) => {
         const lockedInventory = await client.query<PointReturnInventoryRow>(
-          `SELECT iu.id,iu.owner_id,iu.product_id,iu.source_type,iu.source_id,iu.status,p.price,
+          `SELECT iu.id,iu.owner_id,iu.product_id,iu.source_type,iu.source_id,iu.status,
              draw_result.user_id AS draw_user_id,
              draw_result.entitlement_id AS draw_entitlement_id,
              draw_result.prize_product_id AS draw_prize_product_id,
+             purchase_line.unit_price AS reference_amount,
+             purchase_line.category_snapshot AS purchase_category,
+             purchase_line.product_id AS purchase_product_id,
+             purchase_order.status AS purchase_order_status,
+             purchase_order.user_id AS purchase_order_user_id,
+             original_entitlement.user_id AS original_entitlement_user_id,
+             original_entitlement.product_id AS original_entitlement_product_id,
              NOT EXISTS (
                SELECT 1 FROM inventory_ownership_transfers transfer_history
                WHERE transfer_history.inventory_unit_id=iu.id
@@ -1350,6 +1408,9 @@ export async function registerAccountRoutes(app: FastifyInstance, context: ApiCo
            FROM inventory_units iu
            JOIN catalog_products p ON p.id=iu.product_id
            LEFT JOIN draw_results draw_result ON draw_result.prize_inventory_unit_id=iu.id
+           LEFT JOIN draw_entitlements original_entitlement ON original_entitlement.id=draw_result.entitlement_id
+           LEFT JOIN order_lines purchase_line ON purchase_line.id=original_entitlement.order_line_id
+           LEFT JOIN orders purchase_order ON purchase_order.id=purchase_line.order_id
            WHERE iu.id=ANY($1::uuid[])
              AND iu.source_type='GACHA'
              AND iu.storage_expires_at>now()
@@ -1363,7 +1424,12 @@ export async function registerAccountRoutes(app: FastifyInstance, context: ApiCo
         const items = lockedInventory.rows.map((inventory) => {
           const originalDrawLinkMatches = inventory.draw_user_id === actorId
             && inventory.source_id === inventory.draw_entitlement_id
-            && inventory.product_id === inventory.draw_prize_product_id;
+            && inventory.product_id === inventory.draw_prize_product_id
+            && inventory.purchase_category === "gacha"
+            && inventory.original_entitlement_user_id === actorId
+            && inventory.purchase_order_user_id === actorId
+            && inventory.original_entitlement_product_id === inventory.purchase_product_id
+            && ["PAID", "FULFILLED"].includes(inventory.purchase_order_status ?? "");
           if (
             inventory.owner_id !== actorId
             || !isPointReturnEligibleInventory(
@@ -1374,7 +1440,7 @@ export async function registerAccountRoutes(app: FastifyInstance, context: ApiCo
           ) {
             throw conflict("본인이 가챠에서 직접 뽑아 현재 보관 중인 상품만 포인트 환급을 신청할 수 있습니다.");
           }
-          const referenceAmount = numberValue(inventory.price);
+          const referenceAmount = numberValue(inventory.reference_amount);
           const pointAmount = pointReturnAmount(referenceAmount);
           if (pointAmount <= 0) {
             throw conflict("환급 포인트가 0P인 상품은 포인트 환급을 신청할 수 없습니다.");
@@ -1465,7 +1531,7 @@ export async function registerAccountRoutes(app: FastifyInstance, context: ApiCo
   });
 
   app.get("/v1/account/notifications", { preHandler: context.auth.requireUser }, async (request) => {
-    const { limit, cursor } = pagination(queryOf(request));
+    const { limit, cursor } = pagination(queryOf(request), "uuid");
     const values: unknown[] = [request.actor!.userId, limit + 1];
     const filters = ["user_id=$1"];
     if (cursor) {
@@ -1591,7 +1657,7 @@ export async function registerAccountRoutes(app: FastifyInstance, context: ApiCo
 
   app.get("/v1/account/shipping-requests", { preHandler: context.auth.requireUser }, async (request) => {
     const query = queryOf(request);
-    const { limit, cursor } = pagination(query);
+    const { limit, cursor } = pagination(query, "uuid");
     const status = query.status === undefined
       ? undefined
       : enumInput(query, "status", SHIPPING_REQUEST_STATUSES);
@@ -1895,7 +1961,10 @@ export async function registerAccountRoutes(app: FastifyInstance, context: ApiCo
     return sendMutation(reply, result);
   });
 
-  app.get("/v1/account/deletion-preview", { preHandler: context.auth.requireUserWithoutPolicy }, async (request, reply) => {
+  app.get("/v1/account/deletion-preview", {
+    preHandler: context.auth.requireUserWithoutPolicy,
+    config: { allowAccountDeletionScope: true },
+  }, async (request, reply) => {
     const blockers = await loadDeletionBlockers(context.pool, request.actor!.userId);
     return reply.header("cache-control", "no-store").send({
       canDeleteNow: !Object.values(blockers).some((value) => value > 0),
@@ -1963,7 +2032,10 @@ export async function registerAccountRoutes(app: FastifyInstance, context: ApiCo
     return reply.header("cache-control", "no-store").code(204).send();
   });
 
-  app.get("/v1/account/deletion-request", { preHandler: context.auth.requireUserWithoutPolicy }, async (request, reply) => {
+  app.get("/v1/account/deletion-request", {
+    preHandler: context.auth.requireUserWithoutPolicy,
+    config: { allowAccountDeletionScope: true },
+  }, async (request, reply) => {
     const result = await context.pool.query<AccountDeletionRequestRow>(
       `SELECT id,status,blocker_snapshot,request_count,requested_at,last_requested_at,
               completed_at,auth_deletion_status
@@ -1980,7 +2052,7 @@ export async function registerAccountRoutes(app: FastifyInstance, context: ApiCo
   app.get(
     "/v1/account/deletion-requests/:requestId/status",
     {
-      config: { rateLimit: { max: 30, timeWindow: "1 minute" } },
+      config: { rateLimit: { max: 30, timeWindow: "1 minute" }, allowAccountDeletionScope: true },
     },
     async (request, reply) => {
       const requestId = uuidInput((request.params as Record<string, unknown>).requestId, "requestId");
@@ -1999,7 +2071,10 @@ export async function registerAccountRoutes(app: FastifyInstance, context: ApiCo
     },
   );
 
-  app.post("/v1/account/deletion-request", { preHandler: context.auth.requireUserWithoutPolicy }, async (request, reply) => {
+  app.post("/v1/account/deletion-request", {
+    preHandler: context.auth.requireUserWithoutPolicy,
+    config: { allowAccountDeletionScope: true },
+  }, async (request, reply) => {
     const input = objectInput(request.body);
     assertOnlyKeys(input, []);
     const actorId = request.actor!.userId;
@@ -2078,7 +2153,7 @@ export async function registerAccountRoutes(app: FastifyInstance, context: ApiCo
              FROM auth_identities
             WHERE user_id=$1
               AND provider=ANY($2::text[])`,
-          [actorId, ["KAKAO", "NAVER", "GOOGLE", "APPLE", "EMAIL"]],
+          [actorId, [...CUSTOMER_SUBJECT_LOOKUP_PROVIDERS]],
         );
         supabaseAuthUserId = supabaseAuthUserIdForDeletion(
           brokerIdentities.rows.map((row) => row.provider_subject),

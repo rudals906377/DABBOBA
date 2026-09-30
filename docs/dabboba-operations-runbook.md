@@ -1,5 +1,7 @@
 # DABBOBA 운영 런북
 
+> 2026-09-25 대상 변경: 현재 사전오픈 운영 Supabase 프로젝트는 `rconfxsykttfvznakile` (`dabboba-production`)이다. 아래 2026-09-09 기록의 `yxkmvgfruphgghowzvmo`와 target hash는 과거 프로젝트에 대한 기록이며, 새 프로젝트의 배포·역할 준비·스케줄 명령에 재사용하지 않는다. 새 대상 `postgres`의 독립 계산 hash는 `7f6fdac67f393af1aecb9dfe38bde3dec838262e4e94a6e6aceb492fe16822f3`이다. 이 값만으로 운영 변경이 승인되거나 worker가 준비된 것은 아니다. 현재 새 프로젝트에는 `dabboba-api`만 배포돼 있고 `dabboba-worker`는 배포되지 않았다.
+
 > 2026-09-09: 신규 배포 목표는 [Supabase 내부 통합](supabase-only-transition.md)이다. 이 문서의 Cloud Run 절차는 이전 구현 참고용이며 실행하지 않는다. 운영 DB·스케줄·유료 서비스 변경은 별도 승인 대상이다.
 
 ## 목적과 제한
@@ -150,12 +152,26 @@ Next BFF는 지정 header의 단일 IPv4/IPv6 주소와 정규화한 `User-Agent
 
 Fastify의 일반 `trustProxy`는 의도적으로 `false`를 유지한다. 배포 토폴로지를 모르는 애플리케이션이 `Forwarded`나 `X-Forwarded-For`를 임의로 신뢰하면 공격자가 rate-limit key를 바꿀 수 있다. 반대로 TLS ingress 뒤에서 모든 요청이 같은 socket IP로 보이면 한 사용자가 공유 예산을 소진해 다른 사용자를 차단할 수 있다.
 
-출시 전에 배포 경계에 맞춰 다음 중 하나를 선택하고 구성한다.
+전역 limiter(분당 240회)와 route별 limiter의 key는 다음 순서로 정한다(`apps/api/src/lib/rate-limit-key.ts`).
 
-1. API가 실제 client IP를 사용해야 한다면 신뢰할 proxy CIDR 또는 정확한 hop만 제한적으로 설정하고, 첫 신뢰 edge가 외부 forwarding header를 제거한 뒤 표준값으로 항상 덮어쓴다.
-2. 애플리케이션의 `trustProxy: false`를 유지한다면 edge/WAF가 실제 client IP별 일반 API rate-limit을 담당하고, 애플리케이션 제한은 내부 coarse guard로만 사용한다.
+1. `Authorization: Bearer`가 발급 형식(43자 base64url) session token이면 `SESSION_TOKEN_PEPPER` HMAC digest 앞 32자(`session:…`)를 key로 쓴다. rate-limit hook은 인증 전에 실행되므로 DB를 다시 조회하지 않는다. 같은 NAT 뒤 사용자라도 session마다 독립 예산을 가진다.
+2. 그 외 요청과 `/v1/auth/exchange`, `/v1/auth/account-deletion-exchange`는 bearer 값과 무관하게 client IP(`ip:…`, IPv6는 /64 단위)를 key로 쓴다. 로그인 교환은 임의 bearer header로 새 예산을 만들 수 없다.
+3. client IP는 운영자가 명시한 `DABBOBA_TRUSTED_CLIENT_IP_HEADER`(API 설정명 `TRUSTED_CLIENT_IP_HEADER`)가 있을 때만 그 header의 가장 오른쪽 유효 IP를 사용하고, 없거나 형식이 틀리면 socket 주소(`request.ip`)를 사용한다. Edge handler는 이 header 하나만 API로 전달하고 `Forwarded`, `X-Forwarded-For`, `X-Real-IP`, `CF-Connecting-IP` 등 나머지 forwarding header는 계속 제거한다.
+4. 신뢰 header가 설정된 경우 session key 요청에도 client IP별 분당 1,200회 상한을 추가로 적용한다. 위조한 session 형식 token을 계속 바꿔 전역 예산을 우회하는 경로를 막는다.
 
-실제 ingress를 통과하는 통합 테스트에서 서로 다른 두 source IP가 독립 예산을 갖는지, 한 IP의 초과 요청만 429가 되는지, 위조한 `Forwarded`/`X-Forwarded-For`가 key를 바꾸지 못하는지를 확인한다. webhook처럼 공급자 retry가 필요한 경로는 별도 공급자 allowlist/용량 정책도 확인한다. 구성과 테스트 증거가 없으면 출시를 중단한다.
+Home 상품 클릭 기록(`POST /v1/catalog/home-product-clicks/:productId`)은 같은 key 기준 분당 30회로 제한되고, 저장 id를 (key, 상품, UTC 1시간) HMAC으로 서버가 파생해 같은 호출자의 반복 클릭을 한 번만 집계한다. 테이블에는 IP·session 값이 저장되지 않는다.
+
+#### Hosted Edge `remoteAddr` 확인 절차
+
+`DABBOBA_TRUSTED_CLIENT_IP_HEADER`는 아래 확인을 마친 뒤에만 설정한다. 확인 전에는 비워 두고 socket 주소 fallback의 위험(공유 proxy 주소면 익명 요청이 한 예산을 공유함)을 출시 판단에 기록한다.
+
+1. 스테이징 Edge 함수에 일시적으로 요청 metadata 진단 로그를 넣거나 `supabase functions serve` 대신 실제 hosted 함수에서 `Deno.serve((req, info) => …)`의 `info.remoteAddr.hostname`과 후보 header(`x-forwarded-for`, `cf-connecting-ip`, `x-real-ip`)를 IP 값만 기록한다. 토큰·cookie·본문은 기록하지 않고, 확인 후 진단 코드를 제거해 재배포한다.
+2. 서로 다른 두 네트워크(예: 유선 회선과 모바일 hotspot)에서 각각 요청을 보내고, 각 요청 직전에 `curl https://api.ipify.org`로 실제 공인 IP를 기록한다.
+3. `remoteAddr.hostname`이 두 요청의 실제 공인 IP와 각각 같으면 header 설정 없이 socket 주소를 그대로 사용한다.
+4. `remoteAddr`가 두 요청에서 같은 내부/공유 주소이고 특정 header의 가장 오른쪽 값이 실제 공인 IP와 일치하면, 같은 요청에 `-H 'X-Forwarded-For: 203.0.113.1'`, `-H 'CF-Connecting-IP: 203.0.113.1'`을 위조해 다시 보내 그 header의 가장 오른쪽 값이 여전히 실제 IP인지(platform이 덮어쓰거나 끝에 추가하는지) 확인한다. 이 조건을 만족하는 header만 `DABBOBA_TRUSTED_CLIENT_IP_HEADER`로 지정한다.
+5. 설정 후 두 source IP가 독립 예산을 갖는지, 한 IP에서 익명 요청 241회째만 429가 되는지, 위조 header가 key를 바꾸지 못하는지 확인하고 결과(날짜, 함수 버전, 선택한 header)를 출시 증거에 남긴다.
+
+webhook처럼 공급자 retry가 필요한 경로는 별도 공급자 allowlist/용량 정책도 확인한다. 구성과 테스트 증거가 없으면 출시를 중단한다.
 
 ### 애플리케이션
 
@@ -317,6 +333,7 @@ dump 파일에는 개인정보, 알림 동의 변경 evidence와 업무 원장�
 - API: `/healthz`는 외부 의존성을 조회하지 않는 process liveness, `/readyz`는 제한 시간 안의 PostgreSQL 준비 상태이며 실패 시 503
 - worker: Cloud Run Job 실행/종료 로그, pgmq `read_ct`/queue depth, immutable `worker_dead_letters`, unpublished outbox age
 - 구조화 로그: request/correlation, 작업 ID, aggregate ID; API 기본 요청 로그는 HTTP method·고정 route template만 기록하고 동적 URL·query·인증 header/cookie를 제외한다. 오류는 고정 분류·허용된 오류 코드/SQLSTATE를 사용하며 원문 message·stack·cause·DB detail을 일반 로그로 내보내지 않는다. worker의 새 retry/dead-letter 오류 필드도 같은 안전한 식별 요약을 사용한다. 과거 로그/원장의 원문은 자동 삭제하지 않았으므로 접근·보존 정책을 별도로 확인한다.
+- request ID: API는 요청마다 UUID를 새로 생성해 응답 `x-request-id`, 오류 본문 `requestId`, 감사 로그 `request_id`, outbox correlation에 사용한다. 클라이언트가 보낸 `x-request-id`는 형식이 맞을 때 로그의 `clientRequestId` 필드로만 남기며 서버 식별자로 쓰지 않는다. 관리자 BFF 서명에 포함된 요청 ID도 같은 방식으로 `clientRequestId`에서 대조한다.
 - PostgreSQL: unpublished/failed outbox, 오래된 예약, 결제 조정 대상, 감사 로그
 - Supabase Queues: queue depth, visibility timeout 재노출, `read_ct` 재시도, dead-letter 증가
 

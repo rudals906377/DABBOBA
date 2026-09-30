@@ -23,11 +23,13 @@ import { ProductInfoDivider } from "@/components/ProductInfoDivider";
 import { RemainingInventoryMeter } from "@/components/RemainingInventoryMeter";
 import { KoreanPixelTitle } from "@/components/RootCategoryTitle";
 import { AppText as Text } from "@/components/Typography";
+import { SeedInlineGuidance } from "@/design-system/components";
 import { seed } from "@/design-system/seed";
 import { catalogProductCardSurface } from "@/design-system/catalog";
 import { subtleSectionHeaderRule } from "@/design-system/section";
 import { openCustomerLogin } from "@/features/auth/login-navigation";
 import { CategoryAvailabilityState } from "@/features/catalog/CategoryAvailabilityState";
+import { shouldShowCatalogInventory } from "@/features/catalog/remaining-inventory";
 import { useStorefrontCategorySettings } from "@/features/catalog/StorefrontCategorySettingsProvider";
 import { useCommerceCapability } from "@/features/commerce/CommerceCapabilityProvider";
 import {
@@ -105,7 +107,7 @@ export function ProductDetailScreen() {
       }
       setMessage("");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "상품 정보를 불러오지 못했습니다.");
+      setMessage(error instanceof Error ? error.message : "상품 정보를 불러오지 못했어요.");
     } finally {
       setLoading(false);
     }
@@ -143,7 +145,7 @@ export function ProductDetailScreen() {
     if (!snapshot || snapshot.ownedCollectible || snapshot.exchangeReference || wishlistPending) return;
     if (!accessToken) {
       openCustomerLogin(
-        "찜 목록은 로그인한 계정에 저장됩니다.",
+        "찜 목록은 로그인한 계정에 저장돼요.",
         `/product/${encodeURIComponent(productId)}`,
       );
       return;
@@ -175,7 +177,7 @@ export function ProductDetailScreen() {
     }
     if (!accessToken) {
       openCustomerLogin(
-        "주문과 추첨 결과는 로그인한 계정에 저장됩니다.",
+        "주문과 추첨 결과는 로그인한 계정에 저장돼요.",
         isDrawCategory(product.category) && product.category === "kuji"
           ? buildKujiRoomGatePath(product.id)
           : `/checkout/${encodeURIComponent(product.id)}`,
@@ -201,7 +203,7 @@ export function ProductDetailScreen() {
     }
     Alert.alert(
       "결제 화면으로 이동할까요?",
-      `${quantity}개 · ${total.toLocaleString("ko-KR")}원입니다. 결제 화면에서 포인트와 최종 결제 금액을 확인해 주세요.`,
+      `${quantity}개 · ${total.toLocaleString("ko-KR")}원이에요. 결제 화면에서 포인트와 최종 결제 금액을 확인해 주세요.`,
       [
         {
           text: "확인",
@@ -217,6 +219,7 @@ export function ProductDetailScreen() {
     <SafeAreaView style={styles.safeArea} edges={readOnlyReference || productComingSoon ? ["top", "bottom", "left", "right"] : ["top", "left", "right"]}>
       <DetailPageHeader
         title="상품 상세"
+        titleMode="pixel"
         onBack={goBack}
         action={readOnlyReference || productComingSoon ? null : (
           <DetailPageHeaderAction
@@ -238,7 +241,7 @@ export function ProductDetailScreen() {
       ) : message || !snapshot || !product ? (
         <View style={styles.center}>
           <DecorativeIonicon name="alert-circle-outline" size={34} color={colors.muted} />
-          <Text style={styles.errorTitle}>{message || "상품을 찾을 수 없습니다."}</Text>
+          <Text style={styles.errorTitle}>{message || "상품을 찾을 수 없어요."}</Text>
           <Pressable accessibilityRole="button" accessibilityLabel="상품 상세 다시 불러오기" onPress={() => void load()} style={styles.retryButton}><Text style={styles.retryLabel}>다시 불러오기</Text></Pressable>
         </View>
       ) : productComingSoon ? (
@@ -260,14 +263,14 @@ export function ProductDetailScreen() {
                 <View style={styles.categoryBadge}><Text style={styles.categoryBadgeLabel}>{categoryLabel(product.category)}</Text></View>
                 {readOnlyReference ? (
                   <Text style={styles.stock}>{ownedCollectible ? "내 보관 상품" : "교환 등록 상품"}</Text>
-                ) : (
+                ) : shouldShowCatalogInventory(product, commerceEnabled) ? (
                   <RemainingInventoryMeter
                     category={product.category}
                     availableQuantity={product.availableQuantity}
                     totalQuantity={product.totalQuantity}
                     style={styles.detailInventory}
                   />
-                )}
+                ) : null}
               </View>
             </View>
 
@@ -287,13 +290,6 @@ export function ProductDetailScreen() {
                 <InfoRow label="출시일" value={product.releaseDate ?? "상품 상세 고지 예정"} />
               </View>
             )}
-
-            <CommerceGuidance
-              drawCategory={isDrawCategory(product.category)}
-              ownedCollectible={ownedCollectible}
-              exchangeReference={exchangeReference}
-              prelaunch={!commerceEnabled}
-            />
           </ScrollView>
 
           {!readOnlyReference ? <FloatingBottomActionPanel panelStyle={styles.footer}>
@@ -337,22 +333,36 @@ export function ProductDetailScreen() {
   );
 }
 
+const HERO_ASPECT_RATIO_BOUNDS = { min: 0.6, max: 2.4 } as const;
+
 function ProductHero({ snapshot, assetBaseUrl }: { snapshot: ProductDetailSnapshot; assetBaseUrl: string | null }) {
   const uri = resolveCatalogImageUrl(snapshot.product.imageUrl, assetBaseUrl, snapshot.product.version);
+  const editionLabel = productMetadataText(snapshot.product, "edition")?.trim();
+  const [measured, setMeasured] = useState<{ uri: string | null; aspectRatio: number } | null>(null);
+  // Until the source is measured, reserve a neutral loading footprint; the hero then
+  // takes the image's own aspect ratio so the complete photo shows without a frame.
+  const loadingAspectRatio = snapshot.product.category === "kuji" ? 16 / 9 : 1;
+  const heroAspectRatio = measured?.uri === uri ? measured.aspectRatio : loadingAspectRatio;
 
   return (
     <View style={styles.heroContainer}>
-      <View style={[
-        styles.hero,
-        snapshot.product.category === "kuji" ? styles.heroKuji : styles.heroGacha,
-      ]}>
+      <View style={[styles.hero, { aspectRatio: heroAspectRatio }]}>
         <CatalogProductImage
           uri={uri}
           requestKey={snapshot.product.version}
           resizeMode="contain"
           style={styles.heroImage}
+          onDimensions={(width, height) => setMeasured({
+            uri,
+            aspectRatio: Math.min(
+              HERO_ASPECT_RATIO_BOUNDS.max,
+              Math.max(HERO_ASPECT_RATIO_BOUNDS.min, width / height),
+            ),
+          })}
         />
-        <View style={styles.editionBadge}><Text style={styles.editionLabel}>{productMetadataText(snapshot.product, "edition") ?? snapshot.product.sku}</Text></View>
+        {editionLabel ? (
+          <View style={styles.editionBadge}><Text style={styles.editionLabel}>{editionLabel}</Text></View>
+        ) : null}
       </View>
     </View>
   );
@@ -386,7 +396,12 @@ function OddsSection({ snapshot }: { snapshot: ProductDetailSnapshot }) {
               </View>
             ))}
           </View>
-          <Text style={styles.disclosure}>확률표 v{odds.version} · 현재 남은 경품 수량과 서버 가중치를 기준으로 계산됩니다.</Text>
+          <SeedInlineGuidance
+            accessibilityLabel={`확률표 버전 ${odds.version}. 확률은 남은 수량에 따라 실시간으로 바뀌어요`}
+            style={styles.disclosure}
+          >
+            확률은 남은 수량에 따라 실시간으로 바뀌어요
+          </SeedInlineGuidance>
         </>
       ) : (
         <View style={styles.oddsEmpty}>
@@ -394,73 +409,6 @@ function OddsSection({ snapshot }: { snapshot: ProductDetailSnapshot }) {
           <View style={styles.oddsEmptyCopy}><Text style={styles.oddsEmptyTitle}>포함 상품 정보를 준비 중이에요</Text><Text style={styles.oddsEmptyBody}>상품 구성이 공개되면 이곳에서 바로 확인할 수 있어요.</Text></View>
         </View>
       )}
-    </View>
-  );
-}
-
-function CommerceGuidance({
-  drawCategory,
-  ownedCollectible,
-  exchangeReference,
-  prelaunch,
-}: {
-  drawCategory: boolean;
-  ownedCollectible: boolean;
-  exchangeReference: boolean;
-  prelaunch: boolean;
-}) {
-  const [expanded, setExpanded] = useState(false);
-  const title = ownedCollectible || exchangeReference
-    ? "보관·교환 안내"
-    : prelaunch ? "사전오픈 안내" : "구매·보관 안내";
-  const facts = ownedCollectible
-    ? [
-        { icon: "shield-checkmark-outline" as const, text: "로그인한 계정의 보유 기록으로 확인된 상품이에요." },
-        { icon: "cube-outline" as const, text: "배송·교환 상태는 보관함과 각 신청 내역에서 확인해 주세요." },
-      ]
-    : exchangeReference
-      ? [
-          { icon: "swap-horizontal-outline" as const, text: "교환 글에서 확인된 등록 상품이에요." },
-          { icon: "cube-outline" as const, text: "교환 상태와 신청은 원래 교환 글에서 확인해 주세요." },
-        ]
-      : prelaunch
-        ? [
-            { icon: "heart-outline" as const, text: "첫 공개판에서는 상품 탐색과 관심 상품 저장만 제공해요." },
-            { icon: "lock-closed-outline" as const, text: "결제·뽑기·재고 사용·배송 신청은 아직 열리지 않아요." },
-            { icon: "notifications-outline" as const, text: "정식 오픈 일정과 이용 안내는 앱 공지에서 알려드릴게요." },
-          ]
-        : [
-          { icon: "receipt-outline" as const, text: drawCategory ? "결제 후 서버가 확정한 결과로 추첨해요." : "표시된 상품을 그대로 구매해요." },
-          { icon: "cube-outline" as const, text: drawCategory ? "뽑은 상품은 내 보관함에 등록돼요." : "구매 상품은 일반 배송 주문으로 처리돼요." },
-          { icon: "car-outline" as const, text: drawCategory ? "보관함에서 여러 상품을 묶어 배송 신청할 수 있어요." : "구매 내역에서 주문과 배송 상태를 확인해 주세요." },
-        ];
-
-  return (
-    <View style={styles.guidance}>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={title}
-        accessibilityHint={expanded ? "안내 내용을 접습니다" : "안내 내용을 펼칩니다"}
-        accessibilityState={{ expanded }}
-        onPress={() => setExpanded((current) => !current)}
-        style={({ pressed }) => [styles.guidanceTrigger, pressed && styles.pressed]}
-      >
-        <View style={styles.guidanceTitleRow}>
-          <DecorativeIonicon name="information-circle-outline" size={21} color={colors.greenInk} />
-          <Text style={styles.guidanceTitle}>{title}</Text>
-        </View>
-        <DecorativeIonicon name={expanded ? "chevron-up" : "chevron-down"} size={20} color={colors.muted} />
-      </Pressable>
-      {expanded ? (
-        <View style={styles.guidanceBody}>
-          {facts.map((fact) => (
-            <View key={fact.text} style={styles.fact}>
-              <DecorativeIonicon name={fact.icon} size={20} color={colors.greenInk} />
-              <Text style={styles.factText}>{fact.text}</Text>
-            </View>
-          ))}
-        </View>
-      ) : null}
     </View>
   );
 }
@@ -483,11 +431,9 @@ const styles = StyleSheet.create({
   scrollView: { flex: 1 },
   content: { paddingBottom: seed.spacing.screenBottom },
   heroContainer: { marginHorizontal: seed.spacing.x2, marginVertical: seed.spacing.x4 },
-  hero: { width: "100%", overflow: "hidden", borderRadius: seed.radius.r6, backgroundColor: colors.white },
-  heroGacha: { aspectRatio: 4 / 3 },
-  heroKuji: { aspectRatio: 16 / 9 },
+  hero: { width: "100%", overflow: "hidden" },
   heroImage: { width: "100%", height: "100%" },
-  editionBadge: { position: "absolute", left: 12, bottom: 12, maxWidth: "82%", paddingHorizontal: 10, paddingVertical: 7, borderRadius: seed.radius.r2, backgroundColor: "rgba(7,16,11,0.88)" },
+  editionBadge: { position: "absolute", left: 12, bottom: 12, maxWidth: "82%", paddingHorizontal: 10, paddingVertical: 7, borderRadius: seed.radius.r2, backgroundColor: seed.color.inverted.surface },
   editionLabel: { color: colors.white, fontSize: 11, lineHeight: 16, fontWeight: "800" },
   detailCopy: { paddingHorizontal: seed.spacing.globalGutter },
   badgeRow: { marginTop: seed.spacing.x3, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
@@ -499,13 +445,6 @@ const styles = StyleSheet.create({
   ipName: { color: colors.muted, fontSize: 13 },
   productName: { color: seed.color.foreground.neutral, ...seed.typography.screenTitle, marginTop: seed.spacing.x1 },
   price: { color: colors.ink, fontSize: 22, fontWeight: "900", marginTop: seed.spacing.x3 },
-  guidance: { marginHorizontal: seed.spacing.globalGutter, marginTop: seed.spacing.x4, borderRadius: seed.radius.r4, borderWidth: 1, borderColor: seed.color.stroke.neutral, backgroundColor: seed.color.layer.default, overflow: "hidden" },
-  guidanceTrigger: { minHeight: seed.size.touchTarget, paddingHorizontal: seed.spacing.x3_5, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: seed.spacing.x3 },
-  guidanceTitleRow: { flex: 1, flexDirection: "row", alignItems: "center", gap: seed.spacing.x2_5 },
-  guidanceTitle: { color: colors.ink, fontSize: 13, lineHeight: 19, fontWeight: "900" },
-  guidanceBody: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: seed.color.stroke.neutral, paddingVertical: seed.spacing.x1 },
-  fact: { minHeight: 48, paddingHorizontal: seed.spacing.x3_5, flexDirection: "row", alignItems: "center", gap: seed.spacing.x2_5 },
-  factText: { flex: 1, color: colors.ink, fontSize: 13, lineHeight: 19, fontWeight: "700" },
   section: { marginHorizontal: seed.spacing.globalGutter, marginTop: seed.spacing.x6, padding: seed.spacing.x4_5, borderRadius: seed.radius.r5, borderWidth: 1, borderColor: seed.color.stroke.neutral, backgroundColor: seed.color.layer.default },
   sectionTitle: { marginBottom: seed.spacing.x3_5 },
   includedHeader: { marginBottom: seed.spacing.x3_5, ...subtleSectionHeaderRule, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 },
@@ -517,7 +456,7 @@ const styles = StyleSheet.create({
   includedCopy: { minHeight: 66, paddingHorizontal: 10, paddingVertical: 9 },
   includedName: { color: colors.ink, fontSize: 12, lineHeight: 17, fontWeight: "800" },
   includedOdds: { color: colors.greenInk, fontSize: 11, fontWeight: "900", marginTop: 5 },
-  disclosure: { color: colors.muted, fontSize: 11, lineHeight: 17, marginTop: 13 },
+  disclosure: { marginTop: seed.spacing.x3 },
   oddsEmpty: { padding: seed.spacing.x3_5, borderRadius: seed.radius.r3, backgroundColor: seed.color.background.neutralWeak, flexDirection: "row", alignItems: "flex-start", gap: seed.spacing.x2_5 },
   oddsEmptyCopy: { flex: 1 },
   oddsEmptyTitle: { color: colors.ink, fontSize: 13, fontWeight: "900" },

@@ -8,14 +8,24 @@ import {
 } from "./backend-environment.js";
 
 export * from "./admin-proxy-identity.js";
+export * from "./admin-service-signature.js";
 export * from "./backend-environment.js";
 export * from "./media-storage.js";
 
 export type RuntimeEnvironment = "development" | "test" | "production";
 export type ApiSurface = "customer" | "admin" | "all";
 export type CommerceLaunchMode = "PRELAUNCH" | "LIVE";
-export const CUSTOMER_LOGIN_PROVIDERS = ["KAKAO", "NAVER", "GOOGLE", "APPLE", "EMAIL"] as const;
+export const CUSTOMER_LOGIN_PROVIDERS = ["PHONE", "KAKAO", "NAVER", "GOOGLE", "APPLE"] as const;
 export type CustomerLoginProvider = (typeof CUSTOMER_LOGIN_PROVIDERS)[number];
+/**
+ * Third-party social logins that App Store Review Guideline 4.8 pairs with
+ * Sign in with Apple. PHONE is a first-party OTP method and is exempt.
+ */
+export const APPLE_PARITY_SOCIAL_PROVIDERS = ["KAKAO", "NAVER", "GOOGLE"] as const satisfies readonly CustomerLoginProvider[];
+/** Absolute administrator session lifetime measured from login. */
+export const DEFAULT_ADMIN_SESSION_MAX_HOURS = 12;
+/** Administrator inactivity window renewed by the console keepalive. */
+export const DEFAULT_ADMIN_SESSION_IDLE_MINUTES = 60;
 
 export type ApiConfig = {
   environment: RuntimeEnvironment;
@@ -33,19 +43,42 @@ export type ApiConfig = {
   adminOrigins: string[];
   sessionTokenPepper: string;
   adminProxyIdentitySecret: string | null;
+  /**
+   * Lower-case header that the hosting edge overwrites with the real client IP.
+   * Null means rate limits key anonymous callers by the socket address only.
+   */
+  trustedClientIpHeader?: string | null;
   supabaseUrl?: string | null;
   supabaseJwtAudience?: string | null;
   supabasePublishableKey?: string | null;
   customerLoginProviders?: CustomerLoginProvider[];
   /** Server-only AES-256-GCM key used to seal Apple refresh tokens before DB storage. */
   appleCredentialEncryption?: { key: string; keyVersion: number } | null;
-  /** Customer Dukroom/community API exposure. Disabled by default in environment-loaded builds. */
+  /**
+   * Customer Dukroom posts/comments/likes API exposure. Disabled by default in
+   * environment-loaded builds. Notices, inquiries, reports, and user blocks are
+   * customer support and stay mounted regardless of this flag.
+   */
   communityEnabled?: boolean;
   /** Server-side commerce kill switch. Production defaults to PRELAUNCH. */
   commerceMode?: CommerceLaunchMode;
   sessionTtlDays: number;
+  /**
+   * Absolute administrator session cap in hours, measured from the login that
+   * created the session. Loaded configs always set it; optional only for older
+   * programmatic fixtures, which fall back to DEFAULT_ADMIN_SESSION_MAX_HOURS.
+   */
+  adminSessionMaxHours?: number;
+  /**
+   * Administrator inactivity expiry in minutes. Keepalive renews it without
+   * exceeding the absolute cap. Optional only for older programmatic fixtures,
+   * which fall back to DEFAULT_ADMIN_SESSION_IDLE_MINUTES.
+   */
+  adminSessionIdleMinutes?: number;
   paymentProvider: string;
   paymentWebhookSecret: string | null;
+  /** Separate server-to-server key for the worker's bounded PortOne requery. */
+  paymentReconciliationWorkerSecret?: string | null;
   /** Server-only PortOne V2/KG INICIS credentials. Null unless the rail is fully configured. */
   portOne?: {
     apiSecret: string;
@@ -232,6 +265,38 @@ function parseCustomerLoginProviders(raw: string): CustomerLoginProvider[] {
   return CUSTOMER_LOGIN_PROVIDERS.filter((provider) => values.includes(provider));
 }
 
+/**
+ * App Store Review Guideline 4.8: an iOS app that offers third-party social
+ * login must also offer Sign in with Apple. The customer app renders exactly
+ * the providers this list exposes, so a STAGING/PRODUCTION configuration that
+ * enables KAKAO, NAVER, or GOOGLE without APPLE would ship a rejectable build.
+ * LOCAL/TEST may run partial provider fixtures and only receive a warning.
+ */
+export function assertAppleSignInParity(
+  providers: readonly CustomerLoginProvider[],
+  tier: BackendEnvironmentTier,
+  warn: (message: string) => void = (message) => console.warn(message),
+): void {
+  const social = providers.filter((provider) =>
+    (APPLE_PARITY_SOCIAL_PROVIDERS as readonly string[]).includes(provider));
+  if (social.length === 0 || providers.includes("APPLE")) return;
+  const message = `CUSTOMER_AUTH_ENABLED_PROVIDERS enables ${social.join(",")} without APPLE; `
+    + "App Store Review Guideline 4.8 requires Sign in with Apple beside third-party social login";
+  if (tier === "STAGING" || tier === "PRODUCTION") {
+    throw new Error(`${message} (blocked in ${tier})`);
+  }
+  warn(`[dabboba-config] ${message} (allowed only in ${tier})`);
+}
+
+function adminSessionLimits(env: Environment): Pick<ApiConfig, "adminSessionMaxHours" | "adminSessionIdleMinutes"> {
+  const adminSessionMaxHours = integer(env, "ADMIN_SESSION_MAX_HOURS", DEFAULT_ADMIN_SESSION_MAX_HOURS, 1, 168);
+  const adminSessionIdleMinutes = integer(env, "ADMIN_SESSION_IDLE_MINUTES", DEFAULT_ADMIN_SESSION_IDLE_MINUTES, 5, 1_440);
+  if (adminSessionIdleMinutes > adminSessionMaxHours * 60) {
+    throw new Error("ADMIN_SESSION_IDLE_MINUTES must not exceed ADMIN_SESSION_MAX_HOURS");
+  }
+  return { adminSessionMaxHours, adminSessionIdleMinutes };
+}
+
 function legacyJwtRole(value: string): string | null {
   const payload = value.split(".")[1];
   if (!payload) return null;
@@ -358,6 +423,51 @@ function adminClientIpHeader(env: Environment, runtime: RuntimeEnvironment, secr
   }
   if ((value && !secret) || (!value && secret)) {
     throw new Error("ADMIN_EDGE_CLIENT_IP_HEADER and ADMIN_PROXY_IDENTITY_SECRET must be configured together");
+  }
+  return value;
+}
+
+/**
+ * Production administrator sessions must use the `__Host-` prefix so browsers
+ * enforce Secure, Path=/ and no Domain attribute, which keeps sibling
+ * subdomains from planting or reading the console session cookie.
+ */
+export const PRODUCTION_ADMIN_SESSION_COOKIE_PREFIX = "__Host-";
+
+function adminSessionCookieName(env: Environment, runtime: RuntimeEnvironment): string {
+  const value = env.ADMIN_SESSION_COOKIE_NAME?.trim() || "dabboba_admin_session";
+  if (!/^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,128}$/.test(value)) {
+    throw new Error("ADMIN_SESSION_COOKIE_NAME must be a valid cookie name");
+  }
+  if (runtime === "production"
+    && (!value.startsWith(PRODUCTION_ADMIN_SESSION_COOKIE_PREFIX)
+      || value.length === PRODUCTION_ADMIN_SESSION_COOKIE_PREFIX.length)) {
+    throw new Error("ADMIN_SESSION_COOKIE_NAME must start with __Host- in production");
+  }
+  return value;
+}
+
+const UNTRUSTABLE_CLIENT_IP_HEADERS = new Set([
+  "authorization",
+  "cookie",
+  "host",
+  "content-type",
+  "content-length",
+  "idempotency-key",
+  "x-request-id",
+  "x-admin-reason",
+  ...INTERNAL_ADMIN_IDENTITY_HEADERS,
+]);
+
+/**
+ * The client-IP header is trusted only when an operator names it explicitly
+ * after verifying that the hosting edge overwrites it on every request.
+ */
+function trustedClientIpHeader(env: Environment): string | null {
+  const value = optional(env, "TRUSTED_CLIENT_IP_HEADER")?.toLowerCase() || null;
+  if (value && (!/^[!#$%&'*+.^_`|~0-9a-z-]{1,64}$/.test(value)
+    || UNTRUSTABLE_CLIENT_IP_HEADERS.has(value) || value.startsWith("x-dabboba-"))) {
+    throw new Error("TRUSTED_CLIENT_IP_HEADER must be a valid dedicated client-IP header name");
   }
   return value;
 }
@@ -498,6 +608,7 @@ export function loadApiConfig(env: Environment = process.env): ApiConfig {
     ? originList(env, "ADMIN_ORIGINS", "http://127.0.0.1:4180", runtime)
     : [];
   const supabaseAuth = supabaseAuthConfig(env, runtime, includesCustomer);
+  assertAppleSignInParity(supabaseAuth.customerLoginProviders ?? [], environmentTier);
   const communityFlag = env.DABBOBA_ENABLE_DUKROOM?.trim() || "false";
   if (communityFlag !== "true" && communityFlag !== "false") {
     throw new Error("DABBOBA_ENABLE_DUKROOM must be true or false");
@@ -517,6 +628,27 @@ export function loadApiConfig(env: Environment = process.env): ApiConfig {
     }
   }
   const payment = paymentConfig(env, runtime, pepper, proxyIdentitySecret);
+  const paymentReconciliationWorkerSecret = optional(env, "PAYMENT_RECONCILIATION_WORKER_SECRET");
+  if (paymentReconciliationWorkerSecret) {
+    const size = Buffer.byteLength(paymentReconciliationWorkerSecret, "utf8");
+    if (size < 32 || size > 512 || /[\r\n]/.test(paymentReconciliationWorkerSecret)
+      || /(?:change-me|local-development)/i.test(paymentReconciliationWorkerSecret)
+      || paymentReconciliationWorkerSecret === pepper
+      || paymentReconciliationWorkerSecret === proxyIdentitySecret
+      || paymentReconciliationWorkerSecret === payment.paymentWebhookSecret
+      || paymentReconciliationWorkerSecret === payment.portOne?.apiSecret
+      || paymentReconciliationWorkerSecret === payment.portOne?.webhookSecret) {
+      throw new Error("PAYMENT_RECONCILIATION_WORKER_SECRET must be a distinct 32-512 byte server-only secret");
+    }
+    if (payment.paymentProvider !== "PORTONE_V2_INICIS" || commerceMode !== "LIVE") {
+      throw new Error("PAYMENT_RECONCILIATION_WORKER_SECRET requires LIVE PortOne commerce");
+    }
+  }
+  if (runtime === "production" && commerceMode === "LIVE"
+    && payment.paymentProvider === "PORTONE_V2_INICIS"
+    && !paymentReconciliationWorkerSecret) {
+    throw new Error("LIVE PortOne commerce requires PAYMENT_RECONCILIATION_WORKER_SECRET");
+  }
   if (runtime === "production" && commerceMode === "PRELAUNCH" && payment.paymentProvider !== "UNCONFIGURED") {
     throw new Error("PRELAUNCH requires PAYMENT_PROVIDER=UNCONFIGURED in production");
   }
@@ -539,11 +671,14 @@ export function loadApiConfig(env: Environment = process.env): ApiConfig {
     adminOrigins,
     sessionTokenPepper: pepper,
     adminProxyIdentitySecret: proxyIdentitySecret,
+    trustedClientIpHeader: trustedClientIpHeader(env),
     ...supabaseAuth,
     communityEnabled: communityFlag === "true",
     commerceMode,
     sessionTtlDays: integer(env, "SESSION_TTL_DAYS", 30, 1, 365),
+    ...adminSessionLimits(env),
     ...payment,
+    paymentReconciliationWorkerSecret,
     gcsBucket: optional(env, "GCS_BUCKET"),
     gcsProjectId: optional(env, "GCS_PROJECT_ID"),
     ...loadMediaStorageConfig(env, runtime),
@@ -583,7 +718,7 @@ export function loadAdminConfig(env: Environment = process.env): AdminConfig {
     environmentTier,
     apiBaseUrl,
     publicApiBaseUrl,
-    sessionCookieName: env.ADMIN_SESSION_COOKIE_NAME?.trim() || "dabboba_admin_session",
+    sessionCookieName: adminSessionCookieName(env, runtime),
     adminProxyIdentitySecret: proxyIdentitySecret,
     adminEdgeClientIpHeader: edgeClientIpHeader,
   };

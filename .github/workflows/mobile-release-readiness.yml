@@ -15,6 +15,7 @@ jobs:
     env:
       PAYMENT_PROVIDER: ${{ vars.PAYMENT_PROVIDER }}
       DABBOBA_COMMERCE_MODE: ${{ vars.DABBOBA_COMMERCE_MODE }}
+      DABBOBA_PHONE_LOGIN_READY: ${{ vars.DABBOBA_PHONE_LOGIN_READY }}
       PORTONE_CHANNEL_ENVIRONMENT: ${{ vars.PORTONE_CHANNEL_ENVIRONMENT }}
       EXPO_PUBLIC_COMMERCE_CAPABILITY: ${{ vars.EXPO_PUBLIC_COMMERCE_CAPABILITY }}
       EXPO_PUBLIC_DABBOBA_API_URL: ${{ vars.EXPO_PUBLIC_DABBOBA_API_URL }}
@@ -45,6 +46,12 @@ jobs:
 
       - name: Validate production mobile configuration
         run: pnpm run release:mobile:check
+
+      - name: Verify the exact public API used by the mobile build
+        run: pnpm run release:mobile:api:verify
+
+      - name: Verify the deployed LIVE worker denies anonymous execution
+        run: pnpm run release:edge:worker:verify
 
       - name: Export and inspect iOS and Android production JavaScript bundles
         run: pnpm run release:mobile:bundle:check

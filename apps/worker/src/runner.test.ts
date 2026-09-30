@@ -3,6 +3,7 @@ import test from "node:test";
 import type { DatabasePool } from "@dabboba/db";
 import { loadWorkerConfig } from "./config.js";
 import { InicisInquiryPaymentProvider } from "./inicis-inquiry.js";
+import { PortOneApiReconciliationProvider } from "./portone-api-requery.js";
 import type { JobDependencies } from "./jobs.js";
 import type { Logger } from "./logger.js";
 import type { PgmqMessage } from "./pgmq.js";
@@ -58,13 +59,26 @@ test("configured KG INICIS reconciliation is wired into actual worker job depend
 
   await runWorkerOnce(config, logger, () => false, () => pool, operations);
 
-  assert.equal(observedProviders.length, 5);
+  assert.equal(observedProviders.length, 6);
   assert.equal(observedProviders.every((provider) => provider instanceof InicisInquiryPaymentProvider), true);
   assert.ok(createPaymentReconciliationProvider(config) instanceof InicisInquiryPaymentProvider);
   assert.throws(
     () => createPaymentReconciliationProvider({ ...config, environmentTier: "TEST" }),
     /matching STAGING or PRODUCTION worker tier/,
   );
+});
+
+test("explicit PortOne API reconciliation is wired to the scheduled worker provider", () => {
+  const config = loadWorkerConfig({
+    NODE_ENV: "production",
+    DABBOBA_ENVIRONMENT_TIER: "STAGING",
+    WORKER_DATABASE_URL: "postgresql://worker:secret@127.0.0.1:5432/dabboba",
+    GCS_BUCKET: "staging-media",
+    PAYMENT_RECONCILIATION_PROVIDER: "PORTONE_API",
+    PORTONE_RECONCILIATION_API_BASE_URL: "https://api.example.test/functions/v1/dabboba-api",
+    PAYMENT_RECONCILIATION_WORKER_SECRET: "separate-worker-requery-secret-for-tests",
+  });
+  assert.ok(createPaymentReconciliationProvider(config) instanceof PortOneApiReconciliationProvider);
 });
 
 test("an overlapping scheduled execution exits successfully without doing worker work", async () => {
@@ -170,15 +184,16 @@ test("a productive run prioritizes lease-sensitive periodic work before queue co
 
   const summary = await runWorkerOnce(config, logger, () => false, () => pool, operations);
 
-  assert.equal(summary.periodicCompleted, 5);
+  assert.equal(summary.periodicCompleted, 6);
   assert.equal(summary.periodicFailed, 0);
-  assert.deepEqual(trace.slice(0, 8), [
+  assert.deepEqual(trace.slice(0, 9), [
     "acl",
-    "periodic:reservation.sweep",
     "periodic:payment.reconcile",
+    "periodic:reservation.sweep",
     "periodic:inventory.storage-expiry",
     "periodic:account-auth.cleanup",
     "periodic:media.cleanup",
+    "periodic:retention.sweep",
     "dispatch",
     "queue",
   ]);
@@ -236,12 +251,13 @@ test("a failed periodic class does not starve later maintenance or one bounded q
     /reservation\.sweep/,
   );
 
-  assert.deepEqual(trace.slice(1, 9), [
-    "periodic:reservation.sweep",
+  assert.deepEqual(trace.slice(1, 10), [
     "periodic:payment.reconcile",
+    "periodic:reservation.sweep",
     "periodic:inventory.storage-expiry",
     "periodic:account-auth.cleanup",
     "periodic:media.cleanup",
+    "periodic:retention.sweep",
     "dispatch",
     "queue",
     "dispatch",

@@ -15,6 +15,7 @@ import {
   type PaymentReconciliationProvider,
 } from "./payments.js";
 import { expireOrderReservations, expireReservationBatch } from "./reservations.js";
+import { runRetentionBatch } from "./retention.js";
 import { processInventoryStorageExpiryBatch } from "./storage-expiry.js";
 import { parseOutboxEvent, parseWorkerJob, type OutboxEvent, type WorkerJob } from "./types.js";
 
@@ -127,7 +128,13 @@ export async function processWorkerJob(dependencies: JobDependencies, raw: unkno
       return reconcilePaymentBatch(
         dependencies.pool,
         dependencies.paymentProvider,
-        { batchSize: dependencies.config.outboxBatchSize, staleMinutes: dependencies.config.paymentStaleMinutes },
+        {
+          batchSize: dependencies.config.outboxBatchSize,
+          staleMinutes: dependencies.config.paymentStaleMinutes,
+          ...(dependencies.config.paymentWindowValidityMinutes === undefined
+            ? {}
+            : { paymentWindowValidityMinutes: dependencies.config.paymentWindowValidityMinutes }),
+        },
         dependencies.logger,
         new Date(),
         dependencies.shouldContinue,
@@ -159,6 +166,13 @@ export async function processWorkerJob(dependencies: JobDependencies, raw: unkno
           rejectedTtlHours: dependencies.config.mediaRejectedTtlHours,
         },
         new Date(),
+        dependencies.shouldContinue,
+      );
+    case "retention.sweep":
+      return runRetentionBatch(
+        dependencies.pool,
+        dependencies.config.retention,
+        dependencies.logger,
         dependencies.shouldContinue,
       );
   }

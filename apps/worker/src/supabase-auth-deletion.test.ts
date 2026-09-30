@@ -58,6 +58,18 @@ test("Apple token revocation posts the refresh token only to Apple's fixed endpo
   assert.equal(body.get("token_type_hint"), "refresh_token");
 });
 
+test("Apple token revocation does not treat a provider rejection as success", async () => {
+  const client = new HttpAppleTokenRevocationClient(
+    "com.dabboba.app",
+    "signed-client-secret-value-that-is-long-enough",
+    async () => new Response(JSON.stringify({ error: "invalid_client" }), { status: 400 }),
+  );
+  await assert.rejects(
+    () => client.revokeRefreshToken("r".repeat(64)),
+    /Apple token revocation failed with HTTP 400/,
+  );
+});
+
 test("Apple revocation is confirmed before Supabase deletion and is not stored in logs", async () => {
   const localUserId = "local-user-apple";
   const encryptionKey = Buffer.alloc(32, 7).toString("base64url");
@@ -168,6 +180,72 @@ test("an Apple identity without revocation configuration stays retryable and nev
   assert.equal(supabaseDeletes, 0);
   assert.equal(retryUpdates.length, 1);
   assert.equal(retryUpdates[0]?.[2], "Error");
+});
+
+test("an Apple revocation failure defers Auth deletion without exposing the token", async () => {
+  const localUserId = "local-user-apple-rejected";
+  const encryptionKey = Buffer.alloc(32, 7).toString("base64url");
+  const refreshToken = "apple-refresh-" + "x".repeat(64);
+  const nonce = Buffer.alloc(12, 9);
+  const cipher = createCipheriv("aes-256-gcm", Buffer.from(encryptionKey, "base64url"), nonce);
+  cipher.setAAD(Buffer.from(`dabboba:apple-refresh-token:${localUserId}:v1`, "utf8"));
+  const ciphertext = Buffer.concat([cipher.update(refreshToken, "utf8"), cipher.final()]);
+  const authTag = cipher.getAuthTag();
+  const retryUpdates: unknown[][] = [];
+  let claimed = false;
+  let authDeletes = 0;
+  const pool = {
+    async query(sql: string, params: unknown[] = []) {
+      if (sql.includes("WITH candidate") && !claimed) {
+        claimed = true;
+        return { rowCount: 1, rows: [{
+          id: "job-apple-rejected",
+          deletion_request_id: "request-apple-rejected",
+          user_id: localUserId,
+          supabase_user_id: userId,
+          external_deleted_at: null,
+          apple_revoked_at: null,
+          has_apple_identity: true,
+          attempts: 1,
+        }] };
+      }
+      if (sql.includes("COALESCE((SELECT balance")) return { rowCount: 1, rows: [{ point_balance: 0 }] };
+      if (sql.includes("FROM apple_auth_credentials")) {
+        return { rowCount: 1, rows: [{ ciphertext, nonce, auth_tag: authTag, key_version: 1 }] };
+      }
+      if (sql.includes("SET status='PENDING'")) {
+        retryUpdates.push(params);
+        return { rowCount: 1, rows: [] };
+      }
+      throw new Error(`Unexpected pool query: ${sql}`);
+    },
+  } as unknown as DatabasePool;
+  const result = await cleanupSupabaseAuthUsers(
+    pool,
+    {
+      outboxBatchSize: 1,
+      jobBackoffMs: 1_000,
+      appleRevocation: {
+        clientId: "com.dabboba.app",
+        clientSecret: "signed-client-secret-value-that-is-long-enough",
+        encryptionKey,
+        keyVersion: 1,
+      },
+    } as WorkerConfig,
+    logger,
+    () => true,
+    { async deleteUser() { authDeletes += 1; } },
+    emptyMediaStore,
+    { async revokeRefreshToken(token) {
+      assert.equal(token, refreshToken);
+      throw new Error("provider rejected the revoke request");
+    } },
+  );
+  assert.deepEqual(result, { completed: 0, deferred: 1 });
+  assert.equal(authDeletes, 0);
+  assert.equal(retryUpdates.length, 1);
+  assert.equal(retryUpdates[0]?.[2], "Error");
+  assert.equal(JSON.stringify(retryUpdates).includes(refreshToken), false);
 });
 
 test("successful Auth deletion completes the request and removes the transient identifier job", async () => {

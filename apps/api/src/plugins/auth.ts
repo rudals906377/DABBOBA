@@ -1,10 +1,22 @@
 import { createHmac, randomBytes } from "node:crypto";
-import type { ApiConfig } from "@dabboba/config";
+import {
+  DEFAULT_ADMIN_SESSION_IDLE_MINUTES,
+  DEFAULT_ADMIN_SESSION_MAX_HOURS,
+  type ApiConfig,
+} from "@dabboba/config";
 import type { DatabasePool, Queryable } from "@dabboba/db";
 import { isAdminRole, type UserRole, type UserStatus } from "@dabboba/domain";
 import type { FastifyReply, FastifyRequest, preHandlerHookHandler } from "fastify";
-import { forbidden, unauthorized } from "../lib/errors.js";
+import { AppError, forbidden, unauthorized } from "../lib/errors.js";
 import { assertRequiredPolicyAcceptance } from "../lib/legal-policy.js";
+
+/**
+ * FULL is an ordinary customer or administrator session. ACCOUNT_DELETION is
+ * the short-lived session issued by the public account-deletion
+ * re-authentication and only unlocks routes that opt in with
+ * `config.allowAccountDeletionScope`.
+ */
+export type SessionScope = "FULL" | "ACCOUNT_DELETION";
 
 export type Actor = {
   userId: string;
@@ -14,16 +26,28 @@ export type Actor = {
   status: UserStatus;
   sessionId: string;
   sessionKind: "USER" | "ADMIN";
+  sessionScope: SessionScope;
 };
 
 declare module "fastify" {
   interface FastifyRequest {
     actor: Actor | null;
   }
+  interface FastifyContextConfig {
+    /** Route opt-in for ACCOUNT_DELETION-scoped sessions; every other route rejects them. */
+    allowAccountDeletionScope?: boolean;
+  }
 }
 
 export function tokenDigest(token: string, pepper: string): string {
   return createHmac("sha256", pepper).update(token).digest("hex");
+}
+
+export function adminSessionLimits(config: ApiConfig): { maxHours: number; idleMinutes: number } {
+  return {
+    maxHours: config.adminSessionMaxHours ?? DEFAULT_ADMIN_SESSION_MAX_HOURS,
+    idleMinutes: config.adminSessionIdleMinutes ?? DEFAULT_ADMIN_SESSION_IDLE_MINUTES,
+  };
 }
 
 export async function issueSession(
@@ -32,13 +56,23 @@ export async function issueSession(
   input: {
     userId: string;
     kind: "USER" | "ADMIN";
+    scope?: SessionScope;
     ip?: string;
     userAgent?: string;
     expiresInMs?: number;
   },
 ) {
   const token = randomBytes(32).toString("base64url");
-  const configuredTtlMs = config.sessionTtlDays * 86_400_000;
+  const scope: SessionScope = input.scope ?? "FULL";
+  if (scope === "ACCOUNT_DELETION" && input.kind !== "USER") {
+    throw new Error("Account-deletion scope applies only to customer sessions");
+  }
+  const admin = adminSessionLimits(config);
+  // Administrator sessions start with the idle window and are capped by the
+  // absolute lifetime from login; customer sessions keep the long TTL.
+  const configuredTtlMs = input.kind === "ADMIN"
+    ? Math.min(admin.idleMinutes * 60_000, admin.maxHours * 3_600_000)
+    : config.sessionTtlDays * 86_400_000;
   if (
     input.expiresInMs !== undefined
     && (!Number.isSafeInteger(input.expiresInMs) || input.expiresInMs < 60_000)
@@ -47,9 +81,17 @@ export async function issueSession(
   }
   const expiresAt = new Date(Date.now() + Math.min(input.expiresInMs ?? configuredTtlMs, configuredTtlMs));
   const result = await pool.query<{ id: string }>(
-    `INSERT INTO sessions (user_id, session_kind, token_digest, ip_address, user_agent, expires_at)
-     VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
-    [input.userId, input.kind, tokenDigest(token, config.sessionTokenPepper), input.ip || null, input.userAgent || null, expiresAt],
+    `INSERT INTO sessions (user_id, session_kind, scope, token_digest, ip_address, user_agent, expires_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
+    [
+      input.userId,
+      input.kind,
+      scope,
+      tokenDigest(token, config.sessionTokenPepper),
+      input.ip || null,
+      input.userAgent || null,
+      expiresAt,
+    ],
   );
   return { token, sessionId: result.rows[0]!.id, expiresAt };
 }
@@ -62,6 +104,7 @@ function bearerToken(request: FastifyRequest): string | null {
 }
 
 export function createAuthHooks(pool: DatabasePool, config: ApiConfig) {
+  const admin = adminSessionLimits(config);
   const loadActor = async (request: FastifyRequest): Promise<Actor> => {
     if (request.actor) return request.actor;
     const token = bearerToken(request);
@@ -69,6 +112,7 @@ export function createAuthHooks(pool: DatabasePool, config: ApiConfig) {
     const result = await pool.query<{
       session_id: string;
       session_kind: "USER" | "ADMIN";
+      scope: SessionScope;
       user_id: string;
       email: string | null;
       nickname: string;
@@ -77,13 +121,17 @@ export function createAuthHooks(pool: DatabasePool, config: ApiConfig) {
       suspended_until: Date | null;
     }>(
       `WITH active_session AS MATERIALIZED (
-         SELECT s.id AS session_id, s.session_kind, u.id AS user_id,
+         SELECT s.id AS session_id, s.session_kind, s.scope, u.id AS user_id,
                 u.email::text, u.nickname, u.role, u.status, u.suspended_until
            FROM sessions s
            JOIN users u ON u.id = s.user_id
           WHERE s.token_digest = $1
             AND s.revoked_at IS NULL
             AND s.expires_at > now()
+            AND (
+              s.session_kind <> 'ADMIN'
+              OR s.created_at + ($2::integer * interval '1 hour') > now()
+            )
           LIMIT 1
        ), touch_target AS MATERIALIZED (
          SELECT s.id
@@ -100,7 +148,7 @@ export function createAuthHooks(pool: DatabasePool, config: ApiConfig) {
        )
        SELECT active.*, EXISTS(SELECT 1 FROM touch) AS last_seen_touched
          FROM active_session active`,
-      [tokenDigest(token, config.sessionTokenPepper)],
+      [tokenDigest(token, config.sessionTokenPepper), admin.maxHours],
     );
     const row = result.rows[0];
     if (!row) throw unauthorized("세션이 만료되었거나 유효하지 않습니다.");
@@ -108,6 +156,20 @@ export function createAuthHooks(pool: DatabasePool, config: ApiConfig) {
       throw forbidden("이용이 정지된 계정입니다.");
     }
     if (row.status !== "ACTIVE" && row.status !== "SUSPENDED") throw forbidden("사용할 수 없는 계정입니다.");
+    // A deletion-scoped session proves ownership for the public deletion flow
+    // only. Fail closed on any route that has not opted in, including the
+    // optional-viewer helpers that would otherwise treat it as a customer.
+    if (row.scope !== "FULL") {
+      const allowed = row.scope === "ACCOUNT_DELETION"
+        && request.routeOptions?.config?.allowAccountDeletionScope === true;
+      if (!allowed) {
+        throw new AppError(
+          403,
+          "SESSION_SCOPE_FORBIDDEN",
+          "계정 삭제 확인용 세션으로는 이 기능을 사용할 수 없습니다.",
+        );
+      }
+    }
     const actor: Actor = {
       userId: row.user_id,
       email: row.email,
@@ -116,6 +178,7 @@ export function createAuthHooks(pool: DatabasePool, config: ApiConfig) {
       status: row.status,
       sessionId: row.session_id,
       sessionKind: row.session_kind,
+      sessionScope: row.scope,
     };
     request.actor = actor;
     return actor;

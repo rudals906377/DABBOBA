@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { SUPABASE_INTEGRATION_PROJECT_REF } from "./supabase-integration-profile.mjs";
 
 export const REQUIRED_PUBLIC_BUILD_VARIABLES = Object.freeze([
   "EXPO_PUBLIC_DABBOBA_API_URL",
@@ -57,8 +58,13 @@ const SOURCE_GATES = Object.freeze([
   },
   {
     relativePath: "apps/mobile/src/features/auth/LoginScreen.tsx",
-    required: [/\/legal\/terms/, /\/legal\/privacy/],
-    description: "login must expose terms and privacy before authentication",
+    required: [
+      /onOpen=\{\(\) => openCurrentPolicy\("terms"\)\}/,
+      /onOpen=\{\(\) => openCurrentPolicy\("privacy"\)\}/,
+      /resolvePublicAppLink\(kind\)/,
+      /Linking\.openURL\(url\)/,
+    ],
+    description: "login must open the published terms and privacy before authentication",
   },
   {
     relativePath: "apps/mobile/src/features/profile/ProfileMemberDetailScreen.tsx",
@@ -71,7 +77,28 @@ const PLACEHOLDER_HOST = /(^|\.)(?:localhost|example(?:\.com)?|invalid|test|loca
 const FORBIDDEN_PRODUCTION_MARKERS = /TEST_PG|INTERNAL_ZERO|ENABLE_DEMO|ENABLE_DEV_SESSION|MOBILE_TEST_FIXTURE/i;
 const PRELAUNCH_LEGAL_MARKERS = /사전오픈판|결제(?:와|·주문·뽑기·배송 신청은).*제공하지 않습니다/;
 const PORTONE_CONFIG_PLUGIN = "@portone/react-native-sdk/plugin";
+const EXPECTED_IOS_RELEASE_TEAM_ID = "MCZ4884P7F";
 const require = createRequire(import.meta.url);
+
+// Production (PRELAUNCH and LIVE store builds) may only call the approved
+// DABBOBA backend: the pinned Supabase project's Edge host or an explicitly
+// approved custom domain that fronts it. Extend this list deliberately.
+export const APPROVED_PRODUCTION_API_HOSTS = Object.freeze([
+  `${SUPABASE_INTEGRATION_PROJECT_REF}.supabase.co`,
+  "api.dabboba.net",
+]);
+
+export function isApprovedProductionApiUrl(rawValue) {
+  if (typeof rawValue !== "string" || !rawValue.trim()) return false;
+  try {
+    const url = new URL(rawValue.trim());
+    return url.protocol === "https:"
+      && !url.port
+      && APPROVED_PRODUCTION_API_HOSTS.includes(url.hostname.toLowerCase());
+  } catch {
+    return false;
+  }
+}
 
 function addIssue(collection, code, message) {
   collection.push({ code, message });
@@ -157,6 +184,13 @@ function validateAppConfiguration(rootDir, environment, errors, warnings, struct
   }
   if (!validReverseDns(expo.ios?.bundleIdentifier)) {
     addIssue(errors, "IOS_BUNDLE_ID_INVALID", "iOS bundleIdentifier가 유효한 운영 식별자가 아닙니다.");
+  }
+  if (expo.ios?.appleTeamId !== EXPECTED_IOS_RELEASE_TEAM_ID) {
+    addIssue(
+      errors,
+      "IOS_RELEASE_TEAM_MISMATCH",
+      "iOS 공개 빌드는 확인된 친구 명의 Apple Developer 팀으로만 서명해야 합니다.",
+    );
   }
   if (expo.ios?.usesAppleSignIn !== true) {
     addIssue(errors, "IOS_APPLE_SIGN_IN_CAPABILITY_MISSING", "Apple 로그인을 제공하는 iOS 빌드는 usesAppleSignIn capability를 선언해야 합니다.");
@@ -355,7 +389,32 @@ function validateLiveLegalDocuments(rootDir, environment, errors) {
   }
 }
 
-function validateCardReviewBusinessPhone(rootDir, errors, warnings, structureOnly) {
+const LEGAL_BUSINESS_PHONE_DOCUMENTS = Object.freeze([
+  "public/legal/terms/index.html",
+  "public/legal/privacy/index.html",
+]);
+
+function validateLegalBusinessPhone(rootDir, phone, errors) {
+  for (const relativePath of LEGAL_BUSINESS_PHONE_DOCUMENTS) {
+    const filePath = path.join(rootDir, relativePath);
+    if (!existsSync(filePath)) {
+      addIssue(errors, "LEGAL_BUSINESS_PHONE_DOCUMENT_MISSING", `${relativePath} 공개 문서가 없습니다.`);
+      continue;
+    }
+    const html = readFileSync(filePath, "utf8");
+    const links = [...html.matchAll(/<a\s[^>]*href="tel:([^"]*)"[^>]*>([^<]*)<\/a>/gi)];
+    const published = links.flatMap(([, href, label]) => [href, label].map((value) => value.replace(/\D/g, "")));
+    if (published.length === 0 || published.some((value) => value !== phone)) {
+      addIssue(
+        errors,
+        "LEGAL_BUSINESS_PHONE_MISMATCH",
+        `${relativePath}의 사업자 대표전화가 앱 내 사업자 정보와 일치해야 합니다.`,
+      );
+    }
+  }
+}
+
+export function validateCardReviewBusinessPhone(rootDir, errors, warnings, strict) {
   const businessInfoPath = path.join(
     rootDir,
     "apps/mobile/src/features/profile/business-information.ts",
@@ -380,11 +439,12 @@ function validateCardReviewBusinessPhone(rootDir, errors, warnings, structureOnl
   }
   if (/^01(?:0|1|6|7|8|9)/.test(phone)) {
     addIssue(
-      structureOnly ? warnings : errors,
+      strict ? errors : warnings,
       "PG_REVIEW_BUSINESS_PHONE_MOBILE",
       "PG·카드사 심사용 대표전화는 휴대폰 번호가 아닌 사업자 유선 또는 대표번호로 교체해야 합니다.",
     );
   }
+  validateLegalBusinessPhone(rootDir, phone, errors);
 }
 
 function validateHttpsEnvironment(environment, errors, options = {}) {
@@ -434,6 +494,18 @@ function validateHttpsEnvironment(environment, errors, options = {}) {
     if (value && (value.length < 6 || value.length > 200 || /placeholder|replace[_-]?me|your-/i.test(value))) {
       addIssue(errors, `ENV_${variable}_INVALID`, `${variable}에 실제 PortOne 운영 값을 설정해야 합니다.`);
     }
+  }
+}
+
+function validateProductionApiHost(environment, errors) {
+  const rawValue = environment.EXPO_PUBLIC_DABBOBA_API_URL?.trim();
+  if (!rawValue) return;
+  if (!isApprovedProductionApiUrl(rawValue)) {
+    addIssue(
+      errors,
+      "ENV_EXPO_PUBLIC_DABBOBA_API_URL_HOST_NOT_APPROVED",
+      `운영 빌드의 EXPO_PUBLIC_DABBOBA_API_URL 호스트는 ${APPROVED_PRODUCTION_API_HOSTS.join(", ")} 중 하나여야 합니다.`,
+    );
   }
 }
 
@@ -572,11 +644,18 @@ export function inspectMobileReleaseConfig({
   validateEasConfiguration(resolvedRoot, errors);
   validateSourceGates(resolvedRoot, errors);
   validateEnvironmentExample(resolvedRoot, errors);
-  validateCardReviewBusinessPhone(resolvedRoot, errors, warnings, structureOnly && !pgReview);
+  const commerceCapability = environment.EXPO_PUBLIC_COMMERCE_CAPABILITY?.trim();
+  validateCardReviewBusinessPhone(
+    resolvedRoot,
+    errors,
+    warnings,
+    pgReview || (!structureOnly && commerceCapability !== "PRELAUNCH"),
+  );
   if (pgReview) {
     validatePgReviewEnvironment(resolvedRoot, environment, errors);
   } else if (!structureOnly) {
     validateHttpsEnvironment(environment, errors);
+    validateProductionApiHost(environment, errors);
     validateLiveLegalDocuments(resolvedRoot, environment, errors);
     validateProductionPaymentBoundary(resolvedRoot, environment, errors);
   }

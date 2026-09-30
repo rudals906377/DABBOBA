@@ -75,7 +75,96 @@ test("API surface registration keeps customer and admin routes out of each other
   }
 });
 
+test("production admin surface keeps notice and moderation routes when public community is disabled", async () => {
+  const config = { ...testConfig("admin"), environment: "production" as const, communityEnabled: false };
+  const { app } = await buildApp({ config, pool: unusedPool });
+  try {
+    for (const path of ["/v1/admin/notices", "/v1/admin/posts", "/v1/admin/comments", "/v1/admin/reports"]) {
+      assert.equal(app.hasRoute({ method: "GET", url: path }), true, path);
+    }
+    assert.equal(app.hasRoute({ method: "GET", url: "/v1/notices" }), false);
+    assert.equal(app.hasRoute({ method: "GET", url: "/v1/posts" }), false);
+  } finally {
+    await app.close();
+  }
+});
+
+test("customer support routes stay mounted on every surface while only Dukroom follows the community flag", async () => {
+  const supportRoutes = [
+    { method: "GET", url: "/v1/notices" },
+    { method: "GET", url: "/v1/inquiries" },
+    { method: "POST", url: "/v1/inquiries/:inquiryId/messages" },
+    { method: "POST", url: "/v1/reports" },
+    { method: "GET", url: "/v1/community/blocks" },
+    { method: "POST", url: "/v1/community/blocks/:userId" },
+    { method: "GET", url: "/v1/community/operations-policy" },
+    { method: "POST", url: "/v1/community/operations-policy/acceptance" },
+  ] as const;
+  const adminSupportRoutes = ["/v1/admin/notices", "/v1/admin/inquiries", "/v1/admin/reports"];
+  const dukroomRoutes = [
+    { method: "GET", url: "/v1/community/posts" },
+    { method: "POST", url: "/v1/community/posts" },
+    { method: "POST", url: "/v1/community/posts/:postId/like" },
+    { method: "GET", url: "/v1/community/posts/:postId/comments" },
+    { method: "DELETE", url: "/v1/community/comments/:commentId" },
+  ] as const;
+  const adminDukroomRoutes = ["/v1/admin/posts", "/v1/admin/comments"];
+  const cases = [
+    { surface: "customer", communityEnabled: false, dukroom: false },
+    { surface: "customer", communityEnabled: true, dukroom: true },
+    { surface: "all", communityEnabled: false, dukroom: false },
+    { surface: "admin", communityEnabled: false, dukroom: true },
+  ] as const;
+  for (const { surface, communityEnabled, dukroom } of cases) {
+    const config = { ...testConfig(surface), environment: "production" as const, communityEnabled };
+    const { app } = await buildApp({ config, pool: unusedPool });
+    const label = `${surface} surface, communityEnabled=${communityEnabled}`;
+    try {
+      for (const route of supportRoutes) {
+        assert.equal(app.hasRoute(route), surface !== "admin", `${label}: ${route.method} ${route.url}`);
+      }
+      for (const url of adminSupportRoutes) {
+        assert.equal(app.hasRoute({ method: "GET", url }), surface !== "customer", `${label}: GET ${url}`);
+      }
+      for (const route of dukroomRoutes) {
+        assert.equal(app.hasRoute(route), dukroom && surface !== "admin", `${label}: ${route.method} ${route.url}`);
+      }
+      for (const url of adminDukroomRoutes) {
+        assert.equal(app.hasRoute({ method: "GET", url }), dukroom && surface !== "customer", `${label}: GET ${url}`);
+      }
+    } finally {
+      await app.close();
+    }
+  }
+});
+
+test("production customer surface serves notices and reports with the Dukroom flag off", async () => {
+  const config = { ...testConfig("customer"), environment: "production" as const, communityEnabled: false };
+  const { app } = await buildApp({ config, pool: unusedPool });
+  try {
+    const notices = await app.inject({ method: "GET", url: "/v1/notices" });
+    assert.equal(notices.statusCode, 200, notices.body);
+    assert.deepEqual(notices.json().items, []);
+
+    const report = await app.inject({
+      method: "POST",
+      url: "/v1/reports",
+      payload: { targetType: "USER", targetId: "20000000-0000-4000-8000-000000000001", reason: "SPAM" },
+    });
+    assert.equal(report.statusCode, 401, report.body);
+
+    const blocks = await app.inject({ method: "GET", url: "/v1/community/blocks" });
+    assert.equal(blocks.statusCode, 401, blocks.body);
+
+    const posts = await app.inject({ method: "GET", url: "/v1/community/posts" });
+    assert.equal(posts.statusCode, 404, posts.body);
+  } finally {
+    await app.close();
+  }
+});
+
 test("Cloud Run health endpoints are not consumed by the global request limiter", async () => {
+
   const { app } = await buildApp({ config: testConfig("customer"), pool: unusedPool });
   try {
     for (let request = 0; request < 250; request += 1) {
@@ -145,6 +234,7 @@ test("PRELAUNCH rejects every customer commerce mutation before its handler can 
           rows: [{
             session_id: "10000000-0000-4000-8000-000000000001",
             session_kind: "USER",
+            scope: "FULL",
             user_id: "20000000-0000-4000-8000-000000000001",
             email: "customer@example.test",
             nickname: "고객",
@@ -164,7 +254,7 @@ test("PRELAUNCH rejects every customer commerce mutation before its handler can 
   const guardedRequests = [
     { method: "POST", url: "/v1/orders" },
     { method: "POST", url: "/v1/payments/30000000-0000-4000-8000-000000000001/confirm" },
-    { method: "POST", url: "/v1/payments/webhooks/provider" },
+    { method: "POST", url: "/v1/payments/30000000-0000-4000-8000-000000000001/abandon" },
     { method: "POST", url: "/v1/payments/webhooks/portone" },
     { method: "POST", url: "/v1/draws/40000000-0000-4000-8000-000000000001/consume" },
     { method: "POST", url: "/v1/kuji/rooms/coming-soon-kuji/entries" },
@@ -191,6 +281,10 @@ test("PRELAUNCH rejects every customer commerce mutation before its handler can 
       assert.equal(response.statusCode, 503, `${request.method} ${request.url}: ${response.body}`);
       assert.equal(response.json().error.code, "COMMERCE_NOT_AVAILABLE");
     }
+    // The shared-secret HMAC rail is not registered unless a local/test
+    // provider is configured.
+    const sharedSecretWebhook = await app.inject({ method: "POST", url: "/v1/payments/webhooks/provider", headers: authorization });
+    assert.equal(sharedSecretWebhook.statusCode, 404, sharedSecretWebhook.body);
     const commerceHandlerQueries = observed.filter((sql) => (
       !sql.includes("WITH active_session AS MATERIALIZED")
       && !sql.includes("FROM account_deletion_requests")
@@ -198,5 +292,173 @@ test("PRELAUNCH rejects every customer commerce mutation before its handler can 
     assert.deepEqual(commerceHandlerQueries, []);
   } finally {
     await app.close();
+  }
+});
+
+test("request ids are always server-generated and echoed on the response", async () => {
+  const { app } = await buildApp({ config: testConfig("all"), pool: unusedPool });
+  app.get("/test-only/request-id", async (request) => ({ id: request.id }));
+  app.get("/test-only/request-id-error", async () => {
+    throw Object.assign(new Error("boom"), { statusCode: 422 });
+  });
+  try {
+    const response = await app.inject({
+      method: "GET",
+      url: "/test-only/request-id",
+      headers: { "x-request-id": "client-chosen-request-id" },
+    });
+    assert.equal(response.statusCode, 200);
+    const serverId = response.json().id as string;
+    assert.match(serverId, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    assert.notEqual(serverId, "client-chosen-request-id");
+    assert.equal(response.headers["x-request-id"], serverId);
+
+    const failed = await app.inject({
+      method: "GET",
+      url: "/test-only/request-id-error",
+      headers: { "x-request-id": "client-chosen-request-id" },
+    });
+    assert.equal(failed.json().error.requestId, failed.headers["x-request-id"]);
+    assert.notEqual(failed.json().error.requestId, "client-chosen-request-id");
+  } finally {
+    await app.close();
+  }
+});
+
+test("the global limiter keys authenticated callers by session and anonymous callers by IP", async () => {
+  const { app } = await buildApp({ config: testConfig("all"), pool: unusedPool });
+  app.get("/test-only/limited", async () => ({ ok: true }));
+  const tokenA = { authorization: `Bearer ${"a".repeat(43)}` };
+  const tokenB = { authorization: `Bearer ${"b".repeat(43)}` };
+  try {
+    for (let index = 0; index < 240; index += 1) {
+      const response = await app.inject({ method: "GET", url: "/test-only/limited", headers: tokenA });
+      assert.equal(response.statusCode, 200);
+    }
+    assert.equal((await app.inject({ method: "GET", url: "/test-only/limited", headers: tokenA })).statusCode, 429);
+    // Another session behind the same address keeps its own bucket.
+    assert.equal((await app.inject({ method: "GET", url: "/test-only/limited", headers: tokenB })).statusCode, 200);
+    // Anonymous traffic from that address is also independent of either session.
+    assert.equal((await app.inject({ method: "GET", url: "/test-only/limited" })).statusCode, 200);
+  } finally {
+    await app.close();
+  }
+});
+
+test("login exchange limits follow the client IP even when random bearer tokens are sent", async () => {
+  const { app } = await buildApp({ config: testConfig("customer"), pool: unusedPool });
+  try {
+    const statuses: number[] = [];
+    for (let index = 0; index < 13; index += 1) {
+      const response = await app.inject({
+        method: "POST",
+        url: "/v1/auth/exchange",
+        headers: { authorization: `Bearer ${String(index).padStart(43, "r")}`, "content-type": "application/json" },
+        payload: "{}",
+      });
+      statuses.push(response.statusCode);
+    }
+    assert.equal(statuses.slice(0, 12).includes(429), false, statuses.join(","));
+    assert.equal(statuses[12], 429);
+  } finally {
+    await app.close();
+  }
+});
+
+test("with a trusted client-IP header, fabricated session tokens cannot escape a per-IP ceiling", async () => {
+  const config = { ...testConfig("all"), trustedClientIpHeader: "cf-connecting-ip" };
+  const { app } = await buildApp({ config, pool: unusedPool });
+  app.get("/test-only/guarded", async () => ({ ok: true }));
+  try {
+    let limited = 0;
+    for (let index = 0; index < 1_201; index += 1) {
+      const response = await app.inject({
+        method: "GET",
+        url: "/test-only/guarded",
+        headers: {
+          authorization: `Bearer ${String(index).padStart(43, "g")}`,
+          "cf-connecting-ip": "198.51.100.20",
+        },
+      });
+      if (response.statusCode === 429) limited += 1;
+    }
+    assert.equal(limited, 1);
+    const otherAddress = await app.inject({
+      method: "GET",
+      url: "/test-only/guarded",
+      headers: { authorization: `Bearer ${"h".repeat(43)}`, "cf-connecting-ip": "198.51.100.21" },
+    });
+    assert.equal(otherAddress.statusCode, 200);
+  } finally {
+    await app.close();
+  }
+});
+
+test("PRELAUNCH also gates admin shipping-status and exchange-resolution mutations", async () => {
+  const config = { ...testConfig("admin"), commerceMode: "PRELAUNCH" as const };
+  const { app } = await buildApp({ config, pool: unusedPool });
+  try {
+    for (const url of [
+      "/v1/admin/commerce/shipping/30000000-0000-4000-8000-000000000001/status",
+      "/v1/admin/exchange/listings/60000000-0000-4000-8000-000000000001/resolution",
+    ]) {
+      const response = await app.inject({ method: "POST", url, headers: { authorization: `Bearer ${"x".repeat(43)}` } });
+      assert.equal(response.statusCode, 503, `${url}: ${response.body}`);
+      assert.equal(response.json().error.code, "COMMERCE_NOT_AVAILABLE");
+    }
+  } finally {
+    await app.close();
+  }
+});
+
+test("the shared-secret payment webhook is registered only for local/test providers", async () => {
+  const portOneSecret = "portone-api-secret-for-route-tests";
+  const portOneConfig: ApiConfig = {
+    ...testConfig("customer"),
+    commerceMode: "LIVE",
+    paymentProvider: "PORTONE_V2_INICIS",
+    paymentWebhookSecret: "normalized-payment-webhook-secret-for-tests",
+    portOne: {
+      apiSecret: portOneSecret,
+      merchantId: "merchant-test",
+      storeId: "store-test",
+      channelKey: "channel-test",
+      channelEnvironment: "TEST",
+      webhookSecret: "portone-webhook-secret-for-route-tests",
+    },
+  };
+  const touched: string[] = [];
+  const pool = {
+    async query(sql: string) { touched.push(sql); return { rows: [], rowCount: 0 }; },
+    async connect() { throw new Error("A 404 route must not open a transaction."); },
+  } as unknown as DatabasePool;
+  const portOne = await buildApp({ config: portOneConfig, pool });
+  try {
+    assert.equal(portOne.app.hasRoute({ method: "POST", url: "/v1/payments/webhooks/:provider" }), false);
+    assert.equal(portOne.app.hasRoute({ method: "POST", url: "/v1/payments/webhooks/portone" }), true);
+    for (const provider of ["PORTONE_V2_INICIS", "TEST_PG", "INTERNAL_ZERO"]) {
+      const response = await portOne.app.inject({
+        method: "POST",
+        url: `/v1/payments/webhooks/${provider}`,
+        headers: { "content-type": "application/json", "x-dabboba-signature": `sha256=${"0".repeat(64)}` },
+        payload: JSON.stringify({ eventId: "evt", eventType: "PAYMENT_SUCCEEDED" }),
+      });
+      assert.equal(response.statusCode, 404, `${provider}: ${response.body}`);
+    }
+    assert.deepEqual(touched, []);
+  } finally {
+    await portOne.app.close();
+  }
+
+  for (const [paymentProvider, registered] of [["TEST_PG", true], ["INTERNAL_ZERO", true], ["UNCONFIGURED", false]] as const) {
+    const { app } = await buildApp({
+      config: { ...testConfig("customer"), commerceMode: "LIVE", paymentProvider, paymentWebhookSecret: "local-webhook-secret" },
+      pool: unusedPool,
+    });
+    try {
+      assert.equal(app.hasRoute({ method: "POST", url: "/v1/payments/webhooks/:provider" }), registered, paymentProvider);
+    } finally {
+      await app.close();
+    }
   }
 });

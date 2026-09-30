@@ -1,7 +1,7 @@
 import Constants from "expo-constants";
 import { type Href, useRouter } from "expo-router";
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, View } from "react-native";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ActivityIndicator, FlatList, Platform, Pressable, RefreshControl, StyleSheet, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { DecorativeIonicon, type DecorativeIoniconName } from "@/components/DecorativeIonicon";
 import { DetailPageHeader } from "@/components/DetailPageHeader";
@@ -15,6 +15,8 @@ import {
   markAccountNotificationRead,
   type AccountNotification,
 } from "@/features/notifications/notifications-api";
+import { ProfileSessionGate } from "@/features/profile/ProfileSessionGate";
+import { ProfileApiError } from "@/features/profile/profile-api";
 import { resolveMobileRuntimeConfig, type MobilePlatform } from "@/lib/runtime-config";
 import { readAuthTokens } from "@/lib/session-store";
 import { colors } from "@/theme";
@@ -36,10 +38,13 @@ export function NotificationsScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [message, setMessage] = useState("");
-  const [guest, setGuest] = useState(false);
+  const [sessionGate, setSessionGate] = useState<"guest" | "expired" | null>(null);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
+  // A failed page stops automatic end-of-list loading until the next
+  // successful load, so a persistent error cannot loop through onEndReached.
+  const autoLoadMoreBlocked = useRef(false);
 
   const load = useCallback(async (manual = false) => {
     if (manual) setRefreshing(true);
@@ -48,16 +53,17 @@ export function NotificationsScreen() {
       const tokens = await readAuthTokens();
       if (!tokens) {
         setAccessToken(null);
-        setGuest(true);
+        setSessionGate("guest");
         setNotifications([]);
         setNextCursor(null);
         setUnreadCount(0);
         setMessage("");
         return;
       }
-      setGuest(false);
+      setSessionGate(null);
       setAccessToken(tokens.accessToken);
       const page = await fetchAccountNotificationPage(runtime.apiBaseUrl, tokens.accessToken);
+      autoLoadMoreBlocked.current = false;
       setNotifications(page.items);
       setNextCursor(page.nextCursor);
       try {
@@ -66,10 +72,19 @@ export function NotificationsScreen() {
         setMessage("");
       } catch (error) {
         setUnreadCount(page.items.filter((notification) => !notification.readAt).length);
-        setMessage(error instanceof Error ? error.message : "읽지 않은 알림 수를 불러오지 못했습니다.");
+        setMessage(error instanceof Error ? error.message : "읽지 않은 알림 수를 불러오지 못했어요.");
       }
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "알림함을 불러오지 못했습니다.");
+      if (error instanceof ProfileApiError && error.status === 401) {
+        setAccessToken(null);
+        setSessionGate("expired");
+        setNotifications([]);
+        setNextCursor(null);
+        setUnreadCount(0);
+        setMessage("");
+        return;
+      }
+      setMessage(error instanceof Error ? error.message : "알림함을 불러오지 못했어요.");
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -117,12 +132,16 @@ export function NotificationsScreen() {
       });
       setNextCursor(page.nextCursor);
       setMessage("");
+      autoLoadMoreBlocked.current = false;
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "이전 알림을 불러오지 못했습니다.");
+      autoLoadMoreBlocked.current = true;
+      setMessage(error instanceof Error ? error.message : "이전 알림을 불러오지 못했어요.");
     } finally {
       setLoadingMore(false);
     }
   };
+
+  const showList = !loading && !sessionGate && notifications.length > 0;
 
   return (
     <SafeAreaView style={styles.safeArea} edges={["top", "bottom", "left", "right"]}>
@@ -133,50 +152,53 @@ export function NotificationsScreen() {
         action={unreadCount ? <KoreanPixelTitleAccessory style={styles.unreadCount}>{unreadCount > 99 ? "99+" : unreadCount}</KoreanPixelTitleAccessory> : null}
       />
 
-      <ScrollView
+      <FlatList
+        data={showList ? notifications : []}
+        keyExtractor={(notification) => notification.id}
+        renderItem={({ item: notification }) => (
+          <NotificationRow notification={notification} onPress={() => void openNotification(notification)} />
+        )}
+        ItemSeparatorComponent={NotificationSeparator}
         contentContainerStyle={styles.content}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void load(true)} tintColor={colors.ink} />}
-      >
-        <Text style={styles.description}>주문·뽑기·교환·배송·문의처럼 서버에서 완료된 계정 활동을 시간순으로 보여드려요.</Text>
-
-        {loading ? (
+        ListHeaderComponent={(
+          <>
+            <Text style={styles.description}>주문·뽑기·교환·배송·문의처럼 서버에서 완료된 계정 활동을 시간순으로 보여드려요.</Text>
+            {showList && message ? <View style={styles.inlineError}><Text style={styles.inlineErrorText}>{message}</Text></View> : null}
+          </>
+        )}
+        ListEmptyComponent={loading ? (
           <State loading body="알림을 불러오는 중" />
-        ) : guest ? (
-          <View style={styles.state}>
-            <View style={styles.stateIcon}><DecorativeIonicon name="notifications-outline" size={30} color={colors.greenInk} /></View>
-            <Text style={styles.stateTitle}>로그인이 필요해요</Text>
-            <Text style={styles.stateBody}>로그인하면 주문·교환·배송·문의 활동 알림을 확인할 수 있어요.</Text>
-            <SeedActionButton label="내정보로 이동" onPress={() => router.replace("/(tabs)/profile")} style={styles.primaryButton} />
-          </View>
-        ) : message && !notifications.length ? (
+        ) : sessionGate ? (
+          <ProfileSessionGate
+            status={sessionGate}
+            returnTo="/notifications"
+            guestBody="로그인하면 주문·교환·배송·문의 활동 알림을 확인할 수 있어요."
+          />
+        ) : message ? (
           <View style={styles.state}>
             <DecorativeIonicon name="alert-circle-outline" size={34} color={colors.muted} />
             <Text style={styles.stateTitle}>{message}</Text>
             <SeedActionButton label="다시 불러오기" size="small" variant="neutralSolid" onPress={() => void load(true)} style={styles.retryButton} />
           </View>
-        ) : notifications.length ? (
-          <>
-            {message ? <View style={styles.inlineError}><Text style={styles.inlineErrorText}>{message}</Text></View> : null}
-            <View style={styles.list}>
-              {notifications.map((notification) => (
-                <NotificationRow key={notification.id} notification={notification} onPress={() => void openNotification(notification)} />
-              ))}
-            </View>
-            {nextCursor ? (
-              <SeedActionButton
-                label={loadingMore ? "불러오는 중" : "이전 알림 더 보기"}
-                size="small"
-                variant="neutralSolid"
-                disabled={loadingMore}
-                onPress={() => void loadMore()}
-                style={styles.loadMoreButton}
-              />
-            ) : null}
-          </>
         ) : (
           <State icon="checkmark-done-outline" title="새 알림이 없어요" body="완료된 계정 활동이 생기면 이곳에서 확인할 수 있어요." />
         )}
-      </ScrollView>
+        ListFooterComponent={showList && nextCursor ? (
+          <SeedActionButton
+            label={loadingMore ? "불러오는 중" : "이전 알림 더 보기"}
+            size="small"
+            variant="neutralSolid"
+            disabled={loadingMore}
+            onPress={() => void loadMore()}
+            style={styles.loadMoreButton}
+          />
+        ) : null}
+        onEndReached={() => {
+          if (showList && !autoLoadMoreBlocked.current) void loadMore();
+        }}
+        onEndReachedThreshold={0.5}
+      />
     </SafeAreaView>
   );
 }
@@ -193,6 +215,10 @@ function NotificationRow({ notification, onPress }: { notification: AccountNotif
       </View>
     </Pressable>
   );
+}
+
+function NotificationSeparator() {
+  return <View style={styles.listGap} />;
 }
 
 function State({ icon = "notifications-outline", title, body, loading = false }: { icon?: DecorativeIoniconName; title?: string; body: string; loading?: boolean }) {
@@ -217,7 +243,7 @@ const styles = StyleSheet.create({
   unreadCount: { minWidth: 24, height: 24, paddingHorizontal: 6, borderRadius: seed.radius.r3, overflow: "hidden", backgroundColor: colors.brand, color: colors.ink, fontSize: 11, lineHeight: 24, textAlign: "center" },
   content: { paddingHorizontal: seed.spacing.globalGutter, paddingTop: seed.spacing.x4, paddingBottom: seed.spacing.screenBottom },
   description: { color: colors.muted, fontSize: 12, lineHeight: 18, marginBottom: 18 },
-  list: { gap: 10 },
+  listGap: { height: 10 },
   notification: { minHeight: 112, padding: seed.spacing.x3_5, borderRadius: seed.radius.r4, borderWidth: 1, borderColor: seed.color.stroke.neutral, backgroundColor: seed.color.layer.default, flexDirection: "row", alignItems: "flex-start", gap: seed.spacing.componentDefault },
   notificationUnread: { borderColor: seed.color.stroke.brand, backgroundColor: seed.color.layer.default },
   pressed: { opacity: seed.state.pressedOpacity, transform: [{ translateY: seed.state.pressedTranslateY }, { scale: seed.state.pressedScale }] },
@@ -232,10 +258,8 @@ const styles = StyleSheet.create({
   inlineError: { padding: seed.spacing.componentDefault, marginBottom: seed.spacing.componentDefault, borderRadius: seed.radius.r3, backgroundColor: seed.color.background.criticalWeak },
   inlineErrorText: { color: colors.ink, fontSize: 12, lineHeight: 18 },
   state: { minHeight: 420, paddingHorizontal: 28, alignItems: "center", justifyContent: "center" },
-  stateIcon: { width: seed.spacing.x16, height: seed.spacing.x16, borderRadius: seed.radius.r5, alignItems: "center", justifyContent: "center", backgroundColor: seed.color.background.brandWeak },
-  stateTitle: { color: colors.ink, fontSize: 17, lineHeight: 24, fontWeight: "900", textAlign: "center", marginTop: 14 },
+  stateTitle: { color: colors.ink, ...seed.typography.subtitle, textAlign: "center", marginTop: 14 },
   stateBody: { color: colors.muted, fontSize: 13, lineHeight: 20, textAlign: "center", marginTop: 7 },
-  primaryButton: { marginTop: seed.spacing.x4_5 },
   retryButton: { marginTop: seed.spacing.x4 },
   loadMoreButton: { alignSelf: "center", marginTop: seed.spacing.x4 },
 });

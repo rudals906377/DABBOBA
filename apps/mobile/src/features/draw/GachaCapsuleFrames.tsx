@@ -91,17 +91,29 @@ export function GachaCapsuleFrames({
     callbacks.current.onUnavailable?.("Capsule atlas image unavailable");
   }, [loaded]);
 
-  const apertureStyle = useAnimatedStyle(() => {
+  // Layout props are kept apart from the per-frame opacity so they only change
+  // while the pickup is clipped. After the capsule lands the aperture is the
+  // constant full viewport, and Reanimated skips the unchanged layout commit
+  // on every reveal frame.
+  const apertureLayoutStyle = useAnimatedStyle(() => {
+    const clipped = dispenseProgress.value < 1;
+    if (!clipped) {
+      return { left: 0, top: 0, width: viewportSize.width, height: viewportSize.height };
+    }
     const camera = sampleGachaCameraMotion(progress.value, viewportSize.width, viewportSize.height, reduceMotion);
-    const pickup = sampleGachaPickupMotion(dispenseProgress.value, reduceMotion);
     const box = GACHA_PICKUP_GEOMETRY;
     const worldScale = camera.presentationScale * camera.scale;
-    const clipped = dispenseProgress.value < 1;
     return {
-      left: clipped ? viewportSize.width / 2 + (box.left - box.machineWidth / 2) * worldScale + camera.translateX : 0,
-      top: clipped ? viewportSize.height / 2 + (box.top - box.machineHeight / 2) * worldScale + camera.translateY : 0,
-      width: clipped ? box.width * worldScale : viewportSize.width,
-      height: clipped ? box.height * worldScale : viewportSize.height,
+      left: viewportSize.width / 2 + (box.left - box.machineWidth / 2) * worldScale + camera.translateX,
+      top: viewportSize.height / 2 + (box.top - box.machineHeight / 2) * worldScale + camera.translateY,
+      width: box.width * worldScale,
+      height: box.height * worldScale,
+    };
+  });
+
+  const apertureOpacityStyle = useAnimatedStyle(() => {
+    const pickup = sampleGachaPickupMotion(dispenseProgress.value, reduceMotion);
+    return {
       // The atlas already contains the shader's shell fade; do not apply it twice.
       opacity: !reduceMotion && tone === ATLAS.tone && active.value > 0 ? loaded.value * pickup.opacity : 0,
     };
@@ -132,7 +144,7 @@ export function GachaCapsuleFrames({
 
   return (
     <View pointerEvents="none" collapsable={false} style={StyleSheet.absoluteFill}>
-      <Animated.View style={[styles.aperture, apertureStyle]}>
+      <Animated.View style={[styles.aperture, apertureLayoutStyle, apertureOpacityStyle]}>
         <Animated.View testID="gacha-capsule-frames" style={[styles.frame, capsuleStyle]}>
           <Animated.Image
             source={ATLAS_IMAGE}

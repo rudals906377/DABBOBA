@@ -16,6 +16,7 @@ import { slugIdInput, uuidInput } from "../lib/input.js";
 import { releasePendingOrder } from "../lib/pending-order-release.js";
 import { iso, nullableIso, numberValue } from "../lib/rows.js";
 import type { ApiContext } from "../types.js";
+import { rebaseLegacyCatalogMediaUrl } from "./catalog-media-url.js";
 
 export { KUJI_CHECKOUT_LEASE_SECONDS, kujiCheckoutExpiry };
 const RECENT_ACTIVITY_LIMIT = 8;
@@ -259,7 +260,7 @@ export async function expireAndPromoteKujiRoomLocked(
 
 async function roomSnapshot(
   client: DatabaseClient,
-  input: { productId: string; entryId: string; userId: string; serverNow: Date },
+  input: { productId: string; entryId: string; userId: string; serverNow: Date; catalogMediaBaseUrl: string | null | undefined },
 ) {
   const room = await client.query<{ version: string | number | bigint }>(
     "SELECT version FROM kuji_rooms WHERE product_id=$1",
@@ -341,7 +342,7 @@ async function roomSnapshot(
       id: item.id,
       displayName: maskKujiDisplayName(item.nickname),
       prizeName: item.prize_name_snapshot,
-      prizeImageUrl: item.prize_image_url_snapshot,
+      prizeImageUrl: rebaseLegacyCatalogMediaUrl(input.catalogMediaBaseUrl, item.prize_image_url_snapshot),
       rarity: item.rarity,
       committedAt: iso(item.committed_at),
     })),
@@ -388,7 +389,7 @@ export async function registerKujiRoomRoutes(app: FastifyInstance, context: ApiC
           if (settled.changed) await bumpKujiRoomVersion(client, productId);
           return {
             replay: true,
-            snapshot: await roomSnapshot(client, { productId, entryId: entry.id, userId, serverNow }),
+            snapshot: await roomSnapshot(client, { productId, entryId: entry.id, userId, serverNow, catalogMediaBaseUrl: context.config.catalogMediaBaseUrl }),
           };
         }
 
@@ -417,7 +418,7 @@ export async function registerKujiRoomRoutes(app: FastifyInstance, context: ApiC
         await bumpKujiRoomVersion(client, productId);
         return {
           replay: false,
-          snapshot: await roomSnapshot(client, { productId, entryId, userId, serverNow }),
+          snapshot: await roomSnapshot(client, { productId, entryId, userId, serverNow, catalogMediaBaseUrl: context.config.catalogMediaBaseUrl }),
         };
       });
       if ("unavailable" in result) throw conflict("현재 참여할 수 없는 쿠지 상품입니다.");
@@ -457,7 +458,7 @@ export async function registerKujiRoomRoutes(app: FastifyInstance, context: ApiC
         });
         await lockKujiProductState(client, productId);
         if (settled.changed) await bumpKujiRoomVersion(client, productId);
-        return roomSnapshot(client, { productId, entryId, userId, serverNow });
+        return roomSnapshot(client, { productId, entryId, userId, serverNow, catalogMediaBaseUrl: context.config.catalogMediaBaseUrl });
       });
       return reply.code(200).send(snapshot);
     },
@@ -512,7 +513,7 @@ export async function registerKujiRoomRoutes(app: FastifyInstance, context: ApiC
             && ["CANCELLED", "FAILED"].includes(payment.rows[0]!.status)
             && ["CANCELLED", "EXPIRED"].includes(roomEntry.state)
           ) {
-            return roomSnapshot(client, { productId, entryId, userId, serverNow });
+            return roomSnapshot(client, { productId, entryId, userId, serverNow, catalogMediaBaseUrl: context.config.catalogMediaBaseUrl });
           }
           if (order.rows[0]!.status !== "PENDING_PAYMENT" || payment.rows[0]!.status !== "PENDING") {
             throw conflict("결제가 시작되었거나 완료된 쿠지 주문은 대기 취소로 종료할 수 없습니다.");
@@ -547,7 +548,7 @@ export async function registerKujiRoomRoutes(app: FastifyInstance, context: ApiC
             eventType: "order.cancelled",
             payload: { orderId: roomEntry.order_id, userId, reason: "KUJI_ROOM_ENTRY_CANCELLED" },
           });
-          return roomSnapshot(client, { productId, entryId, userId, serverNow });
+          return roomSnapshot(client, { productId, entryId, userId, serverNow, catalogMediaBaseUrl: context.config.catalogMediaBaseUrl });
         }
 
         const cancelled = await client.query(
@@ -558,7 +559,7 @@ export async function registerKujiRoomRoutes(app: FastifyInstance, context: ApiC
         );
         const promotedEntryId = await promoteNextKujiRoomEntryLocked(client, { productId, serverNow });
         if ((cancelled.rowCount ?? 0) > 0 || promotedEntryId) await bumpKujiRoomVersion(client, productId);
-        return roomSnapshot(client, { productId, entryId, userId, serverNow });
+        return roomSnapshot(client, { productId, entryId, userId, serverNow, catalogMediaBaseUrl: context.config.catalogMediaBaseUrl });
       });
       return reply.code(200).send(snapshot);
     },

@@ -6,6 +6,8 @@ supabase/functions/dabboba-api/api.generated.js
 supabase/functions/dabboba-api/api.generated.js.tmp
 supabase/functions/dabboba-api/api.smoke.generated.js
 supabase/functions/dabboba-api/api.smoke.generated.js.tmp
+supabase/functions/dabboba-admin-api/api.generated.js
+supabase/functions/dabboba-admin-api/api.generated.js.tmp
 test-results/
 playwright-report/
 .expo/
@@ -17,6 +19,7 @@ playwright-report/
 !.env.example
 .turbo/
 .wrangler/
+.open-next/
 .dev.vars*
 coverage/
 *.log

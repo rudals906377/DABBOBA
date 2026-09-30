@@ -9,23 +9,24 @@ import { NotoSansKR_700Bold } from "@expo-google-fonts/noto-sans-kr/700Bold";
 import { NotoSansKR_900Black } from "@expo-google-fonts/noto-sans-kr/900Black";
 import { useFonts } from "expo-font";
 import { Stack } from "expo-router";
-import { SQLiteProvider } from "expo-sqlite";
+import { SQLiteProvider, useSQLiteContext } from "expo-sqlite";
 import { StatusBar } from "expo-status-bar";
 import { Suspense, useEffect, useState, type ReactNode } from "react";
-import { ActivityIndicator, AppState, Platform, StyleSheet, View } from "react-native";
+import { ActivityIndicator, AppState, Platform, Pressable, StyleSheet, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
+import { AppText as Text } from "@/components/Typography";
 import { KujiNotificationObserver } from "@/features/kuji/KujiNotificationObserver";
 import { AccountNotificationObserver } from "@/features/notifications/AccountNotificationObserver";
 import { StorefrontCategorySettingsProvider } from "@/features/catalog/StorefrontCategorySettingsProvider";
 import { CommerceCapabilityProvider } from "@/features/commerce/CommerceCapabilityProvider";
-import { ensureInternalCustomerSession } from "@/features/demo/demo-api";
+import { ensureInternalCustomerSession, InternalCustomerDataCleanupError } from "@/features/demo/demo-api";
 import { clearExpiredSocialLoginAttempt } from "@/features/auth/supabase-broker";
 import { PolicyReconsentProvider } from "@/features/auth/PolicyReconsentProvider";
 import {
   ensureCustomerSessionForUse,
   restoreCustomerSession,
 } from "@/lib/customer-session";
-import { initializeLocalDatabase } from "@/lib/local-database";
+import { clearUserScopedLocalData, initializeLocalDatabase } from "@/lib/local-database";
 import {
   resolveMobileRuntimeConfig,
   type MobilePlatform,
@@ -55,23 +56,23 @@ export default function RootLayout() {
       <StatusBar style="dark" />
       <Suspense fallback={<AppBootFallback />}>
         <PolicyReconsentProvider>
-          <InternalCustomerSessionBootstrap enabled={__DEV__}>
-            <CustomerSessionBootstrap>
-              <CommerceCapabilityProvider>
-                <StorefrontCategorySettingsProvider>
-                  <AccountNotificationObserver />
-                  <KujiNotificationObserver />
-                  <SQLiteProvider
-                    databaseName="dabboba-local.db"
-                    onInit={initializeLocalDatabase}
-                    useSuspense
-                  >
+          <SQLiteProvider
+            databaseName="dabboba-local.db"
+            onInit={initializeLocalDatabase}
+            useSuspense
+          >
+            <InternalCustomerSessionBootstrap enabled={__DEV__}>
+              <CustomerSessionBootstrap>
+                <CommerceCapabilityProvider>
+                  <StorefrontCategorySettingsProvider>
+                    <AccountNotificationObserver />
+                    <KujiNotificationObserver />
                     <Stack screenOptions={{ headerShown: false, contentStyle: styles.stack }} />
-                  </SQLiteProvider>
-                </StorefrontCategorySettingsProvider>
-              </CommerceCapabilityProvider>
-            </CustomerSessionBootstrap>
-          </InternalCustomerSessionBootstrap>
+                  </StorefrontCategorySettingsProvider>
+                </CommerceCapabilityProvider>
+              </CustomerSessionBootstrap>
+            </InternalCustomerSessionBootstrap>
+          </SQLiteProvider>
         </PolicyReconsentProvider>
       </Suspense>
     </GestureHandlerRootView>
@@ -125,7 +126,10 @@ function InternalCustomerSessionBootstrap({
   enabled: boolean;
   children: ReactNode;
 }) {
+  const db = useSQLiteContext();
   const [ready, setReady] = useState(!enabled);
+  const [cleanupBlocked, setCleanupBlocked] = useState(false);
+  const [retryCount, setRetryCount] = useState(0);
 
   useEffect(() => {
     let active = true;
@@ -143,8 +147,13 @@ function InternalCustomerSessionBootstrap({
       platform: Platform.OS as MobilePlatform,
       development: true,
     });
-    void ensureInternalCustomerSession(runtime.apiBaseUrl, () => active)
+    void ensureInternalCustomerSession(runtime.apiBaseUrl, () => clearUserScopedLocalData(db), () => active)
       .catch((error: unknown) => {
+        if (!active) return;
+        if (error instanceof InternalCustomerDataCleanupError) {
+          setCleanupBlocked(true);
+          return;
+        }
         console.warn(
           "DABBOBA customer session restore failed; continuing to sign-in.",
           error instanceof Error ? error.message : error,
@@ -157,9 +166,29 @@ function InternalCustomerSessionBootstrap({
     return () => {
       active = false;
     };
-  }, [enabled]);
+  }, [db, enabled, retryCount]);
 
-  return ready ? children : <AppBootFallback />;
+  if (!ready) return <AppBootFallback />;
+  if (cleanupBlocked) {
+    return (
+      <View style={styles.cleanupBlocked}>
+        <Text style={styles.cleanupTitle}>계정 데이터를 정리하지 못했어요</Text>
+        <Text style={styles.cleanupDescription}>이전 계정 정보가 보이지 않도록 앱을 잠시 멈췄어요.</Text>
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => {
+            setReady(false);
+            setCleanupBlocked(false);
+            setRetryCount((count) => count + 1);
+          }}
+          style={styles.cleanupRetry}
+        >
+          <Text style={styles.cleanupRetryText}>다시 시도</Text>
+        </Pressable>
+      </View>
+    );
+  }
+  return children;
 }
 
 function AppBootFallback() {
@@ -179,4 +208,16 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     backgroundColor: colors.canvas,
   },
+  cleanupBlocked: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 12,
+    paddingHorizontal: 24,
+    backgroundColor: colors.canvas,
+  },
+  cleanupTitle: { color: colors.ink, fontSize: 20, fontWeight: "700", textAlign: "center" },
+  cleanupDescription: { color: colors.ink, fontSize: 14, textAlign: "center" },
+  cleanupRetry: { minHeight: 44, justifyContent: "center", paddingHorizontal: 20 },
+  cleanupRetryText: { color: colors.ink, fontSize: 16, fontWeight: "700" },
 });

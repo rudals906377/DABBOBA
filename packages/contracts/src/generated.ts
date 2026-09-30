@@ -130,7 +130,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** @description Verifies an asymmetric Supabase access token and the live Auth user for Kakao, Naver, Google, Apple, or email OTP identities, then returns an opaque DABBOBA session. Multiple allowed identities automatically linked by Supabase reuse one DABBOBA account only when they share the exact broker issuer and subject. Matching email strings never merge different broker subjects. */
+        /** @description Verifies an asymmetric Supabase access token and the live Auth user for phone OTP, Kakao, Naver, Google, or Apple identities, then returns an opaque DABBOBA session. Multiple allowed identities automatically linked by Supabase reuse one DABBOBA account only when they share the exact broker issuer and subject. Matching contact strings never merge different broker subjects. */
         post: operations["exchangeCustomerAccessToken"];
         delete?: never;
         options?: never;
@@ -147,7 +147,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** @description Verifies a live Supabase social-provider session for an already linked DABBOBA customer and issues an ephemeral customer session used by the public account-deletion flow. This endpoint never creates a user or links an unknown provider subject. */
+        /** @description Verifies a live Supabase social-provider session for an already linked DABBOBA customer and issues an ephemeral ACCOUNT_DELETION-scoped customer session used by the public account-deletion flow. That session is accepted only by the account-deletion preview, request, and status routes and by logout; every other authenticated route answers 403 SESSION_SCOPE_FORBIDDEN. A provider that is not currently enabled is refused unless the verified identity is already linked to an existing account. This endpoint never creates a user or links an unknown provider subject. */
         post: operations["exchangeExistingCustomerForAccountDeletion"];
         delete?: never;
         options?: never;
@@ -279,6 +279,23 @@ export interface paths {
         get: operations["getAdminActor"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/auth/keepalive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description Rotates an active administrator session after authenticated activity. The previous token is revoked; the replacement keeps the original login time and expires at the earlier of the idle window (ADMIN_SESSION_IDLE_MINUTES) and the absolute lifetime (ADMIN_SESSION_MAX_HOURS from login). A session past its absolute lifetime is revoked and answered with 401. */
+        post: operations["keepAdminSessionAlive"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1223,6 +1240,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/payments/{paymentId}/attempt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description Atomically claims the first native PortOne payment window for an owned, payable order. A later call from this or another device must re-query the existing payment instead of opening another window. The claim is never payment approval. */
+        post: operations["claimOwnPortOnePaymentAttempt"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/payments/{paymentId}/confirm": {
         parameters: {
             query?: never;
@@ -1232,8 +1266,25 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** @description Re-queries PortOne with the authenticated owner's payment ID and applies only the provider-authoritative state to the order. A client redirect or callback is never accepted as proof of payment. */
+        /** @description Re-queries PortOne with the authenticated owner's payment ID and applies only the provider-authoritative state to the order. A client redirect or callback is never accepted as proof of payment. Limited to six calls per minute per client. An already settled local payment (PAID, FAILED, REFUNDED, or CANCELLED before any PG window claim) returns outcome already_settled without a provider call; providerStatus is then the provider-equivalent of that settled state and localStatus is included. */
         post: operations["confirmOwnPortOnePayment"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/payments/{paymentId}/abandon": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description Owner-only release of an unpaid PortOne payment window. The server performs a fresh PortOne lookup and cancels the still-pending order (releasing stock reservations, the kuji room entry, coupons, and points) only when PortOne authoritatively reports no payment (READY with no money, or PAYMENT_NOT_FOUND). A terminal no-charge FAILED/CANCELLED provider state is applied through the canonical provider path. Any payment evidence (PAY_PENDING, virtual account, paid or cancelled amounts, cancellation records) returns 409 PAYMENT_EVIDENCE_PRESENT with no change. Replays with the same Idempotency-Key return the original response without another provider call. */
+        post: operations["abandonOwnPortOnePaymentWindow"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1266,6 +1317,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /** @description Shared-secret HMAC event rail for the local/test TEST_PG and INTERNAL_ZERO providers only. The route is not registered (404) when PAYMENT_PROVIDER is PORTONE_V2_INICIS or UNCONFIGURED; PortOne events are applied in-process only after a fresh authenticated PortOne lookup. */
         post: operations["receivePaymentWebhook"];
         delete?: never;
         options?: never;
@@ -2380,6 +2432,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/internal/payments/{paymentId}/reconcile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description Internal LIVE-only worker requery. The worker signs the method, exact path, and Unix timestamp with the configured reconciliation secret; no client callback is accepted as payment proof. This operation never initiates a charge or cancellation. */
+        post: operations["reconcileWorkerPortOnePayment"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/commerce/payments/{paymentId}/reconcile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description SUPER_ADMIN only. Requeries PortOne and applies the verified state through the canonical payment handler; never sends a charge or cancellation request. */
+        post: operations["reconcileAdminPortOnePayment"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/commerce/refund-reviews": {
         parameters: {
             query?: never;
@@ -2406,6 +2492,91 @@ export interface paths {
         get: operations["getAdminRefundReview"];
         put?: never;
         post: operations["updateAdminRefundReview"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/commerce/refund-reviews/{paymentId}/cancellation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Reads the single durable provider cancellation attempt, if present. A local REFUNDED payment is reported as reconciled even if a webhook overtook the response update. */
+        get: operations["getAdminPortOneRefundCancellation"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/commerce/refund-reviews/{paymentId}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description SUPER_ADMIN only. Requests one full cancellation for an unfulfilled late order or a paid gacha/kuji order whose draw entitlements are all unused. The payment keeps one attempt row. A new request (new Idempotency-Key) may resume that row only from a stale PRECHECK, PRECHECK_FAILED, or REVIEW_REQUIRED with lastErrorCode LOCAL_STATE_CHANGED, PROVIDER_STATE_MISMATCH, or PROVIDER_CANCEL_FAILED, after a fresh provider read and full local recheck. CALLING, PROVIDER_PENDING, INDETERMINATE, and RECONCILED are never retried. */
+        post: operations["requestAdminPortOneLateRefund"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/commerce/payments/{paymentId}/refund": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description SUPER_ADMIN only. Atomically freezes a fully paid, entirely unused gacha/kuji order before making one full PortOne cancellation request. A stale or consumed draw is rejected. The provider result may require later reconciliation. Resumes the payment's single attempt row under the same rules as the refund-review cancel operation. */
+        post: operations["requestAdminPortOneFullDrawRefund"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/commerce/refund-reviews/{paymentId}/cancellation/reconcile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description SUPER_ADMIN only. Fresh provider lookup and canonical ledger reconciliation; never sends another cancellation request. */
+        post: operations["reconcileAdminPortOneRefundCancellation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/commerce/refund-reviews/{paymentId}/cancellation/abort": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description Requires refunds.cancel. Aborts a cancellation attempt that never reached a provider cancellation in flight (stale PRECHECK, or REVIEW_REQUIRED with LOCAL_STATE_CHANGED, PROVIDER_STATE_MISMATCH, or PROVIDER_CANCEL_FAILED) after a fresh PortOne read confirms the full amount is still paid with no cancellation. A normal draw order frozen by the attempt returns from REFUND_REVIEW to PAID (payment and order); a late-success review keeps its review state. The attempt becomes PRECHECK_FAILED with lastErrorCode ABORTED_BY_ADMIN and may be resumed later. Audited and idempotent. */
+        post: operations["abortAdminPortOneRefundCancellation"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2553,7 +2724,7 @@ export interface components {
             requiredPolicyVersions: components["schemas"]["RequiredPolicyVersions"];
         };
         /** @enum {string} */
-        CustomerAuthProvider: "KAKAO" | "NAVER" | "GOOGLE" | "APPLE" | "EMAIL";
+        CustomerAuthProvider: "PHONE" | "KAKAO" | "NAVER" | "GOOGLE" | "APPLE";
         CustomerLoginProviders: {
             methods: components["schemas"]["CustomerAuthProvider"][];
             brokerExchangeConfigured: boolean;
@@ -2575,7 +2746,7 @@ export interface components {
         AccountDeletionAccessTokenExchangeInput: {
             accessToken: string;
             /** @enum {string} */
-            loginProvider: "KAKAO" | "NAVER" | "GOOGLE" | "APPLE";
+            loginProvider: "PHONE" | "KAKAO" | "NAVER" | "GOOGLE" | "APPLE";
             /** @description Optional fresh Apple provider refresh token. When absent, an existing encrypted revocation credential is required. */
             appleRefreshToken?: string;
             acceptedPolicies: components["schemas"]["RequiredPolicyVersions"];
@@ -2965,8 +3136,9 @@ export interface components {
             kind: string;
             title: string;
             body: string;
+            /** @description Validated destination identifiers only (for example orderId or productId); other stored notification fields are never exposed. */
             data: {
-                [key: string]: unknown;
+                [key: string]: string;
             };
             destination: components["schemas"]["NotificationDestination"];
             /** Format: date-time */
@@ -3358,8 +3530,9 @@ export interface components {
             releaseDate?: string | null;
             /** @description Positive public price or null while the price is not published. Customer APIs never expose a zero-price sellable product. */
             price: number | null;
+            /** @description Customer catalog responses return 0 without disclosing real inventory during PRELAUNCH or COMING_SOON; this is not a stock-out signal. Admin responses retain the real value. */
             availableQuantity: number;
-            /** @description ACTIVE 쿠지 덱의 전체 슬롯 수 또는 모든 항목에 초기 수량이 있는 ACTIVE 유한 가챠 풀의 초기 수량 합계입니다. 신뢰할 총수량이 없으면 null입니다. */
+            /** @description LIVE 판매 중에만 공개하는 총수량입니다. PRELAUNCH·COMING_SOON에는 null이며, 그 밖에는 ACTIVE 쿠지 덱의 전체 슬롯 수 또는 모든 항목에 초기 수량이 있는 ACTIVE 유한 가챠 풀의 초기 수량 합계입니다. */
             totalQuantity: number | null;
             /** @description ACTIVE 쿠지 덱에서 아직 결과 확정으로 소진되지 않은 상만 순서대로 제공합니다. 가챠이거나 공개 덱이 없으면 빈 배열이며, 봉인된 번호별 결과는 포함하지 않습니다. */
             remainingKujiTiers?: components["schemas"]["PublicKujiTierRemaining"][];
@@ -3658,6 +3831,8 @@ export interface components {
             /** Format: date-time */
             storageExpiresAt?: string;
             pointReturnEligible?: boolean;
+            /** @description Half of the original paid gacha unit price; present only when point return is eligible. */
+            pointReturnAmount?: number;
         };
         InventoryUnitPage: components["schemas"]["PageMeta"] & {
             items: components["schemas"]["InventoryUnit"][];
@@ -3755,6 +3930,16 @@ export interface components {
             orderKind: "PRODUCT" | "SHIPPING_FEE";
             /** Format: uuid */
             shippingRequestId: string | null;
+            /**
+             * Format: uuid
+             * @description Server-bound room entry for a Kuji order; null for other orders. A client must not use route parameters as proof of this binding.
+             */
+            kujiRoomEntryId?: string | null;
+            /**
+             * Format: date-time
+             * @description First server-claimed PortOne window time, or null before any attempt. A non-null value requires provider reconciliation, not another window.
+             */
+            paymentAttemptStartedAt?: string | null;
             /** @enum {string} */
             status: "PENDING_PAYMENT" | "PAID" | "FULFILLED" | "CANCELLED" | "REFUND_REVIEW" | "REFUNDED";
             /** Format: uuid */
@@ -3798,13 +3983,19 @@ export interface components {
         PaymentWebhookInput: {
             eventId: string;
             /** @enum {string} */
-            eventType: "PAYMENT_SUCCEEDED" | "PAYMENT_FAILED" | "PAYMENT_CANCELLED" | "REFUND_SUCCEEDED";
+            eventType: "PAYMENT_SUCCEEDED" | "PAYMENT_FAILED" | "PAYMENT_CANCELLED" | "PAYMENT_STATE_ANOMALY" | "REFUND_SUCCEEDED" | "REFUND_PARTIAL";
             /** Format: uuid */
             paymentId: string;
             providerPaymentId?: string | null;
             /** Format: date-time */
             occurredAt: string;
             amount: number;
+            providerObservation?: {
+                /** @enum {string} */
+                status: "READY" | "PAY_PENDING" | "VIRTUAL_ACCOUNT_ISSUED" | "PAID" | "FAILED" | "PARTIAL_CANCELLED" | "CANCELLED";
+                paidAmount: number;
+                cancelledAmount: number;
+            };
         };
         PortOnePaymentConfirmation: {
             /** @constant */
@@ -3815,8 +4006,27 @@ export interface components {
             orderId: string;
             /** @enum {string} */
             providerStatus: "READY" | "PAY_PENDING" | "VIRTUAL_ACCOUNT_ISSUED" | "PAID" | "FAILED" | "CANCELLED" | "PARTIAL_CANCELLED";
-            /** @description Canonical reconciliation outcome. pending means no order transition was applied. */
+            /** @description Canonical reconciliation outcome. pending means no order transition was applied; already_settled means the local payment was already settled and PortOne was not re-queried. */
             outcome: string;
+            /** @description Present only with outcome already_settled. */
+            localStatus?: components["schemas"]["PaymentStatus"];
+        };
+        PortOnePaymentAbandonment: {
+            /** @constant */
+            accepted: true;
+            /** Format: uuid */
+            paymentId: string;
+            /** Format: uuid */
+            orderId: string;
+            /**
+             * @description cancelled means this request released the pending order; already_closed means it was already cancelled without payment.
+             * @enum {string}
+             */
+            outcome: "cancelled" | "already_closed";
+            /** @enum {string} */
+            providerStatus: "READY" | "PAYMENT_NOT_FOUND" | "FAILED" | "CANCELLED";
+            localStatus: components["schemas"]["PaymentStatus"];
+            orderStatus: string;
         };
         DrawResult: {
             /** Format: uuid */
@@ -4537,10 +4747,20 @@ export interface components {
             processingError: string | null;
             /** Format: date-time */
             createdAt: string;
+            /** @description Sanitized status and money fields for anomaly review only; the provider payload is never returned. */
+            providerObservation: {
+                /** @enum {string} */
+                status: "READY" | "PAY_PENDING" | "VIRTUAL_ACCOUNT_ISSUED" | "PAID" | "FAILED" | "PARTIAL_CANCELLED" | "CANCELLED";
+                paidAmount: number;
+                cancelledAmount: number;
+            } | null;
         };
         AdminPaymentDetail: components["schemas"]["AdminPayment"] & {
             ledger: components["schemas"]["AdminPaymentLedgerEntry"][];
             providerEvents: components["schemas"]["AdminPaymentProviderEvent"][];
+            providerReconciliationAvailable: boolean;
+            refundActionAvailable: boolean;
+            refundActionBlocker: string | null;
         };
         AdminPaymentPage: components["schemas"]["PageMeta"] & {
             items: components["schemas"]["AdminPayment"][];
@@ -4558,6 +4778,7 @@ export interface components {
             closedAt: string | null;
         };
         AdminRefundReview: components["schemas"]["AdminPayment"] & {
+            providerCancellationStatus: string | null;
             review: components["schemas"]["AdminRefundReviewState"] | null;
         };
         AdminRefundReviewPage: components["schemas"]["PageMeta"] & {
@@ -4585,8 +4806,38 @@ export interface components {
         AdminRefundReviewDetail: components["schemas"]["AdminRefundReview"] & {
             assetSafety: components["schemas"]["AdminRefundAssetSafety"];
             notes: components["schemas"]["AdminRefundReviewNote"][];
-            /** @constant */
-            providerActionAvailable: false;
+            providerCancellation: components["schemas"]["AdminPortOneRefundCancellationSummary"] | null;
+            providerActionAvailable: boolean;
+            providerActionBlocker: string | null;
+            providerReconciliationAvailable: boolean;
+        };
+        AdminPortOneRefundCancellationSummary: {
+            /** @enum {string} */
+            status: "PRECHECK" | "PRECHECK_FAILED" | "CALLING" | "PROVIDER_PENDING" | "INDETERMINATE" | "RECONCILED" | "REVIEW_REQUIRED";
+            providerCancellationId: string | null;
+            providerStatus: string | null;
+            lastErrorCode: string | null;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        AdminPortOneRefundReasonInput: {
+            reason: string;
+        };
+        AdminPortOneRefundCancellation: {
+            /** Format: uuid */
+            paymentId: string;
+            /** @enum {string} */
+            status: "PRECHECK" | "PRECHECK_FAILED" | "CALLING" | "PROVIDER_PENDING" | "INDETERMINATE" | "RECONCILED" | "REVIEW_REQUIRED";
+            localPaymentStatus: string | null;
+            providerCancellationId: string | null;
+            providerStatus: string | null;
+            lastErrorCode: string | null;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
         };
         UpdateAdminRefundReviewInput: {
             status: components["schemas"]["RefundReviewStatus"];
@@ -4831,7 +5082,7 @@ export interface components {
                 "application/json": components["schemas"]["LegalAcceptanceRequiredErrorEnvelope"];
             };
         };
-        /** @description The authenticated actor lacks the required role or ownership. */
+        /** @description The authenticated actor lacks the required role or ownership, or presents an ACCOUNT_DELETION-scoped session on a route that does not accept it (SESSION_SCOPE_FORBIDDEN). */
         Forbidden: {
             headers: {
                 [name: string]: unknown;
@@ -5138,7 +5389,7 @@ export interface operations {
             409: components["responses"]["Conflict"];
             428: components["responses"]["LegalAcceptanceRequired"];
             429: components["responses"]["RateLimited"];
-            /** @description Supabase customer token exchange or Apple revocation credential protection is unavailable. */
+            /** @description Supabase customer token exchange, the selected login provider for an unlinked identity (CUSTOMER_LOGIN_PROVIDER_UNAVAILABLE), or Apple revocation credential protection is unavailable. */
             503: {
                 headers: {
                     [name: string]: unknown;
@@ -5329,6 +5580,37 @@ export interface operations {
             403: components["responses"]["Forbidden"];
         };
     };
+    keepAdminSessionAlive: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Administrator session rotated and renewed within its absolute lifetime. */
+            200: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        token: string;
+                        /** Format: date-time */
+                        expiresAt: string;
+                        /** Format: uuid */
+                        sessionId: string;
+                        /** Format: uuid */
+                        rotatedFromSessionId: string;
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
     listPublishedNotices: {
         parameters: {
             query?: {
@@ -5379,6 +5661,13 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             409: components["responses"]["Conflict"];
+            /** @description Declared byteSize exceeds the active storage provider's object limit (Supabase Storage 5 MiB). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             428: components["responses"]["LegalAcceptanceRequired"];
             /** @description Per-user active */
             429: {
@@ -5558,7 +5847,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Short-lived URL for privileged review of an attachment. */
+            /** @description Short-lived URL for privileged review of an attachment. Requires inquiries.read for INQUIRY media, catalog.read for CATALOG/CATALOG_REQUEST media, and moderation.read otherwise; every issuance writes an admin audit row. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -5600,6 +5889,13 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
+            /** @description Declared byteSize exceeds the active storage provider's object limit (Supabase Storage 5 MiB). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             /** @description Per-administrator active */
             429: {
                 headers: {
@@ -7329,6 +7625,51 @@ export interface operations {
             428: components["responses"]["LegalAcceptanceRequired"];
         };
     };
+    claimOwnPortOnePaymentAttempt: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                paymentId: components["parameters"]["PaymentId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The caller may open the single payment window for this order. */
+            200: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @constant */
+                        accepted: true;
+                        /** Format: uuid */
+                        paymentId: string;
+                        /** Format: uuid */
+                        orderId: string;
+                        /** Format: date-time */
+                        startedAt: string;
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            428: components["responses"]["LegalAcceptanceRequired"];
+            /** @description Commerce is unavailable in PRELAUNCH, or the PortOne channel is not configured. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
     confirmOwnPortOnePayment: {
         parameters: {
             query?: never;
@@ -7340,7 +7681,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Fresh provider state was reconciled, or the payment is still pending. */
+            /** @description Fresh provider state was reconciled, the payment is still pending, or it was already settled. */
             200: {
                 headers: {
                     "Cache-Control"?: "no-store";
@@ -7354,6 +7695,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             428: components["responses"]["LegalAcceptanceRequired"];
+            429: components["responses"]["RateLimited"];
             /** @description PortOne could not be queried or its response failed contract validation. */
             502: {
                 headers: {
@@ -7364,6 +7706,54 @@ export interface operations {
                 };
             };
             /** @description Commerce is unavailable in PRELAUNCH, or the PortOne production channel is not configured. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    abandonOwnPortOnePaymentWindow: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                paymentId: components["parameters"]["PaymentId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The order was released, or was already closed without payment. */
+            200: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortOnePaymentAbandonment"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            428: components["responses"]["LegalAcceptanceRequired"];
+            429: components["responses"]["RateLimited"];
+            /** @description PortOne could not be queried or its response failed contract validation; nothing changed. */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Commerce is unavailable in PRELAUNCH, or the PortOne channel is not configured. */
             503: {
                 headers: {
                     [name: string]: unknown;
@@ -7439,6 +7829,13 @@ export interface operations {
                 content?: never;
             };
             401: components["responses"]["Unauthorized"];
+            /** @description The shared-secret rail is not registered for the configured payment provider. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             503: components["responses"]["CommerceUnavailable"];
         };
     };
@@ -9836,6 +10233,99 @@ export interface operations {
             404: components["responses"]["NotFound"];
         };
     };
+    reconcileWorkerPortOnePayment: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Unix seconds within two minutes of server time; included in the HMAC message. */
+                "x-dabboba-worker-timestamp": string;
+            };
+            path: {
+                paymentId: components["parameters"]["PaymentId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current provider observation and canonical local payment status, or an already-settled payment that required no lookup. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @constant */
+                        accepted: true;
+                        /** Format: uuid */
+                        paymentId: string;
+                        /** Format: uuid */
+                        orderId: string;
+                        /** @enum {string|null} */
+                        providerStatus: "READY" | "PAY_PENDING" | "VIRTUAL_ACCOUNT_ISSUED" | "PAID" | "FAILED" | "CANCELLED" | "PARTIAL_CANCELLED" | null;
+                        /** @description Canonical outcome. provider_not_found means PortOne authoritatively has no payment for this ID (providerStatus is null); no local state changed. */
+                        outcome: string;
+                        localStatus: components["schemas"]["PaymentStatus"];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            /** @description PortOne lookup or reconciliation failed. */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description LIVE commerce */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    reconcileAdminPortOnePayment: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description ASCII reasons remain compatible. For non-ASCII text, percent-encode UTF-8 and also send X-Admin-Reason-Encoding as utf-8-percent. */
+                "X-Admin-Reason": components["parameters"]["AdminReason"];
+            };
+            path: {
+                paymentId: components["parameters"]["PaymentId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminPortOneRefundReasonInput"];
+            };
+        };
+        responses: {
+            /** @description Fresh provider observation and canonical reconciliation outcome. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortOnePaymentConfirmation"];
+                };
+            };
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            /** @description LIVE commerce or PortOne provider is not configured. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     listAdminRefundReviews: {
         parameters: {
             query?: {
@@ -9917,6 +10407,197 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+        };
+    };
+    getAdminPortOneRefundCancellation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                paymentId: components["parameters"]["PaymentId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Existing provider cancellation attempt. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminPortOneRefundCancellation"];
+                };
+            };
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    requestAdminPortOneLateRefund: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description ASCII reasons remain compatible. For non-ASCII text, percent-encode UTF-8 and also send X-Admin-Reason-Encoding as utf-8-percent. */
+                "X-Admin-Reason": components["parameters"]["AdminReason"];
+            };
+            path: {
+                paymentId: components["parameters"]["PaymentId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminPortOneRefundReasonInput"];
+            };
+        };
+        responses: {
+            /** @description Durable attempt recorded; status may still require provider reconciliation. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminPortOneRefundCancellation"];
+                };
+            };
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            /** @description LIVE commerce or PortOne provider is not configured. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    requestAdminPortOneFullDrawRefund: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description ASCII reasons remain compatible. For non-ASCII text, percent-encode UTF-8 and also send X-Admin-Reason-Encoding as utf-8-percent. */
+                "X-Admin-Reason": components["parameters"]["AdminReason"];
+            };
+            path: {
+                paymentId: components["parameters"]["PaymentId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminPortOneRefundReasonInput"];
+            };
+        };
+        responses: {
+            /** @description Durable attempt recorded; status may still require provider reconciliation. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminPortOneRefundCancellation"];
+                };
+            };
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            /** @description LIVE commerce or PortOne provider is not configured. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    reconcileAdminPortOneRefundCancellation: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description ASCII reasons remain compatible. For non-ASCII text, percent-encode UTF-8 and also send X-Admin-Reason-Encoding as utf-8-percent. */
+                "X-Admin-Reason": components["parameters"]["AdminReason"];
+            };
+            path: {
+                paymentId: components["parameters"]["PaymentId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminPortOneRefundReasonInput"];
+            };
+        };
+        responses: {
+            /** @description Fresh provider observation and current attempt status. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminPortOneRefundCancellation"];
+                };
+            };
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            /** @description LIVE commerce or PortOne provider is not configured. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    abortAdminPortOneRefundCancellation: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description ASCII reasons remain compatible. For non-ASCII text, percent-encode UTF-8 and also send X-Admin-Reason-Encoding as utf-8-percent. */
+                "X-Admin-Reason": components["parameters"]["AdminReason"];
+            };
+            path: {
+                paymentId: components["parameters"]["PaymentId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminPortOneRefundReasonInput"];
+            };
+        };
+        responses: {
+            /** @description Attempt aborted; localPaymentStatus reports the restored or retained payment status. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminPortOneRefundCancellation"];
+                };
+            };
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            /** @description PortOne lookup failed; nothing changed. */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description LIVE commerce or PortOne provider is not configured. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
     listAdminInventory: {

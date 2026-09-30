@@ -4,6 +4,7 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { resolveTwoColumnProductCardWidth } from "../apps/mobile/src/features/shop/shop-layout.ts";
+import { productPriceLabel, productPriceParts } from "../apps/mobile/src/features/commerce/product-commerce-presentation.ts";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const readSource = (relativePath) => readFileSync(path.join(root, relativePath), "utf8");
@@ -13,6 +14,7 @@ const typographySource = readSource("apps/mobile/src/components/Typography.tsx")
 const meterSource = readSource("apps/mobile/src/components/RemainingInventoryMeter.tsx");
 const catalogRowSource = readSource("apps/mobile/src/components/CatalogProductRow.tsx");
 const shopSource = readSource("apps/mobile/src/features/shop/ShopScreen.tsx");
+const detailSource = readSource("apps/mobile/src/features/shop/ProductDetailScreen.tsx");
 const topIndicatorSource = readSource("apps/mobile/src/components/CatalogProductTopIndicator.tsx");
 
 test("catalog cards use the shared readable type scale", () => {
@@ -26,13 +28,41 @@ test("catalog cards use the shared readable type scale", () => {
   assert.doesNotMatch(meterSource, /seed\.typography\.finePrint/);
 });
 
+test("prelaunch shop cards keep the amount on one line without losing its full accessible label", () => {
+  const product = { price: 9_900, saleStatus: "COMING_SOON" };
+  assert.deepEqual(productPriceParts(product, false), { qualifier: "오픈 예정가", amount: "9,900원" });
+  assert.equal(productPriceLabel(product, false), "오픈 예정가 9,900원");
+  assert.deepEqual(productPriceParts({ price: 0 }, false), { qualifier: null, amount: "가격 공개 예정" });
+  assert.deepEqual(productPriceParts({ price: 9_900, saleStatus: "ON_SALE" }, true), { qualifier: null, amount: "9,900원" });
+  assert.match(shopSource, /price\.qualifier \? \([\s\S]*?style=\{styles\.productPriceQualifier\}>\{price\.qualifier\}<\/Text>/);
+  assert.match(shopSource, /variant="catalogPrice" maxFontSizeMultiplier=\{CATALOG_CARD_TEXT_MAX_FONT_SIZE_MULTIPLIER\} style=\{styles\.productPrice\}>\{price\.amount\}<\/Text>/);
+  assert.doesNotMatch(shopSource, /adjustsFontSizeToFit|minimumFontScale/);
+  assert.doesNotMatch(shopSource, />예정가<\/Text>/);
+});
+
+test("a failed refresh warns when previously loaded cards remain visible", () => {
+  assert.match(shopSource, /if \(manual\) \{\s*setRefreshing\(true\)/);
+  assert.match(shopSource, /else \{\s*firstPageFailed\.current = true;\s*setMessage\("연결 상태를 확인한 뒤 다시 시도해 주세요\."\);/);
+  assert.match(shopSource, /message && products\.length > 0 && !loading && !refreshing/);
+  assert.match(shopSource, /표시된 가격·재고가 최신이 아닐 수 있어요\./);
+  assert.match(shopSource, /accessibilityLabel="상품 목록 다시 불러오기"[\s\S]*?onPress=\{\(\) => void loadProducts\(\{ manual: true \}\)\}/);
+});
+
+test("product details do not expose internal SKU or example fixture IDs as a customer badge", () => {
+  assert.match(detailSource, /const editionLabel = productMetadataText\(snapshot\.product, "edition"\)\?\.trim\(\)/);
+  assert.match(detailSource, /\{editionLabel \? \(/);
+  assert.doesNotMatch(detailSource, /snapshot\.product\.sku/);
+});
+
 test("compact catalog rows share image states and use gacha storefront artwork without cropping kuji", () => {
   assert.match(catalogRowSource, /const uri = product\.category === "gacha" \? storefrontUri \?\? primaryUri : primaryUri/);
   assert.match(catalogRowSource, /<CatalogProductImage/);
   assert.match(catalogRowSource, /product\.category === "kuji" \|\| \(product\.category === "gacha" && !storefrontUri\)/);
   assert.match(catalogRowSource, /fallbackSources=\{product\.category === "gacha" && storefrontUri \? \[\{ uri: primaryUri, resizeMode: "contain" \}\] : \[\]\}/);
-  assert.match(catalogRowSource, /product\.category === "kuji" && styles\.categoryBadgeKuji/);
-  assert.match(catalogRowSource, /categoryBadgeKuji:[^\n]*backgroundColor:\s*colors\.kujiOrange/);
+  assert.doesNotMatch(catalogRowSource, /categoryBadge|orientation="vertical"/);
+  assert.match(catalogRowSource, /<Text variant="catalogMetadata" numberOfLines=\{1\} style=\{styles\.categoryLabel\}>\{categoryLabel\(product\.category\)\}<\/Text>/);
+  assert.match(catalogRowSource, /categoryLabel: \{ flexShrink: 0, color: colors\.muted \}/);
+  assert.match(catalogRowSource, /<ProductInfoDivider style=\{styles\.fieldDivider\} \/>/);
   assert.doesNotMatch(catalogRowSource, />이미지 없음<\/Text>/);
 });
 

@@ -26,17 +26,17 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
       <section className="login-brand">
         <div className="login-brand__lockup">
           <span className="login-brand__wordmark-surface"><BrandWordmark /></span>
-          <span>PRIVILEGED OPERATIONS</span>
+          <span>관리자 페이지</span>
         </div>
         <div>
-          <h1>운영 판단을<br />안전하게 기록합니다.</h1>
-          <p>회원, 커뮤니티, 고객 문의와 카탈로그를 한곳에서 관리합니다. 실제 권한과 모든 상태 변경은 API 서버가 최종 판단합니다.</p>
+          <h1>다뽀바 운영을<br />한곳에서.</h1>
+          <p>상품, 주문, 배송, 고객 문의를 쉽고 안전하게 관리하세요.</p>
         </div>
-        <span>NO PUBLIC SIGN-UP · NO FIXTURE FALLBACK</span>
+        <span>승인된 관리자만 접속할 수 있습니다.</span>
       </section>
       <section className="login-panel">
         <div className="login-card">
-          <span className="status-badge">ADMIN ACCESS</span>
+          <span className="status-badge">관리자 전용</span>
           <h2>관리자 로그인</h2>
           <p>발급받은 운영 계정으로만 로그인할 수 있습니다.</p>
           {error ? <p className="feedback" data-kind="error" role="alert">{ERROR_MESSAGES[error] || "로그인을 완료하지 못했습니다."}</p> : null}
@@ -48,7 +48,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
             <label>비밀번호<input name="password" type="password" autoComplete="current-password" minLength={12} maxLength={256} required /></label>
             <button type="submit">로그인</button>
           </form>
-          <div className="login-security">세션 토큰은 Secure · HttpOnly · SameSite=Strict 쿠키에만 저장되며 브라우저 스크립트와 저장소에 노출되지 않습니다.</div>
+          <div className="login-security">공용 기기에서는 작업을 마친 뒤 꼭 로그아웃해 주세요.</div>
         </div>
       </section>
     </main>

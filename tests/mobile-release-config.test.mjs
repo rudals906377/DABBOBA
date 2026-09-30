@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -7,9 +9,16 @@ import {
   PG_REVIEW_PUBLIC_BUILD_VARIABLES,
   REQUIRED_PUBLIC_BUILD_VARIABLES,
   inspectMobileReleaseConfig,
+  validateCardReviewBusinessPhone,
 } from "../scripts/check-mobile-release-config.mjs";
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+test("iOS release configuration targets the verified friend-owned Apple team", () => {
+  const appConfig = JSON.parse(readFileSync(path.join(rootDir, "apps/mobile/app.json"), "utf8"));
+
+  assert.equal(appConfig.expo.ios.appleTeamId, "MCZ4884P7F");
+});
 
 const productionPublicEnvironment = {
   DABBOBA_COMMERCE_MODE: "LIVE",
@@ -38,6 +47,7 @@ test("mobile release structure is store-shaped without external credentials", ()
   assert.equal(report.warnings.some((issue) => issue.code === "ANDROID_ADAPTIVE_ICON_REQUIRED"), false);
   assert.equal(report.warnings.some((issue) => issue.code === "PG_REVIEW_BUSINESS_PHONE_MOBILE"), false);
   assert.equal(report.errors.some((issue) => issue.code === "IOS_APPLE_SIGN_IN_CAPABILITY_MISSING"), false);
+  assert.equal(report.errors.some((issue) => issue.code === "IOS_RELEASE_TEAM_MISMATCH"), false);
   assert.equal(report.errors.some((issue) => issue.code === "EAS_PG_REVIEW_PROFILE_INVALID"), false);
 });
 
@@ -176,4 +186,133 @@ test("production mobile release gate rejects local URLs and privileged Supabase 
   assert.ok(codes.has("ENV_EXPO_PUBLIC_DABBOBA_API_URL_INVALID"));
   assert.ok(codes.has("ENV_EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY_PRIVILEGED"));
   assert.ok(codes.has("PAYMENT_PROVIDER_NOT_READY"));
+});
+
+function businessPhoneFixture({ appPhone = "031-947-9996", termsPhone = "031-947-9996", privacyPhone = "031-947-9996", omit = [] } = {}) {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "dabboba-business-phone-"));
+  const write = (relativePath, source) => {
+    if (omit.includes(relativePath)) return;
+    mkdirSync(path.dirname(path.join(directory, relativePath)), { recursive: true });
+    writeFileSync(path.join(directory, relativePath), source);
+  };
+  const link = (phone) => `<a href="tel:${phone.replace(/\D/g, "")}">${phone}</a>`;
+  write(
+    "apps/mobile/src/features/profile/business-information.ts",
+    `export const BUSINESS = { representativePhone: "${appPhone}" };\n`,
+  );
+  write("public/legal/terms/index.html", `<p>대표전화 ${link(termsPhone)}</p>`);
+  write("public/legal/privacy/index.html", `<p>전화 ${link(privacyPhone)}</p>`);
+  return directory;
+}
+
+function businessPhoneIssues(options) {
+  const directory = businessPhoneFixture(options);
+  const errors = [];
+  const warnings = [];
+  try {
+    validateCardReviewBusinessPhone(directory, errors, warnings, true);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+  return { errors: errors.map((issue) => issue.code), warnings: warnings.map((issue) => issue.code) };
+}
+
+test("business phone gate accepts matching app and public legal phones", () => {
+  assert.deepEqual(businessPhoneIssues(), { errors: [], warnings: [] });
+});
+
+test("business phone gate fails when the public terms phone differs from the app", () => {
+  const { errors } = businessPhoneIssues({ termsPhone: "010-6374-4900" });
+  assert.deepEqual(errors, ["LEGAL_BUSINESS_PHONE_MISMATCH"]);
+});
+
+test("business phone gate fails when the public privacy phone differs from the app", () => {
+  const { errors } = businessPhoneIssues({ privacyPhone: "031-947-9997" });
+  assert.deepEqual(errors, ["LEGAL_BUSINESS_PHONE_MISMATCH"]);
+});
+
+test("business phone gate fails when a legal document omits the phone or is missing", () => {
+  const directory = businessPhoneFixture();
+  const errors = [];
+  try {
+    writeFileSync(path.join(directory, "public/legal/privacy/index.html"), "<p>문의 support@dabboba.net</p>");
+    validateCardReviewBusinessPhone(directory, errors, [], true);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+  assert.deepEqual(errors.map((issue) => issue.code), ["LEGAL_BUSINESS_PHONE_MISMATCH"]);
+  assert.deepEqual(
+    businessPhoneIssues({ omit: ["public/legal/terms/index.html"] }).errors,
+    ["LEGAL_BUSINESS_PHONE_DOCUMENT_MISSING"],
+  );
+});
+
+test("business phone gate compares the published documents with the current app constant", () => {
+  const { errors } = businessPhoneIssues({ appPhone: "02-000-0000" });
+  assert.deepEqual(errors, ["LEGAL_BUSINESS_PHONE_MISMATCH", "LEGAL_BUSINESS_PHONE_MISMATCH"]);
+});
+
+test("production mobile builds pin the customer API host to the approved backend", async () => {
+  const { APPROVED_PRODUCTION_API_HOSTS, isApprovedProductionApiUrl } = await import(
+    "../scripts/check-mobile-release-config.mjs"
+  );
+  const { SUPABASE_INTEGRATION_PROJECT_REF } = await import("../scripts/supabase-integration-profile.mjs");
+  assert.ok(APPROVED_PRODUCTION_API_HOSTS.includes(`${SUPABASE_INTEGRATION_PROJECT_REF}.supabase.co`));
+  assert.ok(APPROVED_PRODUCTION_API_HOSTS.includes("api.dabboba.net"));
+
+  for (const approved of [
+    "https://api.dabboba.net",
+    `https://${SUPABASE_INTEGRATION_PROJECT_REF}.supabase.co/functions/v1/dabboba-api`,
+  ]) {
+    assert.equal(isApprovedProductionApiUrl(approved), true, approved);
+    for (const capability of ["LIVE", "PRELAUNCH"]) {
+      const report = inspectMobileReleaseConfig({
+        rootDir,
+        environment: {
+          ...productionPublicEnvironment,
+          EXPO_PUBLIC_COMMERCE_CAPABILITY: capability,
+          EXPO_PUBLIC_DABBOBA_API_URL: approved,
+        },
+      });
+      assert.equal(
+        report.errors.some((issue) => issue.code === "ENV_EXPO_PUBLIC_DABBOBA_API_URL_HOST_NOT_APPROVED"),
+        false,
+        `${capability} ${approved}`,
+      );
+    }
+  }
+
+  for (const rejected of [
+    "https://yxkmvgfruphgghowzvmo.supabase.co/functions/v1/dabboba-api",
+    "https://api-review.dabboba.net",
+    "https://api.dabboba.net.attacker.example",
+    `https://${SUPABASE_INTEGRATION_PROJECT_REF}.supabase.co.evil.net`,
+    "https://api.dabboba.net:8443",
+  ]) {
+    assert.equal(isApprovedProductionApiUrl(rejected), false, rejected);
+    for (const capability of ["LIVE", "PRELAUNCH"]) {
+      const report = inspectMobileReleaseConfig({
+        rootDir,
+        environment: {
+          ...productionPublicEnvironment,
+          EXPO_PUBLIC_COMMERCE_CAPABILITY: capability,
+          EXPO_PUBLIC_DABBOBA_API_URL: rejected,
+        },
+      });
+      assert.ok(
+        report.errors.some((issue) => issue.code === "ENV_EXPO_PUBLIC_DABBOBA_API_URL_HOST_NOT_APPROVED"),
+        `${capability} must reject ${rejected}`,
+      );
+    }
+  }
+
+  const structureOnly = inspectMobileReleaseConfig({
+    rootDir,
+    environment: { EXPO_PUBLIC_DABBOBA_API_URL: "https://api-review.dabboba.net" },
+    structureOnly: true,
+  });
+  assert.equal(
+    structureOnly.errors.some((issue) => issue.code === "ENV_EXPO_PUBLIC_DABBOBA_API_URL_HOST_NOT_APPROVED"),
+    false,
+  );
 });

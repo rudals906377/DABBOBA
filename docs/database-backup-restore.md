@@ -1,6 +1,6 @@
 # 무료 단계의 암호화 백업·로컬 복원 훈련
 
-작성일: 2026-09-06, 검증 갱신일: 2026-09-14. 유료 기능이나 주기 실행을 활성화하지 않는 오프라인 운영 도구다.
+작성일: 2026-09-06, 검증 갱신일: 2026-09-14, 운영 절차 보강: 2026-09-30. 유료 기능이나 주기 실행을 활성화하지 않는 오프라인 운영 도구다.
 
 ## 제공 범위와 보안 경계
 
@@ -86,5 +86,17 @@ node ops/database/test-backup.integration.mjs
 ## 아직 완료가 아닌 항목
 
 위 원격 archive들을 실제로 복원하지는 않았다. 2026-09-08의 84-table 및 2026-09-14의 86-table 복원 증거는 모두 고객 데이터가 없는 별도 로컬 fixture 훈련 결과다. Supabase 관리 schema/extension/Auth 설정을 포함한 전체 플랫폼 복구는 공식 운영 절차로 별도 검증해야 한다. ACL/소유권·글로벌 역할 비밀번호·Storage의 실제 이미지 객체는 이 훈련의 복원 보장 범위가 아니다. 기존 미디어 provider 변경, 자동/예약/오프사이트 백업, PITR, 복구 담당자, RPO/RTO/보존 기간, 정기 훈련과 알림도 완료하지 않았다.
+
+## 0078~0080 적용 전후 운영 절차 (2026-09-30, 원격 미실행)
+
+이 절은 **아직 실행하지 않은 필수 절차**다. 이 저장소 변경은 원격 DB·백업·PITR 설정을 전혀 바꾸지 않았다. 아래 단계는 승인된 운영자가 승인된 friend 소유 프로젝트(`rconfxsykttfvznakile`)에서만 수행한다.
+
+1. **대상 확인.** `DATABASE_MIGRATION_URL`이 승인 프로젝트의 Session pooler(5432) 또는 direct 주소인지 확인한다. 폐기된 QA 프로젝트 `yxkmvgfruphgghowzvmo`에는 `0067` 이상 migration이 적용될 수 없다. `packages/db/src/migrate.ts`는 대기 중인 `0067`+ migration이 있으면 아무것도 적용하기 전에 실패하고, `scripts/supabase-integration-profile.mjs`의 `assertMigrationTargetAllowed`도 같은 대상·하한을 거부한다.
+2. **PITR·플랫폼 백업 확인.** Supabase 대시보드에서 해당 프로젝트의 플랜, 일일 백업 보존 기간, PITR 활성 여부와 보존 창을 확인하고 기록한다. PITR은 유료 add-on이므로 활성화·비용 결정은 소유자 승인 사항이며 이 작업에서 켜지 않았다. PITR이 없으면 일일 백업 시점과 아래 논리 백업만이 복구 지점이다.
+3. **적용 직전 암호화 논리 백업.** 위 `backup` → `verify` 명령으로 새 archive를 만들고, SHA-256·크기·migration 개수를 위 표에 추가한다. 키는 archive와 다른 장애 도메인에 둔다(현재 같은 컴퓨터 보관은 오프사이트 백업이 아니다).
+4. **적용.** `0078`과 `0080`은 첫 줄 `-- dabboba:no-transaction` 헤더로 트랜잭션 밖에서 `CREATE INDEX CONCURRENTLY IF NOT EXISTS`를 한 문장씩 실행한다. 중단된 빌드가 남긴 INVALID 인덱스는 다음 실행에서 `DROP INDEX CONCURRENTLY` 후 재생성하며, 모든 인덱스가 valid일 때만 checksum을 기록한다. 트랜잭션 migration은 `lock_timeout=5s`로 대기하고 `55P03`이면 최대 3회 재시도한다. `0079`는 retention 권한·일일 집계 테이블·service_role 권한 회수를 한 트랜잭션으로 적용하고 자체 검증한다. 적용 후 `db:migrate`를 한 번 더 실행해 "Database schema is current."를 확인한다.
+5. **적용 후 검증.** `check:release`가 `service_role_table_grants_exposed` 없이 통과하고, `pg_index.indisvalid`가 새 인덱스 13개 모두 `true`인지 확인한다. worker의 retention 작업은 게시 후 30일 지난 outbox, 만료된 비-`CREATE_ORDER` 멱등 키, 30일 지난 폐기·만료 세션, 35일 지난 Home 클릭(일일 집계로 이관)을 실행당 최대 500행씩만 지운다. 삭제는 되돌릴 수 없으므로 첫 적용 전 3단계 백업이 필수다.
+6. **복원 훈련(RPO/RTO 측정).** Supabase 관리 schema와 `pg_cron`·`pg_net`·`supabase_vault`가 있는 **별도 disposable Supabase 프로젝트 또는 branch**에 PITR 또는 플랫폼 백업 복원을 수행하고, 복원 시점·소요 시간·migration checksum 일치·역할 재provisioning(`provision:runtime-role`/`provision:worker-role`)·`check:release` 통과를 기록한다. 일반 PostgreSQL 컨테이너 복원은 위 2026-09-20 기록처럼 플랫폼 전체 복원 증거가 되지 않는다.
+7. **정기화.** 복구 담당자, 목표 RPO/RTO, 백업·PITR 보존 기간, 분기별 복원 훈련 일정, 실패 알림 경로를 소유자가 정하고 이 문서에 기록한다. 이 항목들이 기록되기 전에는 공개 출시 조건을 충족하지 않는다.
 
 공식 참고: [Supabase 백업 범위](https://supabase.com/docs/guides/platform/backups), [PostgreSQL pg_dump](https://www.postgresql.org/docs/17/app-pgdump.html), [pg_restore](https://www.postgresql.org/docs/17/app-pgrestore.html), [snapshot 공유](https://www.postgresql.org/docs/17/functions-admin.html#FUNCTIONS-SNAPSHOT-SYNCHRONIZATION), [sequence 동작](https://www.postgresql.org/docs/17/functions-sequence.html).

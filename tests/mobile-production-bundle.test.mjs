@@ -44,6 +44,32 @@ test("production bundle scan rejects test payment, demo-session, fixture, and lo
   }
 });
 
+test("production bundle scan inspects Hermes and embedded native bundles", async () => {
+  const directory = await fixture({
+    "_expo/static/js/ios/entry.hbc": "TEST_PG /v1/demo/session http://localhost:8788/v1/orders",
+    "android/main.jsbundle": "MOBILE_TEST_FIXTURE",
+  });
+  try {
+    assert.deepEqual(
+      new Set(scanMobileProductionBundle(directory).map((issue) => issue.code)),
+      new Set(["TEST_PAYMENT", "DEMO_SESSION", "LOOPBACK_HOST", "MOBILE_TEST_FIXTURE"]),
+    );
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("production bundle scan accepts loopback rejection logic without a configured loopback URL", async () => {
+  const directory = await fixture({
+    "_expo/static/js/ios/entry.hbc": 'if (hostname === "localhost") throw new Error("Invalid API host");',
+  });
+  try {
+    assert.deepEqual(scanMobileProductionBundle(directory), []);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("production export runs from the Expo app root rather than the monorepo root", () => {
   const invocation = mobileProductionExportInvocation({
     platform: "ios",

@@ -8,6 +8,7 @@ import {
   View,
 } from "react-native";
 import { DecorativeIonicon } from "@/components/DecorativeIonicon";
+import { KoreanPixelTitleAccessory } from "@/components/RootCategoryTitle";
 import { AppText as Text } from "@/components/Typography";
 import { seed } from "@/design-system/seed";
 import { getTickerOverflowDistance } from "@/features/home/home-feed";
@@ -128,7 +129,7 @@ export function AnnouncementTicker({ messages, onPress }: AnnouncementTickerProp
     <>
       <View style={styles.signal}>
         <Animated.View style={[styles.led, { opacity: ledOpacity }]} />
-        <Text style={styles.labelText}>공지</Text>
+        <KoreanPixelTitleAccessory style={styles.labelText}>공지</KoreanPixelTitleAccessory>
       </View>
       <View
         pointerEvents="none"
@@ -236,7 +237,7 @@ const styles = StyleSheet.create({
   },
   signal: { flexDirection: "row", alignItems: "center", gap: seed.spacing.x1_5 },
   led: { width: 6, height: 6, borderRadius: seed.radius.full, backgroundColor: colors.brand, shadowColor: colors.brand, shadowOpacity: 0.55, shadowRadius: 4, shadowOffset: { width: 0, height: 0 } },
-  labelText: { color: colors.greenInk, fontFamily: "Galmuri11", fontSize: 11, lineHeight: 16, fontWeight: "400" },
+  labelText: { color: colors.greenInk },
   viewport: { flex: 1, height: TICKER_ROW_HEIGHT, overflow: "hidden" },
   measureLayer: { position: "absolute", width: 10_000, opacity: 0 },
   measureMessage: { width: 10_000 },

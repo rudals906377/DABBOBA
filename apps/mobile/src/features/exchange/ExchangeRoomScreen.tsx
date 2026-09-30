@@ -3,15 +3,16 @@ import { router, useFocusEffect } from "expo-router";
 import { useSQLiteContext } from "expo-sqlite";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  AccessibilityInfo,
   ActivityIndicator,
   Alert,
+  FlatList,
   Image,
   Keyboard,
   Modal,
   Platform,
   Pressable,
   RefreshControl,
-  ScrollView,
   StyleSheet,
   View,
 } from "react-native";
@@ -109,7 +110,7 @@ export function ExchangeRoomScreen() {
         if (tokens) {
           setSnapshot(null);
           setSource("empty");
-          setMessage(error instanceof Error ? error.message : "교환 글을 불러오지 못했습니다.");
+          setMessage(error instanceof Error ? error.message : "교환 글을 불러오지 못했어요.");
           return;
         }
         const cached = await readExchangeListingCache(db, undefined);
@@ -135,7 +136,7 @@ export function ExchangeRoomScreen() {
         } else {
           setSnapshot(null);
           setSource("empty");
-          setMessage(error instanceof Error ? error.message : "교환 글을 불러오지 못했습니다.");
+          setMessage(error instanceof Error ? error.message : "교환 글을 불러오지 못했어요.");
         }
       } finally {
         if (sequence === loadSequence.current) {
@@ -228,13 +229,26 @@ export function ExchangeRoomScreen() {
   return (
     <SafeAreaView style={styles.safeArea} edges={["top", "bottom", "left", "right"]}>
       <DetailPageHeader title="교환방" titleMode="pixel" onBack={goBack} backLabel="보관함으로 돌아가기" />
-      <ScrollView
+      <FlatList
+        data={items}
+        keyExtractor={(item) => item.id}
+        renderItem={({ item }) => (
+          <View style={styles.listItem}>
+            <ListingCard
+              item={item}
+              ipNames={snapshot?.ipNames ?? {}}
+              assetBaseUrl={assetBaseUrl}
+            />
+          </View>
+        )}
+        ItemSeparatorComponent={ListingSeparator}
         keyboardShouldPersistTaps="handled"
         contentContainerStyle={styles.content}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={() => void load(true)} tintColor={colors.ink} />
         }
-      >
+        ListHeaderComponent={(
+        <>
         <View style={styles.primaryActions}>
           <Pressable
             accessibilityRole="button"
@@ -243,7 +257,7 @@ export function ExchangeRoomScreen() {
             style={({ pressed }) => [styles.createPrimary, pressed && styles.pressed]}
           >
             <DecorativeIonicon name="add" size={22} color={colors.ink} />
-            <Text style={styles.createPrimaryLabel}>상품 올리기</Text>
+            <Text variant="button" style={styles.createPrimaryLabel}>교환 상품 올리기</Text>
           </Pressable>
           <Pressable
             accessibilityRole="button"
@@ -252,7 +266,7 @@ export function ExchangeRoomScreen() {
             style={({ pressed }) => [styles.myExchangeButton, pressed && styles.pressed]}
           >
             <DecorativeIonicon name="person-outline" size={20} color={colors.ink} />
-            <Text style={styles.myExchangeLabel}>현황</Text>
+            <Text variant="button" style={styles.myExchangeLabel}>내 교환 현황</Text>
           </Pressable>
         </View>
 
@@ -314,18 +328,10 @@ export function ExchangeRoomScreen() {
           </View>
         ) : null}
 
-        {items.length > 0 ? (
-          <View style={styles.list}>
-            {items.map((item) => (
-              <ListingCard
-                key={item.id}
-                item={item}
-                ipNames={snapshot?.ipNames ?? {}}
-                assetBaseUrl={assetBaseUrl}
-              />
-            ))}
-          </View>
-        ) : null}
+        </>
+        )}
+        ListEmptyComponent={(
+        <>
 
         {snapshot && normalizedQuery && !searchPending && items.length === 0 && source !== "empty" ? (
           <View style={styles.searchEmpty}>
@@ -346,7 +352,9 @@ export function ExchangeRoomScreen() {
             </BalancedAppText>
           </View>
         ) : null}
-      </ScrollView>
+        </>
+        )}
+      />
 
       <ExchangeRulesModal
         visible={rulesVisible}
@@ -356,6 +364,10 @@ export function ExchangeRoomScreen() {
       />
     </SafeAreaView>
   );
+}
+
+function ListingSeparator() {
+  return <View style={styles.listGap} />;
 }
 
 function ExchangeRulesModal({
@@ -369,9 +381,22 @@ function ExchangeRulesModal({
   onDismissCheckedChange: (checked: boolean) => void;
   onClose: () => void;
 }) {
+  const [reduceMotion, setReduceMotion] = useState(false);
+  useEffect(() => {
+    let active = true;
+    void AccessibilityInfo.isReduceMotionEnabled().then((enabled) => {
+      if (active) setReduceMotion(enabled);
+    });
+    const subscription = AccessibilityInfo.addEventListener("reduceMotionChanged", setReduceMotion);
+    return () => {
+      active = false;
+      subscription.remove();
+    };
+  }, []);
+
   return (
     <Modal
-      animationType="fade"
+      animationType={reduceMotion ? "none" : "fade"}
       transparent
       visible={visible}
       statusBarTranslucent
@@ -379,6 +404,7 @@ function ExchangeRulesModal({
       onRequestClose={onClose}
     >
       <View style={styles.modalBackdrop}>
+        <View pointerEvents="none" style={styles.modalScrim} />
         <View
           accessibilityLabel="교환방 이용 규칙"
           accessibilityViewIsModal
@@ -393,6 +419,7 @@ function ExchangeRulesModal({
             <RuleLine>등록글은 7일 동안 공개되며 성사되지 않으면 자동으로 종료돼요.</RuleLine>
             <RuleLine>교환 완료 시 남은 보관 기간이 14일보다 짧으면 14일로 연장돼요.</RuleLine>
             <RuleLine>교환으로 받은 상품은 포인트 환급 대상이 아니며, 본인이 가챠에서 직접 뽑아 보관 중인 상품만 포인트로 환급할 수 있어요.</RuleLine>
+            <RuleLine>쿠지·피규어·카드 상품은 교환과 포인트 환급 대상이 아니에요.</RuleLine>
             <RuleLine>교환 진행과 문의는 다뽀바 안에서 완료해 주세요.</RuleLine>
           </View>
           <Pressable
@@ -469,7 +496,7 @@ function ListingCard({
         <View style={styles.exchangePanel}>
           <View style={styles.bundleImages}>
             {productDetails.map(({ product }, index) => {
-              const uri = resolveCatalogImageUrl(product.imageUrl, assetBaseUrl, product.version);
+              const uri = resolveCatalogImageUrl(product.imageUrl, assetBaseUrl, product.version, __DEV__);
               return (
                 <View
                   key={`${product.id}-${index}`}
@@ -477,15 +504,10 @@ function ListingCard({
                   accessibilityLabel={`등록 상품 ${index + 1}/${products.length}: ${product.name}`}
                   style={[styles.imageFrame, products.length > 1 && styles.imageFrameBundled]}
                 >
-                  {uri ? <Image source={{ uri }} style={styles.productImage} resizeMode="contain" /> : <MediaPlaceholder />}
+                  {uri ? <Image accessible={false} source={{ uri }} style={styles.productImage} resizeMode="contain" /> : <MediaPlaceholder />}
                 </View>
               );
             })}
-          </View>
-          <DecorativeIonicon name="swap-horizontal" size={24} color={seed.color.stroke.contrast} />
-          <View style={styles.applyTile}>
-            <Text style={styles.applyTileLabel}>교환 신청</Text>
-            <Text style={styles.applyTileMeta}>제안 {item.offerCount}개</Text>
           </View>
         </View>
         <View style={styles.bundleInfoList}>
@@ -507,8 +529,8 @@ function ListingCard({
           ))}
         </View>
         <View style={styles.cardFooter}>
-          <Text style={styles.author}>@{item.authorNickname}</Text>
-          <Text style={styles.offerCount}>D-{daysLeft}</Text>
+          <Text variant="caption" numberOfLines={1} style={styles.author}>@{item.authorNickname}</Text>
+          <Text variant="caption" style={styles.offerCount}>제안 {item.offerCount}개 · D-{daysLeft}</Text>
         </View>
       </View>
     </Pressable>
@@ -518,7 +540,7 @@ function ListingCard({
 function MediaPlaceholder() {
   return (
     <View style={styles.mediaPlaceholder}>
-      <Text style={styles.mediaPlaceholderLabel}>이미지 준비 중</Text>
+      <Text variant="finePrint" style={styles.mediaPlaceholderLabel}>이미지 준비 중</Text>
     </View>
   );
 }
@@ -528,13 +550,14 @@ const styles = StyleSheet.create({
   content: { paddingBottom: seed.spacing.screenBottom },
   primaryActions: { marginHorizontal: seed.spacing.globalGutter, marginTop: seed.spacing.x2_5, flexDirection: "row", gap: seed.spacing.x2_5 },
   createPrimary: { minHeight: 56, flex: 1.45, borderRadius: seed.radius.r3, backgroundColor: seed.color.background.brandSolid, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: seed.spacing.x2 },
-  createPrimaryLabel: { color: colors.ink, ...seed.typography.button, fontWeight: "900" },
+  createPrimaryLabel: { flexShrink: 1, color: colors.ink, textAlign: "center" },
   myExchangeButton: { minHeight: 56, flex: 1, borderRadius: seed.radius.r3, borderWidth: 1, borderColor: seed.color.stroke.neutral, backgroundColor: seed.color.layer.elevated, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: seed.spacing.x2 },
-  myExchangeLabel: { color: colors.ink, ...seed.typography.button },
+  myExchangeLabel: { flexShrink: 1, color: colors.ink, textAlign: "center" },
   searchBox: { marginHorizontal: seed.spacing.globalGutter, marginTop: seed.spacing.x2_5 },
   searchInput: { flex: 1, color: colors.ink, ...seed.typography.body, paddingVertical: seed.spacing.x3 },
   clearSearch: { width: seed.size.touchTarget, height: seed.size.touchTarget, marginRight: -seed.spacing.x2 },
-  modalBackdrop: { flex: 1, paddingHorizontal: seed.spacing.globalGutter, justifyContent: "center", backgroundColor: "rgba(17, 20, 17, 0.48)" },
+  modalBackdrop: { flex: 1, paddingHorizontal: seed.spacing.globalGutter, justifyContent: "center" },
+  modalScrim: { position: "absolute", top: 0, right: 0, bottom: 0, left: 0, backgroundColor: seed.color.foreground.neutral, opacity: 0.48 },
   modalCard: { width: "100%", maxWidth: 480, alignSelf: "center", borderRadius: seed.radius.r5, padding: seed.spacing.x5, backgroundColor: seed.color.layer.elevated, shadowColor: colors.black, shadowOpacity: 0.2, shadowRadius: 24, shadowOffset: { width: 0, height: 12 }, elevation: 12 },
   modalHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: seed.spacing.x3 },
   modalBadge: { overflow: "hidden", borderRadius: seed.radius.r2, paddingHorizontal: seed.spacing.x2_5, paddingVertical: seed.spacing.x1_5, color: colors.greenInk, backgroundColor: seed.color.background.brandWeak, ...seed.typography.finePrint, fontWeight: "800" },
@@ -558,7 +581,8 @@ const styles = StyleSheet.create({
   retryLabel: { color: colors.white, fontSize: 12, fontWeight: "800" },
   loading: { paddingHorizontal: seed.spacing.globalGutter, paddingVertical: 58, alignItems: "center", gap: 12 },
   loadingText: { color: colors.muted, fontSize: 14 },
-  list: { paddingHorizontal: seed.spacing.globalGutter, gap: seed.spacing.x3_5 },
+  listItem: { paddingHorizontal: seed.spacing.globalGutter },
+  listGap: { height: seed.spacing.x3_5 },
   searchEmpty: { minHeight: 320, marginHorizontal: seed.spacing.globalGutter, paddingHorizontal: seed.spacing.x5, alignItems: "center", justifyContent: "center" },
   searchEmptyTitle: { marginTop: seed.spacing.x3_5, textAlign: "center" },
   searchEmptyBody: { marginTop: seed.spacing.x2, color: colors.muted, fontSize: 13, lineHeight: 20, textAlign: "center" },
@@ -575,9 +599,6 @@ const styles = StyleSheet.create({
   listingTitle: { color: colors.ink, fontSize: 16, lineHeight: 22, fontWeight: "900" },
   cardHeadingDivider: { marginTop: seed.spacing.x3 },
   exchangePanel: { marginTop: seed.spacing.x3, borderRadius: seed.radius.r4, backgroundColor: seed.color.background.neutralWeak, padding: seed.spacing.x3, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: seed.spacing.x3 },
-  applyTile: { width: 104, height: 92, borderRadius: seed.radius.r3, backgroundColor: seed.color.background.neutralSolid, alignItems: "center", justifyContent: "center" },
-  applyTileLabel: { color: colors.white, ...seed.typography.bodyStrong },
-  applyTileMeta: { marginTop: seed.spacing.x1, color: "#C9CEC9", ...seed.typography.caption },
   bundleInfoList: { marginTop: seed.spacing.x3 },
   bundleInfoGroup: { minWidth: 0 },
   bundleItemDivider: { marginVertical: seed.spacing.x2_5 },
@@ -587,8 +608,8 @@ const styles = StyleSheet.create({
   bundleValueDivider: { marginTop: seed.spacing.x2 },
   bundleProductValue: { marginTop: seed.spacing.x1_5, color: colors.ink, ...seed.typography.catalogPrice },
   cardFooter: { marginTop: seed.spacing.x3, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 },
-  author: { flex: 1, color: colors.muted, fontSize: 11, fontWeight: "700" },
-  offerCount: { color: colors.greenInk, fontSize: 11, fontWeight: "900" },
+  author: { flex: 1, color: colors.muted, fontWeight: "700" },
+  offerCount: { color: colors.greenInk, fontWeight: "700" },
   mediaPlaceholder: { flex: 1, alignItems: "center", justifyContent: "center", padding: 12 },
-  mediaPlaceholderLabel: { color: colors.muted, fontFamily: "monospace", ...seed.typography.finePrint, fontWeight: "800", textAlign: "center" },
+  mediaPlaceholderLabel: { color: colors.muted, fontWeight: "700", textAlign: "center" },
 });

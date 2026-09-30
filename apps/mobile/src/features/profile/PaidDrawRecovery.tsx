@@ -42,7 +42,7 @@ export function PaidDrawRecovery({
   const sourceForSession = useCallback(async (signal: AbortSignal) => {
     const tokens = await readAuthTokens();
     if (!tokens?.accessToken) throw new Error("로그인 후 남은 추첨권을 확인해 주세요.");
-    if (signal.aborted) throw new Error("추첨권 확인이 취소되었습니다.");
+    if (signal.aborted) throw new Error("추첨권 확인이 취소됐어요.");
     return { source: createPaidDrawRecoverySource(apiBaseUrl, tokens.accessToken, signal), accessToken: tokens.accessToken };
   }, [apiBaseUrl]);
 
@@ -57,7 +57,7 @@ export function PaidDrawRecovery({
           setItems([]);
           setCursor(null);
         }
-        throw new Error("로그인 계정이 변경되었습니다. 구매 내역을 다시 불러와 주세요.");
+        throw new Error("로그인 계정이 변경됐어요. 구매 내역을 다시 불러와 주세요.");
       }
       const page = await source.fetchPage(nextCursor);
       const currentTokens = await readAuthTokens();
@@ -65,13 +65,13 @@ export function PaidDrawRecovery({
       if (currentTokens?.accessToken !== accessToken) {
         setItems([]);
         setCursor(null);
-        throw new Error("로그인 정보가 변경되었습니다. 구매 내역을 다시 불러와 주세요.");
+        throw new Error("로그인 정보가 변경됐어요. 구매 내역을 다시 불러와 주세요.");
       }
-      if (nextCursor && page.nextCursor === nextCursor) throw new Error("추첨권 목록을 더 불러오지 못했습니다.");
+      if (nextCursor && page.nextCursor === nextCursor) throw new Error("추첨권 목록을 더 불러오지 못했어요.");
       setItems((current) => nextCursor ? [...current, ...page.items] : page.items);
       setCursor(page.nextCursor);
     } catch (error) {
-      if (!controller.signal.aborted) setMessage(error instanceof Error ? error.message : "남은 추첨권을 불러오지 못했습니다.");
+      if (!controller.signal.aborted) setMessage(error instanceof Error ? error.message : "남은 추첨권을 불러오지 못했어요.");
     } finally {
       if (!controller.signal.aborted) {
         workingRef.current = false;
@@ -104,7 +104,7 @@ export function PaidDrawRecovery({
       const route = await preparePaidDrawRecovery(group, actorId, source, controller.signal);
       const currentTokens = await readAuthTokens();
       if (controller.signal.aborted) return;
-      if (currentTokens?.accessToken !== accessToken) throw new Error("로그인 정보가 변경되었습니다. 구매 내역을 다시 불러와 주세요.");
+      if (currentTokens?.accessToken !== accessToken) throw new Error("로그인 정보가 변경됐어요. 구매 내역을 다시 불러와 주세요.");
       if (route.startsWith("/draw/reveal/")) {
         presentDrawOpenModeChoice(drawEntitlementCountFromPath(route), (mode) => {
           if (!controller.signal.aborted) router.push(withDrawOpenMode(route, mode) as Href);
@@ -113,7 +113,7 @@ export function PaidDrawRecovery({
         router.push(route as Href);
       }
     } catch (error) {
-      if (!controller.signal.aborted) setMessage(error instanceof Error ? error.message : "이어 뽑기를 시작하지 못했습니다.");
+      if (!controller.signal.aborted) setMessage(error instanceof Error ? error.message : "이어 뽑기를 시작하지 못했어요.");
     } finally {
       if (!controller.signal.aborted) {
         workingRef.current = false;

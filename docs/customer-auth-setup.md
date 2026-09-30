@@ -1,8 +1,35 @@
 # DABBOBA 고객 로그인 연결 안내
 
-## 최신 승인 방향 · 2026-09-09
+## 최신 승인 방향 · 2026-09-25
 
-최신 사용자 결정은 **카카오·네이버·구글·애플·이메일** 다섯 가지다. 이메일은 **비밀번호 없는 인증번호 방식**이다. 휴대폰 로그인은 고객 선택지에서 제외하되 기존 PHONE identity, 전화번호 및 연결된 계정·주문 데이터는 삭제하지 않는다.
+첫 공개판의 고객 로그인 선택지는 **휴대폰 문자 인증, 카카오, 네이버, 구글**이며 **iPhone에는 Apple 로그인도 추가**한다. 이메일 OTP는 새 로그인 화면에서 제외한다. 기존 EMAIL/PHONE identity와 연결된 계정·거래 기록은 삭제하거나 임의 병합하지 않는다. 휴대폰 번호는 한국 010 형식을 E.164로 정규화하고 Supabase Auth의 실제 인증 완료 시각을 확인한다. 문자 인증은 CI/DI 본인확인이 아니다.
+
+서버 환경 `CUSTOMER_AUTH_ENABLED_PROVIDERS`에는 운영 콘솔 설정과 실제 기기 검증을 통과한 방식만 넣는다. 현재 운영 프로젝트에서 공개 provider 목록이 비어 있으면 앱은 로그인 선택지를 숨긴다. SMS 공급자, Kakao/Naver/Google 개발자 앱, Apple 설정, 탈퇴 worker가 준비되지 않은 상태를 코드 테스트만으로 완료 처리하지 않는다. PRELAUNCH에서 결제·뽑기는 계속 차단한다.
+
+웹 계정 삭제는 가입한 휴대폰 또는 기존 소셜 계정으로 재인증한다. 문자 요청은 `create_user:false`로 기존 Auth 사용자만 대상으로 하고, 계정 존재 여부와 관계없이 같은 공개 응답을 반환한다. 확인된 계정에만 단기 DABBOBA 탈퇴 세션을 발급한다. 실제 Supabase Auth 사용자 삭제와 worker 완료 상태를 조회하기 전까지 탈퇴 완료로 보고하지 않는다.
+
+### 새 운영 프로젝트 현황과 친구 명의 계정에서 필요한 작업
+
+2026-09-25 확인 대상은 `rconfxsykttfvznakile`이다. Supabase Auth 공개 설정에서 phone/Kakao/Google/Apple은 꺼져 있고 Naver는 제공자 목록에 없으며 `/v1/auth/providers`는 `methods: []`이다. `sms_provider`에는 Twilio가 선택돼 있지만 사용자가 확인한 Twilio Account SID·Auth Token·Message Service SID 입력란은 비어 있다. Phone 로그인과 실제 문자 발송은 불가능하며 활성화하지 않았다. Supabase의 Email 인증은 켜져 있으며 Auth identity 집계상 email 1건이 존재한다. 새 앱 로그인 선택지에서 EMAIL을 숨기는 결정은 유지하되, 해당 계정의 소유자와 대체 로그인·삭제 경로를 확인하기 전에는 Email 제공자를 전역 비활성화하거나 identity를 삭제하지 않는다. 공개 API는 `PRELAUNCH`다. CLI 기본 연결에서 이 친구 명의 프로젝트가 조회됐으며 운영 DB는 `0067_catalog_media_project_rebase.sql`까지 적용돼 있다. 탈퇴 완료에 필요한 `0068_worker_account_deletion_privileges.sql`은 아직 운영에 적용하지 않았고, 해당 두 열 권한도 없다. Edge Function 목록에는 `dabboba-api`만 있으며 탈퇴를 처리할 `dabboba-worker`와 관련 worker secret은 없다. 웹 탈퇴 화면은 HTTPS 200이지만 자동 인증 설정은 503이다. 현재 Auth 사용자 1명은 소유권이 확인되지 않았으므로 탈퇴 검증 대상으로 사용하거나 삭제하지 않는다. 명시적 승인 후 `dabboba_worker` 비밀번호만 새로 발급·교체했고, 친구 명의 DB의 제한 역할로 재접속을 확인했다. 새 자격증명은 로컬 0600 `../.dabboba-launch/supabase-production-worker.env`에 있으며 Edge에는 아직 배포하지 않았다. 과거 QA Edge profile은 보존하고 새 production profile과 분리했다.
+
+Google Cloud `DABBOBA` 프로젝트에는 `DABBOBA Supabase Auth` 웹 OAuth 클라이언트가 생성돼 있다. 승인된 원본 `https://dabboba.net`과 Supabase callback `https://rconfxsykttfvznakile.supabase.co/auth/v1/callback`을 화면에서 확인했다. 브랜딩의 홈페이지·개인정보처리방침·약관 URL도 각각 공개 HTTPS 페이지로 저장됐다. 단, Google 앱은 아직 **외부·테스트 중**이며 테스트 사용자 0명이다. 친구 명의 운영 Supabase 설정 화면을 2026-09-25 재확인했으나 Google provider는 여전히 Disabled이고, `Client IDs` 칸에는 OAuth ID가 아닌 이메일 형식의 문자열이 입력돼 저장이 비활성화돼 있으며 Client Secret도 비어 있다. 현재 앱 내 브라우저의 Google Cloud 세션은 친구 명의 프로젝트에 접근 권한이 없는 다른 계정으로 열려 있어 자격증명을 옮기지 않았다. 친구 명의 계정으로 콘솔에 로그인한 뒤 실제 Client ID/Secret을 Supabase에 직접 저장해야 한다. 실제 로그인은 수행하지 않았으며 API의 `GOOGLE` 공개 플래그도 켜지 않았다.
+
+태현 iPhone 16 Pro에는 2026-09-25 PRELAUNCH 내부 빌드 `1.0.0 (3)`을 등록·재서명해 설치했고, 실기기 화면에서 홈이 실행되는 것을 확인했다. 이 빌드의 커밋은 `9bd52fe`로 현재 미커밋 인증 변경은 포함되지 않는다. 설치·실행은 Google 등 고객 로그인이나 운영 탈퇴 검증의 증거가 아니다.
+
+격리된 loopback PostgreSQL TEST DB에 `0068`까지 적용·재실행 no-op를 확인했고, 필수 통합검사 `test:integration:required`의 빌드 12/12·테스트 작업 20/20을 통과했다. DB 공유 fixture의 잠금·잔여 작업으로 인해 테스트가 서로 간섭하던 부분은 필수 검사 순차 실행과 각 테스트의 대상 범위 제한으로 수정했다. 이는 운영 migration·Edge worker 배포·실제 Auth 사용자 삭제의 증거가 아니다.
+
+1. 친구 명의 Supabase 프로젝트의 **Authentication → Providers → Phone**에서 이미 선택된 Twilio 계정·발신번호·전송 가능 국가·비용 및 실제 전달 준비를 먼저 확인한다. 이를 모른 채 새 SMS 서비스를 중복 계약하거나 Phone을 공개 활성화하지 않는다. 준비가 확인되면 SMS OTP 길이 6자리, 유효기간 600초, 재전송 제한 60초와 요금 방지 제한/CAPTCHA를 앱·운영 설정에 맞춘다. 발송 서비스의 이름·위탁 및 국외 이전 여부를 법률 담당자에게 확인하고, 개인정보처리방침 새 버전·해시·DB 문서 증거를 먼저 게시한다. 전화번호만으로 CI/DI 실명 본인확인을 했다고 표시하지 않는다.
+2. 친구 명의 Kakao Developers, Naver Developers, Google Cloud, Apple Developer에서 각각 앱/클라이언트를 만들고 Supabase callback `https://rconfxsykttfvznakile.supabase.co/auth/v1/callback`을 등록한다. Naver는 `custom:naver`/issuer `https://nid.naver.com`; iPhone Apple은 `com.dabboba.mobile`과 Apple 삭제 시 토큰 폐기 설정까지 필요하다. 각 client secret은 Supabase/서버 secret 설정 화면에만 넣고 채팅·Git에는 보내지 않는다.
+3. 앱 OAuth allow list `dabboba://auth/callback**`와 웹 탈퇴 callback `https://dabboba.net/account-deletion/auth/social/callback**`을 Supabase에서 확인한다. 제공자마다 실제 기기에서 신규 로그인·재로그인·취소·앱 종료 후 복구를 통과한 뒤에만 서버의 `DABBOBA_API_CUSTOMER_AUTH_ENABLED_PROVIDERS`에 추가한다. Android는 PHONE/KAKAO/NAVER/GOOGLE, iPhone은 이에 APPLE을 더한다. EMAIL은 새 로그인 선택지에 넣지 않는다.
+4. 승인받은 `dabboba_worker` 비밀번호 회전과 새 제한 역할 접속 검증은 완료했다. 검증된 로컬 전용 값만 production Edge profile에 연결하고, 새 프로젝트의 `DABBOBA_WORKER_DATABASE_URL`, `DABBOBA_WORKER_INVOKE_SECRET`, Apple 폐기 비밀을 Edge secret manager에 설정한 뒤 `dabboba-worker` 배포·1분 스케줄·인증된 유한 실행을 확인한다. 과거 QA 프로젝트의 비밀번호·secret은 재사용하지 않는다.
+   - 탈퇴 worker가 실제 완료 기록을 남기려면 `0068_worker_account_deletion_privileges.sql`까지 운영 DB migration을 적용해야 한다. 로컬 PostgreSQL 통합검사에서 이 권한이 없을 때 완료 대신 재시도 상태로 남는 문제를 재현했고, 최소 열 권한을 추가한 뒤 재시도·완료·중복 실행을 통과했다. 이 로컬 검사는 운영 Supabase Auth 삭제의 증거가 아니다.
+5. Cloudflare Pages의 `dabboba.net`에 새 웹 탈퇴 코드와 공개 값만 배포한다. 실제 본인 소유의 삭제 검증용 고객 계정을 명시적으로 지정한 뒤 로그인 → 서버 로그아웃 → 재로그인 → 앱/웹 탈퇴 접수 → worker 실행 → Supabase Auth 사용자 404 또는 목록 부재 → DB 탈퇴 완료·접수증 조회까지 확인한다. 소유권이 불분명한 기존 Auth 사용자를 삭제하지 않는다.
+
+이 항목들은 **설정 절차**이지 완료 증거가 아니다. 공식 참고: [Phone Login](https://supabase.com/docs/guides/auth/phone-login), [Kakao](https://supabase.com/docs/guides/auth/social-login/auth-kakao), [Custom OAuth](https://supabase.com/docs/guides/auth/custom-oauth-providers), [Google](https://supabase.com/docs/guides/auth/social-login/auth-google), [Auth Admin 삭제](https://supabase.com/docs/reference/javascript/auth-admin-deleteuser).
+
+## 이전 승인 방향 · 2026-09-09 (2026-09-25에 로그인 선택지 변경됨)
+
+당시 사용자 결정은 **카카오·네이버·구글·애플·이메일** 다섯 가지였다. 이메일은 **비밀번호 없는 인증번호 방식**이었다. 당시 휴대폰 로그인은 고객 선택지에서 제외했지만, 2026-09-25 새 결정으로 다시 포함됐다. 기존 PHONE identity, 전화번호 및 연결된 계정·주문 데이터는 삭제하지 않는다.
 
 사용자는 **본인확인도 제외하고 SNS·이메일 연결만** 하기로 명시했다. 국내 본인확인, CI/DI 수집, 본인확인 업체 계약과 1인1계정 강제는 이번 범위에서 제외한다. SNS·이메일만으로 동일인의 여러 가입을 확실히 막을 수는 없다. 사용자가 명시적으로 연결한 수단은 동일한 DABBOBA 계정으로 사용하게 한다.
 
@@ -64,14 +91,14 @@ Supabase 변경 기록에서 신규 Free 프로젝트의 기본 SMTP 이메일 �
 
 ## 사용자가 직접 해야 하는 설정
 
-아래는 기존 세 가지 방식의 설정 참고 자료이며 지금 전부 수행하라는 요청이 아니다. 이미 존재하는 Supabase 프로젝트를 중복 생성하지 않는다. 실제 해당 단계에 도달하면 필요한 작업만 사용자와 함께 확인한다. 외부 서비스의 소유자 권한, 약관 동의, 결제수단 또는 비밀값이 필요한 부분을 코드 완료로 대신 표시하지 않는다. 비밀값은 채팅이나 Git에 붙이지 말고 배포 환경의 secret manager 또는 각 서비스 콘솔에 직접 입력한다.
+아래는 친구 명의 운영 계정에서 제공자별로 진행할 설정 안내다. 이미 존재하는 Supabase 프로젝트를 중복 생성하지 않는다. 실제 해당 단계에 도달하면 필요한 작업만 사용자와 함께 확인한다. 외부 서비스의 소유자 권한, 약관 동의, 결제수단 또는 비밀값이 필요한 부분을 코드 완료로 대신 표시하지 않는다. 비밀값은 채팅이나 Git에 붙이지 말고 배포 환경의 secret manager 또는 각 서비스 콘솔에 직접 입력한다.
 
 ### 1. Supabase project와 운영 DB 만들기
 
 1. 서울 또는 최종 운영 지역에 Supabase project를 만든다.
 2. Dashboard에서 project URL과 publishable key를 확인한다.
 3. 운영 API가 사용할 제한 계정 `dabboba_runtime`의 PostgreSQL connection string을 배포 secret manager의 `DATABASE_URL`에 넣는다. worker는 별도 `dabboba_worker` 연결을 `WORKER_DATABASE_URL`로 받고, schema owner인 `postgres` 연결은 `DATABASE_MIGRATION_URL`에 별도로 보관해 단일 migration job에만 주입한다. 세 값 모두 모바일 앱에 넣지 않는다.
-4. Node API 환경에는 `SUPABASE_URL`, `SUPABASE_JWT_AUDIENCE=authenticated`, `SUPABASE_PUBLISHABLE_KEY`를 넣고, 실제 콘솔 설정과 실기기 검증을 끝낸 방식만 `CUSTOMER_AUTH_ENABLED_PROVIDERS`에 쉼표로 나열한다(예: `KAKAO,EMAIL`). 값이 없으면 `/v1/auth/providers`는 로그인 방식을 하나도 노출하지 않는 fail-closed 상태다. 이 public key는 사용자 JWT로 Auth 서버를 재조회하는 데 사용하며 service-role/secret key로 대체하지 않는다. Apple을 노출하려면 API와 탈퇴 worker 양쪽에 같은 `APPLE_TOKEN_ENCRYPTION_KEY`(무작위 32바이트 base64/base64url)와 `APPLE_TOKEN_ENCRYPTION_KEY_VERSION`을 넣고, worker에만 `APPLE_CLIENT_ID`와 `APPLE_CLIENT_SECRET`을 추가한다. Apple refresh token은 로그인 직후 API에서 AES-256-GCM으로 암호화되며 탈퇴 worker가 Apple revoke 성공을 확인한 뒤에만 Supabase 사용자 삭제를 진행한다. 네 값 중 일부가 없거나 복호화/폐기가 실패하면 worker는 로컬 identity와 PII를 유지한 채 재시도한다. Supabase Edge에서는 예약된 사용자 정의 이름 대신 `DABBOBA_API_SUPABASE_PUBLISHABLE_KEY`, `DABBOBA_API_CUSTOMER_AUTH_ENABLED_PROVIDERS`, `DABBOBA_API_APPLE_TOKEN_ENCRYPTION_KEY`, `DABBOBA_API_APPLE_TOKEN_ENCRYPTION_KEY_VERSION`을 사용하거나 플랫폼의 기본 `SUPABASE_ANON_KEY`를 사용한다.
+4. Node API 환경에는 `SUPABASE_URL`, `SUPABASE_JWT_AUDIENCE=authenticated`, `SUPABASE_PUBLISHABLE_KEY`를 넣고, 실제 콘솔 설정과 실기기 검증을 끝낸 방식만 `CUSTOMER_AUTH_ENABLED_PROVIDERS`에 쉼표로 나열한다(예: 검증된 경우 `GOOGLE`). 값이 없으면 `/v1/auth/providers`는 로그인 방식을 하나도 노출하지 않는 fail-closed 상태다. 이 public key는 사용자 JWT로 Auth 서버를 재조회하는 데 사용하며 service-role/secret key로 대체하지 않는다. Apple을 노출하려면 API와 탈퇴 worker 양쪽에 같은 `APPLE_TOKEN_ENCRYPTION_KEY`(무작위 32바이트 base64/base64url)와 `APPLE_TOKEN_ENCRYPTION_KEY_VERSION`을 넣고, worker에만 `APPLE_CLIENT_ID`와 `APPLE_CLIENT_SECRET`을 추가한다. Apple refresh token은 로그인 직후 API에서 AES-256-GCM으로 암호화되며 탈퇴 worker가 Apple revoke 성공을 확인한 뒤에만 Supabase 사용자 삭제를 진행한다. 네 값 중 일부가 없거나 복호화/폐기가 실패하면 worker는 로컬 identity와 PII를 유지한 채 재시도한다. Supabase Edge에서는 예약된 사용자 정의 이름 대신 `DABBOBA_API_SUPABASE_PUBLISHABLE_KEY`, `DABBOBA_API_CUSTOMER_AUTH_ENABLED_PROVIDERS`, `DABBOBA_API_APPLE_TOKEN_ENCRYPTION_KEY`, `DABBOBA_API_APPLE_TOKEN_ENCRYPTION_KEY_VERSION`을 사용하거나 플랫폼의 기본 `SUPABASE_ANON_KEY`를 사용한다.
 5. 모바일 build 환경에는 `EXPO_PUBLIC_SUPABASE_URL`, `EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY`만 넣는다.
 6. JWT signing key가 공개 JWKS로 검증 가능한 `ES256` 또는 `RS256` 비대칭 키인지 확인한다. 현재 API는 공유 secret 방식의 `HS256` 토큰을 받지 않는다.
 7. 값 입력이 끝나면 담당 개발자가 Session pooler(5432)의 migration 재실행이 no-op인지, runtime 역할의 허용·차단 권한, `/readyz`, `/v1/auth/providers`를 다시 검증한다.
@@ -104,11 +131,17 @@ Expo Go는 실제 custom-scheme OAuth 출시 증거로 사용하지 않는다. p
 
 네이버 provider가 Supabase의 현재 Custom OAuth/OIDC 요구사항을 충족하지 못하면 중간 인증 adapter가 추가로 필요하다. client secret을 앱에 직접 넣는 방식으로 우회하지 않는다.
 
-### 5. 휴대폰번호 로그인 · 제외된 과거 설정 참고
+### 5. 구글 로그인
 
-이번 출시 로그인에서는 SMS 및 국내 본인확인을 제외한다. 새 SMS 공급자 계약이나 발송 설정은 요청하지 않는다. 기존 PHONE 계정은 삭제하지 않으며, 해당 계정 사용자의 안전한 로그인 수단 전환·복구는 기존 계정 소유권을 확인한 뒤 별도로 처리한다.
+1. 친구 명의 Google Cloud 프로젝트를 선택하거나 새로 만든다. Google Auth Platform의 Branding·Audience·Data Access를 설정하고 `openid`, `userinfo.email`, `userinfo.profile`만 요청한다.
+2. OAuth client 유형을 **Web application**으로 만들고 승인된 리디렉션 URI에 `https://rconfxsykttfvznakile.supabase.co/auth/v1/callback`을 등록한다. 웹 탈퇴 로그인에 쓸 승인된 JavaScript origin은 `https://dabboba.net`이다. 모바일 `dabboba://auth/callback`은 Google Cloud가 아니라 Supabase Auth의 Redirect URLs 허용 목록에 등록한다.
+3. 발급된 Client ID와 Client Secret을 친구 명의 Supabase 프로젝트의 **Authentication → Providers → Google**에 직접 입력한다. 비밀값을 채팅·Git·Expo 앱에 넣지 않는다. 설정과 Google 심사/게시 상태를 확인한 뒤 실제 고객 소유 계정으로 로그인·앱 재실행·로그아웃·재로그인을 검증한다. 검증 전 API의 공개 `GOOGLE` 플래그는 켜지 않는다.
 
-### 6. 출시 전 운영 결정
+### 6. 휴대폰번호 로그인
+
+Twilio 입력란은 현재 비어 있다. 친구 명의 문자 발송 서비스 계정, 대한민국 수신 가능 여부, 발신 수단과 요금을 확인한 뒤 Supabase Phone 설정에 연결한다. 실제 번호로 OTP 발송·만료·재전송·로그아웃 후 복구를 확인하기 전 Phone 로그인과 공개 API 플래그는 켜지 않는다. 문자 인증을 CI/DI 본인확인으로 표시하지 않는다.
+
+### 7. 출시 전 운영 결정
 
 - Supabase의 인증된 동일 이메일 자동 연결은 승인됐다. 별도 DABBOBA 계정 간의 주문·잔액 병합이나 고객센터 임의 병합은 승인되지 않았다.
 - 같은 이메일이라는 이유만으로 DABBOBA 계정을 합치지 않는다. 본인확인을 제외했으므로 사람 단위 중복 가입 방지는 보장하지 않고, 로그인 상태에서 소유권을 확인한 명시적 연결을 제공한다.
@@ -118,7 +151,7 @@ Expo Go는 실제 custom-scheme OAuth 출시 증거로 사용하지 않는다. p
 
 ## 연결 뒤 확인할 완료 기준
 
-- 카카오·네이버·구글·애플·이메일 인증번호 각각 신규 가입과 재로그인이 성공한다. 휴대폰은 선택지에 없고 기존 계정 데이터는 보존된다.
+- 휴대폰 문자·카카오·네이버·구글, 그리고 iPhone의 Apple 로그인으로 신규 가입과 재로그인이 성공한다. 이메일 OTP는 새 로그인 선택지에 없고 기존 계정 데이터는 보존된다.
 - 외부 access token은 API에서만 검증되고, 앱에는 DABBOBA session만 남는다.
 - 잘못된 issuer/audience/signature, 만료 token, 익명 계정, 지원하지 않는 provider 및 broker 조회의 주체 불일치는 거부된다. Supabase가 같은 주체로 인증한 허용 다중 identity는 같은 계정을 사용한다.
 - 정지·탈퇴 계정은 로그인할 수 없고, 만료된 DABBOBA session은 앱에서 제거된다.

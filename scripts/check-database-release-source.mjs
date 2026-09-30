@@ -93,6 +93,80 @@ export const DATABASE_RELEASE_MIGRATIONS = Object.freeze([
     path: 'packages/db/migrations/0065_legal_policy_dabboba_net.sql',
     sha256: 'd893ceb9ccd56cf7830b1b73b0e61f58d8663bc596d5fa6e8b4e069def2b64e3',
   }),
+  Object.freeze({
+    file: '0066_worker_pgmq_set_vt_dependency.sql',
+    path: 'packages/db/migrations/0066_worker_pgmq_set_vt_dependency.sql',
+    sha256: '0f05466a1bbd71fa2b752da4e3506ab27c5e717de68ca92198db667ce5387792',
+  }),
+  Object.freeze({
+    file: '0067_catalog_media_project_rebase.sql',
+    path: 'packages/db/migrations/0067_catalog_media_project_rebase.sql',
+    sha256: '0a1bb0922d0052665c79e2158cf10e7048f7e99fe0254c3603ae8993fa731a42',
+  }),
+  Object.freeze({
+    file: '0068_worker_account_deletion_privileges.sql',
+    path: 'packages/db/migrations/0068_worker_account_deletion_privileges.sql',
+    sha256: '770dea74cacc6c6db0946c35003d4310fff3c07d2a03affbd04078820c29bd9a',
+  }),
+  Object.freeze({
+    file: '0069_portone_refund_cancellation_attempts.sql',
+    path: 'packages/db/migrations/0069_portone_refund_cancellation_attempts.sql',
+    sha256: '798772fddd50e9a7384de493ddc5637522904487a1ec5327cfbd0258552d06dc',
+  }),
+  Object.freeze({
+    file: '0070_admin_payment_reconciliation_permission.sql',
+    path: 'packages/db/migrations/0070_admin_payment_reconciliation_permission.sql',
+    sha256: 'd4d553b5be97f849f3cb576ac51a731878e6ff004453025a2ceaa9be7ddeee70',
+  }),
+  Object.freeze({
+    file: '0071_worker_verified_portone_reconciliation.sql',
+    path: 'packages/db/migrations/0071_worker_verified_portone_reconciliation.sql',
+    sha256: '0d81599b7c8f01fe4072347fe825fc6d95b55eb1a0791ed7288df017fc4e0434',
+  }),
+  Object.freeze({
+    file: '0072_guard_worker_payment_transitions.sql',
+    path: 'packages/db/migrations/0072_guard_worker_payment_transitions.sql',
+    sha256: '281321415e20688e0670999290f1de960c36b81c46f8b620fed3a07620ea99da',
+  }),
+  Object.freeze({
+    file: '0073_portone_payment_window_claim.sql',
+    path: 'packages/db/migrations/0073_portone_payment_window_claim.sql',
+    sha256: '62a2a7ee195046a747a747c0723dbbcae1fbd225e59aa6ae9f3f1bb88ad9807e',
+  }),
+  Object.freeze({
+    file: '0074_claimed_cancelled_payment_reconciliation_index.sql',
+    path: 'packages/db/migrations/0074_claimed_cancelled_payment_reconciliation_index.sql',
+    sha256: 'c710d7b81a83f1e89e47638fb773d1be81e9906e8b547844cfa8e9e01949cb3c',
+  }),
+  Object.freeze({
+    file: '0075_shipping_request_retry_after_cancellation.sql',
+    path: 'packages/db/migrations/0075_shipping_request_retry_after_cancellation.sql',
+    sha256: 'b2cceb7a6b01e9e9f4a399420a560f2cd7c2d445fcf813760b451e04f95a4494',
+  }),
+  Object.freeze({
+    file: '0076_legal_policy_business_phone.sql',
+    path: 'packages/db/migrations/0076_legal_policy_business_phone.sql',
+    sha256: '48df0f0441e93e754168ce87936ba3c2989e3ce66c807c07e5cf2c1e3d4cd581',
+  }),
+  Object.freeze({
+    file: '0077_session_scope.sql',
+    path: 'packages/db/migrations/0077_session_scope.sql',
+    sha256: 'dd09f7792b61a169d2a11af9741023f9ee7847e93e4cf67cb7624a574de16f48',
+  }),  Object.freeze({
+    file: '0078_commerce_indexes.sql',
+    path: 'packages/db/migrations/0078_commerce_indexes.sql',
+    sha256: '4d03159f18d6a242fee7465fa79ccd97c3eb6189dde55934bbeaa9492e04a611',
+  }),
+  Object.freeze({
+    file: '0079_worker_retention.sql',
+    path: 'packages/db/migrations/0079_worker_retention.sql',
+    sha256: 'd577567db75431c5da750acac84e18867f3bd79169d665d0ae0b7fa876fdb2ff',
+  }),
+  Object.freeze({
+    file: '0080_retention_indexes.sql',
+    path: 'packages/db/migrations/0080_retention_indexes.sql',
+    sha256: 'dbae9f62136ac8cf48be8cebc0ab325c9162d1616838fea12af8eee88c60d10d',
+  }),
 ]);
 
 export const MINIMUM_DATABASE_RELEASE_VERSION =

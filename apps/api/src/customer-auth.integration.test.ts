@@ -35,6 +35,7 @@ test("customer broker reuses one Supabase subject without merging email peers an
     supabaseUrl: "https://project.supabase.co",
     supabaseJwtAudience: "authenticated",
     supabasePublishableKey: "sb_publishable_customer_auth_fixture",
+    customerLoginProviders: ["PHONE", "KAKAO", "NAVER", "GOOGLE", "APPLE"],
     appleCredentialEncryption: {
       key: Buffer.alloc(32, 6).toString("base64url"),
       keyVersion: 1,
@@ -122,7 +123,7 @@ test("customer broker reuses one Supabase subject without merging email peers an
       accessToken,
       loginProvider,
       ...(loginProvider === "APPLE" ? { appleRefreshToken: `apple-refresh-${"x".repeat(64)}` } : {}),
-      acceptedPolicies: { terms: "2026-09-22", privacy: "2026-09-22" },
+      acceptedPolicies: { terms: "2026-09-30", privacy: "2026-09-30" },
     },
     });
   };
@@ -137,7 +138,7 @@ test("customer broker reuses one Supabase subject without merging email peers an
       accessToken,
       loginProvider,
       ...(appleRefreshToken ? { appleRefreshToken } : {}),
-      acceptedPolicies: { terms: "2026-09-22", privacy: "2026-09-22" },
+      acceptedPolicies: { terms: "2026-09-30", privacy: "2026-09-30" },
     },
   });
 
@@ -193,9 +194,10 @@ test("customer broker reuses one Supabase subject without merging email peers an
   assert.notEqual(firstSeparateId, secondSeparateId);
 
   const legacySubject = `legacy-phone-${suffix}`;
+  const legacyPhone = `+8210${suffix.replace(/\D/g, "").padEnd(8, "0").slice(0, 8)}`;
   const legacy = await ownerPool.query<{ id: string }>(
     "INSERT INTO users(email,nickname,role,status,phone_e164) VALUES(NULL,$1,'USER','ACTIVE',$2) RETURNING id",
-    ["legacy phone fixture", `+8210${suffix.replace(/\D/g, "").padEnd(8, "0").slice(0, 8)}`],
+    ["legacy phone fixture", legacyPhone],
   );
   const legacyId = legacy.rows[0]!.id;
   createdUserIds.add(legacyId);
@@ -211,6 +213,30 @@ test("customer broker reuses one Supabase subject without merging email peers an
     [legacyId],
   );
   assert.deepEqual(legacyProviders.rows.map((row) => row.provider), ["APPLE", "PHONE"]);
+
+  const phoneSubject = `phone-otp-${suffix}`;
+  const phoneNumber = `+8210${suffix.replace(/\D/g, "").padEnd(16, "0").slice(8, 16)}`;
+  const phoneClaims = { ...claims(phoneSubject, ["PHONE"], null), phone: phoneNumber };
+  const phoneLogin = await exchange(token("phone-otp", phoneClaims));
+  assert.equal(phoneLogin.statusCode, 201, phoneLogin.body);
+  const phoneUserId = (phoneLogin.json() as { actor: { userId: string } }).actor.userId;
+  createdUserIds.add(phoneUserId);
+  const phoneRow = await ownerPool.query<{ phone_e164: string; provider: string }>(
+    `SELECT u.phone_e164,ai.provider FROM users u
+       JOIN auth_identities ai ON ai.user_id=u.id
+      WHERE u.id=$1 AND ai.provider='PHONE'`,
+    [phoneUserId],
+  );
+  assert.deepEqual(phoneRow.rows, [{ phone_e164: phoneNumber, provider: "PHONE" }]);
+  const phoneReauth = await webDeletionExchange(token("phone-deletion-verify", phoneClaims), "PHONE");
+  assert.equal(phoneReauth.statusCode, 201, phoneReauth.body);
+  assert.equal((phoneReauth.json() as { actor: { userId: string } }).actor.userId, phoneUserId);
+
+  const duplicatePhone = await exchange(token("phone-conflict", {
+    ...claims(`phone-conflict-${suffix}`, ["PHONE"], null),
+    phone: legacyPhone,
+  }));
+  assert.equal(duplicatePhone.statusCode, 409, duplicatePhone.body);
 
   const socialOnlySubject = `web-deletion-social-${suffix}`;
   const socialOnlyClaims = claims(socialOnlySubject, ["KAKAO"], null);
@@ -228,11 +254,17 @@ test("customer broker reuses one Supabase subject without merging email peers an
     actor: { userId: string; sessionId: string };
   };
   assert.equal(socialDeletionBody.actor.userId, socialOnlyUserId);
-  const webDeletionSession = await ownerPool.query<{ expires_at: Date }>(
-    "SELECT expires_at FROM sessions WHERE id=$1 AND user_id=$2",
+  const webDeletionSession = await ownerPool.query<{ expires_at: Date; scope: string }>(
+    "SELECT expires_at,scope FROM sessions WHERE id=$1 AND user_id=$2",
     [socialDeletionBody.actor.sessionId, socialOnlyUserId],
   );
   assert.equal(webDeletionSession.rowCount, 1);
+  assert.equal(webDeletionSession.rows[0]!.scope, "ACCOUNT_DELETION");
+  const ordinarySession = await ownerPool.query<{ scope: string }>(
+    "SELECT scope FROM sessions WHERE id=$1",
+    [(socialOnlyLogin.json() as { actor: { sessionId: string } }).actor.sessionId],
+  );
+  assert.equal(ordinarySession.rows[0]!.scope, "FULL");
   const remainingMs = webDeletionSession.rows[0]!.expires_at.getTime() - Date.now();
   assert.ok(remainingMs > 14 * 60_000 && remainingMs <= 15 * 60_000);
   assert.equal(
@@ -250,6 +282,29 @@ test("customer broker reuses one Supabase subject without merging email peers an
     [`${issuer}#unknown-${suffix}`],
   );
   assert.equal(unknownLocal.rowCount, 0);
+
+  // Disabling a provider closes it for new deletion re-authentication, but an
+  // identity that is already linked keeps a path to delete its account.
+  const enabledProviders = config.customerLoginProviders!;
+  config.customerLoginProviders = ["PHONE", "NAVER", "GOOGLE", "APPLE"];
+  try {
+    const disabledUnknown = await webDeletionExchange(
+      token("web-deletion-disabled-unknown", claims(`disabled-unknown-${suffix}`, ["KAKAO"], null)),
+      "KAKAO",
+    );
+    assert.equal(disabledUnknown.statusCode, 503, disabledUnknown.body);
+    assert.equal((disabledUnknown.json() as { code: string }).code, "CUSTOMER_LOGIN_PROVIDER_UNAVAILABLE");
+    const disabledLogin = await exchange(token("web-deletion-disabled-login", socialOnlyClaims));
+    assert.equal(disabledLogin.statusCode, 503, disabledLogin.body);
+    const disabledLegacy = await webDeletionExchange(
+      token("web-deletion-disabled-legacy", socialOnlyClaims),
+      "KAKAO",
+    );
+    assert.equal(disabledLegacy.statusCode, 201, disabledLegacy.body);
+    assert.equal((disabledLegacy.json() as { actor: { userId: string } }).actor.userId, socialOnlyUserId);
+  } finally {
+    config.customerLoginProviders = enabledProviders;
+  }
 
   const appleDeletion = await webDeletionExchange(
     token("web-deletion-apple", claims(legacySubject, ["APPLE"], null)),

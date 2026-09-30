@@ -71,7 +71,7 @@ test("binding validation keeps the checkout entitlements paired with the chosen 
     probabilityVersion: 2,
     entitlementIds: ENTITLEMENT_IDS,
     slotNumbers: [3, 12],
-  }), /일치하지 않습니다/);
+  }), /일치하지 않아요/);
   assert.equal(formatKujiSlotNumber(3, 50), "03");
   assert.equal(formatKujiSlotNumber(3, 120), "003");
 });

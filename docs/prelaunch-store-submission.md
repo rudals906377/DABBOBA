@@ -6,7 +6,7 @@ It is not proof that the values were entered or approved in either console.
 ## Product scope
 
 - Version: `1.0.0`
-- iOS build: `1`
+- iOS build: `2`
 - Android versionCode: `1`
 - Locale: Korean first
 - Capability: product discovery, search, wishlist, notices, account settings,
@@ -26,7 +26,7 @@ binary rather than later LIVE commerce plans.
 - Name: `DABBOBA`
 - Primary language: Korean
 - Bundle ID: `com.dabboba.mobile`
-- SKU: `com.dabboba.mobile`
+- SKU: `DABBOBA-IOS-001`
 - Subtitle: `가챠·쿠지 상품을 한곳에서`
 - Primary category: Shopping
 - Secondary category: Entertainment
@@ -41,6 +41,9 @@ binary rather than later LIVE commerce plans.
 The Account Holder must still answer Content Rights, age rating, Republic of
 Korea availability, DSA trader status, and App Privacy using real contracts and
 deployed data flows. Do not infer those declarations from source code.
+The Account Holder, store seller, public-policy operator, support controller,
+and any later PG/settlement party must be the designated friend or the same
+verified friend-controlled business before this source is entered in a console.
 
 ### Google Play Console
 
@@ -139,7 +142,10 @@ approved first-release diagnostics boundary.
 - [ ] `https://dabboba.net/privacy`, `/terms`, `/support`, and
   `/account-deletion` return HTTPS 200 without login.
 - [ ] `support@dabboba.net` can send and receive.
-- [ ] Legal owner, retention periods, and policy wording were approved.
+- [ ] The designated friend (or a business verifiably represented and controlled
+  by that friend) matches the store Account Holder/seller, published operator,
+  support controller, and later PG/settlement party; retention periods and
+  policy wording were approved.
 - [ ] Image/IP rights evidence is attached to the release record.
 - [ ] Signed IPA/AAB was inspected and tested on physical iOS/Android devices.
 - [ ] App Store review contact and Play contact phone use verified owner details.

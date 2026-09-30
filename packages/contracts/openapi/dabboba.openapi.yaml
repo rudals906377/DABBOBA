@@ -115,7 +115,7 @@ paths:
     post:
       tags: [Auth]
       operationId: exchangeCustomerAccessToken
-      description: Verifies an asymmetric Supabase access token and the live Auth user for Kakao, Naver, Google, Apple, or email OTP identities, then returns an opaque DABBOBA session. Multiple allowed identities automatically linked by Supabase reuse one DABBOBA account only when they share the exact broker issuer and subject. Matching email strings never merge different broker subjects.
+      description: Verifies an asymmetric Supabase access token and the live Auth user for phone OTP, Kakao, Naver, Google, or Apple identities, then returns an opaque DABBOBA session. Multiple allowed identities automatically linked by Supabase reuse one DABBOBA account only when they share the exact broker issuer and subject. Matching contact strings never merge different broker subjects.
       requestBody:
         required: true
         content:
@@ -149,7 +149,7 @@ paths:
     post:
       tags: [Auth]
       operationId: exchangeExistingCustomerForAccountDeletion
-      description: Verifies a live Supabase social-provider session for an already linked DABBOBA customer and issues an ephemeral customer session used by the public account-deletion flow. This endpoint never creates a user or links an unknown provider subject.
+      description: Verifies a live Supabase social-provider session for an already linked DABBOBA customer and issues an ephemeral ACCOUNT_DELETION-scoped customer session used by the public account-deletion flow. That session is accepted only by the account-deletion preview, request, and status routes and by logout; every other authenticated route answers 403 SESSION_SCOPE_FORBIDDEN. A provider that is not currently enabled is refused unless the verified identity is already linked to an existing account. This endpoint never creates a user or links an unknown provider subject.
       requestBody:
         required: true
         content:
@@ -171,7 +171,7 @@ paths:
         "428": { $ref: "#/components/responses/LegalAcceptanceRequired" }
         "429": { $ref: "#/components/responses/RateLimited" }
         "503":
-          description: Supabase customer token exchange or Apple revocation credential protection is unavailable.
+          description: Supabase customer token exchange, the selected login provider for an unlinked identity (CUSTOMER_LOGIN_PROVIDER_UNAVAILABLE), or Apple revocation credential protection is unavailable.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ErrorEnvelope" }
@@ -283,6 +283,31 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Actor" }
         "403": { $ref: "#/components/responses/Forbidden" }
+  /v1/admin/auth/keepalive:
+    post:
+      tags: [Admin]
+      operationId: keepAdminSessionAlive
+      security: [{ bearerAuth: [] }]
+      description: Rotates an active administrator session after authenticated activity. The previous token is revoked; the replacement keeps the original login time and expires at the earlier of the idle window (ADMIN_SESSION_IDLE_MINUTES) and the absolute lifetime (ADMIN_SESSION_MAX_HOURS from login). A session past its absolute lifetime is revoked and answered with 401.
+      responses:
+        "200":
+          description: Administrator session rotated and renewed within its absolute lifetime.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [token, expiresAt, sessionId, rotatedFromSessionId]
+                properties:
+                  token: { type: string, minLength: 32 }
+                  expiresAt: { type: string, format: date-time }
+                  sessionId: { type: string, format: uuid }
+                  rotatedFromSessionId: { type: string, format: uuid }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
   /v1/notices:
     get:
       tags: [Community]
@@ -317,6 +342,7 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "409": { $ref: "#/components/responses/Conflict" }
+        "413": { description: Declared byteSize exceeds the active storage provider's object limit (Supabase Storage 5 MiB). }
         "429": { description: Per-user active, daily, or retained media count/byte quota exceeded. }
         "503": { description: Media storage is not configured. }
         "428": { $ref: "#/components/responses/LegalAcceptanceRequired" }
@@ -412,7 +438,7 @@ paths:
         - $ref: "#/components/parameters/MediaId"
       responses:
         "200":
-          description: Short-lived URL for privileged review of an attachment.
+          description: Short-lived URL for privileged review of an attachment. Requires inquiries.read for INQUIRY media, catalog.read for CATALOG/CATALOG_REQUEST media, and moderation.read otherwise; every issuance writes an admin audit row.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/MediaReadUrl" }
@@ -440,6 +466,7 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "409": { $ref: "#/components/responses/Conflict" }
+        "413": { description: Declared byteSize exceeds the active storage provider's object limit (Supabase Storage 5 MiB). }
         "429": { description: Per-administrator active, daily, or retained media quota exceeded. }
         "503": { description: Image processing, private storage, or stable catalog delivery is unavailable. }
   /v1/admin/catalog-media/{mediaId}/complete:
@@ -1660,17 +1687,50 @@ paths:
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
         "428": { $ref: "#/components/responses/LegalAcceptanceRequired" }
-  /v1/payments/{paymentId}/confirm:
+  /v1/payments/{paymentId}/attempt:
     post:
       tags: [Commerce]
-      operationId: confirmOwnPortOnePayment
-      description: Re-queries PortOne with the authenticated owner's payment ID and applies only the provider-authoritative state to the order. A client redirect or callback is never accepted as proof of payment.
+      operationId: claimOwnPortOnePaymentAttempt
+      description: Atomically claims the first native PortOne payment window for an owned, payable order. A later call from this or another device must re-query the existing payment instead of opening another window. The claim is never payment approval.
       security: [{ bearerAuth: [] }]
       parameters:
         - $ref: "#/components/parameters/PaymentId"
       responses:
         "200":
-          description: Fresh provider state was reconciled, or the payment is still pending.
+          description: The caller may open the single payment window for this order.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [accepted, paymentId, orderId, startedAt]
+                properties:
+                  accepted: { type: boolean, const: true }
+                  paymentId: { type: string, format: uuid }
+                  orderId: { type: string, format: uuid }
+                  startedAt: { type: string, format: date-time }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "428": { $ref: "#/components/responses/LegalAcceptanceRequired" }
+        "503":
+          description: Commerce is unavailable in PRELAUNCH, or the PortOne channel is not configured.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+  /v1/payments/{paymentId}/confirm:
+    post:
+      tags: [Commerce]
+      operationId: confirmOwnPortOnePayment
+      description: Re-queries PortOne with the authenticated owner's payment ID and applies only the provider-authoritative state to the order. A client redirect or callback is never accepted as proof of payment. Limited to six calls per minute per client. An already settled local payment (PAID, FAILED, REFUNDED, or CANCELLED before any PG window claim) returns outcome already_settled without a provider call; providerStatus is then the provider-equivalent of that settled state and localStatus is included.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PaymentId"
+      responses:
+        "200":
+          description: Fresh provider state was reconciled, the payment is still pending, or it was already settled.
           headers:
             Cache-Control:
               schema: { type: string, const: no-store }
@@ -1680,6 +1740,7 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
+        "429": { $ref: "#/components/responses/RateLimited" }
         "502":
           description: PortOne could not be queried or its response failed contract validation.
           content:
@@ -1691,6 +1752,39 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/ErrorEnvelope" }
         "428": { $ref: "#/components/responses/LegalAcceptanceRequired" }
+  /v1/payments/{paymentId}/abandon:
+    post:
+      tags: [Commerce]
+      operationId: abandonOwnPortOnePaymentWindow
+      description: Owner-only release of an unpaid PortOne payment window. The server performs a fresh PortOne lookup and cancels the still-pending order (releasing stock reservations, the kuji room entry, coupons, and points) only when PortOne authoritatively reports no payment (READY with no money, or PAYMENT_NOT_FOUND). A terminal no-charge FAILED/CANCELLED provider state is applied through the canonical provider path. Any payment evidence (PAY_PENDING, virtual account, paid or cancelled amounts, cancellation records) returns 409 PAYMENT_EVIDENCE_PRESENT with no change. Replays with the same Idempotency-Key return the original response without another provider call.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PaymentId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: The order was released, or was already closed without payment.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PortOnePaymentAbandonment" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "428": { $ref: "#/components/responses/LegalAcceptanceRequired" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "502":
+          description: PortOne could not be queried or its response failed contract validation; nothing changed.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+        "503":
+          description: Commerce is unavailable in PRELAUNCH, or the PortOne channel is not configured.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
   /v1/payments/webhooks/portone:
     post:
       tags: [Commerce]
@@ -1732,6 +1826,7 @@ paths:
     post:
       tags: [Commerce]
       operationId: receivePaymentWebhook
+      description: Shared-secret HMAC event rail for the local/test TEST_PG and INTERNAL_ZERO providers only. The route is not registered (404) when PAYMENT_PROVIDER is PORTONE_V2_INICIS or UNCONFIGURED; PortOne events are applied in-process only after a fresh authenticated PortOne lookup.
       parameters:
         - name: provider
           in: path
@@ -1749,6 +1844,7 @@ paths:
       responses:
         "202": { description: Verified event accepted or previously processed. }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { description: The shared-secret rail is not registered for the configured payment provider. }
         "503": { $ref: "#/components/responses/CommerceUnavailable" }
   /v1/draws/{entitlementId}/consume:
     post:
@@ -3472,6 +3568,68 @@ paths:
               schema: { $ref: "#/components/schemas/AdminPaymentDetail" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+  /v1/internal/payments/{paymentId}/reconcile:
+    post:
+      tags: [Commerce]
+      operationId: reconcileWorkerPortOnePayment
+      description: Internal LIVE-only worker requery. The worker signs the method, exact path, and Unix timestamp with the configured reconciliation secret; no client callback is accepted as payment proof. This operation never initiates a charge or cancellation.
+      security: [{ workerReconciliationSignature: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PaymentId"
+        - name: x-dabboba-worker-timestamp
+          in: header
+          required: true
+          description: Unix seconds within two minutes of server time; included in the HMAC message.
+          schema: { type: string, pattern: "^[0-9]{10}$" }
+      responses:
+        "200":
+          description: Current provider observation and canonical local payment status, or an already-settled payment that required no lookup.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [accepted, paymentId, orderId, providerStatus, outcome, localStatus]
+                properties:
+                  accepted: { type: boolean, const: true }
+                  paymentId: { type: string, format: uuid }
+                  orderId: { type: string, format: uuid }
+                  providerStatus:
+                    type: [string, "null"]
+                    enum: [READY, PAY_PENDING, VIRTUAL_ACCOUNT_ISSUED, PAID, FAILED, CANCELLED, PARTIAL_CANCELLED, null]
+                  outcome:
+                    type: string
+                    description: Canonical outcome. provider_not_found means PortOne authoritatively has no payment for this ID (providerStatus is null); no local state changed.
+                  localStatus: { $ref: "#/components/schemas/PaymentStatus" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "502": { description: PortOne lookup or reconciliation failed. }
+        "503": { description: LIVE commerce, PortOne, or worker reconciliation signing is not configured. }
+  /v1/admin/commerce/payments/{paymentId}/reconcile:
+    post:
+      tags: [Admin, Commerce]
+      operationId: reconcileAdminPortOnePayment
+      description: SUPER_ADMIN only. Requeries PortOne and applies the verified state through the canonical payment handler; never sends a charge or cancellation request.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PaymentId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/AdminReason"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AdminPortOneRefundReasonInput" }
+      responses:
+        "200":
+          description: Fresh provider observation and canonical reconciliation outcome.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PortOnePaymentConfirmation" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "503": { description: LIVE commerce or PortOne provider is not configured. }
   /v1/admin/commerce/refund-reviews:
     get:
       tags: [Admin, Commerce]
@@ -3530,6 +3688,123 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
+  /v1/admin/commerce/refund-reviews/{paymentId}/cancellation:
+    get:
+      tags: [Admin, Commerce]
+      operationId: getAdminPortOneRefundCancellation
+      description: Reads the single durable provider cancellation attempt, if present. A local REFUNDED payment is reported as reconciled even if a webhook overtook the response update.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PaymentId"
+      responses:
+        "200":
+          description: Existing provider cancellation attempt.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminPortOneRefundCancellation" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/admin/commerce/refund-reviews/{paymentId}/cancel:
+    post:
+      tags: [Admin, Commerce]
+      operationId: requestAdminPortOneLateRefund
+      description: SUPER_ADMIN only. Requests one full cancellation for an unfulfilled late order or a paid gacha/kuji order whose draw entitlements are all unused. The payment keeps one attempt row. A new request (new Idempotency-Key) may resume that row only from a stale PRECHECK, PRECHECK_FAILED, or REVIEW_REQUIRED with lastErrorCode LOCAL_STATE_CHANGED, PROVIDER_STATE_MISMATCH, or PROVIDER_CANCEL_FAILED, after a fresh provider read and full local recheck. CALLING, PROVIDER_PENDING, INDETERMINATE, and RECONCILED are never retried.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PaymentId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/AdminReason"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AdminPortOneRefundReasonInput" }
+      responses:
+        "202":
+          description: Durable attempt recorded; status may still require provider reconciliation.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminPortOneRefundCancellation" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "503": { description: LIVE commerce or PortOne provider is not configured. }
+  /v1/admin/commerce/payments/{paymentId}/refund:
+    post:
+      tags: [Admin, Commerce]
+      operationId: requestAdminPortOneFullDrawRefund
+      description: SUPER_ADMIN only. Atomically freezes a fully paid, entirely unused gacha/kuji order before making one full PortOne cancellation request. A stale or consumed draw is rejected. The provider result may require later reconciliation. Resumes the payment's single attempt row under the same rules as the refund-review cancel operation.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PaymentId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/AdminReason"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AdminPortOneRefundReasonInput" }
+      responses:
+        "202":
+          description: Durable attempt recorded; status may still require provider reconciliation.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminPortOneRefundCancellation" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "503": { description: LIVE commerce or PortOne provider is not configured. }
+  /v1/admin/commerce/refund-reviews/{paymentId}/cancellation/reconcile:
+    post:
+      tags: [Admin, Commerce]
+      operationId: reconcileAdminPortOneRefundCancellation
+      description: SUPER_ADMIN only. Fresh provider lookup and canonical ledger reconciliation; never sends another cancellation request.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PaymentId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/AdminReason"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AdminPortOneRefundReasonInput" }
+      responses:
+        "200":
+          description: Fresh provider observation and current attempt status.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminPortOneRefundCancellation" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "503": { description: LIVE commerce or PortOne provider is not configured. }
+  /v1/admin/commerce/refund-reviews/{paymentId}/cancellation/abort:
+    post:
+      tags: [Admin, Commerce]
+      operationId: abortAdminPortOneRefundCancellation
+      description: Requires refunds.cancel. Aborts a cancellation attempt that never reached a provider cancellation in flight (stale PRECHECK, or REVIEW_REQUIRED with LOCAL_STATE_CHANGED, PROVIDER_STATE_MISMATCH, or PROVIDER_CANCEL_FAILED) after a fresh PortOne read confirms the full amount is still paid with no cancellation. A normal draw order frozen by the attempt returns from REFUND_REVIEW to PAID (payment and order); a late-success review keeps its review state. The attempt becomes PRECHECK_FAILED with lastErrorCode ABORTED_BY_ADMIN and may be resumed later. Audited and idempotent.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PaymentId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/AdminReason"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AdminPortOneRefundReasonInput" }
+      responses:
+        "200":
+          description: Attempt aborted; localPaymentStatus reports the restored or retained payment status.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminPortOneRefundCancellation" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "502": { description: PortOne lookup failed; nothing changed. }
+        "503": { description: LIVE commerce or PortOne provider is not configured. }
   /v1/admin/commerce/inventory:
     get:
       tags: [Admin, Commerce]
@@ -3671,6 +3946,11 @@ components:
       type: http
       scheme: bearer
       bearerFormat: opaque-session-token
+    workerReconciliationSignature:
+      type: apiKey
+      in: header
+      name: x-dabboba-worker-signature
+      description: HMAC-SHA256 of POST, the exact request path, and x-dabboba-worker-timestamp, sent as sha256=<lowercase hex>.
   parameters:
     Cursor:
       name: cursor
@@ -3775,7 +4055,7 @@ components:
         application/json:
           schema: { $ref: "#/components/schemas/LegalAcceptanceRequiredErrorEnvelope" }
     Forbidden:
-      description: The authenticated actor lacks the required role or ownership.
+      description: The authenticated actor lacks the required role or ownership, or presents an ACCOUNT_DELETION-scoped session on a route that does not accept it (SESSION_SCOPE_FORBIDDEN).
       content:
         application/json:
           schema: { $ref: "#/components/schemas/ErrorEnvelope" }
@@ -3834,7 +4114,7 @@ components:
         requiredPolicyVersions: { $ref: "#/components/schemas/RequiredPolicyVersions" }
     CustomerAuthProvider:
       type: string
-      enum: [KAKAO, NAVER, GOOGLE, APPLE, EMAIL]
+      enum: [PHONE, KAKAO, NAVER, GOOGLE, APPLE]
     CustomerLoginProviders:
       type: object
       additionalProperties: false
@@ -3880,7 +4160,7 @@ components:
       required: [accessToken, acceptedPolicies, loginProvider]
       properties:
         accessToken: { type: string, minLength: 64, maxLength: 16384, writeOnly: true }
-        loginProvider: { type: string, enum: [KAKAO, NAVER, GOOGLE, APPLE] }
+        loginProvider: { type: string, enum: [PHONE, KAKAO, NAVER, GOOGLE, APPLE] }
         appleRefreshToken:
           type: string
           minLength: 32
@@ -4374,7 +4654,10 @@ components:
         kind: { type: string, maxLength: 100 }
         title: { type: string, maxLength: 160 }
         body: { type: string }
-        data: { type: object, additionalProperties: true }
+        data:
+          type: object
+          description: Validated destination identifiers only (for example orderId or productId); other stored notification fields are never exposed.
+          additionalProperties: { type: string }
         destination: { $ref: "#/components/schemas/NotificationDestination" }
         readAt: { type: [string, "null"], format: date-time }
         createdAt: { type: string, format: date-time }
@@ -4867,11 +5150,14 @@ components:
           type: [integer, "null"]
           minimum: 1
           description: Positive public price or null while the price is not published. Customer APIs never expose a zero-price sellable product.
-        availableQuantity: { type: integer, minimum: 0 }
+        availableQuantity:
+          type: integer
+          minimum: 0
+          description: Customer catalog responses return 0 without disclosing real inventory during PRELAUNCH or COMING_SOON; this is not a stock-out signal. Admin responses retain the real value.
         totalQuantity:
           type: [integer, "null"]
           minimum: 0
-          description: ACTIVE 쿠지 덱의 전체 슬롯 수 또는 모든 항목에 초기 수량이 있는 ACTIVE 유한 가챠 풀의 초기 수량 합계입니다. 신뢰할 총수량이 없으면 null입니다.
+          description: LIVE 판매 중에만 공개하는 총수량입니다. PRELAUNCH·COMING_SOON에는 null이며, 그 밖에는 ACTIVE 쿠지 덱의 전체 슬롯 수 또는 모든 항목에 초기 수량이 있는 ACTIVE 유한 가챠 풀의 초기 수량 합계입니다.
         remainingKujiTiers:
           type: array
           maxItems: 200
@@ -5306,6 +5592,10 @@ components:
         acquiredAt: { type: string, format: date-time }
         storageExpiresAt: { type: string, format: date-time }
         pointReturnEligible: { type: boolean }
+        pointReturnAmount:
+          type: integer
+          minimum: 1
+          description: "Half of the original paid gacha unit price; present only when point return is eligible."
     InventoryUnitPage:
       allOf:
         - $ref: "#/components/schemas/PageMeta"
@@ -5424,6 +5714,14 @@ components:
         userId: { type: string, format: uuid }
         orderKind: { type: string, enum: [PRODUCT, SHIPPING_FEE] }
         shippingRequestId: { type: [string, "null"], format: uuid }
+        kujiRoomEntryId:
+          type: [string, "null"]
+          format: uuid
+          description: Server-bound room entry for a Kuji order; null for other orders. A client must not use route parameters as proof of this binding.
+        paymentAttemptStartedAt:
+          type: [string, "null"]
+          format: date-time
+          description: First server-claimed PortOne window time, or null before any attempt. A non-null value requires provider reconciliation, not another window.
         status: { type: string, enum: [PENDING_PAYMENT, PAID, FULFILLED, CANCELLED, REFUND_REVIEW, REFUNDED] }
         paymentId: { type: string, format: uuid }
         currency: { type: string, enum: [KRW] }
@@ -5479,11 +5777,19 @@ components:
       required: [eventId, eventType, paymentId, occurredAt, amount]
       properties:
         eventId: { type: string, minLength: 1, maxLength: 200 }
-        eventType: { type: string, enum: [PAYMENT_SUCCEEDED, PAYMENT_FAILED, PAYMENT_CANCELLED, REFUND_SUCCEEDED] }
+        eventType: { type: string, enum: [PAYMENT_SUCCEEDED, PAYMENT_FAILED, PAYMENT_CANCELLED, PAYMENT_STATE_ANOMALY, REFUND_SUCCEEDED, REFUND_PARTIAL] }
         paymentId: { type: string, format: uuid }
         providerPaymentId: { type: [string, "null"], maxLength: 200 }
         occurredAt: { type: string, format: date-time }
         amount: { type: integer, minimum: 0 }
+        providerObservation:
+          type: object
+          additionalProperties: false
+          required: [status, paidAmount, cancelledAmount]
+          properties:
+            status: { type: string, enum: [READY, PAY_PENDING, VIRTUAL_ACCOUNT_ISSUED, PAID, FAILED, PARTIAL_CANCELLED, CANCELLED] }
+            paidAmount: { type: integer, minimum: 0 }
+            cancelledAmount: { type: integer, minimum: 0 }
     PortOnePaymentConfirmation:
       type: object
       additionalProperties: false
@@ -5497,7 +5803,27 @@ components:
           enum: [READY, PAY_PENDING, VIRTUAL_ACCOUNT_ISSUED, PAID, FAILED, CANCELLED, PARTIAL_CANCELLED]
         outcome:
           type: string
-          description: Canonical reconciliation outcome. pending means no order transition was applied.
+          description: Canonical reconciliation outcome. pending means no order transition was applied; already_settled means the local payment was already settled and PortOne was not re-queried.
+        localStatus:
+          $ref: "#/components/schemas/PaymentStatus"
+          description: Present only with outcome already_settled.
+    PortOnePaymentAbandonment:
+      type: object
+      additionalProperties: false
+      required: [accepted, paymentId, orderId, outcome, providerStatus, localStatus, orderStatus]
+      properties:
+        accepted: { type: boolean, const: true }
+        paymentId: { type: string, format: uuid }
+        orderId: { type: string, format: uuid }
+        outcome:
+          type: string
+          enum: [cancelled, already_closed]
+          description: cancelled means this request released the pending order; already_closed means it was already cancelled without payment.
+        providerStatus:
+          type: string
+          enum: [READY, PAYMENT_NOT_FOUND, FAILED, CANCELLED]
+        localStatus: { $ref: "#/components/schemas/PaymentStatus" }
+        orderStatus: { type: string }
     DrawResult:
       type: object
       additionalProperties: false
@@ -6389,7 +6715,7 @@ components:
     AdminPaymentProviderEvent:
       type: object
       additionalProperties: false
-      required: [id, providerEventId, eventType, occurredAt, processedAt, processingError, createdAt]
+      required: [id, providerEventId, eventType, occurredAt, processedAt, processingError, createdAt, providerObservation]
       properties:
         id: { type: string, format: uuid }
         providerEventId: { type: string }
@@ -6398,14 +6724,26 @@ components:
         processedAt: { type: [string, "null"], format: date-time }
         processingError: { type: [string, "null"], maxLength: 500 }
         createdAt: { type: string, format: date-time }
+        providerObservation:
+          type: [object, "null"]
+          additionalProperties: false
+          description: Sanitized status and money fields for anomaly review only; the provider payload is never returned.
+          required: [status, paidAmount, cancelledAmount]
+          properties:
+            status: { type: string, enum: [READY, PAY_PENDING, VIRTUAL_ACCOUNT_ISSUED, PAID, FAILED, PARTIAL_CANCELLED, CANCELLED] }
+            paidAmount: { type: integer, minimum: 0 }
+            cancelledAmount: { type: integer, minimum: 0 }
     AdminPaymentDetail:
       allOf:
         - $ref: "#/components/schemas/AdminPayment"
         - type: object
-          required: [ledger, providerEvents]
+          required: [ledger, providerEvents, providerReconciliationAvailable, refundActionAvailable, refundActionBlocker]
           properties:
             ledger: { type: array, items: { $ref: "#/components/schemas/AdminPaymentLedgerEntry" } }
             providerEvents: { type: array, items: { $ref: "#/components/schemas/AdminPaymentProviderEvent" } }
+            providerReconciliationAvailable: { type: boolean }
+            refundActionAvailable: { type: boolean }
+            refundActionBlocker: { type: [string, "null"] }
     AdminPaymentPage:
       allOf:
         - $ref: "#/components/schemas/PageMeta"
@@ -6428,8 +6766,9 @@ components:
       allOf:
         - $ref: "#/components/schemas/AdminPayment"
         - type: object
-          required: [review]
+          required: [review, providerCancellationStatus]
           properties:
+            providerCancellationStatus: { type: [string, "null"] }
             review:
               oneOf:
                 - $ref: "#/components/schemas/AdminRefundReviewState"
@@ -6467,11 +6806,47 @@ components:
       allOf:
         - $ref: "#/components/schemas/AdminRefundReview"
         - type: object
-          required: [assetSafety, notes, providerActionAvailable]
+          required: [assetSafety, notes, providerCancellation, providerActionAvailable, providerActionBlocker, providerReconciliationAvailable]
           properties:
             assetSafety: { $ref: "#/components/schemas/AdminRefundAssetSafety" }
             notes: { type: array, items: { $ref: "#/components/schemas/AdminRefundReviewNote" } }
-            providerActionAvailable: { type: boolean, const: false }
+            providerCancellation:
+              oneOf:
+                - $ref: "#/components/schemas/AdminPortOneRefundCancellationSummary"
+                - type: "null"
+            providerActionAvailable: { type: boolean }
+            providerActionBlocker: { type: [string, "null"] }
+            providerReconciliationAvailable: { type: boolean }
+    AdminPortOneRefundCancellationSummary:
+      type: object
+      additionalProperties: false
+      required: [status, providerCancellationId, providerStatus, lastErrorCode, createdAt, updatedAt]
+      properties:
+        status: { type: string, enum: [PRECHECK, PRECHECK_FAILED, CALLING, PROVIDER_PENDING, INDETERMINATE, RECONCILED, REVIEW_REQUIRED] }
+        providerCancellationId: { type: [string, "null"] }
+        providerStatus: { type: [string, "null"] }
+        lastErrorCode: { type: [string, "null"] }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    AdminPortOneRefundReasonInput:
+      type: object
+      additionalProperties: false
+      required: [reason]
+      properties:
+        reason: { type: string, minLength: 2, maxLength: 500 }
+    AdminPortOneRefundCancellation:
+      type: object
+      additionalProperties: false
+      required: [paymentId, status, localPaymentStatus, providerCancellationId, providerStatus, lastErrorCode, createdAt, updatedAt]
+      properties:
+        paymentId: { type: string, format: uuid }
+        status: { type: string, enum: [PRECHECK, PRECHECK_FAILED, CALLING, PROVIDER_PENDING, INDETERMINATE, RECONCILED, REVIEW_REQUIRED] }
+        localPaymentStatus: { type: [string, "null"] }
+        providerCancellationId: { type: [string, "null"] }
+        providerStatus: { type: [string, "null"] }
+        lastErrorCode: { type: [string, "null"] }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
     UpdateAdminRefundReviewInput:
       type: object
       additionalProperties: false

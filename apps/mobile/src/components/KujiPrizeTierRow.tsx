@@ -75,9 +75,9 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: "#F2B597",
+    borderColor: seed.color.kuji.stroke,
     borderRadius: seed.radius.r1_5,
-    backgroundColor: "#FFF1E9",
+    backgroundColor: seed.color.kuji.weak,
   },
   chipText: {
     flexShrink: 1,
@@ -98,9 +98,9 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignSelf: "flex-start",
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: "#F2B597",
+    borderColor: seed.color.kuji.stroke,
     borderRadius: seed.radius.r1_5,
-    backgroundColor: "rgba(255, 248, 242, 0.94)",
+    backgroundColor: seed.color.kuji.overlay,
   },
   overlayText: {
     color: colors.kujiOrangeDark,

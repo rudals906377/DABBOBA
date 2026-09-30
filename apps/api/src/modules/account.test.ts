@@ -9,6 +9,7 @@ import {
   KUJI_INCLUDED_FREE_SHIPPING_THRESHOLD,
   STANDARD_SHIPPING_FEE,
   accountNotificationDestination,
+  publicNotificationData,
   accountDeletionStatus,
   calculateAccountShippingPolicy,
   canonicalPointReturnInventoryIds,
@@ -143,6 +144,22 @@ test("notification destinations are finite, kind-owned, and never accept stored 
   });
 });
 
+test("notification data returned to clients is limited to validated destination identifiers", () => {
+  const orderId = "11111111-1111-4111-8111-111111111111";
+  assert.deepEqual(publicNotificationData({
+    orderId,
+    productId: "safe-kuji-product",
+    category: "KUJI",
+    userId: "22222222-2222-4222-8222-222222222222",
+    amount: 12_000,
+    reason: "internal operator note",
+    providerPaymentId: "pay_secret",
+    href: "https://attacker.example/steal",
+    listingId: "../../admin",
+  }), { orderId, productId: "safe-kuji-product", category: "KUJI" });
+  assert.deepEqual(publicNotificationData({}), {});
+});
+
 test("Expo push tokens accept only bounded canonical Expo token forms", () => {
   assert.equal(isExpoPushToken("ExpoPushToken[abcdefgh_ABCDEFGH-12345678]"), true);
   assert.equal(isExpoPushToken("ExponentPushToken[abcdefgh_ABCDEFGH-12345678]"), true);
@@ -266,8 +283,9 @@ test("notification APIs are owner-scoped, paged, and expose an authoritative unr
   const list = await routes.get("/v1/account/notifications")!({
     actor: { userId: actorId },
     query: { limit: 1 },
-  }, {}) as { items: Array<{ id: string; destination: { route: string } }>; nextCursor: string | null };
+  }, {}) as { items: Array<{ id: string; data: unknown; destination: { route: string } }>; nextCursor: string | null };
   assert.equal(list.items.length, 1);
+  assert.deepEqual(list.items[0]!.data, {});
   assert.equal(list.items[0]!.id, firstId);
   assert.equal(list.items[0]!.destination.route, "storage");
   assert.ok(list.nextCursor);
@@ -625,7 +643,8 @@ test("account inventory returns the owner's stored, exchanging, or shipping GACH
   assert.match(capturedSql, /iu\.owner_id=\$1/);
   assert.match(capturedSql, /iu\.status IN \('OWNED','EXCHANGE_LISTED','EXCHANGE_OFFERED','SHIPPING','EXPIRED_HOLD'\)/);
   assert.match(capturedSql, /\(iu\.status IN \('SHIPPING','EXPIRED_HOLD'\) OR iu\.storage_expires_at>now\(\)\)/);
-  assert.match(capturedSql, /point_return_draw[\s\S]*?iu\.status='OWNED'/);
+  assert.match(capturedSql, /point_purchase\.reference_amount >= 2/);
+  assert.match(capturedSql, /purchase_line\.unit_price AS reference_amount/);
   assert.match(capturedSql, /iu\.source_type IN \('GACHA','KUJI'\)/);
   assert.match(capturedSql, /draw_result\.prize_inventory_unit_id=iu\.id/);
   assert.match(capturedSql, /draw_result\.user_id=iu\.owner_id/);
@@ -1476,6 +1495,13 @@ test("point return atomically locks original draw inventory, records immutable a
               source_id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
               status: "OWNED",
               price: 9_999,
+              reference_amount: 1_000,
+              purchase_category: "gacha",
+              purchase_product_id: "original-gacha",
+              purchase_order_status: "PAID",
+              purchase_order_user_id: actorId,
+              original_entitlement_user_id: actorId,
+              original_entitlement_product_id: "original-gacha",
               draw_user_id: actorId,
               draw_entitlement_id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
               draw_prize_product_id: "prize-low",
@@ -1489,6 +1515,13 @@ test("point return atomically locks original draw inventory, records immutable a
               source_id: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
               status: "OWNED",
               price: 2_000,
+              reference_amount: 1_000,
+              purchase_category: "gacha",
+              purchase_product_id: "original-gacha",
+              purchase_order_status: "PAID",
+              purchase_order_user_id: actorId,
+              original_entitlement_user_id: actorId,
+              original_entitlement_product_id: "original-gacha",
               draw_user_id: actorId,
               draw_entitlement_id: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
               draw_prize_product_id: "prize-high",
@@ -1507,7 +1540,7 @@ test("point return atomically locks original draw inventory, records immutable a
       if (sql.includes("INSERT INTO point_accounts")) return { rowCount: 1, rows: [] };
       if (sql.includes("INSERT INTO point_ledger_entries")) return { rowCount: 1, rows: [{ id: "ledger-1" }] };
       if (sql.includes("UPDATE point_accounts SET balance=balance+")) {
-        return { rowCount: 1, rows: [{ balance: 7_599, version: 2 }] };
+        return { rowCount: 1, rows: [{ balance: 2_600, version: 2 }] };
       }
       if (sql.includes("INSERT INTO outbox_events")) return { rowCount: 1, rows: [] };
       if (sql.includes("UPDATE idempotency_keys SET state='COMPLETED'")) return { rowCount: 1, rows: [] };
@@ -1537,8 +1570,8 @@ test("point return atomically locks original draw inventory, records immutable a
   assert.deepEqual(responseBody, {
     id: pointReturnId,
     inventoryUnitIds: [lowId, highId],
-    totalPointAmount: 5_999,
-    balance: 7_599,
+    totalPointAmount: 1_000,
+    balance: 2_600,
     returnedAt: returnedAt.toISOString(),
   });
   const inventoryLock = queries.find(({ sql }) => sql.includes("FROM inventory_units iu") && sql.includes("draw_results"));
@@ -1550,7 +1583,8 @@ test("point return atomically locks original draw inventory, records immutable a
   assert.equal(queries.filter(({ sql }) => sql.includes("INSERT INTO point_ledger_entries")).length, 1);
   const pointBalanceUpdate = queries.find(({ sql }) => sql.includes("UPDATE point_accounts SET balance=balance+"));
   assert.match(pointBalanceUpdate?.sql || "", /balance<=\$3::integer-\$2::integer/);
-  assert.deepEqual(pointBalanceUpdate?.params, [actorId, 5_999, MAX_POINT_BALANCE]);
+  assert.deepEqual(pointBalanceUpdate?.params, [actorId, 1_000, MAX_POINT_BALANCE]);
+  assert.match(inventoryLock?.sql || "", /purchase_line\.unit_price AS reference_amount/);
   assert.match(
     queries.find(({ sql }) => sql.includes("UPDATE inventory_units SET status='POINT_RETURNED'"))?.sql || "",
     /storage_expires_at>now\(\)/,

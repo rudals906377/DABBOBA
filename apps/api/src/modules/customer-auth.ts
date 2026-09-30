@@ -19,7 +19,7 @@ import {
 import { issueSession } from "../plugins/auth.js";
 import type { ApiContext } from "../types.js";
 
-const CUSTOMER_LOGIN_METHODS = ["KAKAO", "NAVER", "GOOGLE", "APPLE", "EMAIL"] as const;
+const CUSTOMER_LOGIN_METHODS = ["PHONE", "KAKAO", "NAVER", "GOOGLE", "APPLE"] as const;
 export const REQUIRED_CUSTOMER_POLICY_VERSIONS = FALLBACK_REQUIRED_POLICY_VERSIONS;
 
 type CustomerUserRow = {
@@ -116,7 +116,20 @@ async function applyVerifiedContactClaims(
       await client.query("UPDATE users SET email=$2 WHERE id=$1", [user.id, claims.email]);
     }
   }
-
+  if (claims.phone) {
+    await client.query(
+      "SELECT pg_advisory_xact_lock(hashtextextended($1::text,0))",
+      [`customer-auth-phone:${claims.phone}`],
+    );
+    const usedPhone = await client.query(
+      "SELECT 1 FROM users WHERE phone_e164=$1 AND id<>$2 LIMIT 1",
+      [claims.phone, user.id],
+    );
+    if (usedPhone.rowCount) {
+      throw conflict("인증된 휴대폰 번호가 다른 계정에 연결되어 있습니다. 고객센터에 문의해 주세요.");
+    }
+    await client.query("UPDATE users SET phone_e164=$2 WHERE id=$1", [user.id, claims.phone]);
+  }
 }
 
 async function storeAppleRefreshCredential(
@@ -150,7 +163,8 @@ async function storeAppleRefreshCredential(
 async function existingBrokeredCustomerForDeletion(
   client: DatabaseClient,
   claims: VerifiedSupabaseCustomer,
-  loginProvider: Exclude<(typeof CUSTOMER_LOGIN_METHODS)[number], "EMAIL">,
+  loginProvider: (typeof CUSTOMER_LOGIN_METHODS)[number],
+  providerEnabled: boolean,
 ): Promise<CustomerUserRow> {
   await client.query(
     "SELECT pg_advisory_xact_lock(hashtextextended($1::text,0))",
@@ -164,6 +178,11 @@ async function existingBrokeredCustomerForDeletion(
     [loginProvider, claims.canonicalSubject],
   );
   const linkedUserIds = [...new Set(linked.rows.map((row) => row.user_id))];
+  if (!providerEnabled && linkedUserIds.length !== 1) {
+    // A disabled provider may only re-authenticate an identity that already
+    // exists (see the route comment); it never proves anything new.
+    throw new AppError(503, "CUSTOMER_LOGIN_PROVIDER_UNAVAILABLE", "현재 선택한 로그인 방식을 사용할 수 없습니다.");
+  }
   if (linkedUserIds.length !== 1) {
     throw unauthorized("기존 로그인 계정으로 본인 확인을 완료하지 못했습니다.");
   }
@@ -321,6 +340,9 @@ export async function registerCustomerAuthRoutes(
       const acceptedPolicies = requiredPolicyAcceptance(input, policy.versions);
       const accessToken = stringInput(input, "accessToken", { min: 64, max: 16_384, trim: false })!;
       const loginProvider = enumInput(input, "loginProvider", CUSTOMER_LOGIN_METHODS)!;
+      if (!context.config.customerLoginProviders?.includes(loginProvider)) {
+        throw new AppError(503, "CUSTOMER_LOGIN_PROVIDER_UNAVAILABLE", "현재 선택한 로그인 방식을 사용할 수 없습니다.");
+      }
       const appleRefreshToken = loginProvider === "APPLE"
         ? validateAppleRefreshToken(stringInput(input, "appleRefreshToken", { min: 32, max: 16_384, trim: false }))
         : null;
@@ -331,6 +353,9 @@ export async function registerCustomerAuthRoutes(
       const claims = await verifyAccessToken(accessToken, broker);
       if (!claims.providers.includes(loginProvider)) {
         throw forbidden("로그인 제공자 정보를 확인하지 못했습니다.");
+      }
+      if (loginProvider === "PHONE" && !claims.phone) {
+        throw forbidden("인증된 휴대폰 번호를 확인하지 못했습니다.");
       }
       if (loginProvider === "APPLE" && !context.config.appleCredentialEncryption) {
         throw new AppError(503, "APPLE_AUTH_UNAVAILABLE", "Apple 로그인 삭제 보호 설정이 준비되지 않았습니다.");
@@ -403,7 +428,7 @@ export async function registerCustomerAuthRoutes(
       const policy = await loadRequiredPolicyDocuments(context.pool);
       requiredPolicyAcceptance(input, policy.versions);
       const accessToken = stringInput(input, "accessToken", { min: 64, max: 16_384, trim: false })!;
-      const loginProvider = enumInput(input, "loginProvider", ["KAKAO", "NAVER", "GOOGLE", "APPLE"] as const)!;
+      const loginProvider = enumInput(input, "loginProvider", CUSTOMER_LOGIN_METHODS)!;
       const rawAppleRefreshToken = input.appleRefreshToken === undefined
         ? null
         : validateAppleRefreshToken(stringInput(input, "appleRefreshToken", { min: 32, max: 16_384, trim: false }));
@@ -415,9 +440,20 @@ export async function registerCustomerAuthRoutes(
       if (!claims.providers.includes(loginProvider)) {
         throw forbidden("로그인 제공자 정보를 확인하지 못했습니다.");
       }
+      if (loginProvider === "PHONE" && !claims.phone) {
+        throw forbidden("인증된 휴대폰 번호를 확인하지 못했습니다.");
+      }
+      // Apply the same enabled-provider gate as ordinary login, with one
+      // legacy exception: a verified identity that is already linked to a
+      // DABBOBA account may still re-authenticate here after its provider was
+      // disabled. Account deletion must stay reachable for every existing
+      // customer (App Store Guideline 5.1.1(v)); disabling a provider must not
+      // strand accounts that can only prove ownership through it. A disabled
+      // provider never creates or links an identity on this path.
+      const providerEnabled = context.config.customerLoginProviders?.includes(loginProvider) === true;
       const requestUserAgent = userAgent(request.headers["user-agent"]);
       const { user, session } = await withTransaction(context.pool, async (client) => {
-        const user = await existingBrokeredCustomerForDeletion(client, claims, loginProvider);
+        const user = await existingBrokeredCustomerForDeletion(client, claims, loginProvider, providerEnabled);
         if (loginProvider === "APPLE") {
           if (rawAppleRefreshToken) {
             await storeAppleRefreshCredential(client, context, user.id, rawAppleRefreshToken);
@@ -446,6 +482,7 @@ export async function registerCustomerAuthRoutes(
         const session = await issueSession(client, context.config, {
           userId: user.id,
           kind: "USER",
+          scope: "ACCOUNT_DELETION",
           ip: request.ip,
           expiresInMs: 15 * 60_000,
           ...(requestUserAgent ? { userAgent: requestUserAgent } : {}),

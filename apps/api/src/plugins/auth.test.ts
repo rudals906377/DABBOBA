@@ -4,7 +4,7 @@ import type { ApiConfig } from "@dabboba/config";
 import type { DatabasePool } from "@dabboba/db";
 import type { FastifyRequest } from "fastify";
 import { AppError } from "../lib/errors.js";
-import { createAuthHooks } from "./auth.js";
+import { createAuthHooks, issueSession } from "./auth.js";
 
 const config: ApiConfig = {
   environment: "test",
@@ -30,6 +30,7 @@ const config: ApiConfig = {
 const actorRow = {
   session_id: "11111111-1111-4111-8111-111111111111",
   session_kind: "USER" as const,
+  scope: "FULL" as const,
   user_id: "22222222-2222-4222-8222-222222222222",
   email: "member@example.test",
   nickname: "회원",
@@ -38,11 +39,12 @@ const actorRow = {
   suspended_until: null,
 };
 
-function request(warn = () => undefined) {
+function request(warn = () => undefined, routeConfig: Record<string, unknown> = {}) {
   return {
     actor: null,
     headers: { authorization: `Bearer ${"a".repeat(32)}` },
     log: { warn },
+    routeOptions: { config: routeConfig },
   } as unknown as FastifyRequest;
 }
 
@@ -110,4 +112,97 @@ test("safe account recovery hooks authenticate without requiring policy acceptan
   const hooks = createAuthHooks(pool, config);
   await (hooks.requireUserWithoutPolicy as unknown as (request: FastifyRequest) => Promise<void>)(request());
   assert.equal(statements.some((sql) => sql.includes("legal_document_versions")), false);
+});
+
+test("account-deletion sessions are rejected unless the route opts in", async () => {
+  const deletionRow = { ...actorRow, scope: "ACCOUNT_DELETION" as const };
+  const pool = {
+    async query(sql: string) {
+      if (sql.includes("WITH active_session")) return { rows: [deletionRow], rowCount: 1 };
+      if (sql.includes("account_deletion_requests")) return { rows: [], rowCount: 0 };
+      throw new Error(`Unexpected SQL: ${sql}`);
+    },
+  } as unknown as DatabasePool;
+  const hooks = createAuthHooks(pool, config);
+  const requireUser = hooks.requireUserWithoutPolicy as unknown as (request: FastifyRequest) => Promise<void>;
+  for (const routeConfig of [{}, { allowAccountDeletionScope: false }]) {
+    await assert.rejects(
+      () => requireUser(request(undefined, routeConfig)),
+      (error: unknown) => error instanceof AppError
+        && error.statusCode === 403
+        && error.code === "SESSION_SCOPE_FORBIDDEN",
+    );
+  }
+  await assert.rejects(
+    () => hooks.loadActor(request()),
+    (error: unknown) => error instanceof AppError && error.code === "SESSION_SCOPE_FORBIDDEN",
+  );
+  const allowed = request(undefined, { allowAccountDeletionScope: true });
+  await requireUser(allowed);
+  assert.equal(allowed.actor?.sessionScope, "ACCOUNT_DELETION");
+
+  const fullSession = request();
+  const fullPool = {
+    async query(sql: string) {
+      if (sql.includes("WITH active_session")) return { rows: [actorRow], rowCount: 1 };
+      throw new Error(`Unexpected SQL: ${sql}`);
+    },
+  } as unknown as DatabasePool;
+  assert.equal((await createAuthHooks(fullPool, config).loadActor(fullSession)).sessionScope, "FULL");
+});
+
+test("administrator lookups reject sessions past the absolute lifetime", async () => {
+  let statement = "";
+  let parameters: unknown[] = [];
+  const pool = {
+    async query(sql: string, values: unknown[]) {
+      statement = sql;
+      parameters = values;
+      return { rows: [], rowCount: 0 };
+    },
+  } as unknown as DatabasePool;
+  await assert.rejects(
+    () => createAuthHooks(pool, { ...config, adminSessionMaxHours: 8 }).loadActor(request()),
+    (error: unknown) => error instanceof AppError && error.statusCode === 401,
+  );
+  assert.match(statement, /s\.session_kind <> 'ADMIN'\s+OR s\.created_at \+ \(\$2::integer \* interval '1 hour'\) > now\(\)/);
+  assert.equal(parameters[1], 8);
+
+  await assert.rejects(() => createAuthHooks(pool, config).loadActor(request()));
+  assert.equal(parameters[1], 12);
+});
+
+test("administrator sessions start with the idle window and never exceed the cap", async () => {
+  const inserted: unknown[][] = [];
+  const pool = {
+    async query(_sql: string, values: unknown[]) {
+      inserted.push(values);
+      return { rows: [{ id: "33333333-3333-4333-8333-333333333333" }], rowCount: 1 };
+    },
+  } as unknown as DatabasePool;
+  const before = Date.now();
+  const admin = await issueSession(pool, { ...config, adminSessionIdleMinutes: 45 }, {
+    userId: actorRow.user_id,
+    kind: "ADMIN",
+  });
+  const after = Date.now();
+  assert.ok(admin.expiresAt.getTime() >= before + 45 * 60_000, admin.expiresAt.toISOString());
+  assert.ok(admin.expiresAt.getTime() <= after + 45 * 60_000, admin.expiresAt.toISOString());
+  assert.equal(inserted[0]![2], "FULL");
+
+  const customer = await issueSession(pool, config, { userId: actorRow.user_id, kind: "USER" });
+  assert.ok(customer.expiresAt.getTime() - before > 29 * 86_400_000);
+
+  const deletion = await issueSession(pool, config, {
+    userId: actorRow.user_id,
+    kind: "USER",
+    scope: "ACCOUNT_DELETION",
+    expiresInMs: 15 * 60_000,
+  });
+  assert.equal(inserted[2]![2], "ACCOUNT_DELETION");
+  assert.ok(deletion.expiresAt.getTime() - before <= 15 * 60_000 + 1_000);
+  await assert.rejects(
+    () => issueSession(pool, config, { userId: actorRow.user_id, kind: "ADMIN", scope: "ACCOUNT_DELETION" }),
+    /Account-deletion scope applies only to customer sessions/,
+  );
 });

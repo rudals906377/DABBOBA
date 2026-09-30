@@ -22,7 +22,7 @@ async function releaseRepository({ omit = [], mutate = null } = {}) {
   await mkdir(join(directory, 'apps/worker/src'), { recursive: true });
   const migrationDirectory = new URL('packages/db/migrations/', repositoryRoot);
   const migrations = (await readdir(migrationDirectory))
-    .filter((file) => /^00(?:[0-5][0-9]|6[0-5])_[a-z0-9_]+\.sql$/.test(file))
+    .filter((file) => /^\d{4}_[a-z0-9_]+\.sql$/.test(file) && Number(file.slice(0, 4)) <= 80)
     .sort();
   for (const file of migrations) {
     if (omit.includes(file)) continue;
@@ -40,12 +40,12 @@ async function releaseRepository({ omit = [], mutate = null } = {}) {
   return directory;
 }
 
-test('release source accepts a clean Git commit containing every reviewed release migration through 0065', async () => {
+test('release source accepts a clean Git commit containing every reviewed release migration through 0080', async () => {
   const directory = await releaseRepository();
   try {
     const report = checkDatabaseReleaseSource({ repositoryRoot: directory });
     assert.equal(report.status, 'pass', JSON.stringify(report));
-    assert.equal(report.latestMigration, '0065_legal_policy_dabboba_net.sql');
+    assert.equal(report.latestMigration, '0080_retention_indexes.sql');
     assert.deepEqual(report.blockers, []);
     assert.match(report.head, /^[0-9a-f]{40,64}$/);
     assert.equal(report.worktreeClean, true);
@@ -96,13 +96,13 @@ test('release source blocks an uncommitted required migration even when its byte
 });
 
 test('release source blocks a missing or checksum-rotated required migration', async () => {
-  const missing = await releaseRepository({ omit: ['0065_legal_policy_dabboba_net.sql'] });
+  const missing = await releaseRepository({ omit: ['0068_worker_account_deletion_privileges.sql'] });
   const changed = await releaseRepository({ mutate: '0054_catalog_sale_status_and_prelaunch.sql' });
   try {
     const missingReport = checkDatabaseReleaseSource({ repositoryRoot: missing });
     assert.equal(missingReport.status, 'blocked');
-    assert.ok(missingReport.blockers.includes('required_migration_not_committed:0065_legal_policy_dabboba_net.sql'));
-    assert.ok(missingReport.blockers.includes('latest_committed_migration_below_0065'));
+    assert.ok(missingReport.blockers.includes('required_migration_not_committed:0068_worker_account_deletion_privileges.sql'));
+    assert.ok(missingReport.blockers.includes('committed_migration_sequence_incomplete:0068'));
 
     const changedReport = checkDatabaseReleaseSource({ repositoryRoot: changed });
     assert.equal(changedReport.status, 'blocked');
@@ -112,6 +112,55 @@ test('release source blocks a missing or checksum-rotated required migration', a
       rm(missing, { recursive: true, force: true }),
       rm(changed, { recursive: true, force: true }),
     ]);
+  }
+});
+
+test('release source rejects a release missing the business-phone policy migration', async () => {
+  const directory = await releaseRepository({ omit: ['0076_legal_policy_business_phone.sql'] });
+  try {
+    const report = checkDatabaseReleaseSource({ repositoryRoot: directory });
+    assert.equal(report.status, 'blocked');
+    assert.ok(report.blockers.includes('required_migration_not_committed:0076_legal_policy_business_phone.sql'));
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('release source rejects a release missing the session-scope migration', async () => {
+  const directory = await releaseRepository({ omit: ['0077_session_scope.sql'] });
+  try {
+    const report = checkDatabaseReleaseSource({ repositoryRoot: directory });
+    assert.equal(report.status, 'blocked');
+    assert.ok(report.blockers.includes('required_migration_not_committed:0077_session_scope.sql'));
+    assert.ok(report.blockers.includes('committed_migration_sequence_incomplete:0077'));
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('release source rejects a release missing the retention index migration', async () => {
+  const directory = await releaseRepository({ omit: ['0080_retention_indexes.sql'] });
+  try {
+    const report = checkDatabaseReleaseSource({ repositoryRoot: directory });
+    assert.equal(report.status, 'blocked');
+    assert.equal(report.latestMigration, '0079_worker_retention.sql');
+    assert.ok(report.blockers.includes('required_migration_not_committed:0080_retention_indexes.sql'));
+    assert.ok(report.blockers.includes('latest_committed_migration_below_0080'));
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('release source registers every migration from 0078 without a gap', () => {
+  const files = DATABASE_RELEASE_MIGRATIONS.map((migration) => migration.file);
+  assert.deepEqual(files.slice(-3), [
+    '0078_commerce_indexes.sql',
+    '0079_worker_retention.sql',
+    '0080_retention_indexes.sql',
+  ]);
+  const versions = files.map((file) => Number(file.slice(0, 4)));
+  for (let index = 1; index < versions.length; index += 1) {
+    assert.equal(versions[index], versions[index - 1] + 1, `gap before ${files[index]}`);
   }
 });
 

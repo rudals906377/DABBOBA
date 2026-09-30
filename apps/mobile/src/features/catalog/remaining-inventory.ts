@@ -8,6 +8,13 @@ export type RemainingInventory = Pick<
 export const COMPACT_INVENTORY_INLINE_MAX_FONT_SCALE = 1.3;
 export const COMPACT_INVENTORY_MAX_FONT_SIZE_MULTIPLIER = 2;
 
+export function shouldShowCatalogInventory(
+  product: { saleStatus?: CatalogProduct["saleStatus"] },
+  commerceEnabled: boolean,
+): boolean {
+  return commerceEnabled && (product.saleStatus === undefined || product.saleStatus === "ON_SALE");
+}
+
 export function shouldStackCompactInventoryMeter(
   compact: boolean,
   fontScale: number,
@@ -31,6 +38,15 @@ export function catalogQuantityLabel(
   return typeof inventory.totalQuantity === "number"
     ? `${inventory.availableQuantity}/${inventory.totalQuantity}`
     : `${inventory.availableQuantity}`;
+}
+
+export function visibleInventoryQuantityLabel(
+  category: CatalogProduct["category"],
+  inventory: Pick<CatalogProduct, "availableQuantity" | "totalQuantity">,
+): string {
+  const quantity = catalogQuantityLabel(inventory);
+  if (typeof inventory.totalQuantity === "number") return quantity;
+  return `${quantity}${category === "kuji" ? "장" : "개"} 남음`;
 }
 
 export function remainingInventoryRatio(

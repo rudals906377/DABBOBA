@@ -18,8 +18,14 @@ export const PROFILE_POLICIES: readonly ProfilePolicy[] = [
     id: "terms",
     title: "서비스 이용약관",
     summary: "회원, 상품 구매, 뽑기, 포인트와 교환·신청 이용 기준",
-    updatedAt: "2026.09.14",
+    updatedAt: "2026.09.30",
     sections: [
+      {
+        heading: "사전오픈 안내",
+        paragraphs: [
+          "현재 공개 버전에서는 상품 탐색·검색·관심 상품 저장을 제공하며, 결제·주문·뽑기·배송 신청은 정식 오픈 전까지 제공하지 않습니다.",
+        ],
+      },
       {
         heading: "서비스 이용",
         paragraphs: [
@@ -48,7 +54,7 @@ export const PROFILE_POLICIES: readonly ProfilePolicy[] = [
     id: "privacy",
     title: "개인정보처리방침",
     summary: "개인정보의 수집·이용, 보관과 회원 권리 안내",
-    updatedAt: "2026.09.20",
+    updatedAt: "2026.09.30",
     sections: [
       {
         heading: "처리하는 정보",
@@ -108,7 +114,7 @@ export const PROFILE_POLICIES: readonly ProfilePolicy[] = [
     id: "exchange-request",
     title: "교환방·신청방 운영정책",
     summary: "교환방·신청방의 작성, 신고, 차단 기준",
-    updatedAt: "2026.09.20",
+    updatedAt: "2026.09.22",
     sections: [
       {
         heading: "교환 제안",

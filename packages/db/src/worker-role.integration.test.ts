@@ -81,10 +81,63 @@ test("API and worker database identities are isolated around pgmq", {
     assert.deepEqual(pushSessionColumns.rows.map((row) => row.column_name), [
       "expires_at",
       "id",
+      "revoke_reason",
       "revoked_at",
+      // 0079: retention reads only the rotation parent to honor ON DELETE RESTRICT.
+      "rotated_from_session_id",
       "session_kind",
       "user_id",
     ]);
+
+    const deletionEventColumns = await migrationPool.query<{ column_name: string }>(
+      `SELECT column_name
+         FROM information_schema.column_privileges
+        WHERE grantee=$1 AND table_schema='public'
+          AND table_name='account_deletion_request_events'
+          AND privilege_type='SELECT'
+        ORDER BY column_name`,
+      [WORKER_DATABASE_ROLE],
+    );
+    assert.deepEqual(deletionEventColumns.rows.map((row) => row.column_name), [
+      "deletion_request_id",
+      "idempotency_key",
+    ]);
+
+    const idempotencyColumns = await migrationPool.query<{ column_name: string }>(
+      `SELECT column_name
+         FROM information_schema.column_privileges
+        WHERE grantee=$1 AND table_schema='public' AND table_name='idempotency_keys'
+          AND privilege_type='SELECT'
+        ORDER BY column_name`,
+      [WORKER_DATABASE_ROLE],
+    );
+    // Retention reads only its predicate columns, never request hashes or
+    // stored response bodies.
+    assert.deepEqual(idempotencyColumns.rows.map((row) => row.column_name), [
+      "expires_at",
+      "id",
+      "scope",
+    ]);
+
+    const sensitiveReadAccess = await migrationPool.query<{
+      can_read_event_table: boolean;
+      can_read_session_table: boolean;
+      can_read_session_token: boolean;
+    }>(
+      `SELECT
+         has_table_privilege($1,'public.account_deletion_request_events','SELECT')
+           AS can_read_event_table,
+         has_table_privilege($1,'public.sessions','SELECT')
+           AS can_read_session_table,
+         has_column_privilege($1,'public.sessions','token_digest','SELECT')
+           AS can_read_session_token`,
+      [WORKER_DATABASE_ROLE],
+    );
+    assert.deepEqual(sensitiveReadAccess.rows, [{
+      can_read_event_table: false,
+      can_read_session_table: false,
+      can_read_session_token: false,
+    }]);
 
     const reverseMembership = await migrationPool.query(
       `SELECT 1
@@ -108,7 +161,12 @@ test("API and worker database identities are isolated around pgmq", {
       ["account_deletion_requests", new Set(["select"])],
       ["apple_auth_credentials", new Set(["select", "delete"])],
       ["auth_identities", new Set(["select", "delete"])],
-      ["outbox_events", new Set(["select", "insert", "update"])],
+      // 0079: bounded retention deletes published outbox events.
+      ["outbox_events", new Set(["select", "insert", "update", "delete"])],
+      ["idempotency_keys", new Set(["delete"])],
+      ["sessions", new Set(["delete"])],
+      ["home_product_click_events", new Set(["select", "delete"])],
+      ["home_product_click_daily", new Set(["select", "insert", "update"])],
       ["notifications", new Set(["select", "insert", "delete"])],
       ["notification_preferences", new Set(["select", "delete"])],
       ["push_device_tokens", new Set(["select", "update", "delete"])],
@@ -326,6 +384,29 @@ test("API and worker database identities are isolated around pgmq", {
       [WORKER_DATABASE_ROLE],
     );
     assert.equal(unreviewedCallable.rows[0]?.count, "0");
+    const setVtDependency = await migrationPool.query<{
+      timestamp_overload_exists: boolean;
+      worker_can_execute: boolean | null;
+      runtime_can_execute: boolean | null;
+    }>(
+      `WITH dependency AS (
+         SELECT to_regprocedure('pgmq.set_vt(text,bigint,timestamp with time zone)') AS routine
+       )
+       SELECT routine IS NOT NULL AS timestamp_overload_exists,
+              CASE WHEN routine IS NULL THEN NULL
+                   ELSE has_function_privilege($1,routine::oid,'EXECUTE') END
+                AS worker_can_execute,
+              CASE WHEN routine IS NULL THEN NULL
+                   ELSE has_function_privilege($2,routine::oid,'EXECUTE') END
+                AS runtime_can_execute
+         FROM dependency`,
+      [WORKER_DATABASE_ROLE, RUNTIME_DATABASE_ROLE],
+    );
+    assert.equal(setVtDependency.rows.length, 1);
+    assert.deepEqual(setVtDependency.rows[0],
+      setVtDependency.rows[0]?.timestamp_overload_exists
+        ? { timestamp_overload_exists: true, worker_can_execute: true, runtime_can_execute: false }
+        : { timestamp_overload_exists: false, worker_can_execute: null, runtime_can_execute: null });
 
     // API data access remains intact while every direct queue/dead-letter path
     // fails closed after 0029.

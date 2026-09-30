@@ -2,6 +2,9 @@
 
 > 2026-09-09: 사용자가 Supabase 중심 백엔드를 선택했다. 아래 이전 Cloud Run/별도 서버 준비 항목은 보류하고 [Supabase 전환 계획](supabase-only-transition.md)을 우선한다. 지금 Google Cloud·Railway·Render 가입이나 결제는 필요하지 않다. 실제 배포·비밀 등록·Cron 활성화는 별도 승인 뒤 진행한다.
 
+> 2026-09-22: DABBOBA의 최종 출시·운영 주체는 사용자가 지정한 친구로 확정했다. Apple/Google 스토어, Expo/EAS, GitHub, Cloudflare와 도메인, Supabase, 로그인·푸시 제공자, 고객지원 메일, PG·정산·결제·세금 계정은 친구 또는 친구가 대표·통제하는 것으로 확인된 사업자가 소유·통제해야 한다. 개발자는 필요한 범위의 협업 권한만 사용한다.
+> 서비스별 현재 상태와 안전한 이전 순서는 [친구 명의 출시 계정 전환대장](friend-owned-release-accounts.md)을 기준으로 관리한다.
+
 ## 사용 방법
 
 이 문서는 코드로 대신 만들 수 없는 계정, 계약, 비밀값, 사업 결정, 실제 기기 검증의 참고 기록이다. **2026-09-09 최신 지시: 이 목록을 마지막에 한꺼번에 요청하지 않고, 각 작업에 필요한 시점에 사용자와 함께 처리한다.** 뒤쪽의 과거 순서표는 현재 단계의 실행 지시가 아니다. 준비된 비밀은 채팅이나 저장소에 붙이지 말고 승인된 서버 비밀 설정에 직접 넣는다.
@@ -172,8 +175,9 @@ Expo Go 확인은 standalone/store build와 custom scheme의 운영 증거가 �
 
 ## 8. Apple/Google 스토어
 
-- [ ] `계정 필요` Apple Developer 조직 계정, App Store Connect 권한, 인증서/프로비저닝/EAS 자격 준비
-- [ ] `계정 필요` Google Play Console 조직 계정, signing, service account 준비
+- [x] `계정 확인` 친구 명의 활성 Apple Developer Program 개인 Team `MCZ4884P7F` 확인
+- [x] `전환 완료` `com.dabboba.mobile`을 친구 팀에 재등록하고 새 배포 인증서·프로비저닝으로 PRELAUNCH `1.0.0 (1)`을 서명해 App Store Connect 앱 ID `6815146511`에 업로드. Apple 빌드 메타데이터에서도 팀 식별자 확인
+- [ ] `계정 필요` 친구 명의 Google Play Console 계정과 앱 소유권, signing, service account 준비
 - [ ] `미결정` bundle ID/package name, 앱 이름, 연령 등급, 카테고리, 지원 URL 확정
 - [ ] `승인 필요` 개인정보 처리방침 URL, 이용약관 URL, 계정 삭제 웹 경로, 사업자/고객지원 정보 공개
 - [ ] `승인 필요` 스토어 데이터 안전/프라이버시 라벨, 광고/추적 여부, 결제 정책 답변 검토

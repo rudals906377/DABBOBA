@@ -1,10 +1,15 @@
 import { Storage, type GenerateSignedPostPolicyV4Options } from "@google-cloud/storage";
 import { storedMediaLocation, type ApiConfig } from "@dabboba/config";
-import { SupabaseMediaStorage } from "@dabboba/media-storage";
+import { MAX_MEDIA_BYTES, SupabaseMediaStorage } from "@dabboba/media-storage";
 import { AppError } from "./errors.js";
 import type { MediaObject } from "./media-object.js";
 export { validMediaObjectVersion } from "./media-object.js";
 export type { MediaObject, MediaObjectInfo } from "./media-object.js";
+
+/** Largest direct upload the legacy GCS signed POST policy accepts. */
+export const GCS_MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+/** Largest object the Supabase Storage adapter will sign or verify. */
+export const SUPABASE_MAX_UPLOAD_BYTES = MAX_MEDIA_BYTES;
 
 type UploadInput = {
   key: string; mediaId: string; mimeType: string; byteSize: number; checksumSha256: string;
@@ -24,6 +29,7 @@ export function configuredMediaStorage(config: ApiConfig, metadata?: unknown) {
     const client = new SupabaseMediaStorage(config.supabaseStorage);
     return {
       provider, bucket,
+      maxUploadBytes: SUPABASE_MAX_UPLOAD_BYTES,
       location: { provider, bucket },
       file(key: string): MediaObject {
         return {
@@ -55,6 +61,7 @@ export function configuredMediaStorage(config: ApiConfig, metadata?: unknown) {
   });
   return {
     provider, bucket,
+    maxUploadBytes: GCS_MAX_UPLOAD_BYTES,
     location: { provider, bucket },
     file,
     async upload(input: UploadInput) {

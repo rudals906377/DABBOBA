@@ -15,6 +15,7 @@ import {
 import type { CatalogProduct, HomeRecentDrawActivity } from "@dabboba/contracts";
 import { CatalogDiscoveryImage } from "@/components/CatalogDiscoveryImage";
 import { CatalogProductTopIndicator } from "@/components/CatalogProductTopIndicator";
+import { DecorativeIonicon } from "@/components/DecorativeIonicon";
 import { GachaMachineFrame } from "@/components/GachaMachineFrame";
 import { KujiPrizeTierRow } from "@/components/KujiPrizeTierRow";
 import { KujiProductFrame } from "@/components/KujiProductFrame";
@@ -40,9 +41,9 @@ import {
 } from "@/features/catalog/catalog-api";
 import { useStorefrontCategorySettings } from "@/features/catalog/StorefrontCategorySettingsProvider";
 import { isCustomerProductCategoryEnabledOn, productCategoryLabel } from "@/features/catalog/product-categories";
-import { catalogQuantityLabel, remainingInventoryLabel } from "@/features/catalog/remaining-inventory";
+import { catalogQuantityLabel, remainingInventoryLabel, shouldShowCatalogInventory } from "@/features/catalog/remaining-inventory";
 import { useCommerceCapability } from "@/features/commerce/CommerceCapabilityProvider";
-import { productPriceLabel } from "@/features/commerce/product-commerce-presentation";
+import { productPriceLabel, productPriceParts } from "@/features/commerce/product-commerce-presentation";
 import { AnnouncementTicker } from "@/features/home/AnnouncementTicker";
 import { mergeFreshHomeCatalogWithCachedSections } from "@/features/home/home-catalog-recovery";
 import { remainingKujiTierAccessibilityLabel } from "@/features/kuji/kuji-tier-availability";
@@ -53,7 +54,6 @@ import {
   getRecentDrawReelWindow,
   homeAnnouncementMessages,
   resolveHomeProductBadge,
-  shouldExpandHomeHero,
   shouldExpandHomeRecentDraw,
   type ConfiguredHomeCollection,
   type HomeProductBadge,
@@ -76,6 +76,8 @@ type HomeSectionsSource = "loading" | "live" | "cache" | "error";
 
 export function HomeScreen() {
   const rootNavigationScroll = useRootNavigationScroll();
+  const { fontScale } = useWindowDimensions();
+  const expandedConnectionNotice = fontScale > 1.35;
   const db = useSQLiteContext();
   const router = useRouter();
   const { commerceEnabled } = useCommerceCapability();
@@ -126,78 +128,97 @@ export function HomeScreen() {
     })));
   }, [categorySettingsRevision, commerceEnabled, snapshot?.homeSections]);
 
+  // The mount effect and the focus effect can both ask for a load (and both
+  // re-run when category settings change). A load with the same inputs joins
+  // the one already in flight; a newer request supersedes an older one, whose
+  // late results are then discarded instead of overwriting fresher state.
+  const loadGeneration = useRef(0);
+  const loadInFlight = useRef<{ key: string; generation: number; promise: Promise<void> } | null>(null);
+
   const load = useCallback(
-    async (manual = false) => {
+    (manual = false): Promise<void> => {
+      const key = `${categorySettingsRevision}|${runtime.apiBaseUrl}`;
+      if (!manual && loadInFlight.current?.key === key) return loadInFlight.current.promise;
+      const generation = ++loadGeneration.current;
+      const isCurrent = () => generation === loadGeneration.current;
       if (manual) {
         setRefreshing(true);
         setImageRequestKey((current) => current + 1);
       }
-      try {
-        const [catalogResult, recentResult] = await Promise.allSettled([
-          fetchHomeCatalog(runtime.apiBaseUrl),
-          fetchHomeRecentDrawActivity(runtime.apiBaseUrl),
-        ]);
-        const cached = await readHomeCatalogCache(db).catch(() => null);
-        const recoveredRecentDrawActivity = recentResult.status === "fulfilled"
-          ? recentResult.value
-          : cached?.recentDrawActivity ?? null;
-        setRecentDrawActivity(recoveredRecentDrawActivity);
+      const promise = (async () => {
+        try {
+          const [catalogResult, recentResult] = await Promise.allSettled([
+            fetchHomeCatalog(runtime.apiBaseUrl),
+            fetchHomeRecentDrawActivity(runtime.apiBaseUrl),
+          ]);
+          const cached = await readHomeCatalogCache(db).catch(() => null);
+          if (!isCurrent()) return;
+          const recoveredRecentDrawActivity = recentResult.status === "fulfilled"
+            ? recentResult.value
+            : null;
+          setRecentDrawActivity(recoveredRecentDrawActivity);
 
-        if (catalogResult.status === "rejected") {
-          if (cached) {
-            const recovered = {
-              ...cached,
-              products: cached.products.filter((product) => (
-                isCustomerProductCategoryEnabledOn(product.category, "home")
-              )),
-              recentDrawActivity: recoveredRecentDrawActivity,
-            };
-            setSnapshot(recovered);
-            setSource("cache");
-            setHomeSectionsSource(cached.homeSections ? "cache" : "error");
-            setMessage("연결이 불안정해 마지막으로 저장한 목록을 보여드려요.");
-            if (recentResult.status === "fulfilled") {
-              await writeHomeCatalogCache(db, recovered).catch(() => undefined);
+          if (catalogResult.status === "rejected") {
+            if (cached) {
+              const recovered = {
+                ...cached,
+                products: cached.products.filter((product) => (
+                  isCustomerProductCategoryEnabledOn(product.category, "home")
+                )),
+                recentDrawActivity: recoveredRecentDrawActivity,
+              };
+              setSnapshot(recovered);
+              setSource("cache");
+              setHomeSectionsSource(cached.homeSections ? "cache" : "error");
+              setMessage("연결이 불안정해 마지막으로 저장한 목록을 보여드려요.");
+              if (recentResult.status === "fulfilled") {
+                await writeHomeCatalogCache(db, recovered).catch(() => undefined);
+              }
+            } else {
+              setSource("empty");
+              setHomeSectionsSource("error");
+              setMessage("홈을 불러오지 못했어요. 연결 상태를 확인해 주세요.");
             }
-          } else {
-            setSource("empty");
-            setHomeSectionsSource("error");
-            setMessage("홈을 불러오지 못했어요. 연결 상태를 확인해 주세요.");
+            return;
           }
-          return;
-        }
 
-        const fresh = {
-          ...catalogResult.value,
-          recentDrawActivity: recoveredRecentDrawActivity,
-        };
-        if (fresh.homeSections === null) {
-          if (cached?.homeSections) {
-            const recovered = mergeFreshHomeCatalogWithCachedSections(fresh, cached);
-            setSnapshot(recovered);
-            setSource("cache");
-            setHomeSectionsSource("cache");
-            setMessage("홈 진열 정보를 불러오지 못해 마지막으로 확인한 구성을 보여드려요.");
-            if (recentResult.status === "fulfilled") {
-              await writeHomeCatalogCache(db, recovered).catch(() => undefined);
+          const fresh = {
+            ...catalogResult.value,
+            recentDrawActivity: recoveredRecentDrawActivity,
+          };
+          if (fresh.homeSections === null) {
+            if (cached?.homeSections) {
+              const recovered = mergeFreshHomeCatalogWithCachedSections(fresh, cached);
+              setSnapshot(recovered);
+              setSource("cache");
+              setHomeSectionsSource("cache");
+              setMessage("홈 진열 정보를 불러오지 못해 마지막으로 확인한 구성을 보여드려요.");
+              if (recentResult.status === "fulfilled") {
+                await writeHomeCatalogCache(db, recovered).catch(() => undefined);
+              }
+            } else {
+              setSnapshot(fresh);
+              setSource("live");
+              setHomeSectionsSource("error");
+              setMessage("");
             }
-          } else {
-            setSnapshot(fresh);
-            setSource("live");
-            setHomeSectionsSource("error");
-            setMessage("");
+            return;
           }
-          return;
+          setSnapshot(fresh);
+          setSource("live");
+          setHomeSectionsSource("live");
+          setMessage("");
+          await writeHomeCatalogCache(db, fresh).catch(() => undefined);
+        } finally {
+          if (isCurrent()) {
+            initialLoadCompleted.current = true;
+            setRefreshing(false);
+          }
+          if (loadInFlight.current?.generation === generation) loadInFlight.current = null;
         }
-        setSnapshot(fresh);
-        setSource("live");
-        setHomeSectionsSource("live");
-        setMessage("");
-        await writeHomeCatalogCache(db, fresh).catch(() => undefined);
-      } finally {
-        initialLoadCompleted.current = true;
-        setRefreshing(false);
-      }
+      })();
+      loadInFlight.current = { key, generation, promise };
+      return promise;
     },
     [categorySettingsRevision, db, runtime.apiBaseUrl],
   );
@@ -252,14 +273,24 @@ export function HomeScreen() {
         {message ? (
           <View
             accessibilityLiveRegion="polite"
-            style={[styles.connectionNotice, source === "empty" && styles.connectionNoticeError]}
+            style={[styles.connectionNotice, expandedConnectionNotice && styles.connectionNoticeLargeText, source === "empty" && styles.connectionNoticeError]}
           >
-            <Text variant="finePrint" numberOfLines={2} style={styles.connectionNoticeText}>{message}</Text>
+            <Text
+              variant="finePrint"
+              numberOfLines={expandedConnectionNotice ? undefined : 2}
+              style={[styles.connectionNoticeText, expandedConnectionNotice && styles.connectionNoticeTextLarge]}
+            >{message}</Text>
             <Pressable
               accessibilityRole="button"
               accessibilityLabel={source === "cache" ? "홈 새로고침" : "홈 다시 불러오기"}
               onPress={() => void load(true)}
-              style={({ pressed }) => [styles.retry, source === "cache" && styles.retryCache, pressed && styles.pressed]}
+              style={({ pressed }) => [
+                styles.retry,
+                source === "cache" && styles.retryCache,
+                expandedConnectionNotice && styles.retryLargeText,
+                source === "cache" && expandedConnectionNotice && styles.retryCacheLargeText,
+                pressed && styles.pressed,
+              ]}
             >
               <Text variant="finePrint" style={[styles.retryLabel, source === "cache" && styles.retryLabelCache]}>
                 {source === "cache" ? "새로고침" : "다시 불러오기"}
@@ -360,14 +391,13 @@ function HomeCatalogFeedState({
 }
 
 function HomeIntroBanner() {
-  const { fontScale } = useWindowDimensions();
-  const expanded = shouldExpandHomeHero(fontScale);
+  const router = useRouter();
   return (
-    <View
-      accessible
-      accessibilityRole="summary"
-      accessibilityLabel="새 소식 준비 중. 새로운 이벤트 소식이 등록되면 알려드릴게요."
-      style={[styles.hero, expanded && styles.heroLargeText]}
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel="이벤트, 새 소식을 준비하고 있어요. 이벤트가 등록되면 이곳에서 알려드릴게요."
+      onPress={() => router.push("/events" as Href)}
+      style={({ pressed }) => [styles.hero, pressed && styles.pressed]}
     >
       <Image
         accessible={false}
@@ -376,12 +406,14 @@ function HomeIntroBanner() {
         resizeMode="contain"
         style={styles.heroMachine}
       />
-      <KoreanPixelTitle variant="hero" numberOfLines={expanded ? 3 : 2} style={styles.heroTitle}>
-        새 소식을{"\n"}준비하고 있어요.
-      </KoreanPixelTitle>
-      <Text variant="bodyCompact" maxFontSizeMultiplier={2} style={styles.heroBody}>새로운 이벤트 소식이 등록되면 이곳에서 알려드릴게요.</Text>
-      <Text variant="label" maxFontSizeMultiplier={2} style={styles.heroAction}>새 소식 준비 중</Text>
-    </View>
+      <View style={styles.heroCopy}>
+        <KoreanPixelTitle variant="compact" numberOfLines={2} style={styles.heroTitle}>
+          새 소식을 준비하고 있어요
+        </KoreanPixelTitle>
+        <Text variant="caption" maxFontSizeMultiplier={2} style={styles.heroBody}>이벤트가 등록되면 이곳에서 알려드릴게요.</Text>
+      </View>
+      <DecorativeIonicon name="chevron-forward" size={18} color={colors.muted} />
+    </Pressable>
   );
 }
 
@@ -473,7 +505,7 @@ function RecentDrawReelRow({
   expanded?: boolean;
 }) {
   const current = position === "current";
-  const uri = resolveCatalogImageUrl(activity.prizeImageUrl, assetBaseUrl);
+  const uri = resolveCatalogImageUrl(activity.prizeImageUrl, assetBaseUrl, undefined, __DEV__);
   const [imageFailed, setImageFailed] = useState(false);
   useEffect(() => setImageFailed(false), [uri]);
   return (
@@ -601,9 +633,10 @@ function CollectionProductCard({
   commerceEnabled: boolean;
   onPress: () => void;
 }) {
-  const storefrontUri = resolveCatalogImageUrl(product.storefrontImageUrl, assetBaseUrl, product.version);
-  const primaryUri = resolveCatalogImageUrl(product.imageUrl, assetBaseUrl, product.version);
+  const storefrontUri = resolveCatalogImageUrl(product.storefrontImageUrl, assetBaseUrl, product.version, __DEV__);
+  const primaryUri = resolveCatalogImageUrl(product.imageUrl, assetBaseUrl, product.version, __DEV__);
   const cardWidth = getHomeProductCardWidth(layoutKind);
+  const price = productPriceParts(product, commerceEnabled);
   return (
     <Pressable
       accessibilityRole="button"
@@ -618,7 +651,7 @@ function CollectionProductCard({
         imageRequestKey={imageRequestKey}
         layoutKind={layoutKind}
         statusBadge={badge}
-        remainingKujiTiers={product.remainingKujiTiers}
+        remainingKujiTiers={shouldShowCatalogInventory(product, commerceEnabled) ? product.remainingKujiTiers : undefined}
       />
       <View style={[styles.productCardBody, layoutKind === "gacha" && styles.productCardBodyGacha]}>
         {layoutKind === "kuji" && ipName ? (
@@ -637,21 +670,38 @@ function CollectionProductCard({
         >
           {layoutKind === "gacha" ? catalogCardTitle(product.name, ipName) : productSubjectTitle(product.name, ipName)}
         </Text>
+        {layoutKind === "gacha" && price.qualifier ? (
+          <Text
+            variant="catalogMetadata"
+            maxFontSizeMultiplier={CATALOG_CARD_TEXT_MAX_FONT_SIZE_MULTIPLIER}
+            style={styles.collectionProductPriceQualifier}
+          >
+            {price.qualifier}
+          </Text>
+        ) : null}
         <Text
           variant="catalogPrice"
           maxFontSizeMultiplier={CATALOG_CARD_TEXT_MAX_FONT_SIZE_MULTIPLIER}
-          style={[styles.collectionProductPrice, layoutKind === "gacha" && styles.collectionProductPriceGacha]}
+          style={[
+            styles.collectionProductPrice,
+            layoutKind === "gacha" && styles.collectionProductPriceGacha,
+            layoutKind === "gacha" && price.qualifier && styles.collectionProductPriceAfterQualifier,
+          ]}
         >
-          {productPriceLabel(product, commerceEnabled)}
+          {layoutKind === "gacha" && price.qualifier
+            ? price.amount.replace(/원$/, "\u2060원")
+            : productPriceLabel(product, commerceEnabled)}
         </Text>
-        <RemainingInventoryMeter
-          category={product.category}
-          availableQuantity={product.availableQuantity}
-          totalQuantity={product.totalQuantity}
-          compact
-          style={[styles.productInventory, layoutKind === "gacha" && styles.productInventoryGacha]}
-          quantityTextStyle={styles.homeInventoryQuantity}
-        />
+        {shouldShowCatalogInventory(product, commerceEnabled) ? (
+          <RemainingInventoryMeter
+            category={product.category}
+            availableQuantity={product.availableQuantity}
+            totalQuantity={product.totalQuantity}
+            compact
+            style={[styles.productInventory, layoutKind === "gacha" && styles.productInventoryGacha]}
+            quantityTextStyle={styles.homeInventoryQuantity}
+          />
+        ) : null}
       </View>
     </Pressable>
   );
@@ -672,7 +722,9 @@ function homeProductAccessibilityLabel(
     ipName,
     product.name,
     productPriceLabel(product, commerceEnabled),
-    `${remainingInventoryLabel(product.category)} ${catalogQuantityLabel(product)}`,
+    shouldShowCatalogInventory(product, commerceEnabled)
+      ? `${remainingInventoryLabel(product.category)} ${catalogQuantityLabel(product)}`
+      : null,
     tierAccessibilityLabel,
     "상세 보기",
   ].filter(Boolean).join(", ");
@@ -743,27 +795,32 @@ const styles = StyleSheet.create({
   },
   connectionNoticeError: { backgroundColor: seed.color.background.criticalWeak },
   connectionNoticeText: { flex: 1, color: colors.ink },
+  connectionNoticeLargeText: { flexDirection: "column", alignItems: "stretch", padding: seed.spacing.x3 },
+  connectionNoticeTextLarge: { flex: 0 },
   retry: { minHeight: seed.size.touchTarget, justifyContent: "center", paddingHorizontal: 10, borderRadius: seed.radius.r2, backgroundColor: colors.ink },
+  retryLargeText: { alignSelf: "stretch", alignItems: "center", paddingVertical: seed.spacing.x2 },
   retryLabel: { color: colors.white, fontWeight: "800" },
   retryCache: { borderLeftWidth: StyleSheet.hairlineWidth, borderLeftColor: seed.color.stroke.brand, backgroundColor: seed.color.background.transparent },
+  retryCacheLargeText: { borderLeftWidth: 0, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: seed.color.stroke.brand },
   retryLabelCache: { color: colors.greenInk },
   hero: {
-    position: "relative",
-    minHeight: seed.spacing.x16 + seed.spacing.x16 + seed.spacing.x9,
-    overflow: "hidden",
+    minHeight: seed.spacing.x16,
     marginHorizontal: seed.spacing.globalGutter,
     marginTop: seed.spacing.x3_5,
     borderRadius: seed.radius.r4,
-    paddingHorizontal: seed.spacing.x5,
-    paddingVertical: seed.spacing.x6,
-    justifyContent: "center",
-    backgroundColor: colors.black,
+    borderWidth: 1,
+    borderColor: seed.color.stroke.neutral,
+    paddingHorizontal: seed.spacing.x4,
+    paddingVertical: seed.spacing.x2_5,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: seed.spacing.x3,
+    backgroundColor: seed.color.layer.elevated,
   },
-  heroLargeText: { minHeight: 220 },
-  heroTitle: { width: "66%", color: colors.white },
-  heroBody: { width: "64%", marginTop: seed.spacing.x3, color: "#B9C1B9", ...seed.typography.bodyCompact },
-  heroAction: { width: "64%", marginTop: seed.spacing.x3, color: colors.white, fontWeight: "800" },
-  heroMachine: { position: "absolute", top: -21, right: -10, width: "50%", height: "122%", opacity: 1 },
+  heroCopy: { flex: 1, minWidth: 0 },
+  heroTitle: { color: seed.color.foreground.neutral },
+  heroBody: { marginTop: seed.spacing.x0_5, color: seed.color.foreground.muted },
+  heroMachine: { width: seed.spacing.x10, height: seed.spacing.x10 },
   sectionHeader: {
     marginTop: seed.spacing.x8,
     marginBottom: seed.spacing.x4,
@@ -807,7 +864,7 @@ const styles = StyleSheet.create({
   recentDrawImage: { width: "100%", height: "100%" },
   recentDrawImageFallback: { width: "100%", height: "100%", alignItems: "center", justifyContent: "center", backgroundColor: seed.color.background.brandWeak },
   recentDrawImageFallbackLabel: { color: colors.greenInk, fontWeight: "800" },
-  recentDrawSilhouetteOverlay: { position: "absolute", top: 0, right: 0, bottom: 0, left: 0, backgroundColor: "rgba(17, 20, 17, 0.16)" },
+  recentDrawSilhouetteOverlay: { position: "absolute", top: 0, right: 0, bottom: 0, left: 0, backgroundColor: seed.color.foreground.neutral, opacity: 0.16 },
   recentDrawCopy: { minWidth: 0, flex: 1 },
   recentDrawPrize: { color: colors.ink, fontWeight: "800" },
   recentDrawPrizeGhost: { color: colors.muted, fontWeight: "700" },
@@ -862,8 +919,10 @@ const styles = StyleSheet.create({
   collectionProductName: { minHeight: 40, flexShrink: 1, color: colors.ink, ...seed.typography.catalogTitle, marginTop: seed.spacing.x1 },
   collectionProductNameGacha: { marginTop: 0 },
   collectionProductNameKuji: { minHeight: 0, ...seed.typography.catalogTitleWide },
+  collectionProductPriceQualifier: { color: colors.muted, ...seed.typography.catalogMetadata, marginTop: seed.spacing.x0_5 },
   collectionProductPrice: { color: colors.ink, ...seed.typography.catalogPrice, fontWeight: "500", marginTop: seed.spacing.x1 },
   collectionProductPriceGacha: { marginTop: seed.spacing.x0_5 },
+  collectionProductPriceAfterQualifier: { marginTop: 0 },
   pressed: {
     opacity: seed.state.pressedOpacity,
     transform: [{ translateY: seed.state.pressedTranslateY }, { scale: seed.state.pressedScale }],

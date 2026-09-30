@@ -1,5 +1,5 @@
 import { storedMediaLocation, type ApiConfig } from "@dabboba/config";
-import { SupabaseMediaStorage } from "@dabboba/media-storage";
+import { MAX_MEDIA_BYTES, SupabaseMediaStorage } from "@dabboba/media-storage";
 import { AppError } from "./errors.js";
 import type { ApiMediaStorage } from "./media-runtime.js";
 
@@ -19,6 +19,7 @@ export function configuredSupabaseMediaStorage(config: ApiConfig, metadata?: unk
   return {
     provider: "supabase",
     bucket,
+    maxUploadBytes: MAX_MEDIA_BYTES,
     location: { provider: "supabase", bucket },
     file(key: string) {
       return {

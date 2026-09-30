@@ -15,7 +15,8 @@ export type WorkerJob =
   | { kind: "payment.reconcile" }
   | { kind: "inventory.storage-expiry" }
   | { kind: "account-auth.cleanup" }
-  | { kind: "media.cleanup" };
+  | { kind: "media.cleanup" }
+  | { kind: "retention.sweep" };
 
 export function parseWorkerJob(value: unknown): WorkerJob {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Worker job must be an object");
@@ -26,6 +27,7 @@ export function parseWorkerJob(value: unknown): WorkerJob {
   if (input.kind === "inventory.storage-expiry") return { kind: "inventory.storage-expiry" };
   if (input.kind === "account-auth.cleanup") return { kind: "account-auth.cleanup" };
   if (input.kind === "media.cleanup") return { kind: "media.cleanup" };
+  if (input.kind === "retention.sweep") return { kind: "retention.sweep" };
   if (input.kind === "reservation.expire-order" && typeof input.orderId === "string" && input.orderId.length > 0) {
     return { kind: "reservation.expire-order", orderId: input.orderId };
   }

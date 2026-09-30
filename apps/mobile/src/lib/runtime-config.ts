@@ -58,16 +58,71 @@ export function mostRestrictiveCommerceCapability(
   return buildCapability === "LIVE" && serverCapability === "LIVE" ? "LIVE" : "PRELAUNCH";
 }
 
+export type CommerceRouteAccess = "WAIT" | "ALLOW" | "DENY";
+
+/**
+ * Where the current server capability came from. `VERIFIED` is a real server
+ * answer (fresh or still inside the public-config grace window), including an
+ * explicit `PRELAUNCH`. `UNAVAILABLE` means the value is `null` only because
+ * refreshes failed (never succeeded, or the grace window expired).
+ */
+export type ServerCapabilitySource = "VERIFIED" | "UNAVAILABLE";
+
+export function resolveServerCapabilitySource(
+  serverCapability: CommerceCapability | null,
+): ServerCapabilitySource {
+  return serverCapability === null ? "UNAVAILABLE" : "VERIFIED";
+}
+
+/**
+ * Route gate decision.
+ *
+ * - A PRELAUNCH build never opens commerce routes.
+ * - Before the first config answer, wait.
+ * - A new entry requires an explicit server `LIVE` (ALLOW).
+ * - An explicit server `PRELAUNCH` always removes the route (DENY).
+ * - A failure-induced `null` denies new entries, but once this gate has
+ *   already rendered ALLOW (`previousAccess === "ALLOW"`) it keeps the mounted
+ *   screen: a dropped network request must not unmount a live payment/draw.
+ */
+export function resolveCommerceRouteAccess(
+  buildCapability: CommerceCapability,
+  serverCapability: CommerceCapability | null,
+  configReady: boolean,
+  previousAccess: CommerceRouteAccess | null = null,
+): CommerceRouteAccess {
+  if (buildCapability !== "LIVE") return "DENY";
+  if (serverCapability === "PRELAUNCH") return "DENY";
+  if (serverCapability === "LIVE") return configReady ? "ALLOW" : "WAIT";
+  // serverCapability === null: unknown because refreshes failed or none finished.
+  if (previousAccess === "ALLOW") return "ALLOW";
+  if (!configReady) return "WAIT";
+  return "DENY";
+}
+
+/**
+ * Resolves a server image reference to a loadable URL. Absolute URLs must be
+ * HTTPS; plain `http:` is accepted only when `development` is true (callers
+ * pass `__DEV__`), so a release build never loads cleartext catalog media.
+ * Relative paths resolve against the runtime asset base, which the runtime
+ * config already restricts to HTTPS outside development.
+ */
+/** True only inside a development JS bundle; plain Node tests see false. */
+function isDevelopmentRuntime(): boolean {
+  return typeof __DEV__ !== "undefined" && __DEV__ === true;
+}
+
 export function resolveCatalogImageUrl(
   imageUrl: string | null,
   assetBaseUrl: string | null,
   version?: string | number,
+  development = isDevelopmentRuntime(),
 ): string | null {
   if (!imageUrl) return null;
   let resolved: string | null;
   try {
     const absolute = new URL(imageUrl);
-    resolved = absolute.protocol === "https:" || absolute.protocol === "http:"
+    resolved = absolute.protocol === "https:" || (development && absolute.protocol === "http:")
       ? absolute.toString()
       : null;
   } catch {

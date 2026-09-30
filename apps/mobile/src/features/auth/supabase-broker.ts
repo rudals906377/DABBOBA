@@ -19,17 +19,25 @@ import {
   type PendingSocialLogin,
 } from "@/features/auth/social-login-state";
 import type { AcceptedPolicyVersions } from "@/features/auth/auth-api";
+import {
+  normalizeKoreanMobileNumber,
+  parsePendingPhoneOtp,
+  PHONE_OTP_RESEND_COOLDOWN_MS,
+  PHONE_OTP_TTL_MS,
+  type PendingPhoneOtp,
+} from "@/features/auth/phone-otp";
 
 WebBrowser.maybeCompleteAuthSession();
 
 const BROKER_STORAGE_KEY = "dabboba.auth.broker";
 const PENDING_SOCIAL_LOGIN_KEY = "dabboba.auth.social-login.v1";
 const PENDING_EMAIL_OTP_KEY = "dabboba.auth.email-otp.v1";
+const PENDING_PHONE_OTP_KEY = "dabboba.auth.phone-otp.v1";
 export const EMAIL_OTP_TTL_MS = 10 * 60_000;
 export const EMAIL_OTP_RESEND_COOLDOWN_MS = 60_000;
 
-export type DabbobaLoginProvider = "KAKAO" | "NAVER" | "GOOGLE" | "APPLE" | "EMAIL";
-export type DabbobaSocialLoginProvider = Exclude<DabbobaLoginProvider, "EMAIL">;
+export type DabbobaLoginProvider = "PHONE" | "KAKAO" | "NAVER" | "GOOGLE" | "APPLE";
+export type DabbobaSocialLoginProvider = Exclude<DabbobaLoginProvider, "PHONE">;
 
 export type SupabaseBrokerConfig = {
   url: string;
@@ -283,11 +291,58 @@ export async function clearPendingEmailOtp(): Promise<void> {
   await SecureStore.deleteItemAsync(PENDING_EMAIL_OTP_KEY).catch(() => undefined);
 }
 
+export async function requestPhoneOtp(value: string, nowMs = Date.now()): Promise<PendingPhoneOtp> {
+  const phone = normalizeKoreanMobileNumber(value);
+  const pending = await readPendingPhoneOtp(nowMs);
+  if (pending && pending.resendAvailableAt > nowMs) {
+    const seconds = Math.ceil((pending.resendAvailableAt - nowMs) / 1_000);
+    throw new Error(`${seconds}초 후 인증번호를 다시 받을 수 있어요.`);
+  }
+  const client = requireBrokerClient();
+  const result = await client.auth.signInWithOtp({ phone, options: { shouldCreateUser: true } });
+  if (result.error) throw new Error(result.error.message);
+  const next: PendingPhoneOtp = {
+    phone,
+    requestedAt: nowMs,
+    expiresAt: nowMs + PHONE_OTP_TTL_MS,
+    resendAvailableAt: nowMs + PHONE_OTP_RESEND_COOLDOWN_MS,
+  };
+  await SecureStore.setItemAsync(PENDING_PHONE_OTP_KEY, JSON.stringify(next));
+  return next;
+}
+
+export async function verifyPhoneOtp(phone: string, token: string): Promise<string> {
+  if (!/^\d{6}$/.test(token)) throw new Error("인증번호 6자리를 입력해 주세요.");
+  const pending = await readPendingPhoneOtp();
+  if (!pending || pending.phone !== normalizeKoreanMobileNumber(phone)) {
+    throw new Error("휴대폰 인증 요청이 만료되었습니다. 다시 시도해 주세요.");
+  }
+  const client = requireBrokerClient();
+  const result = await client.auth.verifyOtp({ phone: pending.phone, token, type: "sms" });
+  if (result.error || !result.data.session?.access_token) {
+    throw new Error(result.error?.message || "인증번호를 확인하지 못했습니다.");
+  }
+  await clearPendingPhoneOtp();
+  return result.data.session.access_token;
+}
+
+export async function readPendingPhoneOtp(nowMs = Date.now()): Promise<PendingPhoneOtp | null> {
+  const raw = await SecureStore.getItemAsync(PENDING_PHONE_OTP_KEY);
+  const pending = parsePendingPhoneOtp(raw, nowMs);
+  if (!pending && raw) await clearPendingPhoneOtp();
+  return pending;
+}
+
+export async function clearPendingPhoneOtp(): Promise<void> {
+  await SecureStore.deleteItemAsync(PENDING_PHONE_OTP_KEY).catch(() => undefined);
+}
+
 export async function clearBrokerSession(): Promise<void> {
   const pending = parsePendingSocialLogin(await SecureStore.getItemAsync(PENDING_SOCIAL_LOGIN_KEY));
   if (pending) await brokerSecureStorage.removeItem(pending.pkceVerifierKey).catch(() => undefined);
   await SecureStore.deleteItemAsync(PENDING_SOCIAL_LOGIN_KEY).catch(() => undefined);
   await clearPendingEmailOtp();
+  await clearPendingPhoneOtp();
   if (brokerClient) await brokerClient.auth.signOut({ scope: "local" }).catch(() => undefined);
 }
 

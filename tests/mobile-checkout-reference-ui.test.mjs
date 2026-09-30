@@ -54,7 +54,8 @@ test("checkout keeps unconfigured providers fail-closed while live, points, and 
   assert.equal(checkoutPaymentAvailability(6_500, true), "demo");
   assert.equal(checkoutPaymentAvailability(6_500, false, true), "live");
   assert.match(checkoutSource, /결제 수단 준비 중/);
-  assert.match(checkoutSource, /포인트로 구매하기/);
+  assert.match(checkoutSource, /label=\{!recoveringGachaOrder && paymentAvailability === "unavailable"\s*\? "결제 수단 준비 중"\s*: "구매하기"\}/);
+  assert.match(checkoutSource, /loading=\{submitting\}/);
   assert.match(checkoutSource, /paymentAvailability === "unavailable"/);
   assert.match(checkoutSource, /const testPaymentsEnabled = __DEV__ && demoEnabled/);
   assert.match(checkoutSource, /accessibilityRole="radio"/);
@@ -135,7 +136,9 @@ test("checkout follows the compact reference hierarchy and exposes only the conf
   assert.doesNotMatch(checkoutSource, /<KoreanPixelTitle[^>]*>수량 선택<\/KoreanPixelTitle>/);
   assert.doesNotMatch(checkoutSource, /24,900|54,900|60일|15%/);
   assert.match(checkoutSource, /width: "100%"/);
-  assert.doesNotMatch(checkoutSource, /<KoreanPixelTitle/);
+  for (const title of ["구매 상품", "쿠폰 사용", "포인트 사용", "결제 수단", "결제 금액"]) {
+    assert.match(checkoutSource, new RegExp(`<KoreanPixelTitle variant="section" style=\\{styles\\.sectionTitle\\}>${title}</KoreanPixelTitle>`));
+  }
   assert.doesNotMatch(checkoutSource, /couponRow[\s\S]*?chevron-down/);
 });
 
@@ -143,9 +146,23 @@ test("PortOne return and foreground recovery always re-query the server before o
   assert.match(portOnePaymentSource, /payMethod: "CARD"/);
   assert.match(portOnePaymentSource, /currency: "KRW"/);
   assert.match(portOnePaymentSource, /productType: "REAL"/);
+  assert.match(portOnePaymentSource, /appScheme: "dabboba:\/\/"/);
+  assert.match(portOnePaymentSource, /customer: \{ customerId: order\.userId, fullName: customerName \}/);
+  assert.match(portOnePaymentSource, /if \(!customerName\) return null;/);
+  assert.match(portOnePaymentSource, /await preparePaymentAttempt\(SecureStore, nextOrder\);\s*const claim = await claimPortOnePaymentAttempt\([\s\S]*?await markPaymentAttemptStarted\(SecureStore, nextOrder\);\s*setOrder\(nextOrder\);\s*setPayerName\(customerName\);\s*setPhase\("paying"\)/);
   assert.match(portOnePaymentSource, /redirectUrl: `dabboba:\/\/checkout\/payment\/\$\{encodeURIComponent\(order\.id\)\}\?paymentId=\$\{encodeURIComponent\(order\.paymentId\)\}`/);
   assert.match(portOnePaymentSource, /await confirmPortOnePayment\([\s\S]*?await fetchCheckoutOrder/);
   assert.match(portOnePaymentSource, /nextOrder\.status === "PAID" \|\| nextOrder\.status === "FULFILLED"/);
-  assert.match(portOnePaymentSource, /state === "active" && order\?\.status === "PENDING_PAYMENT"/);
+  assert.match(portOnePaymentSource, /state !== "active" \|\| order\?\.status !== "PENDING_PAYMENT"/);
+  assert.match(portOnePaymentSource, /phase === "paying"\) void refreshOrderOnResume\(order\)/);
+  assert.match(portOnePaymentSource, /reconcileOwnedPaymentOnResume\([\s\S]*?\(paymentId\) => confirmPortOnePayment\(/);
+  assert.match(portOnePaymentSource, /phase === "pending"\) void load\(\)/);
+  assert.match(portOnePaymentSource, /if \(nextOrder\.paymentAttemptStartedAt \|\| await hasStartedPaymentAttempt\(SecureStore, nextOrder\)\) \{[\s\S]*?await confirmPayment\(nextOrder\);[\s\S]*?return;/);
+  assert.match(portOnePaymentSource, /await assertPayableKujiOrder\(nextOrder, accessToken\);[\s\S]*?await preparePaymentAttempt\(SecureStore, nextOrder\);[\s\S]*?await claimPortOnePaymentAttempt\(/);
+  assert.match(portOnePaymentSource, /if \(nextOrder\.paymentAttemptStartedAt\) \{[\s\S]*?await confirmPayment\(nextOrder\);[\s\S]*?return;/);
+  assert.match(portOnePaymentSource, /const localAttemptState = await paymentAttemptState\(SecureStore, nextOrder\);[\s\S]*?if \(localAttemptState === "started"\) \{[\s\S]*?await confirmPayment\(nextOrder\);/);
+  assert.match(portOnePaymentSource, /await assertPayableKujiOrder\(nextOrder, tokens\.accessToken\);[\s\S]*?setPhase\("details"\)/);
+  assert.match(portOnePaymentSource, /if \(localAttemptState === "preparing"\) \{[\s\S]*?다시 시도해 주세요/);
+  assert.match(portOnePaymentSource, /label="주문·뽑기 상태 다시 확인" onPress=\{\(\) => \{ void load\(\); \}\}/);
   assert.doesNotMatch(portOnePaymentSource, /onComplete=\{[^}]*continueToDraw/);
 });

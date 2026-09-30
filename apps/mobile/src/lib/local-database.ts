@@ -1,10 +1,11 @@
 import type { SQLiteDatabase } from "expo-sqlite";
 import type { HomeCatalogSnapshot } from "@/features/catalog/catalog-api";
 import type { ExchangeCategory, ExchangeRoomSnapshot } from "@/features/exchange/exchange-api";
+import { isCurrentHomeSectionList } from "../features/home/home-catalog-contract.ts";
 
 const DATABASE_VERSION = 4;
 const HOME_CATALOG_KEY = "home.catalog.v1";
-const EXCHANGE_RULES_DISMISSED_KEY = "exchange.rules.dismissed.v2";
+const EXCHANGE_RULES_DISMISSED_KEY = "exchange.rules.dismissed.v3";
 const DRAW_SOUND_ENABLED_KEY = "draw.sound.enabled.v1";
 
 export async function initializeLocalDatabase(db: SQLiteDatabase): Promise<void> {
@@ -157,14 +158,12 @@ export async function readHomeCatalogCache(
     return {
       ...parsed,
       notices: Array.isArray(parsed.notices) ? parsed.notices : [],
-      homeSections: parsed.homeSections ?? null,
+      homeSections: isCurrentHomeSectionList(parsed.homeSections) ? parsed.homeSections : null,
       homeProductBadges: parsed.homeProductBadges ?? {
         bestProductId: null,
         evaluatedAt: parsed.fetchedAt,
       },
-      recentDrawActivity: Array.isArray(parsed.recentDrawActivity)
-        ? parsed.recentDrawActivity.slice(0, 2)
-        : null,
+      recentDrawActivity: null,
     };
   } catch {
     return null;
@@ -175,10 +174,10 @@ export async function writeHomeCatalogCache(
   db: SQLiteDatabase,
   snapshot: HomeCatalogSnapshot,
 ): Promise<void> {
-  if (snapshot.homeSections === null) return;
+  if (!isCurrentHomeSectionList(snapshot.homeSections)) return;
   const cacheSnapshot: HomeCatalogSnapshot = {
     ...snapshot,
-    recentDrawActivity: snapshot.recentDrawActivity?.slice(0, 2) ?? null,
+    recentDrawActivity: null,
   };
   await db.runAsync(
     `INSERT INTO catalog_cache (cache_key, payload, fetched_at)

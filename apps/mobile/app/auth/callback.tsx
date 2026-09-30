@@ -3,10 +3,12 @@ import { router, useLocalSearchParams, type Href } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Platform, StyleSheet, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useSQLiteContext } from "expo-sqlite";
 import { AppText as Text } from "@/components/Typography";
 import { SeedActionButton } from "@/design-system/components";
 import { seed } from "@/design-system/seed";
 import { completeSocialCustomerLogin } from "@/features/auth/auth-api";
+import { clearUserScopedLocalData } from "@/lib/local-database";
 import { buildSocialLoginCallbackUrl } from "@/features/auth/social-login-state";
 import {
   resolveMobileRuntimeConfig,
@@ -15,6 +17,7 @@ import {
 import { colors } from "@/theme";
 
 export default function CustomerAuthCallbackRoute() {
+  const db = useSQLiteContext();
   const params = useLocalSearchParams<Record<string, string | string[]>>();
   const runtime = useMemo(
     () => resolveMobileRuntimeConfig({
@@ -34,7 +37,7 @@ export default function CustomerAuthCallbackRoute() {
 
   useEffect(() => {
     let active = true;
-    void completeSocialCustomerLogin(runtime.apiBaseUrl, callbackUrl)
+    void completeSocialCustomerLogin(runtime.apiBaseUrl, callbackUrl, () => clearUserScopedLocalData(db))
       .then((returnTo) => {
         if (active) router.replace(returnTo as Href);
       })
@@ -46,7 +49,7 @@ export default function CustomerAuthCallbackRoute() {
     return () => {
       active = false;
     };
-  }, [callbackUrl, runtime.apiBaseUrl]);
+  }, [callbackUrl, db, runtime.apiBaseUrl]);
 
   return (
     <SafeAreaView style={styles.safeArea} edges={["top", "right", "bottom", "left"]}>

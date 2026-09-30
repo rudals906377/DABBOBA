@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   ADMIN_PROXY_IDENTITY_HEADERS,
+  assertAppleSignInParity,
   loadAdminConfig,
   loadApiConfig,
   loadMigrationConfig,
@@ -206,14 +207,14 @@ test("Supabase customer auth is optional and defaults to the authenticated audie
     SESSION_TOKEN_PEPPER: "test-pepper",
     SUPABASE_URL: "http://127.0.0.1:54321/",
     SUPABASE_PUBLISHABLE_KEY: "sb_publishable_local_fixture_key",
-    CUSTOMER_AUTH_ENABLED_PROVIDERS: "KAKAO,NAVER,GOOGLE,APPLE,EMAIL",
+    CUSTOMER_AUTH_ENABLED_PROVIDERS: "PHONE,KAKAO,NAVER,GOOGLE,APPLE",
     APPLE_TOKEN_ENCRYPTION_KEY: Buffer.alloc(32, 4).toString("base64url"),
     APPLE_TOKEN_ENCRYPTION_KEY_VERSION: "1",
   });
   assert.equal(config.supabaseUrl, "http://127.0.0.1:54321");
   assert.equal(config.supabaseJwtAudience, "authenticated");
   assert.equal(config.supabasePublishableKey, "sb_publishable_local_fixture_key");
-  assert.deepEqual(config.customerLoginProviders, ["KAKAO", "NAVER", "GOOGLE", "APPLE", "EMAIL"]);
+  assert.deepEqual(config.customerLoginProviders, ["PHONE", "KAKAO", "NAVER", "GOOGLE", "APPLE"]);
   assert.equal(config.appleCredentialEncryption?.keyVersion, 1);
 });
 
@@ -228,11 +229,11 @@ test("customer auth providers are explicit and fail closed", () => {
   assert.deepEqual(loadApiConfig(base).customerLoginProviders, []);
   assert.deepEqual(loadApiConfig({
     ...base,
-    CUSTOMER_AUTH_ENABLED_PROVIDERS: "KAKAO,EMAIL",
-  }).customerLoginProviders, ["KAKAO", "EMAIL"]);
+    CUSTOMER_AUTH_ENABLED_PROVIDERS: "KAKAO,PHONE",
+  }).customerLoginProviders, ["PHONE", "KAKAO"]);
   assert.throws(() => loadApiConfig({
     ...base,
-    CUSTOMER_AUTH_ENABLED_PROVIDERS: "KAKAO,PHONE",
+    CUSTOMER_AUTH_ENABLED_PROVIDERS: "KAKAO,EMAIL",
   }), /CUSTOMER_AUTH_ENABLED_PROVIDERS/);
   assert.throws(() => loadApiConfig({
     ...base,
@@ -243,6 +244,94 @@ test("customer auth providers are explicit and fail closed", () => {
     ...base,
     CUSTOMER_AUTH_ENABLED_PROVIDERS: "APPLE",
   }), /APPLE login requires encrypted token storage/);
+});
+
+test("STAGING and PRODUCTION refuse third-party social login without Sign in with Apple", () => {
+  const production = {
+    NODE_ENV: "production",
+    API_SURFACE: "customer",
+    DATABASE_URL: "postgresql://dabboba_runtime:secret@db.example.test/postgres",
+    SESSION_TOKEN_PEPPER: "session-pepper-that-is-long-and-production-only",
+    SUPABASE_URL: "https://project.supabase.co",
+    SUPABASE_PUBLISHABLE_KEY: "sb_publishable_production_fixture_key",
+    WEB_ORIGINS: "https://www.example.test",
+  };
+  const appleStorage = {
+    APPLE_TOKEN_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString("base64url"),
+    APPLE_TOKEN_ENCRYPTION_KEY_VERSION: "1",
+  };
+
+  for (const providers of ["KAKAO", "NAVER,GOOGLE", "PHONE,KAKAO,NAVER,GOOGLE"]) {
+    assert.throws(
+      () => loadApiConfig({ ...production, CUSTOMER_AUTH_ENABLED_PROVIDERS: providers }),
+      /without APPLE; App Store Review Guideline 4\.8[^]*blocked in PRODUCTION/,
+    );
+    assert.throws(
+      () => loadApiConfig({
+        ...production,
+        DABBOBA_ENVIRONMENT_TIER: "STAGING",
+        CUSTOMER_AUTH_ENABLED_PROVIDERS: providers,
+      }),
+      /blocked in STAGING/,
+    );
+  }
+
+  assert.deepEqual(loadApiConfig({
+    ...production,
+    ...appleStorage,
+    CUSTOMER_AUTH_ENABLED_PROVIDERS: "PHONE,KAKAO,NAVER,GOOGLE,APPLE",
+  }).customerLoginProviders, ["PHONE", "KAKAO", "NAVER", "GOOGLE", "APPLE"]);
+  assert.deepEqual(loadApiConfig({
+    ...production,
+    CUSTOMER_AUTH_ENABLED_PROVIDERS: "PHONE",
+  }).customerLoginProviders, ["PHONE"]);
+  assert.deepEqual(loadApiConfig(production).customerLoginProviders, []);
+
+  const warnings: string[] = [];
+  assertAppleSignInParity(["KAKAO"], "TEST", (message) => warnings.push(message));
+  assertAppleSignInParity(["GOOGLE", "PHONE"], "LOCAL", (message) => warnings.push(message));
+  assertAppleSignInParity(["PHONE"], "TEST", (message) => warnings.push(message));
+  assertAppleSignInParity(["KAKAO", "APPLE"], "PRODUCTION", (message) => warnings.push(message));
+  assert.equal(warnings.length, 2);
+  assert.match(warnings[0]!, /allowed only in TEST/);
+  assert.match(warnings[1]!, /allowed only in LOCAL/);
+  assert.deepEqual(loadApiConfig({
+    NODE_ENV: "test",
+    DATABASE_URL: "postgresql://test/db",
+    SESSION_TOKEN_PEPPER: "test-pepper",
+    SUPABASE_URL: "https://project.supabase.co",
+    SUPABASE_PUBLISHABLE_KEY: "sb_publishable_local_fixture_key",
+    CUSTOMER_AUTH_ENABLED_PROVIDERS: "KAKAO",
+  }).customerLoginProviders, ["KAKAO"]);
+});
+
+test("administrator session limits default to a bounded cap and idle window", () => {
+  const base = {
+    NODE_ENV: "test",
+    DATABASE_URL: "postgresql://test/db",
+    SESSION_TOKEN_PEPPER: "test-pepper",
+  };
+  const defaults = loadApiConfig(base);
+  assert.equal(defaults.adminSessionMaxHours, 12);
+  assert.equal(defaults.adminSessionIdleMinutes, 60);
+
+  const custom = loadApiConfig({
+    ...base,
+    ADMIN_SESSION_MAX_HOURS: "8",
+    ADMIN_SESSION_IDLE_MINUTES: "30",
+  });
+  assert.equal(custom.adminSessionMaxHours, 8);
+  assert.equal(custom.adminSessionIdleMinutes, 30);
+
+  assert.throws(() => loadApiConfig({ ...base, ADMIN_SESSION_MAX_HOURS: "0" }), /ADMIN_SESSION_MAX_HOURS/);
+  assert.throws(() => loadApiConfig({ ...base, ADMIN_SESSION_MAX_HOURS: "169" }), /ADMIN_SESSION_MAX_HOURS/);
+  assert.throws(() => loadApiConfig({ ...base, ADMIN_SESSION_MAX_HOURS: "1.5" }), /ADMIN_SESSION_MAX_HOURS/);
+  assert.throws(() => loadApiConfig({ ...base, ADMIN_SESSION_IDLE_MINUTES: "4" }), /ADMIN_SESSION_IDLE_MINUTES/);
+  assert.throws(() => loadApiConfig({ ...base, ADMIN_SESSION_IDLE_MINUTES: "1441" }), /ADMIN_SESSION_IDLE_MINUTES/);
+  assert.throws(
+    () => loadApiConfig({ ...base, ADMIN_SESSION_MAX_HOURS: "1", ADMIN_SESSION_IDLE_MINUTES: "61" }),
+    /ADMIN_SESSION_IDLE_MINUTES must not exceed ADMIN_SESSION_MAX_HOURS/,
+  );
 });
 
 test("Dukroom customer API is disabled by default and requires an explicit boolean flag", () => {
@@ -495,6 +584,7 @@ test("production requires a distinct admin proxy secret and explicit edge-overwr
     NODE_ENV: "production",
     DABBOBA_API_URL: "https://api.example.test",
     ADMIN_PROXY_IDENTITY_SECRET: "admin-proxy-secret-that-is-long-and-production-only",
+    ADMIN_SESSION_COOKIE_NAME: "__Host-dabboba_admin_session",
   };
   assert.throws(() => loadAdminConfig(productionAdmin), /ADMIN_EDGE_CLIENT_IP_HEADER/);
   assert.throws(() => loadAdminConfig({
@@ -511,6 +601,42 @@ test("production requires a distinct admin proxy secret and explicit edge-overwr
     ADMIN_EDGE_CLIENT_IP_HEADER: "CF-Connecting-IP",
   });
   assert.equal(config.adminEdgeClientIpHeader, "cf-connecting-ip");
+});
+
+test("production admin session cookies must use the __Host- prefix", () => {
+  const productionAdmin = {
+    NODE_ENV: "production",
+    DABBOBA_API_URL: "https://api.example.test",
+    ADMIN_PROXY_IDENTITY_SECRET: "admin-proxy-secret-that-is-long-and-production-only",
+    ADMIN_EDGE_CLIENT_IP_HEADER: "CF-Connecting-IP",
+  };
+  assert.throws(() => loadAdminConfig(productionAdmin), /__Host-/);
+  for (const name of ["dabboba_admin_session", "__Secure-dabboba_admin_session", "__host-dabboba_admin_session", "__Host-"]) {
+    assert.throws(() => loadAdminConfig({ ...productionAdmin, ADMIN_SESSION_COOKIE_NAME: name }), /__Host-/, name);
+  }
+  assert.throws(
+    () => loadAdminConfig({ ...productionAdmin, ADMIN_SESSION_COOKIE_NAME: "__Host-bad name;" }),
+    /valid cookie name/,
+  );
+  assert.equal(
+    loadAdminConfig({ ...productionAdmin, ADMIN_SESSION_COOKIE_NAME: "__Host-dabboba_admin_session" }).sessionCookieName,
+    "__Host-dabboba_admin_session",
+  );
+  // Local development keeps the plain name so http://127.0.0.1 continues to work.
+  assert.equal(loadAdminConfig({ NODE_ENV: "development", DABBOBA_API_URL: "http://127.0.0.1:8788" }).sessionCookieName, "dabboba_admin_session");
+});
+
+test("the trusted client-IP header is explicit, normalized, and cannot reuse identity headers", () => {
+  const base = {
+    NODE_ENV: "test",
+    DATABASE_URL: "postgresql://test/db",
+    SESSION_TOKEN_PEPPER: "local-development-session-pepper",
+  };
+  assert.equal(loadApiConfig(base).trustedClientIpHeader, null);
+  assert.equal(loadApiConfig({ ...base, TRUSTED_CLIENT_IP_HEADER: "CF-Connecting-IP" }).trustedClientIpHeader, "cf-connecting-ip");
+  for (const value of ["authorization", "Cookie", "x-request-id", "x-dabboba-admin-client-ip", "x-dabboba-anything", "bad header"]) {
+    assert.throws(() => loadApiConfig({ ...base, TRUSTED_CLIENT_IP_HEADER: value }), /TRUSTED_CLIENT_IP_HEADER/, value);
+  }
 });
 
 test("production requires a strong dedicated payment webhook secret when a provider is configured", () => {
@@ -616,6 +742,17 @@ test("PortOne KG INICIS requires a complete environment-specific credential set"
 
   const config = loadApiConfig(base);
   assert.equal(config.paymentProvider, "PORTONE_V2_INICIS");
+  assert.equal(config.paymentReconciliationWorkerSecret, null);
+  const workerSecret = "separate-portone-worker-requery-secret";
+  assert.equal(loadApiConfig({
+    ...base, PAYMENT_RECONCILIATION_WORKER_SECRET: workerSecret,
+  }).paymentReconciliationWorkerSecret, workerSecret);
+  assert.throws(() => loadApiConfig({
+    ...base, PAYMENT_RECONCILIATION_WORKER_SECRET: base.PAYMENT_WEBHOOK_SECRET,
+  }), /distinct/);
+  assert.throws(() => loadApiConfig({
+    ...base, DABBOBA_COMMERCE_MODE: "PRELAUNCH", PAYMENT_RECONCILIATION_WORKER_SECRET: workerSecret,
+  }), /requires LIVE PortOne/);
   assert.deepEqual(config.portOne, {
     apiSecret: base.PORTONE_API_SECRET,
     merchantId: base.PORTONE_MERCHANT_ID,
@@ -632,6 +769,25 @@ test("PortOne KG INICIS requires a complete environment-specific credential set"
     PAYMENT_PROVIDER: "UNCONFIGURED",
     PAYMENT_WEBHOOK_SECRET: "",
   }), /require PAYMENT_PROVIDER/);
+});
+
+test("production LIVE PortOne refuses to start without the worker requery key", () => {
+  const live = {
+    NODE_ENV: "production", DABBOBA_COMMERCE_MODE: "LIVE",
+    DATABASE_URL: "postgresql://dabboba_runtime:secret@db.example.test/postgres",
+    SESSION_TOKEN_PEPPER: "session-pepper-that-is-long-and-production-only",
+    SUPABASE_URL: "https://project.supabase.co", WEB_ORIGINS: "https://www.example.test",
+    PAYMENT_PROVIDER: "PORTONE_V2_INICIS",
+    PAYMENT_WEBHOOK_SECRET: "normalized-payment-secret-unique-value",
+    PORTONE_API_SECRET: "portone-api-secret-unique-value",
+    PORTONE_MERCHANT_ID: "merchant-live", PORTONE_STORE_ID: "store-live",
+    PORTONE_CHANNEL_KEY: "channel-live", PORTONE_CHANNEL_ENVIRONMENT: "LIVE",
+    PORTONE_WEBHOOK_SECRET: "portone-webhook-secret-unique-value",
+  };
+  assert.throws(() => loadApiConfig(live), /LIVE PortOne commerce requires PAYMENT_RECONCILIATION_WORKER_SECRET/);
+  assert.equal(loadApiConfig({
+    ...live, PAYMENT_RECONCILIATION_WORKER_SECRET: "distinct-portone-worker-secret-for-production",
+  }).commerceMode, "LIVE");
 });
 
 test("signed admin proxy identity normalizes addresses and rejects tampering or stale timestamps", () => {

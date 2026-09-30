@@ -4,6 +4,7 @@ import type { DatabaseClient } from "./index.js";
 import {
   completeLockedKujiOrderRoomIfDrawn,
   lockKujiProductRoomAdvisory,
+  releaseRefundedKujiOrderRoom,
 } from "./kuji-room.js";
 
 const ORDER_ID = "11111111-1111-4111-8111-111111111111";
@@ -23,6 +24,33 @@ test("the publish and room flows share one product-scoped advisory key", async (
 
   assert.match(observed[0]!.sql, /pg_advisory_xact_lock\(hashtextextended/);
   assert.deepEqual(observed[0]!.values, [`kuji-room:${PRODUCT_ID}`]);
+});
+
+test("a verified full refund releases a paid kuji room and advances the queue", async () => {
+  const queries: Array<{ sql: string; values: unknown[] }> = [];
+  const client = {
+    async query(sql: string, values: unknown[] = []) {
+      queries.push({ sql, values });
+      if (sql.includes("UPDATE kuji_room_entries") && sql.includes("state IN ('CHECKOUT_PENDING','DRAWING')")) {
+        return { rowCount: 1, rows: [{ product_id: PRODUCT_ID }] };
+      }
+      if (sql.includes("SELECT 1 FROM kuji_room_entries") && sql.includes("state IN ('CHECKOUT_PENDING','DRAWING')")) {
+        return { rowCount: 0, rows: [] };
+      }
+      if (sql.includes("FROM catalog_products p") && sql.includes("FOR UPDATE OF s")) {
+        return { rowCount: 0, rows: [] };
+      }
+      if (sql.includes("UPDATE kuji_rooms SET version=version+1")) {
+        return { rowCount: 1, rows: [] };
+      }
+      throw new Error(`Unexpected query: ${sql}`);
+    },
+  } as unknown as DatabaseClient;
+
+  const released = await releaseRefundedKujiOrderRoom(client, { orderId: ORDER_ID, serverNow: SERVER_NOW });
+  assert.equal(released, true);
+  assert.match(queries[0]!.sql, /state='CANCELLED'/);
+  assert.equal(queries.filter(({ sql }) => sql.includes("UPDATE kuji_rooms SET version=version+1")).length, 1);
 });
 
 function roomClient(input: {

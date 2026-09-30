@@ -207,7 +207,7 @@ test("the public English home deep link resolves to the native Home tab", () => 
 });
 
 test("Expo entry is native-first with typed routes, API contracts, secure tokens, and disposable cache", () => {
-  assert.equal(mobilePackage.dependencies.expo, "~57.0.24");
+  assert.equal(mobilePackage.dependencies.expo, "~57.0.25");
   assert.equal(mobilePackage.dependencies.react, "19.2.3");
   assert.equal(mobilePackage.dependencies["react-dom"], "19.2.3");
   assert.equal(mobilePackage.dependencies["expo-splash-screen"], "~57.0.9");
@@ -218,12 +218,13 @@ test("Expo entry is native-first with typed routes, API contracts, secure tokens
   assert.equal(mobilePackage.dependencies["@dabboba/api-client"], "workspace:*");
   assert.equal(mobilePackage.dependencies["expo-secure-store"], "~57.0.4");
   assert.equal(mobilePackage.dependencies["expo-sqlite"], "~57.0.3");
-  assert.equal(mobilePackage.dependencies["expo-image-picker"], "~57.0.19");
-  assert.equal(mobilePackage.dependencies["expo-image-manipulator"], "~57.0.19");
-  assert.equal(mobilePackage.dependencies["expo-notifications"], "~57.0.20");
-  assert.equal(mobilePackage.dependencies["expo-auth-session"], "~57.0.12");
+  assert.equal(mobilePackage.dependencies["expo-image-picker"], "~57.0.20");
+  assert.equal(mobilePackage.dependencies["expo-image-manipulator"], "~57.0.20");
+  assert.equal(mobilePackage.dependencies["expo-notifications"], "~57.0.21");
+  assert.equal(mobilePackage.dependencies["expo-auth-session"], "~57.0.13");
+  assert.equal(mobilePackage.dependencies["expo-linking"], "~57.0.11");
   assert.equal(mobilePackage.dependencies["expo-web-browser"], "~57.0.3");
-  assert.equal(mobilePackage.dependencies["expo-router"], "~57.0.22");
+  assert.equal(mobilePackage.dependencies["expo-router"], "~57.0.23");
   assert.equal(mobilePackage.dependencies["@react-navigation/bottom-tabs"], undefined);
   assert.ok(mobilePackage.dependencies["@supabase/supabase-js"]);
   assert.equal(mobilePackage.scripts.start, "node ../../scripts/dabboba-mobile-launch.mjs");
@@ -335,7 +336,8 @@ test("Expo entry is native-first with typed routes, API contracts, secure tokens
   assert.match(catalogApiSource, /createDabbobaClient/);
   assert.match(catalogApiSource, /\/v1\/catalog\/home-sections/);
   assert.match(catalogApiSource, /\/v1\/catalog\/recent-draws/);
-  assert.match(catalogApiSource, /homeSections:\s*homeSectionResult\?\.data \?\? null/);
+  assert.match(catalogApiSource, /\n\s*homeSections,\n/);
+  assert.match(catalogApiSource, /isCurrentHomeSectionList\(homeSectionResult\?\.data\)/);
   assert.match(catalogApiSource, /homeSectionRequest = client\.GET\("\/v1\/catalog\/home-sections"\)\.catch\(\(\) => null\)/);
   assert.doesNotMatch(catalogApiSource, /recentDrawRequest = client\.GET/);
   assert.match(catalogApiSource, /function fetchHomeRecentDrawActivity/);
@@ -350,8 +352,8 @@ test("Expo entry is native-first with typed routes, API contracts, secure tokens
   assert.doesNotMatch(homeSource, /<SeedChip|PRODUCT_CATEGORY_OPTIONS\.map|<HomeCategoryNavigation/);
   assert.match(seedComponentsSource, /minHeight:\s*seed\.size\.chip,[\s\S]*?paddingHorizontal:\s*14,[\s\S]*?borderWidth:\s*1,[\s\S]*?borderRadius:\s*seed\.radius\.r2,/);
   assert.match(localDatabaseSource, /CREATE TABLE IF NOT EXISTS catalog_cache/);
-  assert.match(localDatabaseSource, /recentDrawActivity:\s*Array\.isArray\(parsed\.recentDrawActivity\)[\s\S]*?parsed\.recentDrawActivity\.slice\(0, 2\)/);
-  assert.match(localDatabaseSource, /recentDrawActivity:\s*snapshot\.recentDrawActivity\?\.slice\(0, 2\) \?\? null/);
+  assert.doesNotMatch(localDatabaseSource, /parsed\.recentDrawActivity\.slice\(0, 2\)/);
+  assert.match(localDatabaseSource, /recentDrawActivity:\s*null/);
   assert.match(localDatabaseSource, /JSON\.stringify\(cacheSnapshot\)/);
   assert.match(localDatabaseSource, /CREATE TABLE IF NOT EXISTS exchange_listing_cache/);
   assert.match(localDatabaseSource, /CREATE TABLE IF NOT EXISTS recent_searches/);
@@ -385,7 +387,7 @@ test("native Home follows the operator-defined editorial structure and layoutKin
   );
   assert.match(homeSource, /function HomeIntroBanner/);
   assert.match(homeSource, /<HomeIntroBanner \/>/);
-  assert.match(homeSource, /accessibilityRole="summary"[\s\S]*?accessibilityLabel="새 소식 준비 중/);
+  assert.match(homeSource, /function HomeIntroBanner[\s\S]*?accessibilityRole="button"[\s\S]*?router\.push\("\/events" as Href\)/);
   assert.doesNotMatch(homeSource, /<HomeCategoryNavigation|<SeedChip/);
   assert.doesNotMatch(homeSource, /<HomePopularIpSection|<HomeFeaturedProductsSection|<TodayDrawGroup/);
   assert.doesNotMatch(homeSource, /buildTodayDrawGroups|buildHomeFeaturedProducts|buildHomeCollections|DEFAULT_HOME_COLLECTION_IP_IDS/);
@@ -409,7 +411,7 @@ test("native Home follows the operator-defined editorial structure and layoutKin
   assert.doesNotMatch(homeSource, /다뽀바 인기 작품|다뽀바 덕룸|fetchDukroomHomePreview/);
   assert.match(homeSource, /buildConfiguredHomeCollections\(snapshot\.homeSections\.items\.map/);
   assert.doesNotMatch(homeSource, /seenProductIds/);
-  assert.match(localDatabaseSource, /homeSections:\s*parsed\.homeSections \?\? null/);
+  assert.match(localDatabaseSource, /homeSections:\s*isCurrentHomeSectionList\(parsed\.homeSections\) \? parsed\.homeSections : null/);
   assert.match(announcementTickerSource, /Animated\.timing\(translateX/);
   assert.match(announcementTickerSource, /Animated\.timing\(translateY/);
   assert.match(announcementTickerSource, /AccessibilityInfo\.isReduceMotionEnabled/);
@@ -450,8 +452,9 @@ test("native Home uses the approved restrained arcade treatment", () => {
   assert.match(announcementTickerSource, /Animated\.loop\(Animated\.sequence/);
   assert.match(announcementTickerSource, /if \(reduceMotion \|\| paused\) return undefined/);
   assert.match(homeSource, /<HomeIntroBanner \/>/);
-  assert.match(homeSource, /style=\{\[styles\.hero, expanded && styles\.heroLargeText\]\}/);
-  assert.match(homeSource, /style=\{styles\.heroAction\}>새 소식 준비 중<\/Text>/);
+  assert.match(homeSource, /style=\{\(\{ pressed \}\) => \[styles\.hero, pressed && styles\.pressed\]\}/);
+  assert.doesNotMatch(homeSource, /styles\.heroAction|새 소식 준비 중<\/Text>/);
+  assert.match(homeSource, /hero: \{[\s\S]*?borderWidth: 1,[\s\S]*?borderColor: seed\.color\.stroke\.neutral,[\s\S]*?backgroundColor: seed\.color\.layer\.elevated/);
   assert.doesNotMatch(homeSource, />LIVE<\/Text>|실시간 상품/);
   assert.doesNotMatch(homeSource, /ArcadeDotTexture|ArcadeScanlineTexture|dotTexture|scanlineTexture/);
   assert.doesNotMatch(homeSource, /activityCard|activityProduct/);
@@ -524,7 +527,8 @@ test("readable app copy uses Noto Sans while fixed pixel brand surfaces stay iso
   assert.match(typographySource, /fontSize === 12[\s\S]*?"catalogMetadata"[\s\S]*?"caption"/);
   assert.match(typographySource, /fontSize === 15[\s\S]*?"articleBody"[\s\S]*?"body"/);
   assert.match(typographySource, /readableMetrics\(style, "input"\)/);
-  assert.match(rootFloatingTabBarSource, /fontFamily:\s*"NotoSansKR_700Bold"/);
+  assert.doesNotMatch(rootFloatingTabBarSource, /fontFamily:/);
+  assert.match(rootFloatingTabBarSource, /label: \{[\s\S]*?fontWeight: "700"/);
 
   const pixelOnlyNativeText = new Set([
     "apps/mobile/src/components/RootCategoryTitle.tsx",
@@ -542,7 +546,8 @@ test("readable app copy uses Noto Sans while fixed pixel brand surfaces stay iso
   assert.match(rootLayoutSource, /Galmuri11Readable:\s*require\("galmuri\/dist\/Galmuri11\.ttf"\)/);
   assert.match(rootCategoryTitleSource, /section:\s*\{[\s\S]*?fontSize:\s*19/);
   assert.match(rootHeaderActionsSource, /import \{ AppText as Text \} from "@\/components\/Typography"/);
-  assert.match(rootHeaderActionsSource, /<Text style=\{styles\.unreadBadge\}>/);
+  assert.match(rootHeaderActionsSource, /<Text variant="micro" style=\{styles\.unreadBadge\}>/);
+  assert.match(rootHeaderActionsSource, /unreadBadge: \{[\s\S]*?minHeight: 15,/);
   assert.doesNotMatch(rootHeaderActionsSource, /fontFamily:/);
 });
 
@@ -819,7 +824,7 @@ test("native root navigation stays flat and full-width with icon-and-label selec
   assert.match(rootFloatingTabBarSource, /style=\{\[styles\.label, selected && \{ color \}\]\}/);
   assert.doesNotMatch(rootFloatingTabBarSource, /selectionTrack|selectionIndicator|Animated\.spring|Animated\.multiply/);
   assert.match(rootFloatingTabBarSource, /backgroundColor: seed\.color\.layer\.default/);
-  assert.match(rootFloatingTabBarSource, /label:\s*\{[\s\S]*?fontSize:\s*11,[\s\S]*?lineHeight:\s*16/);
+  assert.match(rootFloatingTabBarSource, /variant="finePrint"/);
   assert.match(rootFloatingTabBarSource, /position: "absolute"/);
   assert.match(rootFloatingTabBarSource, /borderTopWidth: StyleSheet\.hairlineWidth/);
   assert.match(rootFloatingTabBarSource, /backgroundColor: seed\.color\.background\.transparent/);
@@ -877,7 +882,7 @@ test("native exchange room uses server records and opens registration, activity,
   assert.match(exchangeRoomSource, /writeExchangeRulesDismissed/);
   assert.match(localDatabaseSource, /DATABASE_VERSION = 4/);
   assert.match(localDatabaseSource, /CREATE TABLE IF NOT EXISTS app_preferences/);
-  assert.match(localDatabaseSource, /exchange\.rules\.dismissed\.v2/);
+  assert.match(localDatabaseSource, /exchange\.rules\.dismissed\.v3/);
   assert.match(localDatabaseSource, /exchange\.listings\.v3/);
   assert.match(exchangeRoomSource, /등록글은 7일 동안 공개/);
   assert.match(exchangeRoomSource, /남은 보관 기간이 14일보다 짧으면 14일로 연장/);
@@ -897,8 +902,12 @@ test("native exchange room uses server records and opens registration, activity,
   assert.match(exchangeApiSource, /items\.length === 0 && includePreview/);
   assert.match(exchangeApiSource, /query:\s*\{\s*limit:\s*30,\s*category,\s*q:\s*search\s*\}/);
   assert.match(exchangeRoomSource, /router\.push\("\/exchange\/new"\)/);
-  assert.match(exchangeRoomSource, />상품 올리기</);
-  assert.match(exchangeRoomSource, />현황</);
+  assert.match(exchangeRoomSource, />교환 상품 올리기</);
+  assert.match(exchangeRoomSource, />내 교환 현황</);
+  assert.match(exchangeRoomSource, /제안 \{item\.offerCount\}개 · D-\{daysLeft\}/);
+  assert.doesNotMatch(exchangeRoomSource, /applyTile|>교환 신청</);
+  assert.match(exchangeRoomSource, /animationType=\{reduceMotion \? "none" : "fade"\}/);
+  assert.match(exchangeRoomSource, /쿠지·피규어·카드 상품은 교환과 포인트 환급 대상이 아니에요\./);
   assert.match(exchangeRoomSource, /accessibilityLabel="교환 상품 올리기"/);
   assert.match(exchangeRoomSource, /accessibilityLabel="내 교환 현황"/);
   assert.match(exchangeActivityRouteSource, /ExchangeActivityScreen/);
@@ -979,7 +988,7 @@ test("native customer screens omit repeated reference-price disclaimers", () => 
   assert.doesNotMatch(customerSource, /표시 금액은 판매가가 아닌 앱 기준가예요/);
   assert.doesNotMatch(customerSource, /사용자가 정한 판매가가 아니라 앱에 등록된 상품 기준가예요/);
   assert.doesNotMatch(customerSource, /판매 상태와 가챠샵 기준가를 확인/);
-  assert.match(profileSectionSource, /예상 환급 포인트 · 기준가의 50%/);
+  assert.match(profileSectionSource, /예상 환급 포인트 · 구매가의 50%/);
 });
 
 test("native gacha and kuji shops coexist with the shared drawn-product storage root", () => {
@@ -1025,14 +1034,15 @@ test("native gacha and kuji shops coexist with the shared drawn-product storage 
   assert.match(shopSource, /\.\.\.catalogProductCardSurface/);
   assert.doesNotMatch(productDetailSource, /Image\.getSize\(|setImageAspectRatio/);
   assert.match(productDetailSource, /<CatalogProductImage/);
-  assert.match(productDetailSource, /product\.category === "kuji" \? styles\.heroKuji : styles\.heroGacha/);
-  assert.match(productDetailSource, /heroGacha:\s*\{[^}]*aspectRatio:\s*4\s*\/\s*3/);
-  assert.match(productDetailSource, /heroKuji:\s*\{[^}]*aspectRatio:\s*16\s*\/\s*9/);
+  assert.match(productDetailSource, /onDimensions=\{\(width, height\) => setMeasured\(/);
+  assert.match(productDetailSource, /\[styles\.hero, \{ aspectRatio: heroAspectRatio \}\]/);
+  assert.doesNotMatch(productDetailSource, /heroGacha|heroKuji/);
   assert.match(productDetailSource, /resizeMode="contain"/);
   assert.match(productDetailSource, /heroContainer:\s*\{[^}]*marginHorizontal:\s*seed\.spacing\.x2/);
   assert.match(productDetailSource, /hero:\s*\{[^}]*width:\s*"100%"/);
   assert.match(homeSource, /\/product\//);
-  assert.doesNotMatch(homeSource, /router\.push\("\/events" as Href\)/);
+  // The always-mounted Home event slot routes to the native event surface (Operator Feed Contract).
+  assert.match(homeSource, /router\.push\("\/events" as Href\)/);
   assert.doesNotMatch(homeSource, /onIpPress|pathname:\s*"\/search"/);
 
   assert.match(storageRouteSource, /StorageRootScreen/);
@@ -1097,7 +1107,7 @@ test("native fixed-category shop empty states separate catalog absence, filtered
   assert.doesNotMatch(shopSource, /error instanceof Error \? error\.message/);
   assert.match(homeSource, /setMessage\("홈을 불러오지 못했어요\. 연결 상태를 확인해 주세요\."\)/);
   assert.doesNotMatch(homeSource, /setMessage\(error instanceof Error \? error\.message/);
-  assert.equal((shopSource.match(/<KoreanPixelTitle variant="section">/g) ?? []).length >= 4, true);
+  assert.equal((shopSource.match(/<KoreanPixelTitle variant="section"(?:\s+[^>]*)?>/g) ?? []).length >= 4, true);
 
   const resetConditionsSource = shopSource.slice(
     shopSource.indexOf("const resetSearchConditions"),
@@ -1166,7 +1176,8 @@ test("native customer category surfaces share operator-managed availability and 
   for (const option of ["최신순", "인기순", "가격 높은순", "가격 낮은순"]) {
     assert.match(shopFilterSource, new RegExp(option));
   }
-  assert.match(shopSource, /animationType="slide"/);
+  assert.match(shopSource, /animationType=\{reduceMotion \? "none" : "slide"\}/);
+  assert.match(shopSource, /AccessibilityInfo\.addEventListener\("reduceMotionChanged", setReduceMotion\)/);
   assert.match(shopSource, /accessibilityRole="switch"/);
   assert.match(shopSource, /accessibilityRole="radio"/);
 });
@@ -1177,11 +1188,11 @@ test("native kuji claims its room before the shared quantity and purchase checko
   assert.match(productDetailSource, /buildKujiRoomGatePath/);
   assert.doesNotMatch(productDetailSource, /buildGachaPreviewParams|resolveKujiEntryPath|결제 금액 확인/);
 
-  assert.match(checkoutScreenSource, /<Text style=\{styles\.sectionTitle\}>구매 상품<\/Text>[\s\S]*?styles\.quantityRow/);
+  assert.match(checkoutScreenSource, /<KoreanPixelTitle variant="section" style=\{styles\.sectionTitle\}>구매 상품<\/KoreanPixelTitle>[\s\S]*?styles\.quantityRow/);
   assert.match(checkoutScreenSource, /구매 수량/);
   assert.match(checkoutScreenSource, /checkoutNeedsAgreement/);
   assert.match(checkoutScreenSource, /결제 수단 준비 중/);
-  assert.match(checkoutScreenSource, /포인트로 구매하기/);
+  assert.match(checkoutScreenSource, /label=\{!recoveringGachaOrder && paymentAvailability === "unavailable"\s*\? "결제 수단 준비 중"\s*: "구매하기"\}/);
   assert.doesNotMatch(checkoutScreenSource, /buildGachaPreviewParams|openGachaPreview|\/draw\/preview|체험하기/);
   assert.match(checkoutScreenSource, /kujiCheckoutExpiresAt/);
   assert.match(checkoutScreenSource, /결제 남은 시간/);
@@ -1218,7 +1229,7 @@ test("native purchase Product Detail continues into a server-verified PortOne ch
   assert.match(checkoutScreenSource, /주문내용 확인 및 결제 동의/);
   assert.match(checkoutScreenSource, /EXPO_PUBLIC_PORTONE_STORE_ID/);
   assert.match(checkoutScreenSource, /결제 수단 준비 중/);
-  assert.match(checkoutScreenSource, /포인트로 구매하기/);
+  assert.match(checkoutScreenSource, /label=\{!recoveringGachaOrder && paymentAvailability === "unavailable"\s*\? "결제 수단 준비 중"\s*: "구매하기"\}/);
   assert.doesNotMatch(checkoutScreenSource, /openConnectionGuide|\/checkout\/connect\//);
   assert.match(checkoutScreenSource, /resizeMode="contain"/);
   assert.match(checkoutScreenSource, /accessibilityRole="radio"/);
@@ -1279,7 +1290,9 @@ test("native my-info hub opens every account utility and nested member detail ou
       && accountMenuIndex > commerceMenuIndex
       && supportMenuIndex > accountMenuIndex,
   );
-  assert.match(profileHomeSource, /<ProfileMetric label="내 포인트" value=\{`\$\{snapshot\.pointBalance\.toLocaleString\("ko-KR"\)\}P`\} accent \/>/);
+  assert.match(profileHomeSource, /<ProfileMetric label="내 포인트" value=\{summary\?\.pointBalanceLabel \?\? "불러오지 못했어요"\}/);
+  assert.match(profileHomeSource, /pointBalanceLabel: pointsFailed \|\| snapshot\.pointBalance === null \? null : `\$\{snapshot\.pointBalance\.toLocaleString\("ko-KR"\)\}P`/);
+  assert.doesNotMatch(profileHomeSource, /pointBalance \?\? 0/);
   assert.doesNotMatch(profileHomeSource, /내 쿠폰|준비 중/);
   assert.match(profileHomeSource, /const COMMERCE_MENU: ReadonlyArray<ProfileMenuItem> = \[/);
   assert.match(profileHomeSource, /const ACCOUNT_MENU: ReadonlyArray<ProfileMenuItem> = \[/);
@@ -1312,13 +1325,14 @@ test("native my-info hub opens every account utility and nested member detail ou
   assert.match(profileSectionSource, /배송 신청/);
   assert.match(profileSectionSource, /포인트 환급/);
   assert.match(profileSectionSource, /createPointReturn/);
-  assert.match(profileSectionSource, /Math\.floor\(item\.product\.price \/ 2\)/);
+  assert.match(profileSectionSource, /item\.pointReturnAmount/);
+  assert.doesNotMatch(profileSectionSource, /Math\.floor\(item\.product\.price \/ 2\)/);
   assert.match(profileSectionSource, /if \(section === "storage"\)[\s\S]*?<StorageHubContent/);
   assert.match(profileSectionSource, /if \(section === "shipping"\) return <ShippingHistory/);
   assert.match(profileSectionSource, /<StorageModeTab label="보관 중"/);
   assert.match(profileSectionSource, /<StorageModeTab label="교환 또는 배송 중인 상품"[\s\S]*?wide/);
   assert.match(profileSectionSource, /<StorageModeTab label="포인트 환급"/);
-  assert.match(profileSectionSource, /snapshot\.inventory\.filter\(isExchangeOrShippingInventory\)/);
+  assert.match(profileSectionSource, /inventory\?\.filter\(isExchangeOrShippingInventory\)/);
   assert.match(profileSectionSource, /item\.status === "EXCHANGE_LISTED"[\s\S]*?item\.status === "EXCHANGE_OFFERED"[\s\S]*?item\.status === "SHIPPING"/);
   assert.doesNotMatch(profileHomeSource, /주문·포인트·배송 상태는 내 계정의 최신 내역/);
   for (const detail of ["개인정보", "기본 배송지", "로그인 및 보안", "알림 수신설정", "개인정보·수신 동의", "약관·운영정책", "로그아웃·회원탈퇴"]) {
@@ -1360,7 +1374,8 @@ test("storage removes the old lead guidance while shared profile leads keep bala
   const sectionLeadSource = profileSectionSource.slice(sectionLeadStart, sectionLeadEnd);
   assert.doesNotMatch(profileSectionSource, /묶음 배송하거나 가챠에서 뽑은 상품을 포인트로 환급할 수 있어요|직접 뽑아 보관 중인 상품을 묶어 배송받거나 포인트로 환급할 수 있어요/);
   assert.match(sectionLeadSource, /BalancedAppText/);
-  assert.doesNotMatch(sectionLeadSource, /numberOfLines|adjustsFontSizeToFit|allowFontScaling|minimumFontScale/);
+  assert.match(sectionLeadSource, /<KoreanPixelTitle variant="section" numberOfLines=\{0\}>/);
+  assert.doesNotMatch(sectionLeadSource, /numberOfLines=\{[1-9]|adjustsFontSizeToFit|allowFontScaling|minimumFontScale/);
 });
 
 test("native shipping request shows the category-sensitive free-shipping policy", () => {
@@ -1430,6 +1445,18 @@ test("native runtime config requires HTTPS in production and derives the Metro h
     "http://192.168.219.100:4174/assets/item.jpg?v=3",
   );
   assert.equal(runtimeConfig.resolveCatalogImageUrl("/assets/item.jpg", null), null);
+  // Absolute cleartext media is accepted only in development builds.
+  assert.equal(runtimeConfig.resolveCatalogImageUrl("http://cdn.example.test/a.png", null), null);
+  assert.equal(runtimeConfig.resolveCatalogImageUrl("http://cdn.example.test/a.png", null, undefined, false), null);
+  assert.equal(
+    runtimeConfig.resolveCatalogImageUrl("http://192.168.219.100:4174/a.png", null, undefined, true),
+    "http://192.168.219.100:4174/a.png",
+  );
+  assert.equal(
+    runtimeConfig.resolveCatalogImageUrl("https://cdn.example.test/a.png", null, 2, false),
+    "https://cdn.example.test/a.png?v=2",
+  );
+  assert.equal(runtimeConfig.resolveCatalogImageUrl("javascript:alert(1)", null, undefined, true), null);
 
   assert.throws(
     () =>
@@ -1451,6 +1478,17 @@ test("native runtime config requires HTTPS in production and derives the Metro h
       development: false,
     }));
   }
+});
+
+test("commerce routes wait for the first LIVE server answer without opening in PRELAUNCH", () => {
+  const access = runtimeConfig.resolveCommerceRouteAccess;
+  assert.equal(access("PRELAUNCH", null, false), "DENY");
+  assert.equal(access("PRELAUNCH", "LIVE", true), "DENY");
+  assert.equal(access("LIVE", null, false), "WAIT");
+  assert.equal(access("LIVE", "LIVE", false), "WAIT");
+  assert.equal(access("LIVE", "LIVE", true), "ALLOW");
+  assert.equal(access("LIVE", "PRELAUNCH", true), "DENY");
+  assert.equal(access("LIVE", null, true), "DENY");
 });
 
 test("legacy WebView compatibility remains bounded while screens migrate", () => {

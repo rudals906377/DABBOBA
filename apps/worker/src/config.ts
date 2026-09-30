@@ -11,6 +11,7 @@ import {
   assertInicisInquiryConfig,
   type InicisInquiryConfig,
 } from "./inicis-inquiry.js";
+import type { PortOneApiRequeryConfig } from "./portone-api-requery.js";
 
 export type RuntimeEnvironment = "development" | "test" | "production";
 
@@ -27,6 +28,29 @@ export const MIN_QUEUE_VISIBILITY_SECONDS =
 // timeout remains a fail-safe for one already-started bounded operation.
 export const MAX_WORKER_RUN_SECONDS = 45;
 
+// The API ranks Home popularity over a rolling 30-day click window, so raw
+// click evidence must outlive that window before it is rolled up and deleted.
+export const HOME_CLICK_POPULARITY_WINDOW_DAYS = 30;
+export const MIN_HOME_CLICK_ROLLUP_DAYS = HOME_CLICK_POPULARITY_WINDOW_DAYS + 1;
+
+export type WorkerRetentionConfig = {
+  /** Published outbox events older than this many days are deleted. */
+  outboxPublishedDays: number;
+  /** Revoked or expired sessions older than this many days are deleted. */
+  sessionDays: number;
+  /** Raw Home click events older than this many days are rolled up daily. */
+  homeClickRollupDays: number;
+  /** Upper bound on rows each retention step touches per worker run. */
+  batchSize: number;
+};
+
+export const DEFAULT_WORKER_RETENTION: WorkerRetentionConfig = Object.freeze({
+  outboxPublishedDays: 30,
+  sessionDays: 30,
+  homeClickRollupDays: 35,
+  batchSize: 500,
+});
+
 export type WorkerConfig = {
   environment: RuntimeEnvironment;
   environmentTier?: BackendEnvironmentTier;
@@ -34,6 +58,12 @@ export type WorkerConfig = {
   queueName: string;
   outboxBatchSize: number;
   paymentStaleMinutes: number;
+  /**
+   * How long a claimed PortOne window may stay READY/PAY_PENDING before the
+   * worker closes its reconciliation as PENDING_EXPIRED. Optional only for
+   * backwards-compatible programmatic fixtures; loaded configs always set it.
+   */
+  paymentWindowValidityMinutes?: number;
   mediaPendingTtlMinutes: number;
   mediaRejectedTtlHours: number;
   jobAttempts: number;
@@ -62,7 +92,10 @@ export type WorkerConfig = {
   /** Optional only for backwards-compatible programmatic fixtures; loaded configs always set it. */
   paymentReconciliation?:
     | { provider: "MANUAL_REVIEW" }
-    | ({ provider: "KG_INICIS" } & InicisInquiryConfig);
+    | ({ provider: "KG_INICIS" } & InicisInquiryConfig)
+    | ({ provider: "PORTONE_API" } & PortOneApiRequeryConfig);
+  /** Optional only for backwards-compatible programmatic fixtures; loaded configs always set it. */
+  retention?: WorkerRetentionConfig;
   logLevel: "debug" | "info" | "warn" | "error";
 };
 
@@ -118,8 +151,8 @@ function paymentReconciliationConfig(
   environmentTier: BackendEnvironmentTier,
 ): NonNullable<WorkerConfig["paymentReconciliation"]> {
   const provider = env.PAYMENT_RECONCILIATION_PROVIDER?.trim() || "MANUAL_REVIEW";
-  if (provider !== "MANUAL_REVIEW" && provider !== "KG_INICIS") {
-    throw new Error("PAYMENT_RECONCILIATION_PROVIDER must be MANUAL_REVIEW or KG_INICIS");
+  if (provider !== "MANUAL_REVIEW" && provider !== "KG_INICIS" && provider !== "PORTONE_API") {
+    throw new Error("PAYMENT_RECONCILIATION_PROVIDER must be MANUAL_REVIEW, KG_INICIS, or PORTONE_API");
   }
 
   const environment = optional(env, "KG_INICIS_ENVIRONMENT");
@@ -127,11 +160,41 @@ function paymentReconciliationConfig(
   const iniApiKey = optional(env, "KG_INICIS_INIAPI_KEY");
   const clientIp = optional(env, "KG_INICIS_CLIENT_IP");
   const hasInicisConfig = Boolean(environment || mid || iniApiKey || clientIp);
+  const apiBaseUrl = optional(env, "PORTONE_RECONCILIATION_API_BASE_URL");
+  const workerSecret = optional(env, "PAYMENT_RECONCILIATION_WORKER_SECRET");
   if (provider === "MANUAL_REVIEW") {
-    if (hasInicisConfig) {
-      throw new Error("KG INICIS inquiry settings must be unset when reconciliation uses MANUAL_REVIEW");
+    if (hasInicisConfig || apiBaseUrl || workerSecret) {
+      throw new Error("Payment reconciliation settings must be unset when using MANUAL_REVIEW");
     }
     return { provider };
+  }
+
+  if (provider === "PORTONE_API") {
+    if (hasInicisConfig) throw new Error("KG INICIS inquiry settings must be unset when using PORTONE_API");
+    if (!env.DABBOBA_ENVIRONMENT_TIER?.trim()
+      || (environmentTier !== "STAGING" && environmentTier !== "PRODUCTION")) {
+      throw new Error("PortOne API reconciliation requires an explicit STAGING or PRODUCTION worker tier");
+    }
+    if (!apiBaseUrl || !workerSecret) {
+      throw new Error("PortOne API reconciliation requires a base URL and worker secret");
+    }
+    const parsed = new URL(apiBaseUrl);
+    if ((env.NODE_ENV === "production" && parsed.protocol !== "https:")
+      || !["https:", "http:"].includes(parsed.protocol)
+      || parsed.username || parsed.password || parsed.search || parsed.hash
+      || !["/", "/functions/v1/dabboba-api"].includes(parsed.pathname)) {
+      throw new Error("PORTONE_RECONCILIATION_API_BASE_URL must identify the dedicated API origin or Supabase function");
+    }
+    const secretSize = Buffer.byteLength(workerSecret, "utf8");
+    if (secretSize < 32 || secretSize > 512 || /[\r\n]/.test(workerSecret)
+      || /(?:change-me|local-development)/i.test(workerSecret)) {
+      throw new Error("PAYMENT_RECONCILIATION_WORKER_SECRET must be a 32-512 byte server-only secret");
+    }
+    return { provider, apiBaseUrl: parsed.href.replace(/\/$/, ""), secret: workerSecret };
+  }
+
+  if (apiBaseUrl || workerSecret) {
+    throw new Error("PortOne API reconciliation settings must be unset when using KG_INICIS");
   }
 
   if (!env.DABBOBA_ENVIRONMENT_TIER?.trim()) {
@@ -285,6 +348,7 @@ export function loadWorkerConfig(env: Environment = process.env): WorkerConfig {
     queueName,
     outboxBatchSize: integer(env, "WORKER_OUTBOX_BATCH_SIZE", 50, 1, 500),
     paymentStaleMinutes: integer(env, "WORKER_PAYMENT_STALE_MINUTES", 10, 1, 10_080),
+    paymentWindowValidityMinutes: integer(env, "WORKER_PAYMENT_WINDOW_VALIDITY_MINUTES", 30, 10, 1_440),
     mediaPendingTtlMinutes: integer(env, "WORKER_MEDIA_PENDING_TTL_MINUTES", 5, 5, 10_080),
     mediaRejectedTtlHours: integer(env, "WORKER_MEDIA_REJECTED_TTL_HOURS", 24, 1, 8_760),
     jobAttempts: integer(env, "WORKER_JOB_ATTEMPTS", 8, 1, 50),
@@ -303,6 +367,36 @@ export function loadWorkerConfig(env: Environment = process.env): WorkerConfig {
     notificationDeliveryToken: optional(env, "NOTIFICATION_DELIVERY_TOKEN"),
     expoPushAccessToken,
     paymentReconciliation,
+    retention: {
+      outboxPublishedDays: integer(
+        env,
+        "WORKER_RETENTION_OUTBOX_DAYS",
+        DEFAULT_WORKER_RETENTION.outboxPublishedDays,
+        30,
+        3_650,
+      ),
+      sessionDays: integer(
+        env,
+        "WORKER_RETENTION_SESSION_DAYS",
+        DEFAULT_WORKER_RETENTION.sessionDays,
+        30,
+        3_650,
+      ),
+      homeClickRollupDays: integer(
+        env,
+        "WORKER_RETENTION_HOME_CLICK_DAYS",
+        DEFAULT_WORKER_RETENTION.homeClickRollupDays,
+        MIN_HOME_CLICK_ROLLUP_DAYS,
+        3_650,
+      ),
+      batchSize: integer(
+        env,
+        "WORKER_RETENTION_BATCH_SIZE",
+        DEFAULT_WORKER_RETENTION.batchSize,
+        1,
+        5_000,
+      ),
+    },
     logLevel: logLevel(env),
   };
 }

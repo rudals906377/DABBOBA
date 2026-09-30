@@ -1,6 +1,7 @@
 import type { Actor } from "../lib/admin-types";
 import { can } from "../lib/capabilities";
 import { ADMIN_NAVIGATION } from "../lib/navigation";
+import { AdminSessionKeepalive } from "./admin-session-keepalive";
 import { BrandWordmark } from "./brand-wordmark";
 import { SidebarNav } from "./sidebar-nav";
 
@@ -9,10 +10,11 @@ export function AdminShell({ actor, children }: { actor: Actor; children: React.
 
   return (
     <div className="admin-frame">
+      <AdminSessionKeepalive />
       <aside className="admin-sidebar">
         <div className="admin-brand">
           <span className="admin-brand__wordmark-surface"><BrandWordmark /></span>
-          <span>OPERATIONS</span>
+          <span>관리자 페이지</span>
         </div>
         <SidebarNav items={navigation} />
         <div className="admin-identity">
@@ -25,8 +27,8 @@ export function AdminShell({ actor, children }: { actor: Actor; children: React.
       </aside>
       <div className="admin-main">
         <header className="admin-topbar">
-          <span>PRIVILEGED CONSOLE</span>
-          <p>모든 변경은 서버 권한 검사와 감사 로그를 거칩니다.</p>
+          <span>다뽀바 운영</span>
+          <p>필요한 메뉴를 왼쪽에서 선택하세요. 변경 내역은 안전하게 기록됩니다.</p>
         </header>
         <div className="admin-content">{children}</div>
       </div>

@@ -123,9 +123,16 @@ function createProductSearchRenderer() {
     },
     "react-native": {
       ActivityIndicator: "ActivityIndicator",
+      // Minimal FlatList: header, rendered rows (or the empty component) and footer.
+      FlatList: (props) => [
+        props.ListHeaderComponent,
+        ...(props.data.length
+          ? props.data.map((item, index) => props.renderItem({ item, index }))
+          : [props.ListEmptyComponent]),
+        props.ListFooterComponent,
+      ],
       Keyboard: { dismiss() {} },
       Platform: { OS: "ios" },
-      ScrollView: "ScrollView",
       StyleSheet: styles,
       View: "View",
     },
@@ -148,6 +155,7 @@ function createProductSearchRenderer() {
         color: { layer: { basement: "#fff" }, stroke: { neutral: "#ddd" } },
         size: { topNavigation: 52 },
         spacing: { x1: 4, x2_5: 10, x3_5: 14, x4: 16, globalGutter: 20, screenBottom: 40 },
+        typography: { subtitle: { fontSize: 18, lineHeight: 24, fontWeight: "700" } },
       },
     },
     "@/features/catalog/StorefrontCategorySettingsProvider": {

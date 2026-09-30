@@ -14,7 +14,7 @@ const activitySource = source("../apps/mobile/src/features/exchange/ExchangeActi
 
 test("a two-product exchange listing renders every registered product image on discovery cards", () => {
   assert.match(roomSource, /productDetails\.map\(\(\{ product \}, index\) =>/);
-  assert.match(roomSource, /resolveCatalogImageUrl\(product\.imageUrl, assetBaseUrl, product\.version\)/);
+  assert.match(roomSource, /resolveCatalogImageUrl\(product\.imageUrl, assetBaseUrl, product\.version, __DEV__\)/);
   assert.match(roomSource, /등록 상품 \$\{index \+ 1\}\/\$\{products\.length\}/);
   assert.doesNotMatch(roomSource, /const uri = resolveCatalogImageUrl\(item\.product\.imageUrl/);
 });
@@ -39,7 +39,7 @@ test("exchange discovery exposes IP, name, category, and value for every bundled
 test("exchange detail renders every product summary in the registered bundle", () => {
   assert.match(detailSource, /item\.products\.map\(\(product, index\) =>/);
   assert.match(detailSource, /<ProductSummary/);
-  assert.match(detailSource, /label=\{`A가 올린 상품 \$\{index \+ 1\}\/\$\{item\.products\.length\}`\}/);
+  assert.match(detailSource, /label=\{`등록 상품 \$\{index \+ 1\}\/\$\{item\.products\.length\}`\}/);
 });
 
 test("exchange application and activity screens render every registered product image", () => {

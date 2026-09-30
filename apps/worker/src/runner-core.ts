@@ -18,6 +18,7 @@ import {
   ManualReviewPaymentProvider,
   type PaymentReconciliationProvider,
 } from "./payments.js";
+import { PortOneApiReconciliationProvider } from "./portone-api-requery.js";
 import {
   assertPgmqRuntime,
   createPgmqOutboxPublisher,
@@ -82,6 +83,12 @@ export function createPaymentReconciliationProvider(
   const reconciliation = config.paymentReconciliation;
   if (!reconciliation || reconciliation.provider === "MANUAL_REVIEW") {
     return new ManualReviewPaymentProvider();
+  }
+  if (reconciliation.provider === "PORTONE_API") {
+    if (config.environmentTier !== "STAGING" && config.environmentTier !== "PRODUCTION") {
+      throw new Error("PortOne API reconciliation requires a matching STAGING or PRODUCTION worker tier");
+    }
+    return new PortOneApiReconciliationProvider(reconciliation);
   }
   if (
     (config.environmentTier === "STAGING" && reconciliation.environment !== "TEST")
@@ -268,12 +275,18 @@ export async function runWorkerOnceCore(
 
     // Lease expiry is latency-sensitive. Run periodic reconciliation before a
     // queue backlog can consume this short, once-per-minute execution window.
+    // Payment reconciliation runs before the reservation sweep so a provider
+    // that already captured a payment is observed (and its canonical PAID
+    // transition applied or its observation recorded) before the sweep could
+    // cancel the same pending order and release its stock and points.
+    // Retention is housekeeping and runs last.
     for (const job of [
-      { kind: "reservation.sweep" } as const,
       { kind: "payment.reconcile" } as const,
+      { kind: "reservation.sweep" } as const,
       { kind: "inventory.storage-expiry" } as const,
       { kind: "account-auth.cleanup" } as const,
       { kind: "media.cleanup" } as const,
+      { kind: "retention.sweep" } as const,
     ]) {
       if (!shouldContinue()) break;
       try {

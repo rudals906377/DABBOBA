@@ -52,6 +52,9 @@ jobs:
       - name: Generate OpenAPI TypeScript contracts
         run: pnpm --filter @dabboba/contracts generate
 
+      - name: Reject stale committed OpenAPI TypeScript contracts
+        run: git diff --exit-code packages/contracts/src/generated.ts
+
       - name: Build all workspace packages and applications
         run: pnpm run build:all
 
@@ -179,29 +182,77 @@ jobs:
           DABBOBA_RELEASE_ENVIRONMENT_TIER: TEST
         run: corepack pnpm --filter @dabboba/db check:release
 
+      - name: Require the complete disposable integration database environment
+        run: node scripts/check-test-backend-env.mjs --require-integration-db
+
       - name: Verify runtime database privileges
         env:
           DATABASE_URL: ""
-        run: pnpm --filter @dabboba/db test
+        working-directory: packages/db
+        run: |
+          node ../../scripts/check-test-backend-env.mjs --require-integration-db
+          pnpm exec tsx --test --test-concurrency=1 \
+            --test-reporter=spec --test-reporter-destination=stdout \
+            --test-reporter=tap --test-reporter-destination="$RUNNER_TEMP/db-tests.tap" \
+            'src/*.test.ts'
+          node ../../scripts/check-node-test-skips.mjs "$RUNNER_TEMP/db-tests.tap"
 
       - name: Build database integration suites
         run: |
           pnpm --filter @dabboba/api build
           pnpm --filter @dabboba/worker build
 
+      - name: Require the integration database before API integration tests
+        run: node scripts/check-test-backend-env.mjs --require-integration-db
+
+      # The runtime-role suites are cleared here and run in the next two steps
+      # with the runtime role configured, so exactly those two may skip.
       - name: Run PostgreSQL-backed API integration tests
         env:
           DATABASE_URL: ""
           DABBOBA_RUNTIME_TEST_DATABASE_URL: ""
-        run: pnpm --filter @dabboba/api test
+        working-directory: apps/api
+        run: |
+          node ../../scripts/check-test-backend-env.mjs
+          node --test --test-concurrency=1 \
+            --test-reporter=spec --test-reporter-destination=stdout \
+            --test-reporter=tap --test-reporter-destination="$RUNNER_TEMP/api-tests.tap" \
+            'dist/**/*.test.js'
+          node ../../scripts/check-node-test-skips.mjs "$RUNNER_TEMP/api-tests.tap" \
+            --allow "customer API account, commerce, and draw routes run as the dedicated runtime database role" \
+            --allow "customer broker reuses one Supabase subject without merging email peers and preserves legacy phone data"
 
       - name: Verify customer API routes with the runtime database role
         env:
           DATABASE_URL: ""
-        run: node --test apps/api/dist/runtime-role-routes.integration.test.js
+        run: |
+          node scripts/check-test-backend-env.mjs --require-integration-db
+          node --test \
+            --test-reporter=spec --test-reporter-destination=stdout \
+            --test-reporter=tap --test-reporter-destination="$RUNNER_TEMP/runtime-role-routes.tap" \
+            apps/api/dist/runtime-role-routes.integration.test.js
+          node scripts/check-node-test-skips.mjs "$RUNNER_TEMP/runtime-role-routes.tap"
+
+      - name: Verify customer authentication broker with the runtime database role
+        env:
+          DATABASE_URL: ""
+        run: |
+          node scripts/check-test-backend-env.mjs --require-integration-db
+          node --test \
+            --test-reporter=spec --test-reporter-destination=stdout \
+            --test-reporter=tap --test-reporter-destination="$RUNNER_TEMP/customer-auth.tap" \
+            apps/api/dist/customer-auth.integration.test.js
+          node scripts/check-node-test-skips.mjs "$RUNNER_TEMP/customer-auth.tap"
 
       - name: Run PostgreSQL-backed worker integration tests
         env:
           DATABASE_URL: ""
           WORKER_DATABASE_URL: ${{ env.DABBOBA_WORKER_TEST_DATABASE_URL }}
-        run: pnpm --filter @dabboba/worker test
+        working-directory: apps/worker
+        run: |
+          node ../../scripts/check-test-backend-env.mjs --require-integration-db
+          pnpm exec tsx --test \
+            --test-reporter=spec --test-reporter-destination=stdout \
+            --test-reporter=tap --test-reporter-destination="$RUNNER_TEMP/worker-tests.tap" \
+            'src/*.test.ts'
+          node ../../scripts/check-node-test-skips.mjs "$RUNNER_TEMP/worker-tests.tap"

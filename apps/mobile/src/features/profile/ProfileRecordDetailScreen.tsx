@@ -23,6 +23,7 @@ import {
   type AccountShippingRequestDetail,
 } from "@/features/profile/profile-detail-api";
 import { categoryLabel, formatDate, ProfileApiError } from "@/features/profile/profile-api";
+import { profileSectionFailure } from "@/features/profile/profile-section-state";
 import { useProfileSnapshot } from "@/features/profile/use-profile-snapshot";
 import { ProfileSessionGate, isProfileSessionBlocked } from "@/features/profile/ProfileSessionGate";
 import { productSubjectTitle } from "@/features/shop/product-title";
@@ -57,9 +58,10 @@ export function ProfileOrderDetailScreen() {
     orderId?: string | string[];
   }>();
   const orderId = singleParam(rawOrderId);
-  const profileState = useProfileSnapshot();
+  const profileState = useProfileSnapshot("orders");
   const snapshot = profileState.snapshot;
-  const order = snapshot?.orders.find((item) => item.id === orderId) ?? null;
+  const order = snapshot?.orders?.find((item) => item.id === orderId) ?? null;
+  const ordersFailure = snapshot ? profileSectionFailure(snapshot, "orders") : null;
   const blockedStatus = isProfileSessionBlocked(profileState.status) ? profileState.status : null;
 
   return (
@@ -71,10 +73,10 @@ export function ProfileOrderDetailScreen() {
     >
       {blockedStatus ? <ProfileSessionGate status={blockedStatus} returnTo={`/profile/orders/${encodeURIComponent(orderId)}`} guestBody="로그인하면 내 주문 상세를 확인할 수 있어요." /> : <>
       {!snapshot && !profileState.message ? <LoadingState label="주문을 불러오는 중" /> : null}
-      {!order && profileState.message ? (
-        <ErrorState message={profileState.message} onRetry={profileState.reload} />
+      {!order && (profileState.message || ordersFailure) ? (
+        <ErrorState message={profileState.message || ordersFailure || ""} onRetry={profileState.reload} />
       ) : null}
-      {snapshot && !order ? (
+      {snapshot && !order && !ordersFailure ? (
         <MissingState icon="receipt-outline" title="주문을 찾을 수 없어요" />
       ) : null}
       {order ? (
@@ -97,7 +99,7 @@ export function ProfileShippingDetailScreen() {
     shippingRequestId?: string | string[];
   }>();
   const shippingRequestId = singleParam(rawShippingRequestId);
-  const profileState = useProfileSnapshot();
+  const profileState = useProfileSnapshot("shipping");
   const [detail, setDetail] = useState<AccountShippingRequestDetail | null>(null);
   const [detailMessage, setDetailMessage] = useState("");
   const [detailLoading, setDetailLoading] = useState(false);
@@ -106,7 +108,7 @@ export function ProfileShippingDetailScreen() {
   const detailGeneration = useRef(0);
   const hasFocusedOnce = useRef(false);
   const snapshotFallback = profileState.status === "authenticated"
-    ? profileState.snapshot?.shippingRequests.find((item) => item.id === shippingRequestId) ?? null
+    ? profileState.snapshot?.shippingRequests?.find((item) => item.id === shippingRequestId) ?? null
     : null;
   const shippingRequest = profileState.status === "authenticated"
     ? (detail?.id === shippingRequestId ? detail : snapshotFallback)
@@ -172,7 +174,7 @@ export function ProfileShippingDetailScreen() {
         setDetailMessage("");
         return;
       }
-      setDetailMessage(error instanceof Error ? error.message : "배송 신청 정보를 불러오지 못했습니다.");
+      setDetailMessage(error instanceof Error ? error.message : "배송 신청 정보를 불러오지 못했어요.");
     } finally {
       if (generation === detailGeneration.current) {
         setDetailLoading(false);
@@ -239,7 +241,7 @@ export function ProfileShippingDetailScreen() {
 export function ProfileNoticeDetailScreen() {
   const { noticeId: rawNoticeId } = useLocalSearchParams<{ noticeId?: string | string[] }>();
   const noticeId = singleParam(rawNoticeId);
-  const profileState = useProfileSnapshot();
+  const profileState = useProfileSnapshot("notices");
   const snapshot = profileState.snapshot;
   const notice = snapshot?.notices.find((item) => item.id === noticeId) ?? null;
 
@@ -424,7 +426,7 @@ function ShippingDetail({
       {"items" in shippingRequest ? (
         <Section title="배송 상품">
           {shippingRequest.items.map((item, index) => {
-            const imageUri = resolveCatalogImageUrl(item.imageUrl, assetBaseUrl, item.productVersion);
+            const imageUri = resolveCatalogImageUrl(item.imageUrl, assetBaseUrl, item.productVersion, __DEV__);
             const media = (
               <View style={styles.shippingProductImageFrame}>
                 {imageUri ? (
@@ -518,7 +520,7 @@ function StatusCard({
   return (
     <View style={styles.statusCard}>
       <View style={[styles.statusIcon, success && styles.statusIconSuccess, critical && styles.statusIconCritical, refund && styles.statusIconRefund]}>
-        <DecorativeIonicon name={icon} size={24} color={critical ? colors.danger : refund ? "#4C5FA8" : success ? colors.greenInk : colors.muted} />
+        <DecorativeIonicon name={icon} size={24} color={critical ? colors.danger : refund ? seed.color.info.ink : success ? colors.greenInk : colors.muted} />
       </View>
       <View style={styles.statusText}>
         <Text style={[styles.statusBadge, success && styles.statusBadgeSuccess, critical && styles.statusBadgeCritical, refund && styles.statusBadgeRefund]}>{status}</Text>
@@ -714,7 +716,7 @@ const styles = StyleSheet.create({
   },
   statusIconSuccess: { backgroundColor: seed.color.background.brandWeak },
   statusIconCritical: { backgroundColor: seed.color.background.criticalWeak },
-  statusIconRefund: { backgroundColor: "#EEF0FA" },
+  statusIconRefund: { backgroundColor: seed.color.info.weak },
   statusText: { flex: 1, minWidth: 0 },
   statusBadge: {
     alignSelf: "flex-start",
@@ -732,12 +734,10 @@ const styles = StyleSheet.create({
     color: colors.danger,
     backgroundColor: seed.color.background.criticalWeak,
   },
-  statusBadgeRefund: { color: "#4C5FA8", backgroundColor: "#EEF0FA" },
+  statusBadgeRefund: { color: seed.color.info.ink, backgroundColor: seed.color.info.weak },
   statusTitle: {
     color: colors.ink,
-    fontSize: 17,
-    lineHeight: 23,
-    fontWeight: "900",
+    ...seed.typography.subtitle,
     marginTop: seed.spacing.x2,
   },
   statusBody: {
@@ -835,8 +835,7 @@ const styles = StyleSheet.create({
   },
   totalValue: {
     color: colors.ink,
-    fontSize: 19,
-    fontWeight: "900",
+    ...seed.typography.subtitle,
   },
   addressBlock: {
     padding: seed.spacing.x4,

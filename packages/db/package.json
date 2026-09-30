@@ -20,14 +20,14 @@
     "provision:worker-role": "tsx src/provision-worker-role.ts",
     "seed": "tsx src/seed.ts",
     "pretest": "node ../../scripts/check-test-backend-env.mjs",
-    "test": "tsx --test 'src/*.test.ts'"
+    "test": "tsx --test --test-concurrency=1 'src/*.test.ts'"
   },
   "dependencies": {
     "@dabboba/config": "workspace:*",
     "pg": "^8.23.0"
   },
   "devDependencies": {
-    "@types/node": "^26.2.0",
+    "@types/node": "^24.19.0",
     "@types/pg": "^8.15.5",
     "tsx": "^4.20.6",
     "typescript": "7.0.2"

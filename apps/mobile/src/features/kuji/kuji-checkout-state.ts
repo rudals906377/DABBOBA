@@ -1,4 +1,12 @@
 export const KUJI_CHECKOUT_LIMIT_SECONDS = 3 * 60;
+export const KUJI_CLOCK_SKEW_WARNING_MS = 5 * 60 * 1_000;
+
+export function isKujiServerClockSkewed(serverNow: string, clientNowMs: number): boolean {
+  const serverNowMs = Date.parse(serverNow);
+  return Number.isFinite(serverNowMs)
+    && Number.isFinite(clientNowMs)
+    && Math.abs(serverNowMs - clientNowMs) > KUJI_CLOCK_SKEW_WARNING_MS;
+}
 
 export type KujiCheckoutPhase = "ACTIVE" | "SUBMITTING" | "EXPIRED" | "PAID";
 

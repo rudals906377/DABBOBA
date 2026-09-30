@@ -18,6 +18,7 @@ const FORBIDDEN_BUNDLE_FRAGMENTS = [
 ];
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const defaultOutputPath = join(repositoryRoot, "supabase/functions/dabboba-api/api.generated.js");
+const adminOutputPath = join(repositoryRoot, "supabase/functions/dabboba-admin-api/api.generated.js");
 const integrationOutputPath = join(repositoryRoot, "supabase/functions/dabboba-api/api.smoke.generated.js");
 
 function resolveEsbuildEntry() {
@@ -69,7 +70,7 @@ function edgeResolutionPlugin(nativeStubPath) {
 
 function inspectBundle(metafile, code, mode) {
   const inputNames = Object.keys(metafile.inputs).map((name) => name.toLowerCase());
-  if (mode === "production" && inputNames.some((name) => name.endsWith("apps/api/src/edge-smoke-entry.ts"))) {
+  if (mode !== "integration" && inputNames.some((name) => name.endsWith("apps/api/src/edge-smoke-entry.ts"))) {
     throw new Error("Supabase API production bundle contains the integration-only entry");
   }
   const externalImports = Object.values(metafile.outputs)
@@ -92,7 +93,7 @@ function inspectBundle(metafile, code, mode) {
 
 export async function buildSupabaseApi(outputPath = defaultOutputPath, options = {}) {
   const mode = options.mode ?? "production";
-  if (mode !== "production" && mode !== "integration") throw new Error("Unknown Supabase API build mode");
+  if (mode !== "production" && mode !== "integration" && mode !== "admin") throw new Error("Unknown Supabase API build mode");
   const esbuild = await loadPinnedEsbuild();
   const temporaryDirectory = await mkdtemp(join(tmpdir(), "dabboba-api-edge-build-"));
   const temporaryOutput = join(temporaryDirectory, "api.generated.js");
@@ -116,9 +117,9 @@ export async function buildSupabaseApi(outputPath = defaultOutputPath, options =
 
     const result = await esbuild.build({
       absWorkingDir: repositoryRoot,
-      entryPoints: [join(repositoryRoot, mode === "production"
-        ? "apps/api/src/edge-handler.ts"
-        : "apps/api/src/edge-smoke-entry.ts")],
+      entryPoints: [join(repositoryRoot, mode === "integration"
+        ? "apps/api/src/edge-smoke-entry.ts"
+        : "apps/api/src/edge-handler.ts")],
       outfile: temporaryOutput,
       bundle: true,
       platform: "node",
@@ -155,8 +156,10 @@ export async function buildSupabaseApi(outputPath = defaultOutputPath, options =
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const integration = process.argv.slice(2).includes("--integration-smoke");
-  buildSupabaseApi(integration ? integrationOutputPath : defaultOutputPath, {
-    mode: integration ? "integration" : "production",
+  const admin = process.argv.slice(2).includes("--admin");
+  if (integration && admin) throw new Error("Select one Supabase API build mode");
+  buildSupabaseApi(integration ? integrationOutputPath : admin ? adminOutputPath : defaultOutputPath, {
+    mode: integration ? "integration" : admin ? "admin" : "production",
   }).then((result) => {
     process.stdout.write(`${JSON.stringify({
       artifact: relative(repositoryRoot, result.outputPath),

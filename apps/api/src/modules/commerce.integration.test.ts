@@ -24,9 +24,11 @@ async function sendWebhook(
   app: FastifyInstance,
   input: {
     eventId?: string;
-    eventType: "PAYMENT_SUCCEEDED" | "PAYMENT_FAILED" | "PAYMENT_CANCELLED" | "REFUND_SUCCEEDED";
+    eventType: "PAYMENT_SUCCEEDED" | "PAYMENT_FAILED" | "PAYMENT_CANCELLED" | "PAYMENT_STATE_ANOMALY" | "REFUND_SUCCEEDED" | "REFUND_PARTIAL";
     paymentId: string;
     amount: number;
+    occurredAt?: string;
+    providerObservation?: { status: "READY" | "PAY_PENDING" | "VIRTUAL_ACCOUNT_ISSUED" | "PAID" | "FAILED" | "PARTIAL_CANCELLED" | "CANCELLED"; paidAmount: number; cancelledAmount: number };
   },
 ) {
   const payload = JSON.stringify({
@@ -34,8 +36,9 @@ async function sendWebhook(
     eventType: input.eventType,
     paymentId: input.paymentId,
     providerPaymentId: `provider-${input.paymentId}`,
-    occurredAt: new Date().toISOString(),
+    occurredAt: input.occurredAt ?? new Date().toISOString(),
     amount: input.amount,
+    ...(input.providerObservation ? { providerObservation: input.providerObservation } : {}),
   });
   const signature = createHmac("sha256", webhookSecret).update(payload).digest("hex");
   return app.inject({
@@ -225,6 +228,76 @@ test(
       ledger_count: "0",
     });
 
+    const shortPaidUser = await createSession("short-paid");
+    const shortPaidOrder = await createOrder(shortPaidUser, paymentDrawProduct);
+    const shortPaid = await sendWebhook(app, {
+      eventType: "PAYMENT_SUCCEEDED",
+      paymentId: shortPaidOrder.paymentId,
+      amount: 9_000,
+    });
+    assert.equal(shortPaid.statusCode, 202, shortPaid.body);
+    assert.equal((shortPaid.json() as { outcome: string }).outcome, "review");
+    assert.deepEqual(await state(shortPaidOrder.id), {
+      order_status: "REFUND_REVIEW", payment_status: "REFUND_REVIEW",
+    });
+    const shortPaidAssets = await pool.query<{ entitlements: string; results: string }>(
+      `SELECT
+         (SELECT count(*) FROM draw_entitlements e JOIN order_lines l ON l.id=e.order_line_id WHERE l.order_id=$1)::text AS entitlements,
+         (SELECT count(*) FROM draw_results r JOIN draw_entitlements e ON e.id=r.entitlement_id JOIN order_lines l ON l.id=e.order_line_id WHERE l.order_id=$1)::text AS results`,
+      [shortPaidOrder.id],
+    );
+    assert.deepEqual(shortPaidAssets.rows[0], { entitlements: "0", results: "0" });
+
+    const anomalousUser = await createSession("anomalous-provider-state");
+    const anomalousOrder = await createOrder(anomalousUser, paymentDrawProduct);
+    const anomalousEventId = `anomaly-${randomUUID()}`;
+    const anomalousInput = {
+      eventId: anomalousEventId,
+      eventType: "PAYMENT_STATE_ANOMALY" as const,
+      paymentId: anomalousOrder.paymentId,
+      amount: 10_000,
+      occurredAt: new Date().toISOString(),
+      providerObservation: { status: "FAILED" as const, paidAmount: 10_000, cancelledAmount: 0 },
+    };
+    const anomalousEvent = await sendWebhook(app, anomalousInput);
+    assert.equal(anomalousEvent.statusCode, 202, anomalousEvent.body);
+    assert.equal((anomalousEvent.json() as { outcome: string }).outcome, "review");
+    assert.deepEqual(await state(anomalousOrder.id), {
+      order_status: "REFUND_REVIEW", payment_status: "REFUND_REVIEW",
+    });
+    const anomalousAssets = await pool.query<{ entitlements: string; results: string; active_reservations: string }>(
+      `SELECT
+         (SELECT count(*) FROM draw_entitlements e JOIN order_lines l ON l.id=e.order_line_id WHERE l.order_id=$1)::text AS entitlements,
+         (SELECT count(*) FROM draw_results r JOIN draw_entitlements e ON e.id=r.entitlement_id JOIN order_lines l ON l.id=e.order_line_id WHERE l.order_id=$1)::text AS results,
+         (SELECT count(*) FROM stock_reservations WHERE order_id=$1 AND status='ACTIVE')::text AS active_reservations`,
+      [anomalousOrder.id],
+    );
+    assert.deepEqual(anomalousAssets.rows[0], { entitlements: "0", results: "0", active_reservations: "1" });
+    const duplicateAnomaly = await sendWebhook(app, anomalousInput);
+    assert.equal(duplicateAnomaly.statusCode, 202, duplicateAnomaly.body);
+    assert.equal((duplicateAnomaly.json() as { outcome: string }).outcome, "duplicate");
+
+    const partialUser = await createSession("partial-refund-owner");
+    const partialOrder = await createOrder(partialUser, paymentDrawProduct);
+    const partialPaid = await sendWebhook(app, {
+      eventType: "PAYMENT_SUCCEEDED", paymentId: partialOrder.paymentId, amount: 10_000,
+    });
+    assert.equal((partialPaid.json() as { outcome: string }).outcome, "processed");
+    const partialNotice = await sendWebhook(app, {
+      eventType: "REFUND_PARTIAL", paymentId: partialOrder.paymentId, amount: 10_000,
+    });
+    assert.equal(partialNotice.statusCode, 202, partialNotice.body);
+    assert.equal((partialNotice.json() as { outcome: string }).outcome, "review");
+    assert.deepEqual(await state(partialOrder.id), {
+      order_status: "REFUND_REVIEW", payment_status: "REFUND_REVIEW",
+    });
+    const partialAssets = await pool.query<{ status: string }>(
+      `SELECT e.status FROM draw_entitlements e
+       JOIN order_lines line ON line.id=e.order_line_id WHERE line.order_id=$1`,
+      [partialOrder.id],
+    );
+    assert.deepEqual(partialAssets.rows, [{ status: "AVAILABLE" }]);
+
     const refundFirstUser = await createSession("refund-first");
     const refundFirstOrder = await createOrder(refundFirstUser, paymentDrawProduct);
     const refundFirstEvent = `refund-first-${randomUUID()}`;
@@ -253,6 +326,15 @@ test(
     assert.equal(successAfterRefund.statusCode, 202, successAfterRefund.body);
     assert.equal((successAfterRefund.json() as { outcome: string }).outcome, "ignored");
     assert.deepEqual(await state(refundFirstOrder.id), { order_status: "REFUNDED", payment_status: "REFUNDED" });
+
+    const partialAfterFullRefund = await sendWebhook(app, {
+      eventType: "REFUND_PARTIAL", paymentId: refundFirstOrder.paymentId, amount: 3_000,
+    });
+    assert.equal(partialAfterFullRefund.statusCode, 202, partialAfterFullRefund.body);
+    assert.equal((partialAfterFullRefund.json() as { outcome: string }).outcome, "review");
+    assert.deepEqual(await state(refundFirstOrder.id), {
+      order_status: "REFUND_REVIEW", payment_status: "REFUND_REVIEW",
+    });
 
     const lateUser = await createSession("late-success");
     const lateOrder = await createOrder(lateUser, paymentDrawProduct);

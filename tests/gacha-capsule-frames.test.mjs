@@ -79,3 +79,13 @@ test("camera magnifies the fixed pickup capsule and its source aperture with mat
   assert.match(renderer, /aperture: \{ position: "absolute", overflow: "hidden", backgroundColor: seed.color.background.transparent \}/);
   assert.doesNotMatch(renderer, /sampleGachaRevealLighting|shellOpacity\s*\*/);
 });
+
+test("aperture layout props are split from the per-frame opacity and stay constant after the pickup lands", () => {
+  const layout = renderer.match(/const apertureLayoutStyle = useAnimatedStyle\(\(\) => \{[\s\S]*?\n  \}\);/)?.[0] ?? "";
+  const opacity = renderer.match(/const apertureOpacityStyle = useAnimatedStyle\(\(\) => \{[\s\S]*?\n  \}\);/)?.[0] ?? "";
+  assert.match(layout, /if \(!clipped\) \{\s*return \{ left: 0, top: 0, width: viewportSize.width, height: viewportSize.height \};/);
+  assert.doesNotMatch(layout, /opacity/);
+  assert.match(opacity, /opacity:/);
+  assert.doesNotMatch(opacity, /left:|top:|width:|height:/);
+  assert.match(renderer, /style=\{\[styles.aperture, apertureLayoutStyle, apertureOpacityStyle\]\}/);
+});

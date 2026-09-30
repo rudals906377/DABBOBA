@@ -19,6 +19,13 @@ const POSTGRES_SQLSTATE_CLASSES = new Set([
   "F0", "HV", "P0", "XX",
 ]);
 
+/**
+ * Data-exception SQLSTATEs caused by malformed client input: 22P02
+ * invalid_text_representation, 22007 invalid_datetime_format, and 22008
+ * datetime_field_overflow.
+ */
+const CLIENT_INPUT_SQLSTATES = new Set(["22P02", "22007", "22008"]);
+
 function errorLike(error: unknown): ErrorLike | null {
   return error instanceof Error ? error as ErrorLike : null;
 }
@@ -130,6 +137,17 @@ export function registerErrorHandler(app: FastifyInstance) {
     if (typedError?.code === "23505") {
       return reply.code(409).send({
         error: { code: "CONFLICT", message: "이미 등록된 값입니다.", requestId: request.id },
+      });
+    }
+    if (typedError?.code && CLIENT_INPUT_SQLSTATES.has(typedError.code)) {
+      // A client-supplied value PostgreSQL could not cast (for example a
+      // non-UUID path or cursor id) is a malformed request, not a server fault.
+      request.log.warn(
+        { requestId: request.id, statusCode: 400, ...safeErrorFields(error) },
+        "request rejected",
+      );
+      return reply.code(400).send({
+        error: { code: "INVALID_REQUEST", message: "요청 값을 확인해 주세요.", requestId: request.id },
       });
     }
     if (

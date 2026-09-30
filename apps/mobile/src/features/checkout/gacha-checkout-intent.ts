@@ -71,7 +71,7 @@ export function createGachaCheckoutOrderIntent(
   const canonicalActorId = validUuid(actorId, "actorId");
   const canonicalPayload = canonicalGachaCheckoutOrderPayload(payload);
   if (!IDEMPOTENCY_KEY_PATTERN.test(idempotencyKey)) {
-    throw new Error("가챠 주문 요청 키를 확인할 수 없습니다.");
+    throw new Error("가챠 주문 요청 키를 확인할 수 없어요.");
   }
   const timestamp = validIsoTimestamp(nowIso, "createdAt");
   return {
@@ -109,7 +109,7 @@ export function resolveGachaCheckoutOrderIntent(
     };
   }
   if (existing.actorId !== actorId || existing.payload.productId !== payload.productId) {
-    throw new Error("다른 계정이나 상품의 가챠 주문 요청은 재사용할 수 없습니다.");
+    throw new Error("다른 계정이나 상품의 가챠 주문 요청은 재사용할 수 없어요.");
   }
   return {
     kind: sameGachaCheckoutOrderPayload(existing.payload, payload)
@@ -270,20 +270,20 @@ function canonicalGachaCheckoutOrderPayload(
   payload: GachaCheckoutOrderPayload,
 ): GachaCheckoutOrderPayload {
   if (!payload || typeof payload.productId !== "string") {
-    throw new Error("가챠 주문 상품을 확인할 수 없습니다.");
+    throw new Error("가챠 주문 상품을 확인할 수 없어요.");
   }
   const productId = payload.productId.trim();
   if (!productId || productId.length > 120) {
-    throw new Error("가챠 주문 상품을 확인할 수 없습니다.");
+    throw new Error("가챠 주문 상품을 확인할 수 없어요.");
   }
   if (!Number.isInteger(payload.quantity) || payload.quantity < 1 || payload.quantity > 20) {
-    throw new Error("가챠 주문 수량을 확인할 수 없습니다.");
+    throw new Error("가챠 주문 수량을 확인할 수 없어요.");
   }
   if (!Number.isInteger(payload.expectedDrawVersion) || payload.expectedDrawVersion < 1) {
-    throw new Error("가챠 확률표 버전을 확인할 수 없습니다.");
+    throw new Error("가챠 확률표 버전을 확인할 수 없어요.");
   }
   if (!Number.isInteger(payload.pointAmount) || payload.pointAmount < 0) {
-    throw new Error("가챠 주문 포인트를 확인할 수 없습니다.");
+    throw new Error("가챠 주문 포인트를 확인할 수 없어요.");
   }
   return {
     productId,
@@ -294,20 +294,20 @@ function canonicalGachaCheckoutOrderPayload(
 }
 
 function validUuid(value: string, field: string): string {
-  if (!UUID_PATTERN.test(value)) throw new Error(`가챠 주문 ${field} 값을 확인할 수 없습니다.`);
+  if (!UUID_PATTERN.test(value)) throw new Error(`가챠 주문 ${field} 값을 확인할 수 없어요.`);
   return value.toLowerCase();
 }
 
 function validIsoTimestamp(value: string, field: string): string {
   if (!value || !Number.isFinite(Date.parse(value))) {
-    throw new Error(`가챠 주문 ${field} 시간을 확인할 수 없습니다.`);
+    throw new Error(`가챠 주문 ${field} 시간을 확인할 수 없어요.`);
   }
   return value;
 }
 
 function validOrderStatus(value: string): GachaCheckoutOrderStatus {
   if (!ORDER_STATUSES.has(value as GachaCheckoutOrderStatus)) {
-    throw new Error("가챠 주문 상태를 확인할 수 없습니다.");
+    throw new Error("가챠 주문 상태를 확인할 수 없어요.");
   }
   return value as GachaCheckoutOrderStatus;
 }

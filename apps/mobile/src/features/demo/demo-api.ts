@@ -1,6 +1,5 @@
 import type { components } from "@dabboba/contracts";
 import {
-  clearAuthTokens,
   readAuthTokens,
   type StoredAuthTokens,
   writeAuthTokens,
@@ -29,6 +28,7 @@ export type InternalCustomerSession = {
 type CheckoutOrder = components["schemas"]["Order"];
 
 const INTERNAL_CUSTOMER_ID = "da000000-0000-4000-8000-00000000000a";
+const DEMO_REQUEST_TIMEOUT_MS = 8_000;
 
 export class TemporaryDemoCapabilityError extends Error {
   constructor() {
@@ -37,28 +37,39 @@ export class TemporaryDemoCapabilityError extends Error {
   }
 }
 
-export async function fetchDemoCapabilities(apiBaseUrl: string): Promise<DemoCapabilities | null> {
-  let response: Response;
-  try {
-    response = await fetch(apiUrl(apiBaseUrl, "/v1/demo/capabilities"), {
-      method: "GET",
-      headers: { Accept: "application/json" },
-    });
-  } catch {
-    throw new TemporaryDemoCapabilityError();
+export class InternalCustomerDataCleanupError extends Error {
+  constructor() {
+    super("이전 계정의 기기 데이터를 정리하지 못했습니다. 다시 시도해 주세요.");
+    this.name = "InternalCustomerDataCleanupError";
   }
-  if (response.status === 404) return null;
-  if (!response.ok) {
-    if (response.status === 429 || response.status >= 500) {
+}
+
+export async function fetchDemoCapabilities(apiBaseUrl: string): Promise<DemoCapabilities | null> {
+  return withDemoRequestTimeout(async (signal) => {
+    let response: Response;
+    try {
+      response = await fetch(apiUrl(apiBaseUrl, "/v1/demo/capabilities"), {
+        method: "GET",
+        headers: { Accept: "application/json" },
+        signal,
+      });
+    } catch {
       throw new TemporaryDemoCapabilityError();
     }
-    throw new Error("테스트 기능을 사용할 수 없는 서버입니다.");
-  }
-  return parseDemoCapabilities(await response.json());
+    if (response.status === 404) return null;
+    if (!response.ok) {
+      if (response.status === 429 || response.status >= 500) {
+        throw new TemporaryDemoCapabilityError();
+      }
+      throw new Error("테스트 기능을 사용할 수 없는 서버입니다.");
+    }
+    return parseDemoCapabilities(await response.json());
+  });
 }
 
 export async function ensureInternalCustomerSession(
   apiBaseUrl: string,
+  clearPreviousCustomerData: () => Promise<void>,
   isCurrent: () => boolean = () => true,
 ): Promise<StoredAuthTokens | null> {
   if (!__DEV__) return null;
@@ -73,25 +84,32 @@ export async function ensureInternalCustomerSession(
     );
     if (!isCurrent()) throw new Error("로그인 화면이 변경되었습니다.");
     if (storedSessionState === "current") return stored;
-    await clearAuthTokens();
-    if (!isCurrent()) throw new Error("로그인 화면이 변경되었습니다.");
   }
 
   if (!isCurrent()) throw new Error("로그인 화면이 변경되었습니다.");
-  const response = await fetch(apiUrl(apiBaseUrl, "/v1/demo/session"), {
-    method: "POST",
-    headers: { Accept: "application/json" },
+  const session = await withDemoRequestTimeout(async (signal) => {
+    const response = await fetch(apiUrl(apiBaseUrl, "/v1/demo/session"), {
+      method: "POST",
+      headers: { Accept: "application/json" },
+      signal,
+    });
+    if (!response.ok) {
+      throw new Error(await responseMessage(response, "로그인 정보를 불러오지 못했습니다."));
+    }
+    return parseInternalCustomerSession(await response.json());
   });
-  if (!response.ok) {
-    throw new Error(await responseMessage(response, "로그인 정보를 불러오지 못했습니다."));
-  }
-  const session = parseInternalCustomerSession(await response.json());
   if (!isCurrent()) throw new Error("로그인 화면이 변경되었습니다.");
   const tokens = {
     accessToken: session.token,
     refreshToken: session.token,
     expiresAt: session.expiresAt,
   };
+  try {
+    await clearPreviousCustomerData();
+  } catch {
+    throw new InternalCustomerDataCleanupError();
+  }
+  if (!isCurrent()) throw new Error("로그인 화면이 변경되었습니다.");
   await writeAuthTokens(tokens);
   return tokens;
 }
@@ -103,21 +121,31 @@ export async function transitionDemoPayment(
   action: DemoPaymentAction,
 ): Promise<CheckoutOrder> {
   await requireDemoCapabilities(apiBaseUrl);
-  const response = await fetch(
-    apiUrl(apiBaseUrl, `/v1/demo/payments/${encodeURIComponent(orderId)}/transition`),
-    {
-      method: "POST",
-      headers: {
-        Accept: "application/json",
-        Authorization: `Bearer ${accessToken}`,
-        "Content-Type": "application/json",
-        "Idempotency-Key": demoPaymentTransitionIdempotencyKey(orderId, action),
-      },
-      body: JSON.stringify({ action }),
-    },
-  );
-  if (!response.ok) throw new Error(await responseMessage(response, "테스트 결제 상태를 바꾸지 못했습니다."));
-  return parseCheckoutOrder(await response.json(), orderId);
+  try {
+    return await withDemoRequestTimeout(async (signal) => {
+      const response = await fetch(
+        apiUrl(apiBaseUrl, `/v1/demo/payments/${encodeURIComponent(orderId)}/transition`),
+        {
+          method: "POST",
+          headers: {
+            Accept: "application/json",
+            Authorization: `Bearer ${accessToken}`,
+            "Content-Type": "application/json",
+            "Idempotency-Key": demoPaymentTransitionIdempotencyKey(orderId, action),
+          },
+          body: JSON.stringify({ action }),
+          signal,
+        },
+      );
+      if (!response.ok) throw new Error(await responseMessage(response, "테스트 결제 상태를 바꾸지 못했습니다."));
+      return parseCheckoutOrder(await response.json(), orderId);
+    });
+  } catch (error) {
+    if (error instanceof TemporaryDemoCapabilityError) {
+      throw new Error("테스트 결제 결과 확인이 지연됐어요. 중복 결제를 피하려면 주문 내역에서 상태를 확인한 후 다시 시도해 주세요.");
+    }
+    throw error;
+  }
 }
 
 async function requireDemoCapabilities(apiBaseUrl: string): Promise<DemoCapabilities> {
@@ -193,30 +221,33 @@ async function readStoredInternalCustomerSession(
   apiBaseUrl: string,
   accessToken: string,
 ): Promise<"current" | "replace"> {
-  const response = await fetch(apiUrl(apiBaseUrl, "/v1/auth/me"), {
-    method: "GET",
-    headers: {
-      Accept: "application/json",
-      Authorization: `Bearer ${accessToken}`,
-    },
+  return withDemoRequestTimeout(async (signal) => {
+    const response = await fetch(apiUrl(apiBaseUrl, "/v1/auth/me"), {
+      method: "GET",
+      headers: {
+        Accept: "application/json",
+        Authorization: `Bearer ${accessToken}`,
+      },
+      signal,
+    });
+    if (response.status === 401) return "replace";
+    if (!response.ok) throw new Error("로그인 상태를 확인하지 못했습니다.");
+    const body = await response.json() as unknown;
+    if (!isRecord(body) || !isRecord(body.actor)) {
+      throw new Error("로그인 상태 응답 형식이 올바르지 않습니다.");
+    }
+    const actor = body.actor;
+    if (
+      actor.userId === INTERNAL_CUSTOMER_ID
+      && isNonBlankString(actor.email)
+      && isNonBlankString(actor.nickname)
+      && actor.role === "USER"
+      && actor.status === "ACTIVE"
+    ) {
+      return "current";
+    }
+    return "replace";
   });
-  if (response.status === 401) return "replace";
-  if (!response.ok) throw new Error("로그인 상태를 확인하지 못했습니다.");
-  const body = await response.json() as unknown;
-  if (!isRecord(body) || !isRecord(body.actor)) {
-    throw new Error("로그인 상태 응답 형식이 올바르지 않습니다.");
-  }
-  const actor = body.actor;
-  if (
-    actor.userId === INTERNAL_CUSTOMER_ID
-    && isNonBlankString(actor.email)
-    && isNonBlankString(actor.nickname)
-    && actor.role === "USER"
-    && actor.status === "ACTIVE"
-  ) {
-    return "current";
-  }
-  return "replace";
 }
 
 function parseCheckoutOrder(value: unknown, orderId: string): CheckoutOrder {
@@ -228,6 +259,19 @@ function parseCheckoutOrder(value: unknown, orderId: string): CheckoutOrder {
 
 function apiUrl(apiBaseUrl: string, path: string): string {
   return `${apiBaseUrl.replace(/\/+$/, "")}${path}`;
+}
+
+async function withDemoRequestTimeout<T>(operation: (signal: AbortSignal) => Promise<T>): Promise<T> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), DEMO_REQUEST_TIMEOUT_MS);
+  try {
+    return await operation(controller.signal);
+  } catch (error) {
+    if (controller.signal.aborted) throw new TemporaryDemoCapabilityError();
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 async function responseMessage(response: Response, fallback: string): Promise<string> {

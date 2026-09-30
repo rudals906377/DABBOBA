@@ -1,10 +1,11 @@
 import Constants from "expo-constants";
-import { router, useLocalSearchParams, type Href } from "expo-router";
-import { useEffect, useMemo, useState } from "react";
+import { router, useFocusEffect, useLocalSearchParams, type Href } from "expo-router";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Image,
   KeyboardAvoidingView,
+  Linking,
   Platform,
   Pressable,
   ScrollView,
@@ -12,6 +13,7 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useSQLiteContext } from "expo-sqlite";
 import { DecorativeIonicon, type DecorativeIoniconName } from "@/components/DecorativeIonicon";
 import { DetailPageHeader } from "@/components/DetailPageHeader";
 import { AppText as Text, AppTextInput as TextInput } from "@/components/Typography";
@@ -27,31 +29,43 @@ import { resolveAfterLoginPath } from "@/features/auth/login-navigation";
 import { ensureInternalCustomerSession } from "@/features/demo/demo-api";
 import {
   beginSocialLogin,
-  clearPendingEmailOtp,
+  clearPendingPhoneOtp,
   clearBrokerSession,
-  EMAIL_OTP_TTL_MS,
-  readPendingEmailOtp,
-  requestEmailOtp,
+  readPendingPhoneOtp,
+  requestPhoneOtp,
   resolveSupabaseBrokerConfig,
-  verifyEmailOtp,
+  verifyPhoneOtp,
   type DabbobaLoginProvider,
   type DabbobaSocialLoginProvider,
-  type PendingEmailOtp,
 } from "@/features/auth/supabase-broker";
+import { PHONE_OTP_TTL_MS, type PendingPhoneOtp } from "@/features/auth/phone-otp";
 import {
   resolveMobileRuntimeConfig,
   type MobilePlatform,
 } from "@/lib/runtime-config";
+import { clearUserScopedLocalData } from "@/lib/local-database";
+import { resolvePublicAppLink } from "@/lib/public-app-links";
 import { colors } from "@/theme";
 
 const WORDMARK = require("../../../assets/brand/dabboba-wordmark.png");
 
-type EmailStep = "ADDRESS" | "OTP";
+function openCurrentPolicy(kind: "terms" | "privacy") {
+  const localRoute = `/legal/${kind}` as Href;
+  const url = resolvePublicAppLink(kind);
+  if (!url) {
+    router.push(localRoute);
+    return;
+  }
+  void Linking.openURL(url).catch(() => router.push(localRoute));
+}
+
+type PhoneStep = "NUMBER" | "OTP";
 type LoginMethod = DabbobaLoginProvider | "SESSION_RECOVERY";
 type InternalSessionState = "checking" | "unavailable" | "failed";
 
 export function LoginScreen() {
-  const { requiredPolicyVersions, configReady } = useCommerceCapability();
+  const db = useSQLiteContext();
+  const { requiredPolicyVersions, configReady, refresh: refreshPublicConfig } = useCommerceCapability();
   const params = useLocalSearchParams<{ returnTo?: string | string[] }>();
   const returnPath = resolveAfterLoginPath(params.returnTo);
   const runtime = useMemo(
@@ -67,16 +81,19 @@ export function LoginScreen() {
   const [brokerReady, setBrokerReady] = useState(false);
   const [enabledProviders, setEnabledProviders] = useState<DabbobaLoginProvider[]>([]);
   const [checking, setChecking] = useState(true);
+  const [providerCheckFailed, setProviderCheckFailed] = useState(false);
+  const [providerAvailabilityMessage, setProviderAvailabilityMessage] = useState("");
+  const providerRequestGeneration = useRef(0);
   const [busy, setBusy] = useState<LoginMethod | null>(null);
   const [message, setMessage] = useState("");
-  const [emailStep, setEmailStep] = useState<EmailStep>("ADDRESS");
-  const [emailInput, setEmailInput] = useState("");
-  const [verifiedEmail, setVerifiedEmail] = useState("");
+  const [phoneStep, setPhoneStep] = useState<PhoneStep>("NUMBER");
+  const [phoneInput, setPhoneInput] = useState("");
+  const [verifiedPhone, setVerifiedPhone] = useState("");
   const [otp, setOtp] = useState("");
   const [otpExpiresAt, setOtpExpiresAt] = useState<number | null>(null);
   const [resendAvailableAt, setResendAvailableAt] = useState<number | null>(null);
   const [clockMs, setClockMs] = useState(() => Date.now());
-  const [emailFocused, setEmailFocused] = useState(false);
+  const [phoneFocused, setPhoneFocused] = useState(false);
   const [otpFocused, setOtpFocused] = useState(false);
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [privacyAccepted, setPrivacyAccepted] = useState(false);
@@ -84,20 +101,20 @@ export function LoginScreen() {
     __DEV__ ? "checking" : "unavailable",
   );
 
-  const applyPendingEmailOtp = (pending: PendingEmailOtp) => {
-    setEmailInput(pending.email);
-    setVerifiedEmail(pending.email);
+  const applyPendingPhoneOtp = (pending: PendingPhoneOtp) => {
+    setPhoneInput(pending.phone);
+    setVerifiedPhone(pending.phone);
     setOtpExpiresAt(pending.expiresAt);
     setResendAvailableAt(pending.resendAvailableAt);
-    setEmailStep("OTP");
+    setPhoneStep("OTP");
     setOtp("");
     setClockMs(Date.now());
   };
 
   useEffect(() => {
     let active = true;
-    void readPendingEmailOtp().then((pending) => {
-      if (active && pending) applyPendingEmailOtp(pending);
+    void readPendingPhoneOtp().then((pending) => {
+      if (active && pending) applyPendingPhoneOtp(pending);
     }).catch(() => undefined);
     return () => {
       active = false;
@@ -105,41 +122,49 @@ export function LoginScreen() {
   }, []);
 
   useEffect(() => {
-    if (emailStep !== "OTP" || otpExpiresAt === null) return undefined;
+    if (phoneStep !== "OTP" || otpExpiresAt === null) return undefined;
     setClockMs(Date.now());
     const timer = setInterval(() => setClockMs(Date.now()), 1_000);
     return () => clearInterval(timer);
-  }, [emailStep, otpExpiresAt]);
+  }, [phoneStep, otpExpiresAt]);
 
-  useEffect(() => {
-    let active = true;
-    void (async () => {
-      try {
-        const localConfigured = Boolean(resolveSupabaseBrokerConfig());
-        const availability = await fetchAuthProviderAvailability(runtime.apiBaseUrl);
-        if (active) {
-          const ready = localConfigured && availability.brokerExchangeConfigured;
-          setEnabledProviders(availability.methods);
-          setBrokerReady(ready);
-          if (!ready || availability.methods.length === 0) {
-            setMessage("사용 가능한 로그인 방식이 아직 설정되지 않았습니다.");
-          }
-        }
-      } catch (error) {
-        if (active) setMessage(error instanceof Error ? error.message : "로그인 연결 상태를 확인하지 못했습니다.");
-      } finally {
-        if (active) setChecking(false);
-      }
-    })();
-    return () => {
-      active = false;
-    };
+  const refreshProviderAvailability = useCallback(async () => {
+    const generation = ++providerRequestGeneration.current;
+    setChecking(true);
+    setProviderCheckFailed(false);
+    try {
+      const localConfigured = Boolean(resolveSupabaseBrokerConfig());
+      const availability = await fetchAuthProviderAvailability(runtime.apiBaseUrl);
+      if (generation !== providerRequestGeneration.current) return;
+      const ready = localConfigured && availability.brokerExchangeConfigured;
+      const supportedMethods = availability.methods.filter((provider) => provider !== "APPLE" || Platform.OS === "ios");
+      setEnabledProviders(supportedMethods);
+      setBrokerReady(ready);
+      setProviderAvailabilityMessage(
+        !ready || supportedMethods.length === 0
+          ? "사용 가능한 로그인 방식이 아직 설정되지 않았어요."
+          : "",
+      );
+    } catch (error) {
+      if (generation !== providerRequestGeneration.current) return;
+      setEnabledProviders([]);
+      setBrokerReady(false);
+      setProviderCheckFailed(true);
+      setProviderAvailabilityMessage(error instanceof Error ? error.message : "로그인 연결 상태를 확인하지 못했어요.");
+    } finally {
+      if (generation === providerRequestGeneration.current) setChecking(false);
+    }
   }, [runtime.apiBaseUrl]);
+
+  useFocusEffect(useCallback(() => {
+    void refreshProviderAvailability();
+    return () => { providerRequestGeneration.current += 1; };
+  }, [refreshProviderAvailability]));
 
   useEffect(() => {
     if (!__DEV__) return;
     let active = true;
-    void ensureInternalCustomerSession(runtime.apiBaseUrl, () => active)
+    void ensureInternalCustomerSession(runtime.apiBaseUrl, () => clearUserScopedLocalData(db), () => active)
       .then((tokens) => {
         if (!active) return;
         if (tokens) {
@@ -151,20 +176,20 @@ export function LoginScreen() {
       .catch(() => {
         if (!active) return;
         setInternalSessionState("failed");
-        setMessage("로그인 정보를 자동으로 불러오지 못했습니다. 다시 시도해 주세요.");
+        setMessage("로그인 정보를 자동으로 불러오지 못했어요. 다시 시도해 주세요.");
       });
     return () => {
       active = false;
     };
-  }, [returnPath, runtime.apiBaseUrl]);
+  }, [db, returnPath, runtime.apiBaseUrl]);
 
-  const finish = async (supabaseAccessToken: string) => {
+  const finishPhone = async (supabaseAccessToken: string) => {
     if (!requiredPolicyVersions || !termsAccepted || !privacyAccepted) {
       throw new Error("필수 약관을 각각 확인하고 동의해 주세요.");
     }
     let exchanged = false;
     try {
-      await exchangeBrokerSession(runtime.apiBaseUrl, supabaseAccessToken, requiredPolicyVersions, "EMAIL");
+      await exchangeBrokerSession(runtime.apiBaseUrl, supabaseAccessToken, requiredPolicyVersions, "PHONE", () => clearUserScopedLocalData(db));
       exchanged = true;
     } finally {
       await clearBrokerSession();
@@ -181,34 +206,34 @@ export function LoginScreen() {
     setMessage("");
     try {
       const callbackUrl = await beginSocialLogin(provider, String(returnPath), requiredPolicyVersions);
-      const completedReturnTo = await completeSocialCustomerLogin(runtime.apiBaseUrl, callbackUrl);
+      const completedReturnTo = await completeSocialCustomerLogin(runtime.apiBaseUrl, callbackUrl, () => clearUserScopedLocalData(db));
       router.replace(completedReturnTo as Href);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "로그인을 완료하지 못했습니다.");
+      setMessage(error instanceof Error ? error.message : "로그인을 완료하지 못했어요.");
     } finally {
       setBusy(null);
     }
   };
 
-  const sendOtp = async (address = emailInput) => {
-    setBusy("EMAIL");
+  const sendOtp = async (number = phoneInput) => {
+    setBusy("PHONE");
     setMessage("");
     try {
-      applyPendingEmailOtp(await requestEmailOtp(address));
+      applyPendingPhoneOtp(await requestPhoneOtp(number));
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "인증번호를 보내지 못했습니다.");
+      setMessage(error instanceof Error ? error.message : "인증번호를 보내지 못했어요.");
     } finally {
       setBusy(null);
     }
   };
 
-  const loginEmail = async () => {
-    setBusy("EMAIL");
+  const loginPhone = async () => {
+    setBusy("PHONE");
     setMessage("");
     try {
-      await finish(await verifyEmailOtp(verifiedEmail, otp));
+      await finishPhone(await verifyPhoneOtp(verifiedPhone, otp));
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "이메일 로그인을 완료하지 못했습니다.");
+      setMessage(error instanceof Error ? error.message : "휴대폰 로그인을 완료하지 못했어요.");
     } finally {
       setBusy(null);
     }
@@ -218,7 +243,7 @@ export function LoginScreen() {
     setBusy("SESSION_RECOVERY");
     setMessage("");
     try {
-      const tokens = await ensureInternalCustomerSession(runtime.apiBaseUrl);
+      const tokens = await ensureInternalCustomerSession(runtime.apiBaseUrl, () => clearUserScopedLocalData(db));
       if (!tokens) {
         setInternalSessionState("unavailable");
         return;
@@ -226,7 +251,7 @@ export function LoginScreen() {
       router.replace(returnPath);
     } catch {
       setInternalSessionState("failed");
-      setMessage("로그인 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.");
+      setMessage("로그인 정보를 불러오지 못했어요. 잠시 후 다시 시도해 주세요.");
     } finally {
       setBusy(null);
     }
@@ -240,21 +265,27 @@ export function LoginScreen() {
     || !termsAccepted
     || !privacyAccepted;
   const providerAvailable = (provider: DabbobaLoginProvider) => (
-    brokerReady && enabledProviders.includes(provider)
+    brokerReady && enabledProviders.includes(provider) && (provider !== "APPLE" || Platform.OS === "ios")
   );
+  const hasSocialProvider = (["KAKAO", "NAVER", "GOOGLE", "APPLE"] as const).some(providerAvailable);
+  const phoneProviderAvailable = providerAvailable("PHONE");
+  const showLoginActions = hasSocialProvider || phoneProviderAvailable || (__DEV__ && internalSessionState === "failed");
   const otpExpired = otpExpiresAt !== null && clockMs >= otpExpiresAt;
   const resendSeconds = resendAvailableAt === null
     ? 0
     : Math.max(0, Math.ceil((resendAvailableAt - clockMs) / 1_000));
   const otpSeconds = otpExpiresAt === null
-    ? Math.floor(EMAIL_OTP_TTL_MS / 1_000)
+    ? Math.floor(PHONE_OTP_TTL_MS / 1_000)
     : Math.max(0, Math.ceil((otpExpiresAt - clockMs) / 1_000));
+  const connectionRetryVisible = !checking
+    && (providerCheckFailed || (configReady && (!requiredPolicyVersions || !brokerReady || enabledProviders.length === 0)));
 
   return (
     <SafeAreaView style={styles.safeArea} edges={["top", "left", "right", "bottom"]}>
       <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === "ios" ? "padding" : undefined}>
         <DetailPageHeader
           title="로그인"
+          titleMode="pixel"
           onBack={() => {
             if (router.canGoBack()) router.back();
             else router.replace("/(tabs)");
@@ -265,108 +296,140 @@ export function LoginScreen() {
           <Image accessibilityLabel="DABBOBA" source={WORDMARK} resizeMode="contain" style={styles.wordmark} />
           <Text style={styles.title}>다뽀바를 계속 즐겨보세요</Text>
           <Text style={styles.subtitle}>관심 상품과 계정 정보를 안전하게 저장해요.</Text>
+          {!configReady ? (
+            <Text accessibilityLiveRegion="polite" style={styles.policyAvailabilityStatus}>현재 약관 버전을 확인하고 있어요.</Text>
+          ) : !requiredPolicyVersions ? (
+            <Text accessibilityRole="alert" style={styles.policyAvailabilityError}>약관 정보를 확인할 수 없어 로그인을 잠시 이용할 수 없어요.</Text>
+          ) : null}
+          {checking ? <ActivityIndicator color={colors.ink} style={styles.status} /> : null}
+          {!checking && providerAvailabilityMessage && requiredPolicyVersions ? (
+            <Text accessibilityRole="alert" style={styles.message}>{providerAvailabilityMessage}</Text>
+          ) : null}
+          {connectionRetryVisible ? (
+            <SeedActionButton
+              label="로그인 연결 다시 확인"
+              variant="neutralSolid"
+              size="small"
+              onPress={() => {
+                setMessage("");
+                void Promise.all([refreshPublicConfig(), refreshProviderAvailability()]);
+              }}
+              style={styles.connectionRetry}
+            />
+          ) : null}
 
-          <View style={styles.actions}>
-            <ProviderButton
-              label="카카오로 계속하기"
-              mark="K"
-              backgroundColor="#FEE500"
-              foregroundColor="#191919"
-              loading={busy === "KAKAO"}
-              disabled={unavailable || !providerAvailable("KAKAO")}
-              onPress={() => void loginSocial("KAKAO")}
-            />
-            <ProviderButton
-              label="네이버로 계속하기"
-              mark="N"
-              backgroundColor="#03C75A"
-              foregroundColor="#FFFFFF"
-              loading={busy === "NAVER"}
-              disabled={unavailable || !providerAvailable("NAVER")}
-              onPress={() => void loginSocial("NAVER")}
-            />
-            <ProviderButton
-              label="구글로 계속하기"
-              icon="logo-google"
-              backgroundColor="#FFFFFF"
-              foregroundColor="#202124"
-              loading={busy === "GOOGLE"}
-              disabled={unavailable || !providerAvailable("GOOGLE")}
-              onPress={() => void loginSocial("GOOGLE")}
-            />
-            <ProviderButton
-              label="애플로 계속하기"
-              icon="logo-apple"
-              backgroundColor="#111111"
-              foregroundColor="#FFFFFF"
-              loading={busy === "APPLE"}
-              disabled={unavailable || !providerAvailable("APPLE")}
-              onPress={() => void loginSocial("APPLE")}
-            />
+          {showLoginActions ? (
+            <View style={[styles.actions, connectionRetryVisible && styles.actionsAfterRetry]}>
+              {providerAvailable("KAKAO") ? (
+                <ProviderButton
+                  label="카카오로 계속하기"
+                  mark="K"
+                  backgroundColor="#FEE500"
+                  foregroundColor="#191919"
+                  loading={busy === "KAKAO"}
+                  disabled={unavailable}
+                  onPress={() => void loginSocial("KAKAO")}
+                />
+              ) : null}
+              {providerAvailable("NAVER") ? (
+                <ProviderButton
+                  label="네이버로 계속하기"
+                  mark="N"
+                  backgroundColor="#03C75A"
+                  foregroundColor="#FFFFFF"
+                  loading={busy === "NAVER"}
+                  disabled={unavailable}
+                  onPress={() => void loginSocial("NAVER")}
+                />
+              ) : null}
+              {providerAvailable("GOOGLE") ? (
+                <ProviderButton
+                  label="구글로 계속하기"
+                  icon="logo-google"
+                  backgroundColor="#FFFFFF"
+                  foregroundColor="#202124"
+                  loading={busy === "GOOGLE"}
+                  disabled={unavailable}
+                  onPress={() => void loginSocial("GOOGLE")}
+                />
+              ) : null}
+              {providerAvailable("APPLE") ? (
+                <ProviderButton
+                  label="애플로 계속하기"
+                  icon="logo-apple"
+                  backgroundColor="#111111"
+                  foregroundColor="#FFFFFF"
+                  loading={busy === "APPLE"}
+                  disabled={unavailable}
+                  onPress={() => void loginSocial("APPLE")}
+                />
+              ) : null}
 
-            <View style={styles.dividerRow}>
-              <View style={styles.divider} />
-              <Text style={styles.dividerLabel}>또는</Text>
-              <View style={styles.divider} />
-            </View>
+              {hasSocialProvider && phoneProviderAvailable ? (
+                <View style={styles.dividerRow}>
+                  <View style={styles.divider} />
+                  <Text style={styles.dividerLabel}>또는</Text>
+                  <View style={styles.divider} />
+                </View>
+              ) : null}
 
-            {emailStep === "ADDRESS" ? (
+              {phoneProviderAvailable && (phoneStep === "NUMBER" ? (
               <>
-                <Text style={styles.fieldLabel}>이메일</Text>
-                <SeedInputShell focused={emailFocused}>
+                <Text style={styles.fieldLabel}>휴대폰 번호</Text>
+                <SeedInputShell focused={phoneFocused}>
                   <TextInput
-                    accessibilityLabel="이메일 주소"
-                    autoCapitalize="none"
-                    autoCorrect={false}
-                    keyboardType="email-address"
-                    value={emailInput}
-                    onChangeText={setEmailInput}
-                    onFocus={() => setEmailFocused(true)}
-                    onBlur={() => setEmailFocused(false)}
-                    placeholder="name@example.com"
+                    accessibilityLabel="휴대폰 번호"
+                    keyboardType="phone-pad"
+                    textContentType="telephoneNumber"
+                    value={phoneInput}
+                    onChangeText={setPhoneInput}
+                    onFocus={() => setPhoneFocused(true)}
+                    onBlur={() => setPhoneFocused(false)}
+                    placeholder="010-1234-5678"
                     placeholderTextColor={seed.color.foreground.muted}
-                    maxLength={254}
+                    maxLength={16}
                     style={styles.input}
                   />
                 </SeedInputShell>
                 <SeedActionButton
-                  label="이메일 인증번호 받기"
+                  label="문자 인증번호 받기"
                   variant="neutralSolid"
-                  loading={busy === "EMAIL"}
-                  disabled={unavailable || !providerAvailable("EMAIL")}
+                  loading={busy === "PHONE"}
+                  disabled={unavailable || !phoneProviderAvailable}
                   onPress={() => void sendOtp()}
-                  style={styles.emailButton}
+                  style={styles.otpButton}
                 />
               </>
             ) : (
               <>
-                <View style={styles.emailSummaryRow}>
-                  <View style={styles.emailOtpLabel}>
+                <View style={styles.phoneSummaryRow}>
+                  <View style={styles.phoneOtpLabel}>
                     <Text style={styles.fieldLabel}>인증번호</Text>
-                    <Text numberOfLines={1} style={styles.verifiedEmail}>{verifiedEmail}</Text>
+                    <Text numberOfLines={1} style={styles.verifiedPhone}>{verifiedPhone}</Text>
                   </View>
                   <Pressable
                     accessibilityRole="button"
-                    accessibilityLabel="이메일 주소 변경"
+                    accessibilityLabel="휴대폰 번호 변경"
                     accessibilityState={{ disabled: busy !== null }}
                     disabled={busy !== null}
                     onPress={() => {
-                      void clearPendingEmailOtp();
-                      setEmailStep("ADDRESS");
+                      void clearPendingPhoneOtp();
+                      setPhoneStep("NUMBER");
                       setOtp("");
                       setOtpExpiresAt(null);
                       setResendAvailableAt(null);
                       setMessage("");
                     }}
-                    style={({ pressed }) => [styles.changeEmailButton, pressed && styles.pressed, busy !== null && styles.disabled]}
+                    style={({ pressed }) => [styles.changePhoneButton, pressed && styles.pressed, busy !== null && styles.disabled]}
                   >
-                    <Text style={styles.changeEmail}>이메일 변경</Text>
+                    <Text style={styles.changePhone}>번호 변경</Text>
                   </Pressable>
                 </View>
                 <SeedInputShell focused={otpFocused}>
                   <TextInput
-                    accessibilityLabel="이메일 인증번호"
+                    accessibilityLabel="문자 인증번호"
                     keyboardType="number-pad"
+                    textContentType="oneTimeCode"
                     value={otp}
                     onChangeText={(value) => setOtp(value.replace(/\D/g, "").slice(0, 6))}
                     onFocus={() => setOtpFocused(true)}
@@ -387,57 +450,52 @@ export function LoginScreen() {
                   <Pressable
                     accessibilityRole="button"
                     accessibilityLabel={resendSeconds > 0 ? `인증번호 재전송, ${resendSeconds}초 후 가능` : "인증번호 재전송"}
-                    accessibilityState={{ disabled: unavailable || !providerAvailable("EMAIL") || resendSeconds > 0 }}
-                    disabled={unavailable || !providerAvailable("EMAIL") || resendSeconds > 0}
-                    onPress={() => void sendOtp(verifiedEmail)}
+                    accessibilityState={{ disabled: unavailable || !phoneProviderAvailable || resendSeconds > 0 }}
+                    disabled={unavailable || !phoneProviderAvailable || resendSeconds > 0}
+                    onPress={() => void sendOtp(verifiedPhone)}
                     style={({ pressed }) => [styles.resendButton, pressed && styles.pressed, (unavailable || resendSeconds > 0) && styles.disabled]}
                   >
                     <Text style={styles.resendLabel}>{resendSeconds > 0 ? `재전송 ${resendSeconds}초` : "인증번호 재전송"}</Text>
                   </Pressable>
                 </View>
                 <SeedActionButton
-                  label="이메일로 로그인"
-                  loading={busy === "EMAIL"}
-                  disabled={unavailable || !providerAvailable("EMAIL") || otpExpired || otp.length !== 6}
-                  onPress={() => void loginEmail()}
-                  style={styles.emailButton}
+                  label="휴대폰으로 로그인"
+                  loading={busy === "PHONE"}
+                  disabled={unavailable || !phoneProviderAvailable || otpExpired || otp.length !== 6}
+                  onPress={() => void loginPhone()}
+                  style={styles.otpButton}
                 />
               </>
-            )}
+              ))}
 
-            {__DEV__ && internalSessionState === "failed" ? (
-              <View style={styles.sessionRecovery}>
-                <SeedActionButton
-                  label="로그인 다시 시도"
-                  variant="neutralSolid"
-                  loading={busy === "SESSION_RECOVERY"}
-                  disabled={busy !== null}
-                  onPress={() => void retryInternalSession()}
-                />
-              </View>
-            ) : null}
-          </View>
-
-          {checking ? <ActivityIndicator color={colors.ink} style={styles.status} /> : null}
-          {!checking && !brokerReady && !message ? (
-            <Text accessibilityRole="alert" style={styles.message}>로그인 서비스 연결 정보가 아직 설정되지 않았습니다.</Text>
+              {__DEV__ && internalSessionState === "failed" ? (
+                <View style={styles.sessionRecovery}>
+                  <SeedActionButton
+                    label="로그인 다시 시도"
+                    variant="neutralSolid"
+                    loading={busy === "SESSION_RECOVERY"}
+                    disabled={busy !== null}
+                    onPress={() => void retryInternalSession()}
+                  />
+                </View>
+              ) : null}
+            </View>
           ) : null}
+
           {message ? <Text accessibilityRole="alert" style={styles.message}>{message}</Text> : null}
           <View style={styles.legalLinks}>
             <PolicyAcceptanceRow
               label="[필수] 서비스 이용약관 동의"
               checked={termsAccepted}
               onToggle={() => setTermsAccepted((value) => !value)}
-              onOpen={() => router.push("/legal/terms" as Href)}
+              onOpen={() => openCurrentPolicy("terms")}
             />
             <PolicyAcceptanceRow
               label="[필수] 개인정보처리방침 동의"
               checked={privacyAccepted}
               onToggle={() => setPrivacyAccepted((value) => !value)}
-              onOpen={() => router.push("/legal/privacy" as Href)}
+              onOpen={() => openCurrentPolicy("privacy")}
             />
-            {!configReady ? <Text style={styles.legalStatus}>현재 약관 버전을 확인하고 있어요.</Text> : null}
-            {configReady && !requiredPolicyVersions ? <Text accessibilityRole="alert" style={styles.legalStatus}>약관 정보를 확인할 수 없어 로그인을 잠시 이용할 수 없어요.</Text> : null}
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -526,7 +584,7 @@ function ProviderButton({
       ) : icon ? (
         <View style={styles.providerMark}><DecorativeIonicon name={icon} size={20} color={foregroundColor} /></View>
       ) : (
-        <Text style={[styles.providerMarkText, { color: foregroundColor }]}>{mark}</Text>
+        <Text variant="subtitle" style={[styles.providerMarkText, { color: foregroundColor }]}>{mark}</Text>
       )}
       <Text style={[styles.providerLabel, { color: foregroundColor }]}>{label}</Text>
       <View style={styles.providerSpacer} />
@@ -542,9 +600,10 @@ const styles = StyleSheet.create({
   title: { color: colors.ink, fontSize: 24, lineHeight: 34, fontWeight: "900", textAlign: "center", marginTop: 32 },
   subtitle: { color: colors.muted, fontSize: 13, lineHeight: 20, textAlign: "center", marginTop: 8 },
   actions: { width: "100%", maxWidth: 480, alignSelf: "center", marginTop: 42, gap: 12 },
+  actionsAfterRetry: { marginTop: seed.spacing.x4 },
   providerButton: { minHeight: 54, borderRadius: seed.radius.r3, paddingHorizontal: 18, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   providerMark: { width: 24, alignItems: "center", justifyContent: "center" },
-  providerMarkText: { width: 24, fontSize: 17, fontWeight: "900", textAlign: "center" },
+  providerMarkText: { width: 24, fontWeight: "900", textAlign: "center" },
   providerLabel: { fontSize: 15, fontWeight: "700" },
   providerSpacer: { width: 24 },
   pressed: { opacity: seed.state.pressedOpacity, transform: [{ translateY: seed.state.pressedTranslateY }, { scale: seed.state.pressedScale }] },
@@ -554,18 +613,18 @@ const styles = StyleSheet.create({
   dividerLabel: { color: colors.muted, fontSize: 11 },
   fieldLabel: { color: colors.ink, fontSize: 13, fontWeight: "700" },
   input: { flex: 1, minHeight: 48, color: colors.ink, fontSize: 15, paddingVertical: 0 },
-  emailButton: { marginTop: 2 },
+  otpButton: { marginTop: 2 },
   sessionRecovery: {
     marginTop: 12,
     paddingTop: 20,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: seed.color.stroke.neutral,
   },
-  emailSummaryRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  emailOtpLabel: { flex: 1, minWidth: 0, marginRight: 12 },
-  verifiedEmail: { color: colors.muted, ...seed.typography.finePrint, marginTop: 3 },
-  changeEmailButton: { minHeight: seed.size.touchTarget, paddingHorizontal: seed.spacing.x2, alignItems: "center", justifyContent: "center" },
-  changeEmail: { color: colors.greenInk, fontSize: 12, fontWeight: "700" },
+  phoneSummaryRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  phoneOtpLabel: { flex: 1, minWidth: 0, marginRight: 12 },
+  verifiedPhone: { color: colors.muted, ...seed.typography.finePrint, marginTop: 3 },
+  changePhoneButton: { minHeight: seed.size.touchTarget, paddingHorizontal: seed.spacing.x2, alignItems: "center", justifyContent: "center" },
+  changePhone: { color: colors.greenInk, fontSize: 12, fontWeight: "700" },
   otpStatusRow: { minHeight: seed.size.touchTarget, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: seed.spacing.x2 },
   otpTimer: { flex: 1, color: colors.muted, ...seed.typography.finePrint },
   otpTimerExpired: { color: seed.color.foreground.critical, fontWeight: "700" },
@@ -573,6 +632,7 @@ const styles = StyleSheet.create({
   resendLabel: { color: colors.greenInk, fontSize: 12, fontWeight: "700" },
   status: { marginTop: 24 },
   message: { color: seed.color.foreground.critical, fontSize: 12, lineHeight: 18, textAlign: "center", marginTop: 20 },
+  connectionRetry: { alignSelf: "center", marginTop: seed.spacing.x3 },
   legalLinks: { alignItems: "center", marginTop: 28, paddingHorizontal: seed.spacing.x3 },
   requiredPolicyRow: { width: "100%", minHeight: 48, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: seed.spacing.x2 },
   requiredPolicyToggle: { flex: 1, minHeight: 44, flexDirection: "row", alignItems: "center", gap: seed.spacing.x2 },
@@ -581,5 +641,6 @@ const styles = StyleSheet.create({
   legalNotice: { flex: 1, color: colors.muted, fontSize: 12, lineHeight: 18 },
   legalLinkTarget: { minWidth: seed.size.touchTarget, minHeight: seed.size.touchTarget, alignItems: "center", justifyContent: "center", paddingHorizontal: seed.spacing.x2 },
   legalLink: { color: colors.ink, fontSize: 11, fontWeight: "700", textDecorationLine: "underline" },
-  legalStatus: { marginTop: seed.spacing.x1, color: colors.muted, fontSize: 11, lineHeight: 17, textAlign: "center" },
+  policyAvailabilityStatus: { marginTop: seed.spacing.x3, color: colors.muted, ...seed.typography.caption, textAlign: "center" },
+  policyAvailabilityError: { marginTop: seed.spacing.x3, color: seed.color.foreground.critical, ...seed.typography.caption, textAlign: "center" },
 });

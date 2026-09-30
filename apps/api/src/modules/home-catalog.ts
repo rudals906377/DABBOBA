@@ -1,4 +1,6 @@
+import { createHmac } from "node:crypto";
 import type { FastifyInstance } from "fastify";
+import { rebaseLegacyCatalogMediaUrl } from "./catalog-media-url.js";
 import { withTransaction, type DatabaseClient } from "@dabboba/db";
 import type { CommerceLaunchMode } from "@dabboba/config";
 import type { ProductCategoryId, ProductSaleStatus } from "@dabboba/domain";
@@ -18,6 +20,7 @@ import {
   uuidInput,
 } from "../lib/input.js";
 import { iso, numberValue } from "../lib/rows.js";
+import { opaqueClientKey, rateLimitKey } from "../lib/rate-limit-key.js";
 import { CATALOG_TOTAL_QUANTITY_SQL } from "../lib/catalog-total-quantity.js";
 import {
   CATALOG_REMAINING_KUJI_TIERS_SQL,
@@ -142,51 +145,56 @@ function productBlockedReason(row: HomeCatalogProductRow, commerceMode: Commerce
   return null;
 }
 
-const mapProduct = (row: HomeCatalogProductRow, commerceMode: CommerceLaunchMode) => ({
-  id: row.id,
-  sku: row.sku,
-  ipId: row.ip_id,
-  characterIds: row.character_ids,
-  category: row.category,
-  name: row.name,
-  manufacturer: row.manufacturer,
-  releaseDate: row.release_date,
-  price: numberValue(row.price) > 0 ? numberValue(row.price) : null,
-  availableQuantity: numberValue(row.available_quantity),
-  totalQuantity: row.total_quantity === null ? null : numberValue(row.total_quantity),
-  metadata: row.metadata,
-  imageUrl: row.image_url,
-  storefrontImageUrl: row.storefront_image_url,
-  isActive: row.is_active,
-  isPrizeOnly: row.is_prize_only,
-  saleStatus: row.sale_status,
-  purchasable: productBlockedReason(row, commerceMode) === null,
-  blockedReason: productBlockedReason(row, commerceMode),
-  version: row.version,
-  createdAt: iso(row.created_at),
-  updatedAt: iso(row.updated_at),
-  ...(row.remaining_kuji_tiers === undefined ? {} : {
-    remainingKujiTiers: row.remaining_kuji_tiers.map((tier) => ({
-      tierCode: tier.tierCode,
-      tierRank: numberValue(tier.tierRank),
-      label: tier.label,
-      initialQuantity: numberValue(tier.initialQuantity),
-      remainingQuantity: numberValue(tier.remainingQuantity),
-    })),
-  }),
-});
+const mapProduct = (row: HomeCatalogProductRow, commerceMode: CommerceLaunchMode) => {
+  const discloseInventory = commerceMode === "LIVE" && row.sale_status === "ON_SALE";
+  return {
+    id: row.id,
+    sku: row.sku,
+    ipId: row.ip_id,
+    characterIds: row.character_ids,
+    category: row.category,
+    name: row.name,
+    manufacturer: row.manufacturer,
+    releaseDate: row.release_date,
+    price: numberValue(row.price) > 0 ? numberValue(row.price) : null,
+    availableQuantity: discloseInventory ? numberValue(row.available_quantity) : 0,
+    totalQuantity: discloseInventory && row.total_quantity !== null
+      ? numberValue(row.total_quantity)
+      : null,
+    metadata: row.metadata,
+    imageUrl: row.image_url,
+    storefrontImageUrl: row.storefront_image_url,
+    isActive: row.is_active,
+    isPrizeOnly: row.is_prize_only,
+    saleStatus: row.sale_status,
+    purchasable: productBlockedReason(row, commerceMode) === null,
+    blockedReason: productBlockedReason(row, commerceMode),
+    version: row.version,
+    createdAt: iso(row.created_at),
+    updatedAt: iso(row.updated_at),
+    ...(row.remaining_kuji_tiers === undefined ? {} : {
+      remainingKujiTiers: (discloseInventory ? row.remaining_kuji_tiers : []).map((tier) => ({
+        tierCode: tier.tierCode,
+        tierRank: numberValue(tier.tierRank),
+        label: tier.label,
+        initialQuantity: numberValue(tier.initialQuantity),
+        remainingQuantity: numberValue(tier.remainingQuantity),
+      })),
+    }),
+  };
+};
 
-const mapHomeRecentDraw = (row: HomeRecentDrawRow) => ({
+const mapHomeRecentDraw = (row: HomeRecentDrawRow, catalogMediaBaseUrl: string | null | undefined) => ({
   id: row.id,
   productId: row.product_id,
   category: row.category,
   prizeName: row.prize_name_snapshot,
-  prizeImageUrl: row.prize_image_url_snapshot,
+  prizeImageUrl: rebaseLegacyCatalogMediaUrl(catalogMediaBaseUrl, row.prize_image_url_snapshot),
   rarity: row.rarity,
   committedAt: iso(row.committed_at),
 });
 
-async function homeRecentDrawActivity(client: Pick<DatabaseClient, "query">, demo: boolean) {
+async function homeRecentDrawActivity(client: Pick<DatabaseClient, "query">, demo: boolean, catalogMediaBaseUrl: string | null | undefined) {
   const result = await client.query<HomeRecentDrawRow>(
     `SELECT result.id,result.product_id,draw_product.category,
             pool_entry.prize_name_snapshot,pool_entry.prize_image_url_snapshot,
@@ -209,7 +217,7 @@ async function homeRecentDrawActivity(client: Pick<DatabaseClient, "query">, dem
       LIMIT $3`,
     [demo ? CUSTOMER_CATALOG_GENERATION : null, [...DEMO_SELLER_PRODUCT_IDS], HOME_RECENT_DRAW_LIMIT],
   );
-  return result.rows.map(mapHomeRecentDraw);
+  return result.rows.map((row) => mapHomeRecentDraw(row, catalogMediaBaseUrl));
 }
 
 async function homeProductBadgeState(client: DatabaseClient, demo: boolean) {
@@ -335,6 +343,32 @@ async function replaceManualProducts(client: DatabaseClient, sectionId: string, 
   );
 }
 
+export const HOME_PRODUCT_CLICK_LIMIT_PER_MINUTE = 30;
+const HOME_PRODUCT_CLICK_DEDUPE_WINDOW_MS = 3_600_000;
+
+/**
+ * Deterministic click-event id for one (caller, product, UTC hour). Replays
+ * inside the window hit the table's primary key and are ignored, so badge
+ * popularity cannot be inflated by one caller. The id is a keyed hash: it
+ * stores no IP, session or device identifier and cannot be reversed without
+ * the server pepper. Formatted as an RFC 9562 version-8 UUID.
+ */
+export function homeProductClickDedupeId(input: {
+  clientKey: string;
+  productId: string;
+  pepper: string;
+  now?: number;
+}): string {
+  const bucket = Math.floor((input.now ?? Date.now()) / HOME_PRODUCT_CLICK_DEDUPE_WINDOW_MS);
+  const digest = createHmac("sha256", input.pepper)
+    .update(`home-product-click\u0000${input.clientKey}\u0000${input.productId}\u0000${bucket}`)
+    .digest();
+  digest[6] = (digest[6]! & 0x0f) | 0x80;
+  digest[8] = (digest[8]! & 0x3f) | 0x80;
+  const hex = digest.subarray(0, 16).toString("hex");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
 export async function registerHomeCatalogRoutes(app: FastifyInstance, context: ApiContext) {
   app.get("/v1/catalog/recent-draws", async (_request, reply) => {
     reply.header("cache-control", "no-store");
@@ -343,7 +377,7 @@ export async function registerHomeCatalogRoutes(app: FastifyInstance, context: A
       await client.query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY");
       return {
         serverNow: new Date().toISOString(),
-        items: await homeRecentDrawActivity(client, demo),
+        items: await homeRecentDrawActivity(client, demo, context.config.catalogMediaBaseUrl),
       };
     });
   });
@@ -521,11 +555,20 @@ export async function registerHomeCatalogRoutes(app: FastifyInstance, context: A
     });
   });
 
-  app.post("/v1/catalog/home-product-clicks/:productId", async (request) => {
+  app.post("/v1/catalog/home-product-clicks/:productId", {
+    config: { rateLimit: { max: HOME_PRODUCT_CLICK_LIMIT_PER_MINUTE, timeWindow: "1 minute" } },
+  }, async (request) => {
     const productId = slugIdInput((request.params as Record<string, unknown>).productId, "productId");
     const body = objectInput(request.body);
     assertOnlyKeys(body, ["eventId"]);
-    const eventId = uuidInput(body.eventId, "eventId");
+    // The client id stays part of the validated contract, but the stored id is
+    // derived server-side so one caller counts at most once per product/hour.
+    uuidInput(body.eventId, "eventId");
+    const eventId = homeProductClickDedupeId({
+      clientKey: opaqueClientKey(rateLimitKey(request, context.config), context.config.sessionTokenPepper),
+      productId,
+      pepper: context.config.sessionTokenPepper,
+    });
     const demo = demoProfileRequested();
 
     return withTransaction(context.pool, async (client) => {

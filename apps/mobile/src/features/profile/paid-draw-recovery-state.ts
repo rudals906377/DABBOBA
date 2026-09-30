@@ -53,7 +53,7 @@ export async function collectAvailableDrawEntitlements(
     assertRecoveryActive(signal);
     items.push(...page.items);
     cursor = page.nextCursor ?? undefined;
-    if (cursor && seenCursors.has(cursor)) throw new Error("남은 추첨권 목록을 끝까지 확인하지 못했습니다.");
+    if (cursor && seenCursors.has(cursor)) throw new Error("남은 추첨권 목록을 끝까지 확인하지 못했어요.");
     if (cursor) seenCursors.add(cursor);
   } while (cursor);
   return items;
@@ -69,18 +69,18 @@ export async function preparePaidDrawRecovery(
   assertRecoveryActive(signal);
   const actorId = await source.fetchActorId();
   assertRecoveryActive(signal);
-  if (actorId !== expectedActorId) throw new Error("로그인 계정이 변경되었습니다. 구매 내역을 다시 불러와 주세요.");
+  if (actorId !== expectedActorId) throw new Error("로그인 계정이 변경됐어요. 구매 내역을 다시 불러와 주세요.");
   const order = await source.fetchOrder(requested.orderId);
   assertRecoveryActive(signal);
-  if (order.id !== requested.orderId || order.userId !== actorId) throw new Error("본인 계정의 주문 정보를 확인하지 못했습니다.");
-  if (order.status !== "PAID" && order.status !== "FULFILLED") throw new Error("결제 완료된 주문만 이어 뽑을 수 있습니다.");
+  if (order.id !== requested.orderId || order.userId !== actorId) throw new Error("본인 계정의 주문 정보를 확인하지 못했어요.");
+  if (order.status !== "PAID" && order.status !== "FULFILLED") throw new Error("결제 완료된 주문만 이어 뽑을 수 있어요.");
   const lines = order.lines.filter((line) => line.productId === requested.product.id && line.category === requested.product.category);
   if (lines.length !== 1 || !Number.isSafeInteger(lines[0]!.quantity) || lines[0]!.quantity < 1) {
-    throw new Error("구매한 상품과 추첨권 정보가 일치하지 않습니다.");
+    throw new Error("구매한 상품과 추첨권 정보가 일치하지 않아요.");
   }
   const freshItems = await collectAvailableDrawEntitlements(source.fetchPage, signal);
   const fresh = groupAvailableDrawEntitlements(freshItems).find((group) => group.key === requested.key);
-  if (!fresh) throw new Error("이 주문에 남아 있는 추첨권이 없습니다. 구매 내역을 새로 확인해 주세요.");
+  if (!fresh) throw new Error("이 주문에 남아 있는 추첨권이 없어요. 구매 내역을 새로 확인해 주세요.");
   const orderIds = order.drawEntitlementIds ?? [];
   const expectedIds = new Set(orderIds.map((id) => id.toLowerCase()));
   if (
@@ -90,7 +90,7 @@ export async function preparePaidDrawRecovery(
     || orderIds.some((id) => !UUID_PATTERN.test(id))
     || expectedIds.size !== orderIds.length
     || fresh.entitlementIds.some((id) => !UUID_PATTERN.test(id) || !expectedIds.has(id.toLowerCase()))
-  ) throw new Error("서버 주문과 남은 추첨권 정보가 일치하지 않습니다.");
+  ) throw new Error("서버 주문과 남은 추첨권 정보가 일치하지 않아요.");
   if (fresh.product.category === "kuji") {
     assertRecoveryActive(signal);
     const recovery = await source.fetchKujiRecovery(order.id);
@@ -138,8 +138,8 @@ function kujiRecoveryRoute(
     || ids.length > purchasedCount || ids.length > 20
     || ids.some((id) => !UUID_PATTERN.test(id) || !available.has(id.toLowerCase()))
     || new Set(identities).size !== ids.length
-  ) throw new Error("서버 주문과 쿠지 복구 정보가 일치하지 않습니다.");
-  if (!ids.length) throw new Error("이 주문에 남아 있는 추첨권이 없습니다. 구매 내역을 새로 확인해 주세요.");
+  ) throw new Error("서버 주문과 쿠지 복구 정보가 일치하지 않아요.");
+  if (!ids.length) throw new Error("이 주문에 남아 있는 추첨권이 없어요. 구매 내역을 새로 확인해 주세요.");
   // The server preserves paid rights after the original draw lease expires.
   // EXPIRED never creates or resets a timer; existing bind/consume owns access.
   if (recovery.roomState !== "DRAWING" && recovery.roomState !== "EXPIRED") {
@@ -152,7 +152,7 @@ function kujiRecoveryRoute(
     entitlementIds: ids.join(","),
   });
   if (!recovery.bindings.length) {
-    if (ids.length !== purchasedCount) throw new Error("남은 쿠지 번호의 연결 정보를 확인하지 못했습니다.");
+    if (ids.length !== purchasedCount) throw new Error("남은 쿠지 번호의 연결 정보를 확인하지 못했어요.");
     query.set("count", String(ids.length));
     return `/kuji/draw/${encodeURIComponent(group.product.id)}?${query.toString()}`;
   }
@@ -167,7 +167,7 @@ function kujiRecoveryRoute(
       || !Number.isSafeInteger(binding.slotNumber)
       || binding.slotNumber < 1 || binding.slotNumber > recovery.totalSlots
     ))
-  ) throw new Error("남은 추첨권과 선택한 쿠지 번호가 일치하지 않습니다.");
+  ) throw new Error("남은 추첨권과 선택한 쿠지 번호가 일치하지 않아요.");
   query.set("category", "kuji");
   query.set("tickets", identities.map((id) => (
     String(bindings.get(id)!.slotNumber).padStart(Math.max(2, String(recovery.totalSlots).length), "0")
@@ -176,5 +176,5 @@ function kujiRecoveryRoute(
 }
 
 function assertRecoveryActive(signal?: AbortSignal): void {
-  if (signal?.aborted) throw new Error("추첨권 복구 요청이 취소되었습니다.");
+  if (signal?.aborted) throw new Error("추첨권 복구 요청이 취소됐어요.");
 }

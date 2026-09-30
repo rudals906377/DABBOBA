@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import type { webcrypto } from "node:crypto";
 import {
   createLocalJWKSet,
   exportJWK,
@@ -69,7 +70,7 @@ test("claim mapping rejects anonymous and unauthenticated broker subjects", asyn
   }));
 });
 
-test("live Auth user verification accepts linked approved identities and ignores legacy phone identity", async () => {
+test("live Auth user verification accepts linked approved identities including verified phone", async () => {
   const signing = await generateKeyPair("ES256");
   const publicJwk = await exportJWK(signing.publicKey);
   publicJwk.kid = "live-user-key";
@@ -106,6 +107,8 @@ test("live Auth user verification accepts linked approved identities and ignores
         is_anonymous: false,
         email: " Customer@Example.com ",
         email_confirmed_at: new Date(Date.now() - 1_000).toISOString(),
+        phone: "+821012345678",
+        phone_confirmed_at: new Date(Date.now() - 1_000).toISOString(),
         identities: [
           { identity_id: "kakao-one", user_id: subject, provider: "kakao" },
           { identity_id: "google-one", user_id: subject, provider: "google" },
@@ -116,8 +119,9 @@ test("live Auth user verification accepts linked approved identities and ignores
       });
     },
   }, keyResolver);
-  assert.deepEqual(verified.providers, ["KAKAO", "GOOGLE", "EMAIL"]);
+  assert.deepEqual(verified.providers, ["PHONE", "KAKAO", "GOOGLE", "EMAIL"]);
   assert.equal(verified.email, "customer@example.com");
+  assert.equal(verified.phone, "+821012345678");
   assert.deepEqual(captured, [{
     url: `${supabaseUrl}/auth/v1/user`,
     authorization: `Bearer ${token}`,
@@ -125,7 +129,7 @@ test("live Auth user verification accepts linked approved identities and ignores
   }]);
 });
 
-test("live Auth user verification rejects a mismatched subject, phone-only user, unconfirmed email, and raw provider errors", async () => {
+test("live Auth user verification accepts confirmed phone only, rejecting unconfirmed phone, mismatched subject and unconfirmed email", async () => {
   const signing = await generateKeyPair("ES256");
   const publicJwk = await exportJWK(signing.publicKey);
   publicJwk.kid = "live-reject-key";
@@ -150,6 +154,18 @@ test("live Auth user verification rejects a mismatched subject, phone-only user,
   await rejectsUnauthorized(() => verifyWith({
     id: subject, role: "authenticated", is_anonymous: false,
     identities: [{ identity_id: "phone", provider: "phone" }],
+  }));
+  const verifiedPhone = await verifyWith({
+    id: subject, role: "authenticated", is_anonymous: false,
+    phone: "+821012345678", phone_confirmed_at: new Date(Date.now() - 1_000).toISOString(),
+    identities: [{ identity_id: "phone", user_id: subject, provider: "phone" }],
+  });
+  assert.deepEqual(verifiedPhone.providers, ["PHONE"]);
+  assert.equal(verifiedPhone.phone, "+821012345678");
+  await rejectsUnauthorized(() => verifyWith({
+    id: subject, role: "authenticated", is_anonymous: false,
+    phone: "01012345678", phone_confirmed_at: new Date(Date.now() - 1_000).toISOString(),
+    identities: [{ identity_id: "phone", user_id: subject, provider: "phone" }],
   }));
   await rejectsUnauthorized(() => verifyWith({
     id: subject, role: "authenticated", is_anonymous: false,
@@ -178,7 +194,7 @@ test("JWT verification requires the configured issuer, exact audience, expiry, r
     role?: string;
     anonymous?: boolean;
     expiration?: number;
-    privateKey?: CryptoKey;
+    privateKey?: webcrypto.CryptoKey;
   } = {}) => new SignJWT({
     role: changes.role || "authenticated",
     is_anonymous: changes.anonymous || false,

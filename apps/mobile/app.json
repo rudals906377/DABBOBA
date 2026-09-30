@@ -10,8 +10,9 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.dabboba.mobile",
+      "appleTeamId": "MCZ4884P7F",
       "usesAppleSignIn": true,
-      "buildNumber": "1",
+      "buildNumber": "3",
       "config": {
         "usesNonExemptEncryption": false
       }

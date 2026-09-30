@@ -8,6 +8,15 @@ export type NotificationTarget = {
 const SAFE_IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9_-]{0,119}$/;
 const SAFE_NOTIFICATION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
+/**
+ * The one identifier check shared by every notification route: a server
+ * product, order, entry or similar ID (which includes UUIDs) must be a short
+ * `[A-Za-z0-9_-]` token before it may become part of an in-app path.
+ */
+export function isSafeNotificationIdentifier(value: unknown): value is string {
+  return typeof value === "string" && SAFE_IDENTIFIER.test(value);
+}
+
 const ROOT_TARGETS: Record<AccountNotification["destination"]["route"], NotificationTarget> = {
   home: { href: "/(tabs)", label: "홈으로 이동" },
   gacha: { href: "/(tabs)/gacha", label: "가챠샵 보기" },

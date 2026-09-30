@@ -43,9 +43,35 @@ test("gacha audio respects Silent Mode and never takes exclusive audio focus", (
   assert.match(audioSource, /Audio feedback must never block or fail a committed draw presentation/);
 });
 
-test("lever, first contact, and seam audio follow the existing reveal clock", () => {
-  assert.match(timingSource, /GACHA_CAPSULE_DISPENSE_DURATION_MS \* 0\.65/);
-  assert.match(timingSource, /GACHA_CAPSULE_DISPENSE_DURATION_MS \+ Math\.round\(3_000 \* 0\.14\)/);
+test("lever, first contact, and seam audio follow the existing reveal clock", async () => {
+  const timing = await import("../apps/mobile/src/features/draw/gacha-reveal-sound.ts");
+  const { GACHA_CAPSULE_DISPENSE_DURATION_MS } = await import("../apps/mobile/src/features/draw/gacha-camera-motion.ts");
+  assert.equal(timing.GACHA_DROP_IMPACT_SOUND_PROGRESS, 0.65);
+  assert.equal(timing.GACHA_SEAM_OPEN_SOUND_PROGRESS, 0.14);
+  // Same wall-clock moments as the retired JS timers on the linear 1.7 s + 3 s clock.
+  assert.deepEqual({ ...timing.GACHA_REVEAL_SOUND_TIMING }, {
+    dropImpactMs: Math.round(GACHA_CAPSULE_DISPENSE_DURATION_MS * 0.65),
+    seamOpenMs: GACHA_CAPSULE_DISPENSE_DURATION_MS + Math.round(3_000 * 0.14),
+  });
+  const stage = timing.resolveGachaRevealSoundStage;
+  assert.equal(stage(0, 1, 1), 0, "an inactive (settled or reset) reveal never cues sound");
+  assert.equal(stage(1, 0.649, 0), 0);
+  assert.equal(stage(1, 0.65, 0), 1);
+  assert.equal(stage(1, 1, 0.139), 1);
+  assert.equal(stage(1, 1, 0.14), 2);
+  assert.match(timingSource, /"worklet";/);
+  // Cues fire from the native timeline, once per stage crossing, never from JS timers.
+  assert.match(machineSource, /useAnimatedReaction\(\s*\(\) => resolveGachaRevealSoundStage\(revealActive\.value, dispenseProgress\.value, revealProgress\.value\),/);
+  assert.match(machineSource, /if \(before < 1 && stage >= 1\) scheduleOnRN\(playDropImpactSound\);/);
+  assert.match(machineSource, /if \(before < 2 && stage >= 2\) scheduleOnRN\(playSeamOpenSound\);/);
+  assert.doesNotMatch(audioSource, /setTimeout|clearTimeout/);
+  // Mute and cancel remain authoritative on the JS side.
+  assert.match(audioSource, /const scheduleDispense = useCallback\(\(\) => \{\s*cuesRef\.current = \{ armed: true, dropPlayed: false, openPlayed: false \};/);
+  assert.match(audioSource, /const cancelScheduled = useCallback\(\(\) => \{\s*cuesRef\.current = \{ armed: false, dropPlayed: false, openPlayed: false \};/);
+  assert.match(audioSource, /if \(!cues\.armed \|\| cues\.dropPlayed\) return;/);
+  assert.match(audioSource, /if \(!cues\.armed \|\| cues\.openPlayed\) return;/);
+  assert.match(audioSource, /if \(!enabledRef\.current\) return;/);
+  assert.match(audioSource, /useEffect\(\(\) => cancelScheduled, \[cancelScheduled\]\)/);
   assert.match(machineSource, /leverSoundPlayed\.value === 0/);
   assert.match(machineSource, /scheduleOnRN\(playLeverSound\)/);
   assert.match(machineSource, /transition\.effect === "start-dispense"[\s\S]*?scheduleDispenseSounds\(\)/);

@@ -111,6 +111,18 @@ test(
       VALUES($1,'TEST_PG',$2,'REFUND_REVIEW',10000) RETURNING id`, [orderId, `provider-${suffix}`]);
     const paymentId = payment.rows[0]!.id;
     await pool.query(
+      `INSERT INTO payment_provider_events(provider,provider_event_id,event_type,payment_id,signature_digest,payload,occurred_at,processed_at)
+       VALUES('TEST_PG',$1,'PAYMENT_STATE_ANOMALY',$2,'fixture-signature',$3::jsonb,now(),now())`,
+      [
+        `anomaly-${suffix}`,
+        paymentId,
+        JSON.stringify({
+          providerObservation: { status: "FAILED", paidAmount: 10_000, cancelledAmount: 0 },
+          privateProviderNote: "never-expose-provider-payload",
+        }),
+      ],
+    );
+    await pool.query(
       "INSERT INTO inventory_units(owner_id,product_id,source_type,source_id) VALUES($1,$2,'PURCHASE',$3)",
       [user.id, productId, line.rows[0]!.id],
     );
@@ -145,6 +157,23 @@ test(
       const response = await app.inject({ method: "GET", url, headers: auth(admin.token) });
       assert.equal(response.statusCode, 200, `${url}: ${response.body}`);
     }
+    const paymentDetail = await app.inject({
+      method: "GET", url: `/v1/admin/commerce/payments/${paymentId}`, headers: auth(admin.token),
+    });
+    assert.equal(paymentDetail.statusCode, 200, paymentDetail.body);
+    assert.deepEqual((paymentDetail.json() as { providerEvents: Array<{ providerObservation: unknown }> }).providerEvents[0]?.providerObservation, {
+      status: "FAILED", paidAmount: 10_000, cancelledAmount: 0,
+    });
+    assert.doesNotMatch(paymentDetail.body, /never-expose-provider-payload/);
+    const customerPaymentDetail = await app.inject({
+      method: "GET", url: `/v1/admin/commerce/payments/${paymentId}`, headers: auth(user.token),
+    });
+    assert.equal(customerPaymentDetail.statusCode, 403, customerPaymentDetail.body);
+    const initialRefundDetail = await app.inject({
+      method: "GET", url: `/v1/admin/commerce/refund-reviews/${paymentId}`, headers: auth(admin.token),
+    });
+    assert.equal((initialRefundDetail.json() as { providerCancellation: unknown; providerReconciliationAvailable: boolean }).providerCancellation, null);
+    assert.equal((initialRefundDetail.json() as { providerReconciliationAvailable: boolean }).providerReconciliationAvailable, false);
 
     const deniedAdjustment = await app.inject({
       method: "POST",
@@ -411,7 +440,7 @@ test(
     assert.equal(falseClose.statusCode, 409, falseClose.body);
 
     const shippingInventory = await pool.query<{ id: string }>(`
-      INSERT INTO inventory_units(owner_id,product_id,source_type,status) VALUES($1,$2,'ADMIN_ADJUSTMENT','SHIPPING') RETURNING id`, [user.id, productId]);
+      INSERT INTO inventory_units(owner_id,product_id,source_type,status) VALUES($1,$2,'ADMIN_ADJUSTMENT','OWNED') RETURNING id`, [user.id, productId]);
     const shipping = await pool.query<{ id: string }>(`
       INSERT INTO shipping_requests(user_id,address_snapshot) VALUES($1,$2) RETURNING id`, [user.id, JSON.stringify({
         recipient: "김다뽀", phone: "010-1234-5678", postalCode: "06236",
@@ -419,6 +448,7 @@ test(
       })]);
     const shippingRequestId = shipping.rows[0]!.id;
     await attachShippingItem(shippingRequestId, shippingInventory.rows[0]!.id);
+    await pool.query("UPDATE inventory_units SET status='SHIPPING' WHERE id=$1", [shippingInventory.rows[0]!.id]);
     const shippingList = await app.inject({ method: "GET", url: "/v1/admin/commerce/shipping", headers: auth(admin.token) });
     assert.equal(shippingList.statusCode, 200, shippingList.body);
     const shippingListBody = shippingList.json() as { items: Array<Record<string, unknown>> };
@@ -476,13 +506,14 @@ test(
     );
 
     const cancelledInventory = await pool.query<{ id: string }>(`
-      INSERT INTO inventory_units(owner_id,product_id,source_type,status) VALUES($1,$2,'ADMIN_ADJUSTMENT','SHIPPING') RETURNING id`, [user.id, productId]);
+      INSERT INTO inventory_units(owner_id,product_id,source_type,status) VALUES($1,$2,'ADMIN_ADJUSTMENT','OWNED') RETURNING id`, [user.id, productId]);
     const cancelledRequest = await pool.query<{ id: string }>(`
       INSERT INTO shipping_requests(user_id,address_snapshot) VALUES($1,$2) RETURNING id`, [user.id, JSON.stringify({
         recipient: "김취소", phone: "010-9876-5432", postalCode: "06236",
         addressLine1: "서울특별시 강남구 테헤란로 2", addressLine2: "202호", deliveryNote: "",
       })]);
     await attachShippingItem(cancelledRequest.rows[0]!.id, cancelledInventory.rows[0]!.id);
+    await pool.query("UPDATE inventory_units SET status='SHIPPING' WHERE id=$1", [cancelledInventory.rows[0]!.id]);
     const cancelledReason = "고객 요청에 따른 출고 전 취소";
     const cancelledKey = `shipping-cancelled-${randomUUID()}`;
     const cancelled = await app.inject({
@@ -546,13 +577,14 @@ test(
     const deletionCandidate = await createActor("USER", "delivered-owner");
     const deliveredInventory = await pool.query<{ id: string }>(`
       INSERT INTO inventory_units(owner_id,product_id,source_type,status)
-      VALUES($1,$2,'ADMIN_ADJUSTMENT','SHIPPING') RETURNING id`, [deletionCandidate.id, productId]);
+      VALUES($1,$2,'ADMIN_ADJUSTMENT','OWNED') RETURNING id`, [deletionCandidate.id, productId]);
     const deliveredRequest = await pool.query<{ id: string }>(`
       INSERT INTO shipping_requests(user_id,address_snapshot) VALUES($1,$2) RETURNING id`, [deletionCandidate.id, JSON.stringify({
         recipient: "김완료", phone: "010-3333-4444", postalCode: "06236",
         addressLine1: "서울특별시 강남구 완료로 4", addressLine2: "404호", deliveryNote: "",
       })]);
     await attachShippingItem(deliveredRequest.rows[0]!.id, deliveredInventory.rows[0]!.id);
+    await pool.query("UPDATE inventory_units SET status='SHIPPING' WHERE id=$1", [deliveredInventory.rows[0]!.id]);
     const deliveredCandidateId = deliveredRequest.rows[0]!.id;
     const candidateProcessing = await advance(
       { status: "PROCESSING", expectedVersion: 1 },

@@ -86,7 +86,7 @@ export function CheckoutConnectionScreen() {
       setSnapshot(nextSnapshot);
       setMessage("");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "결제 연결 정보를 불러오지 못했습니다.");
+      setMessage(error instanceof Error ? error.message : "결제 연결 정보를 불러오지 못했어요.");
     } finally {
       setLoading(false);
     }
@@ -118,7 +118,7 @@ export function CheckoutConnectionScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea} edges={["top", "left", "right"]}>
-      <DetailPageHeader title="결제 연결 안내" onBack={goBack} backLabel="결제 준비로 돌아가기" />
+      <DetailPageHeader title="결제 연결 안내" titleMode="pixel" onBack={goBack} backLabel="결제 준비로 돌아가기" />
 
       {loading ? (
         <View style={styles.state}>
@@ -128,7 +128,7 @@ export function CheckoutConnectionScreen() {
       ) : message || !snapshot || !product ? (
         <View style={styles.state}>
           <DecorativeIonicon name="alert-circle-outline" size={34} color={colors.muted} />
-          <Text style={styles.stateTitle}>{message || "상품을 찾을 수 없습니다."}</Text>
+          <Text style={styles.stateTitle}>{message || "상품을 찾을 수 없어요."}</Text>
           <SeedActionButton label="다시 불러오기" variant="neutralSolid" onPress={() => void load()} />
         </View>
       ) : productComingSoon ? (

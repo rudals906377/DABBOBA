@@ -124,13 +124,15 @@ PRELAUNCH 코드 범위와 자동검증은 대부분 완료됐고, 결제·주�
 
 ### P0 — 제출 전에 반드시 해결
 
-1. **고객지원 메일 미개통**
+1. **고객지원 최종 수신·공개 발신 검증 미완료**
    - `dabboba.net`과 `www.dabboba.net`, `/privacy`, `/terms`, `/support`, `/account-deletion`의 HTTPS 공개와 `www` 리디렉션은 2026-09-22 외부 스모크 테스트를 통과했다.
-   - `support@dabboba.net`의 MX·SPF·DKIM·DMARC 및 실제 송수신 증거는 아직 없다.
-   - Google Play용 웹 계정삭제 요청 페이지는 유지하되, 실제 지원 메일함 송수신을 확인하기 전에는 완료로 판정하지 않는다.
+   - `support@dabboba.net`은 Cloudflare Email Routing에서 활성화됐고 외부 Gmail 테스트가 전달 로그에서 `Forwarded`로 확인됐다. 다만 최종 Naver 받은편지함 도착과 `support@dabboba.net` 발신 정체성은 아직 별도 확인이 필요하다.
+   - Google Play용 웹 계정삭제 요청 페이지는 유지하되, 무료 전달 주소에서 회신하면 개인 Naver 주소가 노출되므로 공개 답변 발신 수단을 정하기 전에는 고객지원 송수신 완료로 판정하지 않는다.
 
-2. **서명 빌드·스토어 자격증명·실기기 검증 부재**
-   - 로컬 Expo CLI가 앱 설정의 EAS project ID를 해석하는 것은 확인했지만, 친구 명의 조직 소유권·지속 가능한 접근 권한·Apple 배포 인증서·프로비저닝·Android keystore·App Store Connect/Play Console 제출 증거가 없다.
+2. **친구 명의 외부 계정 소유권·서명 빌드·실기기 검증 부재**
+   - 2026-09-22 사용자는 DABBOBA의 모든 최종 운영·출시 계정을 친구 명의로 사용하기로 확정했다. Apple/Google 스토어, Expo/EAS, GitHub, Cloudflare·도메인, Supabase, 로그인·푸시 제공자, 고객지원, PG·정산 계정에서 친구가 소유자임을 확인하고 개발자 계정은 최소 협업 권한으로 낮춰야 한다.
+   - 서비스별 현재 소유권 증거, 판정, 안전한 전환 순서는 [친구 명의 출시 계정 전환대장](../../docs/friend-owned-release-accounts.md)에 기록했다. 연결·배포 사실만으로 친구 소유라고 간주하지 않는다.
+   - 2026-09-22 친구 명의 활성 Apple Developer Program 개인 Team `MCZ4884P7F`과 빈 Identifiers/App Store Connect 앱 목록을 브라우저에서 확인했고, 앱 설정과 출시 검사를 이 Team ID로 고정했다. 다만 `com.dabboba.mobile`과 현재 인증서·프로비저닝은 개발자 개인 Team `52HC8BV2BL`에 남아 있다. 기존 App ID의 업로드·Sign in with Apple 상태를 확인해 안전하게 해제·재등록하거나 새 Bundle ID를 선택하기 전에는 App Store Connect 레코드·서명 빌드·TestFlight 제출을 진행하지 않는다. Play Console 앱 레코드·제출 키와 친구 명의 실제 서명 빌드 증거도 아직 없다.
    - 서명 IPA/AAB에서 아이콘·adaptive mask·URL scheme·APNs·권한·Privacy Manifest·export compliance를 확인해야 한다.
    - 보관함 `/storage` 딥링크를 포함해 실기기에서 전 경로를 다시 검증해야 한다.
 
@@ -150,7 +152,7 @@ PRELAUNCH 코드 범위와 자동검증은 대부분 완료됐고, 결제·주�
 
 ### P1 — 공개 제출 전에 완료
 
-- 사업자 대표 연락처가 휴대전화로 설정돼 있다. PG·스토어 공개용 유선 대표번호로 교체하고 실제 연결을 확인해야 한다.
+- 현재 등록된 휴대전화가 실제 서비스 운영 책임자의 공개 연락처인지 확인하고 실제 연결을 검증해야 한다. 결제가 없는 PRELAUNCH 스토어 연락처로는 검증된 번호를 사용할 수 있지만, 이후 PG·카드사 심사 및 LIVE 전환 전에는 요구 조건에 맞는 사업자 유선 또는 대표번호로 교체해야 한다.
 - 보관함 `/storage` 콜드스타트 딥링크를 iOS/Android 서명 실기기에서 재검증해야 한다.
 - 신규 설치부터 탈퇴까지 정상·빈·오류·오프라인·느린 네트워크 흐름을 iOS와 Android에서 완료해야 한다.
 - App Store Privacy와 Google Data Safety를 이메일·주소·연락처·주문·사진·UGC·알림 토큰·구조화 로그의 실제 흐름과 맞춰 제출해야 한다.
@@ -170,7 +172,7 @@ PRELAUNCH 코드 범위와 자동검증은 대부분 완료됐고, 결제·주�
 2. 공개 정책 사이트와 검증된 로그인 제공자를 준비한 뒤 migration `0052`~`0065`를 운영 DB에 반영하고 DB release check 66/66을 통과한다.
 3. `dabboba.net` 네 정책 경로의 공개 상태를 유지하고 `support@dabboba.net` 송수신을 외부에서 검증한다.
 4. 대표 유선번호, 실제 로그인 제공자, APNs/FCM, 탈퇴 외부 연동을 운영 계정으로 검증한다.
-5. `production-prelaunch` 서명 IPA/AAB를 생성하고 iOS·Android 실기기 전체 흐름을 통과한다.
+5. 친구 명의 외부 계정 소유권과 Apple/Google 서명 주체를 확인한 뒤 `production-prelaunch` 서명 IPA/AAB를 생성하고 iOS·Android 실기기 전체 흐름을 통과한다.
 6. PRELAUNCH 배포 환경에서 주문·결제·추첨·재고·배송 mutation 0건을 로그로 확인한다.
 7. TestFlight와 Play 내부 테스트 승인 후 열린 P0/P1 결함이 0건인지 다시 확인한다.
 
@@ -183,6 +185,8 @@ PRELAUNCH 코드 범위와 자동검증은 대부분 완료됐고, 결제·주�
 - 공개 사전오픈 랜딩과 정책 문서를 `dist/public-site`로 분리해 내부 앱 프로토타입이 운영 사이트에 함께 배포되지 않도록 했다. 임시 검수용 `https://dabboba.pages.dev`는 친구 계정의 최종 운영 배포가 아니며, 공개 사이트 Worker 테스트는 19/19 통과했다.
 - 모바일 출시 구조 검사, 모바일 타입검사, Expo Doctor 21/21, Expo 의존성 검사, production 의존성 보안 감사, PRELAUNCH iOS·Android 번들 금칙어 검사가 통과했다.
 - 당시 전체 workspace 검증은 build 11/11, typecheck 19/19, package test 19/19, Playwright 9/9, 사이트 테스트 17/17로 통과했다. 테스트 단계는 생성 디렉터리 경합과 고부하 타임아웃을 피하도록 순차화했고, 제품의 실제 미디어 타임아웃 경계는 별도 16/16 테스트로 확인했다.
-- EAS `production-prelaunch`와 `production-live` 설정은 고정된 Node·pnpm 버전과 각 commerce capability를 사용하며, EAS lifecycle hook이 출시 설정 및 실제 iOS·Android 번들 검사를 자동 실행한다. 현재 EAS Production 환경의 운영 변수와 서명 자격증명은 아직 소유자가 등록·검증해야 한다.
+- EAS `production-prelaunch`와 `production-live` 설정은 고정된 Node·pnpm 버전과 각 commerce capability를 사용하며, EAS lifecycle hook이 출시 설정 및 실제 iOS·Android 번들 검사를 자동 실행한다. 앱 설정은 확인된 친구 Apple Team `MCZ4884P7F`로 고정했지만, EAS의 기존 iOS 자격증명은 개발자 Team `52HC8BV2BL` 것이므로 출시 자격증명으로 인정하지 않는다. 친구 명의 EAS 소유권과 Apple/Google 스토어·서명 주체를 끝까지 교체해야 한다.
+- 2026-09-22 EAS Production 및 GitHub `mobile-production`에는 PRELAUNCH API 대상, Supabase 공개 값, 네 정책 URL, `DABBOBA_COMMERCE_MODE=PRELAUNCH`, `PAYMENT_PROVIDER=UNCONFIGURED`를 등록했다. 공개 Supabase key 외의 서버 비밀과 PortOne 값은 넣지 않았다. `api.dabboba.net` DNS와 최신 API 배포가 없으므로 이 구성은 아직 서명 빌드 시작 승인이 아니다.
+- Android 기본 keystore와 개발자 개인 Apple 팀의 iOS distribution certificate·provisioning profile은 `production-prelaunch`에 연결돼 있다. 기존 자격증명은 친구 명의 대체 항목이 검증될 때까지 삭제하지 않지만 공개 출시에는 사용하지 않는다. APNs/FCM 및 스토어 제출 키, App Store Connect/Play Console 앱 레코드는 아직 연결되지 않았다.
 - PRELAUNCH Expo config에서는 PortOne native plugin이 제거되어 결제 앱 URL scheme과 package query가 들어가지 않고, LIVE config에만 포함되는 것을 구조 테스트와 Expo config introspection으로 확인했다.
-- `dabboba.net`과 `www.dabboba.net`은 HTTPS로 열리고 네 정책 경로도 200 응답을 확인했다. 다만 `support@dabboba.net` 송수신과 자동 웹 탈퇴 연동은 아직 검증되지 않았다. Apple 서명 인증과 App Store Connect 앱 레코드, Google Play 계정 확인도 외부 계정 단계로 남아 있으므로 공개 제출 판정은 계속 **NO-GO**다.
+- `dabboba.net`과 `www.dabboba.net`은 HTTPS로 열리고 네 정책 경로도 200 응답을 확인했다. 다만 `support@dabboba.net`의 최종 수신·공개 발신과 자동 웹 탈퇴 연동은 아직 검증되지 않았다. 친구 명의 외부 계정 소유권, Apple 배포팀 교체, App Store Connect 앱 레코드와 Google Play 계정 확인도 남아 있으므로 공개 제출 판정은 계속 **NO-GO**다.

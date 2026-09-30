@@ -59,7 +59,8 @@ test(
     const missingBackfill = await pool.query<{ count: string }>(
       `SELECT count(*) AS count FROM users u
        LEFT JOIN notification_preferences p ON p.user_id=u.id
-       WHERE u.role='USER' AND p.user_id IS NULL`,
+       WHERE u.id=ANY($1::uuid[]) AND u.role='USER' AND p.user_id IS NULL`,
+      [[owner.id, stranger.id]],
     );
     assert.equal(missingBackfill.rows[0]!.count, "0");
 

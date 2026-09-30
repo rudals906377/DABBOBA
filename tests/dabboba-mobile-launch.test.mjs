@@ -3,7 +3,7 @@ import { spawn } from 'node:child_process';
 import { EventEmitter, once } from 'node:events';
 import { test } from 'node:test';
 import {
-  HOSTED_AUTH_API_URL, HOSTED_AUTH_PROFILE, MOBILE_ROOT, METRO_PORT, assertLaunchUrl,
+  HOSTED_AUTH_API_URL, HOSTED_AUTH_PROFILE, HOSTED_AUTH_PROJECT_REF, MOBILE_ROOT, METRO_PORT, assertLaunchUrl,
   assertMetroProcessEnvironment, buildExpoCommand, buildMobileEnvironment,
   buildHostedAuthMobileEnvironment, ensureAndroidReverse, inspectMetro,
   launchMobile, parseLaunchOptions, readMetroProcessEnvironment, selectIosSimulator,
@@ -23,8 +23,13 @@ test('arguments keep the DABBOBA port and Expo Go mode fixed', () => {
   assert.equal(parseLaunchOptions(['--android']).platform, 'android');
   assert.equal(parseLaunchOptions(['--web', '--clear']).clear, true);
   assert.equal(parseLaunchOptions(['--ios', '--hosted-auth']).hostedAuth, true);
+  assert.equal(parseLaunchOptions(['--ios', '--demo-commerce']).backendProfile, 'supabase-demo');
+  assert.equal(parseLaunchOptions(['--android', '--demo-commerce']).backendProfile, 'supabase-demo');
   for (const args of [['--port', '8081'], ['--port', '0'], ['--lan'], ['--tunnel'], ['--dev-client'], ['--ios', '--android'], ['--device']]) {
     assert.throws(() => parseLaunchOptions(args));
+  }
+  for (const args of [['--demo-commerce'], ['--web', '--demo-commerce'], ['--ios', '--hosted-auth', '--demo-commerce']]) {
+    assert.throws(() => parseLaunchOptions(args), /isolated local/);
   }
 });
 
@@ -170,11 +175,23 @@ test('mobile environment admits only safe shell values and fixed local public se
   assert.equal(environment.EXPO_PUBLIC_SUPABASE_URL, undefined);
   assert.equal(environment.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY, undefined);
   assert.equal(environment.EXPO_NO_DOTENV, '1');
+  assert.equal(environment.EXPO_PUBLIC_COMMERCE_CAPABILITY, 'PRELAUNCH');
+});
+
+test('only an explicitly selected internal demo profile enables development commerce screens', () => {
+  const demo = buildMobileEnvironment({ EXPO_PUBLIC_COMMERCE_CAPABILITY: 'LIVE' }, { backendProfile: 'supabase-demo' });
+  assert.equal(demo.EXPO_PUBLIC_COMMERCE_CAPABILITY, 'LIVE');
+  assert.equal(buildMobileEnvironment({ EXPO_PUBLIC_COMMERCE_CAPABILITY: 'LIVE' }).EXPO_PUBLIC_COMMERCE_CAPABILITY, 'PRELAUNCH');
+  assert.equal(buildMobileEnvironment({}, { backendProfile: 'supabase-integration' }).EXPO_PUBLIC_COMMERCE_CAPABILITY, 'PRELAUNCH');
+  assert.equal(buildExpoCommand('/cli', parseLaunchOptions(['--ios', '--demo-commerce']), {}).options.env.EXPO_PUBLIC_COMMERCE_CAPABILITY, 'LIVE');
+  assert.throws(() => buildMobileEnvironment({}, { backendProfile: 'production' }));
+  assert.doesNotThrow(() => assertMetroProcessEnvironment(environmentLine(demo), demo));
+  assert.throws(() => assertMetroProcessEnvironment(environmentLine(expectedEnvironment), demo));
 });
 
 test('hosted auth environment uses only the approved project public values and deployed API', () => {
   const source = [
-    'EXPO_PUBLIC_SUPABASE_URL=https://yxkmvgfruphgghowzvmo.supabase.co',
+    `EXPO_PUBLIC_SUPABASE_URL=https://${HOSTED_AUTH_PROJECT_REF}.supabase.co`,
     `EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_${'a'.repeat(40)}`,
     '',
   ].join('\n');
@@ -188,14 +205,14 @@ test('hosted auth environment uses only the approved project public values and d
   assert.equal(environment.DABBOBA_LOCAL_BACKEND_PROFILE, HOSTED_AUTH_PROFILE);
   assert.equal(environment.DABBOBA_ENVIRONMENT_TIER, 'PRODUCTION');
   assert.equal(environment.EXPO_PUBLIC_DABBOBA_API_URL, HOSTED_AUTH_API_URL);
-  assert.equal(environment.EXPO_PUBLIC_SUPABASE_URL, 'https://yxkmvgfruphgghowzvmo.supabase.co');
+  assert.equal(environment.EXPO_PUBLIC_SUPABASE_URL, `https://${HOSTED_AUTH_PROJECT_REF}.supabase.co`);
   assert.match(environment.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY, /^sb_publishable_/);
   assert.equal(environment.DATABASE_URL, undefined);
   assert.equal(environment.SUPABASE_SERVICE_ROLE_KEY, undefined);
   assert.doesNotThrow(() => assertMetroProcessEnvironment(environmentLine(environment), environment));
 
   for (const invalid of [
-    source.replace('yxkmvgfruphgghowzvmo', 'abcdefghijklmnopqrst'),
+    source.replace(HOSTED_AUTH_PROJECT_REF, 'abcdefghijklmnopqrst'),
     source.replace('sb_publishable_', 'sb_secret_'),
     `${source}DATABASE_URL=private\n`,
   ]) {
