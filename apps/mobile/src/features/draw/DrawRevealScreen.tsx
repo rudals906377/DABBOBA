@@ -239,9 +239,13 @@ export function DrawRevealScreen({ preview = false }: { preview?: boolean }) {
     && batchResults.length === committedSequence.total
     && !batchError;
   const committedBatchReady = !preview && mode === "all" && batchResults.length > 0;
+  // Both draw categories hold the committed batch summary until the stage's
+  // finite first-result reveal has settled (Reduced Motion settles at once).
   const committedBatchSummaryVisible = committedBatchReady
-    && (sourceCategory !== "kuji" || batchRevealSettled);
+    && ((sourceCategory !== "kuji" && sourceCategory !== "gacha") || batchRevealSettled);
   const settledCommittedResult = result ?? (committedBatchComplete ? batchResults.at(-1) ?? null : null);
+  // The gacha stage opens onto the first committed batch result in "all" mode.
+  const gachaStagePrize = result ?? batchResults[0] ?? null;
   const gachaBottomInset = safeAreaInsets.bottom + seed.spacing.x4;
 
   useFocusEffect(useCallback(() => {
@@ -735,7 +739,11 @@ export function DrawRevealScreen({ preview = false }: { preview?: boolean }) {
       ));
       return;
     }
-    if (sourceCategory === "kuji" && mode === "all" && batchResults.length > 0) {
+    if (
+      (sourceCategory === "kuji" || sourceCategory === "gacha")
+      && mode === "all"
+      && batchResults.length > 0
+    ) {
       setBatchRevealSettled(true);
       return;
     }
@@ -783,6 +791,13 @@ export function DrawRevealScreen({ preview = false }: { preview?: boolean }) {
       return;
     }
 
+    if (mode === "all" && batchResults.length > 0) {
+      // SKIP only reveals already committed server results.
+      requestInFlightRef.current = false;
+      setBatchRevealSettled(true);
+      return;
+    }
+
     if (!requestInFlightRef.current) void openProduct();
   };
 
@@ -820,7 +835,12 @@ export function DrawRevealScreen({ preview = false }: { preview?: boolean }) {
     && !committedResultPresented;
   const gachaRevealInProgress = sourceCategory === "gacha"
     && !committedResultPresented
-    && Boolean(opening || previewResultReady || result);
+    && Boolean(
+      opening
+      || previewResultReady
+      || result
+      || (committedBatchReady && !batchRevealSettled),
+    );
   const drawRevealInProgress = kujiRevealInProgress || gachaRevealInProgress;
   const completed = committedResultPresented || committedBatchSummaryVisible || previewOpened || previewCompleted;
   const isDrawCategory = sourceCategory === "kuji" || sourceCategory === "gacha";
@@ -1179,14 +1199,16 @@ export function DrawRevealScreen({ preview = false }: { preview?: boolean }) {
                     settled={completed}
                     reduceMotion={reduceMotion}
                     soundEnabled={soundPreferenceReady && soundEnabled}
-                    resultReady={preview ? previewResultReady : Boolean(result)}
+                    resultReady={preview ? previewResultReady : Boolean(result || batchResults.length)}
                     requestSignal={revealRequestSignal}
                     resetSignal={revealResetSignal}
                     onRequestOpen={() => void openProduct()}
                     onRevealSettled={handleRevealSettled}
                     prize={{
-                      result,
-                      imageUri: result ? resolveCatalogImageUrl(result.prizeImageUrl, runtime.assetBaseUrl) : null,
+                      result: gachaStagePrize,
+                      imageUri: gachaStagePrize
+                        ? resolveCatalogImageUrl(gachaStagePrize.prizeImageUrl, runtime.assetBaseUrl)
+                        : null,
                       ipName: snapshot?.ip?.nameKo,
                       previewLabel: `RESULT ${String(previewState.openedCount + (previewOpened ? 0 : 1)).padStart(2, "0")}`,
                     }}
