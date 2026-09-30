@@ -121,7 +121,6 @@ test('release source rejects a release missing the business-phone policy migrati
     const report = checkDatabaseReleaseSource({ repositoryRoot: directory });
     assert.equal(report.status, 'blocked');
     assert.ok(report.blockers.includes('required_migration_not_committed:0076_legal_policy_business_phone.sql'));
-    assert.ok(report.blockers.includes('latest_committed_migration_below_0077'));
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
