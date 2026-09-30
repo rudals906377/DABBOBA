@@ -498,6 +498,17 @@ security configuration, and the final AAB/IPA signing identity. Keep the
 inspection output with the release evidence; do not commit provisioning
 profiles, certificates, or private keys.
 
+The browser-based Apple OAuth implementation does not depend on the
+`expo-apple-authentication` config plugin. A local SDK 57 prebuild demonstrated
+that `ios.usesAppleSignIn: true` alone left the native Apple entitlement absent.
+The app now explicitly declares
+`ios.entitlements["com.apple.developer.applesignin"] = ["Default"]`, and the
+release structure gate rejects a missing or malformed declaration. Expo
+introspection confirmed the generated entitlement. This is not proof of the
+final signed provisioning profile or a new device login/deletion test.
+Reference: [Expo iOS capabilities](https://docs.expo.dev/build-reference/ios-capabilities/)
+and [Apple Sign in capability](https://developer.apple.com/documentation/xcode/configuring-sign-in-with-apple).
+
 `ios.supportsTablet` is disabled. The first release is iPhone-only; iPad support
 must be reopened as a separate layout and store-metadata decision rather than
 being enabled accidentally by a build default.
