@@ -215,3 +215,33 @@ test('invalid source never selects Supabase or creates integration secrets', asy
     await assert.rejects(readFile(paths.selectionFile, 'utf8'));
   } finally { await rm(directory, { recursive: true }); }
 });
+
+test('the retired demo project can never receive migrations from 0067 onward', async () => {
+  const { assertMigrationTargetAllowed, RETIRED_SUPABASE_MIGRATION_TARGETS, supabaseProjectRefFromDatabaseUrl } =
+    await import('./supabase-integration-profile.mjs');
+  const pooler = `postgresql://postgres.${SUPABASE_DEMO_PROJECT_REF}:secret@aws-0-ap-northeast-2.pooler.supabase.com:5432/postgres`;
+  const direct = `postgresql://postgres:secret@db.${SUPABASE_DEMO_PROJECT_REF}.supabase.co:5432/postgres`;
+  assert.deepEqual(RETIRED_SUPABASE_MIGRATION_TARGETS, [
+    { projectRef: SUPABASE_DEMO_PROJECT_REF, firstBlockedMigration: '0067' },
+  ]);
+  assert.equal(supabaseProjectRefFromDatabaseUrl(pooler), SUPABASE_DEMO_PROJECT_REF);
+  assert.equal(supabaseProjectRefFromDatabaseUrl(direct), SUPABASE_DEMO_PROJECT_REF);
+  for (const url of [pooler, direct]) {
+    assert.throws(
+      () => assertMigrationTargetAllowed(url, ['0066_worker_pgmq_set_vt_dependency.sql', '0067_catalog_media_project_rebase.sql']),
+      /Refusing to migrate retired Supabase project yxkmvgfruphgghowzvmo: migrations from 0067 onward \(0067_catalog_media_project_rebase\.sql\)/,
+    );
+    assert.throws(() => assertMigrationTargetAllowed(url, ['0080_retention_indexes.sql']), /retired Supabase project/);
+    assert.deepEqual(assertMigrationTargetAllowed(url, ['0066_worker_pgmq_set_vt_dependency.sql']).blocked, []);
+  }
+  const approved = `postgresql://postgres.${SUPABASE_INTEGRATION_PROJECT_REF}:secret@aws-0-ap-northeast-2.pooler.supabase.com:5432/postgres`;
+  assert.deepEqual(assertMigrationTargetAllowed(approved, ['0080_retention_indexes.sql']), {
+    projectRef: SUPABASE_INTEGRATION_PROJECT_REF,
+    blocked: [],
+  });
+  assert.equal(assertMigrationTargetAllowed('postgresql://dabboba:x@127.0.0.1:55433/dabboba', ['0080_x.sql']).projectRef, null);
+
+  // The migration runner enforces the same retired target and floor.
+  const runner = await readFile(new URL('../packages/db/src/migrate.ts', import.meta.url), 'utf8');
+  assert.match(runner, new RegExp(`projectRef: "${SUPABASE_DEMO_PROJECT_REF}", firstBlockedMigration: "0067"`));
+});

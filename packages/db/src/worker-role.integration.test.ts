@@ -83,6 +83,8 @@ test("API and worker database identities are isolated around pgmq", {
       "id",
       "revoke_reason",
       "revoked_at",
+      // 0079: retention reads only the rotation parent to honor ON DELETE RESTRICT.
+      "rotated_from_session_id",
       "session_kind",
       "user_id",
     ]);
@@ -99,6 +101,22 @@ test("API and worker database identities are isolated around pgmq", {
     assert.deepEqual(deletionEventColumns.rows.map((row) => row.column_name), [
       "deletion_request_id",
       "idempotency_key",
+    ]);
+
+    const idempotencyColumns = await migrationPool.query<{ column_name: string }>(
+      `SELECT column_name
+         FROM information_schema.column_privileges
+        WHERE grantee=$1 AND table_schema='public' AND table_name='idempotency_keys'
+          AND privilege_type='SELECT'
+        ORDER BY column_name`,
+      [WORKER_DATABASE_ROLE],
+    );
+    // Retention reads only its predicate columns, never request hashes or
+    // stored response bodies.
+    assert.deepEqual(idempotencyColumns.rows.map((row) => row.column_name), [
+      "expires_at",
+      "id",
+      "scope",
     ]);
 
     const sensitiveReadAccess = await migrationPool.query<{
@@ -143,7 +161,12 @@ test("API and worker database identities are isolated around pgmq", {
       ["account_deletion_requests", new Set(["select"])],
       ["apple_auth_credentials", new Set(["select", "delete"])],
       ["auth_identities", new Set(["select", "delete"])],
-      ["outbox_events", new Set(["select", "insert", "update"])],
+      // 0079: bounded retention deletes published outbox events.
+      ["outbox_events", new Set(["select", "insert", "update", "delete"])],
+      ["idempotency_keys", new Set(["delete"])],
+      ["sessions", new Set(["delete"])],
+      ["home_product_click_events", new Set(["select", "delete"])],
+      ["home_product_click_daily", new Set(["select", "insert", "update"])],
       ["notifications", new Set(["select", "insert", "delete"])],
       ["notification_preferences", new Set(["select", "delete"])],
       ["push_device_tokens", new Set(["select", "update", "delete"])],

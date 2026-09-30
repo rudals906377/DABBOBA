@@ -25,6 +25,53 @@ export const SUPABASE_INTEGRATION_PROJECT_REF = 'rconfxsykttfvznakile';
 // TEST_PG remains bound to the historical QA project and must never target production.
 export const SUPABASE_DEMO_PROJECT_REF = 'yxkmvgfruphgghowzvmo';
 
+// The 2026-09-25 decision retired the historical QA project as a schema
+// target. Migrations from 0067 onward (the catalog-media project rebase and
+// every later schema change) belong only to the approved project; a retired
+// target must never receive them, even by an explicit migration URL.
+export const RETIRED_SUPABASE_MIGRATION_TARGETS = Object.freeze([
+  Object.freeze({ projectRef: SUPABASE_DEMO_PROJECT_REF, firstBlockedMigration: '0067' }),
+]);
+
+/** Supabase project ref named by a direct or Session-pooler URL, or null. */
+export function supabaseProjectRefFromDatabaseUrl(databaseUrl) {
+  let parsed;
+  try { parsed = new URL(databaseUrl); } catch { return null; }
+  const hostname = parsed.hostname.toLowerCase().replace(/\.$/, '');
+  const direct = hostname.match(/^db\.([a-z0-9]{20})\.supabase\.(?:co|com)$/);
+  if (direct) return direct[1];
+  if (hostname.endsWith('.pooler.supabase.com')) {
+    let username;
+    try { username = decodeURIComponent(parsed.username); } catch { return null; }
+    const reference = username.slice(username.lastIndexOf('.') + 1);
+    return /^[a-z0-9]{20}$/.test(reference) ? reference : null;
+  }
+  const projectHost = hostname.match(/^([a-z0-9]{20})\.supabase\.(?:co|com)$/);
+  return projectHost ? projectHost[1] : null;
+}
+
+/**
+ * Hard failure when a retired project would receive any migration at or after
+ * its blocked version. `migrationFiles` is the pending (or planned) list of
+ * migration file names such as `0078_commerce_indexes.sql`.
+ */
+export function assertMigrationTargetAllowed(databaseUrl, migrationFiles) {
+  const projectRef = supabaseProjectRefFromDatabaseUrl(databaseUrl);
+  const retired = RETIRED_SUPABASE_MIGRATION_TARGETS.find((target) => target.projectRef === projectRef);
+  if (!retired) return { projectRef, blocked: [] };
+  const blocked = [...migrationFiles]
+    .filter((file) => /^\d{4}_/.test(file) && file.slice(0, 4) >= retired.firstBlockedMigration)
+    .sort();
+  if (blocked.length) {
+    throw new Error(
+      `Refusing to migrate retired Supabase project ${projectRef}: migrations from `
+      + `${retired.firstBlockedMigration} onward (${blocked[0]}${blocked.length > 1 ? ` and ${blocked.length - 1} more` : ''}) `
+      + 'belong only to the approved DABBOBA project.',
+    );
+  }
+  return { projectRef, blocked };
+}
+
 const repositoryRoot = fileURLToPath(new URL('../', import.meta.url));
 const launchDirectory = resolve(repositoryRoot, '../.dabboba-launch');
 export const BACKEND_PROFILE_SELECTION_FILE = resolve(launchDirectory, 'backend-profile');

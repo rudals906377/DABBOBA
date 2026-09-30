@@ -152,6 +152,20 @@ export const DATABASE_RELEASE_MIGRATIONS = Object.freeze([
     file: '0077_session_scope.sql',
     path: 'packages/db/migrations/0077_session_scope.sql',
     sha256: 'dd09f7792b61a169d2a11af9741023f9ee7847e93e4cf67cb7624a574de16f48',
+  }),  Object.freeze({
+    file: '0078_commerce_indexes.sql',
+    path: 'packages/db/migrations/0078_commerce_indexes.sql',
+    sha256: '4d03159f18d6a242fee7465fa79ccd97c3eb6189dde55934bbeaa9492e04a611',
+  }),
+  Object.freeze({
+    file: '0079_worker_retention.sql',
+    path: 'packages/db/migrations/0079_worker_retention.sql',
+    sha256: 'd577567db75431c5da750acac84e18867f3bd79169d665d0ae0b7fa876fdb2ff',
+  }),
+  Object.freeze({
+    file: '0080_retention_indexes.sql',
+    path: 'packages/db/migrations/0080_retention_indexes.sql',
+    sha256: 'dbae9f62136ac8cf48be8cebc0ab325c9162d1616838fea12af8eee88c60d10d',
   }),
 ]);
 
