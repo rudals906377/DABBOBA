@@ -198,10 +198,7 @@ const styles = StyleSheet.create({
   },
   label: {
     color: seed.color.foreground.muted,
-    fontFamily: "NotoSansKR_700Bold",
-    fontSize: 11,
-    lineHeight: 16,
-    fontWeight: "400",
+    fontWeight: "700",
     textAlign: "center",
   },
 });

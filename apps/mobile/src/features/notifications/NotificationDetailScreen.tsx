@@ -76,7 +76,7 @@ export function NotificationDetailScreen() {
       }
     } catch (error) {
       setNotification(null);
-      setMessage(error instanceof Error ? error.message : "알림 상세를 불러오지 못했습니다.");
+      setMessage(error instanceof Error ? error.message : "알림 상세를 불러오지 못했어요.");
     } finally {
       setLoading(false);
     }
@@ -218,7 +218,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     gap: seed.spacing.x2_5,
   },
-  stateTitle: { color: colors.ink, fontSize: 17, lineHeight: 24, fontWeight: "900", textAlign: "center" },
+  stateTitle: { color: colors.ink, ...seed.typography.subtitle, textAlign: "center" },
   stateBody: { color: colors.muted, fontSize: 13, lineHeight: 20, textAlign: "center" },
   retryButton: {
     minHeight: seed.size.touchTarget,

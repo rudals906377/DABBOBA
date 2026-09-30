@@ -15,6 +15,8 @@ import {
   markAccountNotificationRead,
   type AccountNotification,
 } from "@/features/notifications/notifications-api";
+import { ProfileSessionGate } from "@/features/profile/ProfileSessionGate";
+import { ProfileApiError } from "@/features/profile/profile-api";
 import { resolveMobileRuntimeConfig, type MobilePlatform } from "@/lib/runtime-config";
 import { readAuthTokens } from "@/lib/session-store";
 import { colors } from "@/theme";
@@ -36,7 +38,7 @@ export function NotificationsScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [message, setMessage] = useState("");
-  const [guest, setGuest] = useState(false);
+  const [sessionGate, setSessionGate] = useState<"guest" | "expired" | null>(null);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -48,14 +50,14 @@ export function NotificationsScreen() {
       const tokens = await readAuthTokens();
       if (!tokens) {
         setAccessToken(null);
-        setGuest(true);
+        setSessionGate("guest");
         setNotifications([]);
         setNextCursor(null);
         setUnreadCount(0);
         setMessage("");
         return;
       }
-      setGuest(false);
+      setSessionGate(null);
       setAccessToken(tokens.accessToken);
       const page = await fetchAccountNotificationPage(runtime.apiBaseUrl, tokens.accessToken);
       setNotifications(page.items);
@@ -66,10 +68,19 @@ export function NotificationsScreen() {
         setMessage("");
       } catch (error) {
         setUnreadCount(page.items.filter((notification) => !notification.readAt).length);
-        setMessage(error instanceof Error ? error.message : "읽지 않은 알림 수를 불러오지 못했습니다.");
+        setMessage(error instanceof Error ? error.message : "읽지 않은 알림 수를 불러오지 못했어요.");
       }
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "알림함을 불러오지 못했습니다.");
+      if (error instanceof ProfileApiError && error.status === 401) {
+        setAccessToken(null);
+        setSessionGate("expired");
+        setNotifications([]);
+        setNextCursor(null);
+        setUnreadCount(0);
+        setMessage("");
+        return;
+      }
+      setMessage(error instanceof Error ? error.message : "알림함을 불러오지 못했어요.");
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -118,7 +129,7 @@ export function NotificationsScreen() {
       setNextCursor(page.nextCursor);
       setMessage("");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "이전 알림을 불러오지 못했습니다.");
+      setMessage(error instanceof Error ? error.message : "이전 알림을 불러오지 못했어요.");
     } finally {
       setLoadingMore(false);
     }
@@ -141,13 +152,12 @@ export function NotificationsScreen() {
 
         {loading ? (
           <State loading body="알림을 불러오는 중" />
-        ) : guest ? (
-          <View style={styles.state}>
-            <View style={styles.stateIcon}><DecorativeIonicon name="notifications-outline" size={30} color={colors.greenInk} /></View>
-            <Text style={styles.stateTitle}>로그인이 필요해요</Text>
-            <Text style={styles.stateBody}>로그인하면 주문·교환·배송·문의 활동 알림을 확인할 수 있어요.</Text>
-            <SeedActionButton label="내정보로 이동" onPress={() => router.replace("/(tabs)/profile")} style={styles.primaryButton} />
-          </View>
+        ) : sessionGate ? (
+          <ProfileSessionGate
+            status={sessionGate}
+            returnTo="/notifications"
+            guestBody="로그인하면 주문·교환·배송·문의 활동 알림을 확인할 수 있어요."
+          />
         ) : message && !notifications.length ? (
           <View style={styles.state}>
             <DecorativeIonicon name="alert-circle-outline" size={34} color={colors.muted} />
@@ -232,10 +242,8 @@ const styles = StyleSheet.create({
   inlineError: { padding: seed.spacing.componentDefault, marginBottom: seed.spacing.componentDefault, borderRadius: seed.radius.r3, backgroundColor: seed.color.background.criticalWeak },
   inlineErrorText: { color: colors.ink, fontSize: 12, lineHeight: 18 },
   state: { minHeight: 420, paddingHorizontal: 28, alignItems: "center", justifyContent: "center" },
-  stateIcon: { width: seed.spacing.x16, height: seed.spacing.x16, borderRadius: seed.radius.r5, alignItems: "center", justifyContent: "center", backgroundColor: seed.color.background.brandWeak },
-  stateTitle: { color: colors.ink, fontSize: 17, lineHeight: 24, fontWeight: "900", textAlign: "center", marginTop: 14 },
+  stateTitle: { color: colors.ink, ...seed.typography.subtitle, textAlign: "center", marginTop: 14 },
   stateBody: { color: colors.muted, fontSize: 13, lineHeight: 20, textAlign: "center", marginTop: 7 },
-  primaryButton: { marginTop: seed.spacing.x4_5 },
   retryButton: { marginTop: seed.spacing.x4 },
   loadMoreButton: { alignSelf: "center", marginTop: seed.spacing.x4 },
 });

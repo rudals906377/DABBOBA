@@ -2,6 +2,7 @@ import { randomUUID } from "expo-crypto";
 import { errorMessage } from "@dabboba/api-client";
 import type { components } from "@dabboba/contracts";
 import { createMobileDabbobaClient as createDabbobaClient } from "@/lib/mobile-api-client";
+import { ProfileApiError } from "@/features/profile/profile-api";
 
 export type AccountNotification = components["schemas"]["AccountNotification"];
 export type AccountNotificationPage = components["schemas"]["NotificationPage"];
@@ -18,7 +19,7 @@ export async function fetchAccountNotificationPage(
   const result = await client.GET("/v1/account/notifications", {
     params: { query: { limit, ...(cursor ? { cursor } : {}) } },
   });
-  if (!result.data) throw new Error(errorMessage(result.error, "알림을 불러오지 못했습니다."));
+  if (!result.data) throw new ProfileApiError(result.response.status, errorMessage(result.error, "알림을 불러오지 못했어요."));
   return result.data;
 }
 
@@ -31,7 +32,7 @@ export async function fetchAccountNotification(
   const result = await client.GET("/v1/account/notifications/{notificationId}", {
     params: { path: { notificationId } },
   });
-  if (!result.data) throw new Error(errorMessage(result.error, "알림 상세를 불러오지 못했습니다."));
+  if (!result.data) throw new Error(errorMessage(result.error, "알림 상세를 불러오지 못했어요."));
   return result.data;
 }
 
@@ -41,7 +42,7 @@ export async function fetchAccountNotificationUnreadSummary(
 ): Promise<AccountNotificationUnreadSummary> {
   const client = authorizedClient(apiBaseUrl, accessToken);
   const result = await client.GET("/v1/account/notifications/unread-summary");
-  if (!result.data) throw new Error(errorMessage(result.error, "읽지 않은 알림 수를 불러오지 못했습니다."));
+  if (!result.data) throw new Error(errorMessage(result.error, "읽지 않은 알림 수를 불러오지 못했어요."));
   return result.data;
 }
 
@@ -57,7 +58,7 @@ export async function markAccountNotificationRead(
       header: { "Idempotency-Key": randomUUID() },
     },
   });
-  if (!result.data) throw new Error(errorMessage(result.error, "알림을 읽음 처리하지 못했습니다."));
+  if (!result.data) throw new Error(errorMessage(result.error, "알림을 읽음 처리하지 못했어요."));
   return result.data;
 }
 
@@ -68,7 +69,7 @@ export async function registerAccountPushDevice(
 ): Promise<PushDeviceRegistration> {
   const client = authorizedClient(apiBaseUrl, accessToken);
   const result = await client.POST("/v1/account/push-devices", { body: input });
-  if (!result.data) throw new Error(errorMessage(result.error, "이 기기의 푸시 알림을 등록하지 못했습니다."));
+  if (!result.data) throw new Error(errorMessage(result.error, "이 기기의 푸시 알림을 등록하지 못했어요."));
   return result.data;
 }
 
@@ -82,7 +83,7 @@ export async function unregisterAccountPushDevice(
     params: { path: { installationId } },
   });
   if (!result.response.ok) {
-    throw new Error(errorMessage(result.error, "이 기기의 푸시 알림을 해제하지 못했습니다."));
+    throw new Error(errorMessage(result.error, "이 기기의 푸시 알림을 해제하지 못했어요."));
   }
 }
 
