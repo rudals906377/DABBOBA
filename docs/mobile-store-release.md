@@ -315,6 +315,25 @@ mode fails the gate; do not replace the result with local fixture products. The
 same check runs automatically inside production EAS builds; the separate
 internal PG-review profile does not require the public catalog to be live.
 
+Production (`production-prelaunch` and `production-live`) configuration pins the
+customer API host: `EXPO_PUBLIC_DABBOBA_API_URL` must use HTTPS on the default
+port and its host must be `${SUPABASE_INTEGRATION_PROJECT_REF}.supabase.co`
+(currently `rconfxsykttfvznakile.supabase.co`) or an entry in
+`APPROVED_PRODUCTION_API_HOSTS` in `scripts/check-mobile-release-config.mjs`
+(currently `api.dabboba.net`). Add a new custom domain there deliberately, in a
+reviewed change, before building against it. The internal PG-review profile is
+not pinned.
+
+`release:mobile:api:verify` also self-attests the server against the build
+environment: `DABBOBA_COMMERCE_MODE` must be declared, must equal
+`EXPO_PUBLIC_COMMERCE_CAPABILITY`, and must equal the `commerceMode` returned by
+`/v1/public/config`. Limitation: the public config does not expose the server's
+payment provider today, so `PAYMENT_PROVIDER` is compared only if a future
+contract adds `paymentProvider` to that response; until then the gate prints a
+warning and reports `paymentProviderAttested: false`, and `PAYMENT_PROVIDER`
+remains a build-environment declaration that must be confirmed against the
+deployed Edge secrets separately.
+
 For the later LIVE candidate, use the payment-enabled values:
 
 ```sh

@@ -131,6 +131,7 @@ async function verifyRoutes(baseUrl, routes, fetchImpl, expectedCommerceMode) {
     throw new Error('Expected commerce mode is invalid.');
   }
   if (typeof fetchImpl !== 'function') throw new Error('Fetch is unavailable.');
+  const observed = {};
   for (const [path, label] of routes) {
     let response;
     try {
@@ -147,8 +148,20 @@ async function verifyRoutes(baseUrl, routes, fetchImpl, expectedCommerceMode) {
     try { body = await response.json(); }
     catch { throw new Error(`${label} did not return JSON.`); }
     assertBody(label, body, expectedCommerceMode);
+    if (label === 'Public config') {
+      observed.commerceMode = body.commerceMode;
+      // The public config currently exposes no payment provider. Record one
+      // only when a future server contract adds it as a non-empty string.
+      if (typeof body.paymentProvider === 'string' && body.paymentProvider.trim()) {
+        observed.paymentProvider = body.paymentProvider.trim();
+      }
+    }
   }
-  return { commerceMode: expectedCommerceMode, checkedRoutes: routes.map(([path]) => path) };
+  return {
+    commerceMode: expectedCommerceMode,
+    checkedRoutes: routes.map(([path]) => path),
+    observed,
+  };
 }
 
 export async function verifyPublicEdgeSurface({

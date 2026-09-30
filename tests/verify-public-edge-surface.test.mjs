@@ -26,7 +26,11 @@ function fixtureFetch(overrides = {}) {
 test('public Edge smoke verifies the four mobile Home/config/login contracts with GET only', async () => {
   const { calls, fetchImpl } = fixtureFetch();
   const result = await verifyPublicEdgeSurface({ fetchImpl });
-  assert.deepEqual(result, { commerceMode: 'PRELAUNCH', checkedRoutes: Object.keys(responses) });
+  assert.deepEqual(result, {
+    commerceMode: 'PRELAUNCH',
+    checkedRoutes: Object.keys(responses),
+    observed: { commerceMode: 'PRELAUNCH' },
+  });
   assert.deepEqual(calls.map((call) => call.path), Object.keys(responses));
   assert.equal(calls.every((call) => call.method === 'GET' && call.signal instanceof AbortSignal), true);
 });

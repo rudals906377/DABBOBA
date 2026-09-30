@@ -251,3 +251,68 @@ test("business phone gate compares the published documents with the current app 
   const { errors } = businessPhoneIssues({ appPhone: "02-000-0000" });
   assert.deepEqual(errors, ["LEGAL_BUSINESS_PHONE_MISMATCH", "LEGAL_BUSINESS_PHONE_MISMATCH"]);
 });
+
+test("production mobile builds pin the customer API host to the approved backend", async () => {
+  const { APPROVED_PRODUCTION_API_HOSTS, isApprovedProductionApiUrl } = await import(
+    "../scripts/check-mobile-release-config.mjs"
+  );
+  const { SUPABASE_INTEGRATION_PROJECT_REF } = await import("../scripts/supabase-integration-profile.mjs");
+  assert.ok(APPROVED_PRODUCTION_API_HOSTS.includes(`${SUPABASE_INTEGRATION_PROJECT_REF}.supabase.co`));
+  assert.ok(APPROVED_PRODUCTION_API_HOSTS.includes("api.dabboba.net"));
+
+  for (const approved of [
+    "https://api.dabboba.net",
+    `https://${SUPABASE_INTEGRATION_PROJECT_REF}.supabase.co/functions/v1/dabboba-api`,
+  ]) {
+    assert.equal(isApprovedProductionApiUrl(approved), true, approved);
+    for (const capability of ["LIVE", "PRELAUNCH"]) {
+      const report = inspectMobileReleaseConfig({
+        rootDir,
+        environment: {
+          ...productionPublicEnvironment,
+          EXPO_PUBLIC_COMMERCE_CAPABILITY: capability,
+          EXPO_PUBLIC_DABBOBA_API_URL: approved,
+        },
+      });
+      assert.equal(
+        report.errors.some((issue) => issue.code === "ENV_EXPO_PUBLIC_DABBOBA_API_URL_HOST_NOT_APPROVED"),
+        false,
+        `${capability} ${approved}`,
+      );
+    }
+  }
+
+  for (const rejected of [
+    "https://yxkmvgfruphgghowzvmo.supabase.co/functions/v1/dabboba-api",
+    "https://api-review.dabboba.net",
+    "https://api.dabboba.net.attacker.example",
+    `https://${SUPABASE_INTEGRATION_PROJECT_REF}.supabase.co.evil.net`,
+    "https://api.dabboba.net:8443",
+  ]) {
+    assert.equal(isApprovedProductionApiUrl(rejected), false, rejected);
+    for (const capability of ["LIVE", "PRELAUNCH"]) {
+      const report = inspectMobileReleaseConfig({
+        rootDir,
+        environment: {
+          ...productionPublicEnvironment,
+          EXPO_PUBLIC_COMMERCE_CAPABILITY: capability,
+          EXPO_PUBLIC_DABBOBA_API_URL: rejected,
+        },
+      });
+      assert.ok(
+        report.errors.some((issue) => issue.code === "ENV_EXPO_PUBLIC_DABBOBA_API_URL_HOST_NOT_APPROVED"),
+        `${capability} must reject ${rejected}`,
+      );
+    }
+  }
+
+  const structureOnly = inspectMobileReleaseConfig({
+    rootDir,
+    environment: { EXPO_PUBLIC_DABBOBA_API_URL: "https://api-review.dabboba.net" },
+    structureOnly: true,
+  });
+  assert.equal(
+    structureOnly.errors.some((issue) => issue.code === "ENV_EXPO_PUBLIC_DABBOBA_API_URL_HOST_NOT_APPROVED"),
+    false,
+  );
+});
