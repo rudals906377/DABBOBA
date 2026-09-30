@@ -16,7 +16,7 @@
 
 ### 네이티브 컴파일의 현재 증거 경계
 
-임시 복사본 `/tmp/dabboba-native-launch-qa.AMIG6I`는 커밋 `dcf4143`의 모바일 소스로 생성했으며 비밀 환경 파일을 복사하지 않았다. 원본 node_modules를 읽기 전용 의존성 경로로 재사용했고 원본 package/lock 파일은 보존했다. 처음 pnpm exec가 임시 경로의 모듈 재설치를 거부하자 보호 장치를 우회하지 않고 기존 Expo CLI로 prebuild를 실행했다. iOS CocoaPods 준비는 성공했다.
+임시 복사본 `/tmp/dabboba-native-launch-qa.AMIG6I`는 커밋 `dcf4143`의 모바일 소스로 생성했으며 비밀 환경 파일을 복사하지 않았다. 원본 node_modules를 의존성 참조 경로로 재사용했고 원본 package/lock 파일은 보존했다. 처음 pnpm exec가 임시 경로의 모듈 재설치를 거부하자 보호 장치를 우회하지 않고 기존 Expo CLI로 prebuild를 실행했다. iOS CocoaPods 준비는 성공했다.
 
 빌드 대상은 다뽀바 전용 `DABBOBA SDK57`이며 Release/PRELAUNCH·코드 서명 제외·동시 작업 2개로 **컴파일만** 실행했다. 기기/시뮬레이터 실행·설치·삭제는 하지 않았다. iOS 지침에 따라 꺼진 전용 시뮬레이터를 임의로 켜거나 실행 중인 FINDE 환경을 재사용하지 않았다.
 
