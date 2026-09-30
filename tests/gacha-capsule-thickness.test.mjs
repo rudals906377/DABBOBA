@@ -6,7 +6,7 @@ import { GACHA_CAPSULE_PROFILE } from "../apps/mobile/src/features/draw/gacha-ca
 // The optional path allows a saved prior shader to demonstrate regression
 // sensitivity without reverting or touching the live working tree.
 const shaderPath = process.env.DABBOBA_CAPSULE_THICKNESS_SOURCE
-  || new URL("../apps/mobile/src/features/draw/gacha-capsule-3d-shaders.ts", import.meta.url);
+  || new URL("../scripts/gacha-capsule-3d-shaders.ts", import.meta.url);
 const shader = readFileSync(shaderPath, "utf8");
 const numberFrom = (pattern) => {
   const match = shader.match(pattern);

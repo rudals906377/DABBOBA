@@ -10,10 +10,11 @@ DB·백엔드의 최신 적용 상태와 남은 출시 조건은 [2026-09-08 출
 
 ## 전체 로컬 실행
 
-현재 Supabase는 출시용으로 보호하고, 개발 앱/API/worker는 별도 로컬 DB를 사용합니다. 사전 조건은 Node.js 24, Corepack, Docker Desktop입니다. **기존 `.env`를 source하거나 개발 실행에 넘기지 않습니다.** 해당 파일과 모바일의 기존 Supabase public 설정은 보존하며, 운영 데이터의 복사·초기화 없이 로컬 프로필을 따로 준비합니다.
+현재 Supabase는 출시용으로 보호하고, 개발 앱/API/worker는 별도 로컬 DB를 사용합니다. 사전 조건은 **Node.js 24(필수, `engines.node` `>=24 <26`)**, Corepack, Docker Desktop입니다. `engineStrict`(`pnpm-workspace.yaml`)와 `.npmrc`의 `engine-strict=true` 때문에 다른 Node 주 버전에서는 `pnpm install`이 실패합니다. `node --version`이 `v24.x`인지 먼저 확인하세요. **기존 `.env`를 source하거나 개발 실행에 넘기지 않습니다.** 해당 파일과 모바일의 기존 Supabase public 설정은 보존하며, 운영 데이터의 복사·초기화 없이 로컬 프로필을 따로 준비합니다.
 
 ```sh
 cd dabboba-app
+node --version   # v24.x 필요
 corepack pnpm --version
 corepack pnpm install --frozen-lockfile
 corepack pnpm run local:backend:prepare

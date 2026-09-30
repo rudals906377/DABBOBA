@@ -6,7 +6,7 @@ import test from "node:test";
 import {
   CAPSULE_3D_FRAGMENT_SHADER,
   CAPSULE_3D_VERTEX_SHADER,
-} from "../apps/mobile/src/features/draw/gacha-capsule-3d-shaders.ts";
+} from "../scripts/gacha-capsule-3d-shaders.ts";
 import { GACHA_CLOSEUP_DURATION_MS } from "../apps/mobile/src/features/draw/gacha-reveal-timeline.ts";
 
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url));
