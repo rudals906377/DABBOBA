@@ -10,6 +10,7 @@ import { DetailPageHeader } from "@/components/DetailPageHeader";
 import { AppText as Text } from "@/components/Typography";
 import { SeedActionButton, SeedChip, SeedInlineGuidance } from "@/design-system/components";
 import { seed } from "@/design-system/seed";
+import { profileSectionFailure } from "@/features/profile/profile-section-state";
 import { useProfileSnapshot } from "@/features/profile/use-profile-snapshot";
 import { ProfileSessionGate, isProfileSessionBlocked } from "@/features/profile/ProfileSessionGate";
 import { fetchShopSnapshot, type ShopSnapshot } from "@/features/shop/shop-api";
@@ -21,7 +22,7 @@ type HistoryMode = "viewed" | "drawn" | "wishlist";
 export function ProductHistoryScreen() {
   const db = useSQLiteContext();
   const router = useRouter();
-  const profileState = useProfileSnapshot();
+  const profileState = useProfileSnapshot("history");
   const [mode, setMode] = useState<HistoryMode>("viewed");
   const [catalog, setCatalog] = useState<ShopSnapshot | null>(null);
   const [viewedIds, setViewedIds] = useState<string[]>([]);
@@ -73,13 +74,17 @@ export function ProductHistoryScreen() {
   const viewedProducts = viewedIds
     .map((id) => productById.get(id))
     .filter((product): product is CatalogProduct => Boolean(product));
-  const drawnInventory = profileState.snapshot?.inventory.filter(
+  const drawnInventory = profileState.snapshot?.inventory?.filter(
     (unit) => unit.sourceType === "GACHA" || unit.sourceType === "KUJI",
   ) ?? [];
   const wishlistItems = profileState.snapshot?.wishlist ?? [];
   const needsProfile = mode === "drawn" || mode === "wishlist";
   const blockedStatus = needsProfile && isProfileSessionBlocked(profileState.status)
     ? profileState.status
+    : null;
+  // A failed personal section renders the retryable failure, never an empty list.
+  const profileSectionMessage = needsProfile && profileState.snapshot && profileState.status === "authenticated"
+    ? profileSectionFailure(profileState.snapshot, mode === "drawn" ? "inventory" : "wishlist")
     : null;
   const retry = () => {
     void load(true);
@@ -118,8 +123,8 @@ export function ProductHistoryScreen() {
           <ProfileSessionGate status={blockedStatus} returnTo="/product-history" guestBody="로그인하면 내가 뽑은 상품과 찜한 상품을 확인할 수 있어요." />
         ) : loading || (needsProfile && profileState.status === "loading") ? (
           <View style={styles.state}><ActivityIndicator color={colors.ink} /><Text style={styles.stateBody}>상품 기록을 불러오는 중</Text></View>
-        ) : message || (needsProfile && profileState.status === "error") ? (
-          <View style={styles.state}><DecorativeIonicon name="alert-circle-outline" size={32} color={colors.muted} /><Text style={styles.stateTitle}>{message || profileState.message}</Text><SeedActionButton label="다시 불러오기" size="small" variant="neutralSolid" onPress={retry} style={styles.retryButton} /></View>
+        ) : message || (needsProfile && profileState.status === "error") || profileSectionMessage ? (
+          <View style={styles.state}><DecorativeIonicon name="alert-circle-outline" size={32} color={colors.muted} /><Text style={styles.stateTitle}>{message || profileState.message || profileSectionMessage}</Text><SeedActionButton label="다시 불러오기" size="small" variant="neutralSolid" onPress={retry} style={styles.retryButton} /></View>
         ) : mode === "viewed" ? (
           viewedProducts.length ? (
             <View style={styles.list}>

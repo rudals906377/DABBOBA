@@ -407,3 +407,98 @@ test("restricted worker retries only claimed cancelled PortOne payments until a 
   assert.equal(ledger.rows.find((row) => row.id === paymentIds[0])?.last_outcome, "RECONCILED");
   assert.equal(ledger.rows.find((row) => row.id === paymentIds[1])?.last_outcome, null);
 });
+
+test("restricted worker closes expired READY PG windows as PENDING_EXPIRED without touching payments", {
+  skip: !migrationDatabaseUrl,
+  timeout: 30_000,
+}, async (t) => {
+  const fixturePool = createMigrationDatabasePool(migrationDatabaseUrl!, "dabboba-expired-window-fixture");
+  const workerSession = await workerRoleSession(migrationDatabaseUrl!, "dabboba-expired-window-worker");
+  const userId = randomUUID();
+  const orderIds = [randomUUID(), randomUUID(), randomUUID()];
+  const paymentIds = [randomUUID(), randomUUID(), randomUUID()];
+  t.after(async () => {
+    await fixturePool.query("DELETE FROM worker_payment_reconciliations WHERE payment_id=ANY($1::uuid[])", [paymentIds]).catch(() => undefined);
+    await fixturePool.query("DELETE FROM payments WHERE id=ANY($1::uuid[])", [paymentIds]).catch(() => undefined);
+    await fixturePool.query("DELETE FROM orders WHERE id=ANY($1::uuid[])", [orderIds]).catch(() => undefined);
+    await fixturePool.query("DELETE FROM users WHERE id=$1", [userId]).catch(() => undefined);
+    await Promise.all([fixturePool.end(), workerSession.close()]);
+  });
+  await fixturePool.query("INSERT INTO users(id,email,nickname) VALUES($1,$2,$3)", [
+    userId, `expired-window-${userId}@example.test`, `만료 창 ${userId.slice(0, 8)}`,
+  ]);
+  const now = new Date();
+  const longAgo = new Date(now.getTime() - 2 * 60 * 60_000);
+  const recently = new Date(now.getTime() - 5 * 60_000);
+  // [0] cancelled by the sweep after a claim, [1] still pending after a claim,
+  // [2] claimed only five minutes ago (inside the 30-minute validity).
+  const fixtures = [
+    { status: "CANCELLED", orderStatus: "CANCELLED", claimedAt: longAgo },
+    { status: "PENDING", orderStatus: "PENDING_PAYMENT", claimedAt: longAgo },
+    { status: "CANCELLED", orderStatus: "CANCELLED", claimedAt: recently },
+  ];
+  for (let index = 0; index < fixtures.length; index += 1) {
+    const fixture = fixtures[index]!;
+    await fixturePool.query(
+      "INSERT INTO orders(id,user_id,status,subtotal,total,created_at,updated_at) VALUES($1,$2,$3,10000,10000,'2000-01-01','2000-01-01')",
+      [orderIds[index], userId, fixture.orderStatus],
+    );
+    await fixturePool.query(
+      `INSERT INTO payments(id,order_id,provider,status,amount,pg_attempt_started_at,created_at,updated_at)
+       VALUES($1,$2,'PORTONE_V2_INICIS',$3,10000,$4,'2000-01-01','2000-01-01')`,
+      [paymentIds[index], orderIds[index], fixture.status, fixture.claimedAt],
+    );
+  }
+  const scopedPool = { query(sql: string, values?: unknown[]) {
+    if (sql.includes("FROM payments p") && sql.includes("ORDER BY")) {
+      return workerSession.workerPool.query(sql.replace("ORDER BY", "AND p.id=ANY($4::uuid[]) ORDER BY"), [
+        ...(values ?? []), paymentIds,
+      ]);
+    }
+    return workerSession.workerPool.query(sql, values);
+  } } as unknown as DatabasePool;
+  const observed: string[] = [];
+  const logger = { debug() {}, info() {}, warn() {}, error() {} } as Logger;
+  // PortOne keeps reporting READY: the API reconciled nothing.
+  const provider = { async observe(payment: { id: string; status: string }) {
+    observed.push(payment.id);
+    return {
+      state: "PENDING" as const, canonicalStatus: payment.status, providerStatus: "READY",
+      observedAt: new Date().toISOString(),
+    };
+  } };
+  const options = { batchSize: 5, staleMinutes: 10, paymentWindowValidityMinutes: 30 };
+  const first = await reconcilePaymentBatch(scopedPool, provider, options, logger, now);
+  assert.deepEqual(first, { examined: 3, unknown: 0, manualReview: 1, reconciled: 2, failed: 0 });
+  const records = async () => new Map((await fixturePool.query<{ payment_id: string; last_outcome: string; last_observed_state: string }>(
+    "SELECT payment_id,last_outcome,last_observed_state FROM worker_payment_reconciliations WHERE payment_id=ANY($1::uuid[])",
+    [paymentIds],
+  )).rows.map((row) => [row.payment_id, `${row.last_outcome}/${row.last_observed_state}`]));
+  const afterFirst = await records();
+  assert.equal(afterFirst.get(paymentIds[0]!), "RECONCILED/PENDING");
+  assert.equal(afterFirst.get(paymentIds[1]!), "RECONCILED/PENDING");
+  assert.equal(afterFirst.get(paymentIds[2]!), "MANUAL_REVIEW/PENDING");
+
+  // The closures are final for this payment version; only the in-validity
+  // window is revisited once its own validity has passed.
+  observed.length = 0;
+  const later = new Date(now.getTime() + 24 * 60 * 60_000);
+  const second = await reconcilePaymentBatch(scopedPool, provider, options, logger, later);
+  assert.deepEqual(second, { examined: 1, unknown: 0, manualReview: 0, reconciled: 1, failed: 0 });
+  assert.deepEqual(observed, [paymentIds[2]]);
+
+  // The sweep cancelling the still-pending order bumps its version, which
+  // re-opens exactly one verification before closing again.
+  await fixturePool.query("UPDATE payments SET status='CANCELLED',version=version+1 WHERE id=$1", [paymentIds[1]]);
+  observed.length = 0;
+  const third = await reconcilePaymentBatch(scopedPool, provider, options, logger, later);
+  assert.deepEqual(third, { examined: 1, unknown: 0, manualReview: 0, reconciled: 1, failed: 0 });
+  assert.deepEqual(observed, [paymentIds[1]]);
+  const fourth = await reconcilePaymentBatch(scopedPool, provider, options, logger, new Date(later.getTime() + 24 * 60 * 60_000));
+  assert.equal(fourth.examined, 0);
+
+  const ledger = await fixturePool.query<{ status: string }>(
+    "SELECT status FROM payments WHERE id=ANY($1::uuid[])", [paymentIds],
+  );
+  assert.ok(ledger.rows.every((row) => row.status === "CANCELLED"));
+});

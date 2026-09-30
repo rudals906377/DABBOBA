@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { CAPSULE_3D_FRAGMENT_SHADER as shader } from "../apps/mobile/src/features/draw/gacha-capsule-3d-shaders.ts";
+import { CAPSULE_3D_FRAGMENT_SHADER as shader } from "../scripts/gacha-capsule-3d-shaders.ts";
 import { GACHA_CAPSULE_PROFILE as profile, createCapsuleProfileRings } from "../apps/mobile/src/features/draw/gacha-capsule-profile.ts";
 import { GACHA_CHAMBER_CAPSULES } from "../apps/mobile/src/features/draw/gacha-capsule-motion.ts";
 

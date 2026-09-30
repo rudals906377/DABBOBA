@@ -8,6 +8,7 @@ const responses = {
   '/v1/public/config': { commerceMode: 'PRELAUNCH', requiredPolicyVersions: { terms: '2026-09-24', privacy: '2026-09-24' } },
   '/v1/catalog/recent-draws': { serverNow: '2026-09-24T00:00:00.000Z', items: [] },
   '/v1/catalog/home-sections': { configured: false, items: [], bestProductId: null, evaluatedAt: '2026-09-24T00:00:00.000Z' },
+  '/v1/auth/providers': { methods: [], brokerExchangeConfigured: false },
 };
 
 function fixtureFetch(overrides = {}) {
@@ -22,10 +23,14 @@ function fixtureFetch(overrides = {}) {
   return { calls, fetchImpl };
 }
 
-test('public Edge smoke verifies the three mobile Home/config contracts with GET only', async () => {
+test('public Edge smoke verifies the four mobile Home/config/login contracts with GET only', async () => {
   const { calls, fetchImpl } = fixtureFetch();
   const result = await verifyPublicEdgeSurface({ fetchImpl });
-  assert.deepEqual(result, { commerceMode: 'PRELAUNCH', checkedRoutes: Object.keys(responses) });
+  assert.deepEqual(result, {
+    commerceMode: 'PRELAUNCH',
+    checkedRoutes: Object.keys(responses),
+    observed: { commerceMode: 'PRELAUNCH' },
+  });
   assert.deepEqual(calls.map((call) => call.path), Object.keys(responses));
   assert.equal(calls.every((call) => call.method === 'GET' && call.signal instanceof AbortSignal), true);
 });
@@ -90,15 +95,16 @@ test('mobile release smoke verifies the configured customer API, not only the Ed
     fetchImpl,
   });
   assert.equal(result.commerceMode, 'PRELAUNCH');
-  assert.deepEqual(calls.map(({ url }) => new URL(url).hostname), Array(5).fill('api.dabboba.net'));
+  assert.deepEqual(calls.map(({ url }) => new URL(url).hostname), Array(6).fill('api.dabboba.net'));
   assert.deepEqual(calls.map(({ url }) => new URL(url).pathname), [
     '/v1/public/config',
     '/v1/catalog/recent-draws',
     '/v1/catalog/home-sections',
+    '/v1/auth/providers',
     '/v1/catalog/products',
     '/v1/catalog/ips',
   ]);
-  assert.equal(new URL(calls[3].url).search, '?category=gacha&limit=1');
+  assert.equal(new URL(calls[4].url).search, '?category=gacha&limit=1');
   assert.equal(calls.every(({ method, signal }) => method === 'GET' && signal instanceof AbortSignal), true);
 });
 
@@ -150,7 +156,7 @@ test('LIVE mobile release requires configured login and purchasable gacha and ku
     ...responses,
     '/v1/public/config': { ...responses['/v1/public/config'], commerceMode: 'LIVE' },
     '/v1/auth/providers': {
-      methods: ['PHONE', 'KAKAO', 'NAVER', 'GOOGLE', 'APPLE'],
+      methods: ['KAKAO', 'NAVER', 'GOOGLE', 'APPLE'],
       brokerExchangeConfigured: true,
     },
   };
@@ -182,8 +188,8 @@ test('LIVE mobile release requires configured login and purchasable gacha and ku
   assert.equal(result.commerceMode, 'LIVE');
   assert.equal(valid.calls.length, 8);
   assert.equal(valid.calls.every((call) => call.method === 'GET'), true);
-  assert.deepEqual(valid.calls.slice(-3).map(({ path, search }) => `${path}${search}`), [
-    '/v1/auth/providers',
+  assert.equal(valid.calls[3].path, '/v1/auth/providers');
+  assert.deepEqual(valid.calls.slice(-2).map(({ path, search }) => `${path}${search}`), [
     '/v1/catalog/products?category=gacha&saleStatus=ON_SALE&excludeSoldOut=true&limit=1',
     '/v1/catalog/products?category=kuji&saleStatus=ON_SALE&excludeSoldOut=true&limit=1',
   ]);
@@ -193,6 +199,21 @@ test('LIVE mobile release requires configured login and purchasable gacha and ku
   });
   await assert.rejects(publicApiSmoke.verifyMobilePublicApiSurface({
     apiBaseUrl: 'https://api.dabboba.net', expectedCommerceMode: 'LIVE', fetchImpl: missingLogin.fetchImpl,
+  }), /LIVE customer login providers are incomplete/);
+
+  const withPhone = fetchLive({
+    '/v1/auth/providers': { methods: ['PHONE', 'KAKAO', 'NAVER', 'GOOGLE', 'APPLE'], brokerExchangeConfigured: true },
+  });
+  await assert.rejects(publicApiSmoke.verifyMobilePublicApiSurface({
+    apiBaseUrl: 'https://api.dabboba.net', expectedCommerceMode: 'LIVE', fetchImpl: withPhone.fetchImpl,
+  }), /PHONE without DABBOBA_PHONE_LOGIN_READY=true/);
+  await publicApiSmoke.verifyMobilePublicApiSurface({
+    apiBaseUrl: 'https://api.dabboba.net', expectedCommerceMode: 'LIVE', fetchImpl: withPhone.fetchImpl,
+    requirePhoneLogin: true,
+  });
+  await assert.rejects(publicApiSmoke.verifyMobilePublicApiSurface({
+    apiBaseUrl: 'https://api.dabboba.net', expectedCommerceMode: 'LIVE', fetchImpl: valid.fetchImpl,
+    requirePhoneLogin: true,
   }), /LIVE customer login providers are incomplete/);
 
   const unsellableGacha = fetchLive({
@@ -210,6 +231,36 @@ test('LIVE mobile release requires configured login and purchasable gacha and ku
   await assert.rejects(publicApiSmoke.verifyMobilePublicApiSurface({
     apiBaseUrl: 'https://api.dabboba.net', expectedCommerceMode: 'LIVE', fetchImpl: missingKuji.fetchImpl,
   }), /LIVE kuji catalog has no purchasable product/);
+});
+
+test('every profile rejects a third-party login listed without Sign in with Apple', async () => {
+  for (const methods of [['KAKAO'], ['PHONE', 'NAVER'], ['GOOGLE'], ['PHONE', 'KAKAO', 'NAVER', 'GOOGLE']]) {
+    const { fetchImpl } = fixtureFetch({ '/v1/auth/providers': { methods, brokerExchangeConfigured: true } });
+    await assert.rejects(
+      verifyPublicEdgeSurface({ fetchImpl }),
+      /third-party login without Sign in with Apple/,
+      `PRELAUNCH edge must reject ${methods.join(',')}`,
+    );
+    await assert.rejects(
+      verifyPublicEdgeSurface({
+        fetchImpl: fixtureFetch({
+          '/v1/public/config': { ...responses['/v1/public/config'], commerceMode: 'LIVE' },
+          '/v1/auth/providers': { methods, brokerExchangeConfigured: true },
+        }).fetchImpl,
+        expectedCommerceMode: 'LIVE',
+      }),
+      /third-party login without Sign in with Apple/,
+      `LIVE edge must reject ${methods.join(',')}`,
+    );
+  }
+  for (const methods of [[], ['PHONE'], ['PHONE', 'KAKAO', 'APPLE'], ['APPLE']]) {
+    const { fetchImpl } = fixtureFetch({ '/v1/auth/providers': { methods, brokerExchangeConfigured: methods.length > 0 } });
+    await verifyPublicEdgeSurface({ fetchImpl });
+  }
+  await assert.rejects(
+    verifyPublicEdgeSurface({ fetchImpl: fixtureFetch({ '/v1/auth/providers': { brokerExchangeConfigured: false } }).fetchImpl }),
+    /Auth providers contract is incomplete/,
+  );
 });
 
 test('the release workflow checks the customer API after configuration and before bundling', () => {

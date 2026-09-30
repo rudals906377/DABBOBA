@@ -1,10 +1,10 @@
 import { Redirect, type Href } from "expo-router";
-import type { ReactNode } from "react";
+import { useRef, type ReactNode } from "react";
 import { ActivityIndicator, StyleSheet, View } from "react-native";
 import { AppText as Text } from "@/components/Typography";
 import { seed } from "@/design-system/seed";
 import { useCommerceCapability } from "@/features/commerce/CommerceCapabilityProvider";
-import { resolveCommerceRouteAccess } from "@/lib/runtime-config";
+import { resolveCommerceRouteAccess, type CommerceRouteAccess } from "@/lib/runtime-config";
 
 export function CommerceRouteGate({
   children,
@@ -14,7 +14,18 @@ export function CommerceRouteGate({
   fallback?: Href;
 }) {
   const { buildCapability, serverCapability, configReady } = useCommerceCapability();
-  const access = resolveCommerceRouteAccess(buildCapability, serverCapability, configReady);
+  // Once this gate has rendered its screen, only an explicit server PRELAUNCH
+  // (or a PRELAUNCH build) removes it. A failure-induced unknown capability keeps
+  // the mounted payment/draw screen instead of ejecting the customer mid-flow;
+  // new entries still require a verified LIVE answer.
+  const renderedAccess = useRef<CommerceRouteAccess | null>(null);
+  const access = resolveCommerceRouteAccess(
+    buildCapability,
+    serverCapability,
+    configReady,
+    renderedAccess.current,
+  );
+  renderedAccess.current = access;
   // A LIVE deep link can arrive before the server capability has been fetched.
   // Wait for that first answer instead of redirecting a valid paid draw on cold start.
   if (access === "WAIT") {

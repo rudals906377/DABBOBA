@@ -7,7 +7,7 @@ import { chromium } from "playwright";
 import {
   CAPSULE_3D_FRAGMENT_SHADER,
   CAPSULE_3D_VERTEX_SHADER,
-} from "../apps/mobile/src/features/draw/gacha-capsule-3d-shaders.ts";
+} from "./gacha-capsule-3d-shaders.ts";
 import { sampleGachaRevealLighting, sampleGachaRevealRattle } from "../apps/mobile/src/features/draw/gacha-reveal-timeline.ts";
 
 const REPOSITORY_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");

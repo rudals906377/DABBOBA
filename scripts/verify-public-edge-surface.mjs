@@ -8,17 +8,22 @@ const ROUTES = Object.freeze([
   ['/v1/public/config', 'Public config'],
   ['/v1/catalog/recent-draws', 'Recent draws'],
   ['/v1/catalog/home-sections', 'Home sections'],
+  ['/v1/auth/providers', 'Auth providers'],
 ]);
 const MOBILE_CATALOG_ROUTES = Object.freeze([
   ['/v1/catalog/products?category=gacha&limit=1', 'Products'],
   ['/v1/catalog/ips', 'IPs'],
 ]);
 const LIVE_MOBILE_ROUTES = Object.freeze([
-  ['/v1/auth/providers', 'Auth providers'],
   ['/v1/catalog/products?category=gacha&saleStatus=ON_SALE&excludeSoldOut=true&limit=1', 'Gacha products'],
   ['/v1/catalog/products?category=kuji&saleStatus=ON_SALE&excludeSoldOut=true&limit=1', 'Kuji products'],
 ]);
-const REQUIRED_LIVE_LOGIN_METHODS = Object.freeze(['PHONE', 'KAKAO', 'NAVER', 'GOOGLE', 'APPLE']);
+// PHONE (SMS OTP) is required in LIVE only when the build attests verified SMS
+// delivery with DABBOBA_PHONE_LOGIN_READY=true; otherwise it must stay off.
+const REQUIRED_LIVE_LOGIN_METHODS = Object.freeze(['KAKAO', 'NAVER', 'GOOGLE', 'APPLE']);
+// App Store Review Guideline 4.8: offering a third-party social login requires
+// Sign in with Apple as an equivalent option, in every commerce mode.
+const THIRD_PARTY_LOGIN_METHODS = Object.freeze(['KAKAO', 'NAVER', 'GOOGLE']);
 const POLICY_VERSION = /^\d{4}-\d{2}-\d{2}$/;
 const SECTION_LAYOUTS = new Set(['gacha', 'kuji']);
 const SECTION_SOURCES = new Set(['MANUAL', 'IP', 'NEW', 'POPULAR']);
@@ -34,7 +39,7 @@ function exposesPrelaunchInventory(product) {
     || (Array.isArray(product.remainingKujiTiers) && product.remainingKujiTiers.length > 0);
 }
 
-function assertBody(route, body, expectedCommerceMode) {
+function assertBody(route, body, expectedCommerceMode, { requirePhoneLogin = false } = {}) {
   if (!isRecord(body)) throw new Error(`${route} contract is incomplete.`);
   if (route === 'Public config') {
     if (body.commerceMode !== expectedCommerceMode) {
@@ -82,9 +87,22 @@ function assertBody(route, body, expectedCommerceMode) {
       throw new Error(`LIVE ${category} catalog has no purchasable product.`);
     }
   } else if (route === 'Auth providers') {
-    if (!Array.isArray(body.methods) || body.brokerExchangeConfigured !== true
-      || REQUIRED_LIVE_LOGIN_METHODS.some((method) => !body.methods.includes(method))) {
+    if (!Array.isArray(body.methods) || typeof body.brokerExchangeConfigured !== 'boolean') {
+      throw new Error('Auth providers contract is incomplete.');
+    }
+    if (THIRD_PARTY_LOGIN_METHODS.some((method) => body.methods.includes(method))
+      && !body.methods.includes('APPLE')) {
+      throw new Error('Auth providers list a third-party login without Sign in with Apple.');
+    }
+    const requiredLiveMethods = requirePhoneLogin
+      ? ['PHONE', ...REQUIRED_LIVE_LOGIN_METHODS]
+      : REQUIRED_LIVE_LOGIN_METHODS;
+    if (expectedCommerceMode === 'LIVE' && (body.brokerExchangeConfigured !== true
+      || requiredLiveMethods.some((method) => !body.methods.includes(method)))) {
       throw new Error('LIVE customer login providers are incomplete.');
+    }
+    if (expectedCommerceMode === 'LIVE' && !requirePhoneLogin && body.methods.includes('PHONE')) {
+      throw new Error('LIVE customer login lists PHONE without DABBOBA_PHONE_LOGIN_READY=true.');
     }
   }
 }
@@ -116,11 +134,12 @@ function assertMobileApiBaseUrl(value) {
   return url.toString().replace(/\/+$/, '');
 }
 
-async function verifyRoutes(baseUrl, routes, fetchImpl, expectedCommerceMode) {
+async function verifyRoutes(baseUrl, routes, fetchImpl, expectedCommerceMode, options = {}) {
   if (!['PRELAUNCH', 'LIVE'].includes(expectedCommerceMode)) {
     throw new Error('Expected commerce mode is invalid.');
   }
   if (typeof fetchImpl !== 'function') throw new Error('Fetch is unavailable.');
+  const observed = {};
   for (const [path, label] of routes) {
     let response;
     try {
@@ -136,9 +155,21 @@ async function verifyRoutes(baseUrl, routes, fetchImpl, expectedCommerceMode) {
     let body;
     try { body = await response.json(); }
     catch { throw new Error(`${label} did not return JSON.`); }
-    assertBody(label, body, expectedCommerceMode);
+    assertBody(label, body, expectedCommerceMode, options);
+    if (label === 'Public config') {
+      observed.commerceMode = body.commerceMode;
+      // The public config currently exposes no payment provider. Record one
+      // only when a future server contract adds it as a non-empty string.
+      if (typeof body.paymentProvider === 'string' && body.paymentProvider.trim()) {
+        observed.paymentProvider = body.paymentProvider.trim();
+      }
+    }
   }
-  return { commerceMode: expectedCommerceMode, checkedRoutes: routes.map(([path]) => path) };
+  return {
+    commerceMode: expectedCommerceMode,
+    checkedRoutes: routes.map(([path]) => path),
+    observed,
+  };
 }
 
 export async function verifyPublicEdgeSurface({
@@ -152,12 +183,13 @@ export async function verifyMobilePublicApiSurface({
   apiBaseUrl,
   fetchImpl = globalThis.fetch,
   expectedCommerceMode = 'PRELAUNCH',
+  requirePhoneLogin = false,
 } = {}) {
   const baseUrl = assertMobileApiBaseUrl(apiBaseUrl);
   const routes = expectedCommerceMode === 'LIVE'
     ? [...ROUTES, ...MOBILE_CATALOG_ROUTES, ...LIVE_MOBILE_ROUTES]
     : [...ROUTES, ...MOBILE_CATALOG_ROUTES];
-  return verifyRoutes(baseUrl, routes, fetchImpl, expectedCommerceMode);
+  return verifyRoutes(baseUrl, routes, fetchImpl, expectedCommerceMode, { requirePhoneLogin });
 }
 
 export async function waitForPublicEdgeSurface({

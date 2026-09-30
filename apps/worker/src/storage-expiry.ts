@@ -29,6 +29,15 @@ const EMPTY_RESULT: StorageExpiryBatchResult = {
   reminders: 0,
 };
 
+/** Reminder milestones, in days before the storage deadline. */
+export const STORAGE_REMINDER_MILESTONE_DAYS = Object.freeze([1, 3, 7, 14] as const);
+/**
+ * The widest reminder window. The outer WHERE is bounded by it so the planner
+ * can use the storage-expiry index range instead of evaluating the lateral
+ * milestone join for every stored unit, most of which are months away.
+ */
+export const STORAGE_REMINDER_WINDOW_DAYS = Math.max(...STORAGE_REMINDER_MILESTONE_DAYS);
+
 function count(value: number | string | undefined): number {
   const parsed = Number(value ?? 0);
   if (!Number.isSafeInteger(parsed) || parsed < 0) {
@@ -203,7 +212,7 @@ export async function processInventoryStorageExpiryBatch(
            FROM inventory_units inventory
            CROSS JOIN LATERAL (
              SELECT milestone.days
-               FROM (VALUES (1),(3),(7),(14)) AS milestone(days)
+               FROM unnest($3::integer[]) AS milestone(days)
               WHERE inventory.storage_expires_at
                     <= $2::timestamptz + make_interval(days => milestone.days)
               ORDER BY milestone.days
@@ -211,6 +220,8 @@ export async function processInventoryStorageExpiryBatch(
            ) reminder
           WHERE inventory.status IN ('OWNED','EXCHANGE_LISTED','EXCHANGE_OFFERED')
             AND inventory.storage_expires_at>$2::timestamptz
+            AND inventory.storage_expires_at
+                <= $2::timestamptz + make_interval(days => $4::integer)
             AND NOT EXISTS (
               SELECT 1
                 FROM exchange_listing_items item
@@ -264,7 +275,7 @@ export async function processInventoryStorageExpiryBatch(
        SELECT
          (SELECT count(*)::integer FROM recorded) AS recorded_events,
          (SELECT count(*)::integer FROM emitted) AS outbox_events`,
-      [limit, now],
+      [limit, now, [...STORAGE_REMINDER_MILESTONE_DAYS], STORAGE_REMINDER_WINDOW_DAYS],
     );
     const reminderCount = assertOutboxParity(reminders.rows[0], "Storage expiry reminder");
 

@@ -79,7 +79,11 @@ test("release checker requires Session pooler port 5432 for migration and worker
   assert.ok(report.blockers.includes("worker_session_pooler_5432_required"));
 });
 
-function fakeReleasePool(kind: "migration" | "runtime" | "worker", blank = false): DatabasePool {
+function fakeReleasePool(
+  kind: "migration" | "runtime" | "worker",
+  blank = false,
+  serviceRoleExposedCount = "0",
+): DatabasePool {
   const role = kind === "migration"
     ? "migration_admin"
     : kind === "runtime"
@@ -124,6 +128,8 @@ function fakeReleasePool(kind: "migration" | "runtime" | "worker", blank = false
             anon_exposed_count: "0",
             authenticated_role_count: "1",
             authenticated_exposed_count: "0",
+            service_role_count: "1",
+            service_role_exposed_count: serviceRoleExposedCount,
             rls_disabled_count: "0",
             rls_enabled_count: "1",
             total_count: "1",
@@ -171,4 +177,16 @@ test("release checker blocks an empty database instead of reporting zero-count s
   assert.equal(report.status, "blocked");
   assert.ok(report.blockers.includes("migration_readonly_snapshot_failed"));
   assert.ok(report.blockers.includes("database_aggregate_unavailable"));
+});
+
+test("release checker blocks any public table grant to Supabase service_role", async () => {
+  const report = await checkDatabaseRelease(localReleaseInputs, {
+    createPool: (kind) => fakeReleasePool(kind, false, "2"),
+    loadDiskChecksums: async () => new Map([["0000_test.sql", "disk-checksum"]]),
+  });
+
+  assert.equal(report.status, "blocked");
+  assert.ok(report.blockers.includes("service_role_table_grants_exposed"));
+  assert.equal(report.database?.publicTables.serviceRoleRolePresent, true);
+  assert.equal(report.database?.publicTables.serviceRoleExposedCount, 2);
 });

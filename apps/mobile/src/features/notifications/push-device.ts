@@ -3,6 +3,7 @@ import { randomUUID } from "expo-crypto";
 import * as Notifications from "expo-notifications";
 import * as SecureStore from "expo-secure-store";
 import { Platform } from "react-native";
+import { colors } from "@/theme";
 import {
   registerAccountPushDevice,
   unregisterAccountPushDevice,
@@ -39,7 +40,7 @@ export async function synchronizeAccountPushDevice(
       name: "계정 활동",
       importance: Notifications.AndroidImportance.HIGH,
       vibrationPattern: [0, 180, 100, 180],
-      lightColor: "#91E98E",
+      lightColor: colors.brand,
     });
   }
 

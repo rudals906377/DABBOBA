@@ -142,7 +142,7 @@ export function LoginScreen() {
       setBrokerReady(ready);
       setProviderAvailabilityMessage(
         !ready || supportedMethods.length === 0
-          ? "사용 가능한 로그인 방식이 아직 설정되지 않았습니다."
+          ? "사용 가능한 로그인 방식이 아직 설정되지 않았어요."
           : "",
       );
     } catch (error) {
@@ -150,7 +150,7 @@ export function LoginScreen() {
       setEnabledProviders([]);
       setBrokerReady(false);
       setProviderCheckFailed(true);
-      setProviderAvailabilityMessage(error instanceof Error ? error.message : "로그인 연결 상태를 확인하지 못했습니다.");
+      setProviderAvailabilityMessage(error instanceof Error ? error.message : "로그인 연결 상태를 확인하지 못했어요.");
     } finally {
       if (generation === providerRequestGeneration.current) setChecking(false);
     }
@@ -176,7 +176,7 @@ export function LoginScreen() {
       .catch(() => {
         if (!active) return;
         setInternalSessionState("failed");
-        setMessage("로그인 정보를 자동으로 불러오지 못했습니다. 다시 시도해 주세요.");
+        setMessage("로그인 정보를 자동으로 불러오지 못했어요. 다시 시도해 주세요.");
       });
     return () => {
       active = false;
@@ -209,7 +209,7 @@ export function LoginScreen() {
       const completedReturnTo = await completeSocialCustomerLogin(runtime.apiBaseUrl, callbackUrl, () => clearUserScopedLocalData(db));
       router.replace(completedReturnTo as Href);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "로그인을 완료하지 못했습니다.");
+      setMessage(error instanceof Error ? error.message : "로그인을 완료하지 못했어요.");
     } finally {
       setBusy(null);
     }
@@ -221,7 +221,7 @@ export function LoginScreen() {
     try {
       applyPendingPhoneOtp(await requestPhoneOtp(number));
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "인증번호를 보내지 못했습니다.");
+      setMessage(error instanceof Error ? error.message : "인증번호를 보내지 못했어요.");
     } finally {
       setBusy(null);
     }
@@ -233,7 +233,7 @@ export function LoginScreen() {
     try {
       await finishPhone(await verifyPhoneOtp(verifiedPhone, otp));
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "휴대폰 로그인을 완료하지 못했습니다.");
+      setMessage(error instanceof Error ? error.message : "휴대폰 로그인을 완료하지 못했어요.");
     } finally {
       setBusy(null);
     }
@@ -251,7 +251,7 @@ export function LoginScreen() {
       router.replace(returnPath);
     } catch {
       setInternalSessionState("failed");
-      setMessage("로그인 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.");
+      setMessage("로그인 정보를 불러오지 못했어요. 잠시 후 다시 시도해 주세요.");
     } finally {
       setBusy(null);
     }
@@ -285,6 +285,7 @@ export function LoginScreen() {
       <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === "ios" ? "padding" : undefined}>
         <DetailPageHeader
           title="로그인"
+          titleMode="pixel"
           onBack={() => {
             if (router.canGoBack()) router.back();
             else router.replace("/(tabs)");
@@ -583,7 +584,7 @@ function ProviderButton({
       ) : icon ? (
         <View style={styles.providerMark}><DecorativeIonicon name={icon} size={20} color={foregroundColor} /></View>
       ) : (
-        <Text style={[styles.providerMarkText, { color: foregroundColor }]}>{mark}</Text>
+        <Text variant="subtitle" style={[styles.providerMarkText, { color: foregroundColor }]}>{mark}</Text>
       )}
       <Text style={[styles.providerLabel, { color: foregroundColor }]}>{label}</Text>
       <View style={styles.providerSpacer} />
@@ -602,7 +603,7 @@ const styles = StyleSheet.create({
   actionsAfterRetry: { marginTop: seed.spacing.x4 },
   providerButton: { minHeight: 54, borderRadius: seed.radius.r3, paddingHorizontal: 18, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   providerMark: { width: 24, alignItems: "center", justifyContent: "center" },
-  providerMarkText: { width: 24, fontSize: 17, fontWeight: "900", textAlign: "center" },
+  providerMarkText: { width: 24, fontWeight: "900", textAlign: "center" },
   providerLabel: { fontSize: 15, fontWeight: "700" },
   providerSpacer: { width: 24 },
   pressed: { opacity: seed.state.pressedOpacity, transform: [{ translateY: seed.state.pressedTranslateY }, { scale: seed.state.pressedScale }] },

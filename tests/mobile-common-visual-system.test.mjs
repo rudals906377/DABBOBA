@@ -129,9 +129,10 @@ test("Home hero and dense account chrome avoid extra-large clipping without chan
   const profileHomeSource = readSource("apps/mobile/src/features/profile/ProfileHomeScreen.tsx");
   const profileSectionSource = readSource("apps/mobile/src/features/profile/ProfileSectionScreen.tsx");
 
-  assert.match(homeSource, /const expanded = shouldExpandHomeHero\(fontScale\)/);
-  assert.match(homeSource, /numberOfLines=\{expanded \? 3 : 2\}/);
-  assert.match(homeSource, /heroLargeText:\s*\{\s*minHeight:\s*220\s*\}/);
+  // The light Home event banner grows naturally with Dynamic Type instead of a fixed expanded height.
+  assert.match(homeSource, /hero: \{\s*minHeight: seed\.spacing\.x16,/);
+  assert.doesNotMatch(homeSource, /heroLargeText|shouldExpandHomeHero/);
+  assert.match(homeSource, /<Text variant="caption" maxFontSizeMultiplier=\{2\} style=\{styles\.heroBody\}>/);
   assert.match(homeSource, /brandTagline[\s\S]*?maxFontSizeMultiplier=\{2\}|maxFontSizeMultiplier=\{2\}[\s\S]*?brandTagline/);
 
   assert.match(storageRootSource, /accessibilityHint="보관 상품을 서로 교환해요\."/);

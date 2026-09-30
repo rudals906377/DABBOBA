@@ -111,7 +111,7 @@ test("Home keeps the fixed editorial order before every operator section", () =>
   assert.ok(recentDrawIndex > eventIndex);
   assert.ok(operatorSectionsIndex > recentDrawIndex);
   assert.match(source, /<HomeIntroBanner \/>/);
-  assert.match(source, /새 소식 준비 중/);
+  assert.match(source, /새 소식을 준비하고 있어요/);
   assert.match(source, /homeCollections\.map\(\(collection\) => \([\s\S]*?<OperatorHomeSection/);
   assert.doesNotMatch(source, /<HomePopularIpSection|<HomeFeaturedProductsSection|todayDrawGroups\.map/);
   assert.doesNotMatch(source, /DEFAULT_HOME_COLLECTION_IP_IDS|buildHomeCollections/);
@@ -121,7 +121,8 @@ test("Home keeps the fixed editorial order before every operator section", () =>
 });
 
 test("Home uses plain canvas section headings and a shorter hero", () => {
-  assert.match(source, /hero:\s*\{[\s\S]*?minHeight:\s*seed\.spacing\.x16 \+ seed\.spacing\.x16 \+ seed\.spacing\.x9/);
+  assert.match(source, /hero:\s*\{\s*minHeight:\s*seed\.spacing\.x16,/);
+  assert.doesNotMatch(source, /hero:\s*\{[^}]*backgroundColor:\s*colors\.black/);
   assert.match(source, /sectionHeader:\s*\{[\s\S]*?marginTop:\s*seed\.spacing\.x8[\s\S]*?marginBottom:\s*seed\.spacing\.x4/);
   assert.doesNotMatch(source, /sectionHeader:\s*\{[^}]*minHeight/);
   assert.doesNotMatch(source, /sectionHeader:\s*\{[^}]*borderTopWidth/);

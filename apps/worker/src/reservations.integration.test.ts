@@ -284,3 +284,138 @@ test("reservation sweep prioritizes releasable stock and records reconciliation 
   );
   assert.equal(alerts.rows[0]?.count, "1");
 });
+
+test("reservation sweep raises a reconciliation alert instead of cancelling a provider-settled pending order", {
+  skip: !migrationDatabaseUrl || !workerDatabaseUrl,
+  timeout: 30_000,
+}, async (t) => {
+  const fixturePool = createMigrationDatabasePool(
+    migrationDatabaseUrl!,
+    "dabboba-worker-reservation-settled-fixture-integration",
+  );
+  const workerPool = createDatabasePool(
+    workerDatabaseUrl!,
+    "dabboba-worker-reservation-settled-integration",
+    { expectedRole: WORKER_DATABASE_ROLE },
+  );
+  const suffix = randomUUID().replaceAll("-", "").slice(0, 12);
+  const userId = randomUUID();
+  const orderId = randomUUID();
+  const paymentId = randomUUID();
+  const lineId = randomUUID();
+  const productId = `worker-settled-product-${suffix}`;
+  const ipId = `worker-settled-ip-${suffix}`;
+  t.after(async () => {
+    await fixturePool.query(
+      "DELETE FROM outbox_events WHERE correlation_id=$1",
+      [`worker-reservation-reconciliation-${orderId}`],
+    ).catch(() => undefined);
+    await fixturePool.query("DELETE FROM worker_payment_reconciliations WHERE payment_id=$1", [paymentId]).catch(() => undefined);
+    await fixturePool.query("DELETE FROM stock_reservations WHERE order_id=$1", [orderId]).catch(() => undefined);
+    await fixturePool.query("DELETE FROM payments WHERE id=$1", [paymentId]).catch(() => undefined);
+    await fixturePool.query("DELETE FROM order_lines WHERE id=$1", [lineId]).catch(() => undefined);
+    await fixturePool.query("DELETE FROM orders WHERE id=$1", [orderId]).catch(() => undefined);
+    await fixturePool.query("DELETE FROM product_stock WHERE product_id=$1", [productId]).catch(() => undefined);
+    await fixturePool.query("DELETE FROM catalog_products WHERE id=$1", [productId]).catch(() => undefined);
+    await fixturePool.query("DELETE FROM catalog_ips WHERE id=$1", [ipId]).catch(() => undefined);
+    await fixturePool.query("DELETE FROM users WHERE id=$1", [userId]).catch(() => undefined);
+    await Promise.all([fixturePool.end(), workerPool.end()]);
+  });
+
+  await fixturePool.query(
+    "INSERT INTO users(id,email,nickname) VALUES($1,$2,$3)",
+    [userId, `worker-reservation-settled-${suffix}@example.test`, `정산관찰${suffix}`],
+  );
+  await fixturePool.query(
+    "INSERT INTO catalog_ips(id,slug,name_ko,name_en) VALUES($1,$2,$3,$4)",
+    [ipId, ipId, `정산 관찰 ${suffix}`, `Settled observation ${suffix}`],
+  );
+  await fixturePool.query(
+    `INSERT INTO catalog_products(id,sku,ip_id,category,name,price)
+     VALUES($1,$2,$3,'figure',$4,1000)`,
+    [productId, `WORKER-SETTLED-${suffix.toUpperCase()}`, ipId, `정산 관찰 상품 ${suffix}`],
+  );
+  await fixturePool.query("INSERT INTO product_stock(product_id,on_hand,reserved) VALUES($1,5,1)", [productId]);
+  await fixturePool.query(
+    "INSERT INTO orders(id,user_id,subtotal,total) VALUES($1,$2,1000,1000)",
+    [orderId, userId],
+  );
+  await fixturePool.query(
+    `INSERT INTO order_lines(
+       id,order_id,product_id,product_name_snapshot,category_snapshot,unit_price,quantity,line_total
+     ) VALUES($1,$2,$3,$4,'figure',1000,1,1000)`,
+    [lineId, orderId, productId, `정산 관찰 상품 ${suffix}`],
+  );
+  const payment = await fixturePool.query<{ version: number }>(
+    `INSERT INTO payments(id,order_id,provider,status,amount)
+     VALUES($1,$2,'TEST_PG','PENDING',1000) RETURNING version`,
+    [paymentId, orderId],
+  );
+  await fixturePool.query(
+    `INSERT INTO stock_reservations(order_id,order_line_id,product_id,quantity,expires_at)
+     VALUES($1,$2,$3,1,$4)`,
+    [orderId, lineId, productId, new Date("2000-01-01T00:00:00.000Z")],
+  );
+  // The provider was observed PAID for this exact payment version, but the
+  // canonical transition has not landed. Cancelling now would strand money.
+  await fixturePool.query(
+    `INSERT INTO worker_payment_reconciliations(
+       payment_id,payment_version,attempts,last_outcome,last_observed_state,
+       last_error,last_attempted_at,next_attempt_at
+     ) VALUES($1,$2,1,'MANUAL_REVIEW','PAID',NULL,now(),now()+interval '1 hour')`,
+    [paymentId, payment.rows[0]!.version],
+  );
+
+  const logger = { debug() {}, info() {}, warn() {}, error() {} } as Logger;
+  const now = new Date("2001-01-01T00:00:00.000Z");
+  const outcome = await expireOrderReservations(workerPool, orderId, now);
+  assert.deepEqual(outcome, {
+    status: "requires_reconciliation",
+    released: 0,
+    reason: "PROVIDER_OBSERVED_SETTLED",
+  });
+
+  const first = await expireReservationBatch(workerPool, 50, logger, now);
+  assert.equal(first.reconciliation >= 1, true);
+  const state = await fixturePool.query<{ order_status: string; payment_status: string; reservation_status: string; reserved: number }>(
+    `SELECT o.status AS order_status,p.status AS payment_status,
+            sr.status AS reservation_status,s.reserved
+       FROM orders o
+       JOIN payments p ON p.order_id=o.id
+       JOIN stock_reservations sr ON sr.order_id=o.id
+       JOIN product_stock s ON s.product_id=sr.product_id
+      WHERE o.id=$1`,
+    [orderId],
+  );
+  assert.deepEqual(state.rows, [{
+    order_status: "PENDING_PAYMENT",
+    payment_status: "PENDING",
+    reservation_status: "ACTIVE",
+    reserved: 1,
+  }]);
+  const alerts = await fixturePool.query<{ reason: string }>(
+    `SELECT payload->>'reason' AS reason FROM outbox_events
+      WHERE aggregate_type='PAYMENT' AND aggregate_id=$1
+        AND event_type='payment.reservation_expired_requires_reconciliation'`,
+    [paymentId],
+  );
+  assert.deepEqual(alerts.rows, [{ reason: "PROVIDER_OBSERVED_SETTLED" }]);
+
+  // With the durable alert recorded, later sweeps neither cancel the order nor
+  // raise a second alert for the same payment version.
+  await expireReservationBatch(workerPool, 500, logger, now);
+  const afterSecond = await fixturePool.query<{ status: string; alerts: string }>(
+    `SELECT sr.status,
+            (SELECT count(*)::text FROM outbox_events
+              WHERE aggregate_type='PAYMENT' AND aggregate_id=$2
+                AND event_type='payment.reservation_expired_requires_reconciliation') AS alerts
+       FROM stock_reservations sr WHERE sr.order_id=$1`,
+    [orderId, paymentId],
+  );
+  assert.deepEqual(afterSecond.rows, [{ status: "ACTIVE", alerts: "1" }]);
+
+  // A later version (the reconciliation evidence is now stale) releases normally.
+  await fixturePool.query("UPDATE payments SET version=version+1 WHERE id=$1", [paymentId]);
+  const released = await expireOrderReservations(workerPool, orderId, now);
+  assert.deepEqual(released, { status: "expired", released: 1 });
+});

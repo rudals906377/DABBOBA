@@ -67,7 +67,7 @@ export function RootHeaderActions() {
           <View style={styles.iconFrame}>
             <DecorativeIonicon name={action.icon} size={23} color={seed.color.foreground.neutral} />
             {action.route === "/notifications" && unreadCount > 0 ? (
-              <Text style={styles.unreadBadge}>{unreadCount > 99 ? "99+" : unreadCount}</Text>
+              <Text variant="micro" style={styles.unreadBadge}>{unreadCount > 99 ? "99+" : unreadCount}</Text>
             ) : null}
           </View>
         </SeedIconButton>
@@ -81,18 +81,16 @@ const styles = StyleSheet.create({
   iconFrame: { width: 25, height: 25, alignItems: "center", justifyContent: "center" },
   unreadBadge: {
     position: "absolute",
-    top: -6,
-    right: -9,
-    minWidth: 17,
-    height: 17,
+    top: -5,
+    right: -8,
+    minWidth: 15,
+    minHeight: 15,
     paddingHorizontal: 4,
     overflow: "hidden",
     borderRadius: seed.radius.full,
     backgroundColor: seed.color.foreground.critical,
     color: seed.color.foreground.inverted,
-    fontSize: 10,
-    lineHeight: 17,
-    fontWeight: "900",
+    fontWeight: "700",
     textAlign: "center",
   },
 });

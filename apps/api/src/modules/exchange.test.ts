@@ -4,6 +4,8 @@ import test from "node:test";
 import type { FastifyInstance } from "fastify";
 import type { ApiContext } from "../types.js";
 import {
+  createThrottledExchangeExpirySweep,
+  EXCHANGE_READ_EXPIRY_SWEEP_INTERVAL_MS,
   exchangeInventoryBundleInput,
   expireStaleExchangeListings,
   isDrawExchangeSource,
@@ -356,5 +358,62 @@ test("exchange listing detail hides non-gacha legacy listings", async () => {
   assert.match(
     capturedSql,
     /listing_draw_result\.prize_product_id=invalid_listing_inventory\.product_id/,
+  );
+});
+
+test("public exchange reads share one expiry sweep per 30 seconds per process", async () => {
+  let sweeps = 0;
+  let release: (() => void) | null = null;
+  const queryable = {
+    async query(sql: string) {
+      assert.match(sql, /cancel_reason='AUTO_EXPIRED'/);
+      sweeps += 1;
+      await new Promise<void>((resolve) => { release = resolve; });
+      return { rowCount: 0, rows: [] };
+    },
+  };
+  let now = 1_000_000;
+  const sweep = createThrottledExchangeExpirySweep(queryable as never, EXCHANGE_READ_EXPIRY_SWEEP_INTERVAL_MS, () => now);
+  assert.equal(EXCHANGE_READ_EXPIRY_SWEEP_INTERVAL_MS, 30_000);
+
+  const concurrent = [sweep(), sweep(), sweep()];
+  await new Promise((resolve) => setImmediate(resolve));
+  release!();
+  await Promise.all(concurrent);
+  assert.equal(sweeps, 1);
+
+  now += 29_999;
+  await sweep();
+  assert.equal(sweeps, 1);
+
+  now += 1;
+  const next = sweep();
+  await new Promise((resolve) => setImmediate(resolve));
+  release!();
+  await next;
+  assert.equal(sweeps, 2);
+});
+
+test("a failed throttled sweep is retried on the next read", async () => {
+  let calls = 0;
+  const queryable = {
+    async query() {
+      calls += 1;
+      if (calls === 1) throw new Error("transient");
+      return { rowCount: 0, rows: [] };
+    },
+  };
+  const sweep = createThrottledExchangeExpirySweep(queryable as never, 30_000, () => 5_000);
+  await assert.rejects(sweep(), /transient/);
+  await sweep();
+  assert.equal(calls, 2);
+});
+
+test("browse hides lapsed OPEN listings between sweeps and admin resolution is commerce-gated", async () => {
+  const source = await readFile(new URL("../../src/modules/exchange.ts", import.meta.url), "utf8");
+  assert.match(source, /"l\.status='OPEN'",\s*"l\.expires_at>now\(\)"/);
+  assert.match(
+    source,
+    /"\/v1\/admin\/exchange\/listings\/:listingId\/resolution",\s*\{ preHandler: \[requireLiveCommerce\(context\), context\.auth\.requirePermission\("exchange\.resolve"\)\] \}/,
   );
 });

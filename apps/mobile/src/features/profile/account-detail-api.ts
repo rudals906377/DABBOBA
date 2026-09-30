@@ -33,7 +33,7 @@ export async function upsertDefaultShippingAddress(
     params: { header: { "Idempotency-Key": randomUUID() } },
     body: input,
   });
-  if (!result.data) throw new Error(errorMessage(result.error, "배송지를 저장하지 못했습니다."));
+  if (!result.data) throw new Error(errorMessage(result.error, "배송지를 저장하지 못했어요."));
   return result.data;
 }
 
@@ -45,7 +45,7 @@ export async function fetchAccountDeletionRequest(
   const result = await client.GET("/v1/account/deletion-request");
   if (result.data) return result.data;
   if (result.response.status === 404) return null;
-  throw new Error(errorMessage(result.error, "탈퇴 요청 상태를 확인하지 못했습니다."));
+  throw new Error(errorMessage(result.error, "탈퇴 요청 상태를 확인하지 못했어요."));
 }
 
 export async function fetchAccountDeletionPreview(
@@ -54,7 +54,7 @@ export async function fetchAccountDeletionPreview(
 ): Promise<AccountDeletionPreview> {
   const client = authorizedClient(apiBaseUrl, accessToken);
   const result = await client.GET("/v1/account/deletion-preview");
-  if (!result.data) throw new Error(errorMessage(result.error, "탈퇴 가능 상태를 확인하지 못했습니다."));
+  if (!result.data) throw new Error(errorMessage(result.error, "탈퇴 가능 상태를 확인하지 못했어요."));
   return result.data;
 }
 
@@ -64,7 +64,7 @@ export async function fetchAccountPolicyAcceptances(
 ): Promise<AccountPolicyAcceptanceStatus> {
   const client = authorizedClient(apiBaseUrl, accessToken);
   const result = await client.GET("/v1/account/policy-acceptances");
-  if (!result.data) throw new Error(errorMessage(result.error, "약관 동의 현황을 확인하지 못했습니다."));
+  if (!result.data) throw new Error(errorMessage(result.error, "약관 동의 현황을 확인하지 못했어요."));
   return result.data;
 }
 
@@ -77,7 +77,7 @@ export async function requestAccountDeletion(
     params: { header: { "Idempotency-Key": randomUUID() } },
     body: {},
   });
-  if (!result.data) throw new Error(errorMessage(result.error, "회원탈퇴를 요청하지 못했습니다."));
+  if (!result.data) throw new Error(errorMessage(result.error, "회원탈퇴를 요청하지 못했어요."));
   return result.data;
 }
 
@@ -92,7 +92,7 @@ export async function fetchAccountDeletionStatusByReceipt(
       header: { "X-Deletion-Status-Token": receipt.statusToken },
     },
   });
-  if (!result.data) throw new Error(errorMessage(result.error, "탈퇴 처리 상태를 확인하지 못했습니다."));
+  if (!result.data) throw new Error(errorMessage(result.error, "탈퇴 처리 상태를 확인하지 못했어요."));
   return result.data;
 }
 

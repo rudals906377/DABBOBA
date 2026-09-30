@@ -32,7 +32,7 @@ test("admin session cookie is hardened and opaque token is not returned", async 
   assert.doesNotMatch(login, /NextResponse\.json\(session/);
 });
 
-test("active admin sessions renew a persistent cookie without exposing the token", async () => {
+test("active admin sessions rotate a persistent cookie without exposing the token", async () => {
   const route = await readFile(join(adminRoot, "app/api/auth/keepalive/route.ts"), "utf8");
   const client = await readFile(join(adminRoot, "components/admin-session-keepalive.tsx"), "utf8");
   assert.match(route, /isSameOriginRequest\(request\)/);
@@ -43,6 +43,10 @@ test("active admin sessions renew a persistent cookie without exposing the token
   assert.match(route, /error\.status === 401 \|\| error\.status === 403/);
   assert.match(route, /response\(503\)/);
   assert.doesNotMatch(route, /NextResponse\.json\([^)]*token/);
+  assert.match(route, /token:\s*rotatedToken/);
+  assert.match(route, /cookies\.set\(config\.sessionCookieName,\s*rotatedToken,/);
+  assert.doesNotMatch(route, /cookies\.set\(config\.sessionCookieName,\s*token,/);
+  assert.match(client, /navigator\.locks\.request\(KEEPALIVE_LOCK_NAME/);
   assert.match(client, /visibilitychange/);
   assert.match(client, /KEEPALIVE_INTERVAL_MS = 5 \* 60 \* 1_000/);
   assert.doesNotMatch(client, /localStorage|sessionStorage/);

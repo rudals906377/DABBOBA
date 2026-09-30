@@ -34,7 +34,6 @@ import {
   type ExchangeDetailSnapshot,
   type ExchangeOfferInventorySnapshot,
 } from "@/features/exchange/exchange-api";
-import { ExchangeRuleList, ExchangeSafetyNotice } from "@/features/exchange/ExchangeGuidance";
 import { toggleExchangeInventorySelection } from "@/features/exchange/exchange-selection";
 import { ProfileSessionGate } from "@/features/profile/ProfileSessionGate";
 import { ProfileApiError } from "@/features/profile/profile-api";
@@ -123,7 +122,7 @@ export function ExchangeOfferScreen() {
         return;
       }
       setSessionStatus("error");
-      setError(cause instanceof Error ? cause.message : "내가 뽑은 상품을 불러오지 못했습니다.");
+      setError(cause instanceof Error ? cause.message : "내가 뽑은 상품을 불러오지 못했어요.");
     } finally {
       if (generation === loadGeneration.current) setRefreshing(false);
     }
@@ -156,7 +155,7 @@ export function ExchangeOfferScreen() {
     if (!listingId || !accessToken || selected.length === 0 || submitting) return;
     Alert.alert(
       `선택한 상품 ${selected.length}개로 신청할까요?`,
-      `${selected.map((item) => item.product.name).join("\n")}\n\n신청에는 별도 글이 포함되지 않으며 선택한 상품 정보만 전달돼요.`,
+      `${selected.map((item) => item.product.name).join("\n")}\n\n신청에는 별도 글이 포함되지 않으며 선택한 상품 정보만 전달돼요.\n다뽀바 밖에서 연락하거나 거래하면 보호받기 어려우니 교환은 앱 안에서만 진행해 주세요.`,
       [
         { text: "취소", style: "cancel" },
         {
@@ -225,11 +224,6 @@ export function ExchangeOfferScreen() {
 
         {sessionStatus === "authenticated" ? (
           <>
-            <View style={styles.notificationBanner}>
-              <DecorativeIonicon name="swap-horizontal" size={18} color={colors.greenInk} />
-              <Text style={styles.notificationText}>신청 결과는 내 교환 현황에서 확인할 수 있어요.</Text>
-            </View>
-            <ExchangeSafetyNotice compact />
             <View style={styles.selectionHeader}>
               <KoreanPixelTitle variant="section">교환 아이템 선택</KoreanPixelTitle>
               {snapshot && snapshot.items.length > 0 ? (
@@ -292,7 +286,6 @@ export function ExchangeOfferScreen() {
             }}
           />
         ))}
-        {sessionStatus === "authenticated" && snapshot ? <ExchangeRuleList title="교환 신청 안내" /> : null}
       </ScrollView>
 
       {sessionStatus === "authenticated" && hasEligibleItems ? <FloatingBottomActionPanel>
@@ -310,7 +303,7 @@ export function ExchangeOfferScreen() {
           {submitting ? (
             <ActivityIndicator color={colors.ink} />
           ) : (
-            <Text style={styles.submitLabel}>{selected.length ? "교환 신청하기" : "상품을 선택해 주세요"}</Text>
+            <Text variant="button" style={styles.submitLabel}>{selected.length ? "교환 신청하기" : "상품을 선택해 주세요"}</Text>
           )}
         </Pressable>
       </FloatingBottomActionPanel> : null}
@@ -339,7 +332,7 @@ function TargetListingProducts({
             style={styles.targetProductRow}
           >
             {imageUri ? (
-              <Image source={{ uri: imageUri }} resizeMode="contain" style={styles.targetImage} />
+              <Image accessible={false} source={{ uri: imageUri }} resizeMode="contain" style={styles.targetImage} />
             ) : <View style={styles.targetImage} />}
             <View style={styles.targetCopy}>
               {products.length > 1 ? (
@@ -387,9 +380,9 @@ function InventoryChoice({
     >
       <View style={styles.imageFrame}>
         {imageUri ? (
-          <Image source={{ uri: imageUri }} resizeMode="cover" style={styles.image} />
+          <Image accessible={false} source={{ uri: imageUri }} resizeMode="cover" style={styles.image} />
         ) : (
-          <View style={styles.imagePlaceholder}><Text style={styles.imagePlaceholderText}>이미지 없음</Text></View>
+          <View style={styles.imagePlaceholder}><Text variant="finePrint" style={styles.imagePlaceholderText}>이미지 없음</Text></View>
         )}
       </View>
       <View style={styles.productInfo}>
@@ -430,8 +423,6 @@ const styles = StyleSheet.create({
   targetProductDivider: { marginTop: seed.spacing.x2 },
   targetMeta: { marginTop: seed.spacing.x1_5, color: colors.ink, ...seed.typography.catalogPrice },
   storageExpiry: { marginTop: seed.spacing.x1, color: colors.muted, ...seed.typography.caption },
-  notificationBanner: { marginTop: seed.spacing.x4, marginBottom: seed.spacing.x3, minHeight: 44, borderRadius: seed.radius.r3, backgroundColor: seed.color.background.neutralWeak, paddingHorizontal: seed.spacing.x3, flexDirection: "row", alignItems: "center", gap: seed.spacing.x2 },
-  notificationText: { flex: 1, color: colors.muted, ...seed.typography.bodyCompact },
   selectionHeader: { marginTop: seed.spacing.x6, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: seed.spacing.x3 },
   selectionSummary: { alignItems: "flex-end" },
   selectionCount: { color: colors.greenInk, ...seed.typography.caption, fontWeight: "800" },
@@ -445,7 +436,7 @@ const styles = StyleSheet.create({
   imageFrame: { width: 106, aspectRatio: 1, ...catalogProductImageSurface },
   image: { width: "100%", height: "100%" },
   imagePlaceholder: { flex: 1, alignItems: "center", justifyContent: "center" },
-  imagePlaceholderText: { color: colors.muted, fontFamily: "monospace", ...seed.typography.finePrint, fontWeight: "800" },
+  imagePlaceholderText: { color: colors.muted, fontWeight: "700" },
   productInfo: { flex: 1, minWidth: 0 },
   ipName: { color: colors.muted, ...seed.typography.catalogMetadata },
   productName: { color: colors.ink, ...seed.typography.catalogTitle, marginTop: 3 },
@@ -455,7 +446,7 @@ const styles = StyleSheet.create({
   radio: { width: 24, height: 24, borderRadius: seed.radius.r3, borderWidth: 1.5, borderColor: seed.color.stroke.contrast, alignItems: "center", justifyContent: "center" },
   radioSelected: { borderColor: colors.greenInk, backgroundColor: colors.brand },
   submitButton: { minHeight: seed.size.actionButton.large, borderRadius: seed.radius.r3, alignItems: "center", justifyContent: "center", backgroundColor: seed.color.background.brandSolid },
-  submitLabel: { color: colors.ink, fontSize: 15, fontWeight: "900" },
+  submitLabel: { color: colors.ink },
   pressed: { opacity: seed.state.pressedOpacity, transform: [{ scale: seed.state.pressedScale }] },
   disabled: { opacity: seed.state.disabledOpacity },
 });

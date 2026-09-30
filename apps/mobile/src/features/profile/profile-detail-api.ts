@@ -23,7 +23,7 @@ export async function fetchAccountShippingRequestDetail(
   if (!result.data) {
     throw new ProfileApiError(
       result.response.status,
-      errorMessage(result.error, "배송 신청 정보를 불러오지 못했습니다."),
+      errorMessage(result.error, "배송 신청 정보를 불러오지 못했어요."),
     );
   }
   return result.data;

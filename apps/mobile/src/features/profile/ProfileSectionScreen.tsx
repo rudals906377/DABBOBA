@@ -1,8 +1,9 @@
 import { router, useFocusEffect, useLocalSearchParams, type Href } from "expo-router";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement, type ReactNode } from "react";
 import {
   ActivityIndicator,
   Alert,
+  FlatList,
   Image,
   KeyboardAvoidingView,
   Platform,
@@ -26,7 +27,7 @@ import {
   AppText as Text,
   BalancedAppText,
 } from "@/components/Typography";
-import { SeedInlineGuidance, SeedTextInput } from "@/design-system/components";
+import { SeedActionButton, SeedInlineGuidance, SeedTextInput } from "@/design-system/components";
 import { catalogProductCardSurface, catalogProductImageSurface } from "@/design-system/catalog";
 import { seed } from "@/design-system/seed";
 import { openCustomerLogin } from "@/features/auth/login-navigation";
@@ -40,11 +41,14 @@ import {
   formatDate,
   removeWishlistItem,
   setWantedRequestLike,
+  type ProfileSnapshotScope,
   type ShippingQuote,
   updateAccountProfile,
 } from "@/features/profile/profile-api";
 import { isPointReturnEligibleInventory } from "@/features/profile/point-return-eligibility";
 import { PaidDrawRecovery } from "@/features/profile/PaidDrawRecovery";
+import { ProfileSectionErrorState } from "@/features/profile/ProfileSectionErrorState";
+import { profileSectionFailure } from "@/features/profile/profile-section-state";
 import {
   GACHA_ONLY_FREE_SHIPPING_THRESHOLD,
   KUJI_INCLUDED_FREE_SHIPPING_THRESHOLD,
@@ -59,6 +63,9 @@ import { resolveCatalogImageUrl } from "@/lib/runtime-config";
 import { colors } from "@/theme";
 
 type WishlistItem = components["schemas"]["WishlistItem"];
+type AccountShippingRequest = components["schemas"]["AccountShippingRequest"];
+type AccountOrder = components["schemas"]["AccountOrder"];
+type PointLedgerEntry = components["schemas"]["PointLedgerEntry"];
 type InventoryUnit = components["schemas"]["InventoryUnit"];
 type WantedRequest = components["schemas"]["WantedRequest"];
 type StorageMode = "shipping" | "exchange-or-shipping" | "point-return";
@@ -78,14 +85,31 @@ const SECTION_META = {
 
 type ProfileSection = keyof typeof SECTION_META;
 
+/** Each section requests only the snapshot sections it renders. */
+const SECTION_SCOPE: Record<ProfileSection, ProfileSnapshotScope> = {
+  edit: "account",
+  wishlist: "wishlist",
+  storage: "storage",
+  shipping: "shipping",
+  orders: "orders",
+  points: "points",
+  requests: "requests",
+  support: "support",
+  "member-info": "account",
+  settings: "account",
+};
+
 export function ProfileSectionScreen() {
   const { section: rawSection } = useLocalSearchParams<{ section?: string }>();
   const section: ProfileSection = rawSection && rawSection in SECTION_META ? rawSection as ProfileSection : "edit";
   const meta = SECTION_META[section];
-  const profileState = useProfileSnapshot();
+  const profileState = useProfileSnapshot(SECTION_SCOPE[section]);
   const hasFocusedOnce = useRef(false);
   const assetBaseUrl = profileState.runtime.assetBaseUrl
     ?? (__DEV__ ? profileState.runtime.apiBaseUrl.replace(/:8788$/, ":4174") : null);
+  // Loaded record lists render through a virtualized FlatList; loading,
+  // session gates and failures keep the plain scroll layout.
+  const listSpec = profileListSpec(section, profileState, assetBaseUrl);
 
   useFocusEffect(
     useCallback(() => {
@@ -98,6 +122,23 @@ export function ProfileSectionScreen() {
     <SafeAreaView style={styles.safeArea} edges={["top", "bottom", "left", "right"]}>
       <DetailHeader title={meta.title} />
       <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+        {listSpec ? (
+          <FlatList
+            data={listSpec.data}
+            keyExtractor={listSpec.keyExtractor}
+            renderItem={({ item }) => listSpec.renderItem(item)}
+            ListHeaderComponent={(
+              <>
+                {profileState.status === "error" ? <ErrorState message={profileState.message} onRetry={profileState.reload} /> : null}
+                {listSpec.header}
+              </>
+            )}
+            ListEmptyComponent={listSpec.empty}
+            contentContainerStyle={styles.content}
+            keyboardShouldPersistTaps="handled"
+            refreshControl={<RefreshControl refreshing={profileState.refreshing} onRefresh={profileState.reload} tintColor={colors.ink} />}
+          />
+        ) : (
         <ScrollView
           contentContainerStyle={styles.content}
           keyboardShouldPersistTaps="handled"
@@ -117,6 +158,7 @@ export function ProfileSectionScreen() {
             />
           ) : null}
         </ScrollView>
+        )}
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -143,7 +185,7 @@ function SectionContent({
     );
   }
   if (section === "edit") return <ProfileEdit profileState={profileState} />;
-  if (section === "wishlist") return <Wishlist profileState={profileState} assetBaseUrl={assetBaseUrl} />;
+  if (section === "wishlist") return <Wishlist profileState={profileState} />;
   if (section === "storage") {
     return (
       <StorageHubContent
@@ -230,43 +272,141 @@ function ProfileEdit({ profileState }: { profileState: ReturnType<typeof useProf
   );
 }
 
-function Wishlist({
+/** Failure state for the wishlist; loaded lists render through `profileListSpec`. */
+function Wishlist({ profileState }: { profileState: ReturnType<typeof useProfileSnapshot> }) {
+  const failure = profileSectionFailure(profileState.snapshot!, "wishlist");
+  return failure ? <ProfileSectionErrorState message={failure} onRetry={profileState.reload} /> : null;
+}
+
+function WishlistRow({
+  item,
   profileState,
   assetBaseUrl,
 }: {
+  item: WishlistItem;
   profileState: ReturnType<typeof useProfileSnapshot>;
   assetBaseUrl: string | null;
 }) {
-  const items = profileState.snapshot!.wishlist;
-  const remove = async (item: WishlistItem) => {
+  const removeLocally = (current: NonNullable<typeof profileState.snapshot>) => (
+    current.wishlist
+      ? { ...current, wishlist: current.wishlist.filter((candidate) => candidate.id !== item.id) }
+      : current
+  );
+  const remove = async () => {
     if (!profileState.snapshot) return;
     if (profileState.snapshot.isExample || !profileState.accessToken) {
-      profileState.setSnapshot((current) => current ? { ...current, wishlist: current.wishlist.filter((candidate) => candidate.id !== item.id) } : current);
+      profileState.setSnapshot((current) => current ? removeLocally(current) : current);
       return;
     }
     try {
       await removeWishlistItem(profileState.runtime.apiBaseUrl, profileState.accessToken, item.product.id);
-      profileState.setSnapshot((current) => current ? { ...current, wishlist: current.wishlist.filter((candidate) => candidate.id !== item.id) } : current);
+      profileState.setSnapshot((current) => current ? removeLocally(current) : current);
     } catch (error) {
       Alert.alert("찜을 해제하지 못했어요", error instanceof Error ? error.message : "잠시 후 다시 시도해 주세요.");
     }
   };
   return (
-    <>
-      <SectionLead title={`관심 상품 ${items.length}개`} />
-      {items.length ? items.map((item) => (
-        <ProductRow
-          key={item.id}
-          product={item.product}
-          ipName={item.product.ipNameKo}
-          caption={categoryLabel(item.product.category)}
-          assetBaseUrl={assetBaseUrl}
-          onPress={() => router.push(`/product/${encodeURIComponent(item.product.id)}` as Href)}
-          trailing={<Pressable accessibilityRole="button" accessibilityLabel={`${item.product.name} 찜 해제`} onPress={() => void remove(item)} style={({ pressed }) => [styles.heartButton, pressed && styles.pressed]}><DecorativeIonicon name="heart" size={20} color={colors.danger} /></Pressable>}
-        />
-      )) : <EmptyState icon="heart-outline" title="찜한 상품이 없어요" body="뽀바에서 관심 상품을 찜하면 여기에 모여요." />}
-    </>
+    <ProductRow
+      product={item.product}
+      ipName={item.product.ipNameKo}
+      caption={categoryLabel(item.product.category)}
+      assetBaseUrl={assetBaseUrl}
+      onPress={() => router.push(`/product/${encodeURIComponent(item.product.id)}` as Href)}
+      trailing={<Pressable accessibilityRole="button" accessibilityLabel={`${item.product.name} 찜 해제`} onPress={() => void remove()} style={({ pressed }) => [styles.heartButton, pressed && styles.pressed]}><DecorativeIonicon name="heart" size={20} color={colors.danger} /></Pressable>}
+    />
   );
+}
+
+type ProfileListSpec = {
+  data: readonly unknown[];
+  keyExtractor: (item: unknown) => string;
+  renderItem: (item: unknown) => ReactElement;
+  header: ReactNode;
+  empty: ReactElement;
+};
+
+function listSpec<T>(spec: {
+  data: readonly T[];
+  keyExtractor: (item: T) => string;
+  renderItem: (item: T) => ReactElement;
+  header?: ReactNode;
+  empty: ReactElement;
+}): ProfileListSpec {
+  return {
+    data: spec.data,
+    keyExtractor: spec.keyExtractor as (item: unknown) => string,
+    renderItem: spec.renderItem as (item: unknown) => ReactElement,
+    header: spec.header ?? null,
+    empty: spec.empty,
+  };
+}
+
+/**
+ * Returns the FlatList description for a loaded record-list section, or `null`
+ * when the section is not a list, is still loading, is gated behind a session
+ * state, or failed (those states render through `SectionContent`).
+ */
+function profileListSpec(
+  section: ProfileSection,
+  profileState: ReturnType<typeof useProfileSnapshot>,
+  assetBaseUrl: string | null,
+): ProfileListSpec | null {
+  const snapshot = profileState.snapshot;
+  if (!snapshot || isProfileSessionBlocked(profileState.status)) return null;
+  if (section === "wishlist") {
+    if (profileSectionFailure(snapshot, "wishlist")) return null;
+    const items = snapshot.wishlist ?? [];
+    return listSpec({
+      data: items,
+      keyExtractor: (item) => item.id,
+      renderItem: (item) => <WishlistRow item={item} profileState={profileState} assetBaseUrl={assetBaseUrl} />,
+      header: <SectionLead title={`관심 상품 ${items.length}개`} />,
+      empty: <EmptyState icon="heart-outline" title="찜한 상품이 없어요" body="뽀바에서 관심 상품을 찜하면 여기에 모여요." />,
+    });
+  }
+  if (section === "shipping") {
+    if (profileSectionFailure(snapshot, "shipping")) return null;
+    return listSpec({
+      data: snapshot.shippingRequests ?? [],
+      keyExtractor: (request) => request.id,
+      renderItem: (request) => <ShippingHistoryRow request={request} />,
+      empty: <EmptyState icon="car-outline" title="배송 신청 내역이 없어요" body="신청한 배송의 진행 상태가 여기에 표시돼요." />,
+    });
+  }
+  if (section === "orders") {
+    if (profileSectionFailure(snapshot, "orders")) return null;
+    const orders = snapshot.orders ?? [];
+    return listSpec({
+      data: orders,
+      keyExtractor: (order) => order.id,
+      renderItem: (order) => <OrderRow order={order} catalogProducts={snapshot.catalogProducts} ipNames={snapshot.ipNames} />,
+      header: (
+        <>
+          <OrdersPaidDrawRecovery profileState={profileState} />
+          <SectionLead title={`주문 ${orders.length}건`} description="서버에서 확정한 결제 금액과 주문 상태를 그대로 표시해요." />
+        </>
+      ),
+      empty: <EmptyState icon="receipt-outline" title="구매 내역이 없어요" body="결제가 완료된 주문이 이곳에 표시돼요." />,
+    });
+  }
+  if (section === "points") {
+    const pointBalance = snapshot.pointBalance;
+    const pointHistory = snapshot.pointHistory;
+    if (profileSectionFailure(snapshot, "points") || pointBalance === null || pointHistory === null) return null;
+    return listSpec({
+      data: pointHistory,
+      keyExtractor: (entry) => entry.id,
+      renderItem: (entry) => <PointRow entry={entry} />,
+      header: (
+        <>
+          <View style={styles.pointHero}><Text style={styles.pointCaption}>사용 가능한 포인트</Text><Text style={styles.pointBalance}>{pointBalance.toLocaleString("ko-KR")}P</Text></View>
+          <KoreanPixelTitle variant="compact" style={styles.listHeading}>적립·사용 내역</KoreanPixelTitle>
+        </>
+      ),
+      empty: <EmptyState icon="wallet-outline" title="포인트 내역이 없어요" body="적립하거나 사용한 포인트가 여기에 기록돼요." />,
+    });
+  }
+  return null;
 }
 
 export function StorageHubContent({
@@ -287,32 +427,43 @@ export function StorageHubContent({
   const { fontScale } = useWindowDimensions();
   const largeText = Number.isFinite(fontScale) && fontScale > 1.3;
   const [mode, setMode] = useState<StorageMode>(initialMode);
+  // A failed or partially failed inventory load closes every storage action:
+  // selection, shipping, and point return all need the complete verified list.
+  const inventoryFailure = profileSectionFailure(snapshot, "inventory");
+  const inventory = inventoryFailure ? null : snapshot.inventory;
   const storedDrawItems = useMemo(
-    () => snapshot.inventory.filter(isStoredDrawInventory),
-    [snapshot.inventory],
+    () => inventory?.filter(isStoredDrawInventory) ?? null,
+    [inventory],
   );
   const pointReturnItems = useMemo(
-    () => snapshot.inventory.filter(isPointReturnEligibleInventory),
-    [snapshot.inventory],
+    () => inventory?.filter(isPointReturnEligibleInventory) ?? null,
+    [inventory],
   );
   const exchangeOrShippingItems = useMemo(
-    () => snapshot.inventory.filter(isExchangeOrShippingInventory),
-    [snapshot.inventory],
+    () => inventory?.filter(isExchangeOrShippingInventory) ?? null,
+    [inventory],
   );
 
   return (
     <View style={rootLayout ? styles.storageRootHub : undefined}>
       <View accessibilityRole="tablist" style={styles.storageTabs}>
-        <StorageModeTab label="보관 중" count={storedDrawItems.length} selected={mode === "shipping"} largeText={largeText} onPress={() => setMode("shipping")} />
-        <StorageModeTab label="교환 또는 배송 중인 상품" count={exchangeOrShippingItems.length} wide selected={mode === "exchange-or-shipping"} largeText={largeText} onPress={() => setMode("exchange-or-shipping")} />
-        <StorageModeTab label="포인트 환급" count={pointReturnItems.length} selected={mode === "point-return"} largeText={largeText} onPress={() => setMode("point-return")} />
+        <StorageModeTab label="보관 중" count={storedDrawItems?.length ?? null} selected={mode === "shipping"} largeText={largeText} onPress={() => setMode("shipping")} />
+        <StorageModeTab label="교환 또는 배송 중인 상품" count={exchangeOrShippingItems?.length ?? null} wide selected={mode === "exchange-or-shipping"} largeText={largeText} onPress={() => setMode("exchange-or-shipping")} />
+        <StorageModeTab label="포인트 환급" count={pointReturnItems?.length ?? null} selected={mode === "point-return"} largeText={largeText} onPress={() => setMode("point-return")} />
       </View>
       {!commerceEnabled ? (
         <SeedInlineGuidance style={styles.prelaunchStorageGuidance}>
-          사전오픈 기간에는 보관 상품과 기존 진행 내역만 확인할 수 있어요. 배송·포인트 환급 신청은 정식 오픈 후 제공됩니다.
+          사전오픈 기간에는 보관 상품과 기존 진행 내역만 확인할 수 있어요. 배송·포인트 환급 신청은 정식 오픈 후 제공돼요.
         </SeedInlineGuidance>
       ) : null}
-      {mode === "shipping" ? (
+      {inventoryFailure || !storedDrawItems || !exchangeOrShippingItems || !pointReturnItems ? (
+        <StorageLoadFailure
+          message={inventoryFailure ?? "보관함을 불러오지 못했어요."}
+          profileState={profileState}
+          rootLayout={rootLayout}
+          rootScrollProps={rootScrollProps}
+        />
+      ) : mode === "shipping" ? (
         <Shipping profileState={profileState} items={storedDrawItems} assetBaseUrl={assetBaseUrl} commerceEnabled={commerceEnabled} rootLayout={rootLayout} rootScrollProps={rootScrollProps} />
       ) : mode === "exchange-or-shipping" ? (
         <ExchangeOrShipping profileState={profileState} items={exchangeOrShippingItems} assetBaseUrl={assetBaseUrl} rootLayout={rootLayout} rootScrollProps={rootScrollProps} />
@@ -323,11 +474,36 @@ export function StorageHubContent({
   );
 }
 
-function StorageModeTab({ label, count, selected, largeText, wide = false, onPress }: { label: string; count: number; selected: boolean; largeText: boolean; wide?: boolean; onPress: () => void }) {
+function StorageLoadFailure({
+  message,
+  profileState,
+  rootLayout = false,
+  rootScrollProps,
+}: {
+  message: string;
+  profileState: ReturnType<typeof useProfileSnapshot>;
+  rootLayout?: boolean;
+  rootScrollProps?: Pick<ScrollViewProps, "onScroll" | "scrollEventThrottle">;
+}) {
+  const content = <ProfileSectionErrorState message={message} onRetry={profileState.reload} style={styles.storageLoadFailure} />;
+  if (!rootLayout) return content;
+  return (
+    <ScrollView
+      {...rootScrollProps}
+      style={styles.storageModeBody}
+      contentContainerStyle={styles.storageScrollContent}
+      refreshControl={<RefreshControl refreshing={profileState.refreshing} onRefresh={profileState.reload} tintColor={colors.ink} />}
+    >
+      {content}
+    </ScrollView>
+  );
+}
+
+function StorageModeTab({ label, count, selected, largeText, wide = false, onPress }: { label: string; count: number | null; selected: boolean; largeText: boolean; wide?: boolean; onPress: () => void }) {
   return (
     <Pressable
       accessibilityRole="tab"
-      accessibilityLabel={`${label}, ${count}개`}
+      accessibilityLabel={count === null ? `${label}, 불러오지 못했어요` : `${label}, ${count}개`}
       accessibilityState={{ selected }}
       onPress={onPress}
       style={({ pressed }) => [styles.storageTab, wide && styles.storageTabWide, largeText && styles.storageTabLargeText, pressed && styles.pressed]}
@@ -411,6 +587,10 @@ function Shipping({
   const submit = async () => {
     if (!selected.length) {
       Alert.alert("배송할 상품을 선택해 주세요");
+      return;
+    }
+    if (snapshot.sectionErrors.address) {
+      Alert.alert("기본 배송지를 확인하지 못했어요", `${snapshot.sectionErrors.address} 다시 불러온 뒤 신청해 주세요.`);
       return;
     }
     if (!snapshot.defaultAddress) {
@@ -668,28 +848,27 @@ function ExchangeOrShipping({
   );
 }
 
+/** Failure state for shipping history; loaded lists render through `profileListSpec`. */
 function ShippingHistory({
   profileState,
 }: {
   profileState: ReturnType<typeof useProfileSnapshot>;
 }) {
-  const snapshot = profileState.snapshot!;
+  const failure = profileSectionFailure(profileState.snapshot!, "shipping");
+  return failure ? <ProfileSectionErrorState message={failure} onRetry={profileState.reload} /> : null;
+}
+
+function ShippingHistoryRow({ request }: { request: AccountShippingRequest }) {
+  const compactDestination = compactShippingDestination(request.destination.addressLine1);
   return (
-    <>
-      {snapshot.shippingRequests.length ? snapshot.shippingRequests.map((request) => {
-        const compactDestination = compactShippingDestination(request.destination.addressLine1);
-        return (
-          <Pressable key={request.id} accessibilityRole="button" accessibilityLabel={`${formatDate(request.requestedAt)} 배송 신청 상세`} onPress={() => router.push(`/profile/shipping/${encodeURIComponent(request.id)}` as Href)} style={({ pressed }) => [styles.historyCard, pressed && styles.pressed]}>
-            <View style={styles.historyTop}>
-              <Text style={styles.historyTitle}>배송 {request.inventoryUnitIds.length}개</Text>
-              <Text style={[styles.statusBadge, shippingStatusStyle(request.status)]}>{shippingStatus(request.status)}</Text>
-            </View>
-            <Text style={styles.historyMeta}>{formatDate(request.requestedAt)} 신청 · {request.destination.recipientMasked}</Text>
-            {compactDestination ? <Text style={styles.historyMeta}>{compactDestination}</Text> : null}
-          </Pressable>
-        );
-      }) : <EmptyState icon="car-outline" title="배송 신청 내역이 없어요" body="신청한 배송의 진행 상태가 여기에 표시돼요." />}
-    </>
+    <Pressable accessibilityRole="button" accessibilityLabel={`${formatDate(request.requestedAt)} 배송 신청 상세`} onPress={() => router.push(`/profile/shipping/${encodeURIComponent(request.id)}` as Href)} style={({ pressed }) => [styles.historyCard, pressed && styles.pressed]}>
+      <View style={styles.historyTop}>
+        <Text style={styles.historyTitle}>배송 {request.inventoryUnitIds.length}개</Text>
+        <Text style={[styles.statusBadge, shippingStatusStyle(request.status)]}>{shippingStatus(request.status)}</Text>
+      </View>
+      <Text style={styles.historyMeta}>{formatDate(request.requestedAt)} 신청 · {request.destination.recipientMasked}</Text>
+      {compactDestination ? <Text style={styles.historyMeta}>{compactDestination}</Text> : null}
+    </Pressable>
   );
 }
 
@@ -837,58 +1016,78 @@ function PointReturn({
   );
 }
 
+/** Failure state for orders; loaded lists render through `profileListSpec`. */
 function Orders({ profileState }: { profileState: ReturnType<typeof useProfileSnapshot> }) {
-  const snapshot = profileState.snapshot!;
-  const orders = snapshot.orders;
+  const failure = profileSectionFailure(profileState.snapshot!, "orders");
   return (
     <>
-      {!snapshot.isExample && profileState.accessToken ? (
-        <PaidDrawRecovery
-          apiBaseUrl={profileState.runtime.apiBaseUrl}
-          actorId={snapshot.profile.id}
-          refreshKey={snapshot.fetchedAt}
-          catalogProducts={snapshot.catalogProducts}
-          ipNames={snapshot.ipNames}
-        />
-      ) : null}
-      <SectionLead title={`주문 ${orders.length}건`} description="서버에서 확정한 결제 금액과 주문 상태를 그대로 표시합니다." />
-      {orders.length ? orders.map((order) => (
-        <Pressable key={order.id} accessibilityRole="button" accessibilityLabel={`${formatDate(order.createdAt)} 주문 상세`} onPress={() => router.push(`/profile/orders/${encodeURIComponent(order.id)}` as Href)} style={({ pressed }) => [styles.historyCard, pressed && styles.pressed]}>
-          <View style={styles.historyTop}>
-            <Text style={styles.historyTitle}>{formatDate(order.createdAt)} {order.orderKind === "SHIPPING_FEE" ? "배송비" : "주문"}</Text>
-            <Text style={[styles.statusBadge, orderStatusStyle(order.status)]}>{orderStatus(order.status)}</Text>
-          </View>
-          {order.orderKind === "SHIPPING_FEE" ? (
-            <Text style={styles.orderLine}>보관함 배송 신청 배송비</Text>
-          ) : null}
-          {order.lines.map((line) => (
-            <OrderProductLine
-              key={`${order.id}-${line.productId}`}
-              line={line}
-              catalogProducts={snapshot.catalogProducts}
-              ipNames={snapshot.ipNames}
-            />
-          ))}
-          <View style={styles.totalRow}><Text style={styles.totalLabel}>결제 금액</Text><Text style={styles.totalValue}>{order.total.toLocaleString("ko-KR")}원</Text></View>
-        </Pressable>
-      )) : <EmptyState icon="receipt-outline" title="구매 내역이 없어요" body="결제가 완료된 주문이 이곳에 표시돼요." />}
+      <OrdersPaidDrawRecovery profileState={profileState} />
+      {failure ? <ProfileSectionErrorState message={failure} onRetry={profileState.reload} /> : null}
     </>
   );
 }
 
+function OrdersPaidDrawRecovery({ profileState }: { profileState: ReturnType<typeof useProfileSnapshot> }) {
+  const snapshot = profileState.snapshot!;
+  return !snapshot.isExample && profileState.accessToken ? (
+    <PaidDrawRecovery
+      apiBaseUrl={profileState.runtime.apiBaseUrl}
+      actorId={snapshot.profile.id}
+      refreshKey={snapshot.fetchedAt}
+      catalogProducts={snapshot.catalogProducts}
+      ipNames={snapshot.ipNames}
+    />
+  ) : null;
+}
+
+function OrderRow({
+  order,
+  catalogProducts,
+  ipNames,
+}: {
+  order: AccountOrder;
+  catalogProducts: CatalogProduct[];
+  ipNames: Record<string, string>;
+}) {
+  return (
+    <Pressable accessibilityRole="button" accessibilityLabel={`${formatDate(order.createdAt)} 주문 상세`} onPress={() => router.push(`/profile/orders/${encodeURIComponent(order.id)}` as Href)} style={({ pressed }) => [styles.historyCard, pressed && styles.pressed]}>
+      <View style={styles.historyTop}>
+        <Text style={styles.historyTitle}>{formatDate(order.createdAt)} {order.orderKind === "SHIPPING_FEE" ? "배송비" : "주문"}</Text>
+        <Text style={[styles.statusBadge, orderStatusStyle(order.status)]}>{orderStatus(order.status)}</Text>
+      </View>
+      {order.orderKind === "SHIPPING_FEE" ? (
+        <Text style={styles.orderLine}>보관함 배송 신청 배송비</Text>
+      ) : null}
+      {order.lines.map((line) => (
+        <OrderProductLine
+          key={`${order.id}-${line.productId}`}
+          line={line}
+          catalogProducts={catalogProducts}
+          ipNames={ipNames}
+        />
+      ))}
+      <View style={styles.totalRow}><Text style={styles.totalLabel}>결제 금액</Text><Text variant="subtitle" style={styles.totalValue}>{order.total.toLocaleString("ko-KR")}원</Text></View>
+    </Pressable>
+  );
+}
+
+/** Failure state for points; loaded ledgers render through `profileListSpec`. */
 function Points({ profileState }: { profileState: ReturnType<typeof useProfileSnapshot> }) {
   const snapshot = profileState.snapshot!;
+  const failure = profileSectionFailure(snapshot, "points");
+  // A failed points request never renders as a 0P balance or an empty ledger.
+  if (failure || snapshot.pointBalance === null || snapshot.pointHistory === null) {
+    return <ProfileSectionErrorState message={failure ?? "포인트 정보를 불러오지 못했어요."} onRetry={profileState.reload} />;
+  }
+  return null;
+}
+
+function PointRow({ entry }: { entry: PointLedgerEntry }) {
   return (
-    <>
-      <View style={styles.pointHero}><Text style={styles.pointCaption}>사용 가능한 포인트</Text><Text style={styles.pointBalance}>{snapshot.pointBalance.toLocaleString("ko-KR")}P</Text></View>
-      <Text style={styles.listHeading}>적립·사용 내역</Text>
-      {snapshot.pointHistory.length ? snapshot.pointHistory.map((entry) => (
-        <View key={entry.id} style={styles.pointRow}>
-          <View><Text style={styles.pointReason}>{entry.reason}</Text><Text style={styles.historyMeta}>{formatDate(entry.createdAt)}</Text></View>
-          <Text style={[styles.pointAmount, entry.amount > 0 ? styles.pointPlus : styles.pointMinus]}>{entry.amount > 0 ? "+" : ""}{entry.amount.toLocaleString("ko-KR")}P</Text>
-        </View>
-      )) : <EmptyState icon="wallet-outline" title="포인트 내역이 없어요" body="적립하거나 사용한 포인트가 여기에 기록돼요." />}
-    </>
+    <View style={styles.pointRow}>
+      <View><Text style={styles.pointReason}>{entry.reason}</Text><Text style={styles.historyMeta}>{formatDate(entry.createdAt)}</Text></View>
+      <Text style={[styles.pointAmount, entry.amount > 0 ? styles.pointPlus : styles.pointMinus]}>{entry.amount > 0 ? "+" : ""}{entry.amount.toLocaleString("ko-KR")}P</Text>
+    </View>
   );
 }
 
@@ -911,13 +1110,13 @@ function RequestRoom({ profileState }: { profileState: ReturnType<typeof useProf
   };
   return (
     <>
-      <View style={styles.requestLead}><Text style={styles.requestLeadTitle}>찾는 상품이 아직 없나요?</Text><Text style={styles.requestLeadBody}>작품·카테고리·원하는 상품을 등록하고 다른 수집가의 관심을 모아보세요.</Text><PrimaryButton label="새 신청 작성" onPress={() => router.push("/profile/requests/new" as Href)} /></View>
-      <Text style={styles.listHeading}>함께 기다리는 신청</Text>
-      {snapshot.sectionErrors.wanted ? <SeedInlineGuidance style={styles.sectionErrorGuidance}>{snapshot.sectionErrors.wanted} 아래로 당겨 다시 시도해 주세요.</SeedInlineGuidance> : null}
+      <View style={styles.requestLead}><SeedActionButton label="새 신청 작성" onPress={() => router.push("/profile/requests/new" as Href)} /><SeedInlineGuidance style={styles.requestLeadGuidance}>찾는 상품이 없다면 작품과 원하는 상품을 등록해 보세요.</SeedInlineGuidance></View>
+      <KoreanPixelTitle variant="compact" style={styles.listHeading}>함께 기다리는 신청</KoreanPixelTitle>
+      {snapshot.sectionErrors.wanted ? <ProfileSectionErrorState message={snapshot.sectionErrors.wanted} onRetry={profileState.reload} style={styles.sectionErrorState} /> : null}
       {snapshot.wantedRequests.map((request) => (
         <View key={request.id} style={styles.requestItem}>
           <Pressable accessibilityRole="button" accessibilityLabel={`${request.desiredItem} 신청 상세`} onPress={() => router.push(`/profile/requests/${encodeURIComponent(request.id)}` as Href)} style={({ pressed }) => [pressed && styles.pressed]}>
-            {request.mediaUrl ? <Image source={{ uri: request.mediaUrl }} resizeMode="cover" style={styles.requestPhoto} /> : null}
+            {request.mediaUrl ? <Image accessible={false} source={{ uri: request.mediaUrl }} resizeMode="cover" style={styles.requestPhoto} /> : null}
             <View style={styles.historyTop}><Text style={styles.requestAuthor}>@{request.authorNickname}</Text><Text style={styles.categoryBadge}>{categoryLabel(request.category)}</Text></View>
             <Text style={styles.requestItemTitle}>{request.desiredItem}</Text>
             <Text style={styles.requestIp}>{request.ipNameKo}</Text>
@@ -934,25 +1133,28 @@ function Support({ profileState }: { profileState: ReturnType<typeof useProfileS
   const { commerceEnabled } = useCommerceCapability();
   const snapshot = profileState.snapshot!;
   const blockedStatus = isProfileSessionBlocked(profileState.status) ? profileState.status : null;
+  const inquiriesFailure = profileSectionFailure(snapshot, "inquiries");
+  const inquiries = snapshot.inquiries;
   return (
     <>
       <SectionLead title="무엇을 도와드릴까요?" description="신청방은 상품 요청 공간이고, 고객센터는 공지·이용 안내·문의 처리를 담당해요." />
       <View style={styles.supportContact}><DecorativeIonicon name="chatbubble-ellipses-outline" size={22} color={colors.greenInk} /><View><Text style={styles.supportTitle}>문의 안내</Text><Text style={styles.supportBody}>문의는 1:1 문의에서 접수할 수 있어요.</Text></View></View>
-      <Text style={styles.listHeading}>자주 묻는 질문</Text>
+      <KoreanPixelTitle variant="compact" style={styles.listHeading}>자주 묻는 질문</KoreanPixelTitle>
       <Faq title="보관 상품은 언제 배송할 수 있나요?" body={commerceEnabled ? "보관함에 보관 중인 상품을 선택해 배송 신청할 수 있어요." : "사전오픈 기간에는 배송 신청을 이용할 수 없어요."} />
       {commerceEnabled ? <Faq title="교환 중인 상품도 배송할 수 있나요?" body="교환 등록이나 제안에 사용 중인 상품은 교환을 취소하거나 종료한 뒤 배송할 수 있어요." /> : null}
-      <Text style={styles.listHeading}>공지사항</Text>
-      {snapshot.sectionErrors.notices ? <SeedInlineGuidance style={styles.sectionErrorGuidance}>{snapshot.sectionErrors.notices} 아래로 당겨 다시 시도해 주세요.</SeedInlineGuidance> : null}
+      <KoreanPixelTitle variant="compact" style={styles.listHeading}>공지사항</KoreanPixelTitle>
+      {snapshot.sectionErrors.notices ? <ProfileSectionErrorState message={snapshot.sectionErrors.notices} onRetry={profileState.reload} style={styles.sectionErrorState} /> : null}
       {snapshot.notices.map((notice) => <Pressable key={notice.id} accessibilityRole="button" accessibilityLabel={`${notice.title} 공지 상세`} onPress={() => router.push(`/profile/notices/${encodeURIComponent(notice.id)}` as Href)} style={({ pressed }) => [styles.noticeCard, pressed && styles.pressed]}><Text style={styles.noticeTitle}>{notice.isPinned ? "[중요] " : ""}{notice.title}</Text><Text numberOfLines={3} style={styles.noticeBody}>{notice.content}</Text><Text style={styles.historyMeta}>{formatDate(notice.publishedAt ?? notice.createdAt)}</Text></Pressable>)}
-      <Text style={styles.listHeading}>내 문의</Text>
-      {snapshot.sectionErrors.inquiries ? <SeedInlineGuidance style={styles.sectionErrorGuidance}>{snapshot.sectionErrors.inquiries} 아래로 당겨 다시 시도해 주세요.</SeedInlineGuidance> : null}
+      <KoreanPixelTitle variant="compact" style={styles.listHeading}>내 문의</KoreanPixelTitle>
       {blockedStatus ? (
         <ProfileSessionGate
           status={blockedStatus}
           returnTo="/profile/support"
           guestBody="로그인하면 내 문의 내역을 확인하고 새 문의를 남길 수 있어요."
         />
-      ) : snapshot.inquiries.length ? snapshot.inquiries.map((inquiry) => <Pressable key={inquiry.id} accessibilityRole="button" accessibilityLabel={`${inquiry.title} 문의 상세`} onPress={() => router.push(`/profile/inquiries/${encodeURIComponent(inquiry.id)}` as Href)} style={({ pressed }) => [styles.historyCard, pressed && styles.pressed]}><View style={styles.historyTop}><Text style={styles.historyTitle}>{inquiry.title}</Text><Text style={styles.statusBadge}>{inquiryStatus(inquiry.status)}</Text></View><Text style={styles.historyMeta}>{formatDate(inquiry.updatedAt)} 업데이트</Text></Pressable>) : <EmptyState icon="chatbubble-ellipses-outline" title="문의 내역이 없어요" body="도움이 필요하면 1:1 문의를 남길 수 있어요." />}
+      ) : inquiriesFailure || !inquiries ? (
+        <ProfileSectionErrorState message={inquiriesFailure ?? "문의 내역을 불러오지 못했어요."} onRetry={profileState.reload} />
+      ) : inquiries.length ? inquiries.map((inquiry) => <Pressable key={inquiry.id} accessibilityRole="button" accessibilityLabel={`${inquiry.title} 문의 상세`} onPress={() => router.push(`/profile/inquiries/${encodeURIComponent(inquiry.id)}` as Href)} style={({ pressed }) => [styles.historyCard, pressed && styles.pressed]}><View style={styles.historyTop}><Text style={styles.historyTitle}>{inquiry.title}</Text><Text style={styles.statusBadge}>{inquiryStatus(inquiry.status)}</Text></View><Text style={styles.historyMeta}>{formatDate(inquiry.updatedAt)} 업데이트</Text></Pressable>) : <EmptyState icon="chatbubble-ellipses-outline" title="문의 내역이 없어요" body="도움이 필요하면 1:1 문의를 남길 수 있어요." />}
       {!blockedStatus ? <PrimaryButton label="1:1 문의하기" onPress={() => router.push("/profile/inquiries/new" as Href)} /> : null}
       <View style={styles.publicInfoMenu}><MemberLink href="/profile/business" label="사업자 정보" caption="상호 · 대표자 · 사업자등록정보" icon="business-outline" last /></View>
     </>
@@ -962,7 +1164,7 @@ function Support({ profileState }: { profileState: ReturnType<typeof useProfileS
 function MemberInfoMenu() {
   return (
     <>
-      <SectionLead title="회원정보를 안전하게 관리해요" description="개인정보와 배송지는 필요한 범위에서만 관리합니다." />
+      <SectionLead title="회원정보를 안전하게 관리해요" description="개인정보와 배송지는 필요한 범위에서만 관리해요." />
       <View style={styles.menuCard}>
         <MemberLink section="personal" label="개인정보" caption="닉네임 · 휴대폰 · 이메일 · 생년월일" icon="id-card-outline" />
         <MemberLink section="address" label="기본 배송지" caption="받는 사람 · 연락처 · 주소" icon="location-outline" />
@@ -976,7 +1178,7 @@ function MemberInfoMenu() {
 function SettingsMenu() {
   return (
     <>
-      <SectionLead title="앱과 계정을 설정해요" description="주문·배송 필수 알림과 선택 알림을 분리해서 관리합니다." />
+      <SectionLead title="앱과 계정을 설정해요" description="주문·배송 필수 알림과 선택 알림을 분리해서 관리해요." />
       <View style={styles.menuCard}>
         <MemberLink section="notifications" label="알림 수신설정" caption="주문 · 교환 · 신청방 · 마케팅" icon="notifications-outline" />
         <MemberLink section="personal" label="계정정보" caption="회원정보와 연락처" icon="person-circle-outline" />
@@ -1018,8 +1220,8 @@ function OrderProductLine({ line, catalogProducts, ipNames }: { line: components
 }
 
 function ProductThumb({ product, assetBaseUrl, catalogFrameCategory }: { product: { name: string; imageUrl: string | null; version?: number }; assetBaseUrl: string | null; catalogFrameCategory?: CatalogProduct["category"] }) {
-  const uri = resolveCatalogImageUrl(product.imageUrl, assetBaseUrl, product.version ?? 1);
-  const thumb = <View style={styles.thumb}>{uri ? <Image source={{ uri }} resizeMode={catalogFrameCategory === "kuji" ? "contain" : "cover"} style={styles.thumbImage} /> : <DecorativeIonicon name="image-outline" size={24} color={colors.muted} />}</View>;
+  const uri = resolveCatalogImageUrl(product.imageUrl, assetBaseUrl, product.version ?? 1, __DEV__);
+  const thumb = <View style={styles.thumb}>{uri ? <Image accessible={false} source={{ uri }} resizeMode={catalogFrameCategory === "kuji" ? "contain" : "cover"} style={styles.thumbImage} /> : <DecorativeIonicon name="image-outline" size={24} color={colors.muted} />}</View>;
   return catalogFrameCategory ? <GachaMachineFrame category={catalogFrameCategory} clean><KujiProductFrame category={catalogFrameCategory} clean>{thumb}</KujiProductFrame></GachaMachineFrame> : thumb;
 }
 
@@ -1095,7 +1297,7 @@ export function DetailHeader({ title }: { title: string }) {
 }
 
 function SectionLead({ title, description }: { title: string; description?: string }) {
-  return <View style={styles.sectionLead}><Text style={styles.sectionLeadTitle}>{title}</Text>{description ? <BalancedAppText style={styles.sectionLeadBody}>{description}</BalancedAppText> : null}</View>;
+  return <View style={styles.sectionLead}><KoreanPixelTitle variant="section" numberOfLines={0}>{title}</KoreanPixelTitle>{description ? <BalancedAppText style={styles.sectionLeadBody}>{description}</BalancedAppText> : null}</View>;
 }
 
 function FieldLabel({ label, caption }: { label: string; caption: string }) {
@@ -1191,9 +1393,9 @@ const styles = StyleSheet.create({
   errorBox: { marginTop: seed.spacing.x5, borderRadius: seed.radius.r4, padding: seed.spacing.x5, backgroundColor: seed.color.background.criticalWeak },
   errorText: { color: colors.ink, fontSize: 13, lineHeight: 20, textAlign: "center" },
   exampleGuidance: { marginBottom: seed.spacing.x4 },
-  sectionErrorGuidance: { marginBottom: seed.spacing.x3 },
+  sectionErrorState: { marginBottom: seed.spacing.x3 },
+  storageLoadFailure: { marginTop: seed.spacing.x4 },
   sectionLead: { marginBottom: 18 },
-  sectionLeadTitle: { color: seed.color.foreground.neutral, ...seed.typography.sectionTitle },
   sectionLeadBody: { color: colors.muted, ...seed.typography.bodyCompact, marginTop: seed.spacing.x2 },
   storageRootHub: { flex: 1, minHeight: 0 },
   prelaunchStorageGuidance: { marginTop: seed.spacing.x3, marginBottom: seed.spacing.x1 },
@@ -1241,7 +1443,7 @@ const styles = StyleSheet.create({
   statusBadgeProgress: { color: colors.greenInk, backgroundColor: seed.color.background.brandWeak },
   statusBadgeSuccess: { color: colors.greenInk, backgroundColor: seed.color.background.brandWeak },
   statusBadgeCritical: { color: seed.color.foreground.critical, backgroundColor: seed.color.background.criticalWeak },
-  statusBadgeRefund: { color: "#4C5FA8", backgroundColor: "#EEF0FA" },
+  statusBadgeRefund: { color: seed.color.info.ink, backgroundColor: seed.color.info.weak },
   pointReturnSummary: { flexDirection: "row", alignItems: "flex-end", justifyContent: "space-between", gap: seed.spacing.x3, borderRadius: seed.radius.r4, borderWidth: 1, borderColor: seed.color.stroke.neutral, padding: seed.spacing.x4, marginBottom: seed.spacing.x3_5, backgroundColor: seed.color.layer.default },
   pointReturnEstimate: { color: colors.greenInk, fontSize: 11, lineHeight: 17, fontWeight: "800", marginTop: seed.spacing.x1 },
   storageExpiryPolicy: { color: colors.muted, ...seed.typography.finePrint, fontWeight: "700", marginTop: seed.spacing.x1_5 },
@@ -1268,7 +1470,7 @@ const styles = StyleSheet.create({
   shippingSubmitLabelDisabled: { color: colors.muted },
   compactStorageEmpty: { flex: 1, minHeight: 240, alignItems: "center", justifyContent: "center", paddingHorizontal: seed.spacing.x6 },
   compactStorageEmptyText: { color: colors.muted, fontSize: 13, lineHeight: 20, textAlign: "center" },
-  listHeading: { color: colors.ink, fontSize: 16, fontWeight: "900", marginTop: 25, marginBottom: 11 },
+  listHeading: { marginTop: seed.spacing.x6, marginBottom: seed.spacing.x2_5 },
   selectRow: { minHeight: 88, flexDirection: "row", alignItems: "center", ...catalogProductCardSurface, borderWidth: 1, borderColor: seed.color.stroke.neutral, padding: seed.spacing.x1_5, marginBottom: seed.spacing.x2_5 },
   selectRowActive: { borderWidth: 2, borderColor: colors.greenInk },
   selectProductLink: { minHeight: 76, flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", gap: 11, padding: 4 },
@@ -1283,7 +1485,7 @@ const styles = StyleSheet.create({
   orderLine: { color: colors.ink, ...seed.typography.catalogTitle, fontWeight: "800", marginTop: 2 },
   totalRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.line, marginTop: 12, paddingTop: 12 },
   totalLabel: { color: colors.muted, fontSize: 11 },
-  totalValue: { color: colors.ink, fontSize: 17, fontWeight: "900" },
+  totalValue: { color: colors.ink },
   pointHero: { borderRadius: seed.radius.r5, borderWidth: 1, borderColor: seed.color.stroke.neutral, padding: seed.spacing.x6, backgroundColor: seed.color.background.brandWeak },
   pointCaption: { color: colors.greenInk, fontSize: 11, fontWeight: "800" },
   pointBalance: { color: colors.ink, fontSize: 34, lineHeight: 42, fontWeight: "900", marginTop: 5 },
@@ -1292,9 +1494,8 @@ const styles = StyleSheet.create({
   pointAmount: { fontSize: 14, fontWeight: "900" },
   pointPlus: { color: colors.greenInk },
   pointMinus: { color: colors.ink },
-  requestLead: { borderRadius: seed.radius.r5, padding: seed.spacing.x5, backgroundColor: colors.ink },
-  requestLeadTitle: { color: colors.white, fontSize: 20, fontWeight: "900" },
-  requestLeadBody: { color: "#B8C0B9", fontSize: 12, lineHeight: 19, marginTop: 7 },
+  requestLead: { gap: seed.spacing.x2 },
+  requestLeadGuidance: { textAlign: "center" },
   requestItem: { borderRadius: seed.radius.r4, borderWidth: 1, borderColor: colors.line, padding: seed.spacing.x4, marginBottom: seed.spacing.x3, backgroundColor: colors.surface },
   requestPhoto: { width: "100%", aspectRatio: 16 / 9, borderRadius: seed.radius.r3, marginBottom: seed.spacing.x3, backgroundColor: seed.color.layer.basement },
   requestAuthor: { color: colors.muted, fontSize: 11, fontWeight: "800" },
@@ -1319,7 +1520,7 @@ const styles = StyleSheet.create({
   menuCard: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: seed.color.stroke.neutral, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: seed.color.stroke.neutral, backgroundColor: seed.color.layer.default },
   memberRow: { minHeight: 76, flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 14 },
   memberRowBorder: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.line },
-  memberIcon: { width: 40, height: 40, borderRadius: seed.radius.r3, alignItems: "center", justifyContent: "center", backgroundColor: "#EEF1EC" },
+  memberIcon: { width: 40, height: 40, borderRadius: seed.radius.r3, alignItems: "center", justifyContent: "center", backgroundColor: seed.color.background.neutralWeak },
   memberText: { flex: 1, minWidth: 0 },
   memberLabel: { color: colors.ink, fontSize: 14, fontWeight: "900" },
   memberCaption: { color: colors.muted, ...seed.typography.finePrint, marginTop: seed.spacing.x1 },

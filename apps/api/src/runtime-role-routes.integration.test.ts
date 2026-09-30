@@ -430,7 +430,7 @@ test(
         "idempotency-key": `runtime-foreign-consume-${randomUUID()}`,
       },
     });
-    assert.equal(otherConsume.statusCode, 403, otherConsume.body);
+    assert.equal(otherConsume.statusCode, 404, otherConsume.body);
 
     const gachaConsumeKey = `runtime-gacha-consume-${randomUUID()}`;
     const consumeGacha = () => app.inject({

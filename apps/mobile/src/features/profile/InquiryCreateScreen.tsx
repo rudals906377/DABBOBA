@@ -39,7 +39,7 @@ const CATEGORY_OPTIONS: ReadonlyArray<{ value: InquiryCategory; label: string }>
 
 export function InquiryCreateScreen() {
   const router = useRouter();
-  const profileState = useProfileSnapshot();
+  const profileState = useProfileSnapshot("account");
   const hasFocusedOnce = useRef(false);
   const [category, setCategory] = useState<InquiryCategory>("ORDER");
   const [title, setTitle] = useState("");
@@ -96,7 +96,7 @@ export function InquiryCreateScreen() {
         setError("");
         return;
       }
-      setError(cause instanceof Error ? cause.message : "문의를 접수하지 못했습니다.");
+      setError(cause instanceof Error ? cause.message : "문의를 접수하지 못했어요.");
     } finally {
       setSubmitting(false);
     }

@@ -1,6 +1,6 @@
 import { randomUUID } from "expo-crypto";
 import type { SQLiteDatabase } from "expo-sqlite";
-import { errorMessage } from "@dabboba/api-client";
+import { errorMessage, requestTimeoutSignal } from "@dabboba/api-client";
 import type { components } from "@dabboba/contracts";
 import {
   attachOrderToGachaCheckoutIntent,
@@ -13,6 +13,12 @@ import {
   type GachaCheckoutOrderIntent,
   type GachaCheckoutOrderPayload,
 } from "@/features/checkout/gacha-checkout-intent";
+import {
+  interpretPaymentAbandonResponse,
+  paymentAbandonIdempotencyKey,
+  type PaymentAbandonOutcome,
+  type PaymentAbandonResponseBody,
+} from "@/features/checkout/payment-abandon";
 import { createMobileDabbobaClient as createDabbobaClient } from "@/lib/mobile-api-client";
 
 export type CheckoutOrder = components["schemas"]["Order"];
@@ -51,7 +57,7 @@ export async function fetchCheckoutActorId(
   const result = await client.GET("/v1/account/profile");
   if (!result.data) {
     throw new CheckoutOrderApiError(
-      errorMessage(result.error, "로그인 계정을 확인하지 못했습니다."),
+      errorMessage(result.error, "로그인 계정을 확인하지 못했어요."),
       result.response.status,
       apiErrorCode(result.error),
     );
@@ -68,7 +74,7 @@ export async function fetchCheckoutPointBalance(
     params: { query: { limit: 1 } },
   });
   if (!result.data) {
-    throw new Error(errorMessage(result.error, "포인트 정보를 불러오지 못했습니다."));
+    throw new Error(errorMessage(result.error, "포인트 정보를 불러오지 못했어요."));
   }
   return Math.max(0, result.data.balance);
 }
@@ -92,7 +98,7 @@ export async function createGachaCheckoutOrder(
   });
   if (!result.data) {
     throw new CheckoutOrderApiError(
-      errorMessage(result.error, "가챠 주문을 접수하지 못했습니다."),
+      errorMessage(result.error, "가챠 주문을 접수하지 못했어요."),
       result.response.status,
       apiErrorCode(result.error),
     );
@@ -111,7 +117,7 @@ export async function fetchCheckoutOrder(
   });
   if (!result.data) {
     throw new CheckoutOrderApiError(
-      errorMessage(result.error, "이전 가챠 주문 상태를 확인하지 못했습니다."),
+      errorMessage(result.error, "이전 가챠 주문 상태를 확인하지 못했어요."),
       result.response.status,
       apiErrorCode(result.error),
     );
@@ -130,7 +136,7 @@ export async function fetchPaidKujiDrawRecovery(
   });
   if (!result.data) {
     throw new CheckoutOrderApiError(
-      errorMessage(result.error, "결제한 쿠지 뽑기방을 확인하지 못했습니다."),
+      errorMessage(result.error, "결제한 쿠지 뽑기방을 확인하지 못했어요."),
       result.response.status,
       apiErrorCode(result.error),
     );
@@ -147,6 +153,9 @@ export async function confirmPortOnePayment(
     `${apiBaseUrl.replace(/\/$/, "")}/v1/payments/${encodeURIComponent(paymentId)}/confirm`,
     {
       method: "POST",
+      // Explicit deadline: a hung PG round trip must surface as a retryable
+      // network failure instead of blocking checkout recovery forever.
+      signal: requestTimeoutSignal(),
       headers: {
         authorization: `Bearer ${accessToken}`,
         "content-type": "application/json",
@@ -167,7 +176,7 @@ export async function confirmPortOnePayment(
     throw new CheckoutOrderApiError(
       typeof body?.error?.message === "string"
         ? body.error.message
-        : "결제 승인 상태를 확인하지 못했습니다.",
+        : "결제 승인 상태를 확인하지 못했어요.",
       response.status,
       typeof body?.error?.code === "string" ? body.error.code : null,
     );
@@ -178,7 +187,7 @@ export async function confirmPortOnePayment(
     || typeof body.providerStatus !== "string"
     || typeof body.outcome !== "string"
   ) {
-    throw new CheckoutOrderApiError("결제 승인 응답 형식을 확인하지 못했습니다.", 502);
+    throw new CheckoutOrderApiError("결제 승인 응답 형식을 확인하지 못했어요.", 502);
   }
   return {
     accepted: true,
@@ -187,6 +196,34 @@ export async function confirmPortOnePayment(
     providerStatus: body.providerStatus,
     outcome: body.outcome,
   };
+}
+
+/**
+ * Abandons the owner's pending PortOne payment after the customer closed the
+ * PG window. 200 cancels the order; 409 means payment evidence exists and the
+ * caller must confirm instead. The idempotency key is stable per paymentId.
+ */
+export async function abandonPortOnePayment(
+  apiBaseUrl: string,
+  accessToken: string,
+  paymentId: string,
+): Promise<PaymentAbandonOutcome> {
+  const response = await fetch(
+    `${apiBaseUrl.replace(/\/$/, "")}/v1/payments/${encodeURIComponent(paymentId)}/abandon`,
+    {
+      method: "POST",
+      signal: requestTimeoutSignal(),
+      headers: {
+        authorization: `Bearer ${accessToken}`,
+        "content-type": "application/json",
+        "idempotency-key": paymentAbandonIdempotencyKey(paymentId),
+        "x-request-id": randomUUID(),
+      },
+      body: "{}",
+    },
+  );
+  const body = await response.json().catch(() => null) as PaymentAbandonResponseBody | null;
+  return interpretPaymentAbandonResponse(response.status, body, paymentId);
 }
 
 export async function claimPortOnePaymentAttempt(
@@ -198,6 +235,7 @@ export async function claimPortOnePaymentAttempt(
     `${apiBaseUrl.replace(/\/$/, "")}/v1/payments/${encodeURIComponent(paymentId)}/attempt`,
     {
       method: "POST",
+      signal: requestTimeoutSignal(),
       headers: {
         authorization: `Bearer ${accessToken}`,
         "content-type": "application/json",
@@ -212,14 +250,14 @@ export async function claimPortOnePaymentAttempt(
   } | null;
   if (!response.ok || !body || body.accepted !== true) {
     throw new CheckoutOrderApiError(
-      typeof body?.error?.message === "string" ? body.error.message : "결제 시도를 확인하지 못했습니다.",
+      typeof body?.error?.message === "string" ? body.error.message : "결제 시도를 확인하지 못했어요.",
       response.status,
       typeof body?.error?.code === "string" ? body.error.code : null,
     );
   }
   if (typeof body.paymentId !== "string" || typeof body.orderId !== "string"
     || typeof body.startedAt !== "string" || !Number.isFinite(Date.parse(body.startedAt))) {
-    throw new CheckoutOrderApiError("결제 시도 응답 형식을 확인하지 못했습니다.", 502);
+    throw new CheckoutOrderApiError("결제 시도 응답 형식을 확인하지 못했어요.", 502);
   }
   return { paymentId: body.paymentId, orderId: body.orderId, startedAt: body.startedAt };
 }
@@ -252,7 +290,7 @@ export async function createKujiCheckoutOrder(
   });
   if (!result.data) {
     throw new CheckoutOrderApiError(
-      errorMessage(result.error, "쿠지 주문을 접수하지 못했습니다."),
+      errorMessage(result.error, "쿠지 주문을 접수하지 못했어요."),
       result.response.status,
     );
   }
@@ -275,7 +313,7 @@ export async function claimPendingGachaCheckoutOrderIntent(
     );
     const existing = row ? parseGachaCheckoutOrderIntent(row.preference_value) : null;
     if (row && !existing) {
-      throw new Error("저장된 가챠 주문 요청을 안전하게 확인할 수 없습니다.");
+      throw new Error("저장된 가챠 주문 요청을 안전하게 확인할 수 없어요.");
     }
     assertGachaIntentScope(existing, input.actorId, input.payload.productId);
     resolution = resolveGachaCheckoutOrderIntent(existing, {
@@ -294,7 +332,7 @@ export async function claimPendingGachaCheckoutOrderIntent(
       );
     }
   });
-  if (!resolution) throw new Error("가챠 주문 요청을 저장하지 못했습니다.");
+  if (!resolution) throw new Error("가챠 주문 요청을 저장하지 못했어요.");
   return resolution;
 }
 
@@ -310,7 +348,7 @@ export async function readPendingGachaCheckoutOrderIntent(
   if (!row) return null;
   const intent = parseGachaCheckoutOrderIntent(row.preference_value);
   if (!intent) {
-    throw new Error("저장된 가챠 주문 요청을 안전하게 확인할 수 없습니다.");
+    throw new Error("저장된 가챠 주문 요청을 안전하게 확인할 수 없어요.");
   }
   assertGachaIntentScope(intent, input.actorId, input.productId);
   return intent;
@@ -322,7 +360,7 @@ export async function recordPendingGachaCheckoutOrder(
   order: CheckoutOrder,
 ): Promise<GachaCheckoutOrderIntent> {
   if (!matchesGachaCheckoutOrderIntent(order, intent)) {
-    throw new Error("서버 주문이 현재 가챠 구매 요청과 일치하지 않습니다.");
+    throw new Error("서버 주문이 현재 가챠 구매 요청과 일치하지 않아요.");
   }
   const preferenceKey = gachaCheckoutIntentPreferenceKey(intent.actorId, intent.payload.productId);
   let recorded: GachaCheckoutOrderIntent | null = null;
@@ -333,10 +371,10 @@ export async function recordPendingGachaCheckoutOrder(
     );
     const current = row ? parseGachaCheckoutOrderIntent(row.preference_value) : null;
     if (!current || current.idempotencyKey !== intent.idempotencyKey) {
-      throw new Error("가챠 주문 응답을 현재 구매 요청에 연결하지 못했습니다.");
+      throw new Error("가챠 주문 응답을 현재 구매 요청에 연결하지 못했어요.");
     }
     if (!matchesGachaCheckoutOrderIntent(order, current)) {
-      throw new Error("서버 주문이 저장된 가챠 구매 요청과 일치하지 않습니다.");
+      throw new Error("서버 주문이 저장된 가챠 구매 요청과 일치하지 않아요.");
     }
     recorded = attachOrderToGachaCheckoutIntent(
       current,
@@ -352,7 +390,7 @@ export async function recordPendingGachaCheckoutOrder(
       preferenceKey,
     );
   });
-  if (!recorded) throw new Error("가챠 주문 응답을 저장하지 못했습니다.");
+  if (!recorded) throw new Error("가챠 주문 응답을 저장하지 못했어요.");
   return recorded;
 }
 
@@ -374,7 +412,7 @@ export async function clearPendingGachaCheckoutOrderIntent(
       || current.idempotencyKey !== intent.idempotencyKey
       || current.orderId !== intent.orderId
     ) {
-      throw new Error("다른 가챠 주문 요청은 삭제할 수 없습니다.");
+      throw new Error("다른 가챠 주문 요청은 삭제할 수 없어요.");
     }
     await transaction.runAsync(
       "DELETE FROM app_preferences WHERE preference_key = ?",
@@ -438,7 +476,7 @@ function assertGachaIntentScope(
 ): void {
   if (!intent) return;
   if (intent.actorId !== actorId.toLowerCase() || intent.payload.productId !== productId.trim()) {
-    throw new Error("다른 계정이나 상품의 가챠 주문 요청은 재사용할 수 없습니다.");
+    throw new Error("다른 계정이나 상품의 가챠 주문 요청은 재사용할 수 없어요.");
   }
 }
 

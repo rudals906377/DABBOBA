@@ -123,7 +123,7 @@ test("customer broker reuses one Supabase subject without merging email peers an
       accessToken,
       loginProvider,
       ...(loginProvider === "APPLE" ? { appleRefreshToken: `apple-refresh-${"x".repeat(64)}` } : {}),
-      acceptedPolicies: { terms: "2026-09-22", privacy: "2026-09-22" },
+      acceptedPolicies: { terms: "2026-09-30", privacy: "2026-09-30" },
     },
     });
   };
@@ -138,7 +138,7 @@ test("customer broker reuses one Supabase subject without merging email peers an
       accessToken,
       loginProvider,
       ...(appleRefreshToken ? { appleRefreshToken } : {}),
-      acceptedPolicies: { terms: "2026-09-22", privacy: "2026-09-22" },
+      acceptedPolicies: { terms: "2026-09-30", privacy: "2026-09-30" },
     },
   });
 
@@ -254,11 +254,17 @@ test("customer broker reuses one Supabase subject without merging email peers an
     actor: { userId: string; sessionId: string };
   };
   assert.equal(socialDeletionBody.actor.userId, socialOnlyUserId);
-  const webDeletionSession = await ownerPool.query<{ expires_at: Date }>(
-    "SELECT expires_at FROM sessions WHERE id=$1 AND user_id=$2",
+  const webDeletionSession = await ownerPool.query<{ expires_at: Date; scope: string }>(
+    "SELECT expires_at,scope FROM sessions WHERE id=$1 AND user_id=$2",
     [socialDeletionBody.actor.sessionId, socialOnlyUserId],
   );
   assert.equal(webDeletionSession.rowCount, 1);
+  assert.equal(webDeletionSession.rows[0]!.scope, "ACCOUNT_DELETION");
+  const ordinarySession = await ownerPool.query<{ scope: string }>(
+    "SELECT scope FROM sessions WHERE id=$1",
+    [(socialOnlyLogin.json() as { actor: { sessionId: string } }).actor.sessionId],
+  );
+  assert.equal(ordinarySession.rows[0]!.scope, "FULL");
   const remainingMs = webDeletionSession.rows[0]!.expires_at.getTime() - Date.now();
   assert.ok(remainingMs > 14 * 60_000 && remainingMs <= 15 * 60_000);
   assert.equal(
@@ -276,6 +282,29 @@ test("customer broker reuses one Supabase subject without merging email peers an
     [`${issuer}#unknown-${suffix}`],
   );
   assert.equal(unknownLocal.rowCount, 0);
+
+  // Disabling a provider closes it for new deletion re-authentication, but an
+  // identity that is already linked keeps a path to delete its account.
+  const enabledProviders = config.customerLoginProviders!;
+  config.customerLoginProviders = ["PHONE", "NAVER", "GOOGLE", "APPLE"];
+  try {
+    const disabledUnknown = await webDeletionExchange(
+      token("web-deletion-disabled-unknown", claims(`disabled-unknown-${suffix}`, ["KAKAO"], null)),
+      "KAKAO",
+    );
+    assert.equal(disabledUnknown.statusCode, 503, disabledUnknown.body);
+    assert.equal((disabledUnknown.json() as { code: string }).code, "CUSTOMER_LOGIN_PROVIDER_UNAVAILABLE");
+    const disabledLogin = await exchange(token("web-deletion-disabled-login", socialOnlyClaims));
+    assert.equal(disabledLogin.statusCode, 503, disabledLogin.body);
+    const disabledLegacy = await webDeletionExchange(
+      token("web-deletion-disabled-legacy", socialOnlyClaims),
+      "KAKAO",
+    );
+    assert.equal(disabledLegacy.statusCode, 201, disabledLegacy.body);
+    assert.equal((disabledLegacy.json() as { actor: { userId: string } }).actor.userId, socialOnlyUserId);
+  } finally {
+    config.customerLoginProviders = enabledProviders;
+  }
 
   const appleDeletion = await webDeletionExchange(
     token("web-deletion-apple", claims(legacySubject, ["APPLE"], null)),

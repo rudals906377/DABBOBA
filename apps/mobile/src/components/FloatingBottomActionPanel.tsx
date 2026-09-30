@@ -55,7 +55,7 @@ const styles = StyleSheet.create({
     borderColor: "rgba(17, 20, 17, 0.13)",
     borderRadius: seed.radius.r5_5,
     backgroundColor: "rgba(252, 252, 248, 0.94)",
-    shadowColor: "#111411",
+    shadowColor: seed.color.foreground.neutral,
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.12,
     shadowRadius: 18,

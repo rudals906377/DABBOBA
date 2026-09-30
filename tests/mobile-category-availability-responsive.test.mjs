@@ -14,9 +14,10 @@ test("category opening-soon state expands instead of clipping at accessibility t
   assert.match(source, /useWindowDimensions/);
   assert.match(source, /const expanded = fontScale >= 1\.6/);
   assert.match(source, /<KoreanPixelTitle[\s\S]*?numberOfLines=\{expanded \? 2 : 1\}/);
-  assert.match(source, /expanded \? `\$\{label\}샵 오픈\\n준비 중`/);
   assert.match(source, /expanded && styles\.containerLargeText/);
-  assert.match(source, /expanded && styles\.statusPillLargeText/);
-  assert.match(source, /statusText:\s*\{[^}]*flexShrink:\s*1[^}]*textAlign:\s*"center"/);
-  assert.match(source, /statusPillLargeText:\s*\{[^}]*width:\s*"100%"[^}]*paddingVertical:/);
+  assert.match(source, /CATEGORY_COMING_SOON_TITLE = "준비중입니다\."/);
+  assert.match(source, /<KoreanPixelTitle[\s\S]*?\{CATEGORY_COMING_SOON_TITLE\}\s*<\/KoreanPixelTitle>/);
+  assert.match(source, /<SeedInlineGuidance style=\{styles\.guidance\}>\{guidance\}<\/SeedInlineGuidance>/);
+  assert.match(source, /accessibilityLabel=\{`\$\{label\} 상품은 아직 준비 중이에요\. \$\{guidance\}`\}/);
+  assert.doesNotMatch(source, /OPENING SOON|statusPill|eyebrow|습니다/);
 });

@@ -413,7 +413,7 @@ export function KujiPeelTicket({
       >
         {resultContent ?? (
           <View style={styles.resultFallback}>
-            <Text numberOfLines={1} adjustsFontSizeToFit style={styles.resultFallbackLabel}>
+            <Text numberOfLines={2} style={styles.resultFallbackLabel}>
               {resultLabel}
             </Text>
             <Text style={styles.resultFallbackSerial}>{primaryLabel}</Text>
@@ -426,7 +426,7 @@ export function KujiPeelTicket({
           accessible={!settled}
           accessibilityRole="button"
           accessibilityLabel={busy ? `${accessibilityLabel}, 결과 확인 중` : accessibilityLabel}
-          accessibilityHint="두 번 탭하거나 왼쪽 손잡이를 오른쪽으로 밀어 엽니다"
+          accessibilityHint="두 번 탭하거나 왼쪽 손잡이를 오른쪽으로 밀어 열어요"
           accessibilityState={{ disabled, busy }}
           onAccessibilityTap={beginOpen}
           style={[styles.pressTarget, entryStyle]}
@@ -460,7 +460,7 @@ export function KujiPeelTicket({
                     </View>
                   </View>
                   <View style={styles.resultTicketBody}>
-                    <Text numberOfLines={1} adjustsFontSizeToFit style={styles.resultTicketGrade}>
+                    <Text numberOfLines={2} style={styles.resultTicketGrade}>
                       {resultReady ? resultLabel : "···"}
                     </Text>
                     <View style={styles.resultTicketCopy}>
@@ -603,7 +603,7 @@ const styles = StyleSheet.create({
     left: 0,
     width: 20,
     backgroundColor: "#FFF4DA",
-    shadowColor: "#000000",
+    shadowColor: seed.color.inverted.surface,
     shadowOpacity: 0.2,
     shadowRadius: 10,
     shadowOffset: { width: 5, height: 0 },
@@ -620,7 +620,7 @@ const styles = StyleSheet.create({
     borderWidth: 4,
     borderColor: KUJI_ORANGE_DARK,
     backgroundColor: "transparent",
-    shadowColor: "#000000",
+    shadowColor: seed.color.inverted.surface,
     shadowOpacity: 0.3,
     shadowRadius: 12,
     shadowOffset: { width: 0, height: 8 },
@@ -631,7 +631,7 @@ const styles = StyleSheet.create({
     margin: 4,
     overflow: "hidden",
     borderRadius: seed.radius.r2,
-    backgroundColor: "#151A15",
+    backgroundColor: seed.color.inverted.surface,
     zIndex: 2,
   },
   resultTicketBand: {
@@ -688,7 +688,7 @@ const styles = StyleSheet.create({
   },
   resultTicketSerial: {
     marginTop: seed.spacing.x1,
-    color: "#B8C0B7",
+    color: seed.color.inverted.foregroundMuted,
     fontSize: 11,
     lineHeight: 16,
     fontWeight: "700",
@@ -745,7 +745,7 @@ const styles = StyleSheet.create({
     top: 0,
     bottom: 0,
     width: "34%",
-    backgroundColor: "#E8E9E4",
+    backgroundColor: seed.color.stroke.muted,
   },
   paperFoldHighlight: {
     position: "absolute",
@@ -812,7 +812,7 @@ const styles = StyleSheet.create({
     width: 27,
     height: 20,
     borderRadius: 5,
-    backgroundColor: "#FFFFFF",
+    backgroundColor: colors.white,
   },
   pullArrowEraserHead: {
     position: "absolute",
@@ -825,7 +825,7 @@ const styles = StyleSheet.create({
     borderLeftWidth: 21,
     borderTopColor: "transparent",
     borderBottomColor: "transparent",
-    borderLeftColor: "#FFFFFF",
+    borderLeftColor: colors.white,
   },
   pullArrowShaftOutline: {
     position: "absolute",

@@ -111,8 +111,9 @@ test("a real product reveal consumes only the explicitly opened server entitleme
   assert.match(screen, /onPress=\{handleAction\}/);
   assert.match(screen, /void openProduct\(\)/);
   assert.match(screen, /await consumeDrawEntitlement/);
-  const mountEffect = screen.match(/useEffect\(\(\) => \{([\s\S]*?)\}, \[loadPreview\]\);/)?.[1] ?? "";
-  assert.doesNotMatch(mountEffect, /consumeDrawEntitlement/);
+  const resetEffect = screen.match(/useEffect\(\(\) => \{([\s\S]*?)\}, \[routeKey\]\);/)?.[1] ?? "";
+  assert.ok(resetEffect, "the route reset effect must exist");
+  assert.doesNotMatch(resetEffect, /consumeDrawEntitlement|openProduct/);
   assert.match(state, /createKujiOpenMotionState/);
   assert.match(state, /transitionKujiOpenMotion/);
   // SQLite retains only purchase recovery identity; prizes/inventory stay server-owned.
@@ -141,35 +142,29 @@ test("a paid multi-kuji route supports explicit single and all presentation mode
   assert.match(sequence, /nextEntitlementId: entitlementIds\[safeActiveIndex \+ 1\] \?\? null/);
 });
 
-test("preview sequencing stays bounded and never invents a prize", () => {
+test("the unreachable preview reveal mode is removed and never invents a prize", () => {
   const screen = read("apps/mobile/src/features/draw/DrawRevealScreen.tsx");
+  const route = read("apps/mobile/app/draw/reveal/[entitlementId].tsx");
   const kuji = read("apps/mobile/src/features/kuji/KujiDrawScreen.tsx");
 
+  assert.match(route, /<DrawRevealScreen \/>/);
+  assert.match(screen, /export function DrawRevealScreen\(\) \{/);
+  assert.doesNotMatch(screen, /\bpreview\b|Preview|queuedPreviewOpen|handleOpenNextTicket|handleOpenAllRemaining|대표 결과|selectHighestRankedResultId/);
   assert.match(screen, /const requestedMode = firstParam\(params\.mode\)/);
   assert.match(screen, /resolveDrawOpenMode\(requestedMode, count\)/);
-  assert.match(screen, /previewTickets\.length \|\| boundedCount\(firstParam\(params\.count\)\)/);
-  assert.match(screen, /advancePreviewRevealState/);
-  assert.match(screen, /completePreviewRevealState/);
-  assert.match(screen, /Math\.min\(Math\.trunc\(parsed\), 50\)/);
-  assert.match(screen, /RESULT \{String\(openedIndex\)\.padStart\(2, "0"\)\}/);
   assert.match(screen, /FlatList/);
-  assert.match(screen, /summaryRail/);
   assert.doesNotMatch(screen, /가상 당첨|예시 당첨|획득 완료/);
   assert.match(kuji, /bindPaidKujiSlots/);
   assert.match(kuji, /paidKujiRevealPath/);
   assert.match(screen, /parseKujiTicketNumbers\(firstParam\(params\.tickets\)\)/);
-  assert.match(screen, /KUJI \{featured\.ticketNumber\}/);
 });
 
 test("multi-gacha summaries keep gacha semantics and hide kuji ticket labels", () => {
   const screen = read("apps/mobile/src/features/draw/DrawRevealScreen.tsx");
 
-  assert.match(screen, /<PreviewResultSummary[\s\S]*?sourceCategory=\{sourceCategory\}/);
-  assert.match(screen, /const isKuji = sourceCategory === "kuji"/);
-  assert.match(screen, /sourceCategory === "gacha" \? "가챠"/);
-  assert.match(screen, /isKuji && featured\.ticketNumber \? \(/);
-  assert.match(screen, /isKuji && item\.ticketNumber \? \(/);
-  assert.match(screen, /가챠 \$\{previewState\.openedCount\}번째 결과가 열렸어요/);
+  assert.match(screen, /<CommittedBatchSummary[\s\S]*?sourceCategory=\{sourceCategory\}/);
+  assert.match(screen, /const ticket = sourceCategory === "kuji" \? tickets\[index\] : undefined/);
+  assert.match(screen, /\{ticket \? <Text style=\{styles\.committedBatchTicket\}>KUJI \{ticket\}<\/Text> : null\}/);
 });
 
 test("kuji selection explicitly chooses an open mode after the paid slots are bound", () => {
@@ -182,10 +177,7 @@ test("kuji selection explicitly chooses an open mode after the paid slots are bo
   assert.doesNotMatch(kuji, /결제 금액 확인|buildKujiPaymentConfirmation/);
   assert.match(kuji, /presentDrawOpenModeChoice\(bindings\.length/);
   assert.match(kuji, /totalSlots: board\.totalSlots, mode/);
-  assert.match(screen, /buildPreviewOpenActions\(previewState\)/);
-  assert.match(screen, /openAllLabel/);
-  assert.match(screen, /onPress=\{handleOpenNextTicket\}/);
-  assert.match(screen, /onPress=\{handleOpenAllRemaining\}/);
+  assert.match(screen, /committedResultPresented && committedSequence\.nextEntitlementId\s*\?\s*`\$\{committedSequence\.activeIndex \+ 2\}번째 쿠지 선택`/);
   assert.doesNotMatch(screen, /다음 쿠지 준비/);
 });
 
@@ -193,11 +185,7 @@ test("each sequential kuji returns to a sealed ticket that can be dragged before
   const screen = read("apps/mobile/src/features/draw/DrawRevealScreen.tsx");
   const ticket = read("apps/mobile/src/features/draw/KujiPeelTicket.tsx");
 
-  assert.match(screen, /resolvePreviewNextTicketAction\(previewState\)/);
-  assert.match(screen, /nextAction === "prepare"[\s\S]*?advancePreviewRevealState\(current\)[\s\S]*?return;/);
-  assert.match(screen, /nextAction === "open"[\s\S]*?setRevealRequestSignal/);
-  assert.doesNotMatch(screen, /setQueuedPreviewOpen\("single"\)/);
-  assert.match(screen, /setQueuedPreviewOpen\("all"\)/);
+  assert.match(screen, /if \(kujiMotionVisible && !kujiRevealInProgress\) \{\s*setRevealRequestSignal/);
   assert.match(ticket, /Gesture\.Pan\(\)[\s\S]*?resolveKujiPeelRelease/);
   assert.match(ticket, /phase === "sealed"/);
 });
@@ -213,31 +201,20 @@ test("kuji retains its ticket surface and pre-mounted committed result through t
     "completion must not unmount the ticket/result surface and replay another entrance");
   assert.match(ticket, /settled=\{completed\}/);
   assert.match(ticket, /disabled=\{opening \|\| completed\}/);
-  assert.match(ticket, /resultReady=\{preview \? previewResultReady : Boolean\(result \|\| batchResults\.length\)\}/);
-  assert.match(ticket, /onRequestOpen=\{\(\) => void openProduct\(\)\}/);
-  assert.match(ticket, /onRevealSettled=\{handleRevealSettled\}/);
+  assert.match(ticket, /resultReady=\{Boolean\(result \|\| batchResults\.length\)\}/);
+  assert.match(ticket, /onRequestOpen=\{requestStageOpen\}/);
+  assert.match(ticket, /onRevealSettled=\{settleStageReveal\}/);
   assert.match(ticket, /resultContent=\{result \? \(\s*<CommittedResult[\s\S]*?result=\{result\}[\s\S]*?imageUri=\{resolveCatalogImageUrl\(result.prizeImageUrl, runtime.assetBaseUrl\)\}/);
   assert.match(ticket, /\) : batchResults\[0\] \? \(\s*<CommittedResult[\s\S]*?result=\{batchResults\[0\]\}/,
     "a committed Kuji batch keeps its first real server result mounted through the peel handoff");
   assert.match(ticket, /<CommittedResult[\s\S]*?\sreduceMotion\s*\/>/,
     "the ticket's shared progress owns appearance, not a second autonomous result animation");
-  assert.match(ticket, /<PreviewResultStage[\s\S]*?\sopened\s[\s\S]*?\sreduceMotion\s*\/>/);
+  assert.match(ticket, /\) : null\}/, "without a committed result the hidden layer holds no invented content");
   assert.doesNotMatch(ticket, /snapshot\.product\.imageUrl|Math\.random|selectHighestRankedResultId/,
     "the hidden real card may only consume the immutable prize snapshot, not catalog art or a client draw");
-  assert.match(ticket, /key=\{preview[\s\S]*?previewItems\[currentPreviewIndex\]\?\.ticketNumber[\s\S]*?: entitlementId \|\| productId\}/);
+  assert.match(ticket, /key=\{entitlementId \|\| productId\}/);
   assert.match(ticket, /requestSignal=\{revealRequestSignal\}/);
   assert.match(ticket, /resetSignal=\{revealResetSignal\}/);
-
-  const ordinal = ticket.match(/openedIndex=\{([^}]+)\}/)?.[1];
-  assert.ok(ordinal);
-  for (const order of [1, 2, 7, 50]) {
-    const evaluate = (openedCount, previewOpened) => runInNewContext(`(${ordinal})`, {
-      previewState: { openedCount }, previewOpened,
-    });
-    assert.equal(evaluate(order - 1, false), order);
-    assert.equal(evaluate(order, true), order,
-      "the result's number must not jump when the completion callback increments openedCount");
-  }
 });
 
 test("committed batch mode verifies the paid order and consumes sequentially without Promise.all", () => {
@@ -253,9 +230,8 @@ test("committed batch mode verifies the paid order and consumes sequentially wit
   assert.match(batch, /남은 뽑기에서 이어서 확인/);
   assert.doesNotMatch(batch, /Promise\.all/);
   assert.match(helper, /for \(const \[index, entitlementId\] of entitlementIds\.entries\(\)\)/);
-  assert.match(screen, /total=\{preview && activeMode === "all" \? remainingPreviewCount : undefined\}/);
   const prepare = screen.slice(screen.indexOf("const prepareNextCommittedResult ="), screen.indexOf("const handleGachaSkip ="));
-  assert.match(prepare, /if \(preview \|\| !result \|\| !revealSettled \|\| !nextEntitlementId\) return/);
+  assert.match(prepare, /if \(!result \|\| !revealSettled \|\| !nextEntitlementId\) return/);
   assert.match(prepare, /setResult\(null\)/);
   assert.match(prepare, /setRevealResetSignal/);
   assert.match(prepare, /router.setParams\(\{ entitlementId: nextEntitlementId \}\)/);
@@ -263,69 +239,44 @@ test("committed batch mode verifies the paid order and consumes sequentially wit
     "preparing the next sealed ticket must never immediately consume it");
 });
 
-test("kuji parent settlement keeps a completed preview visible after clearing its temporary result-ready flag", async () => {
-  const state = await import("../apps/mobile/src/features/draw/draw-reveal-state.ts");
+test("kuji parent settlement keeps a committed result visible and never invents one", async () => {
   const motion = await import("../apps/mobile/src/features/draw/kuji-ticket-reveal-motion.ts");
   const screen = read("apps/mobile/src/features/draw/DrawRevealScreen.tsx");
   const ticket = read("apps/mobile/src/features/draw/KujiPeelTicket.tsx");
-  const settlement = screen.slice(screen.indexOf("const handleRevealSettled ="), screen.indexOf("const prepareNextCommittedResult ="));
+  const settlement = screen.slice(screen.indexOf("const handleRevealSettled ="), screen.indexOf("  // The stage components read these"));
   const completedExpression = screen.match(/const completed = ([^;]+);/)?.[1];
   assert.ok(completedExpression);
   assert.match(ticket, /isKujiResultGateOpen\(phase, resultReady, settled\)/);
   assert.match(ticket, /resultAccessible = resultGateOpen && settled/);
 
-  // Execute the actual parent callback, not a replacement completion reducer.
-  // A preview clears resultReady at the exact moment it marks the ticket settled.
-  for (const mode of ["single", "all"]) {
-    for (const count of [1, 3, 8]) {
-      let previewState = state.createPreviewRevealState(mode, count);
-      let previewResultReady = true;
-      let revealSettled = false;
-      const context = {
-        ...state,
-        preview: true,
-        result: null,
-        requestInFlightRef: { current: true },
-        skipRequestedRef: { current: false },
-        setPreviewResultReady: (value) => { previewResultReady = value; },
-        setPreviewState: (update) => { previewState = update(previewState); },
-        setRevealSettled: (value) => { revealSettled = value; },
-      };
-      runInNewContext(`${settlement}\nglobalThis.finish = handleRevealSettled;`, context);
-      context.finish();
-      context.finish();
-      assert.equal(previewResultReady, false);
-      assert.equal(revealSettled, false, "preview completion must not invent a committed server result");
-      assert.equal(previewState.openedCount, mode === "all" ? count : 1,
-        "a duplicate settlement must not advance another sealed ticket");
-      const completed = runInNewContext(completedExpression, {
-        committedResultPresented: false,
-        committedBatchSummaryVisible: false,
-        previewOpened: previewState.phase === "revealed",
-        previewCompleted: previewState.phase === "summary",
-      });
-      assert.equal(completed, true);
-      const gate = motion.isKujiResultGateOpen("revealed", previewResultReady, completed);
-      for (const reduceMotion of [false, true]) {
-        const frame = motion.sampleKujiTicketRevealMotion(1, gate, reduceMotion);
-        assert.equal(frame.resultOpacity, 1, "the finished preview must not disappear on its parent's rerender");
-        assert.equal(frame.ticketOpacity, 0);
-        assert.equal(frame.glowOpacity, 0, "completion must not restart the payoff glow");
-      }
-      if (mode === "single" && count > 1) {
-        previewState = state.advancePreviewRevealState(previewState);
-        assert.equal(previewState.phase, "sealed");
-        const nextCompleted = runInNewContext(completedExpression, {
-          committedResultPresented: false,
-          committedBatchSummaryVisible: false,
-          previewOpened: false,
-          previewCompleted: false,
-        });
-        assert.equal(nextCompleted, false);
-        const nextGate = motion.isKujiResultGateOpen("sealed", false, nextCompleted);
-        assert.equal(motion.sampleKujiTicketRevealMotion(1, nextGate).resultOpacity, 0,
-          "a stale finished motion value cannot expose the next sealed result");
-      }
+  // Execute the actual parent callback: without a committed server result it
+  // must not mark anything settled.
+  for (const result of [null, { id: "committed" }]) {
+    let revealSettled = false;
+    const context = {
+      result,
+      sourceCategory: "kuji",
+      mode: "single",
+      batchResults: [],
+      requestInFlightRef: { current: true },
+      skipRequestedRef: { current: true },
+      setBatchRevealSettled: () => assert.fail("single mode has no batch"),
+      setRevealSettled: (value) => { revealSettled = value; },
+    };
+    runInNewContext(`${settlement}\nglobalThis.finish = handleRevealSettled;`, context);
+    context.finish();
+    assert.equal(context.requestInFlightRef.current, false);
+    assert.equal(context.skipRequestedRef.current, false);
+    assert.equal(revealSettled, Boolean(result), "only a committed server result can be presented");
+    const completed = runInNewContext(completedExpression, {
+      committedResultPresented: Boolean(result) && revealSettled,
+      committedBatchSummaryVisible: false,
+    });
+    assert.equal(completed, Boolean(result));
+    const gate = motion.isKujiResultGateOpen("revealed", Boolean(result), completed);
+    for (const reduceMotion of [false, true]) {
+      const frame = motion.sampleKujiTicketRevealMotion(1, gate, reduceMotion);
+      assert.equal(frame.resultOpacity, result ? 1 : 0);
     }
   }
 });
@@ -337,49 +288,65 @@ test("a committed Kuji batch waits for the peel handoff before replacing it with
     screen.indexOf("const prepareNextCommittedResult ="),
   );
 
-  assert.match(screen, /const committedBatchReady = !preview && mode === "all" && batchResults\.length > 0/);
+  assert.match(screen, /const committedBatchReady = mode === "all" && batchResults\.length > 0/);
   assert.match(
     screen,
-    /const committedBatchSummaryVisible = committedBatchReady\s*&& \(sourceCategory !== "kuji" \|\| batchRevealSettled\)/,
+    /const committedBatchSummaryVisible = committedBatchReady\s*&& \(\(sourceCategory !== "kuji" && sourceCategory !== "gacha"\) \|\| batchRevealSettled\)/,
   );
   assert.match(
     settlement,
-    /sourceCategory === "kuji" && mode === "all" && batchResults\.length > 0[\s\S]*?setBatchRevealSettled\(true\)[\s\S]*?return/,
+    /\(sourceCategory === "kuji" \|\| sourceCategory === "gacha"\)\s*&& mode === "all"\s*&& batchResults\.length > 0[\s\S]*?setBatchRevealSettled\(true\)[\s\S]*?return/,
   );
-  assert.match(screen, /resultReady=\{preview \? previewResultReady : Boolean\(result \|\| batchResults\.length\)\}/);
-  assert.match(screen, /previewCompleted \|\| committedBatchSummaryVisible \? \(/);
+  assert.match(screen, /resultReady=\{Boolean\(result \|\| batchResults\.length\)\}/);
+  assert.match(screen, /\{committedBatchSummaryVisible \? \(/);
 
-  const summaryVisible = (category, batchReady, peelSettled) => (
-    batchReady && (category !== "kuji" || peelSettled)
+  const summaryVisible = (category, batchReady, stageSettled) => (
+    batchReady && ((category !== "kuji" && category !== "gacha") || stageSettled)
   );
   assert.equal(summaryVisible("kuji", true, false), false);
   assert.equal(summaryVisible("kuji", true, true), true);
-  assert.equal(summaryVisible("gacha", true, false), true,
-    "the Kuji paper handoff must not delay existing gacha summaries");
+  assert.equal(summaryVisible("gacha", true, false), false,
+    "a committed gacha batch must finish the capsule reveal before the summary replaces it");
+  assert.equal(summaryVisible("gacha", true, true), true);
 });
 
-test("the sequential kuji result footer distinguishes selecting from opening and stays visually flat", () => {
-  const screen = read("apps/mobile/src/features/draw/DrawRevealScreen.tsx");
-  const state = read("apps/mobile/src/features/draw/draw-reveal-state.ts");
+test("a committed gacha open-all batch drives the lever machine from the first committed result", () => {
+  const screen = readFileSync(
+    new URL("../apps/mobile/src/features/draw/DrawRevealScreen.tsx", import.meta.url),
+    "utf8",
+  );
+  const machineUse = screen.slice(screen.indexOf("<GachaLeverMachine"), screen.indexOf("/>", screen.indexOf("<GachaLeverMachine")));
+  assert.match(screen, /const gachaStagePrize = result \?\? batchResults\[0\] \?\? null;/);
+  assert.match(machineUse, /resultReady=\{Boolean\(result \|\| batchResults\.length\)\}/);
+  assert.match(machineUse, /prize=\{gachaStagePrizeView\}/);
+  assert.match(machineUse, /onRequestOpen=\{requestStageOpen\}/);
+  assert.match(machineUse, /onRevealSettled=\{settleStageReveal\}/);
+  // The machine is memoized, so its object/handler props must keep stable identities.
+  assert.match(screen, /const gachaStagePrizeView = useMemo\(\(\) => \(\{\s*result: gachaStagePrize,[\s\S]*?\}\), \[gachaStagePrize, runtime\.assetBaseUrl, snapshot\?\.ip\?\.nameKo\]\);/);
+  assert.match(screen, /const requestStageOpen = useCallback\(\(\) => \{\s*void openProductRef\.current\(\);\s*\}, \[\]\);/);
+  assert.match(screen, /const settleStageReveal = useCallback\(\(\) => \{\s*handleRevealSettledRef\.current\(\);\s*\}, \[\]\);/);
+  assert.match(read("apps/mobile/src/features/draw/GachaLeverMachine.tsx"), /export const GachaLeverMachine = memo\(function GachaLeverMachine\(/);
+  assert.match(
+    screen,
+    /const gachaRevealInProgress = sourceCategory === "gacha"[\s\S]*?\|\| \(committedBatchReady && !batchRevealSettled\)/,
+  );
+  const skip = screen.slice(screen.indexOf("const handleGachaSkip ="), screen.indexOf("const sourceLabel ="));
+  assert.match(skip, /mode === "all" && batchResults\.length > 0[\s\S]*?setBatchRevealSettled\(true\)/);
+});
 
-  assert.match(state, /state\.phase === "revealed"\s*\?\s*`\$\{nextPosition\}번째 쿠지 선택`\s*:\s*`\$\{nextPosition\}번째 쿠지 열기`/);
-  assert.match(screen, /const showSplitOpenActions =/);
-  assert.match(screen, /const footerPanelStyle = showSplitOpenActions[\s\S]*?styles\.footerSplitPanel/);
-  assert.match(screen, /panelStyle=\{footerPanelStyle\}/);
-  assert.match(screen, /variant="neutralWeak"/);
-  assert.match(screen, /styles\.footerOpenAllAction/);
-  assert.match(screen, /footerSplitPanel:[\s\S]*?backgroundColor:\s*seed\.color\.background\.transparent/);
-  assert.match(screen, /footerOpenAllAction:[\s\S]*?backgroundColor:\s*seed\.color\.layer\.elevated/);
+test("the sequential kuji result footer is one flat full-width action", () => {
+  const screen = read("apps/mobile/src/features/draw/DrawRevealScreen.tsx");
+
+  assert.match(screen, /<FloatingBottomActionPanel>\s*<SeedActionButton\s*label=\{actionLabel\}/);
+  assert.doesNotMatch(screen, /showSplitOpenActions|footerSplitPanel|footerOpenAllAction|variant="neutralWeak"/);
 });
 
 test("a one-item kuji purchase stops on its single product result", () => {
   const screen = read("apps/mobile/src/features/draw/DrawRevealScreen.tsx");
 
   assert.match(screen, /const mode: RevealMode = resolveDrawOpenMode\(requestedMode, count\)/);
-  assert.match(screen, /const singlePreviewFinished = preview && count === 1/);
   assert.match(screen, /drawSequenceFinished\s*\?\s*"상품으로 돌아가기"/);
   assert.match(screen, /if \(drawSequenceFinished\) \{\s*returnToSourceProduct\(\);\s*return;\s*\}/);
-  assert.match(screen, /if \(items\.length === 1\) \{[\s\S]*?<PreviewResultStage/);
 });
 
 test("finished gacha and kuji reveals return to their source product detail", () => {
@@ -389,7 +356,7 @@ test("finished gacha and kuji reveals return to their source product detail", ()
   assert.match(screen, /const sourceProductId = result\?\.productId \?\? batchResults\[0\]\?\.productId \?\? snapshot\?\.product\.id \?\? productId/);
   assert.match(screen, /const returnToSourceProduct = async \(\) => \{[\s\S]*?router\.dismissTo\(\s*`\/product\/\$\{encodeURIComponent\(sourceProductId\)\}` as Href/);
   assert.match(screen, /const committedSequenceFinished = \(committedBatchSummaryVisible && committedBatchComplete\) \|\| \([\s\S]*?committedSequence\.nextEntitlementId === null/);
-  assert.match(screen, /const drawSequenceFinished = committedSequenceFinished \|\| previewCompleted \|\| singlePreviewFinished/);
+  assert.match(screen, /const drawSequenceFinished = committedSequenceFinished;/);
   assert.match(screen, /onPress=\{drawSequenceFinished \? returnToSourceProduct : goBack\}/);
   assert.doesNotMatch(screen, /router\.replace\("\/\(tabs\)\/dukroom"\)/);
   assert.match(agentGuide, /completed gacha or kuji reveal sequence[\s\S]*source catalog product detail/);
@@ -455,10 +422,9 @@ test("the native gacha machine offers one clockwise turn or six taps with matchi
     screen,
     /opacity: gachaMotionVisible && !gachaRevealInProgress \? 1 : 0[\s\S]*?<SeedInlineGuidance[\s\S]*?레버 6회 연속 터치 또는 시계 방향 1바퀴 드래그[\s\S]*?<\/SeedInlineGuidance>/,
   );
-  assert.match(screen, /resultReady=\{preview \? previewResultReady : Boolean\(result\)\}/);
-  assert.match(screen, /onRequestOpen=\{\(\) => void openProduct\(\)\}/);
-  assert.match(screen, /onRevealSettled=\{handleRevealSettled\}/);
-  assert.match(screen, /sourceCategory === "kuji" && ticketNumber/);
+  assert.match(screen, /resultReady=\{Boolean\(result \|\| batchResults\.length\)\}/);
+  assert.match(screen, /onRequestOpen=\{requestStageOpen\}/);
+  assert.match(screen, /onRevealSettled=\{settleStageReveal\}/);
   assert.match(machine, /Gesture\.Pan\(\)/);
   assert.match(machine, /capsule-machine-front-empty\.png/);
   assert.doesNotMatch(machine, /MACHINE_PRESENTATION_SCALE/);
@@ -541,7 +507,7 @@ test("gacha and kuji share the same measured thirty-six-ember field and one cloc
   assert.match(screen, /const isDrawCategory = sourceCategory === "kuji" \|\| sourceCategory === "gacha"/);
   assert.match(screen, /const showStageHeader = !isDrawCategory/);
   assert.match(screen, /showStageHeader \? \([\s\S]*?styles\.stageHeader/);
-  assert.match(screen, /previewCompleted \|\| committedBatchSummaryVisible \? \([\s\S]*?styles\.summaryContent[\s\S]*?styles\.stageHeader/);
+  assert.match(screen, /\{committedBatchSummaryVisible \? \([\s\S]*?styles\.summaryContent[\s\S]*?styles\.stageHeader/);
   assert.match(
     screen,
     /styles\.stage,[\s\S]*?isDrawCategory && styles\.expandedDrawStage,[\s\S]*?sourceCategory === "gacha" && styles\.fullGachaStage/,
@@ -560,7 +526,7 @@ test("gacha and kuji share the same measured thirty-six-ember field and one cloc
   assert.match(screen, /return \(\) => cancelAnimation\(phase\)/);
   assert.doesNotMatch(screen, /setTimeout\(|setInterval\(/);
   assert.doesNotMatch(screen, /Math\.random/);
-  assert.match(fireflyMotion, /export const KUJI_FIREFLY_COUNT = 12/);
+  assert.doesNotMatch(fireflyMotion, /KUJI_FIREFLY_COUNT|createKujiFireflyConfigs/);
   assert.match(fireflyMotion, /laneIndex/);
   assert.match(fireflyMotion, /startOffset/);
   assert.match(fireflyMotion, /Math\.sin\(curvedProgress \* Math\.PI\)[\s\S]*?curveAmplitude/);
@@ -708,6 +674,9 @@ test("the settled reveal displays only committed server snapshot fields", () => 
   assert.match(screen, /KujiPeelTicket/);
   assert.match(screen, /AccessibilityInfo\.isReduceMotionEnabled/);
   assert.match(screen, /reduceMotionChanged/);
+  // Seeded synchronously so the stage never mounts reduced and then flips.
+  assert.match(screen, /const systemReduceMotion = useReducedMotion\(\);\s*const \[reduceMotion, setReduceMotion\] = useState\(systemReduceMotion\);/);
+  assert.doesNotMatch(screen, /useState\(true\)/);
   assert.match(screen, /announceForAccessibility/);
   assert.doesNotMatch(screen, /Math\.random|recordInventoryUnit|INSERT INTO inventory|UPDATE inventory/);
 });

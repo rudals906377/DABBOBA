@@ -3,23 +3,31 @@ import test from "node:test";
 import type { FastifyInstance } from "fastify";
 import { DEMO_SELLER_PRODUCT_IDS } from "../lib/demo-testing.js";
 import type { ApiContext } from "../types.js";
-import { registerHomeCatalogRoutes } from "./home-catalog.js";
+import { opaqueClientKey } from "../lib/rate-limit-key.js";
+import { HOME_PRODUCT_CLICK_LIMIT_PER_MINUTE, homeProductClickDedupeId, registerHomeCatalogRoutes } from "./home-catalog.js";
 
 type Handler = (request: Record<string, unknown>, reply: Record<string, unknown>) => Promise<unknown>;
 
 function routeHarness() {
   const routes = new Map<string, Handler>();
+  const options = new Map<string, Record<string, unknown>>();
   const register = (method: string) => (...args: unknown[]) => {
     const path = args[0];
     const handler = args.at(-1);
     if (typeof path !== "string" || typeof handler !== "function") throw new Error("invalid route");
     routes.set(`${method} ${path}`, handler as Handler);
+    if (args.length > 2 && args[1] && typeof args[1] === "object") {
+      options.set(`${method} ${path}`, args[1] as Record<string, unknown>);
+    }
   };
   return {
     app: { get: register("GET"), post: register("POST"), patch: register("PATCH") } as unknown as FastifyInstance,
     routes,
+    options,
   };
 }
+
+const TEST_PEPPER = "home-catalog-test-pepper-value";
 
 const authStub = {
   requireUser: async () => undefined,
@@ -84,7 +92,11 @@ const productRow = {
 };
 
 function contextWithPool(pool: Record<string, unknown>, catalogMediaBaseUrl: string | null = null) {
-  return { pool, auth: authStub, config: { catalogMediaBaseUrl } } as unknown as ApiContext;
+  return {
+    pool,
+    auth: authStub,
+    config: { catalogMediaBaseUrl, sessionTokenPepper: TEST_PEPPER, trustedClientIpHeader: null },
+  } as unknown as ApiContext;
 }
 
 function transactionPool(query: (sql: string, values?: unknown[]) => Promise<{ rowCount: number; rows: unknown[] }>) {
@@ -564,7 +576,7 @@ test("public Home recent draws expose only immutable prize snapshots without cus
 });
 
 test("Home product clicks are recorded once and immediately update the BEST product", async () => {
-  const { app, routes } = routeHarness();
+  const { app, routes, options } = routeHarness();
   const eventId = "55555555-5555-4555-8555-555555555555";
   const observed: Array<{ sql: string; values: unknown[] }> = [];
   const pool = transactionPool(async (sql, values = []) => {
@@ -576,18 +588,51 @@ test("Home product clicks are recorded once and immediately update the BEST prod
   });
   await registerHomeCatalogRoutes(app, contextWithPool(pool));
 
-  const handler = routes.get("POST /v1/catalog/home-product-clicks/:productId");
+  const route = "POST /v1/catalog/home-product-clicks/:productId";
+  const handler = routes.get(route);
   assert.ok(handler);
-  const result = await handler({ params: { productId: productRow.id }, body: { eventId } }, {}) as {
+  assert.deepEqual(options.get(route)?.config, {
+    rateLimit: { max: HOME_PRODUCT_CLICK_LIMIT_PER_MINUTE, timeWindow: "1 minute" },
+  });
+  assert.equal(HOME_PRODUCT_CLICK_LIMIT_PER_MINUTE, 30);
+  const request = (ip: string, clientEventId: string) => ({
+    params: { productId: productRow.id },
+    body: { eventId: clientEventId },
+    headers: {},
+    ip,
+    routeOptions: { url: "/v1/catalog/home-product-clicks/:productId" },
+  });
+  const result = await handler(request("203.0.113.7", eventId), {}) as {
     bestProductId: string | null;
     evaluatedAt: string;
   };
+  await handler(request("203.0.113.7", "66666666-6666-4666-8666-666666666666"), {});
+  await handler(request("198.51.100.4", eventId), {});
 
   assert.equal(result.bestProductId, productRow.id);
   assert.equal(Number.isNaN(Date.parse(result.evaluatedAt)), false);
-  const insert = observed.find(({ sql }) => sql.includes("INSERT INTO home_product_click_events"));
-  assert.deepEqual(insert?.values, [eventId, productRow.id]);
-  assert.match(insert!.sql, /ON CONFLICT \(id\) DO NOTHING/);
+  const inserts = observed.filter(({ sql }) => sql.includes("INSERT INTO home_product_click_events"));
+  assert.equal(inserts.length, 3);
+  assert.match(inserts[0]!.sql, /ON CONFLICT \(id\) DO NOTHING/);
+  // The stored id is server-derived: a new client event id from the same
+  // caller maps to the same row, while another caller gets its own row.
+  assert.equal(inserts[0]!.values[1], productRow.id);
+  assert.notEqual(inserts[0]!.values[0], eventId);
+  assert.equal(inserts[1]!.values[0], inserts[0]!.values[0]);
+  assert.notEqual(inserts[2]!.values[0], inserts[0]!.values[0]);
+  assert.match(String(inserts[0]!.values[0]), /^[0-9a-f]{8}-[0-9a-f]{4}-8[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  assert.doesNotMatch(JSON.stringify(observed), /203\.0\.113\.7|198\.51\.100\.4/);
+});
+
+test("Home click dedupe ids are stable within one hour and rotate across hours and products", () => {
+  const clientKey = opaqueClientKey("ip:203.0.113.7", TEST_PEPPER);
+  const base = { clientKey, productId: productRow.id, pepper: TEST_PEPPER };
+  const hour = Date.UTC(2026, 8, 30, 3);
+  const first = homeProductClickDedupeId({ ...base, now: hour + 1_000 });
+  assert.equal(homeProductClickDedupeId({ ...base, now: hour + 3_599_000 }), first);
+  assert.notEqual(homeProductClickDedupeId({ ...base, now: hour + 3_600_000 }), first);
+  assert.notEqual(homeProductClickDedupeId({ ...base, productId: "other-product", now: hour + 1_000 }), first);
+  assert.notEqual(homeProductClickDedupeId({ ...base, pepper: "another-pepper-value", now: hour + 1_000 }), first);
 });
 
 test("admin Home section listing includes inactive records in configured order", async () => {

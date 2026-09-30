@@ -1,4 +1,5 @@
 import { randomUUID } from "expo-crypto";
+import { idempotencyKeyFrom, requestTimeoutSignal } from "@dabboba/api-client";
 import { isKujiRoomEndpointUnavailable } from "@/features/kuji/kuji-queue-state";
 
 export type KujiRoomEntryState =
@@ -65,8 +66,23 @@ export async function joinKujiRoom(
   apiBaseUrl: string,
   accessToken: string,
   productId: string,
+  options: { userId?: string | null } = {},
 ): Promise<KujiRoomSnapshot> {
-  return requestKujiRoom(apiBaseUrl, accessToken, productId, "POST");
+  return requestKujiRoom(apiBaseUrl, accessToken, productId, "POST", undefined, {
+    idempotencyKey: kujiRoomJoinIdempotencyKey(productId, options.userId),
+  });
+}
+
+/**
+ * Deterministic join key so a retry after a lost response is the same join.
+ * The server also dedupes joins by the actor's active entry and scopes any
+ * idempotency record to the authenticated actor, so the user segment only
+ * adds clarity; it is omitted when the caller does not know the user ID.
+ */
+export function kujiRoomJoinIdempotencyKey(productId: string, userId?: string | null): string {
+  return userId
+    ? idempotencyKeyFrom("kuji-join", userId, productId)
+    : idempotencyKeyFrom("kuji-join", productId);
 }
 
 export async function fetchKujiRoom(
@@ -99,15 +115,17 @@ async function requestKujiRoom(
   productId: string,
   method: "POST" | "GET" | "DELETE",
   entryId?: string,
+  options: { idempotencyKey?: string } = {},
 ): Promise<KujiRoomSnapshot> {
   const roomPath = `/v1/kuji/rooms/${encodeURIComponent(productId)}/entries`;
   const entryPath = entryId ? `${roomPath}/${encodeURIComponent(entryId)}` : roomPath;
   const response = await fetch(`${apiBaseUrl.replace(/\/$/, "")}${entryPath}`, {
     method,
+    signal: requestTimeoutSignal(),
     headers: {
       Authorization: `Bearer ${accessToken}`,
       "X-Request-Id": randomUUID(),
-      ...(method === "POST" ? { "Idempotency-Key": randomUUID() } : {}),
+      ...(method === "POST" ? { "Idempotency-Key": options.idempotencyKey ?? randomUUID() } : {}),
     },
   });
   const body = await readResponseBody(response);
@@ -123,7 +141,7 @@ async function readResponseBody(response: Response): Promise<unknown> {
   try {
     return JSON.parse(text) as unknown;
   } catch {
-    throw new KujiRoomApiError("쿠지 대기실 응답을 확인하지 못했습니다.", response.status);
+    throw new KujiRoomApiError("쿠지 대기실 응답을 확인하지 못했어요.", response.status);
   }
 }
 
@@ -136,7 +154,7 @@ function readErrorMessage(body: unknown, status: number): string {
   }
   if (status === 409) return "다른 쿠지 상품에서 이미 대기하거나 진행 중이에요.";
   if (status === 401) return "로그인 정보를 다시 확인해 주세요.";
-  return "쿠지 대기실을 불러오지 못했습니다.";
+  return "쿠지 대기실을 불러오지 못했어요.";
 }
 
 function parseKujiRoomSnapshot(value: unknown): KujiRoomSnapshot {
@@ -260,13 +278,13 @@ function readRoomState(value: unknown): KujiRoomEntryState {
 
 function readNonNegativeInteger(value: unknown, field: string): number {
   if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
-    throw new KujiRoomApiError(`쿠지 대기실의 ${field} 값이 올바르지 않습니다.`, 500);
+    throw new KujiRoomApiError(`쿠지 대기실의 ${field} 값이 올바르지 않아요.`, 500);
   }
   return value;
 }
 
 function invalidSnapshot(): KujiRoomApiError {
-  return new KujiRoomApiError("쿠지 대기실 응답 형식이 올바르지 않습니다.", 500);
+  return new KujiRoomApiError("쿠지 대기실 응답 형식이 올바르지 않아요.", 500);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

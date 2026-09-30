@@ -6,6 +6,7 @@ import type { DatabasePool } from "@dabboba/db";
 import { buildAppCore } from "./app-core.js";
 import {
   assertSupabaseEdgeApiConfig,
+  createEdgeMediaRuntime,
   createSupabaseEdgeApiHandler,
   EDGE_REQUEST_BODY_TIMEOUT_MS,
   normalizeSupabaseEdgeApiEnvironment,
@@ -180,6 +181,50 @@ test("Edge API preserves customer request bytes and query while removing spoofed
   assert.match(response.headers.get("set-cookie") ?? "", /b=2/);
 });
 
+test("Edge API passes only the operator-verified client-IP header and maps it into the API config", async () => {
+  const captured: InjectOptions[] = [];
+  let trustedHeader: string | null | undefined;
+  const handler = createSupabaseEdgeApiHandler({
+    readEnvironment: () => edgeEnvironment({ DABBOBA_TRUSTED_CLIENT_IP_HEADER: "CF-Connecting-IP" }),
+    buildApp: async (config) => {
+      trustedHeader = config.trustedClientIpHeader;
+      return fakeApp(captured);
+    },
+  });
+  const response = await handler(new Request("https://example.test/functions/v1/dabboba-api/v1/catalog/products", {
+    headers: {
+      "cf-connecting-ip": "198.51.100.30",
+      "x-forwarded-for": "203.0.113.9",
+      "x-real-ip": "203.0.113.10",
+      forwarded: "for=203.0.113.11",
+    },
+  }), { remoteAddr: { hostname: "10.0.0.1" } });
+  assert.equal(response.status, 207);
+  assert.equal(trustedHeader, "cf-connecting-ip");
+  assert.equal(captured[0]?.headers["cf-connecting-ip"], "198.51.100.30");
+  assert.equal(captured[0]?.headers["x-forwarded-for"], undefined);
+  assert.equal(captured[0]?.headers["x-real-ip"], undefined);
+  assert.equal(captured[0]?.headers.forwarded, undefined);
+  assert.equal(captured[0]?.remoteAddress, "10.0.0.1");
+
+  const unconfigured: InjectOptions[] = [];
+  const defaultHandler = createSupabaseEdgeApiHandler({
+    readEnvironment: () => edgeEnvironment(),
+    buildApp: async (config) => {
+      assert.equal(config.trustedClientIpHeader, null);
+      return fakeApp(unconfigured);
+    },
+  });
+  await defaultHandler(new Request("https://example.test/functions/v1/dabboba-api/v1/catalog/products", {
+    headers: { "cf-connecting-ip": "198.51.100.30" },
+  }));
+  assert.equal(unconfigured[0]?.headers["cf-connecting-ip"], undefined);
+  assert.throws(
+    () => normalizeSupabaseEdgeApiEnvironment(edgeEnvironment({ TRUSTED_CLIENT_IP_HEADER: "cf-connecting-ip" })),
+    /forbidden legacy setting/,
+  );
+});
+
 test("Edge API injects the hosted WASM sanitizer into the shared media runtime", async () => {
   const sanitizeImage = async () => ({
     data: Buffer.from("webp"),
@@ -201,6 +246,68 @@ test("Edge API injects the hosted WASM sanitizer into the shared media runtime",
   assert.equal((await handler(new Request("https://example.test/dabboba-api/healthz"))).status, 207);
   assert.equal(received, sanitizeImage);
 });
+
+test("admin Edge function injects the same WASM sanitizer so catalog-media completion is available", async () => {
+  const sanitizeImage = async () => ({
+    data: Buffer.from("webp"),
+    mimeType: "image/webp" as const,
+    checksumSha256: "0".repeat(64),
+    byteSize: 4,
+    width: 1,
+    height: 1,
+  });
+  let received: unknown;
+  const serviceSecret = "fixture-admin-service-secret-1234567890";
+  const handler = createSupabaseEdgeApiHandler({
+    surface: "admin",
+    readEnvironment: () => edgeEnvironment({
+      DABBOBA_ADMIN_ORIGINS: "https://admin.example.test",
+      DABBOBA_ADMIN_PROXY_IDENTITY_SECRET: "fixture-admin-proxy-secret-1234567890",
+      DABBOBA_ADMIN_EDGE_CLIENT_IP_HEADER: "cf-connecting-ip",
+      DABBOBA_ADMIN_SERVICE_SECRET: serviceSecret,
+    }),
+    sanitizeImage,
+    buildApp: async (config, sanitizer) => {
+      assert.equal(config.surface, "admin");
+      received = sanitizer;
+      return fakeApp([]);
+    },
+  });
+  const canonicalPath = "/v1/admin/catalog-media/uploads";
+  const requestId = "0b8f4f7e-6a47-4c4c-9a55-2f0d3c1f7a11";
+  const body = JSON.stringify({ mimeType: "image/png" });
+  const signature = signAdminServiceRequest({
+    secret: serviceSecret, method: "POST", path: canonicalPath, requestId,
+    authorization: "Bearer opaque-admin", reason: encodeURIComponent("상품 이미지"), reasonEncoding: "utf-8-percent",
+    contentType: "application/json", body,
+  });
+  const response = await handler(new Request(`https://example.test/dabboba-admin-api${canonicalPath}`, {
+    method: "POST",
+    headers: {
+      ...signature,
+      "x-request-id": requestId,
+      authorization: "Bearer opaque-admin",
+      "x-admin-reason": encodeURIComponent("상품 이미지"),
+      "x-admin-reason-encoding": "utf-8-percent",
+      "content-type": "application/json",
+    },
+    body,
+  }));
+  assert.equal(response.status, 207);
+  assert.equal(received, sanitizeImage);
+
+  assert.equal(edgeMediaRuntime.completionAvailable, false);
+  assert.equal(createEdgeMediaRuntime().completionAvailable, false);
+  const adminRuntime = createEdgeMediaRuntime(sanitizer(received));
+  assert.equal(adminRuntime.completionAvailable, true);
+  assert.equal((await adminRuntime.sanitizeImage(Buffer.from("png"), "image/png")).mimeType, "image/webp");
+  const failing = createEdgeMediaRuntime(async () => { throw new Error("decode failed"); });
+  await assert.rejects(failing.sanitizeImage(Buffer.from("x"), "image/png"), /안전하게 처리할 수 없습니다/);
+});
+
+function sanitizer(value: unknown) {
+  return value as Parameters<typeof createEdgeMediaRuntime>[0];
+}
 
 test("Edge API reuses the managed Supabase service role key when no duplicate Storage secret is set", () => {
   const normalized = normalizeSupabaseEdgeApiEnvironment(edgeEnvironment({

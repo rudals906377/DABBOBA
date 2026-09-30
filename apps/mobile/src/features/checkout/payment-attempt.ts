@@ -15,7 +15,7 @@ export type PaymentAttemptState = "none" | "preparing" | "started";
 
 export class PaymentAttemptMismatchError extends Error {
   constructor() {
-    super("이전 결제 시도 정보가 현재 주문과 일치하지 않습니다.");
+    super("이전 결제 시도 정보가 현재 주문과 일치하지 않아요.");
     this.name = "PaymentAttemptMismatchError";
   }
 }

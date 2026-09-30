@@ -105,3 +105,20 @@ export function queryString(value: unknown, maximum = 120): string | undefined {
   if (typeof value !== "string" || value.length > maximum) throw badRequest("검색 값을 확인해 주세요.");
   return value.trim() || undefined;
 }
+
+/**
+ * Escape LIKE/ILIKE metacharacters so user search text matches literally.
+ * Callers must pair the pattern with `ESCAPE '\'` in SQL.
+ */
+export function escapeLikePattern(value: string): string {
+  return value.replace(/[\\%_]/g, (character) => `\\${character}`);
+}
+
+/**
+ * Build a literal "contains" ILIKE pattern. Search text made only of LIKE
+ * wildcards or the escape character would scan every row, so it is rejected.
+ */
+export function likeContainsPattern(search: string): string {
+  if (!/[^\\%_\s]/.test(search)) throw badRequest("검색어에 문자나 숫자를 포함해 주세요.");
+  return `%${escapeLikePattern(search)}%`;
+}

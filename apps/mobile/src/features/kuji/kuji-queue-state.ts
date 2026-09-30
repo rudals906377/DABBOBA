@@ -20,7 +20,7 @@ export function isKujiRoomEndpointUnavailable(status: number, message: string): 
   if ([405, 501, 502, 503, 504].includes(status)) return true;
   if (status !== 404) return false;
   return /route\b.*\bnot found/i.test(message)
-    || message === "쿠지 대기실 응답을 확인하지 못했습니다.";
+    || message === "쿠지 대기실 응답을 확인하지 못했어요.";
 }
 
 export type KujiQueueSnapshot = {

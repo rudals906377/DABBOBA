@@ -645,12 +645,40 @@ export function accountNotificationDestination(
   return { route: "home", detail: null };
 }
 
+/**
+ * Stored notification data is written by many server modules and may carry
+ * internal fields (actor ids, amounts, reasons, provider state). Customer
+ * clients only need the identifiers already covered by the destination
+ * contract, so every other key is withheld and each value is re-validated.
+ */
+const PUBLIC_NOTIFICATION_DATA_FIELDS: Readonly<Record<string, RegExp>> = {
+  orderId: UUID_PATTERN,
+  shippingRequestId: UUID_PATTERN,
+  inquiryId: UUID_PATTERN,
+  listingId: UUID_PATTERN,
+  exchangeListingId: UUID_PATTERN,
+  requestId: UUID_PATTERN,
+  wantedRequestId: UUID_PATTERN,
+  aggregateId: UUID_PATTERN,
+  productId: SLUG_PATTERN,
+  category: /^[A-Za-z]{1,20}$/,
+};
+
+export function publicNotificationData(data: Record<string, unknown>): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const [key, pattern] of Object.entries(PUBLIC_NOTIFICATION_DATA_FIELDS)) {
+    const value = data[key];
+    if (typeof value === "string" && pattern.test(value)) result[key] = value;
+  }
+  return result;
+}
+
 const mapNotification = (row: NotificationRow) => ({
   id: row.id,
   kind: row.kind,
   title: row.title,
   body: row.body,
-  data: row.data,
+  data: publicNotificationData(row.data),
   destination: accountNotificationDestination(row.kind, row.data),
   readAt: nullableIso(row.read_at),
   createdAt: iso(row.created_at),
@@ -1140,7 +1168,7 @@ export async function registerAccountRoutes(app: FastifyInstance, context: ApiCo
   });
 
   app.get("/v1/account/wishlist", { preHandler: context.auth.requireUser }, async (request) => {
-    const { limit, cursor } = pagination(queryOf(request));
+    const { limit, cursor } = pagination(queryOf(request), "uuid");
     const values: unknown[] = [request.actor!.userId, limit + 1];
     const filters = ["w.user_id=$1", "p.is_prize_only=false"];
     if (cursor) {
@@ -1204,7 +1232,7 @@ export async function registerAccountRoutes(app: FastifyInstance, context: ApiCo
   });
 
   app.get("/v1/account/inventory", { preHandler: context.auth.requireUser }, async (request) => {
-    const { limit, cursor } = pagination(queryOf(request));
+    const { limit, cursor } = pagination(queryOf(request), "uuid");
     const values: unknown[] = [request.actor!.userId, limit + 1];
     const filters = [
       "iu.owner_id=$1",
@@ -1241,7 +1269,7 @@ export async function registerAccountRoutes(app: FastifyInstance, context: ApiCo
   });
 
   app.get("/v1/account/orders", { preHandler: context.auth.requireUser }, async (request) => {
-    const { limit, cursor } = pagination(queryOf(request));
+    const { limit, cursor } = pagination(queryOf(request), "uuid");
     return withTransaction(context.pool, async (client) => {
       await client.query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY");
       const values: unknown[] = [request.actor!.userId, limit + 1];
@@ -1295,7 +1323,7 @@ export async function registerAccountRoutes(app: FastifyInstance, context: ApiCo
 
   app.get("/v1/account/draw-entitlements", { preHandler: context.auth.requireUser }, async (request) => {
     const query = queryOf(request);
-    const { limit, cursor } = pagination(query);
+    const { limit, cursor } = pagination(query, "uuid");
     const status = query.status === undefined
       ? "AVAILABLE"
       : enumInput(query, "status", DRAW_ENTITLEMENT_STATUSES)!;
@@ -1322,7 +1350,7 @@ export async function registerAccountRoutes(app: FastifyInstance, context: ApiCo
   });
 
   app.get("/v1/account/points", { preHandler: context.auth.requireUser }, async (request) => {
-    const { limit, cursor } = pagination(queryOf(request));
+    const { limit, cursor } = pagination(queryOf(request), "uuid");
     const actorId = request.actor!.userId;
     const values: unknown[] = [actorId, limit + 1];
     const filters = ["user_id=$1"];
@@ -1503,7 +1531,7 @@ export async function registerAccountRoutes(app: FastifyInstance, context: ApiCo
   });
 
   app.get("/v1/account/notifications", { preHandler: context.auth.requireUser }, async (request) => {
-    const { limit, cursor } = pagination(queryOf(request));
+    const { limit, cursor } = pagination(queryOf(request), "uuid");
     const values: unknown[] = [request.actor!.userId, limit + 1];
     const filters = ["user_id=$1"];
     if (cursor) {
@@ -1629,7 +1657,7 @@ export async function registerAccountRoutes(app: FastifyInstance, context: ApiCo
 
   app.get("/v1/account/shipping-requests", { preHandler: context.auth.requireUser }, async (request) => {
     const query = queryOf(request);
-    const { limit, cursor } = pagination(query);
+    const { limit, cursor } = pagination(query, "uuid");
     const status = query.status === undefined
       ? undefined
       : enumInput(query, "status", SHIPPING_REQUEST_STATUSES);
@@ -1933,7 +1961,10 @@ export async function registerAccountRoutes(app: FastifyInstance, context: ApiCo
     return sendMutation(reply, result);
   });
 
-  app.get("/v1/account/deletion-preview", { preHandler: context.auth.requireUserWithoutPolicy }, async (request, reply) => {
+  app.get("/v1/account/deletion-preview", {
+    preHandler: context.auth.requireUserWithoutPolicy,
+    config: { allowAccountDeletionScope: true },
+  }, async (request, reply) => {
     const blockers = await loadDeletionBlockers(context.pool, request.actor!.userId);
     return reply.header("cache-control", "no-store").send({
       canDeleteNow: !Object.values(blockers).some((value) => value > 0),
@@ -2001,7 +2032,10 @@ export async function registerAccountRoutes(app: FastifyInstance, context: ApiCo
     return reply.header("cache-control", "no-store").code(204).send();
   });
 
-  app.get("/v1/account/deletion-request", { preHandler: context.auth.requireUserWithoutPolicy }, async (request, reply) => {
+  app.get("/v1/account/deletion-request", {
+    preHandler: context.auth.requireUserWithoutPolicy,
+    config: { allowAccountDeletionScope: true },
+  }, async (request, reply) => {
     const result = await context.pool.query<AccountDeletionRequestRow>(
       `SELECT id,status,blocker_snapshot,request_count,requested_at,last_requested_at,
               completed_at,auth_deletion_status
@@ -2018,7 +2052,7 @@ export async function registerAccountRoutes(app: FastifyInstance, context: ApiCo
   app.get(
     "/v1/account/deletion-requests/:requestId/status",
     {
-      config: { rateLimit: { max: 30, timeWindow: "1 minute" } },
+      config: { rateLimit: { max: 30, timeWindow: "1 minute" }, allowAccountDeletionScope: true },
     },
     async (request, reply) => {
       const requestId = uuidInput((request.params as Record<string, unknown>).requestId, "requestId");
@@ -2037,7 +2071,10 @@ export async function registerAccountRoutes(app: FastifyInstance, context: ApiCo
     },
   );
 
-  app.post("/v1/account/deletion-request", { preHandler: context.auth.requireUserWithoutPolicy }, async (request, reply) => {
+  app.post("/v1/account/deletion-request", {
+    preHandler: context.auth.requireUserWithoutPolicy,
+    config: { allowAccountDeletionScope: true },
+  }, async (request, reply) => {
     const input = objectInput(request.body);
     assertOnlyKeys(input, []);
     const actorId = request.actor!.userId;

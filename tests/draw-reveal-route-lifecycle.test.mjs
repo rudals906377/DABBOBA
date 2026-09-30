@@ -47,5 +47,7 @@ test("consume completion, failure, and final cleanup all check the current reque
   assert.match(openProduct, /committedSnapshot = null;\s*\}\s*if \(!isCurrentRequest\(generation, owner\)\) return/);
   assert.match(openProduct, /catch \(error\) \{\s*if \(!isCurrentRequest\(generation, owner\)\) return/);
   assert.match(openProduct, /finally \{\s*if \(isCurrentRequest\(generation, owner\)\) setOpening\(false\)/);
-  assert.match(screen, /setResult\(null\);[\s\S]*?\}, \[preview, routeKey\]\)/);
+  assert.match(screen, /setResult\(null\);[\s\S]*?\}, \[routeKey\]\)/);
+  // The initial mount already starts fresh; only a later route change resets the stage.
+  assert.match(screen, /const resetRouteKeyRef = useRef\(routeKey\);\s*useEffect\(\(\) => \{\s*if \(resetRouteKeyRef\.current === routeKey\) return;\s*resetRouteKeyRef\.current = routeKey;/);
 });

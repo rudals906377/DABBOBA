@@ -173,7 +173,7 @@ test("native never completes after failed or redirected storage responses", asyn
   for (const method of ["POST", "PUT"]) {
     for (const response of [{ ok: false, redirected: false }, { ok: true, redirected: true }]) {
       const h = harness(method, undefined, false, response);
-      await assert.rejects(h.run(), /업로드하지 못했습니다/);
+      await assert.rejects(h.run(), /업로드하지 못했어요/);
       assert.equal(h.calls.length, 2);
     }
   }

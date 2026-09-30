@@ -637,12 +637,22 @@ test("the crank uses a smooth bolt-free plate and one thick straight faceted han
 
   assert.match(
     component,
-    /GACHA_CRANK_PLATE = require\("\.\.\/\.\.\/\.\.\/\.\.\/\.\.\/public\/assets\/dabboba\/draw\/gacha\/capsule-crank-plate-clean\.png"\)/,
+    /GACHA_CRANK_PLATE = require\("\.\.\/\.\.\/\.\.\/assets\/draw\/gacha\/capsule-crank-plate-clean\.png"\)/,
   );
   assert.match(
     component,
-    /GACHA_CRANK_HANDLE = require\("\.\.\/\.\.\/\.\.\/\.\.\/\.\.\/public\/assets\/dabboba\/draw\/gacha\/capsule-crank-handle-thick-straight\.png"\)/,
+    /GACHA_CRANK_HANDLE = require\("\.\.\/\.\.\/\.\.\/assets\/draw\/gacha\/capsule-crank-handle-thick-straight\.png"\)/,
   );
+  // The Expo bundle consumes byte-identical copies; the web originals stay in place.
+  assert.deepEqual(
+    readFileSync(new URL("../apps/mobile/assets/draw/gacha/capsule-crank-plate-clean.png", import.meta.url)),
+    plateAsset,
+  );
+  assert.deepEqual(
+    readFileSync(new URL("../apps/mobile/assets/draw/gacha/capsule-crank-handle-thick-straight.png", import.meta.url)),
+    handleAsset,
+  );
+  assert.doesNotMatch(component, /public\/assets\/dabboba/);
   assert.doesNotMatch(component, /capsule-crank-handle-symmetric\.png/);
   assert.doesNotMatch(component, /capsule-crank-plate-pixel\.png|capsule-crank-pixel\.png/);
   assert.equal((component.match(/source=\{GACHA_CRANK_PLATE\}/g) ?? []).length, 1);

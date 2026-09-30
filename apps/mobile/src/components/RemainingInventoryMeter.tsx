@@ -119,7 +119,7 @@ const styles = StyleSheet.create({
   },
   trackCompact: { height: 4 },
   trackLargeText: { width: "100%", flex: 0 },
-  trackDark: { backgroundColor: "#434A43" },
+  trackDark: { backgroundColor: seed.color.inverted.strokeStrong },
   fill: {
     height: "100%",
     borderRadius: seed.radius.full,

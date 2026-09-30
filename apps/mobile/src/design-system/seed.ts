@@ -39,6 +39,31 @@ export const seed = {
       transparent: "transparent",
       transparentPressed: "rgba(17, 20, 17, 0.06)",
     },
+    /** Small Kuji category cues only; never whole cards or navigation. */
+    kuji: {
+      solid: colors.kujiOrange,
+      ink: colors.kujiOrangeDark,
+      weak: "#FFF1E9",
+      weakStrong: "#FFF2E8",
+      stroke: "#F2B597",
+      overlay: "rgba(255, 248, 242, 0.94)",
+    },
+    /** Neutral informational state (e.g. point refunds), distinct from brand and critical. */
+    info: {
+      ink: "#4C5FA8",
+      weak: "#EEF0FA",
+    },
+    /** Text and strokes on the near-black arcade/draw surface. */
+    inverted: {
+      surface: colors.black,
+      surfaceRaised: "#202520",
+      surfaceSubtle: "#2D322D",
+      stroke: "#3A403A",
+      strokeStrong: "#434A43",
+      foreground: colors.white,
+      foregroundMuted: "#AEB6AD",
+      foregroundSubtle: "#929A91",
+    },
     stroke: {
       neutral: colors.line,
       muted: "#E7E9E4",

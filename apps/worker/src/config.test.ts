@@ -322,3 +322,14 @@ test("loadWorkerConfig reserves shutdown time inside the Cloud Run task timeout"
     /WORKER_MAX_RUN_SECONDS must be an integer between/,
   );
 });
+
+test("the PG window validity is bounded and defaults to thirty minutes", () => {
+  assert.equal(loadWorkerConfig(base).paymentWindowValidityMinutes, 30);
+  assert.equal(loadWorkerConfig({ ...base, WORKER_PAYMENT_WINDOW_VALIDITY_MINUTES: "45" }).paymentWindowValidityMinutes, 45);
+  for (const value of ["9", "1441", "abc"]) {
+    assert.throws(
+      () => loadWorkerConfig({ ...base, WORKER_PAYMENT_WINDOW_VALIDITY_MINUTES: value }),
+      /WORKER_PAYMENT_WINDOW_VALIDITY_MINUTES must be an integer between 10 and 1440/,
+    );
+  }
+});

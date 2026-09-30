@@ -2,6 +2,7 @@ import Constants from "expo-constants";
 import { type Href, useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  AccessibilityInfo,
   ActivityIndicator,
   FlatList,
   Keyboard,
@@ -57,6 +58,7 @@ import {
   type ShopSortOption,
 } from "@/features/shop/shop-filter";
 import { resolveTwoColumnProductCardWidth } from "@/features/shop/shop-layout";
+import { mergeRefreshedFirstPage, shouldRefreshShopOnFocus } from "@/features/shop/shop-refresh";
 import {
   resolveCatalogImageUrl,
   resolveMobileRuntimeConfig,
@@ -65,6 +67,8 @@ import {
 import { colors } from "@/theme";
 
 type ShopRootCategory = Extract<ProductCategory, "gacha" | "kuji">;
+
+const SHOP_PAGE_SIZE = 20;
 
 export function ShopScreen({ category }: { category: ShopRootCategory }) {
   const rootNavigationScroll = useRootNavigationScroll();
@@ -99,8 +103,13 @@ export function ShopScreen({ category }: { category: ShopRootCategory }) {
   const [filterDrawerOpen, setFilterDrawerOpen] = useState(false);
   const [excludeSoldOut, setExcludeSoldOut] = useState(false);
   const [sortOption, setSortOption] = useState<ShopSortOption>("latest");
-  const [focusRevision, setFocusRevision] = useState(0);
   const requestSequence = useRef(0);
+  const lastSuccessfulLoadAt = useRef<number | null>(null);
+  const firstPageFailed = useRef(false);
+  const productsRef = useRef(products);
+  const nextCursorRef = useRef(nextCursor);
+  productsRef.current = products;
+  nextCursorRef.current = nextCursor;
 
   const catalogEnabled = isCustomerProductCategoryEnabledOn(category, "catalog");
   const prelaunchKuji = category === "kuji" && !commerceEnabled;
@@ -117,9 +126,12 @@ export function ShopScreen({ category }: { category: ShopRootCategory }) {
   const loadProducts = useCallback(async ({
     cursor,
     manual = false,
+    inPlace = false,
   }: {
     cursor?: string;
     manual?: boolean;
+    /** Background refresh: keep the visible items (and scroll position) until page 1 returns. */
+    inPlace?: boolean;
   } = {}) => {
     if (!catalogEnabled || isComingSoon) {
       setProducts([]);
@@ -135,7 +147,7 @@ export function ShopScreen({ category }: { category: ShopRootCategory }) {
       setImageRequestKey((current) => current + 1);
     } else if (append) {
       setLoadingMore(true);
-    } else {
+    } else if (!inPlace) {
       setLoading(true);
       setProducts([]);
       setNextCursor(null);
@@ -149,19 +161,37 @@ export function ShopScreen({ category }: { category: ShopRootCategory }) {
         sort: sortOption,
         excludeSoldOut,
         cursor,
-        limit: 20,
+        limit: SHOP_PAGE_SIZE,
       });
       if (sequence !== requestSequence.current) return;
-      setProducts((current) => append
-        ? mergeUniqueProducts(current, page.products)
-        : page.products);
-      setNextCursor(page.nextCursor);
+      if (append) {
+        setProducts((current) => mergeUniqueProducts(current, page.products));
+        setNextCursor(page.nextCursor);
+      } else if (inPlace) {
+        const merged = mergeRefreshedFirstPage(
+          { items: productsRef.current, nextCursor: nextCursorRef.current },
+          { items: page.products, nextCursor: page.nextCursor },
+          SHOP_PAGE_SIZE,
+        );
+        setProducts(merged.items);
+        setNextCursor(merged.nextCursor);
+      } else {
+        setProducts(page.products);
+        setNextCursor(page.nextCursor);
+      }
+      if (!append) {
+        lastSuccessfulLoadAt.current = Date.now();
+        firstPageFailed.current = false;
+      }
       setMessage("");
       setLoadMoreMessage("");
     } catch {
       if (sequence !== requestSequence.current) return;
       if (append) setLoadMoreMessage("다음 상품을 불러오지 못했어요.");
-      else setMessage("연결 상태를 확인한 뒤 다시 시도해 주세요.");
+      else {
+        firstPageFailed.current = true;
+        setMessage("연결 상태를 확인한 뒤 다시 시도해 주세요.");
+      }
     } finally {
       if (sequence === requestSequence.current) {
         setLoading(false);
@@ -171,18 +201,46 @@ export function ShopScreen({ category }: { category: ShopRootCategory }) {
     }
   }, [catalogEnabled, category, excludeSoldOut, isComingSoon, query, requestedIpId, runtime.apiBaseUrl, sortOption]);
 
-  useFocusEffect(useCallback(() => {
-    setFocusRevision((current) => current + 1);
-    void loadIps();
-    return undefined;
-  }, [loadIps]));
+  const loadProductsRef = useRef(loadProducts);
+  loadProductsRef.current = loadProducts;
+  const hasFocusedOnce = useRef(false);
 
+  // Revisiting the tab keeps the loaded list and its scroll position. Only a
+  // list whose last successful load is older than the stale window refreshes,
+  // and it does so in place; a list whose first load failed retries page 1.
+  useFocusEffect(useCallback(() => {
+    void loadIps();
+    if (!hasFocusedOnce.current) {
+      hasFocusedOnce.current = true;
+      return undefined;
+    }
+    if (lastSuccessfulLoadAt.current === null) {
+      if (firstPageFailed.current) void loadProductsRef.current();
+    } else if (
+      // Kuji remaining-tier counts must refresh whenever the shop regains focus.
+      category === "kuji"
+      || shouldRefreshShopOnFocus(lastSuccessfulLoadAt.current, Date.now())
+    ) {
+      void loadProductsRef.current({ inPlace: true });
+    }
+    return undefined;
+  }, [category, loadIps]));
+
+  // Changing the search, sort, filter or category conditions starts a new list.
   useEffect(() => {
     const timer = setTimeout(() => {
       void loadProducts();
     }, query.trim() ? 300 : 0);
     return () => clearTimeout(timer);
-  }, [categorySettingsRevision, focusRevision, loadProducts]);
+  }, [loadProducts]);
+
+  // An operator category-settings change refreshes the current list in place.
+  const seenCategorySettingsRevision = useRef(categorySettingsRevision);
+  useEffect(() => {
+    if (seenCategorySettingsRevision.current === categorySettingsRevision) return;
+    seenCategorySettingsRevision.current = categorySettingsRevision;
+    void loadProductsRef.current({ inPlace: true });
+  }, [categorySettingsRevision]);
 
   const requestedIp = ips.find((ip) => ip.id === requestedIpId) ?? null;
   const ipNames = useMemo(
@@ -242,7 +300,7 @@ export function ShopScreen({ category }: { category: ShopRootCategory }) {
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="상품 필터 및 정렬 열기"
-          accessibilityHint={commerceEnabled ? "품절 제외와 상품 정렬 방식을 선택합니다" : "상품 정렬 방식을 선택합니다"}
+          accessibilityHint={commerceEnabled ? "품절 제외와 상품 정렬 방식을 선택해요" : "상품 정렬 방식을 선택해요"}
           accessibilityValue={{ text: excludeSoldOut || sortOption !== "latest" ? "필터 적용됨" : "기본 필터" }}
           hitSlop={4}
           onPress={() => { Keyboard.dismiss(); setFilterDrawerOpen(true); }}
@@ -277,8 +335,8 @@ export function ShopScreen({ category }: { category: ShopRootCategory }) {
         <View style={styles.refreshFailure} accessibilityLiveRegion="polite">
           <Text variant="caption" style={styles.refreshFailureText}>
             {commerceEnabled
-              ? "목록을 갱신하지 못했어요. 표시된 가격·재고가 최신이 아닐 수 있습니다."
-              : "목록을 갱신하지 못했어요. 표시된 예정가가 최신이 아닐 수 있습니다."}
+              ? "목록을 갱신하지 못했어요. 표시된 가격·재고가 최신이 아닐 수 있어요."
+              : "목록을 갱신하지 못했어요. 표시된 예정가가 최신이 아닐 수 있어요."}
           </Text>
           <Pressable
             accessibilityRole="button"
@@ -419,6 +477,19 @@ function ShopFilterDrawer({
 }) {
   const [draftExcludeSoldOut, setDraftExcludeSoldOut] = useState(excludeSoldOut);
   const [draftSortOption, setDraftSortOption] = useState(sortOption);
+  const [reduceMotion, setReduceMotion] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    void AccessibilityInfo.isReduceMotionEnabled().then((enabled) => {
+      if (active) setReduceMotion(enabled);
+    });
+    const subscription = AccessibilityInfo.addEventListener("reduceMotionChanged", setReduceMotion);
+    return () => {
+      active = false;
+      subscription.remove();
+    };
+  }, []);
 
   useEffect(() => {
     if (!visible) return;
@@ -430,7 +501,7 @@ function ShopFilterDrawer({
     <Modal
       visible={visible}
       transparent
-      animationType="slide"
+      animationType={reduceMotion ? "none" : "slide"}
       statusBarTranslucent
       onRequestClose={onClose}
     >
@@ -521,8 +592,8 @@ function ProductCard({
   commerceEnabled: boolean;
   onPress: () => void;
 }) {
-  const storefrontUri = resolveCatalogImageUrl(product.storefrontImageUrl, assetBaseUrl, product.version);
-  const primaryUri = resolveCatalogImageUrl(product.imageUrl, assetBaseUrl, product.version);
+  const storefrontUri = resolveCatalogImageUrl(product.storefrontImageUrl, assetBaseUrl, product.version, __DEV__);
+  const primaryUri = resolveCatalogImageUrl(product.imageUrl, assetBaseUrl, product.version, __DEV__);
   const tierAccessibilityLabel = product.category === "kuji"
     ? remainingKujiTierAccessibilityLabel(product.remainingKujiTiers)
     : null;
@@ -569,9 +640,9 @@ function ProductCard({
         </Text>
         <View style={[styles.productMeta, wide && styles.kujiProductMeta]}>
           {price.qualifier ? (
-            <Text variant="catalogMetadata" maxFontSizeMultiplier={CATALOG_CARD_TEXT_MAX_FONT_SIZE_MULTIPLIER} numberOfLines={1} style={styles.productPriceQualifier}>예정가</Text>
+            <Text variant="catalogMetadata" maxFontSizeMultiplier={CATALOG_CARD_TEXT_MAX_FONT_SIZE_MULTIPLIER} style={styles.productPriceQualifier}>{price.qualifier}</Text>
           ) : null}
-          <Text variant="catalogPrice" maxFontSizeMultiplier={CATALOG_CARD_TEXT_MAX_FONT_SIZE_MULTIPLIER} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.72} style={styles.productPrice}>{price.amount}</Text>
+          <Text variant="catalogPrice" maxFontSizeMultiplier={CATALOG_CARD_TEXT_MAX_FONT_SIZE_MULTIPLIER} style={styles.productPrice}>{price.amount}</Text>
         </View>
         {product.category === "kuji" && shouldShowCatalogInventory(product, commerceEnabled) ? (
           <KujiPrizeTierRow tiers={product.remainingKujiTiers} style={styles.kujiPrizeTiers} />
@@ -687,10 +758,10 @@ const styles = StyleSheet.create({
   productName: { minHeight: 40, color: colors.ink, ...seed.typography.catalogTitle, marginTop: seed.spacing.x1 },
   gachaProductName: { marginTop: 0 },
   kujiProductName: { minHeight: 0, marginTop: seed.spacing.x1, ...seed.typography.catalogTitleWide },
-  productMeta: { marginTop: seed.spacing.x2, flexDirection: "row", alignItems: "baseline", gap: 4 },
+  productMeta: { marginTop: seed.spacing.x2, gap: seed.spacing.x0_5 },
   kujiProductMeta: { marginTop: seed.spacing.x2 },
-  productPriceQualifier: { flexShrink: 0, color: colors.muted, ...seed.typography.catalogMetadata },
-  productPrice: { flexShrink: 1, minWidth: 0, color: colors.ink, ...seed.typography.catalogPrice },
+  productPriceQualifier: { color: colors.muted, ...seed.typography.catalogMetadata },
+  productPrice: { color: colors.ink, ...seed.typography.catalogPrice },
   kujiPrizeTiers: { marginTop: seed.spacing.x1_5 },
   productInventory: { marginTop: seed.spacing.x1_5 },
   kujiProductInventory: { marginTop: seed.spacing.x1_5 },
@@ -699,7 +770,7 @@ const styles = StyleSheet.create({
   retryButton: { minHeight: seed.size.touchTarget, justifyContent: "center", paddingHorizontal: 16, marginTop: 15, borderRadius: seed.radius.r2_5, backgroundColor: colors.ink },
   retryLabel: { color: colors.white, fontWeight: "700" },
   drawerOverlay: { flex: 1, justifyContent: "flex-end" },
-  drawerBackdrop: { ...StyleSheet.absoluteFill, backgroundColor: "rgba(7, 16, 11, 0.42)" },
+  drawerBackdrop: { ...StyleSheet.absoluteFill, backgroundColor: seed.color.inverted.surface, opacity: 0.42 },
   drawerSheet: { paddingHorizontal: seed.spacing.globalGutter, paddingTop: seed.spacing.x2, borderTopLeftRadius: seed.radius.r6, borderTopRightRadius: seed.radius.r6, backgroundColor: seed.color.layer.elevated },
   drawerHandle: { alignSelf: "center", width: 38, height: 4, marginBottom: seed.spacing.x2, borderRadius: seed.radius.r0_5, backgroundColor: seed.color.stroke.contrast },
   drawerHeader: { minHeight: seed.size.topNavigation, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },

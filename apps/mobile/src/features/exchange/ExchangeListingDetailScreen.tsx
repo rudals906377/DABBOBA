@@ -26,6 +26,7 @@ import { catalogProductCardSurface, catalogProductImageSurface } from "@/design-
 import { subtleSectionHeaderRule } from "@/design-system/section";
 import { seed } from "@/design-system/seed";
 import { catalogPriceLabel } from "@/features/commerce/product-commerce-presentation";
+import { openCustomerLogin } from "@/features/auth/login-navigation";
 import {
   categoryLabel,
   decideExchangeOffer,
@@ -78,7 +79,7 @@ export function ExchangeListingDetailScreen() {
         setDetail(next);
         setMessage("");
       } catch (error) {
-        setMessage(error instanceof Error ? error.message : "교환 글을 불러오지 못했습니다.");
+        setMessage(error instanceof Error ? error.message : "교환 글을 불러오지 못했어요.");
       } finally {
         setRefreshing(false);
       }
@@ -91,15 +92,15 @@ export function ExchangeListingDetailScreen() {
   }, [load]);
 
   const offer = useCallback(async () => {
+    if (!listingId) return;
     const tokens = await readAuthTokens();
     if (!tokens) {
-      Alert.alert(
-        "로그인이 필요해요",
+      openCustomerLogin(
         "교환 신청은 로그인 후 내가 가챠로 직접 뽑아 보관 중인 상품으로만 할 수 있어요.",
+        `/exchange/${listingId}/offer`,
       );
       return;
     }
-    if (!listingId) return;
     router.push(`/exchange/${listingId}/offer`);
   }, [listingId]);
 
@@ -126,7 +127,7 @@ export function ExchangeListingDetailScreen() {
         accepting ? "이 제안을 선택할까요?" : "이 제안을 거절할까요?",
         accepting
           ? `${proposal.proposerNickname}님의 상품 ${proposal.products.length}개를 선택하면 나머지 대기 제안은 자동으로 거절돼요.`
-          : "거절한 상품은 제안자의 보관함에서 다시 사용할 수 있게 됩니다.",
+          : "거절한 상품은 제안자의 보관함에서 다시 사용할 수 있게 돼요.",
         [
           { text: "취소", style: "cancel" },
           {
@@ -174,7 +175,7 @@ export function ExchangeListingDetailScreen() {
   const showOfferAction = detail?.viewerRole === "VISITOR" && detail.listingStatus === "OPEN";
   const listingStatusLabel = item && detail?.listingStatus === "OPEN"
     ? `D-${Math.max(0, Math.ceil((new Date(item.expiresAt).getTime() - Date.now()) / 86_400_000))}`
-    : "선택완료";
+    : "선택 완료";
   const assetBaseUrl = runtime.assetBaseUrl
     ?? (__DEV__ ? runtime.apiBaseUrl.replace(/:8788$/, ":4174") : null);
   const goBack = () => {
@@ -246,7 +247,7 @@ export function ExchangeListingDetailScreen() {
                 exchangeListingId={item.id}
                 ipName={detail.ipNames[product.ipId] ?? null}
                 assetBaseUrl={assetBaseUrl}
-                label={`A가 올린 상품 ${index + 1}/${item.products.length}`}
+                label={`등록 상품 ${index + 1}/${item.products.length}`}
               />
             ))}
 
@@ -367,6 +368,7 @@ function ProductSummary({
       ]}>
         {imageUri ? (
           <Image
+            accessible={false}
             source={{ uri: imageUri }}
             style={styles.productImage}
             resizeMode="contain"
@@ -376,7 +378,7 @@ function ProductSummary({
             }}
           />
         ) : (
-          <View style={styles.mediaPlaceholder}><Text style={styles.mediaPlaceholderLabel}>이미지 없음</Text></View>
+          <View style={styles.mediaPlaceholder}><Text variant="finePrint" style={styles.mediaPlaceholderLabel}>이미지 없음</Text></View>
         )}
       </View>
       <View style={styles.productInfo}>
@@ -386,7 +388,7 @@ function ProductSummary({
         </Text>
         <Text numberOfLines={2} style={styles.productName}>{productSubjectTitle(product.name, ipName)}</Text>
         <ProductInfoDivider style={styles.productFieldDivider} />
-        <Text style={styles.price}>{catalogPriceLabel(product.price)}</Text>
+        <Text variant="catalogPrice" style={styles.price}>{catalogPriceLabel(product.price)}</Text>
         <View style={styles.productDetailHint}>
           <Text style={styles.productDetailHintLabel}>상품 상세</Text>
           <DecorativeIonicon name="chevron-forward" size={14} color={colors.muted} />
@@ -482,11 +484,11 @@ const styles = StyleSheet.create({
   retry: { minHeight: seed.size.touchTarget, marginTop: seed.spacing.x3_5, justifyContent: "center", paddingHorizontal: seed.spacing.x4, borderRadius: seed.radius.r2_5, backgroundColor: colors.ink },
   retryLabel: { color: colors.white, fontSize: 13, fontWeight: "800" },
   ownerHeader: { minHeight: 38, flexDirection: "row", alignItems: "center", gap: 8 },
-  avatar: { width: 34, height: 34, borderRadius: seed.radius.full, alignItems: "center", justifyContent: "center", backgroundColor: "#E5E9E6" },
+  avatar: { width: 34, height: 34, borderRadius: seed.radius.full, alignItems: "center", justifyContent: "center", backgroundColor: seed.color.background.neutralWeak },
   avatarText: { color: colors.greenInk, fontSize: 13, fontWeight: "900" },
   ownerName: { color: colors.ink, fontSize: 14, fontWeight: "800" },
   meBadge: { overflow: "hidden", borderRadius: seed.radius.r1_5, paddingHorizontal: seed.spacing.x2, paddingVertical: seed.spacing.x1, backgroundColor: colors.brand, color: colors.ink, ...seed.typography.finePrint, fontWeight: "900" },
-  listingStatus: { marginLeft: "auto", overflow: "hidden", borderRadius: seed.radius.r3, paddingHorizontal: 10, paddingVertical: 6, backgroundColor: "#EDF0ED", color: colors.muted, fontSize: 11, fontWeight: "800" },
+  listingStatus: { marginLeft: "auto", overflow: "hidden", borderRadius: seed.radius.r3, paddingHorizontal: 10, paddingVertical: 6, backgroundColor: seed.color.background.neutralWeak, color: colors.muted, fontSize: 11, fontWeight: "800" },
   title: { color: seed.color.foreground.neutral, ...seed.typography.screenTitle, marginTop: seed.spacing.x4_5 },
   details: { color: colors.muted, fontSize: 14, lineHeight: 22, marginTop: 7 },
   productCard: { marginTop: seed.spacing.x4, flexDirection: "row", alignItems: "center", gap: seed.spacing.x3_5, ...catalogProductCardSurface, padding: seed.spacing.x3_5 },
@@ -495,13 +497,13 @@ const styles = StyleSheet.create({
   productImageFrameLandscape: { width: "100%" },
   productImage: { width: "100%", height: "100%" },
   mediaPlaceholder: { flex: 1, alignItems: "center", justifyContent: "center" },
-  mediaPlaceholderLabel: { color: colors.muted, fontFamily: "monospace", ...seed.typography.finePrint, fontWeight: "800" },
+  mediaPlaceholderLabel: { color: colors.muted, fontWeight: "700" },
   productInfo: { flex: 1, minWidth: 0, alignSelf: "stretch", justifyContent: "center" },
   productLabel: { color: colors.greenInk, ...seed.typography.finePrint, fontWeight: "900" },
   productName: { color: colors.ink, ...seed.typography.catalogTitle, marginTop: 3 },
   productMeta: { color: colors.muted, fontSize: 11, lineHeight: 16, marginTop: 4 },
   productFieldDivider: { marginTop: 7 },
-  price: { color: colors.ink, fontSize: 17, lineHeight: 23, fontWeight: "900", marginTop: 6 },
+  price: { color: colors.ink, marginTop: 6 },
   productDetailHint: { flexDirection: "row", alignItems: "center", gap: seed.spacing.x1, marginTop: seed.spacing.x2 },
   productDetailHintLabel: { color: colors.muted, ...seed.typography.finePrint, fontWeight: "800" },
   proposalSection: { marginTop: seed.spacing.x7 },
@@ -513,11 +515,11 @@ const styles = StyleSheet.create({
   proposalCard: { marginTop: seed.spacing.x3_5, borderRadius: seed.radius.r5, borderWidth: 2, borderColor: seed.color.stroke.neutral, backgroundColor: seed.color.layer.default, padding: seed.spacing.x3_5 },
   proposalCardAccepted: { borderColor: colors.greenInk },
   proposerRow: { flexDirection: "row", alignItems: "center", gap: 8 },
-  smallAvatar: { width: 30, height: 30, borderRadius: seed.radius.full, alignItems: "center", justifyContent: "center", backgroundColor: "#E5E9E6" },
+  smallAvatar: { width: 30, height: 30, borderRadius: seed.radius.full, alignItems: "center", justifyContent: "center", backgroundColor: seed.color.background.neutralWeak },
   smallAvatarText: { color: colors.greenInk, fontSize: 11, fontWeight: "900" },
   proposerName: { color: colors.ink, fontSize: 13, fontWeight: "800" },
   exchangeRatio: { overflow: "hidden", borderRadius: seed.radius.r2, paddingHorizontal: seed.spacing.x2, paddingVertical: seed.spacing.x1, backgroundColor: seed.color.background.brandWeak, color: colors.greenInk, fontSize: 11, lineHeight: 16, fontWeight: "900" },
-  proposalStatus: { marginLeft: "auto", overflow: "hidden", borderRadius: seed.radius.r2, paddingHorizontal: seed.spacing.x2, paddingVertical: seed.spacing.x1, backgroundColor: "#EDF0ED", color: colors.muted, ...seed.typography.finePrint, fontWeight: "900" },
+  proposalStatus: { marginLeft: "auto", overflow: "hidden", borderRadius: seed.radius.r2, paddingHorizontal: seed.spacing.x2, paddingVertical: seed.spacing.x1, backgroundColor: seed.color.background.neutralWeak, color: colors.muted, ...seed.typography.finePrint, fontWeight: "900" },
   proposalStatusAccepted: { backgroundColor: colors.brand, color: colors.ink },
   decisionRow: { flexDirection: "row", gap: seed.spacing.x2_5, marginTop: seed.spacing.x3_5 },
   rejectButton: { minHeight: 48, flex: 1, alignItems: "center", justifyContent: "center", borderRadius: seed.radius.r3, backgroundColor: seed.color.background.neutralWeak },

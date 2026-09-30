@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Image, StyleSheet, View } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, {
@@ -62,6 +62,7 @@ import {
   type GachaLeverMotionPhase,
 } from "@/features/draw/gacha-lever-motion";
 import { useGachaRevealAudio } from "@/features/draw/useGachaRevealAudio";
+import { resolveGachaRevealSoundStage } from "@/features/draw/gacha-reveal-sound";
 import { colors } from "@/theme";
 
 type GachaLeverMachineProps = {
@@ -98,12 +99,14 @@ const smoothEasing = Easing.bezier(0.16, 0.82, 0.28, 1);
 
 const GACHA_MACHINE = require("../../../assets/draw/gacha/capsule-machine-front-empty.png");
 const DABBOBA_WORDMARK = require("../../../assets/brand/dabboba-wordmark.png");
-const GACHA_CRANK_PLATE = require("../../../../../public/assets/dabboba/draw/gacha/capsule-crank-plate-clean.png");
-const GACHA_CRANK_HANDLE = require("../../../../../public/assets/dabboba/draw/gacha/capsule-crank-handle-thick-straight.png");
+const GACHA_CRANK_PLATE = require("../../../assets/draw/gacha/capsule-crank-plate-clean.png");
+const GACHA_CRANK_HANDLE = require("../../../assets/draw/gacha/capsule-crank-handle-thick-straight.png");
 const DISPENSED_CAPSULE = GACHA_CHAMBER_CAPSULES.find((capsule) => capsule.isDispenseCapsule)
   ?? GACHA_CHAMBER_CAPSULES[GACHA_CHAMBER_CAPSULES.length - 1]!;
 
-export function GachaLeverMachine({
+// Memoized: DrawRevealScreen passes stable handlers and a memoized prize view,
+// so screen-level state changes do not re-render the machine and its chamber.
+export const GachaLeverMachine = memo(function GachaLeverMachine({
   disabled = false,
   settled = false,
   reduceMotion,
@@ -141,7 +144,9 @@ export function GachaLeverMachine({
   const leverSoundPlayed = useSharedValue(0);
   const {
     cancelScheduled: cancelRevealSounds,
+    playDropImpact: playDropImpactSound,
     playLever: playLeverSound,
+    playSeamOpen: playSeamOpenSound,
     scheduleDispense: scheduleDispenseSounds,
   } = useGachaRevealAudio(soundEnabled);
   const motionStateRef = useRef(createGachaLeverMotionState(reduceMotion));
@@ -268,10 +273,8 @@ export function GachaLeverMachine({
     }),
     (drive) => {
       if (reduceMotion) return;
-      if (drive.radians <= 0.001) {
-        triggeredPulseCount.value = 0;
-        return;
-      }
+      // A consumed cam threshold stays consumed while the handle unwinds or
+      // reverses; only an explicit reset or Reduced Motion clears the count.
       if (drive.pulseCount <= triggeredPulseCount.value) return;
       triggeredPulseCount.value = drive.pulseCount;
       cancelAnimation(agitationProgress);
@@ -282,6 +285,20 @@ export function GachaLeverMachine({
       });
     },
     [reduceMotion],
+  );
+
+  // Contact and seam cues follow the same UI-thread clock as the visuals.
+  // The JS side only plays a cue while the current dispense is armed, so a
+  // reset, SKIP, settle or unmount still silences anything already in flight.
+  useAnimatedReaction(
+    () => resolveGachaRevealSoundStage(revealActive.value, dispenseProgress.value, revealProgress.value),
+    (stage, previous) => {
+      const before = previous ?? 0;
+      if (stage <= before) return;
+      if (before < 1 && stage >= 1) scheduleOnRN(playDropImpactSound);
+      if (before < 2 && stage >= 2) scheduleOnRN(playSeamOpenSound);
+    },
+    [playDropImpactSound, playSeamOpenSound],
   );
 
   useEffect(() => {
@@ -523,10 +540,16 @@ export function GachaLeverMachine({
         return;
       }
       interactionRadians.value = gestureStartRadians.value;
-      leverRadians.value = reduceMotion
-        ? gestureStartRadians.value
-        : withTiming(gestureStartRadians.value, { duration: 220, easing: smoothEasing });
-    }), [animationRun, beginOpen, clockwiseCueOpacity, clockwiseCueRotation, disabled, gestureAccepted, gestureCompleted, gestureEnded, gestureStartRadians, gestureTravel, interactionRadians, leverRadians, leverSoundPlayed, phase, playLeverSound, previousAngle, reduceMotion]);
+      if (reduceMotion) {
+        leverRadians.value = gestureStartRadians.value;
+        return;
+      }
+      // Let an already-fired chamber impulse finish its own rotor sweep before
+      // the unfinished drag contribution unwinds.
+      const unwind = withTiming(gestureStartRadians.value, { duration: 220, easing: smoothEasing });
+      const impulseRemainingMs = Math.max(0, 1 - agitationProgress.value) * GACHA_AGITATION_DURATION_MS;
+      leverRadians.value = impulseRemainingMs > 0 ? withDelay(impulseRemainingMs, unwind) : unwind;
+    }), [agitationProgress, animationRun, beginOpen, clockwiseCueOpacity, clockwiseCueRotation, disabled, gestureAccepted, gestureCompleted, gestureEnded, gestureStartRadians, gestureTravel, interactionRadians, leverRadians, leverSoundPlayed, phase, playLeverSound, previousAngle, reduceMotion]);
 
   const clockwiseCueStyle = useAnimatedStyle(() => ({
     opacity: clockwiseCueOpacity.value * 0.9,
@@ -588,40 +611,11 @@ export function GachaLeverMachine({
               style={styles.machineMarqueeWordmark}
             />
           </View>
-          <View pointerEvents="none" style={styles.capsuleChamber}>
-            <View style={styles.chamberBackDepth} />
-            <View style={styles.chamberTopDepth} />
-            <View style={styles.chamberSideDepthLeft} />
-            <View style={styles.chamberSideDepthRight} />
-            <View style={styles.chamberFloorDepth} />
-            <GachaChamberAgitator
-              impulseProgress={agitationProgress}
-              reduceMotion={reduceMotion}
-            />
-            {GACHA_CHAMBER_CAPSULES.map((capsule) => (
-              <GachaCapsuleContactShadow
-                key={`${capsule.id}-shadow`}
-                capsule={capsule}
-                impulseProgress={agitationProgress}
-                dispenseProgress={dispenseProgress}
-                reduceMotion={reduceMotion}
-              />
-            ))}
-            {GACHA_CHAMBER_CAPSULES.map((capsule) => (
-              <GachaChamberCapsule
-                key={capsule.id}
-                capsule={capsule}
-                impulseProgress={agitationProgress}
-                dispenseProgress={dispenseProgress}
-                reduceMotion={reduceMotion}
-              />
-            ))}
-            <View style={styles.chamberGlassTint} />
-            <View style={styles.chamberGlassReflection} />
-            <View style={styles.chamberGlassReflectionThin} />
-            <View style={styles.chamberFrontLip} />
-            <View style={styles.chamberInnerStroke} />
-          </View>
+          <GachaChamber
+            impulseProgress={agitationProgress}
+            dispenseProgress={dispenseProgress}
+            reduceMotion={reduceMotion}
+          />
           <View pointerEvents="none" style={styles.dispenseTrack}>
             <Animated.View style={[styles.dispenseCapsuleShadow, dispenseShadowStyle]} />
             <Animated.View style={[styles.dispensedCapsule, capsuleStyle]}>
@@ -686,7 +680,7 @@ export function GachaLeverMachine({
       </View>
     </View>
   );
-}
+});
 
 function GachaDropImpact({
   progress,
@@ -1037,6 +1031,58 @@ function GachaRevealOptics({
   );
 }
 
+/**
+ * The chamber only depends on stable shared values and the Reduced Motion
+ * flag, so memoizing it keeps the 26-capsule pile out of every parent
+ * render (phase changes, stage layout); all motion stays on the UI thread.
+ */
+const GachaChamber = memo(function GachaChamber({
+  impulseProgress,
+  dispenseProgress,
+  reduceMotion,
+}: {
+  impulseProgress: SharedValue<number>;
+  dispenseProgress: SharedValue<number>;
+  reduceMotion: boolean;
+}) {
+  return (
+    <View pointerEvents="none" style={styles.capsuleChamber}>
+      <View style={styles.chamberBackDepth} />
+      <View style={styles.chamberTopDepth} />
+      <View style={styles.chamberSideDepthLeft} />
+      <View style={styles.chamberSideDepthRight} />
+      <View style={styles.chamberFloorDepth} />
+      <GachaChamberAgitator
+        impulseProgress={impulseProgress}
+        reduceMotion={reduceMotion}
+      />
+      {GACHA_CHAMBER_CAPSULES.map((capsule) => (
+        <GachaCapsuleContactShadow
+          key={`${capsule.id}-shadow`}
+          capsule={capsule}
+          impulseProgress={impulseProgress}
+          dispenseProgress={dispenseProgress}
+          reduceMotion={reduceMotion}
+        />
+      ))}
+      {GACHA_CHAMBER_CAPSULES.map((capsule) => (
+        <GachaChamberCapsule
+          key={capsule.id}
+          capsule={capsule}
+          impulseProgress={impulseProgress}
+          dispenseProgress={dispenseProgress}
+          reduceMotion={reduceMotion}
+        />
+      ))}
+      <View style={styles.chamberGlassTint} />
+      <View style={styles.chamberGlassReflection} />
+      <View style={styles.chamberGlassReflectionThin} />
+      <View style={styles.chamberFrontLip} />
+      <View style={styles.chamberInnerStroke} />
+    </View>
+  );
+});
+
 function GachaChamberAgitator({
   impulseProgress,
   reduceMotion,
@@ -1068,7 +1114,7 @@ function GachaChamberAgitator({
   );
 }
 
-function GachaCapsuleContactShadow({
+const GachaCapsuleContactShadow = memo(function GachaCapsuleContactShadow({
   capsule,
   impulseProgress,
   dispenseProgress,
@@ -1137,9 +1183,9 @@ function GachaCapsuleContactShadow({
       ]}
     />
   );
-}
+});
 
-function GachaChamberCapsule({
+const GachaChamberCapsule = memo(function GachaChamberCapsule({
   capsule,
   impulseProgress,
   dispenseProgress,
@@ -1205,7 +1251,7 @@ function GachaChamberCapsule({
       <GachaCapsuleVisual tone={capsule.tone} depth={capsule.depth} diameter={capsule.size} />
     </Animated.View>
   );
-}
+});
 
 const styles = StyleSheet.create({
   container: { width: "100%", flex: 1, minHeight: MACHINE_SLOT_HEIGHT, alignItems: "center", justifyContent: "center" },

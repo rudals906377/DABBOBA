@@ -143,6 +143,30 @@ export const DATABASE_RELEASE_MIGRATIONS = Object.freeze([
     path: 'packages/db/migrations/0075_shipping_request_retry_after_cancellation.sql',
     sha256: 'b2cceb7a6b01e9e9f4a399420a560f2cd7c2d445fcf813760b451e04f95a4494',
   }),
+  Object.freeze({
+    file: '0076_legal_policy_business_phone.sql',
+    path: 'packages/db/migrations/0076_legal_policy_business_phone.sql',
+    sha256: '48df0f0441e93e754168ce87936ba3c2989e3ce66c807c07e5cf2c1e3d4cd581',
+  }),
+  Object.freeze({
+    file: '0077_session_scope.sql',
+    path: 'packages/db/migrations/0077_session_scope.sql',
+    sha256: 'dd09f7792b61a169d2a11af9741023f9ee7847e93e4cf67cb7624a574de16f48',
+  }),  Object.freeze({
+    file: '0078_commerce_indexes.sql',
+    path: 'packages/db/migrations/0078_commerce_indexes.sql',
+    sha256: '4d03159f18d6a242fee7465fa79ccd97c3eb6189dde55934bbeaa9492e04a611',
+  }),
+  Object.freeze({
+    file: '0079_worker_retention.sql',
+    path: 'packages/db/migrations/0079_worker_retention.sql',
+    sha256: 'd577567db75431c5da750acac84e18867f3bd79169d665d0ae0b7fa876fdb2ff',
+  }),
+  Object.freeze({
+    file: '0080_retention_indexes.sql',
+    path: 'packages/db/migrations/0080_retention_indexes.sql',
+    sha256: 'dbae9f62136ac8cf48be8cebc0ab325c9162d1616838fea12af8eee88c60d10d',
+  }),
 ]);
 
 export const MINIMUM_DATABASE_RELEASE_VERSION =

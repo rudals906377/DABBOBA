@@ -3,6 +3,10 @@ packages:
   - "apps/*"
   - "packages/*"
 
+# Refuse installs on a Node/pnpm outside package.json "engines" (Node 24).
+# pnpm 11 reads this here; .npmrc carries engine-strict=true for npm-compatible tools.
+engineStrict: true
+
 allowBuilds:
   esbuild: true
   msgpackr-extract: false
@@ -13,11 +17,26 @@ minimumReleaseAgeExclude:
   - wrangler@4.141.0
 
 overrides:
+  # Security-only transitive pins. Each entry forces the first patched release of a
+  # vulnerable range still reachable through third-party dependencies. Remove an
+  # entry once no dependency in pnpm-lock.yaml resolves into the vulnerable range.
+  # GHSA-qhr7-859c-m2p7, GHSA-6j4f-fj2g-mc7p, GHSA-rgw5-rvv9-x895, GHSA-mh99-v99m-4gvg,
+  # GHSA-q2hr-2g5m-vwhr (brace-expansion expansion DoS / recursion / quadratic rewrite).
+  brace-expansion@>=4.0.0 <5.0.12: 5.0.12
+  # GHSA-vcc3-ghjq-m6fr, GHSA-w573-4hg7-7wgq (decode-uri-component decoding DoS).
   decode-uri-component@<=0.4.2: 0.5.0
-  fast-uri@>=3.0.0 <3.1.7: 3.1.7
-  fast-uri@>=4.0.0 <4.1.4: 4.1.4
+  # GHSA-qw65-cvwx-89v3, GHSA-58mr-gqgx-xq4g, GHSA-hrr3-gc8f-f4qj, GHSA-f65p-4m7j-42xc,
+  # GHSA-jqff-g426-hqxp (fast-uri host confusion / authority injection / SSRF), 3.x line.
+  fast-uri@>=3.0.0 <3.1.8: 3.1.8
+  # Same fast-uri advisories plus GHSA-jvvf-x445-j334 (mailto header injection), 4.x line.
+  fast-uri@>=4.0.0 <4.1.5: 4.1.5
+  # GHSA-2883-xcg3-v3hh, GHSA-5p4m-2wfm-xmqj, GHSA-52cp-r559-cp3m, GHSA-mh29-5h37-fv8m
+  # (js-yaml merge-key / !!omap CPU DoS and merge prototype pollution).
   js-yaml@>=4.0.0 <4.3.2: 4.3.2
-  metro@0.83.3: 0.83.8
+  # GHSA-fxqj-rqcc-2cmp, GHSA-r28c-9q8g-f849, GHSA-6g55-p6wh-862q, GHSA-qx2v-qp2m-jg93
+  # (PostCSS source-map file read / path traversal / stringify XSS).
   postcss@<=8.5.22: 8.5.26
+  # GHSA-rgj7-g3m4-5g8c (sharp bundled libheif vulnerabilities).
   sharp@>=0.35.0 <0.35.4: 0.35.4
+  # GHSA-w5hq-g745-h8pq (uuid v3/v5/v6 missing buffer bounds check).
   uuid@<11.1.1: 11.1.1

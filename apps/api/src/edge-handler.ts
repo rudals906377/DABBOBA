@@ -72,6 +72,8 @@ const API_ENVIRONMENT_MAPPING = {
   DABBOBA_API_SESSION_TOKEN_PEPPER: "SESSION_TOKEN_PEPPER",
   DABBOBA_API_WEB_ORIGINS: "WEB_ORIGINS",
   DABBOBA_API_SESSION_TTL_DAYS: "SESSION_TTL_DAYS",
+  DABBOBA_API_ADMIN_SESSION_MAX_HOURS: "ADMIN_SESSION_MAX_HOURS",
+  DABBOBA_API_ADMIN_SESSION_IDLE_MINUTES: "ADMIN_SESSION_IDLE_MINUTES",
   DABBOBA_API_DATABASE_POOL_MAX: "DATABASE_POOL_MAX",
   DABBOBA_API_PAYMENT_PROVIDER: "PAYMENT_PROVIDER",
   DABBOBA_API_COMMERCE_MODE: "DABBOBA_COMMERCE_MODE",
@@ -89,6 +91,7 @@ const API_ENVIRONMENT_MAPPING = {
   DABBOBA_API_APPLE_TOKEN_ENCRYPTION_KEY: "APPLE_TOKEN_ENCRYPTION_KEY",
   DABBOBA_API_APPLE_TOKEN_ENCRYPTION_KEY_VERSION: "APPLE_TOKEN_ENCRYPTION_KEY_VERSION",
   DABBOBA_API_LOG_LEVEL: "LOG_LEVEL",
+  DABBOBA_TRUSTED_CLIENT_IP_HEADER: "TRUSTED_CLIENT_IP_HEADER",
   DABBOBA_API_CATALOG_MEDIA_BASE_URL: "DABBOBA_CATALOG_MEDIA_BASE_URL",
   DABBOBA_STORAGE_BUCKET: "SUPABASE_STORAGE_BUCKET",
   DABBOBA_STORAGE_SERVICE_KEY: "SUPABASE_STORAGE_SERVICE_KEY",
@@ -119,6 +122,7 @@ const FORBIDDEN_EDGE_KEYS = [
   "DABBOBA_COMMERCE_MODE",
   "ADMIN_PROXY_IDENTITY_SECRET",
   "ADMIN_EDGE_CLIENT_IP_HEADER",
+  "TRUSTED_CLIENT_IP_HEADER",
 ] as const;
 
 function present(value: string | undefined): boolean {
@@ -181,7 +185,17 @@ function apiPath(url: URL, surface: "customer" | "admin"): string | null {
   return null;
 }
 
-function requestHeaders(headers: Headers): Record<string, string> {
+/**
+ * The operator-verified client-IP header, if configured. It is the only
+ * forwarding header allowed through to the API; every other spoofable
+ * forwarding header is still stripped.
+ */
+function trustedClientIpHeaderName(environment: EdgeApiEnvironment): string | null {
+  const value = environment.DABBOBA_TRUSTED_CLIENT_IP_HEADER?.trim().toLowerCase();
+  return value ? value : null;
+}
+
+function requestHeaders(headers: Headers, trustedClientIpHeader: string | null = null): Record<string, string> {
   const result: Record<string, string> = {};
   const nominated = new Set((headers.get("connection") ?? "")
     .split(",")
@@ -189,7 +203,8 @@ function requestHeaders(headers: Headers): Record<string, string> {
     .filter(Boolean));
   for (const [rawName, value] of headers) {
     const name = rawName.toLowerCase();
-    if (HOP_BY_HOP_HEADERS.has(name) || nominated.has(name) || SPOOFABLE_FORWARDING_HEADERS.has(name)
+    if (HOP_BY_HOP_HEADERS.has(name) || nominated.has(name)
+      || (SPOOFABLE_FORWARDING_HEADERS.has(name) && name !== trustedClientIpHeader)
       || name === "host" || name === ADMIN_SERVICE_HEADERS.timestamp || name === ADMIN_SERVICE_HEADERS.signature) continue;
     result[name] = value;
   }
@@ -348,6 +363,29 @@ export function assertSupabaseEdgeApiConfig(config: ApiConfig, surface: "custome
   }
 }
 
+/**
+ * Media upload completion needs the hosted WASM sanitizer. Both the customer
+ * and admin Edge functions inject it, so admin catalog-media completion works
+ * on the same terms as customer media.
+ */
+export function createEdgeMediaRuntime(
+  sanitizeImage?: ApiMediaRuntime["sanitizeImage"],
+): ApiMediaRuntime {
+  return sanitizeImage
+    ? {
+        ...edgeMediaRuntime,
+        completionAvailable: true,
+        async sanitizeImage(input, detectedMimeType) {
+          try {
+            return await sanitizeImage(input, detectedMimeType);
+          } catch {
+            throw new AppError(400, "MEDIA_IMAGE_INVALID", "이미지를 안전하게 처리할 수 없습니다.");
+          }
+        },
+      }
+    : edgeMediaRuntime;
+}
+
 async function defaultBuildApp(
   config: ApiConfig,
   sanitizeImage?: ApiMediaRuntime["sanitizeImage"],
@@ -368,19 +406,7 @@ async function defaultBuildApp(
     statementTimeoutMs: 1_000,
   });
   try {
-    const mediaRuntime: ApiMediaRuntime = sanitizeImage
-      ? {
-          ...edgeMediaRuntime,
-          completionAvailable: true,
-          async sanitizeImage(input, detectedMimeType) {
-            try {
-              return await sanitizeImage(input, detectedMimeType);
-            } catch {
-              throw new AppError(400, "MEDIA_IMAGE_INVALID", "이미지를 안전하게 처리할 수 없습니다.");
-            }
-          },
-        }
-      : edgeMediaRuntime;
+    const mediaRuntime = createEdgeMediaRuntime(sanitizeImage);
     const built = await buildAppCore({
       config,
       mediaRuntime,
@@ -487,7 +513,7 @@ export function createSupabaseEdgeApiHandler(
       const response = await (await app()).inject({
         method: request.method,
         url: path,
-        headers: requestHeaders(request.headers),
+        headers: requestHeaders(request.headers, trustedClientIpHeaderName(dependencies.readEnvironment())),
         ...(body.body ? { payload: body.body } : {}),
         ...(info?.remoteAddr?.hostname ? { remoteAddress: info.remoteAddr.hostname } : {}),
       });

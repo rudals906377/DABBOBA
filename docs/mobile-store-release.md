@@ -21,9 +21,13 @@ The production API checked again on 2026-09-26 still returned `PRELAUNCH` and an
 empty list of customer login methods (`methods: []`). Its filtered public catalog
 returned one gacha item and no Kuji item; this is not evidence that either can
 currently be purchased. The new read-only LIVE mobile API gate
-requires all requested login methods (`PHONE`, `KAKAO`, `NAVER`, `GOOGLE`,
-`APPLE`) and at least one genuinely purchasable, in-stock gacha and kuji
-product each. It is a candidate-screening check, not proof that a real account
+requires the social login methods (`KAKAO`, `NAVER`, `GOOGLE`, `APPLE`) and at
+least one genuinely purchasable, in-stock gacha and kuji product each. `PHONE`
+(SMS OTP) is required only when the build environment and the Edge profile both
+set `DABBOBA_PHONE_LOGIN_READY=true` after SMS delivery has been contracted and
+verified on real devices; without that flag a LIVE server that lists `PHONE`
+fails the gate, and `prepare-supabase-edge-profile.mjs` rejects a LIVE profile
+that enables `PHONE`. It is a candidate-screening check, not proof that a real account
 can sign in, a card can be charged/refunded, or a draw can complete.
 The production release workflow also checks the deployed worker's public
 boundary before bundling: `GET` must return the expected 405 handler response,
@@ -126,9 +130,15 @@ requires the five requested login methods, a LIVE PortOne channel, distinct API
 payment/webhook secrets, the same dedicated API/worker requery secret, a worker
 configured for `PORTONE_API` against this project's API route, production
 storage and database roles, and a clean reviewed commit containing migration
-`0075` or later. It then runs the target database's read-only release check.
+`0076` or later. Migration `0076` publishes the 2026-09-30 TERMS/PRIVACY
+revision whose only change is the business phone `031-947-9996`; the
+release-config gate fails when either public policy phone differs from the
+in-app business information. It then runs the target database's read-only release check.
 It does not create the profile, apply migrations, upload secrets, deploy a
 function, enable Cron, charge a card, or establish provider/store approval.
+After the same preflight and project check, `supabase:edge:deploy` builds and
+deploys `dabboba-api`, `dabboba-admin-api` (with the shared WASM image
+sanitizer, so admin catalog-media completion works), and `dabboba-worker`.
 The existing `supabase:edge:deploy` command remains PRELAUNCH-only; do not
 point it at a LIVE profile or treat this preflight as authorization to switch
 shared production secrets before a reviewed cutover and rollback sequence is
@@ -308,6 +318,25 @@ missing DNS record, stale Edge deployment, invalid response, or wrong commerce
 mode fails the gate; do not replace the result with local fixture products. The
 same check runs automatically inside production EAS builds; the separate
 internal PG-review profile does not require the public catalog to be live.
+
+Production (`production-prelaunch` and `production-live`) configuration pins the
+customer API host: `EXPO_PUBLIC_DABBOBA_API_URL` must use HTTPS on the default
+port and its host must be `${SUPABASE_INTEGRATION_PROJECT_REF}.supabase.co`
+(currently `rconfxsykttfvznakile.supabase.co`) or an entry in
+`APPROVED_PRODUCTION_API_HOSTS` in `scripts/check-mobile-release-config.mjs`
+(currently `api.dabboba.net`). Add a new custom domain there deliberately, in a
+reviewed change, before building against it. The internal PG-review profile is
+not pinned.
+
+`release:mobile:api:verify` also self-attests the server against the build
+environment: `DABBOBA_COMMERCE_MODE` must be declared, must equal
+`EXPO_PUBLIC_COMMERCE_CAPABILITY`, and must equal the `commerceMode` returned by
+`/v1/public/config`. Limitation: the public config does not expose the server's
+payment provider today, so `PAYMENT_PROVIDER` is compared only if a future
+contract adds `paymentProvider` to that response; until then the gate prints a
+warning and reports `paymentProviderAttested: false`, and `PAYMENT_PROVIDER`
+remains a build-environment declaration that must be confirmed against the
+deployed Edge secrets separately.
 
 For the later LIVE candidate, use the payment-enabled values:
 

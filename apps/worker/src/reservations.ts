@@ -16,6 +16,7 @@ type OrderPaymentRow = {
   order_kind: "PRODUCT" | "SHIPPING_FEE";
   shipping_request_id: string | null;
   created_at: Date;
+  provider_observed_settled: boolean;
 };
 
 type ReservationRow = {
@@ -25,9 +26,36 @@ type ReservationRow = {
   expires_at: Date;
 };
 
+export type ReconciliationReason = "EXPIRED_ACTIVE_RESERVATION" | "PROVIDER_OBSERVED_SETTLED";
+
 export type ExpiryOutcome =
-  | { status: "missing" | "not_due" | "already_resolved" | "requires_reconciliation"; released: 0 }
+  | { status: "missing" | "not_due" | "already_resolved"; released: 0 }
+  | { status: "requires_reconciliation"; released: 0; reason: ReconciliationReason }
   | { status: "expired"; released: number };
+
+/** Provider states that mean money may already have moved for this payment. */
+export const PROVIDER_SETTLED_OBSERVATIONS = ["PAID", "AUTHORIZED"] as const;
+
+/**
+ * Decide the expiry action for a locked order. A locally PENDING payment whose
+ * latest worker reconciliation of the same payment version observed the
+ * provider as PAID/AUTHORIZED must never be cancelled: the canonical transition
+ * has not landed yet (or failed verification), so releasing stock and refunding
+ * points would strand a captured payment. Raise the durable alert instead.
+ */
+export function guardedExpiryAction(
+  orderStatus: string,
+  paymentStatus: string,
+  hasExpiredReservation: boolean,
+  providerObservedSettled: boolean,
+): { action: "release" | "wait" } | { action: "reconcile"; reason: ReconciliationReason } {
+  const action = reservationExpiryAction(orderStatus, paymentStatus, hasExpiredReservation);
+  if (action === "reconcile") return { action, reason: "EXPIRED_ACTIVE_RESERVATION" };
+  if (action === "release" && providerObservedSettled) {
+    return { action: "reconcile", reason: "PROVIDER_OBSERVED_SETTLED" };
+  }
+  return { action };
+}
 
 export function reservationExpiryAction(
   orderStatus: string,
@@ -96,9 +124,16 @@ async function expireLockedOrder(
 ): Promise<ExpiryOutcome> {
   if (order.order_kind === "SHIPPING_FEE") {
     const due = order.created_at.getTime() + 15 * 60_000 <= now.getTime();
-    const action = reservationExpiryAction(order.status, order.payment_status, due);
-    if (action === "wait") return { status: "not_due", released: 0 };
-    if (action === "reconcile") return { status: "requires_reconciliation", released: 0 };
+    const decision = guardedExpiryAction(
+      order.status,
+      order.payment_status,
+      due,
+      order.provider_observed_settled,
+    );
+    if (decision.action === "wait") return { status: "not_due", released: 0 };
+    if (decision.action === "reconcile") {
+      return { status: "requires_reconciliation", released: 0, reason: decision.reason };
+    }
     if (!order.shipping_request_id) throw new Error(`Shipping payment order ${order.id} has no shipping request`);
     const shipping = await client.query<{ status: string }>(
       "SELECT status FROM shipping_requests WHERE id=$1 AND user_id=$2 FOR UPDATE",
@@ -153,9 +188,16 @@ async function expireLockedOrder(
   }
   if (!reservations.rowCount) return { status: "already_resolved", released: 0 };
   const hasExpired = reservations.rows.some((reservation) => reservation.expires_at.getTime() <= now.getTime());
-  const action = reservationExpiryAction(order.status, order.payment_status, hasExpired);
-  if (action === "wait") return { status: "not_due", released: 0 };
-  if (action === "reconcile") return { status: "requires_reconciliation", released: 0 };
+  const decision = guardedExpiryAction(
+    order.status,
+    order.payment_status,
+    hasExpired,
+    order.provider_observed_settled,
+  );
+  if (decision.action === "wait") return { status: "not_due", released: 0 };
+  if (decision.action === "reconcile") {
+    return { status: "requires_reconciliation", released: 0, reason: decision.reason };
+  }
 
   if (!shouldContinue()) throw new Error("Worker run deadline reached before stock release");
   const requiredByProduct = new Map<string, number>();
@@ -210,11 +252,19 @@ export async function expireOrderReservations(
     if (!shouldContinue()) throw new Error("Worker run deadline reached before reservation transaction");
     const linkedKujiRoom = await lockLinkedKujiRoomForOrder(client, orderId);
     if (!shouldContinue()) throw new Error("Worker run deadline reached after kuji room lock");
-    const payment = await client.query<{ id: string; status: string }>(
-      "SELECT id,status FROM payments WHERE order_id=$1 FOR UPDATE",
+    const payment = await client.query<{ id: string; status: string; version: number }>(
+      "SELECT id,status,version FROM payments WHERE order_id=$1 FOR UPDATE",
       [orderId],
     );
     if (!payment.rowCount) return { status: "missing", released: 0 };
+    // The payment row is locked, so its version cannot advance underneath this
+    // check; a reconciliation recorded for an older version is stale evidence.
+    const observation = await client.query<{ settled: boolean }>(
+      `SELECT last_observed_state = ANY($3::text[]) AS settled
+         FROM worker_payment_reconciliations
+        WHERE payment_id=$1 AND payment_version=$2`,
+      [payment.rows[0]!.id, payment.rows[0]!.version, [...PROVIDER_SETTLED_OBSERVATIONS]],
+    );
     const order = await client.query<{ id: string; user_id: string; status: string; point_total: number; order_kind: "PRODUCT" | "SHIPPING_FEE"; shipping_request_id: string | null; created_at: Date }>(
       "SELECT id,user_id,status,point_total,order_kind,shipping_request_id,created_at FROM orders WHERE id=$1 FOR UPDATE",
       [orderId],
@@ -224,6 +274,7 @@ export async function expireOrderReservations(
       ...order.rows[0]!,
       payment_id: payment.rows[0]!.id,
       payment_status: payment.rows[0]!.status,
+      provider_observed_settled: observation.rows[0]?.settled === true,
     }, now, shouldContinue);
     if (outcome.status === "expired" && linkedKujiRoom) {
       if (!shouldContinue()) throw new Error("Worker run deadline reached before kuji room release");
@@ -257,10 +308,34 @@ export async function expireReservationBatch(
              WHERE sr.order_id=o.id AND sr.status='ACTIVE' AND sr.expires_at <= $1
           ))
           OR
-          (o.order_kind='SHIPPING_FEE' AND o.created_at <= $1 - interval '15 minutes')
+          (o.order_kind='SHIPPING_FEE'
+            AND o.status='PENDING_PAYMENT'
+            AND o.created_at <= $1 - interval '15 minutes'
+            AND EXISTS (
+              SELECT 1 FROM shipping_requests s
+               WHERE s.id=o.shipping_request_id AND s.status='PAYMENT_PENDING'
+            ))
         )
         AND (
-          p.status IN ('PENDING','FAILED','CANCELLED')
+          (
+            p.status IN ('PENDING','FAILED','CANCELLED')
+            -- A releasable row whose provider was already observed settled has
+            -- been turned into one durable alert; stop re-examining it until
+            -- the payment version changes.
+            AND NOT (
+              EXISTS (
+                SELECT 1 FROM worker_payment_reconciliations r
+                 WHERE r.payment_id=p.id AND r.payment_version=p.version
+                   AND r.last_observed_state IN ('PAID','AUTHORIZED')
+              )
+              AND EXISTS (
+                SELECT 1 FROM outbox_events event
+                 WHERE event.aggregate_type='PAYMENT'
+                   AND event.aggregate_id=p.id::text
+                   AND event.event_type='payment.reservation_expired_requires_reconciliation'
+              )
+            )
+          )
           OR (
             p.status IN ('AUTHORIZED','PAID','REFUND_REVIEW','REFUNDED')
             AND NOT EXISTS (
@@ -297,7 +372,7 @@ export async function expireReservationBatch(
           JSON.stringify({
             paymentId: candidate.payment_id,
             orderId: candidate.order_id,
-            reason: "EXPIRED_ACTIVE_RESERVATION",
+            reason: outcome.reason,
           }),
           `worker-reservation-reconciliation-${candidate.order_id}`,
         ],
@@ -305,7 +380,12 @@ export async function expireReservationBatch(
       const recorded = Boolean(event.rowCount);
       summary.reconciliation += 1;
       logger.warn(
-        { orderId: candidate.order_id, paymentId: candidate.payment_id, durableAlertRecorded: recorded },
+        {
+          orderId: candidate.order_id,
+          paymentId: candidate.payment_id,
+          reason: outcome.reason,
+          durableAlertRecorded: recorded,
+        },
         "Expired reservation is payment-authorized and requires reconciliation",
       );
     }

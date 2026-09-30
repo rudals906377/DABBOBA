@@ -838,14 +838,23 @@ test("webhooks reject the internal zero rail and a disabled provider before data
     (error: unknown) => error instanceof AppError && error.statusCode === 403,
   );
 
-  const disabledContext = testContext(pool);
-  disabledContext.config.paymentProvider = "UNCONFIGURED";
-  const disabled = routeCapture();
-  await registerCommerceRoutes(disabled.app, disabledContext);
+  const missingSecretContext = testContext(pool);
+  missingSecretContext.config.paymentWebhookSecret = null;
+  const missingSecret = routeCapture();
+  await registerCommerceRoutes(missingSecret.app, missingSecretContext);
   await assert.rejects(
-    disabled.routes.get("/v1/payments/webhooks/:provider")!({ params: { provider: "INTERNAL_ZERO" }, headers: {} }, {}),
+    missingSecret.routes.get("/v1/payments/webhooks/:provider")!({ params: { provider: "TEST_PG" }, headers: {} }, {}),
     (error: unknown) => error instanceof AppError && error.statusCode === 503 && error.code === "PAYMENT_NOT_CONFIGURED",
   );
+
+  // Disabled and PortOne providers never register the shared-secret rail.
+  for (const paymentProvider of ["UNCONFIGURED", "PORTONE_V2_INICIS"]) {
+    const context = testContext(pool);
+    context.config.paymentProvider = paymentProvider;
+    const captured = routeCapture();
+    await registerCommerceRoutes(captured.app, context);
+    assert.equal(captured.routes.has("/v1/payments/webhooks/:provider"), false, paymentProvider);
+  }
 });
 
 test("an authenticated webhook for an unknown payment returns 404 before event persistence", async () => {

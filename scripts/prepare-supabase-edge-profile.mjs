@@ -28,6 +28,11 @@ export const SUPABASE_EDGE_PROFILE_FILE = resolve(launchDirectory, 'supabase-edg
 export const SUPABASE_PRODUCTION_WORKER_CREDENTIAL_FILE = resolve(launchDirectory, 'supabase-production-worker.env');
 
 const CUSTOMER_AUTH_PROVIDERS = ['PHONE', 'KAKAO', 'NAVER', 'GOOGLE', 'APPLE'];
+// LIVE always requires the social logins. PHONE (SMS OTP) depends on a
+// separately contracted and verified SMS provider, so it is required only when
+// the operator explicitly attests readiness with DABBOBA_PHONE_LOGIN_READY=true.
+export const LIVE_REQUIRED_SOCIAL_LOGIN_METHODS = Object.freeze(['KAKAO', 'NAVER', 'GOOGLE', 'APPLE']);
+export const PHONE_LOGIN_READY_KEY = 'DABBOBA_PHONE_LOGIN_READY';
 const LIVE_API_BASE_URL = `https://${SUPABASE_INTEGRATION_PROJECT_REF}.supabase.co/functions/v1/dabboba-api`;
 const LIVE_PAYMENT_SECRETS = [
   'DABBOBA_API_PAYMENT_WEBHOOK_SECRET',
@@ -79,6 +84,7 @@ export const SUPABASE_EDGE_EXTERNAL_OPTIONAL_KEYS = Object.freeze([
   'DABBOBA_WORKER_APPLE_TOKEN_ENCRYPTION_KEY',
   'DABBOBA_WORKER_APPLE_TOKEN_ENCRYPTION_KEY_VERSION',
   'DABBOBA_WORKER_EXPO_PUSH_ACCESS_TOKEN',
+  PHONE_LOGIN_READY_KEY,
 ]);
 
 const REQUIRED_KEYS = [
@@ -195,11 +201,28 @@ function requiredLiveValue(values, key, minimumBytes) {
   return value;
 }
 
-function assertLivePaymentConfiguration(values, providers) {
-  if (providers.length !== CUSTOMER_AUTH_PROVIDERS.length
-    || CUSTOMER_AUTH_PROVIDERS.some((provider) => !providers.includes(provider))) {
+export function phoneLoginReady(values) {
+  const flag = values?.[PHONE_LOGIN_READY_KEY]?.trim();
+  if (flag === undefined || flag === '' || flag === 'false') return false;
+  if (flag === 'true') return true;
+  throw new Error(`${PHONE_LOGIN_READY_KEY} must be true or false.`);
+}
+
+function assertLiveLoginMethods(values, providers) {
+  const phoneReady = phoneLoginReady(values);
+  const required = phoneReady
+    ? ['PHONE', ...LIVE_REQUIRED_SOCIAL_LOGIN_METHODS]
+    : LIVE_REQUIRED_SOCIAL_LOGIN_METHODS;
+  if (required.some((provider) => !providers.includes(provider))) {
     throw new Error('LIVE Edge profile requires all requested customer login methods.');
   }
+  if (!phoneReady && providers.includes('PHONE')) {
+    throw new Error(`LIVE Edge profile enables PHONE login without ${PHONE_LOGIN_READY_KEY}=true (verified SMS delivery).`);
+  }
+}
+
+function assertLivePaymentConfiguration(values, providers) {
+  assertLiveLoginMethods(values, providers);
   if (values.DABBOBA_API_PORTONE_CHANNEL_ENVIRONMENT !== 'LIVE') {
     throw new Error('LIVE Edge profile requires a PortOne LIVE channel.');
   }

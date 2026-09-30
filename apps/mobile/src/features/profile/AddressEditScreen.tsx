@@ -16,13 +16,17 @@ import { AppText as Text } from "@/components/Typography";
 import { SeedActionButton, SeedTextInput } from "@/design-system/components";
 import { seed } from "@/design-system/seed";
 import { upsertDefaultShippingAddress } from "@/features/profile/account-detail-api";
+import { ProfileSectionErrorState } from "@/features/profile/ProfileSectionErrorState";
+import { profileSectionFailure } from "@/features/profile/profile-section-state";
 import { useProfileSnapshot } from "@/features/profile/use-profile-snapshot";
 import { ProfileSessionGate, isProfileSessionBlocked } from "@/features/profile/ProfileSessionGate";
 import { colors } from "@/theme";
 
 export function AddressEditScreen() {
-  const profileState = useProfileSnapshot();
+  const profileState = useProfileSnapshot("address");
   const address = profileState.snapshot?.defaultAddress;
+  // Editing over an unknown address could overwrite it without its version; require a successful load first.
+  const addressFailure = profileState.snapshot ? profileSectionFailure(profileState.snapshot, "address") : null;
   const [recipient, setRecipient] = useState("");
   const [phone, setPhone] = useState("");
   const [postalCode, setPostalCode] = useState("");
@@ -88,6 +92,8 @@ export function AddressEditScreen() {
           {profileState.status === "error" ? <View><Text style={styles.error}>{profileState.message}</Text><SeedActionButton label="다시 불러오기" variant="neutralSolid" onPress={profileState.reload} style={styles.retry} /></View> : null}
           {isProfileSessionBlocked(profileState.status) ? (
             <ProfileSessionGate status={profileState.status} returnTo="/profile/member/address/edit" guestBody="로그인하면 기본 배송지를 등록하거나 수정할 수 있어요." />
+          ) : profileState.snapshot && addressFailure ? (
+            <ProfileSectionErrorState message={addressFailure} onRetry={profileState.reload} />
           ) : profileState.snapshot ? (
             <>
               <Field label="받는 사람" value={recipient} onChangeText={(value) => setRecipient(value.slice(0, 80))} placeholder="이름" />

@@ -3,7 +3,7 @@ import Constants from "expo-constants";
 import * as SecureStore from "expo-secure-store";
 import { type Href, useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, AppState, KeyboardAvoidingView, Platform, StyleSheet, View } from "react-native";
+import { ActivityIndicator, Alert, AppState, KeyboardAvoidingView, Platform, StyleSheet, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { DetailPageHeader } from "@/components/DetailPageHeader";
 import { DecorativeIonicon } from "@/components/DecorativeIonicon";
@@ -11,6 +11,7 @@ import { AppText as Text, AppTextInput as TextInput } from "@/components/Typogra
 import { SeedActionButton, SeedInputShell } from "@/design-system/components";
 import { seed } from "@/design-system/seed";
 import {
+  abandonPortOnePayment,
   claimPortOnePaymentAttempt,
   confirmPortOnePayment,
   fetchCheckoutActorId,
@@ -29,6 +30,11 @@ import {
   paymentAttemptState,
   preparePaymentAttempt,
 } from "@/features/checkout/payment-attempt";
+import {
+  abandonedPaymentDestination,
+  isPortOneUserCancel,
+  isPortOneUserCancelError,
+} from "@/features/checkout/payment-abandon";
 import { normalizedPaymentCustomerName } from "@/features/checkout/payment-customer";
 import {
   assertKujiPaymentLease,
@@ -48,7 +54,7 @@ import {
 import { readAuthTokens } from "@/lib/session-store";
 import { colors } from "@/theme";
 
-type PaymentPhase = "loading" | "details" | "paying" | "confirming" | "pending" | "failed";
+type PaymentPhase = "loading" | "details" | "paying" | "confirming" | "abandoning" | "pending" | "failed";
 
 export function PortOnePaymentScreen() {
   const router = useRouter();
@@ -61,6 +67,7 @@ export function PortOnePaymentScreen() {
     paymentId?: string | string[];
   }>();
   const orderId = firstParam(params.orderId) ?? "";
+  const routeProductId = firstParam(params.productId);
   const redirectPaymentId = firstParam(params.paymentId);
   const runtime = useMemo(
     () => resolveMobileRuntimeConfig({
@@ -83,15 +90,16 @@ export function PortOnePaymentScreen() {
   const resumingRef = useRef(false);
   const continuingRef = useRef(false);
   const completedRef = useRef(false);
+  const abandoningRef = useRef(false);
 
   const continueToDraw = useCallback(async (paidOrder: CheckoutOrder) => {
     if (completedRef.current || continuingRef.current) return;
     continuingRef.current = true;
     try {
-      if (paidOrder.id !== orderId) throw new Error("결제 주문 번호가 일치하지 않습니다.");
+      if (paidOrder.id !== orderId) throw new Error("결제 주문 번호가 일치하지 않아요.");
       const currentToken = await verifiedCheckoutToken(runtime.apiBaseUrl, paidOrder.userId);
       if (paidOrder.orderKind === "SHIPPING_FEE") {
-        if (!paidOrder.shippingRequestId) throw new Error("결제한 배송 신청 정보를 찾지 못했습니다.");
+        if (!paidOrder.shippingRequestId) throw new Error("결제한 배송 신청 정보를 찾지 못했어요.");
         completedRef.current = true;
         router.replace(`/profile/shipping/${encodeURIComponent(paidOrder.shippingRequestId)}` as Href);
         return;
@@ -119,7 +127,7 @@ export function PortOnePaymentScreen() {
           } catch {
             completedRef.current = false;
             setPhase("failed");
-            setMessage("로그인 계정이 변경되었습니다. 결제·뽑기 복구에서 다시 확인해 주세요.");
+            setMessage("로그인 계정이 변경됐어요. 결제·뽑기 복구에서 다시 확인해 주세요.");
             return;
           }
           const query = new URLSearchParams({
@@ -136,7 +144,7 @@ export function PortOnePaymentScreen() {
       });
     } catch (error) {
       setPhase("pending");
-      setMessage(error instanceof Error ? error.message : "결제한 뽑기 정보를 확인하지 못했습니다.");
+      setMessage(error instanceof Error ? error.message : "결제한 뽑기 정보를 확인하지 못했어요.");
     } finally {
       continuingRef.current = false;
     }
@@ -149,14 +157,14 @@ export function PortOnePaymentScreen() {
     setMessage("");
     try {
       const tokens = await readAuthTokens();
-      if (!tokens?.accessToken) throw new Error("로그인 세션을 확인하지 못했습니다.");
+      if (!tokens?.accessToken) throw new Error("로그인 세션을 확인하지 못했어요.");
       const confirmation = await confirmPortOnePayment(runtime.apiBaseUrl, tokens.accessToken, paymentOrder.paymentId);
       if (confirmation.orderId !== paymentOrder.id || confirmation.paymentId !== paymentOrder.paymentId) {
-        throw new Error("결제사 승인 정보와 주문이 일치하지 않습니다.");
+        throw new Error("결제사 승인 정보와 주문이 일치하지 않아요.");
       }
       const nextOrder = await fetchCheckoutOrder(runtime.apiBaseUrl, tokens.accessToken, paymentOrder.id);
       if (nextOrder.id !== paymentOrder.id || nextOrder.paymentId !== paymentOrder.paymentId) {
-        throw new Error("결제한 주문 정보를 다시 확인하지 못했습니다.");
+        throw new Error("결제한 주문 정보를 다시 확인하지 못했어요.");
       }
       setOrder(nextOrder);
       if (nextOrder.status === "PAID" || nextOrder.status === "FULFILLED") {
@@ -169,20 +177,53 @@ export function PortOnePaymentScreen() {
         setPhase("failed");
         setMessage(
           nextOrder.status === "REFUND_REVIEW"
-            ? "결제 상태를 안전하게 확인하는 중입니다. 추가 결제는 하지 말고 고객지원 또는 내정보에서 상태를 확인해 주세요."
-            : "결제가 완료되지 않았습니다. 상품과 결제 상태를 다시 확인해 주세요.",
+            ? "결제 상태를 안전하게 확인하는 중이에요. 추가 결제는 하지 말고 고객지원 또는 내정보에서 상태를 확인해 주세요."
+            : "결제가 완료되지 않았어요. 상품과 결제 상태를 다시 확인해 주세요.",
         );
         return;
       }
       setPhase("pending");
-      setMessage("결제사 승인 결과를 기다리고 있습니다. 추가 결제는 하지 말고 잠시 후 다시 확인해 주세요.");
+      setMessage("결제사 승인 결과를 기다리고 있어요. 추가 결제는 하지 말고 잠시 후 다시 확인해 주세요.");
     } catch (error) {
       setPhase("pending");
-      setMessage(`${error instanceof Error ? error.message : "결제 상태를 확인하지 못했습니다."} 추가 결제는 하지 말고 상태를 다시 확인해 주세요.`);
+      setMessage(`${error instanceof Error ? error.message : "결제 상태를 확인하지 못했어요."} 추가 결제는 하지 말고 상태를 다시 확인해 주세요.`);
     } finally {
       confirmingRef.current = false;
     }
   }, [continueToDraw, runtime.apiBaseUrl]);
+
+  // The customer closed the PG window. Ask the server to cancel this owned
+  // pending order (stable idempotency key per paymentId). A 409 means the server
+  // already holds payment evidence, so fall back to the normal confirm path.
+  const abandonPayment = useCallback(async (paymentOrder: CheckoutOrder) => {
+    if (abandoningRef.current || confirmingRef.current || completedRef.current) return;
+    abandoningRef.current = true;
+    setPhase("abandoning");
+    setMessage("");
+    let confirmInstead = false;
+    try {
+      const accessToken = await verifiedCheckoutToken(runtime.apiBaseUrl, paymentOrder.userId);
+      const outcome = await abandonPortOnePayment(runtime.apiBaseUrl, accessToken, paymentOrder.paymentId);
+      if (outcome.kind === "PAYMENT_EVIDENCE") {
+        confirmInstead = true;
+      } else {
+        if (outcome.orderId !== null && outcome.orderId !== paymentOrder.id) {
+          throw new Error("결제 취소 정보와 주문이 일치하지 않아요.");
+        }
+        completedRef.current = true;
+        void clearPaymentAttempt(SecureStore, paymentOrder).catch(() => undefined);
+        router.replace(abandonedPaymentDestination(paymentOrder, routeProductId) as Href);
+        Alert.alert("결제를 취소했어요", "결제창을 닫아 주문을 취소했어요. 필요하면 다시 시도해 주세요.");
+        return;
+      }
+    } catch (error) {
+      setPhase("pending");
+      setMessage(`${error instanceof Error ? error.message : "결제 취소 상태를 확인하지 못했어요."} 추가 결제는 하지 말고 상태를 다시 확인해 주세요.`);
+    } finally {
+      abandoningRef.current = false;
+    }
+    if (confirmInstead) await confirmPayment(paymentOrder);
+  }, [confirmPayment, routeProductId, router, runtime.apiBaseUrl]);
 
   const assertPayableKujiOrder = useCallback(async (paymentOrder: CheckoutOrder, accessToken: string) => {
     const kujiLine = paymentOrder.lines.find((line) => line.category === "kuji");
@@ -215,7 +256,7 @@ export function PortOnePaymentScreen() {
         || nextOrder.userId !== paymentOrder.userId
         || nextOrder.total !== paymentOrder.total
         || nextOrder.status !== "PENDING_PAYMENT"
-      ) throw new Error("결제 주문이 변경되었거나 종료되었습니다. 추가 결제 전에 주문 상태를 확인해 주세요.");
+      ) throw new Error("결제 주문이 변경되었거나 종료됐어요. 추가 결제 전에 주문 상태를 확인해 주세요.");
       if (nextOrder.paymentAttemptStartedAt || await hasStartedPaymentAttempt(SecureStore, nextOrder)) {
         await confirmPayment(nextOrder);
         return;
@@ -226,7 +267,7 @@ export function PortOnePaymentScreen() {
       await preparePaymentAttempt(SecureStore, nextOrder);
       const claim = await claimPortOnePaymentAttempt(runtime.apiBaseUrl, accessToken, nextOrder.paymentId);
       if (claim.paymentId !== nextOrder.paymentId || claim.orderId !== nextOrder.id) {
-        throw new Error("결제 시도 정보와 주문이 일치하지 않습니다.");
+        throw new Error("결제 시도 정보와 주문이 일치하지 않아요.");
       }
       await markPaymentAttemptStarted(SecureStore, nextOrder);
       setOrder(nextOrder);
@@ -239,10 +280,10 @@ export function PortOnePaymentScreen() {
       }
       if ((await paymentAttemptState(SecureStore, paymentOrder).catch(() => "started")) !== "none") {
         setPhase("pending");
-        setMessage("결제 시도 결과를 다시 확인해 주세요. 상태가 불확실할 때는 새 결제창을 열지 않습니다.");
+        setMessage("결제 시도 결과를 다시 확인해 주세요. 상태가 불확실할 때는 새 결제창을 열지 않아요.");
       } else {
         setPhase("failed");
-        setMessage(error instanceof Error ? error.message : "결제 주문을 다시 확인하지 못했습니다.");
+        setMessage(error instanceof Error ? error.message : "결제 주문을 다시 확인하지 못했어요.");
       }
     } finally {
       startingRef.current = false;
@@ -271,13 +312,13 @@ export function PortOnePaymentScreen() {
         void clearPaymentAttempt(SecureStore, nextOrder).catch(() => undefined);
         setPhase("failed");
         setMessage(nextOrder.status === "REFUND_REVIEW"
-          ? "결제 상태를 안전하게 확인하는 중입니다. 추가 결제는 하지 말고 고객지원 또는 내정보에서 상태를 확인해 주세요."
-          : "결제가 완료되지 않았습니다. 상품과 결제 상태를 다시 확인해 주세요.");
+          ? "결제 상태를 안전하게 확인하는 중이에요. 추가 결제는 하지 말고 고객지원 또는 내정보에서 상태를 확인해 주세요."
+          : "결제가 완료되지 않았어요. 상품과 결제 상태를 다시 확인해 주세요.");
       }
     } catch (error) {
       if (error instanceof PaymentResumeIdentityMismatchError) {
         setPhase("failed");
-        setMessage("결제 주문 정보가 변경되었습니다. 추가 결제는 하지 말고 고객지원에서 확인해 주세요.");
+        setMessage("결제 주문 정보가 변경됐어요. 추가 결제는 하지 말고 고객지원에서 확인해 주세요.");
       }
       // A transient API/provider failure must not close an in-progress PG screen.
     } finally {
@@ -289,13 +330,13 @@ export function PortOnePaymentScreen() {
     setPhase("loading");
     setMessage("");
     try {
-      if (!orderId) throw new Error("주문 번호를 확인하지 못했습니다.");
+      if (!orderId) throw new Error("주문 번호를 확인하지 못했어요.");
       const tokens = await readAuthTokens();
       if (!tokens?.accessToken) throw new Error("로그인 후 결제를 계속해 주세요.");
       const nextOrder = await fetchCheckoutOrder(runtime.apiBaseUrl, tokens.accessToken, orderId);
-      if (nextOrder.id !== orderId) throw new Error("결제 주문 번호가 일치하지 않습니다.");
+      if (nextOrder.id !== orderId) throw new Error("결제 주문 번호가 일치하지 않아요.");
       if (redirectPaymentId && redirectPaymentId !== nextOrder.paymentId) {
-        throw new Error("결제 복귀 정보와 주문이 일치하지 않습니다.");
+        throw new Error("결제 복귀 정보와 주문이 일치하지 않아요.");
       }
       setOrder(nextOrder);
       if (nextOrder.status === "PAID" || nextOrder.status === "FULFILLED") {
@@ -306,7 +347,7 @@ export function PortOnePaymentScreen() {
       if (nextOrder.status !== "PENDING_PAYMENT") {
         void clearPaymentAttempt(SecureStore, nextOrder).catch(() => undefined);
         setPhase("failed");
-        setMessage("결제를 계속할 수 없는 주문입니다. 주문 내역에서 상태를 확인해 주세요.");
+        setMessage("결제를 계속할 수 없는 주문이에요. 주문 내역에서 상태를 확인해 주세요.");
         return;
       }
       if (redirectPaymentId) {
@@ -327,7 +368,7 @@ export function PortOnePaymentScreen() {
       }
       if (!storeId || !channelKey) {
         setPhase("failed");
-        setMessage("결제 채널이 설치 빌드에 구성되지 않았습니다.");
+        setMessage("결제 채널이 설치 빌드에 구성되지 않았어요.");
         return;
       }
       await assertPayableKujiOrder(nextOrder, tokens.accessToken);
@@ -343,7 +384,7 @@ export function PortOnePaymentScreen() {
         return;
       }
       setPhase("failed");
-      setMessage(error instanceof Error ? error.message : "결제 주문을 불러오지 못했습니다.");
+      setMessage(error instanceof Error ? error.message : "결제 주문을 불러오지 못했어요.");
     }
   }, [assertPayableKujiOrder, channelKey, confirmPayment, continueToDraw, orderId, redirectPaymentId, router, runtime.apiBaseUrl, storeId]);
 
@@ -392,7 +433,7 @@ export function PortOnePaymentScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea} edges={["top", "left", "right"]}>
-      <DetailPageHeader title="카드 결제" onBack={goBack} backLabel="결제 화면 닫기" />
+      <DetailPageHeader title="카드 결제" titleMode="pixel" onBack={goBack} backLabel="결제 화면 닫기" />
       {phase === "details" ? (
         <KeyboardAvoidingView
           behavior={Platform.OS === "ios" ? "padding" : undefined}
@@ -426,13 +467,21 @@ export function PortOnePaymentScreen() {
       ) : paymentRequest ? (
         <Payment
           request={paymentRequest}
-          onComplete={() => { if (order) void confirmPayment(order); }}
-          onError={() => { if (order) void confirmPayment(order); }}
+          onComplete={(response) => {
+            if (!order) return;
+            if (isPortOneUserCancel(response)) void abandonPayment(order);
+            else void confirmPayment(order);
+          }}
+          onError={(error) => {
+            if (!order) return;
+            if (isPortOneUserCancelError(error)) void abandonPayment(order);
+            else void confirmPayment(order);
+          }}
           style={styles.payment}
         />
       ) : (
         <View style={styles.state}>
-          {phase === "loading" || phase === "confirming" ? (
+          {phase === "loading" || phase === "confirming" || phase === "abandoning" ? (
             <ActivityIndicator color={colors.ink} />
           ) : (
             <DecorativeIonicon
@@ -446,6 +495,8 @@ export function PortOnePaymentScreen() {
               ? "주문을 확인하고 있어요"
               : phase === "confirming"
                 ? "결제 승인을 확인하고 있어요"
+                : phase === "abandoning"
+                  ? "결제 취소를 확인하고 있어요"
                 : phase === "pending"
                   ? order?.status === "PAID" || order?.status === "FULFILLED"
                     ? "결제 후 뽑기 정보를 확인하고 있어요"
@@ -455,6 +506,13 @@ export function PortOnePaymentScreen() {
           {message ? <Text style={styles.stateBody}>{message}</Text> : null}
           {phase === "pending" ? (
             <SeedActionButton label="주문·뽑기 상태 다시 확인" onPress={() => { void load(); }} />
+          ) : null}
+          {phase === "pending" && order?.status === "PENDING_PAYMENT" ? (
+            <SeedActionButton
+              label="결제창을 닫았다면 다시 시도"
+              variant="neutralSolid"
+              onPress={() => { void abandonPayment(order); }}
+            />
           ) : null}
           {(phase === "pending" || phase === "failed")
             && (order?.status === "PAID" || order?.status === "FULFILLED") ? (
@@ -487,7 +545,7 @@ async function verifiedCheckoutToken(apiBaseUrl: string, expectedActorId: string
     if (actorId === expectedActorId) return tokens.accessToken;
     break;
   }
-  throw new Error("로그인 계정이 변경되었습니다. 결제·뽑기 복구에서 다시 확인해 주세요.");
+  throw new Error("로그인 계정이 변경됐어요. 결제·뽑기 복구에서 다시 확인해 주세요.");
 }
 
 const styles = StyleSheet.create({

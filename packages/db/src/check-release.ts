@@ -50,6 +50,9 @@ type DatabaseAggregateEvidence = {
     authenticatedExposedCount: number;
     rlsDisabledCount: number;
     rlsEnabledCount: number;
+    /** Supabase's RLS-bypassing Data API role; absent on plain PostgreSQL. */
+    serviceRoleRolePresent: boolean;
+    serviceRoleExposedCount: number;
     totalCount: number;
   };
   roleMembershipEdgesBetweenRuntimeAndWorker: number;
@@ -317,6 +320,8 @@ async function inspectDatabase(
     authenticated_exposed_count: string;
     rls_disabled_count: string;
     rls_enabled_count: string;
+    service_role_count: string;
+    service_role_exposed_count: string;
     total_count: string;
   }>(
     `WITH app_tables AS (
@@ -330,7 +335,7 @@ async function inspectDatabase(
        SELECT database_role.rolname,app_table.oid
          FROM app_tables AS app_table
          JOIN pg_catalog.pg_roles AS database_role
-           ON database_role.rolname IN ('anon','authenticated')
+           ON database_role.rolname IN ('anon','authenticated','service_role')
         WHERE pg_catalog.has_table_privilege(database_role.oid,app_table.oid,'SELECT')
            OR pg_catalog.has_table_privilege(database_role.oid,app_table.oid,'INSERT')
            OR pg_catalog.has_table_privilege(database_role.oid,app_table.oid,'UPDATE')
@@ -344,8 +349,10 @@ async function inspectDatabase(
             count(*) FILTER (WHERE NOT relrowsecurity)::text AS rls_disabled_count,
             (SELECT count(DISTINCT oid)::text FROM exposed WHERE rolname='anon') AS anon_exposed_count,
             (SELECT count(DISTINCT oid)::text FROM exposed WHERE rolname='authenticated') AS authenticated_exposed_count,
+            (SELECT count(DISTINCT oid)::text FROM exposed WHERE rolname='service_role') AS service_role_exposed_count,
             (SELECT count(*)::text FROM pg_catalog.pg_roles WHERE rolname='anon') AS anon_role_count,
-            (SELECT count(*)::text FROM pg_catalog.pg_roles WHERE rolname='authenticated') AS authenticated_role_count
+            (SELECT count(*)::text FROM pg_catalog.pg_roles WHERE rolname='authenticated') AS authenticated_role_count,
+            (SELECT count(*)::text FROM pg_catalog.pg_roles WHERE rolname='service_role') AS service_role_count
        FROM app_tables`,
   );
   const tableRow = tables.rows[0];
@@ -367,6 +374,8 @@ async function inspectDatabase(
       authenticatedExposedCount: numberValue(tableRow.authenticated_exposed_count),
       rlsDisabledCount: numberValue(tableRow.rls_disabled_count),
       rlsEnabledCount: numberValue(tableRow.rls_enabled_count),
+      serviceRoleRolePresent: numberValue(tableRow.service_role_count) === 1,
+      serviceRoleExposedCount: numberValue(tableRow.service_role_exposed_count),
       totalCount: numberValue(tableRow.total_count),
     },
     roleMembershipEdgesBetweenRuntimeAndWorker: numberValue(membership.rows[0]?.edge_count),
@@ -531,6 +540,11 @@ export async function checkDatabaseRelease(
     if (database.publicTables.anonExposedCount !== 0) report.blockers.push("anon_table_grants_exposed");
     if (database.publicTables.authenticatedExposedCount !== 0) {
       report.blockers.push("authenticated_table_grants_exposed");
+    }
+    // service_role bypasses RLS, so any public table grant would reopen the
+    // Data API path around the Fastify API. Absent on plain PostgreSQL (count 0).
+    if (database.publicTables.serviceRoleExposedCount !== 0) {
+      report.blockers.push("service_role_table_grants_exposed");
     }
     if (!reviewedRestrictedRole(database.roles.runtime)) report.blockers.push("runtime_role_attributes_unreviewed");
     if (!reviewedRestrictedRole(database.roles.worker)) report.blockers.push("worker_role_attributes_unreviewed");

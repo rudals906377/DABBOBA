@@ -64,6 +64,18 @@ export class PortOneV2Error extends Error {
   }
 }
 
+/**
+ * True only when PortOne authoritatively rejected a lookup because it has no
+ * payment for this ID (the customer never submitted the payment window).
+ * Network failures, timeouts and any other rejection stay indeterminate.
+ */
+export function isPortOnePaymentNotFound(error: unknown): boolean {
+  return error instanceof PortOneV2Error
+    && error.code === "UPSTREAM_REJECTED"
+    && error.httpStatus === 404
+    && error.providerErrorType === "PAYMENT_NOT_FOUND";
+}
+
 export type PortOneCancellation = {
   outcome: PortOneCancellationOutcome;
   cancellationId: string;

@@ -15,6 +15,7 @@ import {
 import type { CatalogProduct, HomeRecentDrawActivity } from "@dabboba/contracts";
 import { CatalogDiscoveryImage } from "@/components/CatalogDiscoveryImage";
 import { CatalogProductTopIndicator } from "@/components/CatalogProductTopIndicator";
+import { DecorativeIonicon } from "@/components/DecorativeIonicon";
 import { GachaMachineFrame } from "@/components/GachaMachineFrame";
 import { KujiPrizeTierRow } from "@/components/KujiPrizeTierRow";
 import { KujiProductFrame } from "@/components/KujiProductFrame";
@@ -53,7 +54,6 @@ import {
   getRecentDrawReelWindow,
   homeAnnouncementMessages,
   resolveHomeProductBadge,
-  shouldExpandHomeHero,
   shouldExpandHomeRecentDraw,
   type ConfiguredHomeCollection,
   type HomeProductBadge,
@@ -128,78 +128,97 @@ export function HomeScreen() {
     })));
   }, [categorySettingsRevision, commerceEnabled, snapshot?.homeSections]);
 
+  // The mount effect and the focus effect can both ask for a load (and both
+  // re-run when category settings change). A load with the same inputs joins
+  // the one already in flight; a newer request supersedes an older one, whose
+  // late results are then discarded instead of overwriting fresher state.
+  const loadGeneration = useRef(0);
+  const loadInFlight = useRef<{ key: string; generation: number; promise: Promise<void> } | null>(null);
+
   const load = useCallback(
-    async (manual = false) => {
+    (manual = false): Promise<void> => {
+      const key = `${categorySettingsRevision}|${runtime.apiBaseUrl}`;
+      if (!manual && loadInFlight.current?.key === key) return loadInFlight.current.promise;
+      const generation = ++loadGeneration.current;
+      const isCurrent = () => generation === loadGeneration.current;
       if (manual) {
         setRefreshing(true);
         setImageRequestKey((current) => current + 1);
       }
-      try {
-        const [catalogResult, recentResult] = await Promise.allSettled([
-          fetchHomeCatalog(runtime.apiBaseUrl),
-          fetchHomeRecentDrawActivity(runtime.apiBaseUrl),
-        ]);
-        const cached = await readHomeCatalogCache(db).catch(() => null);
-        const recoveredRecentDrawActivity = recentResult.status === "fulfilled"
-          ? recentResult.value
-          : null;
-        setRecentDrawActivity(recoveredRecentDrawActivity);
+      const promise = (async () => {
+        try {
+          const [catalogResult, recentResult] = await Promise.allSettled([
+            fetchHomeCatalog(runtime.apiBaseUrl),
+            fetchHomeRecentDrawActivity(runtime.apiBaseUrl),
+          ]);
+          const cached = await readHomeCatalogCache(db).catch(() => null);
+          if (!isCurrent()) return;
+          const recoveredRecentDrawActivity = recentResult.status === "fulfilled"
+            ? recentResult.value
+            : null;
+          setRecentDrawActivity(recoveredRecentDrawActivity);
 
-        if (catalogResult.status === "rejected") {
-          if (cached) {
-            const recovered = {
-              ...cached,
-              products: cached.products.filter((product) => (
-                isCustomerProductCategoryEnabledOn(product.category, "home")
-              )),
-              recentDrawActivity: recoveredRecentDrawActivity,
-            };
-            setSnapshot(recovered);
-            setSource("cache");
-            setHomeSectionsSource(cached.homeSections ? "cache" : "error");
-            setMessage("연결이 불안정해 마지막으로 저장한 목록을 보여드려요.");
-            if (recentResult.status === "fulfilled") {
-              await writeHomeCatalogCache(db, recovered).catch(() => undefined);
+          if (catalogResult.status === "rejected") {
+            if (cached) {
+              const recovered = {
+                ...cached,
+                products: cached.products.filter((product) => (
+                  isCustomerProductCategoryEnabledOn(product.category, "home")
+                )),
+                recentDrawActivity: recoveredRecentDrawActivity,
+              };
+              setSnapshot(recovered);
+              setSource("cache");
+              setHomeSectionsSource(cached.homeSections ? "cache" : "error");
+              setMessage("연결이 불안정해 마지막으로 저장한 목록을 보여드려요.");
+              if (recentResult.status === "fulfilled") {
+                await writeHomeCatalogCache(db, recovered).catch(() => undefined);
+              }
+            } else {
+              setSource("empty");
+              setHomeSectionsSource("error");
+              setMessage("홈을 불러오지 못했어요. 연결 상태를 확인해 주세요.");
             }
-          } else {
-            setSource("empty");
-            setHomeSectionsSource("error");
-            setMessage("홈을 불러오지 못했어요. 연결 상태를 확인해 주세요.");
+            return;
           }
-          return;
-        }
 
-        const fresh = {
-          ...catalogResult.value,
-          recentDrawActivity: recoveredRecentDrawActivity,
-        };
-        if (fresh.homeSections === null) {
-          if (cached?.homeSections) {
-            const recovered = mergeFreshHomeCatalogWithCachedSections(fresh, cached);
-            setSnapshot(recovered);
-            setSource("cache");
-            setHomeSectionsSource("cache");
-            setMessage("홈 진열 정보를 불러오지 못해 마지막으로 확인한 구성을 보여드려요.");
-            if (recentResult.status === "fulfilled") {
-              await writeHomeCatalogCache(db, recovered).catch(() => undefined);
+          const fresh = {
+            ...catalogResult.value,
+            recentDrawActivity: recoveredRecentDrawActivity,
+          };
+          if (fresh.homeSections === null) {
+            if (cached?.homeSections) {
+              const recovered = mergeFreshHomeCatalogWithCachedSections(fresh, cached);
+              setSnapshot(recovered);
+              setSource("cache");
+              setHomeSectionsSource("cache");
+              setMessage("홈 진열 정보를 불러오지 못해 마지막으로 확인한 구성을 보여드려요.");
+              if (recentResult.status === "fulfilled") {
+                await writeHomeCatalogCache(db, recovered).catch(() => undefined);
+              }
+            } else {
+              setSnapshot(fresh);
+              setSource("live");
+              setHomeSectionsSource("error");
+              setMessage("");
             }
-          } else {
-            setSnapshot(fresh);
-            setSource("live");
-            setHomeSectionsSource("error");
-            setMessage("");
+            return;
           }
-          return;
+          setSnapshot(fresh);
+          setSource("live");
+          setHomeSectionsSource("live");
+          setMessage("");
+          await writeHomeCatalogCache(db, fresh).catch(() => undefined);
+        } finally {
+          if (isCurrent()) {
+            initialLoadCompleted.current = true;
+            setRefreshing(false);
+          }
+          if (loadInFlight.current?.generation === generation) loadInFlight.current = null;
         }
-        setSnapshot(fresh);
-        setSource("live");
-        setHomeSectionsSource("live");
-        setMessage("");
-        await writeHomeCatalogCache(db, fresh).catch(() => undefined);
-      } finally {
-        initialLoadCompleted.current = true;
-        setRefreshing(false);
-      }
+      })();
+      loadInFlight.current = { key, generation, promise };
+      return promise;
     },
     [categorySettingsRevision, db, runtime.apiBaseUrl],
   );
@@ -372,14 +391,13 @@ function HomeCatalogFeedState({
 }
 
 function HomeIntroBanner() {
-  const { fontScale } = useWindowDimensions();
-  const expanded = shouldExpandHomeHero(fontScale);
+  const router = useRouter();
   return (
-    <View
-      accessible
-      accessibilityRole="summary"
-      accessibilityLabel="새 소식 준비 중. 새로운 이벤트 소식이 등록되면 알려드릴게요."
-      style={[styles.hero, expanded && styles.heroLargeText]}
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel="이벤트, 새 소식을 준비하고 있어요. 이벤트가 등록되면 이곳에서 알려드릴게요."
+      onPress={() => router.push("/events" as Href)}
+      style={({ pressed }) => [styles.hero, pressed && styles.pressed]}
     >
       <Image
         accessible={false}
@@ -388,12 +406,14 @@ function HomeIntroBanner() {
         resizeMode="contain"
         style={styles.heroMachine}
       />
-      <KoreanPixelTitle variant="hero" numberOfLines={expanded ? 3 : 2} style={styles.heroTitle}>
-        새 소식을{"\n"}준비하고 있어요.
-      </KoreanPixelTitle>
-      <Text variant="bodyCompact" maxFontSizeMultiplier={2} style={styles.heroBody}>새로운 이벤트 소식이 등록되면 이곳에서 알려드릴게요.</Text>
-      <Text variant="label" maxFontSizeMultiplier={2} style={styles.heroAction}>새 소식 준비 중</Text>
-    </View>
+      <View style={styles.heroCopy}>
+        <KoreanPixelTitle variant="compact" numberOfLines={2} style={styles.heroTitle}>
+          새 소식을 준비하고 있어요
+        </KoreanPixelTitle>
+        <Text variant="caption" maxFontSizeMultiplier={2} style={styles.heroBody}>이벤트가 등록되면 이곳에서 알려드릴게요.</Text>
+      </View>
+      <DecorativeIonicon name="chevron-forward" size={18} color={colors.muted} />
+    </Pressable>
   );
 }
 
@@ -485,7 +505,7 @@ function RecentDrawReelRow({
   expanded?: boolean;
 }) {
   const current = position === "current";
-  const uri = resolveCatalogImageUrl(activity.prizeImageUrl, assetBaseUrl);
+  const uri = resolveCatalogImageUrl(activity.prizeImageUrl, assetBaseUrl, undefined, __DEV__);
   const [imageFailed, setImageFailed] = useState(false);
   useEffect(() => setImageFailed(false), [uri]);
   return (
@@ -613,8 +633,8 @@ function CollectionProductCard({
   commerceEnabled: boolean;
   onPress: () => void;
 }) {
-  const storefrontUri = resolveCatalogImageUrl(product.storefrontImageUrl, assetBaseUrl, product.version);
-  const primaryUri = resolveCatalogImageUrl(product.imageUrl, assetBaseUrl, product.version);
+  const storefrontUri = resolveCatalogImageUrl(product.storefrontImageUrl, assetBaseUrl, product.version, __DEV__);
+  const primaryUri = resolveCatalogImageUrl(product.imageUrl, assetBaseUrl, product.version, __DEV__);
   const cardWidth = getHomeProductCardWidth(layoutKind);
   const price = productPriceParts(product, commerceEnabled);
   return (
@@ -784,22 +804,23 @@ const styles = StyleSheet.create({
   retryCacheLargeText: { borderLeftWidth: 0, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: seed.color.stroke.brand },
   retryLabelCache: { color: colors.greenInk },
   hero: {
-    position: "relative",
-    minHeight: seed.spacing.x16 + seed.spacing.x16 + seed.spacing.x9,
-    overflow: "hidden",
+    minHeight: seed.spacing.x16,
     marginHorizontal: seed.spacing.globalGutter,
     marginTop: seed.spacing.x3_5,
     borderRadius: seed.radius.r4,
-    paddingHorizontal: seed.spacing.x5,
-    paddingVertical: seed.spacing.x6,
-    justifyContent: "center",
-    backgroundColor: colors.black,
+    borderWidth: 1,
+    borderColor: seed.color.stroke.neutral,
+    paddingHorizontal: seed.spacing.x4,
+    paddingVertical: seed.spacing.x2_5,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: seed.spacing.x3,
+    backgroundColor: seed.color.layer.elevated,
   },
-  heroLargeText: { minHeight: 220 },
-  heroTitle: { width: "66%", color: colors.white },
-  heroBody: { width: "64%", marginTop: seed.spacing.x3, color: "#B9C1B9", ...seed.typography.bodyCompact },
-  heroAction: { width: "64%", marginTop: seed.spacing.x3, color: colors.white, fontWeight: "800" },
-  heroMachine: { position: "absolute", top: -21, right: -10, width: "50%", height: "122%", opacity: 1 },
+  heroCopy: { flex: 1, minWidth: 0 },
+  heroTitle: { color: seed.color.foreground.neutral },
+  heroBody: { marginTop: seed.spacing.x0_5, color: seed.color.foreground.muted },
+  heroMachine: { width: seed.spacing.x10, height: seed.spacing.x10 },
   sectionHeader: {
     marginTop: seed.spacing.x8,
     marginBottom: seed.spacing.x4,
@@ -843,7 +864,7 @@ const styles = StyleSheet.create({
   recentDrawImage: { width: "100%", height: "100%" },
   recentDrawImageFallback: { width: "100%", height: "100%", alignItems: "center", justifyContent: "center", backgroundColor: seed.color.background.brandWeak },
   recentDrawImageFallbackLabel: { color: colors.greenInk, fontWeight: "800" },
-  recentDrawSilhouetteOverlay: { position: "absolute", top: 0, right: 0, bottom: 0, left: 0, backgroundColor: "rgba(17, 20, 17, 0.16)" },
+  recentDrawSilhouetteOverlay: { position: "absolute", top: 0, right: 0, bottom: 0, left: 0, backgroundColor: seed.color.foreground.neutral, opacity: 0.16 },
   recentDrawCopy: { minWidth: 0, flex: 1 },
   recentDrawPrize: { color: colors.ink, fontWeight: "800" },
   recentDrawPrizeGhost: { color: colors.muted, fontWeight: "700" },

@@ -23,8 +23,7 @@ import {
   slugIdInput,
   stringArrayInput,
   stringInput,
-  uuidInput,
-} from "../lib/input.js";
+  uuidInput, likeContainsPattern } from "../lib/input.js";
 import { cursorPage, pagination } from "../lib/pagination.js";
 import { iso, nullableIso, numberValue } from "../lib/rows.js";
 import { CATALOG_TOTAL_QUANTITY_SQL } from "../lib/catalog-total-quantity.js";
@@ -343,7 +342,7 @@ function catalogCursorScore(cursorSort: string | undefined, sort: CatalogProduct
 export async function registerCatalogRoutes(app: FastifyInstance, context: ApiContext) {
   app.get("/v1/catalog/ips", async (request) => {
     const query = requestQuery(request);
-    const { limit, cursor } = pagination(query);
+    const { limit, cursor } = pagination(query, "slug");
     const search = queryString(query.q);
     const values: unknown[] = [limit + 1];
     const filters = ["is_active = true"];
@@ -356,8 +355,8 @@ export async function registerCatalogRoutes(app: FastifyInstance, context: ApiCo
       )`);
     }
     if (search) {
-      values.push(`%${search}%`);
-      filters.push(`(name_ko ILIKE $${values.length} OR name_en ILIKE $${values.length} OR array_to_string(aliases, ' ') ILIKE $${values.length})`);
+      values.push(likeContainsPattern(search));
+      filters.push(`(name_ko ILIKE $${values.length} ESCAPE '\\' OR name_en ILIKE $${values.length} ESCAPE '\\' OR array_to_string(aliases, ' ') ILIKE $${values.length} ESCAPE '\\')`);
     }
     if (cursor) {
       values.push(cursor.createdAt, cursor.id);
@@ -372,7 +371,7 @@ export async function registerCatalogRoutes(app: FastifyInstance, context: ApiCo
 
   app.get("/v1/catalog/characters", async (request) => {
     const query = requestQuery(request);
-    const { limit, cursor } = pagination(query);
+    const { limit, cursor } = pagination(query, "uuid");
     const search = queryString(query.q);
     const ipId = query.ipId === undefined ? undefined : slugIdInput(query.ipId, "ipId");
     const values: unknown[] = [limit + 1];
@@ -386,8 +385,8 @@ export async function registerCatalogRoutes(app: FastifyInstance, context: ApiCo
       )`);
     }
     if (search) {
-      values.push(`%${search}%`);
-      filters.push(`(c.name ILIKE $${values.length} OR array_to_string(c.aliases, ' ') ILIKE $${values.length})`);
+      values.push(likeContainsPattern(search));
+      filters.push(`(c.name ILIKE $${values.length} ESCAPE '\\' OR array_to_string(c.aliases, ' ') ILIKE $${values.length} ESCAPE '\\')`);
     }
     if (ipId) {
       values.push(ipId);
@@ -411,7 +410,7 @@ export async function registerCatalogRoutes(app: FastifyInstance, context: ApiCo
     reply.header("cache-control", "no-store");
     const commerceMode = effectiveCommerceMode(context.config);
     const query = requestQuery(request);
-    const { limit, cursor } = pagination(query);
+    const { limit, cursor } = pagination(query, "slug");
     const search = queryString(query.q);
     const category = query.category === undefined ? undefined : enumInput(query, "category", PRODUCT_CATEGORIES);
     const saleStatus = query.saleStatus === undefined
@@ -437,13 +436,13 @@ export async function registerCatalogRoutes(app: FastifyInstance, context: ApiCo
       filters.push(`p.id=ANY($${values.length - 1}::text[]) AND p.metadata->>'catalogGeneration'=$${values.length}`);
     }
     if (search) {
-      values.push(`%${search}%`);
-      filters.push(`(p.name ILIKE $${values.length}
-        OR p.sku ILIKE $${values.length}
-        OR COALESCE(p.manufacturer,'') ILIKE $${values.length}
-        OR i.name_ko ILIKE $${values.length}
-        OR i.name_en ILIKE $${values.length}
-        OR array_to_string(i.aliases,' ') ILIKE $${values.length})`);
+      values.push(likeContainsPattern(search));
+      filters.push(`(p.name ILIKE $${values.length} ESCAPE '\\'
+        OR p.sku ILIKE $${values.length} ESCAPE '\\'
+        OR COALESCE(p.manufacturer,'') ILIKE $${values.length} ESCAPE '\\'
+        OR i.name_ko ILIKE $${values.length} ESCAPE '\\'
+        OR i.name_en ILIKE $${values.length} ESCAPE '\\'
+        OR array_to_string(i.aliases,' ') ILIKE $${values.length} ESCAPE '\\')`);
     }
     if (category) { values.push(category); filters.push(`p.category = $${values.length}`); }
     if (saleStatus) { values.push(saleStatus); filters.push(`p.sale_status = $${values.length}`); }
@@ -562,9 +561,9 @@ export async function registerCatalogRoutes(app: FastifyInstance, context: ApiCo
   });
 
   app.get("/v1/admin/ips", { preHandler: context.auth.requirePermission("catalog.read") }, async (request) => {
-    const query = requestQuery(request); const { limit, cursor } = pagination(query); const search = queryString(query.q);
+    const query = requestQuery(request); const { limit, cursor } = pagination(query, "slug"); const search = queryString(query.q);
     const values: unknown[] = [limit + 1]; const filters: string[] = [];
-    if (search) { values.push(`%${search}%`); filters.push(`(name_ko ILIKE $${values.length} OR name_en ILIKE $${values.length} OR array_to_string(aliases, ' ') ILIKE $${values.length})`); }
+    if (search) { values.push(likeContainsPattern(search)); filters.push(`(name_ko ILIKE $${values.length} ESCAPE '\\' OR name_en ILIKE $${values.length} ESCAPE '\\' OR array_to_string(aliases, ' ') ILIKE $${values.length} ESCAPE '\\')`); }
     if (cursor) { values.push(cursor.createdAt, cursor.id); filters.push(`(created_at, id) < ($${values.length - 1}, $${values.length})`); }
     const result = await context.pool.query<IpRow>(`SELECT * FROM catalog_ips ${filters.length ? `WHERE ${filters.join(" AND ")}` : ""} ORDER BY created_at DESC, id DESC LIMIT $1`, values);
     return cursorPage(result.rows, limit, mapIp);
@@ -604,10 +603,10 @@ export async function registerCatalogRoutes(app: FastifyInstance, context: ApiCo
   });
 
   app.get("/v1/admin/characters", { preHandler: context.auth.requirePermission("catalog.read") }, async (request) => {
-    const query = requestQuery(request); const { limit, cursor } = pagination(query); const search = queryString(query.q);
+    const query = requestQuery(request); const { limit, cursor } = pagination(query, "uuid"); const search = queryString(query.q);
     const ipId = query.ipId === undefined ? undefined : slugIdInput(query.ipId, "ipId");
     const values: unknown[] = [limit + 1]; const filters: string[] = [];
-    if (search) { values.push(`%${search}%`); filters.push(`(name ILIKE $${values.length} OR array_to_string(aliases, ' ') ILIKE $${values.length})`); }
+    if (search) { values.push(likeContainsPattern(search)); filters.push(`(name ILIKE $${values.length} ESCAPE '\\' OR array_to_string(aliases, ' ') ILIKE $${values.length} ESCAPE '\\')`); }
     if (ipId) { values.push(ipId); filters.push(`ip_id = $${values.length}`); }
     if (cursor) { values.push(cursor.createdAt, cursor.id); filters.push(`(created_at, id) < ($${values.length - 1}, $${values.length})`); }
     const result = await context.pool.query<CharacterRow>(`SELECT * FROM catalog_characters ${filters.length ? `WHERE ${filters.join(" AND ")}` : ""} ORDER BY created_at DESC,id DESC LIMIT $1`, values);
@@ -645,7 +644,7 @@ export async function registerCatalogRoutes(app: FastifyInstance, context: ApiCo
   });
 
   app.get("/v1/admin/products", { preHandler: context.auth.requirePermission("catalog.read") }, async (request) => {
-    const query = requestQuery(request); const { limit, cursor } = pagination(query); const search = queryString(query.q);
+    const query = requestQuery(request); const { limit, cursor } = pagination(query, "slug"); const search = queryString(query.q);
     const category = query.category === undefined ? undefined : enumInput(query, "category", PRODUCT_CATEGORIES);
     const ipId = query.ipId === undefined ? undefined : slugIdInput(query.ipId, "ipId");
     const characterId = query.characterId === undefined ? undefined : uuidInput(query.characterId, "characterId");
@@ -654,7 +653,7 @@ export async function registerCatalogRoutes(app: FastifyInstance, context: ApiCo
       ? undefined
       : enumInput(query, "saleStatus", PRODUCT_SALE_STATUSES);
     const values: unknown[] = [limit + 1]; const filters: string[] = [];
-    if (search) { values.push(`%${search}%`); filters.push(`(p.name ILIKE $${values.length} OR p.sku ILIKE $${values.length} OR COALESCE(p.manufacturer,'') ILIKE $${values.length})`); }
+    if (search) { values.push(likeContainsPattern(search)); filters.push(`(p.name ILIKE $${values.length} ESCAPE '\\' OR p.sku ILIKE $${values.length} ESCAPE '\\' OR COALESCE(p.manufacturer,'') ILIKE $${values.length} ESCAPE '\\')`); }
     if (category) { values.push(category); filters.push(`p.category=$${values.length}`); }
     if (ipId) { values.push(ipId); filters.push(`p.ip_id=$${values.length}`); }
     if (characterId) { values.push(characterId); filters.push(`EXISTS (SELECT 1 FROM product_characters pc_filter WHERE pc_filter.product_id=p.id AND pc_filter.character_id=$${values.length})`); }
@@ -791,9 +790,9 @@ export async function registerCatalogRoutes(app: FastifyInstance, context: ApiCo
   });
 
   app.get("/v1/admin/catalog-requests", { preHandler: context.auth.requirePermission("catalog.read") }, async (request) => {
-    const query = requestQuery(request); const { limit,cursor }=pagination(query);
+    const query = requestQuery(request); const { limit,cursor }=pagination(query, "uuid");
     const status=query.status===undefined?undefined:enumInput(query,"status",REQUEST_STATUSES); const kind=query.kind===undefined?undefined:enumInput(query,"kind",["PRODUCT","IP"] as const);const search=queryString(query.q);const values:unknown[]=[limit+1]; const filters:string[]=[];
-    if(status){values.push(status);filters.push(`status=$${values.length}`);}if(kind){values.push(kind);filters.push(`kind=$${values.length}`);}if(search){values.push(`%${search}%`);filters.push(`(name ILIKE $${values.length} OR COALESCE(description,'') ILIKE $${values.length})`);} if(cursor){values.push(cursor.createdAt,cursor.id);filters.push(`(created_at,id)<($${values.length-1},$${values.length})`);}
+    if(status){values.push(status);filters.push(`status=$${values.length}`);}if(kind){values.push(kind);filters.push(`kind=$${values.length}`);}if(search){values.push(likeContainsPattern(search));filters.push(`(name ILIKE $${values.length} ESCAPE '\\' OR COALESCE(description,'') ILIKE $${values.length} ESCAPE '\\')`);} if(cursor){values.push(cursor.createdAt,cursor.id);filters.push(`(created_at,id)<($${values.length-1},$${values.length})`);}
     const result=await context.pool.query<CatalogRequestRow>(`SELECT * FROM catalog_requests ${filters.length?`WHERE ${filters.join(" AND ")}`:""} ORDER BY created_at DESC,id DESC LIMIT $1`,values);
     return cursorPage(result.rows,limit,mapCatalogRequest);
   });

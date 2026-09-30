@@ -38,6 +38,7 @@ import {
   logoutOtherAccountSessions,
   updateNotificationPreferences,
 } from "@/features/profile/profile-api";
+import { profileSectionFailure } from "@/features/profile/profile-section-state";
 import { useProfileSnapshot } from "@/features/profile/use-profile-snapshot";
 import { ProfileSessionGate, isProfileSessionBlocked } from "@/features/profile/ProfileSessionGate";
 import { clearAuthTokens } from "@/lib/session-store";
@@ -113,7 +114,7 @@ function ProfileBackedMemberDetailScreen({
   section: ProfileBackedMemberSection;
   title: string;
 }) {
-  const profileState = useProfileSnapshot();
+  const profileState = useProfileSnapshot("member");
   const hasFocusedOnce = useRef(false);
 
   useFocusEffect(
@@ -194,7 +195,7 @@ function DeletionReceiptStatus({
         if (active) {
           setState({
             kind: "error",
-            message: error instanceof Error ? error.message : "탈퇴 처리 상태를 확인하지 못했습니다.",
+            message: error instanceof Error ? error.message : "탈퇴 처리 상태를 확인하지 못했어요.",
           });
         }
       });
@@ -266,7 +267,7 @@ function Personal({ profileState }: { profileState: ReturnType<typeof useProfile
   const basicInfo = snapshot.basicInfo;
   return (
     <>
-      <Lead title="계정 기본정보" body="이메일과 휴대폰 변경은 본인확인을 다시 거쳐야 합니다." />
+      <Lead title="계정 기본정보" body="이메일과 휴대폰 변경은 본인확인을 다시 거쳐야 해요." />
       <InfoCard>
         <InfoRow label="닉네임" value={basicInfo.nickname} />
         <InfoRow label="이메일" value={basicInfo.email ?? "등록된 이메일 없음"} />
@@ -280,7 +281,18 @@ function Personal({ profileState }: { profileState: ReturnType<typeof useProfile
 }
 
 function Address({ profileState }: { profileState: ReturnType<typeof useProfileSnapshot> }) {
-  const address = profileState.snapshot!.defaultAddress;
+  const snapshot = profileState.snapshot!;
+  const address = snapshot.defaultAddress;
+  const failure = profileSectionFailure(snapshot, "address");
+  // A failed address request must not read as "no address yet" or offer registration.
+  if (failure) {
+    return (
+      <>
+        <Lead title="배송에 사용할 기본 주소" body="배송 신청 전 받는 사람과 주소를 다시 확인할 수 있어요." />
+        <ErrorState message={failure} onRetry={profileState.reload} />
+      </>
+    );
+  }
   return (
     <>
       <Lead title="배송에 사용할 기본 주소" body="배송 신청 전 받는 사람과 주소를 다시 확인할 수 있어요." />
@@ -310,7 +322,7 @@ function Security({ profileState }: { profileState: ReturnType<typeof useProfile
     try {
       setRevoking(true);
       await logoutOtherAccountSessions(profileState.runtime.apiBaseUrl, profileState.accessToken);
-      Alert.alert("다른 기기에서 로그아웃했어요", "현재 기기의 로그인은 유지됩니다.");
+      Alert.alert("다른 기기에서 로그아웃했어요", "현재 기기의 로그인은 유지돼요.");
     } catch (error) {
       Alert.alert("세션을 종료하지 못했어요", error instanceof Error ? error.message : "잠시 후 다시 시도해 주세요.");
     } finally {
@@ -338,18 +350,40 @@ function Security({ profileState }: { profileState: ReturnType<typeof useProfile
           <Text style={styles.secondaryActionLabel}>{revoking ? "로그아웃 중" : "다른 기기에서 로그아웃"}</Text>
         </Pressable>
       ) : null}
-      <Text style={styles.disclosure}>공용 기기에서는 이용을 마친 뒤 로그아웃해 주세요. 회원탈퇴를 완료하면 연결된 로그인 계정과 남은 세션도 삭제됩니다.</Text>
+      <Text style={styles.disclosure}>공용 기기에서는 이용을 마친 뒤 로그아웃해 주세요. 회원탈퇴를 완료하면 연결된 로그인 계정과 남은 세션도 삭제돼요.</Text>
     </>
   );
 }
 
 function Notifications({ profileState }: { profileState: ReturnType<typeof useProfileSnapshot> }) {
   const snapshot = profileState.snapshot!;
-  const [preferences, setPreferences] = useState(snapshot.notificationPreferences);
+  const failure = profileSectionFailure(snapshot, "preferences");
+  const loaded = snapshot.notificationPreferences;
+  // Unknown server preferences cannot be edited or saved; show the retryable failure instead of defaults.
+  if (failure || !loaded) {
+    return (
+      <>
+        <Lead title="필수 알림과 선택 알림" body="주문·결제·배송처럼 꼭 필요한 안내는 끌 수 없어요." />
+        <ErrorState message={failure ?? "알림 설정을 불러오지 못했어요."} onRetry={profileState.reload} />
+      </>
+    );
+  }
+  return <NotificationsForm profileState={profileState} loaded={loaded} />;
+}
+
+function NotificationsForm({
+  profileState,
+  loaded,
+}: {
+  profileState: ReturnType<typeof useProfileSnapshot>;
+  loaded: Preferences;
+}) {
+  const snapshot = profileState.snapshot!;
+  const [preferences, setPreferences] = useState(loaded);
   const [saving, setSaving] = useState(false);
   const [pushPermission, setPushPermission] = useState<boolean | null>(null);
   const [connectingPush, setConnectingPush] = useState(false);
-  useEffect(() => setPreferences(snapshot.notificationPreferences), [snapshot.notificationPreferences]);
+  useEffect(() => setPreferences(loaded), [loaded]);
   useEffect(() => {
     let active = true;
     void readPushPermissionGranted().then((granted) => {
@@ -444,8 +478,9 @@ function Notifications({ profileState }: { profileState: ReturnType<typeof usePr
 }
 
 function Consents({ profileState }: { profileState: ReturnType<typeof useProfileSnapshot> }) {
-  const preferences = profileState.snapshot!.notificationPreferences;
   const snapshot = profileState.snapshot!;
+  const preferencesFailure = profileSectionFailure(snapshot, "preferences");
+  const preferences = preferencesFailure ? null : snapshot.notificationPreferences;
   const [policyStatus, setPolicyStatus] = useState<AccountPolicyAcceptanceStatus | null>(null);
   const [policyError, setPolicyError] = useState(false);
   useEffect(() => {
@@ -462,12 +497,15 @@ function Consents({ profileState }: { profileState: ReturnType<typeof useProfile
   return (
     <>
       <Lead title="동의 현황" body="필수 개인정보 처리는 서비스 제공을 위한 범위로 제한하고 선택 동의는 언제든 철회할 수 있어요." />
+      {preferencesFailure || !preferences ? (
+        <ErrorState message={preferencesFailure ?? "알림 설정을 불러오지 못했어요."} onRetry={profileState.reload} />
+      ) : null}
       <InfoCard>
         <ConsentRow title="서비스 이용약관" status={policyAcceptanceLabel(terms, policyError)} />
         <ConsentRow title="개인정보처리방침" status={policyAcceptanceLabel(privacy, policyError)} />
         <ConsentRow title="주문·배송 정보 처리" status="계약 이행 시 처리" />
-        <ConsentRow title="마케팅 정보 수신" status={preferences.marketingPush || preferences.marketingEmail || preferences.marketingSms ? "일부 동의" : "미동의"} />
-        <ConsentRow title="맞춤 추천" status={preferences.personalizedRecommendations ? "동의" : "미동의"} last />
+        <ConsentRow title="마케팅 정보 수신" status={!preferences ? "불러오지 못했어요" : preferences.marketingPush || preferences.marketingEmail || preferences.marketingSms ? "일부 동의" : "미동의"} />
+        <ConsentRow title="맞춤 추천" status={!preferences ? "불러오지 못했어요" : preferences.personalizedRecommendations ? "동의" : "미동의"} last />
       </InfoCard>
       <ActionButton label="선택 동의 변경" onPress={() => router.push("/profile/member/notifications" as Href)} />
       <Text style={styles.disclosure}>수집 항목·이용 목적·보관 기간·처리 위탁은 개인정보처리방침에서 확인할 수 있어요.</Text>
@@ -505,7 +543,7 @@ function AccountActions({ profileState }: { profileState: ReturnType<typeof useP
 
   const logout = () => {
     if (logoutPending) return;
-    Alert.alert("로그아웃할까요?", "이 기기의 로그인 세션을 종료합니다.", [
+    Alert.alert("로그아웃할까요?", "이 기기의 로그인 세션을 종료해요.", [
     { text: "취소", style: "cancel" },
     { text: "로그아웃", style: "destructive", onPress: () => { void (async () => {
       setLogoutPending(true);
@@ -561,7 +599,7 @@ function AccountActions({ profileState }: { profileState: ReturnType<typeof useP
         clearBrokerSession,
         clearAuthTokens,
       });
-      Alert.alert("탈퇴 요청을 접수했어요", `접수번호 ${result.id}\n처리가 완료될 때까지 이 계정의 로그인이 제한됩니다. 내정보 > 설정 > 로그아웃·회원탈퇴에서 상태를 확인할 수 있어요.`, [
+      Alert.alert("탈퇴 요청을 접수했어요", `접수번호 ${result.id}\n처리가 완료될 때까지 이 계정의 로그인이 제한돼요. 내정보 > 설정 > 로그아웃·회원탈퇴에서 상태를 확인할 수 있어요.`, [
         { text: "확인", onPress: () => router.replace("/(tabs)/profile") },
       ]);
     } catch {
@@ -601,7 +639,7 @@ function AccountActions({ profileState }: { profileState: ReturnType<typeof useP
     }
     Alert.alert(
       "회원탈퇴를 요청할까요?",
-      "진행 중인 주문·배송·교환과 보관 상품을 확인한 뒤 처리되며, 요청이 접수되면 모든 기기에서 로그아웃됩니다.",
+      "진행 중인 주문·배송·교환과 보관 상품을 확인한 뒤 처리되며, 요청이 접수되면 모든 기기에서 로그아웃돼요.",
       [
         { text: "취소", style: "cancel" },
         {
@@ -626,7 +664,7 @@ function AccountActions({ profileState }: { profileState: ReturnType<typeof useP
 
   return (
     <>
-      <Lead title="계정 세션과 탈퇴" body="로그아웃은 계정을 삭제하지 않으며, 회원탈퇴는 진행 중인 거래와 법정 보관 기록을 확인한 뒤 처리됩니다." />
+      <Lead title="계정 세션과 탈퇴" body="로그아웃은 계정을 삭제하지 않으며, 회원탈퇴는 진행 중인 거래와 법정 보관 기록을 확인한 뒤 처리돼요." />
       <View style={styles.actionCard}>
         <DecorativeIonicon name="log-out-outline" size={25} color={colors.ink} />
         <View style={styles.actionText}><Text style={styles.actionTitle}>로그아웃</Text><Text style={styles.actionBody}>이 기기의 현재 로그인 세션만 종료해요.</Text></View>
@@ -635,7 +673,7 @@ function AccountActions({ profileState }: { profileState: ReturnType<typeof useP
       <View style={styles.dangerCard}>
         <DecorativeIonicon name="warning-outline" size={25} color={colors.danger} />
         <Text style={styles.dangerTitle}>탈퇴 후 되돌릴 수 없어요</Text>
-        <Text style={styles.dangerBody}>보관 상품, 진행 중인 주문·배송·교환, 남은 포인트가 있으면 탈퇴 요청이 보류될 수 있어요. 법령상 보관이 필요한 거래 기록은 계정과 분리해 정해진 기간 동안 보관될 수 있습니다.</Text>
+        <Text style={styles.dangerBody}>보관 상품, 진행 중인 주문·배송·교환, 남은 포인트가 있으면 탈퇴 요청이 보류될 수 있어요. 법령상 보관이 필요한 거래 기록은 계정과 분리해 정해진 기간 동안 보관될 수 있어요.</Text>
         {deletionRequest ? <View style={styles.deletionStatus}><Text style={styles.deletionStatusLabel}>현재 상태</Text><Text style={styles.deletionStatusValue}>{deletionStatusLabel(deletionRequest.status)}</Text></View> : null}
         <Pressable accessibilityRole="button" accessibilityLabel="회원탈퇴 요청" accessibilityState={{ disabled: deletionPending, busy: deletionPending }} disabled={deletionPending} onPress={() => void requestDeletion()} style={({ pressed }) => [styles.dangerButton, deletionPending && styles.disabled, pressed && styles.pressed]}><Text style={styles.dangerButtonLabel}>{deletionPending ? "확인 중" : "회원탈퇴 요청"}</Text></Pressable>
         {publicDeletionUrl ? (
@@ -675,7 +713,7 @@ function deletionBlockerMessage(blockers: components["schemas"]["AccountDeletion
     .map(([key, label]) => `${label} ${blockers[key].toLocaleString("ko-KR")}`);
   return details.length > 0
     ? `${details.join(" · ")} 항목을 먼저 정리해 주세요.`
-    : "계정 상태가 변경됐습니다. 새로고침 후 다시 확인해 주세요.";
+    : "계정 상태가 변경됐어요. 새로고침 후 다시 확인해 주세요.";
 }
 
 function deletionStatusLabel(status: AccountDeletionRequest["status"]): string {
@@ -725,7 +763,7 @@ function ToggleRow({ label, body, value, onChange, disabled = false, last = fals
           disabled={disabled}
           hitSlop={SWITCH_HIT_SLOP}
           onValueChange={onChange}
-          trackColor={{ false: "#C9CEC8", true: colors.brand }}
+          trackColor={{ false: seed.color.stroke.contrast, true: colors.brand }}
           thumbColor={colors.white}
         />
       </View>
@@ -812,7 +850,7 @@ const styles = StyleSheet.create({
   actionText: { flex: 1, minWidth: 0 },
   actionTitle: { color: colors.ink, fontSize: 14, fontWeight: "900" },
   actionBody: { color: colors.muted, ...seed.typography.finePrint, marginTop: seed.spacing.x1 },
-  smallButton: { minHeight: seed.size.touchTarget, justifyContent: "center", borderRadius: seed.radius.r2_5, paddingHorizontal: seed.spacing.x3, backgroundColor: "#ECEFEC" },
+  smallButton: { minHeight: seed.size.touchTarget, justifyContent: "center", borderRadius: seed.radius.r2_5, paddingHorizontal: seed.spacing.x3, backgroundColor: seed.color.background.neutralWeak },
   smallButtonLabel: { color: colors.ink, ...seed.typography.finePrint, fontWeight: "900" },
   dangerCard: { borderRadius: seed.radius.r5, borderWidth: 1, borderColor: seed.color.stroke.critical, padding: seed.spacing.x4_5, marginTop: seed.spacing.x3_5, backgroundColor: seed.color.background.criticalWeak },
   dangerTitle: { color: colors.danger, fontSize: 16, fontWeight: "900", marginTop: 12 },

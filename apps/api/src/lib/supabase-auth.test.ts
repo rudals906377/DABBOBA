@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import type { webcrypto } from "node:crypto";
 import {
   createLocalJWKSet,
   exportJWK,
@@ -193,7 +194,7 @@ test("JWT verification requires the configured issuer, exact audience, expiry, r
     role?: string;
     anonymous?: boolean;
     expiration?: number;
-    privateKey?: CryptoKey;
+    privateKey?: webcrypto.CryptoKey;
   } = {}) => new SignJWT({
     role: changes.role || "authenticated",
     is_anonymous: changes.anonymous || false,
