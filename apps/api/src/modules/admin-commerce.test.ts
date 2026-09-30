@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { allowedReviewTransition, allowedShippingTransition } from "./admin-commerce.js";
+import { allowedReviewTransition, allowedShippingTransition, shippingFeeAllowsDispatch } from "./admin-commerce.js";
 
 test("shipping operations expose only the approved forward and cancellation transitions", () => {
   assert.equal(allowedShippingTransition("REQUESTED", "PROCESSING"), true);
@@ -15,6 +15,18 @@ test("shipping operations expose only the approved forward and cancellation tran
   assert.equal(allowedShippingTransition("SHIPPED", "CANCELLED"), false);
   assert.equal(allowedShippingTransition("DELIVERED", "PROCESSING"), false);
   assert.equal(allowedShippingTransition("CANCELLED", "PROCESSING"), false);
+});
+
+test("a shipping request moves forward only while its fee order is settled", () => {
+  for (const to of ["PROCESSING", "SHIPPED", "DELIVERED"] as const) {
+    assert.equal(shippingFeeAllowsDispatch(null, to), true, "free shipping has no fee order");
+    assert.equal(shippingFeeAllowsDispatch("PAID", to), true);
+    assert.equal(shippingFeeAllowsDispatch("FULFILLED", to), true);
+    for (const unsettled of ["PENDING_PAYMENT", "REFUND_REVIEW", "REFUNDED", "CANCELLED", "EXPIRED"]) {
+      assert.equal(shippingFeeAllowsDispatch(unsettled, to), false, `${unsettled} → ${to}`);
+    }
+  }
+  assert.equal(shippingFeeAllowsDispatch("REFUND_REVIEW", "CANCELLED"), true);
 });
 
 test("refund review states follow an explicit non-reopenable operations workflow", () => {

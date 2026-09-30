@@ -200,6 +200,15 @@ function shippingSummary(row: ShippingSummaryRow) {
   };
 }
 
+/**
+ * A request that carries a shipping-fee order may move forward only while that
+ * order is settled. Cancelling stays possible so an operator can stop a request
+ * whose fee is under refund review.
+ */
+export function shippingFeeAllowsDispatch(feeOrderStatus: string | null, to: ShippingTargetStatus) {
+  return to === "CANCELLED" || feeOrderStatus === null || feeOrderStatus === "PAID" || feeOrderStatus === "FULFILLED";
+}
+
 export function allowedShippingTransition(from: ShippingStatus, to: ShippingTargetStatus) {
   return (from === "REQUESTED" && (to === "PROCESSING" || to === "CANCELLED"))
     || (from === "PROCESSING" && (to === "SHIPPED" || to === "CANCELLED"))
@@ -699,6 +708,12 @@ export async function registerAdminCommerceRoutes(app: FastifyInstance, context:
     const result = await withTransaction(context.pool, async (client) => {
       const idem = await beginIdempotency(client, { actorId: request.actor!.userId, scope: "ADMIN_SHIPPING_TRANSITION", key: mutation.idempotencyKey, hash });
       if (!idem.fresh) return { replay: true, statusCode: idem.statusCode, body: idem.body };
+      // Lock a linked shipping-fee order before its request, in the same order as the
+      // payment webhook, so a refund review observed concurrently cannot be bypassed.
+      const feeOrder = await client.query<{ status: string }>(
+        "SELECT status FROM orders WHERE shipping_request_id=$1 AND order_kind='SHIPPING_FEE' FOR UPDATE",
+        [shippingRequestId],
+      );
       const locked = await client.query<{
         id: string; user_id: string; status: ShippingStatus; tracking_carrier: string | null; tracking_number: string | null;
         shipped_at: Date | null; version: number; updated_at: Date;
@@ -707,6 +722,9 @@ export async function registerAdminCommerceRoutes(app: FastifyInstance, context:
       const before = locked.rows[0]!;
       if (before.version !== expectedVersion) throw conflict("다른 작업이 먼저 배송 상태를 변경했습니다.");
       if (!allowedShippingTransition(before.status, status)) throw conflict(`허용되지 않은 배송 상태 변경입니다: ${before.status} → ${status}`);
+      if (!shippingFeeAllowsDispatch(feeOrder.rows[0]?.status ?? null, status)) {
+        throw conflict("배송비 결제가 환불 검토 중이거나 확정되지 않아 배송을 진행할 수 없습니다.");
+      }
       const inventory = await client.query<{ id: string; status: InventoryUnitStatus }>(`
         SELECT u.id,u.status FROM shipping_request_items i JOIN inventory_units u ON u.id=i.inventory_unit_id
         WHERE i.shipping_request_id=$1 ORDER BY u.id FOR UPDATE OF u`, [shippingRequestId]);
