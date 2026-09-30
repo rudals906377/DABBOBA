@@ -105,6 +105,7 @@ export function ShopScreen({ category }: { category: ShopRootCategory }) {
   const [sortOption, setSortOption] = useState<ShopSortOption>("latest");
   const requestSequence = useRef(0);
   const lastSuccessfulLoadAt = useRef<number | null>(null);
+  const firstPageFailed = useRef(false);
   const productsRef = useRef(products);
   const nextCursorRef = useRef(nextCursor);
   productsRef.current = products;
@@ -178,13 +179,19 @@ export function ShopScreen({ category }: { category: ShopRootCategory }) {
         setProducts(page.products);
         setNextCursor(page.nextCursor);
       }
-      if (!append) lastSuccessfulLoadAt.current = Date.now();
+      if (!append) {
+        lastSuccessfulLoadAt.current = Date.now();
+        firstPageFailed.current = false;
+      }
       setMessage("");
       setLoadMoreMessage("");
     } catch {
       if (sequence !== requestSequence.current) return;
       if (append) setLoadMoreMessage("다음 상품을 불러오지 못했어요.");
-      else setMessage("연결 상태를 확인한 뒤 다시 시도해 주세요.");
+      else {
+        firstPageFailed.current = true;
+        setMessage("연결 상태를 확인한 뒤 다시 시도해 주세요.");
+      }
     } finally {
       if (sequence === requestSequence.current) {
         setLoading(false);
@@ -200,7 +207,7 @@ export function ShopScreen({ category }: { category: ShopRootCategory }) {
 
   // Revisiting the tab keeps the loaded list and its scroll position. Only a
   // list whose last successful load is older than the stale window refreshes,
-  // and it does so in place; a list that never loaded retries from page 1.
+  // and it does so in place; a list whose first load failed retries page 1.
   useFocusEffect(useCallback(() => {
     void loadIps();
     if (!hasFocusedOnce.current) {
@@ -208,7 +215,7 @@ export function ShopScreen({ category }: { category: ShopRootCategory }) {
       return undefined;
     }
     if (lastSuccessfulLoadAt.current === null) {
-      void loadProductsRef.current();
+      if (firstPageFailed.current) void loadProductsRef.current();
     } else if (shouldRefreshShopOnFocus(lastSuccessfulLoadAt.current, Date.now())) {
       void loadProductsRef.current({ inPlace: true });
     }
