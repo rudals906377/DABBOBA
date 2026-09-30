@@ -16,9 +16,12 @@ export async function POST(request: NextRequest) {
   const token = store.get(config.sessionCookieName)?.value;
   if (!token) return response(401);
 
+  // The API rotates the session on every keepalive (like customer refresh) and
+  // never extends it past the absolute administrator cap measured from login.
   let expiresAt: string;
+  let rotatedToken: string;
   try {
-    ({ expiresAt } = await adminApi<{ expiresAt: string }>("/v1/admin/auth/keepalive", {
+    ({ expiresAt, token: rotatedToken } = await adminApi<{ expiresAt: string; token: string }>("/v1/admin/auth/keepalive", {
       method: "POST",
       token,
     }));
@@ -38,9 +41,16 @@ export async function POST(request: NextRequest) {
   }
 
   const expires = new Date(expiresAt);
-  if (Number.isNaN(expires.getTime()) || expires <= new Date()) return response(503);
+  if (
+    typeof rotatedToken !== "string"
+    || rotatedToken.length < 32
+    || Number.isNaN(expires.getTime())
+    || expires <= new Date()
+  ) {
+    return response(503);
+  }
   const renewed = response(204);
-  renewed.cookies.set(config.sessionCookieName, token, {
+  renewed.cookies.set(config.sessionCookieName, rotatedToken, {
     httpOnly: true,
     secure: true,
     sameSite: "strict",

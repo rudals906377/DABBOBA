@@ -148,6 +148,11 @@ export const DATABASE_RELEASE_MIGRATIONS = Object.freeze([
     path: 'packages/db/migrations/0076_legal_policy_business_phone.sql',
     sha256: '48df0f0441e93e754168ce87936ba3c2989e3ce66c807c07e5cf2c1e3d4cd581',
   }),
+  Object.freeze({
+    file: '0077_session_scope.sql',
+    path: 'packages/db/migrations/0077_session_scope.sql',
+    sha256: 'dd09f7792b61a169d2a11af9741023f9ee7847e93e4cf67cb7624a574de16f48',
+  }),
 ]);
 
 export const MINIMUM_DATABASE_RELEASE_VERSION =

@@ -234,6 +234,7 @@ test("PRELAUNCH rejects every customer commerce mutation before its handler can 
           rows: [{
             session_id: "10000000-0000-4000-8000-000000000001",
             session_kind: "USER",
+            scope: "FULL",
             user_id: "20000000-0000-4000-8000-000000000001",
             email: "customer@example.test",
             nickname: "고객",

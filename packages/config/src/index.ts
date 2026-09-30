@@ -17,6 +17,15 @@ export type ApiSurface = "customer" | "admin" | "all";
 export type CommerceLaunchMode = "PRELAUNCH" | "LIVE";
 export const CUSTOMER_LOGIN_PROVIDERS = ["PHONE", "KAKAO", "NAVER", "GOOGLE", "APPLE"] as const;
 export type CustomerLoginProvider = (typeof CUSTOMER_LOGIN_PROVIDERS)[number];
+/**
+ * Third-party social logins that App Store Review Guideline 4.8 pairs with
+ * Sign in with Apple. PHONE is a first-party OTP method and is exempt.
+ */
+export const APPLE_PARITY_SOCIAL_PROVIDERS = ["KAKAO", "NAVER", "GOOGLE"] as const satisfies readonly CustomerLoginProvider[];
+/** Absolute administrator session lifetime measured from login. */
+export const DEFAULT_ADMIN_SESSION_MAX_HOURS = 12;
+/** Administrator inactivity window renewed by the console keepalive. */
+export const DEFAULT_ADMIN_SESSION_IDLE_MINUTES = 60;
 
 export type ApiConfig = {
   environment: RuntimeEnvironment;
@@ -49,6 +58,18 @@ export type ApiConfig = {
   /** Server-side commerce kill switch. Production defaults to PRELAUNCH. */
   commerceMode?: CommerceLaunchMode;
   sessionTtlDays: number;
+  /**
+   * Absolute administrator session cap in hours, measured from the login that
+   * created the session. Loaded configs always set it; optional only for older
+   * programmatic fixtures, which fall back to DEFAULT_ADMIN_SESSION_MAX_HOURS.
+   */
+  adminSessionMaxHours?: number;
+  /**
+   * Administrator inactivity expiry in minutes. Keepalive renews it without
+   * exceeding the absolute cap. Optional only for older programmatic fixtures,
+   * which fall back to DEFAULT_ADMIN_SESSION_IDLE_MINUTES.
+   */
+  adminSessionIdleMinutes?: number;
   paymentProvider: string;
   paymentWebhookSecret: string | null;
   /** Separate server-to-server key for the worker's bounded PortOne requery. */
@@ -237,6 +258,38 @@ function parseCustomerLoginProviders(raw: string): CustomerLoginProvider[] {
     );
   }
   return CUSTOMER_LOGIN_PROVIDERS.filter((provider) => values.includes(provider));
+}
+
+/**
+ * App Store Review Guideline 4.8: an iOS app that offers third-party social
+ * login must also offer Sign in with Apple. The customer app renders exactly
+ * the providers this list exposes, so a STAGING/PRODUCTION configuration that
+ * enables KAKAO, NAVER, or GOOGLE without APPLE would ship a rejectable build.
+ * LOCAL/TEST may run partial provider fixtures and only receive a warning.
+ */
+export function assertAppleSignInParity(
+  providers: readonly CustomerLoginProvider[],
+  tier: BackendEnvironmentTier,
+  warn: (message: string) => void = (message) => console.warn(message),
+): void {
+  const social = providers.filter((provider) =>
+    (APPLE_PARITY_SOCIAL_PROVIDERS as readonly string[]).includes(provider));
+  if (social.length === 0 || providers.includes("APPLE")) return;
+  const message = `CUSTOMER_AUTH_ENABLED_PROVIDERS enables ${social.join(",")} without APPLE; `
+    + "App Store Review Guideline 4.8 requires Sign in with Apple beside third-party social login";
+  if (tier === "STAGING" || tier === "PRODUCTION") {
+    throw new Error(`${message} (blocked in ${tier})`);
+  }
+  warn(`[dabboba-config] ${message} (allowed only in ${tier})`);
+}
+
+function adminSessionLimits(env: Environment): Pick<ApiConfig, "adminSessionMaxHours" | "adminSessionIdleMinutes"> {
+  const adminSessionMaxHours = integer(env, "ADMIN_SESSION_MAX_HOURS", DEFAULT_ADMIN_SESSION_MAX_HOURS, 1, 168);
+  const adminSessionIdleMinutes = integer(env, "ADMIN_SESSION_IDLE_MINUTES", DEFAULT_ADMIN_SESSION_IDLE_MINUTES, 5, 1_440);
+  if (adminSessionIdleMinutes > adminSessionMaxHours * 60) {
+    throw new Error("ADMIN_SESSION_IDLE_MINUTES must not exceed ADMIN_SESSION_MAX_HOURS");
+  }
+  return { adminSessionMaxHours, adminSessionIdleMinutes };
 }
 
 function legacyJwtRole(value: string): string | null {
@@ -505,6 +558,7 @@ export function loadApiConfig(env: Environment = process.env): ApiConfig {
     ? originList(env, "ADMIN_ORIGINS", "http://127.0.0.1:4180", runtime)
     : [];
   const supabaseAuth = supabaseAuthConfig(env, runtime, includesCustomer);
+  assertAppleSignInParity(supabaseAuth.customerLoginProviders ?? [], environmentTier);
   const communityFlag = env.DABBOBA_ENABLE_DUKROOM?.trim() || "false";
   if (communityFlag !== "true" && communityFlag !== "false") {
     throw new Error("DABBOBA_ENABLE_DUKROOM must be true or false");
@@ -571,6 +625,7 @@ export function loadApiConfig(env: Environment = process.env): ApiConfig {
     communityEnabled: communityFlag === "true",
     commerceMode,
     sessionTtlDays: integer(env, "SESSION_TTL_DAYS", 30, 1, 365),
+    ...adminSessionLimits(env),
     ...payment,
     paymentReconciliationWorkerSecret,
     gcsBucket: optional(env, "GCS_BUCKET"),

@@ -1933,7 +1933,10 @@ export async function registerAccountRoutes(app: FastifyInstance, context: ApiCo
     return sendMutation(reply, result);
   });
 
-  app.get("/v1/account/deletion-preview", { preHandler: context.auth.requireUserWithoutPolicy }, async (request, reply) => {
+  app.get("/v1/account/deletion-preview", {
+    preHandler: context.auth.requireUserWithoutPolicy,
+    config: { allowAccountDeletionScope: true },
+  }, async (request, reply) => {
     const blockers = await loadDeletionBlockers(context.pool, request.actor!.userId);
     return reply.header("cache-control", "no-store").send({
       canDeleteNow: !Object.values(blockers).some((value) => value > 0),
@@ -2001,7 +2004,10 @@ export async function registerAccountRoutes(app: FastifyInstance, context: ApiCo
     return reply.header("cache-control", "no-store").code(204).send();
   });
 
-  app.get("/v1/account/deletion-request", { preHandler: context.auth.requireUserWithoutPolicy }, async (request, reply) => {
+  app.get("/v1/account/deletion-request", {
+    preHandler: context.auth.requireUserWithoutPolicy,
+    config: { allowAccountDeletionScope: true },
+  }, async (request, reply) => {
     const result = await context.pool.query<AccountDeletionRequestRow>(
       `SELECT id,status,blocker_snapshot,request_count,requested_at,last_requested_at,
               completed_at,auth_deletion_status
@@ -2018,7 +2024,7 @@ export async function registerAccountRoutes(app: FastifyInstance, context: ApiCo
   app.get(
     "/v1/account/deletion-requests/:requestId/status",
     {
-      config: { rateLimit: { max: 30, timeWindow: "1 minute" } },
+      config: { rateLimit: { max: 30, timeWindow: "1 minute" }, allowAccountDeletionScope: true },
     },
     async (request, reply) => {
       const requestId = uuidInput((request.params as Record<string, unknown>).requestId, "requestId");
@@ -2037,7 +2043,10 @@ export async function registerAccountRoutes(app: FastifyInstance, context: ApiCo
     },
   );
 
-  app.post("/v1/account/deletion-request", { preHandler: context.auth.requireUserWithoutPolicy }, async (request, reply) => {
+  app.post("/v1/account/deletion-request", {
+    preHandler: context.auth.requireUserWithoutPolicy,
+    config: { allowAccountDeletionScope: true },
+  }, async (request, reply) => {
     const input = objectInput(request.body);
     assertOnlyKeys(input, []);
     const actorId = request.actor!.userId;

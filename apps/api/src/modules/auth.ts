@@ -13,7 +13,7 @@ import {
 import { badRequest, forbidden, notFound, unauthorized } from "../lib/errors.js";
 import { objectInput, stringInput } from "../lib/input.js";
 import { verifyPassword, type PasswordRecord } from "../lib/password.js";
-import { issueSession, tokenDigest } from "../plugins/auth.js";
+import { adminSessionLimits, issueSession, tokenDigest } from "../plugins/auth.js";
 import type { ApiContext } from "../types.js";
 
 const DUMMY_PASSWORD: PasswordRecord = {
@@ -228,7 +228,11 @@ export async function registerAuthRoutes(app: FastifyInstance, context: ApiConte
     });
   });
 
-  app.post("/v1/auth/logout", { preHandler: context.auth.requireUserWithoutPolicy }, async (request, reply) => {
+  app.post("/v1/auth/logout", {
+    preHandler: context.auth.requireUserWithoutPolicy,
+    // The public account-deletion page signs its scoped session out when done.
+    config: { allowAccountDeletionScope: true },
+  }, async (request, reply) => {
     const actor = request.actor!;
     await withTransaction(context.pool, async (client) => {
       const revoked = await client.query(
@@ -400,19 +404,73 @@ export async function registerAuthRoutes(app: FastifyInstance, context: ApiConte
     return reply.code(204).send();
   });
 
-  app.post("/v1/admin/auth/keepalive", { preHandler: context.auth.requireAdmin }, async (request) => {
+  app.post("/v1/admin/auth/keepalive", { preHandler: context.auth.requireAdmin }, async (request, reply) => {
     const actor = request.actor!;
-    const result = await context.pool.query<{ expires_at: Date }>(
-      `UPDATE sessions
-          SET expires_at = GREATEST(expires_at, now() + ($3::integer * interval '1 day')),
-              last_seen_at = now()
-        WHERE id = $1 AND user_id = $2 AND session_kind = 'ADMIN'
-          AND revoked_at IS NULL AND expires_at > now()
-        RETURNING expires_at`,
-      [actor.sessionId, actor.userId, context.config.sessionTtlDays],
-    );
-    const session = result.rows[0];
-    if (!session) throw unauthorized("세션이 만료되었거나 유효하지 않습니다.");
-    return { expiresAt: session.expires_at.toISOString() };
+    const limits = adminSessionLimits(context.config);
+    const outcome = await withTransaction(context.pool, async (client) => {
+      const current = await client.query<{ within_cap: boolean }>(
+        `SELECT created_at + ($3::integer * interval '1 hour') > now() AS within_cap
+           FROM sessions
+          WHERE id=$1 AND user_id=$2 AND session_kind='ADMIN'
+            AND revoked_at IS NULL AND expires_at>now()
+          FOR UPDATE`,
+        [actor.sessionId, actor.userId, limits.maxHours],
+      );
+      const row = current.rows[0];
+      if (!row) return { kind: "invalid" as const };
+      if (!row.within_cap) {
+        // The absolute lifetime has elapsed: end the session instead of renewing it.
+        await client.query(
+          `UPDATE sessions SET revoked_at=now(),revoke_reason='ADMIN_SESSION_MAX_AGE'
+            WHERE id=$1 AND revoked_at IS NULL`,
+          [actor.sessionId],
+        );
+        return { kind: "expired" as const };
+      }
+
+      // Rotate like /v1/auth/refresh so a captured cookie stops working after
+      // the next keepalive. The replacement inherits the original login time,
+      // so the absolute cap is measured from login rather than from rotation.
+      const revoked = await client.query(
+        `UPDATE sessions SET revoked_at=now(),revoke_reason='ROTATED'
+          WHERE id=$1 AND user_id=$2 AND session_kind='ADMIN' AND revoked_at IS NULL`,
+        [actor.sessionId, actor.userId],
+      );
+      if (revoked.rowCount !== 1) return { kind: "invalid" as const };
+      const token = randomBytes(32).toString("base64url");
+      // Keep the client metadata verified at login; keepalive calls do not
+      // carry a freshly signed edge identity.
+      const created = await client.query<{ id: string; expires_at: Date }>(
+        `INSERT INTO sessions
+          (user_id,session_kind,scope,token_digest,ip_address,user_agent,
+           created_at,last_seen_at,expires_at,rotated_from_session_id)
+         SELECT user_id,'ADMIN','FULL',$2,ip_address,user_agent,
+                created_at,now(),
+                LEAST(created_at + ($3::integer * interval '1 hour'),
+                      now() + ($4::integer * interval '1 minute')),
+                id
+           FROM sessions
+          WHERE id=$1
+         RETURNING id,expires_at`,
+        [
+          actor.sessionId,
+          tokenDigest(token, context.config.sessionTokenPepper),
+          limits.maxHours,
+          limits.idleMinutes,
+        ],
+      );
+      if (created.rowCount !== 1) return { kind: "invalid" as const };
+      return { kind: "rotated" as const, token, session: created.rows[0]! };
+    });
+    if (outcome.kind === "expired") {
+      throw unauthorized("관리자 세션 최대 유지 시간이 지나 다시 로그인해야 합니다.");
+    }
+    if (outcome.kind === "invalid") throw unauthorized("세션이 만료되었거나 유효하지 않습니다.");
+    return reply.header("cache-control", "no-store").send({
+      token: outcome.token,
+      expiresAt: outcome.session.expires_at.toISOString(),
+      sessionId: outcome.session.id,
+      rotatedFromSessionId: actor.sessionId,
+    });
   });
 }
