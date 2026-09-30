@@ -2,6 +2,7 @@ import Constants from "expo-constants";
 import { randomUUID } from "expo-crypto";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { AppState, Platform } from "react-native";
+import { startForegroundInterval } from "@/lib/foreground-interval";
 import { createMobileDabbobaClient } from "@/lib/mobile-api-client";
 import { resolveMobileRuntimeConfig, type MobilePlatform } from "@/lib/runtime-config";
 import {
@@ -11,7 +12,13 @@ import {
   type CustomerCategorySurface,
 } from "./product-categories";
 
-const CATEGORY_REFRESH_INTERVAL_MS = 10_000;
+/**
+ * Operator category settings change rarely: refresh every five minutes while
+ * the app is in the foreground, immediately on every return to the
+ * foreground, and never while backgrounded. A failed refresh keeps the last
+ * verified settings.
+ */
+const CATEGORY_REFRESH_INTERVAL_MS = 5 * 60_000;
 
 type StorefrontCategoryContextValue = {
   revision: string;
@@ -53,14 +60,7 @@ export function StorefrontCategorySettingsProvider({ children }: { children: Rea
 
   useEffect(() => {
     void refresh();
-    const interval = setInterval(() => void refresh(), CATEGORY_REFRESH_INTERVAL_MS);
-    const subscription = AppState.addEventListener("change", (state) => {
-      if (state === "active") void refresh();
-    });
-    return () => {
-      clearInterval(interval);
-      subscription.remove();
-    };
+    return startForegroundInterval(AppState, () => void refresh(), CATEGORY_REFRESH_INTERVAL_MS);
   }, [refresh]);
 
   const value = useMemo(() => ({ revision, refresh }), [refresh, revision]);

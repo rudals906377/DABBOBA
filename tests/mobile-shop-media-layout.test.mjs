@@ -42,7 +42,7 @@ test("prelaunch shop cards keep the amount on one line without losing its full a
 
 test("a failed refresh warns when previously loaded cards remain visible", () => {
   assert.match(shopSource, /if \(manual\) \{\s*setRefreshing\(true\)/);
-  assert.match(shopSource, /else setMessage\("연결 상태를 확인한 뒤 다시 시도해 주세요\."\)/);
+  assert.match(shopSource, /else \{\s*firstPageFailed\.current = true;\s*setMessage\("연결 상태를 확인한 뒤 다시 시도해 주세요\."\);/);
   assert.match(shopSource, /message && products\.length > 0 && !loading && !refreshing/);
   assert.match(shopSource, /표시된 가격·재고가 최신이 아닐 수 있어요\./);
   assert.match(shopSource, /accessibilityLabel="상품 목록 다시 불러오기"[\s\S]*?onPress=\{\(\) => void loadProducts\(\{ manual: true \}\)\}/);

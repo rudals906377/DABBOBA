@@ -1445,6 +1445,18 @@ test("native runtime config requires HTTPS in production and derives the Metro h
     "http://192.168.219.100:4174/assets/item.jpg?v=3",
   );
   assert.equal(runtimeConfig.resolveCatalogImageUrl("/assets/item.jpg", null), null);
+  // Absolute cleartext media is accepted only in development builds.
+  assert.equal(runtimeConfig.resolveCatalogImageUrl("http://cdn.example.test/a.png", null), null);
+  assert.equal(runtimeConfig.resolveCatalogImageUrl("http://cdn.example.test/a.png", null, undefined, false), null);
+  assert.equal(
+    runtimeConfig.resolveCatalogImageUrl("http://192.168.219.100:4174/a.png", null, undefined, true),
+    "http://192.168.219.100:4174/a.png",
+  );
+  assert.equal(
+    runtimeConfig.resolveCatalogImageUrl("https://cdn.example.test/a.png", null, 2, false),
+    "https://cdn.example.test/a.png?v=2",
+  );
+  assert.equal(runtimeConfig.resolveCatalogImageUrl("javascript:alert(1)", null, undefined, true), null);
 
   assert.throws(
     () =>

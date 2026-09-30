@@ -7,6 +7,7 @@ const list = readFileSync(new URL("../apps/mobile/src/features/notifications/Not
 const detail = readFileSync(new URL("../apps/mobile/src/features/notifications/NotificationDetailScreen.tsx", import.meta.url), "utf8");
 const navigation = readFileSync(new URL("../apps/mobile/src/features/notifications/notification-navigation.ts", import.meta.url), "utf8");
 const observer = readFileSync(new URL("../apps/mobile/src/features/notifications/AccountNotificationObserver.tsx", import.meta.url), "utf8");
+const responseDispatcher = readFileSync(new URL("../apps/mobile/src/features/notifications/notification-response.ts", import.meta.url), "utf8");
 
 test("mobile notifications consume one cursor page and dedicated detail/summary endpoints", () => {
   assert.match(api, /fetchAccountNotificationPage/);
@@ -36,8 +37,9 @@ test("notification navigation is finite and cold-start responses open detail by 
   assert.match(navigation, /profile: \{ href:/);
   assert.doesNotMatch(navigation, /notification\.data/);
   assert.match(navigation, /SAFE_NOTIFICATION_ID/);
-  assert.match(observer, /getLastNotificationResponse/);
-  assert.match(observer, /addNotificationResponseReceivedListener/);
+  assert.match(observer, /installNotificationResponseDispatcher/);
+  assert.match(responseDispatcher, /getLastNotificationResponse/);
+  assert.match(responseDispatcher, /addNotificationResponseReceivedListener/);
 });
 
 test("notification screens hide decorative icon-font glyphs from assistive technology", () => {

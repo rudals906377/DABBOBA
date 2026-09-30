@@ -58,7 +58,7 @@ export function ProfileOrderDetailScreen() {
     orderId?: string | string[];
   }>();
   const orderId = singleParam(rawOrderId);
-  const profileState = useProfileSnapshot();
+  const profileState = useProfileSnapshot("orders");
   const snapshot = profileState.snapshot;
   const order = snapshot?.orders?.find((item) => item.id === orderId) ?? null;
   const ordersFailure = snapshot ? profileSectionFailure(snapshot, "orders") : null;
@@ -99,7 +99,7 @@ export function ProfileShippingDetailScreen() {
     shippingRequestId?: string | string[];
   }>();
   const shippingRequestId = singleParam(rawShippingRequestId);
-  const profileState = useProfileSnapshot();
+  const profileState = useProfileSnapshot("shipping");
   const [detail, setDetail] = useState<AccountShippingRequestDetail | null>(null);
   const [detailMessage, setDetailMessage] = useState("");
   const [detailLoading, setDetailLoading] = useState(false);
@@ -241,7 +241,7 @@ export function ProfileShippingDetailScreen() {
 export function ProfileNoticeDetailScreen() {
   const { noticeId: rawNoticeId } = useLocalSearchParams<{ noticeId?: string | string[] }>();
   const noticeId = singleParam(rawNoticeId);
-  const profileState = useProfileSnapshot();
+  const profileState = useProfileSnapshot("notices");
   const snapshot = profileState.snapshot;
   const notice = snapshot?.notices.find((item) => item.id === noticeId) ?? null;
 
@@ -426,7 +426,7 @@ function ShippingDetail({
       {"items" in shippingRequest ? (
         <Section title="배송 상품">
           {shippingRequest.items.map((item, index) => {
-            const imageUri = resolveCatalogImageUrl(item.imageUrl, assetBaseUrl, item.productVersion);
+            const imageUri = resolveCatalogImageUrl(item.imageUrl, assetBaseUrl, item.productVersion, __DEV__);
             const media = (
               <View style={styles.shippingProductImageFrame}>
                 {imageUri ? (

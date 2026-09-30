@@ -22,7 +22,7 @@ import {
 } from "@/lib/runtime-config";
 import { readAuthTokens } from "@/lib/session-store";
 
-export function useProfileSnapshot(scope: ProfileSnapshotScope = "full") {
+export function useProfileSnapshot(scope: ProfileSnapshotScope) {
   const { revision: categorySettingsRevision } = useStorefrontCategorySettings();
   const runtime = useMemo(
     () => resolveMobileRuntimeConfig({

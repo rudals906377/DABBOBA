@@ -1,9 +1,10 @@
 import Constants from "expo-constants";
-import { type Href, useLocalSearchParams, useNavigation, useRouter } from "expo-router";
+import { type Href, useFocusEffect, useLocalSearchParams, useNavigation, useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  AppState,
   Image,
   Platform,
   Pressable,
@@ -48,6 +49,7 @@ import {
   resolveMobileRuntimeConfig,
   type MobilePlatform,
 } from "@/lib/runtime-config";
+import { startForegroundInterval } from "@/lib/foreground-interval";
 import { colors } from "@/theme";
 
 const KUJI_ROOM_POLL_INTERVAL_MS = 2_000;
@@ -167,8 +169,11 @@ export function KujiQueueScreen() {
       && accessTokenRef.current,
   );
 
-  useEffect(() => {
-    if (!shouldPoll || !entryId) return;
+  // The 2-second room poll runs only while this screen is focused and the app
+  // is in the foreground; a return to the foreground polls immediately. The
+  // server keeps the queue order while the viewer browses elsewhere.
+  useFocusEffect(useCallback(() => {
+    if (!shouldPoll || !entryId) return undefined;
     let mounted = true;
     let requestPending = false;
     const poll = async () => {
@@ -193,12 +198,12 @@ export function KujiQueueScreen() {
         requestPending = false;
       }
     };
-    const timer = setInterval(() => void poll(), KUJI_ROOM_POLL_INTERVAL_MS);
+    const stopPolling = startForegroundInterval(AppState, () => void poll(), KUJI_ROOM_POLL_INTERVAL_MS);
     return () => {
       mounted = false;
-      clearInterval(timer);
+      stopPolling();
     };
-  }, [continueToCheckout, entryId, productId, runtime.apiBaseUrl, shouldPoll]);
+  }, [continueToCheckout, entryId, productId, runtime.apiBaseUrl, shouldPoll]));
 
   const confirmLeave = useCallback(async () => {
     if (!room || leavePending) return;

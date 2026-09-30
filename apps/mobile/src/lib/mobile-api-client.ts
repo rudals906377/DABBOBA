@@ -27,6 +27,9 @@ export function createMobileDabbobaClient(options: MobileDabbobaClientOptions) {
       token: async () => {
         const requestedToken = await originalToken();
         if (!requestedToken) return null;
+        // `readAuthTokens` serves an in-memory copy invalidated by every token
+        // change, so this check and the session lifecycle below read
+        // SecureStore at most once per request.
         const stored = await readAuthTokens();
         if (stored?.accessToken !== requestedToken) return requestedToken;
         return (await ensureCustomerSessionForUse(options.baseUrl))?.accessToken ?? null;

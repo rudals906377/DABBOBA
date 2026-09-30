@@ -11,6 +11,7 @@ const requireMobile = createRequire(`${root}/apps/mobile/package.json`);
 const ts = requireMobile("typescript");
 const guestModule = await import(`${root}/apps/mobile/src/features/profile/guest-profile-snapshot.ts`);
 const responseModule = await import(`${root}/apps/mobile/src/features/profile/profile-response.ts`);
+const scopeModule = await import(`${root}/apps/mobile/src/features/profile/profile-snapshot-scope.ts`);
 const source = readFileSync(`${root}/apps/mobile/src/features/profile/profile-api.ts`, "utf8");
 const code = ts.transpileModule(source, {
   compilerOptions: { module: ts.ModuleKind.CommonJS },
@@ -89,6 +90,7 @@ function setup(failPath, failStatus = 503, inventoryPages = new Map()) {
       }
       if (name.endsWith("guest-profile-snapshot")) return guestModule;
       if (name.endsWith("profile-response")) return responseModule;
+      if (name.endsWith("profile-snapshot-scope")) return scopeModule;
       throw new Error(`Unexpected dependency ${name}`);
     },
   });
@@ -245,3 +247,62 @@ for (const [publicPath, section] of [["wanted-requests", "wanted"], ["notices", 
     assert.ok(result.sectionErrors[section].length > 0);
   });
 }
+
+const identityPaths = ["/v1/auth/me", "/v1/account/profile", "/v1/account/basic-info"];
+
+test("a narrow section scope requests only account identity plus its own section", async () => {
+  const harness = setup();
+  const result = await harness.fetch("http://test.invalid", "test-only-token", { scope: "wishlist" });
+  assert.deepEqual([...harness.calls].sort(), [...identityPaths, "/v1/account/wishlist"].sort());
+  assert.equal(result.wishlist.length, 1);
+  // Unrequested personal sections are not loaded and are not recorded as failures.
+  assert.equal(result.inventory, null);
+  assert.equal(result.orders, null);
+  assert.equal(result.pointBalance, null);
+  assert.equal(Object.keys(result.sectionErrors).length, 0);
+});
+
+test("the home scope reads only the first inventory page and flags further pages", async () => {
+  const pages = new Map([
+    [null, { items: [{ id: "page-1" }], nextCursor: "page-2" }],
+    ["page-2", { items: [{ id: "page-2" }], nextCursor: null }],
+  ]);
+  const harness = setup(undefined, 503, pages);
+  const result = await harness.fetch("http://test.invalid", "test-only-token", { scope: "home" });
+  assert.equal(result.inventory.map((item) => item.id).join(","), "page-1");
+  assert.equal(result.inventoryHasMore, true);
+  assert.equal(harness.calls.filter((call) => call === "/v1/account/inventory").length, 1);
+  for (const skipped of ["/v1/catalog/products", "/v1/catalog/ips", "/v1/wanted-requests", "/v1/notices", "/v1/inquiries", "/v1/account/shipping-requests"]) {
+    assert.equal(harness.calls.includes(skipped), false, skipped);
+  }
+  assert.equal(result.pointBalance, 32400);
+});
+
+test("a failed section inside a narrow scope still becomes a null section with its error", async () => {
+  const harness = setup("/v1/account/points", 500);
+  const result = await harness.fetch("http://test.invalid", "test-only-token", { scope: "points" });
+  assert.equal(result.pointBalance, null);
+  assert.equal(typeof result.sectionErrors.points, "string");
+});
+
+test("a guest scope without public sections makes no network request", async () => {
+  const harness = setup();
+  const result = await harness.fetch("http://test.invalid", undefined, { scope: "home" });
+  assert.equal(harness.calls.length, 0);
+  assert.equal(result.isExample, true);
+});
+
+test("the orders scope loads the catalog used to label order lines", async () => {
+  const harness = setup();
+  await harness.fetch("http://test.invalid", "test-only-token", { scope: "orders" });
+  assert.equal(harness.calls.includes("/v1/catalog/products"), true);
+  assert.equal(harness.calls.includes("/v1/account/orders"), true);
+  assert.equal(harness.calls.includes("/v1/account/inventory"), false);
+});
+
+test("only the storage and legacy full scopes page the whole inventory", () => {
+  for (const scope of ["home", "history", "wishlist", "orders", "points", "shipping", "support", "requests", "request-compose", "notices", "account", "address", "member"]) {
+    assert.notEqual(scopeModule.profileSnapshotPlan(scope).inventory, "all", scope);
+  }
+  assert.equal(scopeModule.profileSnapshotPlan("full").inventory, "all");
+});

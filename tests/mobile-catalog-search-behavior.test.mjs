@@ -123,9 +123,16 @@ function createProductSearchRenderer() {
     },
     "react-native": {
       ActivityIndicator: "ActivityIndicator",
+      // Minimal FlatList: header, rendered rows (or the empty component) and footer.
+      FlatList: (props) => [
+        props.ListHeaderComponent,
+        ...(props.data.length
+          ? props.data.map((item, index) => props.renderItem({ item, index }))
+          : [props.ListEmptyComponent]),
+        props.ListFooterComponent,
+      ],
       Keyboard: { dismiss() {} },
       Platform: { OS: "ios" },
-      ScrollView: "ScrollView",
       StyleSheet: styles,
       View: "View",
     },

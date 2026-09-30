@@ -16,7 +16,7 @@ import { colors } from "@/theme";
 
 export function WantedRequestDetailScreen() {
   const { requestId = "" } = useLocalSearchParams<{ requestId?: string }>();
-  const profileState = useProfileSnapshot();
+  const profileState = useProfileSnapshot("requests");
   const initial = useMemo(
     () => profileState.snapshot?.wantedRequests.find((item) => item.id === requestId) ?? null,
     [profileState.snapshot?.wantedRequests, requestId],

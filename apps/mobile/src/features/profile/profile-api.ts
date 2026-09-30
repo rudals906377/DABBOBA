@@ -7,6 +7,10 @@ import {
 } from "@/features/catalog/product-categories";
 import { createMobileDabbobaClient as createDabbobaClient } from "@/lib/mobile-api-client";
 import { createGuestSnapshot } from "@/features/profile/guest-profile-snapshot";
+import {
+  profileSnapshotPlan,
+  type ProfileSnapshotScope,
+} from "@/features/profile/profile-snapshot-scope";
 
 export { createGuestSnapshot } from "@/features/profile/guest-profile-snapshot";
 
@@ -47,6 +51,11 @@ export type ProfileSnapshot = {
    */
   wishlist: WishlistItem[] | null;
   inventory: InventoryUnit[] | null;
+  /**
+   * True when a first-page-only scope saw a further inventory page. Only the
+   * storage (and legacy full) scope follows every inventory cursor.
+   */
+  inventoryHasMore?: boolean;
   orders: AccountOrder[] | null;
   pointBalance: number | null;
   pointHistory: PointLedgerEntry[] | null;
@@ -73,7 +82,7 @@ export type ProfileSnapshotSection =
   | "inquiries"
   | "preferences";
 
-export type ProfileSnapshotScope = "full" | "storage";
+export type { ProfileSnapshotScope } from "@/features/profile/profile-snapshot-scope";
 
 export type PointReturnResult = {
   id: string;
@@ -104,42 +113,44 @@ export async function fetchProfileSnapshot(
     ...(accessToken ? { token: () => accessToken } : {}),
   });
 
-  if (options.scope === "storage") {
+  const scope = options.scope ?? "full";
+  if (scope === "storage") {
     return fetchStorageProfileSnapshot(client, accessToken);
   }
+  const plan = profileSnapshotPlan(scope);
 
   const [productsResult, ipsResult, wantedResult, noticesResult] = await Promise.all([
-    client.GET("/v1/catalog/products", { params: { query: { limit: 100 } } }),
-    client.GET("/v1/catalog/ips", { params: { query: { limit: 100 } } }),
-    client.GET("/v1/wanted-requests", { params: { query: { limit: 20 } } }),
-    client.GET("/v1/notices", { params: { query: { limit: 20 } } }),
+    whenPlanned(plan.catalog === "products-and-ips", () => client.GET("/v1/catalog/products", { params: { query: { limit: 100 } } })),
+    whenPlanned(plan.catalog !== "none", () => client.GET("/v1/catalog/ips", { params: { query: { limit: 100 } } })),
+    whenPlanned(plan.wanted, () => client.GET("/v1/wanted-requests", { params: { query: { limit: 20 } } })),
+    whenPlanned(plan.notices, () => client.GET("/v1/notices", { params: { query: { limit: 20 } } })),
   ]);
   const sectionErrors: ProfileSnapshot["sectionErrors"] = {};
-  if (!productsResult.data) {
+  if (productsResult && !productsResult.data) {
     throw new ProfileApiError(
       productsResult.response.status,
       errorMessage(productsResult.error, "상품 정보를 불러오지 못했어요."),
     );
   }
-  if (!ipsResult.data) {
+  if (ipsResult && !ipsResult.data) {
     throw new ProfileApiError(
       ipsResult.response.status,
       errorMessage(ipsResult.error, "작품 정보를 불러오지 못했어요."),
     );
   }
-  if (!wantedResult.data) sectionErrors.wanted = errorMessage(wantedResult.error, "신청방을 불러오지 못했어요.");
-  if (!noticesResult.data) sectionErrors.notices = errorMessage(noticesResult.error, "공지사항을 불러오지 못했어요.");
-  const products = productsResult.data.items;
+  if (wantedResult && !wantedResult.data) sectionErrors.wanted = errorMessage(wantedResult.error, "신청방을 불러오지 못했어요.");
+  if (noticesResult && !noticesResult.data) sectionErrors.notices = errorMessage(noticesResult.error, "공지사항을 불러오지 못했어요.");
+  const products = productsResult?.data?.items ?? [];
   const ipNames = Object.fromEntries(
-    ipsResult.data.items.map((ip) => [ip.id, ip.nameKo]),
+    (ipsResult?.data?.items ?? []).map((ip) => [ip.id, ip.nameKo]),
   );
   const wantedRequests = await attachWantedMediaUrls(
     client,
-    (wantedResult.data?.items ?? []).filter((request) => (
+    (wantedResult?.data?.items ?? []).filter((request) => (
       isCustomerVisibleProductCategory(request.category)
     )),
   );
-  const notices = noticesResult.data?.items ?? [];
+  const notices = noticesResult?.data?.items ?? [];
 
   if (!accessToken) {
     return {
@@ -169,14 +180,14 @@ export async function fetchProfileSnapshot(
     client.GET("/v1/auth/me"),
     client.GET("/v1/account/profile"),
     client.GET("/v1/account/basic-info"),
-    client.GET("/v1/account/default-address"),
-    client.GET("/v1/account/wishlist", { params: { query: { limit: 50 } } }),
-    client.GET("/v1/account/inventory", { params: { query: { limit: 100 } } }),
-    client.GET("/v1/account/orders", { params: { query: { limit: 50 } } }),
-    client.GET("/v1/account/points", { params: { query: { limit: 50 } } }),
-    client.GET("/v1/account/shipping-requests", { params: { query: { limit: 50 } } }),
-    client.GET("/v1/inquiries", { params: { query: { limit: 30 } } }),
-    client.GET("/v1/account/notification-preferences"),
+    whenPlanned(plan.address, () => client.GET("/v1/account/default-address")),
+    whenPlanned(plan.wishlist, () => client.GET("/v1/account/wishlist", { params: { query: { limit: 50 } } })),
+    whenPlanned(plan.inventory !== "none", () => client.GET("/v1/account/inventory", { params: { query: { limit: 100 } } })),
+    whenPlanned(plan.orders, () => client.GET("/v1/account/orders", { params: { query: { limit: 50 } } })),
+    whenPlanned(plan.points, () => client.GET("/v1/account/points", { params: { query: { limit: 50 } } })),
+    whenPlanned(plan.shipping, () => client.GET("/v1/account/shipping-requests", { params: { query: { limit: 50 } } })),
+    whenPlanned(plan.inquiries, () => client.GET("/v1/inquiries", { params: { query: { limit: 30 } } })),
+    whenPlanned(plan.preferences, () => client.GET("/v1/account/notification-preferences")),
   ]);
 
   if (!meResult.data || !profileResult.data || !basicInfoResult.data) {
@@ -186,22 +197,23 @@ export async function fetchProfileSnapshot(
       errorMessage(failed.error, "로그인 정보를 확인하지 못했어요."),
     );
   }
-  const defaultAddress = addressResult.data ?? null;
-  if (!addressResult.data && addressResult.response.status !== 404) {
+  const defaultAddress = addressResult?.data ?? null;
+  if (addressResult && !addressResult.data && addressResult.response.status !== 404) {
     sectionErrors.address = errorMessage(addressResult.error, "기본 배송지를 불러오지 못했어요.");
   }
-  if (!wishlistResult.data) sectionErrors.wishlist = errorMessage(wishlistResult.error, "찜 목록을 불러오지 못했어요.");
-  if (!inventoryResult.data) sectionErrors.inventory = errorMessage(inventoryResult.error, "보관함을 불러오지 못했어요.");
-  if (!ordersResult.data) sectionErrors.orders = errorMessage(ordersResult.error, "구매 내역을 불러오지 못했어요.");
-  if (!pointsResult.data) sectionErrors.points = errorMessage(pointsResult.error, "포인트 정보를 불러오지 못했어요.");
-  if (!shippingResult.data) sectionErrors.shipping = errorMessage(shippingResult.error, "배송 신청 내역을 불러오지 못했어요.");
-  if (!inquiriesResult.data) sectionErrors.inquiries = errorMessage(inquiriesResult.error, "문의 내역을 불러오지 못했어요.");
-  if (!preferencesResult.data) sectionErrors.preferences = errorMessage(preferencesResult.error, "알림 설정을 불러오지 못했어요.");
+  if (wishlistResult && !wishlistResult.data) sectionErrors.wishlist = errorMessage(wishlistResult.error, "찜 목록을 불러오지 못했어요.");
+  if (inventoryResult && !inventoryResult.data) sectionErrors.inventory = errorMessage(inventoryResult.error, "보관함을 불러오지 못했어요.");
+  if (ordersResult && !ordersResult.data) sectionErrors.orders = errorMessage(ordersResult.error, "구매 내역을 불러오지 못했어요.");
+  if (pointsResult && !pointsResult.data) sectionErrors.points = errorMessage(pointsResult.error, "포인트 정보를 불러오지 못했어요.");
+  if (shippingResult && !shippingResult.data) sectionErrors.shipping = errorMessage(shippingResult.error, "배송 신청 내역을 불러오지 못했어요.");
+  if (inquiriesResult && !inquiriesResult.data) sectionErrors.inquiries = errorMessage(inquiriesResult.error, "문의 내역을 불러오지 못했어요.");
+  if (preferencesResult && !preferencesResult.data) sectionErrors.preferences = errorMessage(preferencesResult.error, "알림 설정을 불러오지 못했어요.");
 
-  const inventoryItems = [...(inventoryResult.data?.items ?? [])];
+  const inventoryItems = [...(inventoryResult?.data?.items ?? [])];
+  let inventoryCursor = inventoryResult?.data?.nextCursor ?? undefined;
+  const inventoryHasMore = plan.inventory === "first-page" && Boolean(inventoryCursor);
   const seenInventoryCursors = new Set<string>();
-  let inventoryCursor = inventoryResult.data?.nextCursor ?? undefined;
-  while (inventoryCursor) {
+  while (plan.inventory === "all" && inventoryCursor) {
     if (seenInventoryCursors.has(inventoryCursor)) {
       throw new ProfileApiError(502, "보관함 페이지가 반복되어 전체 목록을 확인하지 못했어요.");
     }
@@ -228,21 +240,26 @@ export async function fetchProfileSnapshot(
     profile: profileResult.data,
     basicInfo: basicInfoResult.data,
     defaultAddress,
-    wishlist: wishlistResult.data
+    wishlist: wishlistResult?.data
       ? wishlistResult.data.items.filter((item) => isCustomerBrowsableCatalogCategory(item.product.category))
       : null,
-    inventory: inventoryResult.data ? inventoryItems : null,
-    orders: ordersResult.data?.items ?? null,
-    pointBalance: pointsResult.data?.balance ?? null,
-    pointHistory: pointsResult.data?.items ?? null,
-    shippingRequests: shippingResult.data?.items ?? null,
+    inventory: inventoryResult?.data ? inventoryItems : null,
+    inventoryHasMore,
+    orders: ordersResult?.data?.items ?? null,
+    pointBalance: pointsResult?.data?.balance ?? null,
+    pointHistory: pointsResult?.data?.items ?? null,
+    shippingRequests: shippingResult?.data?.items ?? null,
     wantedRequests,
     notices,
-    inquiries: inquiriesResult.data?.items ?? null,
-    notificationPreferences: preferencesResult.data ?? null,
+    inquiries: inquiriesResult?.data?.items ?? null,
+    notificationPreferences: preferencesResult?.data ?? null,
     sectionErrors,
     fetchedAt: new Date().toISOString(),
   };
+}
+
+function whenPlanned<T>(planned: boolean, request: () => Promise<T>): Promise<T | null> {
+  return planned ? request() : Promise.resolve(null);
 }
 
 async function fetchStorageProfileSnapshot(

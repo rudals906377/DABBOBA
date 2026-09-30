@@ -1,8 +1,9 @@
 import { router, useFocusEffect, useLocalSearchParams, type Href } from "expo-router";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement, type ReactNode } from "react";
 import {
   ActivityIndicator,
   Alert,
+  FlatList,
   Image,
   KeyboardAvoidingView,
   Platform,
@@ -40,6 +41,7 @@ import {
   formatDate,
   removeWishlistItem,
   setWantedRequestLike,
+  type ProfileSnapshotScope,
   type ShippingQuote,
   updateAccountProfile,
 } from "@/features/profile/profile-api";
@@ -61,6 +63,9 @@ import { resolveCatalogImageUrl } from "@/lib/runtime-config";
 import { colors } from "@/theme";
 
 type WishlistItem = components["schemas"]["WishlistItem"];
+type AccountShippingRequest = components["schemas"]["AccountShippingRequest"];
+type AccountOrder = components["schemas"]["AccountOrder"];
+type PointLedgerEntry = components["schemas"]["PointLedgerEntry"];
 type InventoryUnit = components["schemas"]["InventoryUnit"];
 type WantedRequest = components["schemas"]["WantedRequest"];
 type StorageMode = "shipping" | "exchange-or-shipping" | "point-return";
@@ -80,14 +85,31 @@ const SECTION_META = {
 
 type ProfileSection = keyof typeof SECTION_META;
 
+/** Each section requests only the snapshot sections it renders. */
+const SECTION_SCOPE: Record<ProfileSection, ProfileSnapshotScope> = {
+  edit: "account",
+  wishlist: "wishlist",
+  storage: "storage",
+  shipping: "shipping",
+  orders: "orders",
+  points: "points",
+  requests: "requests",
+  support: "support",
+  "member-info": "account",
+  settings: "account",
+};
+
 export function ProfileSectionScreen() {
   const { section: rawSection } = useLocalSearchParams<{ section?: string }>();
   const section: ProfileSection = rawSection && rawSection in SECTION_META ? rawSection as ProfileSection : "edit";
   const meta = SECTION_META[section];
-  const profileState = useProfileSnapshot();
+  const profileState = useProfileSnapshot(SECTION_SCOPE[section]);
   const hasFocusedOnce = useRef(false);
   const assetBaseUrl = profileState.runtime.assetBaseUrl
     ?? (__DEV__ ? profileState.runtime.apiBaseUrl.replace(/:8788$/, ":4174") : null);
+  // Loaded record lists render through a virtualized FlatList; loading,
+  // session gates and failures keep the plain scroll layout.
+  const listSpec = profileListSpec(section, profileState, assetBaseUrl);
 
   useFocusEffect(
     useCallback(() => {
@@ -100,6 +122,23 @@ export function ProfileSectionScreen() {
     <SafeAreaView style={styles.safeArea} edges={["top", "bottom", "left", "right"]}>
       <DetailHeader title={meta.title} />
       <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+        {listSpec ? (
+          <FlatList
+            data={listSpec.data}
+            keyExtractor={listSpec.keyExtractor}
+            renderItem={({ item }) => listSpec.renderItem(item)}
+            ListHeaderComponent={(
+              <>
+                {profileState.status === "error" ? <ErrorState message={profileState.message} onRetry={profileState.reload} /> : null}
+                {listSpec.header}
+              </>
+            )}
+            ListEmptyComponent={listSpec.empty}
+            contentContainerStyle={styles.content}
+            keyboardShouldPersistTaps="handled"
+            refreshControl={<RefreshControl refreshing={profileState.refreshing} onRefresh={profileState.reload} tintColor={colors.ink} />}
+          />
+        ) : (
         <ScrollView
           contentContainerStyle={styles.content}
           keyboardShouldPersistTaps="handled"
@@ -119,6 +158,7 @@ export function ProfileSectionScreen() {
             />
           ) : null}
         </ScrollView>
+        )}
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -145,7 +185,7 @@ function SectionContent({
     );
   }
   if (section === "edit") return <ProfileEdit profileState={profileState} />;
-  if (section === "wishlist") return <Wishlist profileState={profileState} assetBaseUrl={assetBaseUrl} />;
+  if (section === "wishlist") return <Wishlist profileState={profileState} />;
   if (section === "storage") {
     return (
       <StorageHubContent
@@ -232,51 +272,141 @@ function ProfileEdit({ profileState }: { profileState: ReturnType<typeof useProf
   );
 }
 
-function Wishlist({
+/** Failure state for the wishlist; loaded lists render through `profileListSpec`. */
+function Wishlist({ profileState }: { profileState: ReturnType<typeof useProfileSnapshot> }) {
+  const failure = profileSectionFailure(profileState.snapshot!, "wishlist");
+  return failure ? <ProfileSectionErrorState message={failure} onRetry={profileState.reload} /> : null;
+}
+
+function WishlistRow({
+  item,
   profileState,
   assetBaseUrl,
 }: {
+  item: WishlistItem;
   profileState: ReturnType<typeof useProfileSnapshot>;
   assetBaseUrl: string | null;
 }) {
-  const snapshot = profileState.snapshot!;
-  const failure = profileSectionFailure(snapshot, "wishlist");
-  const items = snapshot.wishlist ?? [];
-  const removeLocally = (current: NonNullable<typeof profileState.snapshot>, item: WishlistItem) => (
+  const removeLocally = (current: NonNullable<typeof profileState.snapshot>) => (
     current.wishlist
       ? { ...current, wishlist: current.wishlist.filter((candidate) => candidate.id !== item.id) }
       : current
   );
-  const remove = async (item: WishlistItem) => {
+  const remove = async () => {
     if (!profileState.snapshot) return;
     if (profileState.snapshot.isExample || !profileState.accessToken) {
-      profileState.setSnapshot((current) => current ? removeLocally(current, item) : current);
+      profileState.setSnapshot((current) => current ? removeLocally(current) : current);
       return;
     }
     try {
       await removeWishlistItem(profileState.runtime.apiBaseUrl, profileState.accessToken, item.product.id);
-      profileState.setSnapshot((current) => current ? removeLocally(current, item) : current);
+      profileState.setSnapshot((current) => current ? removeLocally(current) : current);
     } catch (error) {
       Alert.alert("찜을 해제하지 못했어요", error instanceof Error ? error.message : "잠시 후 다시 시도해 주세요.");
     }
   };
-  if (failure) return <ProfileSectionErrorState message={failure} onRetry={profileState.reload} />;
   return (
-    <>
-      <SectionLead title={`관심 상품 ${items.length}개`} />
-      {items.length ? items.map((item) => (
-        <ProductRow
-          key={item.id}
-          product={item.product}
-          ipName={item.product.ipNameKo}
-          caption={categoryLabel(item.product.category)}
-          assetBaseUrl={assetBaseUrl}
-          onPress={() => router.push(`/product/${encodeURIComponent(item.product.id)}` as Href)}
-          trailing={<Pressable accessibilityRole="button" accessibilityLabel={`${item.product.name} 찜 해제`} onPress={() => void remove(item)} style={({ pressed }) => [styles.heartButton, pressed && styles.pressed]}><DecorativeIonicon name="heart" size={20} color={colors.danger} /></Pressable>}
-        />
-      )) : <EmptyState icon="heart-outline" title="찜한 상품이 없어요" body="뽀바에서 관심 상품을 찜하면 여기에 모여요." />}
-    </>
+    <ProductRow
+      product={item.product}
+      ipName={item.product.ipNameKo}
+      caption={categoryLabel(item.product.category)}
+      assetBaseUrl={assetBaseUrl}
+      onPress={() => router.push(`/product/${encodeURIComponent(item.product.id)}` as Href)}
+      trailing={<Pressable accessibilityRole="button" accessibilityLabel={`${item.product.name} 찜 해제`} onPress={() => void remove()} style={({ pressed }) => [styles.heartButton, pressed && styles.pressed]}><DecorativeIonicon name="heart" size={20} color={colors.danger} /></Pressable>}
+    />
   );
+}
+
+type ProfileListSpec = {
+  data: readonly unknown[];
+  keyExtractor: (item: unknown) => string;
+  renderItem: (item: unknown) => ReactElement;
+  header: ReactNode;
+  empty: ReactElement;
+};
+
+function listSpec<T>(spec: {
+  data: readonly T[];
+  keyExtractor: (item: T) => string;
+  renderItem: (item: T) => ReactElement;
+  header?: ReactNode;
+  empty: ReactElement;
+}): ProfileListSpec {
+  return {
+    data: spec.data,
+    keyExtractor: spec.keyExtractor as (item: unknown) => string,
+    renderItem: spec.renderItem as (item: unknown) => ReactElement,
+    header: spec.header ?? null,
+    empty: spec.empty,
+  };
+}
+
+/**
+ * Returns the FlatList description for a loaded record-list section, or `null`
+ * when the section is not a list, is still loading, is gated behind a session
+ * state, or failed (those states render through `SectionContent`).
+ */
+function profileListSpec(
+  section: ProfileSection,
+  profileState: ReturnType<typeof useProfileSnapshot>,
+  assetBaseUrl: string | null,
+): ProfileListSpec | null {
+  const snapshot = profileState.snapshot;
+  if (!snapshot || isProfileSessionBlocked(profileState.status)) return null;
+  if (section === "wishlist") {
+    if (profileSectionFailure(snapshot, "wishlist")) return null;
+    const items = snapshot.wishlist ?? [];
+    return listSpec({
+      data: items,
+      keyExtractor: (item) => item.id,
+      renderItem: (item) => <WishlistRow item={item} profileState={profileState} assetBaseUrl={assetBaseUrl} />,
+      header: <SectionLead title={`관심 상품 ${items.length}개`} />,
+      empty: <EmptyState icon="heart-outline" title="찜한 상품이 없어요" body="뽀바에서 관심 상품을 찜하면 여기에 모여요." />,
+    });
+  }
+  if (section === "shipping") {
+    if (profileSectionFailure(snapshot, "shipping")) return null;
+    return listSpec({
+      data: snapshot.shippingRequests ?? [],
+      keyExtractor: (request) => request.id,
+      renderItem: (request) => <ShippingHistoryRow request={request} />,
+      empty: <EmptyState icon="car-outline" title="배송 신청 내역이 없어요" body="신청한 배송의 진행 상태가 여기에 표시돼요." />,
+    });
+  }
+  if (section === "orders") {
+    if (profileSectionFailure(snapshot, "orders")) return null;
+    const orders = snapshot.orders ?? [];
+    return listSpec({
+      data: orders,
+      keyExtractor: (order) => order.id,
+      renderItem: (order) => <OrderRow order={order} catalogProducts={snapshot.catalogProducts} ipNames={snapshot.ipNames} />,
+      header: (
+        <>
+          <OrdersPaidDrawRecovery profileState={profileState} />
+          <SectionLead title={`주문 ${orders.length}건`} description="서버에서 확정한 결제 금액과 주문 상태를 그대로 표시해요." />
+        </>
+      ),
+      empty: <EmptyState icon="receipt-outline" title="구매 내역이 없어요" body="결제가 완료된 주문이 이곳에 표시돼요." />,
+    });
+  }
+  if (section === "points") {
+    const pointBalance = snapshot.pointBalance;
+    const pointHistory = snapshot.pointHistory;
+    if (profileSectionFailure(snapshot, "points") || pointBalance === null || pointHistory === null) return null;
+    return listSpec({
+      data: pointHistory,
+      keyExtractor: (entry) => entry.id,
+      renderItem: (entry) => <PointRow entry={entry} />,
+      header: (
+        <>
+          <View style={styles.pointHero}><Text style={styles.pointCaption}>사용 가능한 포인트</Text><Text style={styles.pointBalance}>{pointBalance.toLocaleString("ko-KR")}P</Text></View>
+          <KoreanPixelTitle variant="compact" style={styles.listHeading}>적립·사용 내역</KoreanPixelTitle>
+        </>
+      ),
+      empty: <EmptyState icon="wallet-outline" title="포인트 내역이 없어요" body="적립하거나 사용한 포인트가 여기에 기록돼요." />,
+    });
+  }
+  return null;
 }
 
 export function StorageHubContent({
@@ -718,31 +848,27 @@ function ExchangeOrShipping({
   );
 }
 
+/** Failure state for shipping history; loaded lists render through `profileListSpec`. */
 function ShippingHistory({
   profileState,
 }: {
   profileState: ReturnType<typeof useProfileSnapshot>;
 }) {
-  const snapshot = profileState.snapshot!;
-  const failure = profileSectionFailure(snapshot, "shipping");
-  const shippingRequests = snapshot.shippingRequests ?? [];
-  if (failure) return <ProfileSectionErrorState message={failure} onRetry={profileState.reload} />;
+  const failure = profileSectionFailure(profileState.snapshot!, "shipping");
+  return failure ? <ProfileSectionErrorState message={failure} onRetry={profileState.reload} /> : null;
+}
+
+function ShippingHistoryRow({ request }: { request: AccountShippingRequest }) {
+  const compactDestination = compactShippingDestination(request.destination.addressLine1);
   return (
-    <>
-      {shippingRequests.length ? shippingRequests.map((request) => {
-        const compactDestination = compactShippingDestination(request.destination.addressLine1);
-        return (
-          <Pressable key={request.id} accessibilityRole="button" accessibilityLabel={`${formatDate(request.requestedAt)} 배송 신청 상세`} onPress={() => router.push(`/profile/shipping/${encodeURIComponent(request.id)}` as Href)} style={({ pressed }) => [styles.historyCard, pressed && styles.pressed]}>
-            <View style={styles.historyTop}>
-              <Text style={styles.historyTitle}>배송 {request.inventoryUnitIds.length}개</Text>
-              <Text style={[styles.statusBadge, shippingStatusStyle(request.status)]}>{shippingStatus(request.status)}</Text>
-            </View>
-            <Text style={styles.historyMeta}>{formatDate(request.requestedAt)} 신청 · {request.destination.recipientMasked}</Text>
-            {compactDestination ? <Text style={styles.historyMeta}>{compactDestination}</Text> : null}
-          </Pressable>
-        );
-      }) : <EmptyState icon="car-outline" title="배송 신청 내역이 없어요" body="신청한 배송의 진행 상태가 여기에 표시돼요." />}
-    </>
+    <Pressable accessibilityRole="button" accessibilityLabel={`${formatDate(request.requestedAt)} 배송 신청 상세`} onPress={() => router.push(`/profile/shipping/${encodeURIComponent(request.id)}` as Href)} style={({ pressed }) => [styles.historyCard, pressed && styles.pressed]}>
+      <View style={styles.historyTop}>
+        <Text style={styles.historyTitle}>배송 {request.inventoryUnitIds.length}개</Text>
+        <Text style={[styles.statusBadge, shippingStatusStyle(request.status)]}>{shippingStatus(request.status)}</Text>
+      </View>
+      <Text style={styles.historyMeta}>{formatDate(request.requestedAt)} 신청 · {request.destination.recipientMasked}</Text>
+      {compactDestination ? <Text style={styles.historyMeta}>{compactDestination}</Text> : null}
+    </Pressable>
   );
 }
 
@@ -890,68 +1016,78 @@ function PointReturn({
   );
 }
 
+/** Failure state for orders; loaded lists render through `profileListSpec`. */
 function Orders({ profileState }: { profileState: ReturnType<typeof useProfileSnapshot> }) {
-  const snapshot = profileState.snapshot!;
-  const failure = profileSectionFailure(snapshot, "orders");
-  const orders = snapshot.orders ?? [];
+  const failure = profileSectionFailure(profileState.snapshot!, "orders");
   return (
     <>
-      {!snapshot.isExample && profileState.accessToken ? (
-        <PaidDrawRecovery
-          apiBaseUrl={profileState.runtime.apiBaseUrl}
-          actorId={snapshot.profile.id}
-          refreshKey={snapshot.fetchedAt}
-          catalogProducts={snapshot.catalogProducts}
-          ipNames={snapshot.ipNames}
-        />
-      ) : null}
-      {failure ? <ProfileSectionErrorState message={failure} onRetry={profileState.reload} /> : <>
-      <SectionLead title={`주문 ${orders.length}건`} description="서버에서 확정한 결제 금액과 주문 상태를 그대로 표시해요." />
-      {orders.length ? orders.map((order) => (
-        <Pressable key={order.id} accessibilityRole="button" accessibilityLabel={`${formatDate(order.createdAt)} 주문 상세`} onPress={() => router.push(`/profile/orders/${encodeURIComponent(order.id)}` as Href)} style={({ pressed }) => [styles.historyCard, pressed && styles.pressed]}>
-          <View style={styles.historyTop}>
-            <Text style={styles.historyTitle}>{formatDate(order.createdAt)} {order.orderKind === "SHIPPING_FEE" ? "배송비" : "주문"}</Text>
-            <Text style={[styles.statusBadge, orderStatusStyle(order.status)]}>{orderStatus(order.status)}</Text>
-          </View>
-          {order.orderKind === "SHIPPING_FEE" ? (
-            <Text style={styles.orderLine}>보관함 배송 신청 배송비</Text>
-          ) : null}
-          {order.lines.map((line) => (
-            <OrderProductLine
-              key={`${order.id}-${line.productId}`}
-              line={line}
-              catalogProducts={snapshot.catalogProducts}
-              ipNames={snapshot.ipNames}
-            />
-          ))}
-          <View style={styles.totalRow}><Text style={styles.totalLabel}>결제 금액</Text><Text variant="subtitle" style={styles.totalValue}>{order.total.toLocaleString("ko-KR")}원</Text></View>
-        </Pressable>
-      )) : <EmptyState icon="receipt-outline" title="구매 내역이 없어요" body="결제가 완료된 주문이 이곳에 표시돼요." />}
-      </>}
+      <OrdersPaidDrawRecovery profileState={profileState} />
+      {failure ? <ProfileSectionErrorState message={failure} onRetry={profileState.reload} /> : null}
     </>
   );
 }
 
+function OrdersPaidDrawRecovery({ profileState }: { profileState: ReturnType<typeof useProfileSnapshot> }) {
+  const snapshot = profileState.snapshot!;
+  return !snapshot.isExample && profileState.accessToken ? (
+    <PaidDrawRecovery
+      apiBaseUrl={profileState.runtime.apiBaseUrl}
+      actorId={snapshot.profile.id}
+      refreshKey={snapshot.fetchedAt}
+      catalogProducts={snapshot.catalogProducts}
+      ipNames={snapshot.ipNames}
+    />
+  ) : null;
+}
+
+function OrderRow({
+  order,
+  catalogProducts,
+  ipNames,
+}: {
+  order: AccountOrder;
+  catalogProducts: CatalogProduct[];
+  ipNames: Record<string, string>;
+}) {
+  return (
+    <Pressable accessibilityRole="button" accessibilityLabel={`${formatDate(order.createdAt)} 주문 상세`} onPress={() => router.push(`/profile/orders/${encodeURIComponent(order.id)}` as Href)} style={({ pressed }) => [styles.historyCard, pressed && styles.pressed]}>
+      <View style={styles.historyTop}>
+        <Text style={styles.historyTitle}>{formatDate(order.createdAt)} {order.orderKind === "SHIPPING_FEE" ? "배송비" : "주문"}</Text>
+        <Text style={[styles.statusBadge, orderStatusStyle(order.status)]}>{orderStatus(order.status)}</Text>
+      </View>
+      {order.orderKind === "SHIPPING_FEE" ? (
+        <Text style={styles.orderLine}>보관함 배송 신청 배송비</Text>
+      ) : null}
+      {order.lines.map((line) => (
+        <OrderProductLine
+          key={`${order.id}-${line.productId}`}
+          line={line}
+          catalogProducts={catalogProducts}
+          ipNames={ipNames}
+        />
+      ))}
+      <View style={styles.totalRow}><Text style={styles.totalLabel}>결제 금액</Text><Text variant="subtitle" style={styles.totalValue}>{order.total.toLocaleString("ko-KR")}원</Text></View>
+    </Pressable>
+  );
+}
+
+/** Failure state for points; loaded ledgers render through `profileListSpec`. */
 function Points({ profileState }: { profileState: ReturnType<typeof useProfileSnapshot> }) {
   const snapshot = profileState.snapshot!;
   const failure = profileSectionFailure(snapshot, "points");
-  const pointBalance = snapshot.pointBalance;
-  const pointHistory = snapshot.pointHistory;
   // A failed points request never renders as a 0P balance or an empty ledger.
-  if (failure || pointBalance === null || pointHistory === null) {
+  if (failure || snapshot.pointBalance === null || snapshot.pointHistory === null) {
     return <ProfileSectionErrorState message={failure ?? "포인트 정보를 불러오지 못했어요."} onRetry={profileState.reload} />;
   }
+  return null;
+}
+
+function PointRow({ entry }: { entry: PointLedgerEntry }) {
   return (
-    <>
-      <View style={styles.pointHero}><Text style={styles.pointCaption}>사용 가능한 포인트</Text><Text style={styles.pointBalance}>{pointBalance.toLocaleString("ko-KR")}P</Text></View>
-      <KoreanPixelTitle variant="compact" style={styles.listHeading}>적립·사용 내역</KoreanPixelTitle>
-      {pointHistory.length ? pointHistory.map((entry) => (
-        <View key={entry.id} style={styles.pointRow}>
-          <View><Text style={styles.pointReason}>{entry.reason}</Text><Text style={styles.historyMeta}>{formatDate(entry.createdAt)}</Text></View>
-          <Text style={[styles.pointAmount, entry.amount > 0 ? styles.pointPlus : styles.pointMinus]}>{entry.amount > 0 ? "+" : ""}{entry.amount.toLocaleString("ko-KR")}P</Text>
-        </View>
-      )) : <EmptyState icon="wallet-outline" title="포인트 내역이 없어요" body="적립하거나 사용한 포인트가 여기에 기록돼요." />}
-    </>
+    <View style={styles.pointRow}>
+      <View><Text style={styles.pointReason}>{entry.reason}</Text><Text style={styles.historyMeta}>{formatDate(entry.createdAt)}</Text></View>
+      <Text style={[styles.pointAmount, entry.amount > 0 ? styles.pointPlus : styles.pointMinus]}>{entry.amount > 0 ? "+" : ""}{entry.amount.toLocaleString("ko-KR")}P</Text>
+    </View>
   );
 }
 
@@ -1084,7 +1220,7 @@ function OrderProductLine({ line, catalogProducts, ipNames }: { line: components
 }
 
 function ProductThumb({ product, assetBaseUrl, catalogFrameCategory }: { product: { name: string; imageUrl: string | null; version?: number }; assetBaseUrl: string | null; catalogFrameCategory?: CatalogProduct["category"] }) {
-  const uri = resolveCatalogImageUrl(product.imageUrl, assetBaseUrl, product.version ?? 1);
+  const uri = resolveCatalogImageUrl(product.imageUrl, assetBaseUrl, product.version ?? 1, __DEV__);
   const thumb = <View style={styles.thumb}>{uri ? <Image accessible={false} source={{ uri }} resizeMode={catalogFrameCategory === "kuji" ? "contain" : "cover"} style={styles.thumbImage} /> : <DecorativeIonicon name="image-outline" size={24} color={colors.muted} />}</View>;
   return catalogFrameCategory ? <GachaMachineFrame category={catalogFrameCategory} clean><KujiProductFrame category={catalogFrameCategory} clean>{thumb}</KujiProductFrame></GachaMachineFrame> : thumb;
 }

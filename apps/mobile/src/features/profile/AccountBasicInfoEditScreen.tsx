@@ -22,7 +22,7 @@ import { ProfileSessionGate, isProfileSessionBlocked } from "@/features/profile/
 import { colors } from "@/theme";
 
 export function AccountBasicInfoEditScreen() {
-  const profileState = useProfileSnapshot();
+  const profileState = useProfileSnapshot("account");
   const basicInfo = profileState.snapshot?.basicInfo;
   const [nickname, setNickname] = useState("");
   const [birthDate, setBirthDate] = useState("");

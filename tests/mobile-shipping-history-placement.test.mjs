@@ -43,7 +43,14 @@ test("shipping history moves from the storage task into a dedicated My Info entr
     "function ShippingHistory({",
     "function PointReturn({",
   );
-  assert.match(shippingHistory, /snapshot\.shippingRequests/);
   assert.match(shippingHistory, /\/profile\/shipping\/\$\{encodeURIComponent\(request\.id\)\}/);
-  assert.match(shippingHistory, /배송 신청 내역이 없어요/);
+  // The loaded history renders through the virtualized profile list.
+  const shippingList = sourceBetween(
+    profileSectionSource,
+    'if (section === "shipping") {',
+    'if (section === "orders") {',
+  );
+  assert.match(shippingList, /snapshot\.shippingRequests/);
+  assert.match(shippingList, /<ShippingHistoryRow request=\{request\} \/>/);
+  assert.match(shippingList, /배송 신청 내역이 없어요/);
 });

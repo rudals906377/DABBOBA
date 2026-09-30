@@ -22,7 +22,7 @@ type HistoryMode = "viewed" | "drawn" | "wishlist";
 export function ProductHistoryScreen() {
   const db = useSQLiteContext();
   const router = useRouter();
-  const profileState = useProfileSnapshot();
+  const profileState = useProfileSnapshot("history");
   const [mode, setMode] = useState<HistoryMode>("viewed");
   const [catalog, setCatalog] = useState<ShopSnapshot | null>(null);
   const [viewedIds, setViewedIds] = useState<string[]>([]);

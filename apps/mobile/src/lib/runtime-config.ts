@@ -100,16 +100,24 @@ export function resolveCommerceRouteAccess(
   return "DENY";
 }
 
+/**
+ * Resolves a server image reference to a loadable URL. Absolute URLs must be
+ * HTTPS; plain `http:` is accepted only when `development` is true (callers
+ * pass `__DEV__`), so a release build never loads cleartext catalog media.
+ * Relative paths resolve against the runtime asset base, which the runtime
+ * config already restricts to HTTPS outside development.
+ */
 export function resolveCatalogImageUrl(
   imageUrl: string | null,
   assetBaseUrl: string | null,
   version?: string | number,
+  development = false,
 ): string | null {
   if (!imageUrl) return null;
   let resolved: string | null;
   try {
     const absolute = new URL(imageUrl);
-    resolved = absolute.protocol === "https:" || absolute.protocol === "http:"
+    resolved = absolute.protocol === "https:" || (development && absolute.protocol === "http:")
       ? absolute.toString()
       : null;
   } catch {

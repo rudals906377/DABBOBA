@@ -6,13 +6,13 @@ import {
   AccessibilityInfo,
   ActivityIndicator,
   Alert,
+  FlatList,
   Image,
   Keyboard,
   Modal,
   Platform,
   Pressable,
   RefreshControl,
-  ScrollView,
   StyleSheet,
   View,
 } from "react-native";
@@ -229,13 +229,26 @@ export function ExchangeRoomScreen() {
   return (
     <SafeAreaView style={styles.safeArea} edges={["top", "bottom", "left", "right"]}>
       <DetailPageHeader title="교환방" titleMode="pixel" onBack={goBack} backLabel="보관함으로 돌아가기" />
-      <ScrollView
+      <FlatList
+        data={items}
+        keyExtractor={(item) => item.id}
+        renderItem={({ item }) => (
+          <View style={styles.listItem}>
+            <ListingCard
+              item={item}
+              ipNames={snapshot?.ipNames ?? {}}
+              assetBaseUrl={assetBaseUrl}
+            />
+          </View>
+        )}
+        ItemSeparatorComponent={ListingSeparator}
         keyboardShouldPersistTaps="handled"
         contentContainerStyle={styles.content}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={() => void load(true)} tintColor={colors.ink} />
         }
-      >
+        ListHeaderComponent={(
+        <>
         <View style={styles.primaryActions}>
           <Pressable
             accessibilityRole="button"
@@ -315,18 +328,10 @@ export function ExchangeRoomScreen() {
           </View>
         ) : null}
 
-        {items.length > 0 ? (
-          <View style={styles.list}>
-            {items.map((item) => (
-              <ListingCard
-                key={item.id}
-                item={item}
-                ipNames={snapshot?.ipNames ?? {}}
-                assetBaseUrl={assetBaseUrl}
-              />
-            ))}
-          </View>
-        ) : null}
+        </>
+        )}
+        ListEmptyComponent={(
+        <>
 
         {snapshot && normalizedQuery && !searchPending && items.length === 0 && source !== "empty" ? (
           <View style={styles.searchEmpty}>
@@ -347,7 +352,9 @@ export function ExchangeRoomScreen() {
             </BalancedAppText>
           </View>
         ) : null}
-      </ScrollView>
+        </>
+        )}
+      />
 
       <ExchangeRulesModal
         visible={rulesVisible}
@@ -357,6 +364,10 @@ export function ExchangeRoomScreen() {
       />
     </SafeAreaView>
   );
+}
+
+function ListingSeparator() {
+  return <View style={styles.listGap} />;
 }
 
 function ExchangeRulesModal({
@@ -485,7 +496,7 @@ function ListingCard({
         <View style={styles.exchangePanel}>
           <View style={styles.bundleImages}>
             {productDetails.map(({ product }, index) => {
-              const uri = resolveCatalogImageUrl(product.imageUrl, assetBaseUrl, product.version);
+              const uri = resolveCatalogImageUrl(product.imageUrl, assetBaseUrl, product.version, __DEV__);
               return (
                 <View
                   key={`${product.id}-${index}`}
@@ -570,7 +581,8 @@ const styles = StyleSheet.create({
   retryLabel: { color: colors.white, fontSize: 12, fontWeight: "800" },
   loading: { paddingHorizontal: seed.spacing.globalGutter, paddingVertical: 58, alignItems: "center", gap: 12 },
   loadingText: { color: colors.muted, fontSize: 14 },
-  list: { paddingHorizontal: seed.spacing.globalGutter, gap: seed.spacing.x3_5 },
+  listItem: { paddingHorizontal: seed.spacing.globalGutter },
+  listGap: { height: seed.spacing.x3_5 },
   searchEmpty: { minHeight: 320, marginHorizontal: seed.spacing.globalGutter, paddingHorizontal: seed.spacing.x5, alignItems: "center", justifyContent: "center" },
   searchEmptyTitle: { marginTop: seed.spacing.x3_5, textAlign: "center" },
   searchEmptyBody: { marginTop: seed.spacing.x2, color: colors.muted, fontSize: 13, lineHeight: 20, textAlign: "center" },

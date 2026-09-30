@@ -3,19 +3,13 @@ import * as Notifications from "expo-notifications";
 import { type Href, useRouter } from "expo-router";
 import { useEffect, useMemo } from "react";
 import { AppState, Platform } from "react-native";
-import { resolveAccountNotificationResponsePath } from "@/features/notifications/notification-navigation";
+import { ensureForegroundNotificationHandler } from "@/features/notifications/notification-handler";
+import { installNotificationResponseDispatcher } from "@/features/notifications/notification-response";
 import { synchronizeAccountPushDevice } from "@/features/notifications/push-device";
 import { resolveMobileRuntimeConfig, type MobilePlatform } from "@/lib/runtime-config";
 import { readAuthTokens, subscribeAuthTokens } from "@/lib/session-store";
 
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowBanner: true,
-    shouldShowList: true,
-    shouldPlaySound: true,
-    shouldSetBadge: false,
-  }),
-});
+ensureForegroundNotificationHandler();
 
 /** Handles foreground, background, and terminated-state account notification taps. */
 export function AccountNotificationObserver() {
@@ -31,19 +25,12 @@ export function AccountNotificationObserver() {
     [],
   );
 
-  useEffect(() => {
-    const openResponse = (response: Notifications.NotificationResponse | null) => {
-      if (!response) return;
-      const path = resolveAccountNotificationResponsePath(response.notification.request.content.data);
-      if (!path) return;
-      router.push(path as Href);
-      Notifications.clearLastNotificationResponse();
-    };
-
-    openResponse(Notifications.getLastNotificationResponse());
-    const subscription = Notifications.addNotificationResponseReceivedListener(openResponse);
-    return () => subscription.remove();
-  }, [router]);
+  // Account and kuji taps share one kind-based dispatcher, so the launch
+  // response is handled once whichever observer mounts first.
+  useEffect(
+    () => installNotificationResponseDispatcher((path) => router.push(path as Href)),
+    [router],
+  );
 
   useEffect(() => {
     let active = true;

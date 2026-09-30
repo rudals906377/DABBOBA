@@ -58,6 +58,7 @@ import {
   type ShopSortOption,
 } from "@/features/shop/shop-filter";
 import { resolveTwoColumnProductCardWidth } from "@/features/shop/shop-layout";
+import { mergeRefreshedFirstPage, shouldRefreshShopOnFocus } from "@/features/shop/shop-refresh";
 import {
   resolveCatalogImageUrl,
   resolveMobileRuntimeConfig,
@@ -66,6 +67,8 @@ import {
 import { colors } from "@/theme";
 
 type ShopRootCategory = Extract<ProductCategory, "gacha" | "kuji">;
+
+const SHOP_PAGE_SIZE = 20;
 
 export function ShopScreen({ category }: { category: ShopRootCategory }) {
   const rootNavigationScroll = useRootNavigationScroll();
@@ -100,8 +103,13 @@ export function ShopScreen({ category }: { category: ShopRootCategory }) {
   const [filterDrawerOpen, setFilterDrawerOpen] = useState(false);
   const [excludeSoldOut, setExcludeSoldOut] = useState(false);
   const [sortOption, setSortOption] = useState<ShopSortOption>("latest");
-  const [focusRevision, setFocusRevision] = useState(0);
   const requestSequence = useRef(0);
+  const lastSuccessfulLoadAt = useRef<number | null>(null);
+  const firstPageFailed = useRef(false);
+  const productsRef = useRef(products);
+  const nextCursorRef = useRef(nextCursor);
+  productsRef.current = products;
+  nextCursorRef.current = nextCursor;
 
   const catalogEnabled = isCustomerProductCategoryEnabledOn(category, "catalog");
   const prelaunchKuji = category === "kuji" && !commerceEnabled;
@@ -118,9 +126,12 @@ export function ShopScreen({ category }: { category: ShopRootCategory }) {
   const loadProducts = useCallback(async ({
     cursor,
     manual = false,
+    inPlace = false,
   }: {
     cursor?: string;
     manual?: boolean;
+    /** Background refresh: keep the visible items (and scroll position) until page 1 returns. */
+    inPlace?: boolean;
   } = {}) => {
     if (!catalogEnabled || isComingSoon) {
       setProducts([]);
@@ -136,7 +147,7 @@ export function ShopScreen({ category }: { category: ShopRootCategory }) {
       setImageRequestKey((current) => current + 1);
     } else if (append) {
       setLoadingMore(true);
-    } else {
+    } else if (!inPlace) {
       setLoading(true);
       setProducts([]);
       setNextCursor(null);
@@ -150,19 +161,37 @@ export function ShopScreen({ category }: { category: ShopRootCategory }) {
         sort: sortOption,
         excludeSoldOut,
         cursor,
-        limit: 20,
+        limit: SHOP_PAGE_SIZE,
       });
       if (sequence !== requestSequence.current) return;
-      setProducts((current) => append
-        ? mergeUniqueProducts(current, page.products)
-        : page.products);
-      setNextCursor(page.nextCursor);
+      if (append) {
+        setProducts((current) => mergeUniqueProducts(current, page.products));
+        setNextCursor(page.nextCursor);
+      } else if (inPlace) {
+        const merged = mergeRefreshedFirstPage(
+          { items: productsRef.current, nextCursor: nextCursorRef.current },
+          { items: page.products, nextCursor: page.nextCursor },
+          SHOP_PAGE_SIZE,
+        );
+        setProducts(merged.items);
+        setNextCursor(merged.nextCursor);
+      } else {
+        setProducts(page.products);
+        setNextCursor(page.nextCursor);
+      }
+      if (!append) {
+        lastSuccessfulLoadAt.current = Date.now();
+        firstPageFailed.current = false;
+      }
       setMessage("");
       setLoadMoreMessage("");
     } catch {
       if (sequence !== requestSequence.current) return;
       if (append) setLoadMoreMessage("다음 상품을 불러오지 못했어요.");
-      else setMessage("연결 상태를 확인한 뒤 다시 시도해 주세요.");
+      else {
+        firstPageFailed.current = true;
+        setMessage("연결 상태를 확인한 뒤 다시 시도해 주세요.");
+      }
     } finally {
       if (sequence === requestSequence.current) {
         setLoading(false);
@@ -172,18 +201,42 @@ export function ShopScreen({ category }: { category: ShopRootCategory }) {
     }
   }, [catalogEnabled, category, excludeSoldOut, isComingSoon, query, requestedIpId, runtime.apiBaseUrl, sortOption]);
 
+  const loadProductsRef = useRef(loadProducts);
+  loadProductsRef.current = loadProducts;
+  const hasFocusedOnce = useRef(false);
+
+  // Revisiting the tab keeps the loaded list and its scroll position. Only a
+  // list whose last successful load is older than the stale window refreshes,
+  // and it does so in place; a list whose first load failed retries page 1.
   useFocusEffect(useCallback(() => {
-    setFocusRevision((current) => current + 1);
     void loadIps();
+    if (!hasFocusedOnce.current) {
+      hasFocusedOnce.current = true;
+      return undefined;
+    }
+    if (lastSuccessfulLoadAt.current === null) {
+      if (firstPageFailed.current) void loadProductsRef.current();
+    } else if (shouldRefreshShopOnFocus(lastSuccessfulLoadAt.current, Date.now())) {
+      void loadProductsRef.current({ inPlace: true });
+    }
     return undefined;
   }, [loadIps]));
 
+  // Changing the search, sort, filter or category conditions starts a new list.
   useEffect(() => {
     const timer = setTimeout(() => {
       void loadProducts();
     }, query.trim() ? 300 : 0);
     return () => clearTimeout(timer);
-  }, [categorySettingsRevision, focusRevision, loadProducts]);
+  }, [loadProducts]);
+
+  // An operator category-settings change refreshes the current list in place.
+  const seenCategorySettingsRevision = useRef(categorySettingsRevision);
+  useEffect(() => {
+    if (seenCategorySettingsRevision.current === categorySettingsRevision) return;
+    seenCategorySettingsRevision.current = categorySettingsRevision;
+    void loadProductsRef.current({ inPlace: true });
+  }, [categorySettingsRevision]);
 
   const requestedIp = ips.find((ip) => ip.id === requestedIpId) ?? null;
   const ipNames = useMemo(
@@ -535,8 +588,8 @@ function ProductCard({
   commerceEnabled: boolean;
   onPress: () => void;
 }) {
-  const storefrontUri = resolveCatalogImageUrl(product.storefrontImageUrl, assetBaseUrl, product.version);
-  const primaryUri = resolveCatalogImageUrl(product.imageUrl, assetBaseUrl, product.version);
+  const storefrontUri = resolveCatalogImageUrl(product.storefrontImageUrl, assetBaseUrl, product.version, __DEV__);
+  const primaryUri = resolveCatalogImageUrl(product.imageUrl, assetBaseUrl, product.version, __DEV__);
   const tierAccessibilityLabel = product.category === "kuji"
     ? remainingKujiTierAccessibilityLabel(product.remainingKujiTiers)
     : null;
