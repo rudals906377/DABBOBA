@@ -3,13 +3,16 @@ import { spawn } from "node:child_process";
 import {
   closeSync,
   constants,
+  existsSync,
   mkdtempSync,
   openSync,
+  readFileSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { SUPABASE_INTEGRATION_PROJECT_REF } from "./supabase-integration-profile.mjs";
 
@@ -18,8 +21,10 @@ const admin = join(root, "apps/admin");
 const SUPABASE_CLI = "supabase@2.117.0";
 const USAGE = "Usage: DABBOBA_FRIEND_CLOUDFLARE_XDG_CONFIG_HOME=<absolute directory> "
   + "DABBOBA_FRIEND_CLOUDFLARE_ACCOUNT_ID=<account id> DABBOBA_FRIEND_CLOUDFLARE_EMAIL=<owner email> "
+  + "DABBOBA_ADMIN_SECRET_RECOVERY_DIR=<private absolute directory outside the repository> "
   + "node scripts/provision-admin-edge-secrets.mjs --apply "
-  + "[--cloudflare-account-id <id>] [--cloudflare-email <email>]";
+  + "[--cloudflare-account-id <id>] [--cloudflare-email <email>] [--resume <recovery file>]";
+const SECRET_PATTERN = /^[0-9a-f]{96}$/;
 
 function argumentValue(argv, name) {
   const index = argv.indexOf(name);
@@ -34,7 +39,7 @@ function argumentValue(argv, name) {
  * repository constants: they come from flags or the environment.
  */
 export function parseProvisionOptions(argv, env) {
-  const known = new Set(["--apply", "--cloudflare-account-id", "--cloudflare-email"]);
+  const known = new Set(["--apply", "--cloudflare-account-id", "--cloudflare-email", "--resume"]);
   for (let index = 0; index < argv.length; index += 1) {
     if (!known.has(argv[index])) throw new Error(`Unknown argument: ${argv[index]}\n${USAGE}`);
     if (argv[index] !== "--apply") index += 1;
@@ -51,7 +56,58 @@ export function parseProvisionOptions(argv, env) {
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cloudflareEmail)) {
     throw new Error(`The approved Cloudflare owner email is required.\n${USAGE}`);
   }
-  return { cloudflareConfigHome, cloudflareAccountId, cloudflareEmail };
+  const resumeFile = argumentValue(argv, "--resume") ?? null;
+  const recoveryDirectory = env.DABBOBA_ADMIN_SECRET_RECOVERY_DIR?.trim() || null;
+  if (resumeFile !== null && !isAbsolute(resumeFile)) {
+    throw new Error(`--resume needs the absolute path of the recovery file.\n${USAGE}`);
+  }
+  if (resumeFile === null) {
+    // A new generation is written here before either side changes, so a split
+    // rotation can always be finished with --resume instead of being lost.
+    if (!recoveryDirectory || !isAbsolute(recoveryDirectory)
+      || !relative(root, recoveryDirectory).startsWith("..")) {
+      throw new Error(`A private absolute DABBOBA_ADMIN_SECRET_RECOVERY_DIR outside the repository is required.\n${USAGE}`);
+    }
+  }
+  return { cloudflareConfigHome, cloudflareAccountId, cloudflareEmail, resumeFile, recoveryDirectory };
+}
+
+/** Stores one generated secret pair in a new 0600 file; values never reach logs. */
+export function writeRecoveryFile(directory, pair) {
+  for (const value of [pair.proxyIdentitySecret, pair.serviceSecret]) {
+    if (!SECRET_PATTERN.test(value)) throw new Error("Admin secret generation is malformed.");
+  }
+  const file = join(directory, `dabboba-admin-edge-secrets-${Date.now()}-${randomUUID()}.env`);
+  const descriptor = openSync(file, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY, 0o600);
+  try {
+    writeFileSync(
+      descriptor,
+      `DABBOBA_ADMIN_PROXY_IDENTITY_SECRET=${pair.proxyIdentitySecret}\nDABBOBA_ADMIN_SERVICE_SECRET=${pair.serviceSecret}\n`,
+      "utf8",
+    );
+  } finally {
+    closeSync(descriptor);
+  }
+  return file;
+}
+
+export function readRecoveryFile(file) {
+  if (!existsSync(file) || (statSync(file).mode & 0o777) !== 0o600) {
+    throw new Error("The admin secret recovery file is missing or not private (0600).");
+  }
+  const values = Object.fromEntries(readFileSync(file, "utf8").trim().split("\n").map((line) => {
+    const index = line.indexOf("=");
+    return [line.slice(0, index), line.slice(index + 1)];
+  }));
+  const pair = {
+    proxyIdentitySecret: values.DABBOBA_ADMIN_PROXY_IDENTITY_SECRET,
+    serviceSecret: values.DABBOBA_ADMIN_SERVICE_SECRET,
+  };
+  if (!SECRET_PATTERN.test(pair.proxyIdentitySecret ?? "") || !SECRET_PATTERN.test(pair.serviceSecret ?? "")
+    || Object.keys(values).length !== 2) {
+    throw new Error("The admin secret recovery file is malformed.");
+  }
+  return pair;
 }
 
 /**
@@ -124,7 +180,13 @@ export async function provisionAdminEdgeSecrets({
   pause = (ms) => new Promise((resolveWait) => setTimeout(resolveWait, ms)),
   envFileParent,
 } = {}) {
-  const { cloudflareConfigHome, cloudflareAccountId, cloudflareEmail } = parseProvisionOptions(argv, env);
+  const {
+    cloudflareConfigHome,
+    cloudflareAccountId,
+    cloudflareEmail,
+    resumeFile,
+    recoveryDirectory,
+  } = parseProvisionOptions(argv, env);
   const projectRef = SUPABASE_INTEGRATION_PROJECT_REF;
   const cloudflareEnvironment = {
     ...env,
@@ -142,23 +204,46 @@ export async function provisionAdminEdgeSecrets({
   const projects = await run("npx", ["--yes", SUPABASE_CLI, "projects", "list", "--output", "json"]);
   if (!projects.includes(projectRef)) throw new Error("Supabase CLI cannot see the approved production project");
 
-  const proxyIdentitySecret = randomBytes(48).toString("hex");
-  const serviceSecret = randomBytes(48).toString("hex");
-  await setSupabaseAdminSecrets({ run, projectRef, proxyIdentitySecret, serviceSecret, envFileParent });
-  log("Supabase admin-only secrets configured.");
-
-  for (const [name, value] of [
-    ["ADMIN_PROXY_IDENTITY_SECRET", proxyIdentitySecret],
-    ["DABBOBA_ADMIN_SERVICE_SECRET", serviceSecret],
-  ]) {
-    await run("corepack", ["pnpm", "exec", "wrangler", "secret", "put", name, "--name", "dabboba-admin"], {
-      cwd: admin,
-      env: cloudflareEnvironment,
-      input: value,
-    });
-    log(`${name} configured on friend-owned Cloudflare Worker.`);
+  let recoveryFile;
+  let pair;
+  if (resumeFile) {
+    pair = readRecoveryFile(resumeFile);
+    recoveryFile = resumeFile;
+    log("Resuming the stored admin secret generation on both Supabase and Cloudflare.");
+  } else {
+    pair = {
+      proxyIdentitySecret: randomBytes(48).toString("hex"),
+      serviceSecret: randomBytes(48).toString("hex"),
+    };
+    recoveryFile = writeRecoveryFile(recoveryDirectory, pair);
+    log(`New admin secret generation stored before any change: ${recoveryFile}`);
   }
+  const { proxyIdentitySecret, serviceSecret } = pair;
+  try {
+    await setSupabaseAdminSecrets({ run, projectRef, proxyIdentitySecret, serviceSecret, envFileParent });
+    log("Supabase admin-only secrets configured.");
 
+    for (const [name, value] of [
+      ["ADMIN_PROXY_IDENTITY_SECRET", proxyIdentitySecret],
+      ["DABBOBA_ADMIN_SERVICE_SECRET", serviceSecret],
+    ]) {
+      await run("corepack", ["pnpm", "exec", "wrangler", "secret", "put", name, "--name", "dabboba-admin"], {
+        cwd: admin,
+        env: cloudflareEnvironment,
+        input: value,
+      });
+      log(`${name} configured on friend-owned Cloudflare Worker.`);
+    }
+    await verifySignedAdminSmoke({ projectRef, serviceSecret, fetchImpl, loadSigner, log, pause });
+  } catch (error) {
+    log(`Supabase and Cloudflare may hold different admin secret generations. Re-run with --resume ${recoveryFile} to apply the same generation to both.`);
+    throw error;
+  }
+  rmSync(recoveryFile, { force: true });
+  log("Both sides verified on one generation; the recovery file was removed.");
+}
+
+async function verifySignedAdminSmoke({ projectRef, serviceSecret, fetchImpl, loadSigner, log, pause }) {
   log("Admin Edge and BFF secrets are paired. Keep both services on the same generation when rotating.");
   log(`Admin service key ID: ${createHash("sha256").update(serviceSecret).digest("hex").slice(0, 12)}.`);
 

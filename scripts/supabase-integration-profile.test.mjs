@@ -159,6 +159,30 @@ test('demo preparation creates three distinct private secrets once', async () =>
   } finally { await rm(directory, { recursive: true }); }
 });
 
+test('the demo and integration profiles read separate source files so both can stay prepared', async () => {
+  const { SUPABASE_DEMO_SOURCE_FILE, SUPABASE_INTEGRATION_SOURCE_FILE } = await import('./supabase-integration-profile.mjs');
+  assert.notEqual(SUPABASE_DEMO_SOURCE_FILE, SUPABASE_INTEGRATION_SOURCE_FILE);
+  assert.match(SUPABASE_DEMO_SOURCE_FILE, /\.env\.supabase-demo\.local$/, 'git-ignored by the .env.*.local rule');
+  const directory = await mkdtemp(join(tmpdir(), 'dabboba-coexisting-profiles-'));
+  const integrationPaths = {
+    sourceFile: join(directory, '.env'),
+    secretsFile: join(directory, 'supabase-integration.env'),
+    selectionFile: join(directory, 'backend-profile'),
+  };
+  const demoPaths = {
+    sourceFile: join(directory, '.env.supabase-demo.local'),
+    secretsFile: join(directory, 'supabase-demo.env'),
+    selectionFile: join(directory, 'backend-profile'),
+  };
+  try {
+    await writeFile(integrationPaths.sourceFile, `DATABASE_URL=${source.DATABASE_URL}\nSUPABASE_URL=${source.SUPABASE_URL}\n`);
+    await writeFile(demoPaths.sourceFile, `DATABASE_URL=${demoSource.DATABASE_URL}\nSUPABASE_URL=${demoSource.SUPABASE_URL}\n`);
+    assert.equal(configureBackendProfile(SUPABASE_INTEGRATION_PROFILE, integrationPaths), SUPABASE_INTEGRATION_PROFILE);
+    assert.equal(configureBackendProfile(SUPABASE_DEMO_PROFILE, demoPaths), SUPABASE_DEMO_PROFILE);
+    assert.equal(configureBackendProfile(SUPABASE_INTEGRATION_PROFILE, integrationPaths), SUPABASE_INTEGRATION_PROFILE);
+  } finally { await rm(directory, { recursive: true }); }
+});
+
 test('the production project cannot be selected for TEST_PG demo commerce', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'dabboba-production-demo-guard-'));
   const paths = {

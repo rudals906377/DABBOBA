@@ -145,4 +145,6 @@ corepack pnpm run test:runtime
 git diff --check
 ```
 
+통합 테스트는 행을 추가·삭제하므로 `DABBOBA_TEST_DATABASE_URL`, 런타임·워커 테스트 URL, `DATABASE_MIGRATION_URL`은 이름이 `dabboba_…_ci` 또는 `dabboba_…_test`인 일회용 DB(예: `dabboba_ci`, `dabboba_edge_test`)만 가리킬 수 있습니다. `dabboba_development`처럼 보존하는 로컬 DB를 가리키면 `pretest` 점검이 실행을 막습니다.
+
 PostgreSQL 통합 테스트와 배포·복원 절차는 [운영 런북](docs/dabboba-operations-runbook.md), Cloud Run 설정·비용·롤백은 [Cloud Run 배포 가이드](docs/cloud-run-deployment.md), 계정·사업·법무·PG·스토어 등 사용자가 준비할 항목은 [사용자 작업 목록](docs/dabboba-user-actions.md)에 있습니다.

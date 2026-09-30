@@ -3,6 +3,7 @@ import {
   SUPABASE_INTEGRATION_PROFILE,
   SUPABASE_DEMO_PROFILE,
   SUPABASE_DEMO_SECRETS_FILE,
+  SUPABASE_DEMO_SOURCE_FILE,
   configureBackendProfile,
 } from './supabase-integration-profile.mjs';
 import { LOCAL_BACKEND_PROFILE } from './local-backend-profile.mjs';
@@ -22,7 +23,7 @@ if (!profile) {
 } else {
   try {
     configureBackendProfile(profile, profile === SUPABASE_DEMO_PROFILE ? {
-      sourceFile: new URL('../.env', import.meta.url).pathname,
+      sourceFile: SUPABASE_DEMO_SOURCE_FILE,
       secretsFile: SUPABASE_DEMO_SECRETS_FILE,
       selectionFile: new URL('../../.dabboba-launch/backend-profile', import.meta.url).pathname,
     } : undefined);

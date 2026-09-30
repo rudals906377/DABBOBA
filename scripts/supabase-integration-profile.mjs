@@ -78,6 +78,9 @@ export const BACKEND_PROFILE_SELECTION_FILE = resolve(launchDirectory, 'backend-
 export const SUPABASE_INTEGRATION_SECRETS_FILE = resolve(launchDirectory, 'supabase-integration.env');
 export const SUPABASE_DEMO_SECRETS_FILE = resolve(launchDirectory, 'supabase-demo.env');
 export const SUPABASE_INTEGRATION_SOURCE_FILE = resolve(repositoryRoot, '.env');
+// The TEST_PG demo profile targets a different project than the integration
+// profile, so it reads its own git-ignored connection file instead of `.env`.
+export const SUPABASE_DEMO_SOURCE_FILE = resolve(repositoryRoot, '.env.supabase-demo.local');
 
 const SYSTEM_ENV_ALLOWLIST = [
   'PATH', 'HOME', 'TMPDIR', 'SHELL', 'USER', 'LOGNAME', 'LANG', 'LC_ALL',
@@ -237,7 +240,7 @@ function assertSupabaseDemoSecrets(secrets) {
   return secrets;
 }
 
-function readDemoProfileFiles(sourceFile = SUPABASE_INTEGRATION_SOURCE_FILE, secretsFile = SUPABASE_DEMO_SECRETS_FILE) {
+function readDemoProfileFiles(sourceFile = SUPABASE_DEMO_SOURCE_FILE, secretsFile = SUPABASE_DEMO_SECRETS_FILE) {
   let sourceText;
   let secretsText;
   try {
@@ -246,7 +249,7 @@ function readDemoProfileFiles(sourceFile = SUPABASE_INTEGRATION_SOURCE_FILE, sec
     secretsText = readFileSync(secretsFile, 'utf8');
   } catch (error) {
     if (error instanceof Error && error.message.includes('readable only')) throw error;
-    throw new Error('Supabase demo profile is not prepared. Select another profile or prepare it explicitly.');
+    throw new Error('Supabase demo profile is not prepared. Put the demo project connection in .env.supabase-demo.local and select the profile explicitly.');
   }
   return {
     source: assertSupabaseIntegrationSource(parseEnv(sourceText), SUPABASE_DEMO_PROJECT_REF),

@@ -2,16 +2,33 @@
 
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
+import { readdirSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { createMigrationDatabasePool } from "../packages/db/dist/index.js";
 import { loadApiConfig } from "../packages/config/dist/index.js";
 import { readLocalBackendProfileEnv } from "./local-backend-profile.mjs";
-import { assertIsolatedDemoDatabaseUrl } from "./seed-local-demo-commerce.mjs";
+import { assertFreshDemoFixture, assertIsolatedDemoDatabaseUrl } from "./seed-local-demo-commerce.mjs";
 
 const repositoryRoot = fileURLToPath(new URL("../", import.meta.url));
 const TEST_DATABASE = "dabboba_flow_test_20260924";
 const REQUIRED_MIGRATION = "0066_worker_pgmq_set_vt_dependency.sql";
+
+export function repositoryMigrations(
+  directory = new URL("../packages/db/migrations/", import.meta.url),
+) {
+  return readdirSync(directory).filter((file) => /^\d{4}_[a-z0-9_]+\.sql$/.test(file)).sort();
+}
+
+/**
+ * The fixture is current only when every repository migration has been applied,
+ * which also covers the minimum TEST_PG schema; a later migration is not stale.
+ */
+export function pendingIsolatedDemoMigrations(appliedVersions, migrations = repositoryMigrations()) {
+  const applied = new Set(appliedVersions);
+  if (!applied.has(REQUIRED_MIGRATION)) return [REQUIRED_MIGRATION];
+  return migrations.filter((file) => !applied.has(file));
+}
 
 export function isolatedDemoDatabaseUrl(sourceUrl) {
   const source = new URL(sourceUrl);
@@ -68,7 +85,7 @@ export async function assertReadyIsolatedDemoDatabase(databaseUrl) {
   try {
     const result = await pool.query(`SELECT
       current_database() AS database,
-      (SELECT max(version) FROM schema_migrations) AS latest_migration,
+      (SELECT array_agg(version ORDER BY version) FROM schema_migrations) AS applied_migrations,
       (SELECT count(*)::integer FROM users WHERE id='da000000-0000-4000-8000-00000000000a'
         AND email='member01@dabboba.local' AND status='ACTIVE') AS account_count,
       (SELECT count(*)::integer FROM catalog_products WHERE
@@ -83,12 +100,13 @@ export async function assertReadyIsolatedDemoDatabase(databaseUrl) {
     const row = result.rows[0];
     if (
       row?.database !== TEST_DATABASE
-      || row.latest_migration !== REQUIRED_MIGRATION
+      || pendingIsolatedDemoMigrations(row.applied_migrations ?? []).length > 0
       || row.account_count !== 1
       || row.product_count !== 2
       || row.active_draws !== 2
       || row.home_sections !== 2
     ) throw new Error("The isolated example fixture is incomplete.");
+    await assertFreshDemoFixture(pool);
   } finally {
     await pool.end();
   }

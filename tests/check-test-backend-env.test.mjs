@@ -55,17 +55,41 @@ test('test preflight rejects remote, query-overridden, mixed-database, and produ
   }), /query-free/);
   assert.throws(() => assertTestBackendEnvironment({ DABBOBA_ENVIRONMENT_TIER: 'PRODUCTION' }), /TEST/);
   assert.throws(() => assertTestBackendEnvironment({
-    DABBOBA_TEST_DATABASE_URL: 'postgresql://owner:secret@localhost:55433/one',
-    DABBOBA_RUNTIME_TEST_DATABASE_URL: 'postgresql://runtime:secret@127.0.0.1:55433/two',
-    DABBOBA_WORKER_TEST_DATABASE_URL: 'postgresql://worker:secret@localhost:55433/one',
+    DABBOBA_TEST_DATABASE_URL: 'postgresql://owner:secret@localhost:55433/dabboba_one_test',
+    DABBOBA_RUNTIME_TEST_DATABASE_URL: 'postgresql://runtime:secret@127.0.0.1:55433/dabboba_two_test',
+    DABBOBA_WORKER_TEST_DATABASE_URL: 'postgresql://worker:secret@localhost:55433/dabboba_one_test',
   }), /same local database/);
   assert.throws(() => assertTestBackendEnvironment({
     DABBOBA_ENVIRONMENT_TIER: 'TEST',
     DABBOBA_TEST_DATABASE_URL: 'postgresql://owner:fixture@127.0.0.1:55433/dabboba_test',
     DABBOBA_RUNTIME_TEST_DATABASE_URL: 'postgresql://runtime:fixture@127.0.0.1:55433/dabboba_test',
     DABBOBA_WORKER_TEST_DATABASE_URL: 'postgresql://worker:fixture@127.0.0.1:55433/dabboba_test',
-    DATABASE_MIGRATION_URL: 'postgresql://owner:fixture@127.0.0.1:55433/other_test',
+    DATABASE_MIGRATION_URL: 'postgresql://owner:fixture@127.0.0.1:55433/dabboba_other_test',
   }, { requireIntegrationDatabase: true }), /same local database/);
+});
+
+test('integration suites may only target a disposable test database, even on loopback', () => {
+  for (const name of ['dabboba_ci', 'dabboba_test', 'dabboba_edge_test', 'dabboba_flow_test_20260924']) {
+    assert.doesNotThrow(() => assertTestBackendEnvironment({
+      DABBOBA_ENVIRONMENT_TIER: 'TEST',
+      DABBOBA_TEST_DATABASE_URL: `postgresql://owner:fixture@127.0.0.1:55433/${name}`,
+      DABBOBA_RUNTIME_TEST_DATABASE_URL: `postgresql://runtime:fixture@127.0.0.1:55433/${name}`,
+      DABBOBA_WORKER_TEST_DATABASE_URL: `postgresql://worker:fixture@127.0.0.1:55433/${name}`,
+      DATABASE_MIGRATION_URL: `postgresql://owner:fixture@127.0.0.1:55433/${name}`,
+    }, { requireIntegrationDatabase: true }), name);
+  }
+  for (const name of ['dabboba_development', 'dabboba', 'postgres', 'dabboba_testing_copy', 'production_test']) {
+    assert.throws(() => assertTestBackendEnvironment({
+      DABBOBA_ENVIRONMENT_TIER: 'TEST',
+      DABBOBA_TEST_DATABASE_URL: `postgresql://owner:fixture@127.0.0.1:55433/${name}`,
+      DABBOBA_RUNTIME_TEST_DATABASE_URL: `postgresql://runtime:fixture@127.0.0.1:55433/${name}`,
+      DABBOBA_WORKER_TEST_DATABASE_URL: `postgresql://worker:fixture@127.0.0.1:55433/${name}`,
+      DATABASE_MIGRATION_URL: `postgresql://owner:fixture@127.0.0.1:55433/${name}`,
+    }, { requireIntegrationDatabase: true }), /disposable test database/, name);
+  }
+  assert.throws(() => assertTestBackendEnvironment({
+    DATABASE_MIGRATION_URL: 'postgresql://owner:fixture@127.0.0.1:55433/dabboba_development',
+  }), /DATABASE_MIGRATION_URL must name a disposable test database/);
 });
 
 test('test preflight rejects inherited remote provider configuration', () => {

@@ -81,18 +81,25 @@ test('URLs are restricted to the selected platform and fixed app port', () => {
   assert.throws(() => assertLaunchUrl('exp://10.0.2.2:8084', 'android'));
 });
 
-test('Android reverse mapping touches only this emulator and 8084, and never replaces a foreign mapping', async () => {
+test('Android reverse mapping touches only this emulator and the Metro, API and asset ports, never replacing a foreign mapping', async () => {
   const target = { adb: '/sdk/adb', serial: 'emulator-5554' };
-  for (const output of ['', 'host tcp:8081 tcp:8081\n', 'host tcp:8084 tcp:8084\n']) {
+  const reverse = (port) => ['/sdk/adb', ['-s', 'emulator-5554', 'reverse', '--no-rebind', `tcp:${port}`, `tcp:${port}`]];
+  for (const [output, added] of [
+    ['', [8084, 8788, 4174]],
+    ['host tcp:8081 tcp:8081\n', [8084, 8788, 4174]],
+    ['host tcp:8084 tcp:8084\n', [8788, 4174]],
+    ['host tcp:8084 tcp:8084\nhost tcp:8788 tcp:8788\nhost tcp:4174 tcp:4174\n', []],
+  ]) {
     const calls = [];
     await ensureAndroidReverse(target, async (command, args) => { calls.push([command, args]); return { stdout: output }; });
     assert.deepEqual(calls[0], ['/sdk/adb', ['-s', 'emulator-5554', 'reverse', '--list']]);
-    if (output.includes('tcp:8084')) assert.equal(calls.length, 1);
-    else assert.deepEqual(calls[1], ['/sdk/adb', ['-s', 'emulator-5554', 'reverse', '--no-rebind', 'tcp:8084', 'tcp:8084']]);
+    assert.deepEqual(calls.slice(1), added.map(reverse));
   }
-  const calls = [];
-  await assert.rejects(ensureAndroidReverse(target, async (_command, args) => { calls.push(args); return { stdout: 'host tcp:8084 tcp:8081\n' }; }), /another service/);
-  assert.equal(calls.length, 1);
+  for (const foreign of ['host tcp:8084 tcp:8081\n', 'host tcp:8788 tcp:9000\n', 'host tcp:4174 tcp:3000\n']) {
+    const calls = [];
+    await assert.rejects(ensureAndroidReverse(target, async (_command, args) => { calls.push(args); return { stdout: foreign }; }), /another service/);
+    assert.equal(calls.length, 1, 'no mapping is added when any port is foreign');
+  }
 });
 
 test('Simulator selection uses installed SDK evidence rather than a misleading SDK54 name', () => {

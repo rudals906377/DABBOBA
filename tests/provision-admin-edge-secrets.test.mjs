@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import {
   parseProvisionOptions,
   provisionAdminEdgeSecrets,
+  readRecoveryFile,
   writePrivateEnvFile,
 } from '../scripts/provision-admin-edge-secrets.mjs';
 
@@ -15,10 +16,13 @@ const source = readFileSync(
   'utf8',
 );
 const accountId = 'a'.repeat(32);
+const recoveryRoot = mkdtempSync(path.join(os.tmpdir(), 'dabboba-admin-recovery-'));
+test.after(() => rmSync(recoveryRoot, { recursive: true, force: true }));
 const env = {
   DABBOBA_FRIEND_CLOUDFLARE_XDG_CONFIG_HOME: '/secure/cloudflare',
   DABBOBA_FRIEND_CLOUDFLARE_ACCOUNT_ID: accountId,
   DABBOBA_FRIEND_CLOUDFLARE_EMAIL: 'Owner@Example.org',
+  DABBOBA_ADMIN_SECRET_RECOVERY_DIR: recoveryRoot,
 };
 
 test('the provisioning script contains no hard-coded personal account identity', () => {
@@ -31,7 +35,19 @@ test('Cloudflare account and owner email come from flags or the environment', ()
     cloudflareConfigHome: '/secure/cloudflare',
     cloudflareAccountId: accountId,
     cloudflareEmail: 'owner@example.org',
+    resumeFile: null,
+    recoveryDirectory: recoveryRoot,
   });
+  assert.throws(() => parseProvisionOptions(['--apply'], { ...env, DABBOBA_ADMIN_SECRET_RECOVERY_DIR: '' }), /RECOVERY_DIR/);
+  assert.throws(() => parseProvisionOptions(['--apply'], {
+    ...env,
+    DABBOBA_ADMIN_SECRET_RECOVERY_DIR: fileURLToPath(new URL('../', import.meta.url)),
+  }), /outside the repository/);
+  assert.throws(() => parseProvisionOptions(['--apply', '--resume', 'relative.env'], env), /absolute path/);
+  assert.equal(parseProvisionOptions(['--apply', '--resume', '/private/admin.env'], {
+    ...env,
+    DABBOBA_ADMIN_SECRET_RECOVERY_DIR: '',
+  }).resumeFile, '/private/admin.env');
   const flagged = parseProvisionOptions([
     '--apply', '--cloudflare-account-id', 'b'.repeat(32), '--cloudflare-email', 'ops@example.net',
   ], env);
@@ -60,10 +76,12 @@ test('private env files are 0600 and removed by cleanup', () => {
   }
 });
 
-async function runProvisioning({ failSecretsSet = false } = {}) {
+async function runProvisioning({ failSecretsSet = false, failSecondPut = false, argv = ['--apply'] } = {}) {
   const parent = mkdtempSync(path.join(os.tmpdir(), 'dabboba-provision-test-'));
   const calls = [];
+  const logs = [];
   let envFileSnapshot = null;
+  let puts = 0;
   const run = async (command, args, options = {}) => {
     calls.push({ command, args, input: options.input });
     if (args.includes('whoami')) return `Account ${accountId} owner@example.org`;
@@ -73,20 +91,24 @@ async function runProvisioning({ failSecretsSet = false } = {}) {
       envFileSnapshot = { mode: statSync(file).mode & 0o777, text: readFileSync(file, 'utf8'), file };
       if (failSecretsSet) throw new Error('npx operation failed');
     }
+    if (args.includes('put')) {
+      puts += 1;
+      if (failSecondPut && puts === 2) throw new Error('wrangler operation failed');
+    }
     return '';
   };
   try {
     const promise = provisionAdminEdgeSecrets({
-      argv: ['--apply'],
+      argv,
       env,
       run,
       envFileParent: parent,
       fetchImpl: async () => new Response(JSON.stringify({ error: { code: 'UNAUTHENTICATED' } }), { status: 401 }),
       loadSigner: async () => () => ({ 'x-signature': 'fixture' }),
-      log: () => {},
+      log: (message) => logs.push(message),
       pause: async () => {},
     });
-    return { promise, calls, parent, snapshot: () => envFileSnapshot };
+    return { promise, calls, logs, parent, snapshot: () => envFileSnapshot };
   } catch (error) {
     rmSync(parent, { recursive: true, force: true });
     throw error;
@@ -141,4 +163,48 @@ test('an unapproved Wrangler identity stops before any secret is generated or se
     log: () => {},
   }), /not authenticated to the approved/);
   assert.equal(calls.length, 1);
+});
+
+test('a split rotation keeps its generation in a private recovery file and --resume reapplies exactly it', async () => {
+  const failed = await runProvisioning({ failSecondPut: true });
+  let recoveryFile;
+  try {
+    await assert.rejects(failed.promise, /wrangler operation failed/);
+    const hint = failed.logs.find((message) => message.includes('--resume'));
+    assert.ok(hint, 'the operator is told how to finish the same generation');
+    recoveryFile = hint.slice(hint.indexOf('--resume ') + '--resume '.length).split(' ')[0];
+    assert.equal(statSync(recoveryFile).mode & 0o777, 0o600);
+    const pair = readRecoveryFile(recoveryFile);
+    assert.equal(failed.logs.some((message) => message.includes(pair.serviceSecret) || message.includes(pair.proxyIdentitySecret)), false);
+    const firstPuts = failed.calls.filter(({ args }) => args.includes('put')).map(({ input }) => input);
+    assert.deepEqual(firstPuts, [pair.proxyIdentitySecret, pair.serviceSecret]);
+
+    const resumed = await runProvisioning({ argv: ['--apply', '--resume', recoveryFile] });
+    try {
+      await resumed.promise;
+      const secrets = Object.fromEntries(resumed.snapshot().text.trim().split('\n').map((line) => line.split('=')));
+      assert.equal(secrets.DABBOBA_ADMIN_PROXY_IDENTITY_SECRET, pair.proxyIdentitySecret);
+      assert.equal(secrets.DABBOBA_ADMIN_SERVICE_SECRET, pair.serviceSecret);
+      assert.deepEqual(
+        resumed.calls.filter(({ args }) => args.includes('put')).map(({ input }) => input),
+        [pair.proxyIdentitySecret, pair.serviceSecret],
+      );
+      assert.equal(existsSync(recoveryFile), false, 'a verified generation removes its recovery file');
+    } finally {
+      rmSync(resumed.parent, { recursive: true, force: true });
+    }
+  } finally {
+    rmSync(failed.parent, { recursive: true, force: true });
+  }
+});
+
+test('a successful fresh rotation leaves no recovery file behind', async () => {
+  const before = new Set(readdirSync(recoveryRoot));
+  const { promise, parent } = await runProvisioning();
+  try {
+    await promise;
+    assert.deepEqual(readdirSync(recoveryRoot).filter((name) => !before.has(name)), []);
+  } finally {
+    rmSync(parent, { recursive: true, force: true });
+  }
 });

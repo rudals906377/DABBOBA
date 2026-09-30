@@ -6,6 +6,10 @@ import { spawnSync } from 'node:child_process';
 import { parseEnv } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { SupabaseMediaStorage } from '../packages/media-storage/dist/index.js';
+import {
+  SUPABASE_INTEGRATION_PROJECT_REF,
+  supabaseProjectRefFromDatabaseUrl,
+} from './supabase-integration-profile.mjs';
 
 const repositoryRoot = fileURLToPath(new URL('../', import.meta.url));
 const photoRoot = resolve(repositoryRoot, '../상품사진');
@@ -13,8 +17,34 @@ const edgeProfileFile = resolve(repositoryRoot, '../.dabboba-launch/supabase-edg
 const appEnvFile = resolve(repositoryRoot, '.env');
 const generation = 'product-photos-2026-09-10';
 const catalogOwnerId = 'ca7a10a0-0000-4000-8000-000000000001';
-const projectRef = 'yxkmvgfruphgghowzvmo';
-const catalogBaseUrl = `https://${projectRef}.supabase.co/functions/v1/dabboba-api`;
+
+function supabaseProjectRefFromHttpUrl(value) {
+  let url;
+  try { url = new URL(value); } catch { return null; }
+  if (url.protocol !== 'https:') return null;
+  return /^([a-z0-9]{20})\.(?:storage\.)?supabase\.co$/.exec(url.hostname.toLowerCase())?.[1] ?? null;
+}
+
+/**
+ * Every endpoint this operator workflow touches must name one approved project:
+ * the database it rewrites, the Auth/API origin whose service key it fetches,
+ * and the Storage S3 endpoint it uploads to. The delivery base follows from it,
+ * so migrated rows and new uploads share the host rebased by migration 0067.
+ */
+export function resolvePhotoSyncTarget({ databaseUrl, supabaseUrl, s3Endpoint }) {
+  const refs = [
+    supabaseProjectRefFromDatabaseUrl(databaseUrl),
+    supabaseProjectRefFromHttpUrl(supabaseUrl),
+    supabaseProjectRefFromHttpUrl(s3Endpoint),
+  ];
+  if (refs.some((ref) => ref !== SUPABASE_INTEGRATION_PROJECT_REF)) {
+    throw new Error('상품사진 동기화 대상의 DB·Supabase·Storage 주소가 승인된 하나의 프로젝트를 가리키지 않습니다.');
+  }
+  return {
+    projectRef: SUPABASE_INTEGRATION_PROJECT_REF,
+    catalogBaseUrl: `https://${SUPABASE_INTEGRATION_PROJECT_REF}.supabase.co/functions/v1/dabboba-api`,
+  };
+}
 const imageExtensions = new Set(['.jpg', '.jpeg', '.png', '.webp']);
 const requireFromApi = createRequire(new URL('../apps/api/package.json', import.meta.url));
 const { Client } = requireFromApi('pg');
@@ -125,7 +155,7 @@ async function buildPlan() {
   return planned;
 }
 
-function serviceRoleKey() {
+function serviceRoleKey(projectRef) {
   const result = spawnSync('npx', [
     '--yes', 'supabase@2.117.0', 'projects', 'api-keys', '--project-ref', projectRef,
     '--reveal', '--output', 'json',
@@ -166,7 +196,7 @@ async function mapConcurrent(values, concurrency, work) {
   return results;
 }
 
-async function uploadImages(plan, storage, bucket) {
+async function uploadImages(plan, storage, bucket, catalogBaseUrl) {
   const flattened = plan.flatMap((product) => [
     { ...product.cover, role: 'cover', productId: product.id },
     ...product.prizes.map((prize) => ({ ...prize, role: 'prize', productId: product.id })),
@@ -210,7 +240,7 @@ async function currentCatalog(client) {
   return result.rows;
 }
 
-function currentCatalogMatches(rows, plan) {
+function currentCatalogMatches(rows, plan, catalogBaseUrl) {
   if (rows.length !== plan.length) return false;
   const expected = new Map(plan.map((product) => [product.id, product]));
   return rows.every((row) => {
@@ -241,7 +271,7 @@ async function insertMedia(client, image) {
   );
 }
 
-async function replaceCatalog(client, plan) {
+async function replaceCatalog(client, plan, catalogBaseUrl) {
   await client.query('BEGIN');
   try {
     await client.query("SET LOCAL lock_timeout='10s'");
@@ -328,7 +358,7 @@ async function replaceCatalog(client, plan) {
       );
     }
     const active = await currentCatalog(client);
-    if (!currentCatalogMatches(active, plan)) throw new Error('새 상품만 활성화되었는지 확인하지 못했습니다.');
+    if (!currentCatalogMatches(active, plan, catalogBaseUrl)) throw new Error('새 상품만 활성화되었는지 확인하지 못했습니다.');
     await client.query('COMMIT');
   } catch (error) {
     await client.query('ROLLBACK');
@@ -343,6 +373,12 @@ async function main() {
   const imageCount = plan.reduce((sum, product) => sum + product.prizes.length + 1, 0);
   const edge = parseEnv(await readFile(edgeProfileFile, 'utf8'));
   const app = parseEnv(await readFile(appEnvFile, 'utf8'));
+  // Refuse mixed or legacy endpoints before connecting to anything.
+  const target = resolvePhotoSyncTarget({
+    databaseUrl: edge.DABBOBA_API_DATABASE_URL,
+    supabaseUrl: app.SUPABASE_URL,
+    s3Endpoint: edge.DABBOBA_STORAGE_S3_ENDPOINT,
+  });
   const client = new Client({ connectionString: edge.DABBOBA_API_DATABASE_URL, ssl: { rejectUnauthorized: false } });
   await client.connect();
   let uploaded = [];
@@ -352,22 +388,22 @@ async function main() {
     process.stdout.write(`상품사진 확인: 가챠 ${plan.length}개, 쿠지 0개, 이미지 ${imageCount}개\n`);
     process.stdout.write(`현재 공개 상품: ${current.length}개\n`);
     if (mode === '--check') return;
-    if (currentCatalogMatches(current, plan)) {
+    if (currentCatalogMatches(current, plan, target.catalogBaseUrl)) {
       process.stdout.write('상품 DB가 현재 상품사진 구성과 이미 일치합니다.\n');
       return;
     }
     storage = new SupabaseMediaStorage({
       url: app.SUPABASE_URL,
-      serviceKey: serviceRoleKey(),
+      serviceKey: serviceRoleKey(target.projectRef),
       bucket: edge.DABBOBA_STORAGE_BUCKET,
       s3Endpoint: edge.DABBOBA_STORAGE_S3_ENDPOINT,
       s3Region: edge.DABBOBA_STORAGE_S3_REGION,
       s3AccessKeyId: edge.DABBOBA_STORAGE_S3_ACCESS_KEY_ID,
       s3SecretAccessKey: edge.DABBOBA_STORAGE_S3_SECRET_ACCESS_KEY,
     });
-    const uploadResult = await uploadImages(plan, storage, edge.DABBOBA_STORAGE_BUCKET);
+    const uploadResult = await uploadImages(plan, storage, edge.DABBOBA_STORAGE_BUCKET, target.catalogBaseUrl);
     uploaded = uploadResult.uploaded;
-    await replaceCatalog(client, uploadResult.plan);
+    await replaceCatalog(client, uploadResult.plan, target.catalogBaseUrl);
     process.stdout.write(`상품 DB 교체 완료: 공개 가챠 ${plan.length}개, 포함 상품 ${plan.reduce((sum, product) => sum + product.prizes.length, 0)}개\n`);
   } catch (error) {
     if (storage && uploaded.length) await Promise.allSettled(uploaded.map((image) => storage.deleteObject(image.objectKey)));
@@ -377,7 +413,9 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  process.stderr.write(`${error instanceof Error ? error.message : '상품 DB 교체에 실패했습니다.'}\n`);
-  process.exitCode = 1;
-});
+if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
+  main().catch((error) => {
+    process.stderr.write(`${error instanceof Error ? error.message : '상품 DB 교체에 실패했습니다.'}\n`);
+    process.exitCode = 1;
+  });
+}

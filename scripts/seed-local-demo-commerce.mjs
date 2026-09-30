@@ -29,6 +29,33 @@ export function assertIsolatedDemoDatabaseUrl(value) {
   return value;
 }
 
+export const DEMO_FIXTURE_DEPLETION_SQL = `SELECT
+  (SELECT count(*)::integer FROM draw_pool_entries entry
+     JOIN draw_probability_versions version ON version.id=entry.probability_version_id
+    WHERE version.product_id IN ($1,$2) AND version.status='ACTIVE'
+      AND entry.initial_quantity IS NOT NULL
+      AND entry.remaining_quantity IS DISTINCT FROM entry.initial_quantity) AS consumed_pool_entries,
+  (SELECT count(*)::integer FROM kuji_slot_bindings binding
+     JOIN kuji_slot_assignments assignment ON assignment.id=binding.slot_assignment_id
+     JOIN draw_probability_versions version ON version.id=assignment.probability_version_id
+    WHERE version.product_id=$2 AND version.status='ACTIVE'
+      AND binding.state IN ('RESERVED','CONSUMED')) AS used_kuji_slots`;
+
+/**
+ * The seed only inserts missing rows, so it cannot restore draws that a
+ * verification run already consumed. Refuse a depleted fixture instead of
+ * approving it; recreate the isolated database and reseed.
+ */
+export async function assertFreshDemoFixture(queryable) {
+  const result = await queryable.query(DEMO_FIXTURE_DEPLETION_SQL, [GACHA_ID, KUJI_ID]);
+  const row = result.rows[0];
+  if (!row || row.consumed_pool_entries !== 0 || row.used_kuji_slots !== 0) {
+    throw new Error(
+      "The isolated example fixture has consumed draws. Drop and recreate the dabboba_flow_test database, migrate it, then reseed.",
+    );
+  }
+}
+
 function replaceRequired(source, oldValue, newValue) {
   if (!source.includes(oldValue)) throw new Error("The local example fixture template is out of date.");
   return source.replaceAll(oldValue, newValue);
@@ -122,6 +149,7 @@ export async function seedLocalDemoCommerce({ argv = process.argv.slice(2), env 
   const pool = createMigrationDatabasePool(databaseUrl, "dabboba-local-demo-fixture");
   try {
     await pool.query(sql);
+    await assertFreshDemoFixture(pool);
     const result = await pool.query(`SELECT count(*)::integer AS ready FROM catalog_products
       WHERE id IN ($1,$2) AND sale_status='ON_SALE'
         AND metadata->>'internalTestOnly'='true'
