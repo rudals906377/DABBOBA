@@ -167,7 +167,9 @@ test("native kuji keeps the five-column spread while each slot uses the orange p
   assert.match(drawScreen, /ticket:\s*\{[^}]*width:\s*"18\.4%"[^}]*minHeight:\s*seed\.size\.touchTarget/);
   assert.match(theme, /kujiOrange:\s*"#F36B2C"/);
   assert.match(drawScreen, /backgroundColor:\s*colors\.kujiOrange/);
-  assert.match(drawScreen, /require\("\.\.\/\.\.\/\.\.\/assets\/draw\/kuji\/kuji-ticket-front\.png"\)/);
+  assert.match(drawScreen, /KUJI_TICKET_BOARD_ARTWORK = require\("\.\.\/\.\.\/\.\.\/assets\/draw\/kuji\/kuji-ticket-front-board\.png"\)/);
+  assert.match(drawScreen, /source=\{KUJI_TICKET_BOARD_ARTWORK\}/);
+  assert.doesNotMatch(drawScreen, /kuji-ticket-front\.png"\)/);
   assert.match(drawScreen, /styles\.ticketArtwork/);
   assert.match(drawScreen, /styles\.ticketFace/);
   assert.match(drawScreen, /styles\.ticketArtworkSold/);
@@ -176,4 +178,27 @@ test("native kuji keeps the five-column spread while each slot uses the orange p
   assert.doesNotMatch(drawScreen, /ticketPerforation|ticketStub|>NO\.<\/Text>/);
   assert.doesNotMatch(drawScreen, /ticketStrip|KUJI_TICKET_ROWS|nestedScrollEnabled/);
   assert.doesNotMatch(drawScreen, /뽑을 쿠지를 선택해 주세요\./);
+});
+
+test("native kuji board isolates the countdown tick and memoizes each ticket slot", async () => {
+  const drawScreen = await readFile(
+    new URL("../apps/mobile/src/features/kuji/KujiDrawScreen.tsx", import.meta.url),
+    "utf8",
+  );
+  const boardAsset = await readFile(new URL("../apps/mobile/assets/draw/kuji/kuji-ticket-front-board.png", import.meta.url));
+  const width = boardAsset.readUInt32BE(16);
+  const height = boardAsset.readUInt32BE(20);
+
+  assert.ok(width <= 400, "board artwork is downsampled to at most 400 px wide");
+  assert.ok(Math.abs(width / height - 1517 / 1037) < 0.01, "board artwork keeps the 1517:1037 canvas ratio");
+  const countdown = drawScreen.match(/function KujiDrawLeaseCountdown[\s\S]*?\n}\n/)?.[0] ?? "";
+  assert.match(countdown, /setInterval\(tick, 1_000\)/);
+  assert.match(countdown, /kujiDrawLeaseRemainingSeconds\(clock, Date\.now\(\)\)/);
+  assert.match(countdown, /styles\.timerCard/);
+  const screen = drawScreen.match(/export function KujiDrawScreen[\s\S]*?\n}\n/)?.[0] ?? "";
+  assert.doesNotMatch(screen, /setInterval|nowMs/);
+  assert.match(screen, /<KujiDrawLeaseCountdown clock=\{drawLeaseClock\} \/>/);
+  assert.match(drawScreen, /const KujiTicketCell = memo\(function KujiTicketCell/);
+  assert.match(screen, /const toggleTicket = useCallback\(/);
+  assert.match(screen, /onToggle=\{toggleTicket\}/);
 });
