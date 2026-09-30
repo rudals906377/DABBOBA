@@ -194,6 +194,14 @@ export async function handleAccountDeletionService(
   return null;
 }
 
+// Account deletion accepts the enabled login methods plus a legacy EMAIL link,
+// which the API advertises separately from the login menu as deletionMethods.
+// An older API without that field keeps using its login methods.
+function accountDeletionMethods(providerBody) {
+  if (Array.isArray(providerBody?.deletionMethods)) return providerBody.deletionMethods;
+  return Array.isArray(providerBody?.methods) ? providerBody.methods : null;
+}
+
 async function handleRuntimeConfig(runtime, externalFetch) {
   try {
     const [providers, publicConfig] = await Promise.all([
@@ -210,7 +218,7 @@ async function handleRuntimeConfig(runtime, externalFetch) {
     const publicBody = publicConfig.body;
     const providerVersions = requiredPolicyVersions(providerBody?.requiredPolicyVersions);
     const publicVersions = requiredPolicyVersions(publicBody?.requiredPolicyVersions);
-    const methods = Array.isArray(providerBody?.methods) ? providerBody.methods : [];
+    const methods = accountDeletionMethods(providerBody) ?? [];
     const emailOtpEnabled = methods.includes("EMAIL");
     const phoneOtpEnabled = methods.includes("PHONE");
     const socialMethods = [...new Set(methods.filter((method) => Object.hasOwn(SOCIAL_PROVIDER_IDS, method)))];
@@ -218,7 +226,7 @@ async function handleRuntimeConfig(runtime, externalFetch) {
       !providers.response.ok
       || !publicConfig.response.ok
       || providerBody?.brokerExchangeConfigured !== true
-      || !Array.isArray(providerBody?.methods)
+      || !accountDeletionMethods(providerBody)
       || (!emailOtpEnabled && !phoneOtpEnabled && socialMethods.length === 0)
       || !providerVersions
       || !publicVersions
@@ -273,8 +281,7 @@ async function handleSocialLoginStart(request, runtime, externalFetch) {
     if (
       !providers.response.ok
       || providers.body?.brokerExchangeConfigured !== true
-      || !Array.isArray(providers.body?.methods)
-      || !providers.body.methods.includes(provider)
+      || !accountDeletionMethods(providers.body)?.includes(provider)
       || !currentVersions
       || currentVersions.terms !== acceptedPolicies.terms
       || currentVersions.privacy !== acceptedPolicies.privacy
@@ -422,8 +429,8 @@ async function handlePhoneOtp(request, runtime, externalFetch) {
       signal: requestTimeoutSignal(),
     });
     if (!providers.response.ok || providers.body?.brokerExchangeConfigured !== true
-      || !Array.isArray(providers.body?.methods)) return accountDeletionUnavailable();
-    if (!providers.body.methods.includes("PHONE")) {
+      || !accountDeletionMethods(providers.body)) return accountDeletionUnavailable();
+    if (!accountDeletionMethods(providers.body).includes("PHONE")) {
       return jsonResponse(PHONE_OTP_RESPONSE, 202, { "retry-after": "60" });
     }
     const result = await fetchJson(externalFetch, `${runtime.supabaseOrigin}/auth/v1/otp`, {
@@ -504,8 +511,8 @@ async function handleEmailOtp(request, runtime, externalFetch) {
       signal: requestTimeoutSignal(),
     });
     if (!providers.response.ok || providers.body?.brokerExchangeConfigured !== true
-      || !Array.isArray(providers.body?.methods)) return accountDeletionUnavailable();
-    if (!providers.body.methods.includes("EMAIL")) {
+      || !accountDeletionMethods(providers.body)) return accountDeletionUnavailable();
+    if (!accountDeletionMethods(providers.body).includes("EMAIL")) {
       return jsonResponse(EMAIL_OTP_RESPONSE, 202, { "retry-after": "60" });
     }
     const result = await fetchJson(externalFetch, `${runtime.supabaseOrigin}/auth/v1/otp`, {
@@ -558,7 +565,8 @@ async function handleEmailOtpVerification(request, runtime, externalFetch) {
   }
 
   try {
-    const exchanged = await fetchJson(externalFetch, `${runtime.apiOrigin}/v1/auth/exchange`, {
+    // Email is a deletion-only proof for legacy accounts: it never opens an ordinary login session.
+    const exchanged = await fetchJson(externalFetch, `${runtime.apiOrigin}/v1/auth/account-deletion-exchange`, {
       method: "POST",
       headers: { accept: "application/json", "content-type": "application/json" },
       body: JSON.stringify({

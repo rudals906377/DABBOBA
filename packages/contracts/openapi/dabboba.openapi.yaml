@@ -1434,6 +1434,23 @@ paths:
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
         "503": { $ref: "#/components/responses/CommerceUnavailable" }
+  /v1/catalog/products/{productId}/prize-lineup:
+    get:
+      tags: [Catalog]
+      operationId: getProductPrizeLineup
+      description: The published prize lineup of an active gacha or kuji product with each prize's composition quantity in the set. It never returns probabilities, weights or remaining quantities, so it stays available before LIVE commerce.
+      parameters:
+        - $ref: "#/components/parameters/ProductId"
+      responses:
+        "200":
+          description: Prize lineup of the active draw version.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PublicPrizeLineup" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /v1/catalog/products/{productId}/kuji-slots:
     get:
       tags: [Catalog, Kuji, Commerce]
@@ -6406,6 +6423,32 @@ components:
         probabilityNumerator: { type: integer, minimum: 0 }
         probabilityDenominator: { type: integer, minimum: 1 }
         probabilityPercent: { type: number, minimum: 0, maximum: 100 }
+    PublicPrizeLineupEntry:
+      type: object
+      additionalProperties: false
+      required: [id, prizeProductId, prizeName, prizeImageUrl, prizeSku, prizeIpId, prizeCategory, rarity, quantity]
+      properties:
+        id: { type: string, format: uuid }
+        prizeProductId: { type: string, maxLength: 120 }
+        prizeName: { type: string }
+        prizeImageUrl: { type: [string, "null"], format: uri }
+        prizeSku: { type: string, maxLength: 80 }
+        prizeIpId: { type: string, maxLength: 120 }
+        prizeCategory: { $ref: "#/components/schemas/ProductCategory" }
+        rarity: { type: string }
+        quantity:
+          type: [integer, "null"]
+          minimum: 1
+          description: Composition quantity of this prize in the published set; null when the prize is not finite.
+    PublicPrizeLineup:
+      type: object
+      additionalProperties: false
+      required: [productId, version, publishedAt, entries]
+      properties:
+        productId: { type: string, maxLength: 120 }
+        version: { type: integer, minimum: 1 }
+        publishedAt: { type: string, format: date-time }
+        entries: { type: array, items: { $ref: "#/components/schemas/PublicPrizeLineupEntry" } }
     PublicDrawOdds:
       type: object
       additionalProperties: false

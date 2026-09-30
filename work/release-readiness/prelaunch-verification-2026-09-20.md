@@ -132,6 +132,7 @@ PRELAUNCH 코드 범위와 자동검증은 대부분 완료됐고, 결제·주�
 2. **친구 명의 외부 계정 소유권·서명 빌드·실기기 검증 부재**
    - 2026-09-22 사용자는 DABBOBA의 모든 최종 운영·출시 계정을 친구 명의로 사용하기로 확정했다. Apple/Google 스토어, Expo/EAS, GitHub, Cloudflare·도메인, Supabase, 로그인·푸시 제공자, 고객지원, PG·정산 계정에서 친구가 소유자임을 확인하고 개발자 계정은 최소 협업 권한으로 낮춰야 한다.
    - 서비스별 현재 소유권 증거, 판정, 안전한 전환 순서는 [친구 명의 출시 계정 전환대장](../../docs/friend-owned-release-accounts.md)에 기록했다. 연결·배포 사실만으로 친구 소유라고 간주하지 않는다.
+   - 2026-09-23 갱신: 아래 2026-09-22 기록 이후 기존 팀의 미사용 App ID와 프로파일을 승인 후 제거했고, 친구 Team `MCZ4884P7F`에 `com.dabboba.mobile`, 새 배포 인증서·프로비저닝, App Store Connect 앱 ID `6815146511`을 만들었다. Apple이 PRELAUNCH `1.0.0 (1)` TestFlight 빌드를 `MCZ4884P7F.com.dabboba.mobile`로 검증했다. 최신 상태는 [친구 명의 출시 계정 전환대장](../../docs/friend-owned-release-accounts.md)을 따른다. 아래 2026-09-22 문장은 당시 기록으로만 남긴다.
    - 2026-09-22 친구 명의 활성 Apple Developer Program 개인 Team `MCZ4884P7F`과 빈 Identifiers/App Store Connect 앱 목록을 브라우저에서 확인했고, 앱 설정과 출시 검사를 이 Team ID로 고정했다. 다만 `com.dabboba.mobile`과 현재 인증서·프로비저닝은 개발자 개인 Team `52HC8BV2BL`에 남아 있다. 기존 App ID의 업로드·Sign in with Apple 상태를 확인해 안전하게 해제·재등록하거나 새 Bundle ID를 선택하기 전에는 App Store Connect 레코드·서명 빌드·TestFlight 제출을 진행하지 않는다. Play Console 앱 레코드·제출 키와 친구 명의 실제 서명 빌드 증거도 아직 없다.
    - 서명 IPA/AAB에서 아이콘·adaptive mask·URL scheme·APNs·권한·Privacy Manifest·export compliance를 확인해야 한다.
    - 보관함 `/storage` 딥링크를 포함해 실기기에서 전 경로를 다시 검증해야 한다.
@@ -185,7 +186,7 @@ PRELAUNCH 코드 범위와 자동검증은 대부분 완료됐고, 결제·주�
 - 공개 사전오픈 랜딩과 정책 문서를 `dist/public-site`로 분리해 내부 앱 프로토타입이 운영 사이트에 함께 배포되지 않도록 했다. 임시 검수용 `https://dabboba.pages.dev`는 친구 계정의 최종 운영 배포가 아니며, 공개 사이트 Worker 테스트는 19/19 통과했다.
 - 모바일 출시 구조 검사, 모바일 타입검사, Expo Doctor 21/21, Expo 의존성 검사, production 의존성 보안 감사, PRELAUNCH iOS·Android 번들 금칙어 검사가 통과했다.
 - 당시 전체 workspace 검증은 build 11/11, typecheck 19/19, package test 19/19, Playwright 9/9, 사이트 테스트 17/17로 통과했다. 테스트 단계는 생성 디렉터리 경합과 고부하 타임아웃을 피하도록 순차화했고, 제품의 실제 미디어 타임아웃 경계는 별도 16/16 테스트로 확인했다.
-- EAS `production-prelaunch`와 `production-live` 설정은 고정된 Node·pnpm 버전과 각 commerce capability를 사용하며, EAS lifecycle hook이 출시 설정 및 실제 iOS·Android 번들 검사를 자동 실행한다. 앱 설정은 확인된 친구 Apple Team `MCZ4884P7F`로 고정했지만, EAS의 기존 iOS 자격증명은 개발자 Team `52HC8BV2BL` 것이므로 출시 자격증명으로 인정하지 않는다. 친구 명의 EAS 소유권과 Apple/Google 스토어·서명 주체를 끝까지 교체해야 한다.
+- EAS `production-prelaunch`와 `production-live` 설정은 고정된 Node·pnpm 버전과 각 commerce capability를 사용하며, EAS lifecycle hook이 출시 설정 및 실제 iOS·Android 번들 검사를 자동 실행한다. 앱 설정은 확인된 친구 Apple Team `MCZ4884P7F`로 고정했지만, 당시 EAS의 기존 iOS 자격증명은 개발자 Team `52HC8BV2BL` 것이었으므로 출시 자격증명으로 인정하지 않았다(2026-09-23 친구 팀 자격증명으로 서명한 TestFlight 빌드가 Apple에서 검증됨 — 전환대장 참고). 친구 명의 EAS 소유권과 Apple/Google 스토어·서명 주체를 끝까지 교체해야 한다.
 - 2026-09-22 EAS Production 및 GitHub `mobile-production`에는 PRELAUNCH API 대상, Supabase 공개 값, 네 정책 URL, `DABBOBA_COMMERCE_MODE=PRELAUNCH`, `PAYMENT_PROVIDER=UNCONFIGURED`를 등록했다. 공개 Supabase key 외의 서버 비밀과 PortOne 값은 넣지 않았다. `api.dabboba.net` DNS와 최신 API 배포가 없으므로 이 구성은 아직 서명 빌드 시작 승인이 아니다.
 - Android 기본 keystore와 개발자 개인 Apple 팀의 iOS distribution certificate·provisioning profile은 `production-prelaunch`에 연결돼 있다. 기존 자격증명은 친구 명의 대체 항목이 검증될 때까지 삭제하지 않지만 공개 출시에는 사용하지 않는다. APNs/FCM 및 스토어 제출 키, App Store Connect/Play Console 앱 레코드는 아직 연결되지 않았다.
 - PRELAUNCH Expo config에서는 PortOne native plugin이 제거되어 결제 앱 URL scheme과 package query가 들어가지 않고, LIVE config에만 포함되는 것을 구조 테스트와 Expo config introspection으로 확인했다.

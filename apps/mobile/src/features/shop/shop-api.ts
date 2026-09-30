@@ -11,6 +11,7 @@ import { createMobileDabbobaClient as createDabbobaClient } from "@/lib/mobile-a
 
 export type ProductCategory = CatalogProduct["category"];
 export type PublicDrawOdds = components["schemas"]["PublicDrawOdds"];
+export type PublicPrizeLineup = components["schemas"]["PublicPrizeLineup"];
 
 export type ShopSnapshot = {
   products: CatalogProduct[];
@@ -47,6 +48,8 @@ export type ProductDetailSnapshot = {
   ip: CatalogIp | null;
   wishedByViewer: boolean;
   drawOdds: PublicDrawOdds | null;
+  /** Prizes and their composition quantities, used when odds are not disclosed (before LIVE). */
+  prizeLineup: PublicPrizeLineup | null;
   ownedCollectible: boolean;
   exchangeReference: boolean;
 };
@@ -186,12 +189,21 @@ export async function fetchProductDetail(
   const exchangeReference = !publicProduct && !ownedCollectible && Boolean(exchangeProduct);
 
   let drawOdds: PublicDrawOdds | null = null;
+  let prizeLineup: PublicPrizeLineup | null = null;
   if (!ownedCollectible && !exchangeReference && isDrawCategory(product.category)) {
     const oddsResult = await client.GET("/v1/catalog/products/{productId}/draw-odds", {
       params: { path: { productId } },
       signal: context.signal,
     });
     drawOdds = oddsResult.data ?? null;
+    if (!drawOdds) {
+      // Before LIVE the server withholds odds; the lineup still shows what can be won.
+      const lineupResult = await client.GET("/v1/catalog/products/{productId}/prize-lineup", {
+        params: { path: { productId } },
+        signal: context.signal,
+      });
+      prizeLineup = lineupResult.data ?? null;
+    }
   }
 
   return {
@@ -201,6 +213,7 @@ export async function fetchProductDetail(
       && !exchangeReference
       && (wishlistResult.data?.items.some((item) => item.product.id === productId) ?? false),
     drawOdds,
+    prizeLineup,
     ownedCollectible,
     exchangeReference,
   };

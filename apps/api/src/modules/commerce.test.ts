@@ -441,6 +441,65 @@ test("public draw odds are no-store and disclose exact finite-pool probability c
   ]);
 });
 
+test("the prize lineup lists prizes with composition quantity and never odds or live stock", async () => {
+  const queries: string[] = [];
+  const pool = {
+    async query(sql: string) {
+      queries.push(sql);
+      if (queries.length === 1) {
+        return { rowCount: 1, rows: [{ id: "11111111-1111-4111-8111-111111111111", product_id: "draw-product", version: 3, published_at: new Date("2026-09-01T00:00:00.000Z") }] };
+      }
+      return {
+        rowCount: 2,
+        rows: [
+          {
+            id: "22222222-2222-4222-8222-222222222222",
+            prize_product_id: "prize-a",
+            prize_name_snapshot: "A상",
+            prize_image_url_snapshot: "https://example.test/a.png",
+            prize_sku_snapshot: "PRIZE-A",
+            prize_ip_id_snapshot: "ip",
+            prize_category_snapshot: "figure",
+            rarity: "A",
+            initial_quantity: 2,
+          },
+          {
+            id: "33333333-3333-4333-8333-333333333333",
+            prize_product_id: "prize-b",
+            prize_name_snapshot: "B상",
+            prize_image_url_snapshot: null,
+            prize_sku_snapshot: "PRIZE-B",
+            prize_ip_id_snapshot: "ip",
+            prize_category_snapshot: "figure",
+            rarity: "B",
+            initial_quantity: null,
+          },
+        ],
+      };
+    },
+  };
+  const { app, routes } = routeCapture();
+  // PRELAUNCH still serves the lineup; only the odds route is gated.
+  await registerCommerceRoutes(app, { ...testContext(pool), config: { ...testContext(pool).config, commerceMode: "PRELAUNCH" } } as ApiContext);
+  const handler = routes.get("/v1/catalog/products/:productId/prize-lineup");
+  assert.ok(handler);
+  const headers = new Map<string, string>();
+  const result = await handler(
+    { params: { productId: "draw-product" } },
+    { header(name: string, value: string) { headers.set(name, value); } },
+  ) as { version: number; entries: Array<Record<string, unknown>> };
+  assert.equal(headers.get("cache-control"), "no-store");
+  assert.match(queries[0]!, /p\.sale_status IN \('COMING_SOON','ON_SALE'\)/);
+  assert.doesNotMatch(queries[1]!, /remaining_quantity|weight/);
+  assert.equal(result.version, 3);
+  assert.deepEqual(result.entries.map((entry) => [entry.prizeName, entry.quantity]), [["A상", 2], ["B상", null]]);
+  for (const entry of result.entries) {
+    for (const hidden of ["weight", "remainingQuantity", "effectiveWeight", "probabilityPercent", "probabilityNumerator"]) {
+      assert.equal(hidden in entry, false, `${hidden} must stay private`);
+    }
+  }
+});
+
 test("admin draw versions return the stored prize snapshot", async () => {
   const queries: string[] = [];
   const pool = {

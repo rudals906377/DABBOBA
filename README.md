@@ -127,7 +127,7 @@ SUPABASE_PUBLISHABLE_KEY=<운영 publishable key>
 
 친구 소유 계정으로 이전할 때의 Git 연동, DNS·메일, 검증, 롤백 순서는 `docs/cloudflare-pages-handoff.md`를 따릅니다.
 
-Worker는 `https://dabboba.net`이 아닌 Pages preview/custom host에서 인증 경로를 열지 않습니다. 세 값 중 하나라도 없거나 HTTPS origin이 아니거나 publishable key가 privileged key이면 `503`으로 닫힙니다. 또한 운영 API의 `/v1/auth/providers`가 `EMAIL`을 노출하고 `brokerExchangeConfigured=true`를 반환하며, 해당 정책 버전이 `/v1/public/config`와 일치할 때만 폼을 엽니다. 이메일 OTP 요청은 Supabase에 `create_user=false`로 전달하고, 미가입·가입 여부와 무관하게 같은 `202` 본문을 반환합니다. 접수 상태 토큰만 브라우저 localStorage에 보관하며 Supabase/DABBOBA 로그인 토큰은 저장하지 않습니다.
+Worker는 `https://dabboba.net`이 아닌 Pages preview/custom host에서 인증 경로를 열지 않습니다. 세 값 중 하나라도 없거나 HTTPS origin이 아니거나 publishable key가 privileged key이면 `503`으로 닫힙니다. 또한 운영 API의 `/v1/auth/providers`가 탈퇴 인증 목록 `deletionMethods`(구버전 API는 `methods`)에 `EMAIL`을 노출하고 `brokerExchangeConfigured=true`를 반환하며, 해당 정책 버전이 `/v1/public/config`와 일치할 때만 폼을 엽니다. 이메일은 옛 이메일 전용 회원의 탈퇴 인증에만 쓰이며 `/v1/auth/account-deletion-exchange`로만 교환되고 일반 로그인 세션을 열지 않습니다. 이메일 OTP 요청은 Supabase에 `create_user=false`로 전달하고, 미가입·가입 여부와 무관하게 같은 `202` 본문을 반환합니다. 접수 상태 토큰만 브라우저 localStorage에 보관하며 Supabase/DABBOBA 로그인 토큰은 저장하지 않습니다.
 
 배포 전에는 `WEB_ORIGINS`에 정확한 `https://dabboba.net` origin을 추가하고, Cloudflare custom domain·HTTPS·`www` 리디렉션 및 `support@dabboba.net` 송수신을 별도로 확인해야 합니다. `/account-deletion/auth/email-otp`와 `/account-deletion/auth/verify`에는 Cloudflare의 IP별 rate-limit/WAF 규칙을 추가하고, Supabase Auth의 이메일 발송 제한과 운영 SMTP도 함께 검증합니다. 로컬/단위 테스트 성공은 실제 이메일 도착, 운영 Supabase 사용자 삭제 또는 공개 DNS 배포 증거를 대신하지 않습니다.
 

@@ -963,7 +963,9 @@ const accountInventorySelect = `SELECT
   JOIN catalog_products p ON p.id=iu.product_id
   LEFT JOIN product_stock s ON s.product_id=p.id
   LEFT JOIN LATERAL (
-    SELECT purchase_line.unit_price AS reference_amount
+    -- Provenance comes from the owner's own paid gacha draw; the amount is the
+    -- drawn prize product's server reference price (user decision 2026-09-30).
+    SELECT p.price AS reference_amount
     FROM draw_results point_draw
     JOIN draw_entitlements point_entitlement ON point_entitlement.id=point_draw.entitlement_id
     JOIN order_lines purchase_line ON purchase_line.id=point_entitlement.order_line_id
@@ -1400,7 +1402,7 @@ export async function registerAccountRoutes(app: FastifyInstance, context: ApiCo
              draw_result.user_id AS draw_user_id,
              draw_result.entitlement_id AS draw_entitlement_id,
              draw_result.prize_product_id AS draw_prize_product_id,
-             purchase_line.unit_price AS reference_amount,
+             p.price AS reference_amount,
              purchase_line.category_snapshot AS purchase_category,
              purchase_line.product_id AS purchase_product_id,
              purchase_order.status AS purchase_order_status,

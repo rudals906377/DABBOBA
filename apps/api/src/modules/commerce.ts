@@ -638,6 +638,27 @@ export async function applyCanonicalPaymentEvent(context:ApiContext,event:Canoni
 }
 
 export async function registerCommerceRoutes(app:FastifyInstance,context:ApiContext){
+  // Outside LIVE the product page still shows what can be won: each prize and its
+  // composition quantity in the published set, never probabilities, weights or
+  // remaining (live) quantities (user decision 2026-09-30).
+  app.get("/v1/catalog/products/:productId/prize-lineup",async(request,reply)=>{
+    reply.header("cache-control","no-store");
+    const productId=slugIdInput((request.params as Record<string,unknown>).productId,"productId");
+    if(demoProfileRequested()&&!DEMO_SELLER_PRODUCT_IDS.includes(productId as typeof DEMO_SELLER_PRODUCT_IDS[number]))throw notFound("공개 중인 가챠·쿠지 경품 구성을 찾을 수 없습니다.");
+    const version=await context.pool.query<{id:string;product_id:string;version:number;published_at:Date}>(`SELECT v.id,v.product_id,v.version,v.published_at
+      FROM draw_probability_versions v
+      JOIN catalog_products p ON p.id=v.product_id
+      WHERE v.product_id=$1 AND v.status='ACTIVE' AND p.is_active=true AND p.is_prize_only=false
+        AND p.sale_status IN ('COMING_SOON','ON_SALE') AND p.category IN ('gacha','kuji')`,[productId]);
+    if(!version.rowCount)throw notFound("공개 중인 가챠·쿠지 경품 구성을 찾을 수 없습니다.");
+    const active=version.rows[0]!;
+    const entries=await context.pool.query<{id:string;prize_product_id:string;rarity:string;initial_quantity:number|null} & DrawPrizeSnapshotRow>(`SELECT e.id,e.prize_product_id,e.prize_name_snapshot,e.prize_image_url_snapshot,e.prize_sku_snapshot,e.prize_ip_id_snapshot,e.prize_category_snapshot,e.rarity,e.initial_quantity
+      FROM draw_pool_entries e
+      WHERE e.probability_version_id=$1
+      ORDER BY e.rarity,e.id`,[active.id]);
+    return{productId:active.product_id,version:numberValue(active.version),publishedAt:iso(active.published_at),entries:entries.rows.map((entry)=>({id:entry.id,prizeProductId:entry.prize_product_id,...drawPrizeSnapshotFields(entry,context.config.catalogMediaBaseUrl),rarity:entry.rarity,quantity:entry.initial_quantity===null?null:numberValue(entry.initial_quantity)}))};
+  });
+
   // Remaining-quantity odds disclose live stock, so they are served only while commerce is LIVE.
   app.get("/v1/catalog/products/:productId/draw-odds",{preHandler:requireLiveCommerce(context)},async(request,reply)=>{
     reply.header("cache-control","no-store");

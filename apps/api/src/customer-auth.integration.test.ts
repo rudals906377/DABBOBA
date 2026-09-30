@@ -232,37 +232,86 @@ test("customer broker reuses one Supabase subject without merging email peers an
   assert.equal(phoneReauth.statusCode, 201, phoneReauth.body);
   assert.equal((phoneReauth.json() as { actor: { userId: string } }).actor.userId, phoneUserId);
 
-  const duplicatePhone = await exchange(token("phone-conflict", {
-    ...claims(`phone-conflict-${suffix}`, ["PHONE"], null),
+  // User decision 2026-09-30: a verified phone OTP for a number that already
+  // belongs to one account signs in to and links that account.
+  const samePhoneSubject = `phone-same-${suffix}`;
+  const samePhone = await exchange(token("phone-same", {
+    ...claims(samePhoneSubject, ["PHONE"], null),
     phone: legacyPhone,
   }));
-  assert.equal(duplicatePhone.statusCode, 409, duplicatePhone.body);
+  assert.equal(samePhone.statusCode, 201, samePhone.body);
+  assert.equal((samePhone.json() as { actor: { userId: string } }).actor.userId, legacyId);
+  const samePhoneIdentity = await ownerPool.query<{ user_id: string }>(
+    "SELECT user_id FROM auth_identities WHERE provider='PHONE' AND provider_subject=$1",
+    [`${issuer}#${samePhoneSubject}`],
+  );
+  assert.deepEqual(samePhoneIdentity.rows, [{ user_id: legacyId }]);
 
-  // A pre-broker PHONE identity stores the E.164 number as its subject. A new
-  // phone OTP for that number is never auto-linked by the phone string: the
-  // exchange rolls back entirely and points the customer to support recovery.
+  // A login already linked to another account is never merged with the phone's owner.
+  const linkedElsewhere = await exchange(token("phone-linked-elsewhere", {
+    ...claims(phoneSubject, ["PHONE"], null),
+    phone: legacyPhone,
+  }));
+  assert.equal(linkedElsewhere.statusCode, 409, linkedElsewhere.body);
+  assert.equal((linkedElsewhere.json() as { code: string }).code, "PHONE_ACCOUNT_CONFLICT");
+
+  // A pre-broker PHONE identity stored the E.164 number as its subject. A new
+  // verified phone OTP for that number signs in to the same account, links the
+  // broker subject and keeps the legacy identity; account deletion finds it too.
   const e164LegacyPhone = `+8210${suffix.replace(/\D/g, "").padEnd(24, "0").slice(16, 24)}`;
   const e164Legacy = await ownerPool.query<{ id: string }>(
-    "INSERT INTO users(email,nickname,role,status,phone_e164) VALUES(NULL,$1,'USER','ACTIVE',$2) RETURNING id",
-    ["legacy e164 phone fixture", e164LegacyPhone],
+    "INSERT INTO users(email,nickname,role,status,phone_e164) VALUES(NULL,$1,'USER','ACTIVE',NULL) RETURNING id",
+    ["legacy e164 phone fixture"],
   );
-  createdUserIds.add(e164Legacy.rows[0]!.id);
+  const e164LegacyId = e164Legacy.rows[0]!.id;
+  createdUserIds.add(e164LegacyId);
   await ownerPool.query(
     "INSERT INTO auth_identities(user_id,provider,provider_subject,verified_at) VALUES($1,'PHONE',$2,now())",
-    [e164Legacy.rows[0]!.id, e164LegacyPhone],
+    [e164LegacyId, e164LegacyPhone],
   );
   const recoverySubject = `phone-recovery-${suffix}`;
-  const legacyPhoneLogin = await exchange(token("phone-recovery", {
-    ...claims(recoverySubject, ["PHONE"], null),
-    phone: e164LegacyPhone,
-  }));
-  assert.equal(legacyPhoneLogin.statusCode, 409, legacyPhoneLogin.body);
-  assert.equal((legacyPhoneLogin.json() as { code: string }).code, "LEGACY_PHONE_RECOVERY_REQUIRED");
-  const orphanedRecovery = await ownerPool.query(
-    "SELECT 1 FROM auth_identities WHERE provider_subject=$1",
-    [`${issuer}#${recoverySubject}`],
+  const recoveryClaims = { ...claims(recoverySubject, ["PHONE"], null), phone: e164LegacyPhone };
+  const legacyPhoneLogin = await exchange(token("phone-recovery", recoveryClaims));
+  assert.equal(legacyPhoneLogin.statusCode, 201, legacyPhoneLogin.body);
+  assert.equal((legacyPhoneLogin.json() as { actor: { userId: string } }).actor.userId, e164LegacyId);
+  const recoveredIdentities = await ownerPool.query<{ provider_subject: string }>(
+    "SELECT provider_subject FROM auth_identities WHERE user_id=$1 AND provider='PHONE' ORDER BY provider_subject",
+    [e164LegacyId],
   );
-  assert.equal(orphanedRecovery.rowCount, 0, "the rejected phone exchange leaves no temporary identity");
+  assert.deepEqual(
+    recoveredIdentities.rows.map((row) => row.provider_subject).sort(),
+    [e164LegacyPhone, `${issuer}#${recoverySubject}`].sort(),
+  );
+  const recoveredPhone = await ownerPool.query<{ phone_e164: string }>("SELECT phone_e164 FROM users WHERE id=$1", [e164LegacyId]);
+  assert.equal(recoveredPhone.rows[0]!.phone_e164, e164LegacyPhone);
+  const legacyDeletionSubject = `phone-recovery-deletion-${suffix}`;
+  const legacyPhoneDeletion = await webDeletionExchange(
+    token("phone-recovery-deletion", { ...claims(legacyDeletionSubject, ["PHONE"], null), phone: e164LegacyPhone }),
+    "PHONE",
+  );
+  assert.equal(legacyPhoneDeletion.statusCode, 201, legacyPhoneDeletion.body);
+  assert.equal((legacyPhoneDeletion.json() as { actor: { userId: string } }).actor.userId, e164LegacyId);
+
+  // Two different existing owners of one number are refused, never merged.
+  const splitPhone = `+8210${suffix.replace(/\D/g, "").padEnd(32, "0").slice(24, 32)}`;
+  const splitOwners = await ownerPool.query<{ id: string }>(
+    "INSERT INTO users(email,nickname,role,status,phone_e164) VALUES(NULL,'split phone a','USER','ACTIVE',$1),(NULL,'split phone b','USER','ACTIVE',NULL) RETURNING id",
+    [splitPhone],
+  );
+  for (const row of splitOwners.rows) createdUserIds.add(row.id);
+  await ownerPool.query(
+    "INSERT INTO auth_identities(user_id,provider,provider_subject,verified_at) VALUES($1,'PHONE',$2,now())",
+    [splitOwners.rows[1]!.id, splitPhone],
+  );
+  const splitSubject = `phone-split-${suffix}`;
+  const splitLogin = await exchange(token("phone-split", { ...claims(splitSubject, ["PHONE"], null), phone: splitPhone }));
+  assert.equal(splitLogin.statusCode, 409, splitLogin.body);
+  assert.equal((splitLogin.json() as { code: string }).code, "PHONE_ACCOUNT_CONFLICT");
+  const splitIdentity = await ownerPool.query(
+    "SELECT 1 FROM auth_identities WHERE provider_subject=$1",
+    [`${issuer}#${splitSubject}`],
+  );
+  assert.equal(splitIdentity.rowCount, 0, "the refused phone exchange leaves no temporary identity");
 
   const socialOnlySubject = `web-deletion-social-${suffix}`;
   const socialOnlyClaims = claims(socialOnlySubject, ["KAKAO"], null);
