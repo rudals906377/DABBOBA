@@ -43,6 +43,11 @@ export type ApiConfig = {
   adminOrigins: string[];
   sessionTokenPepper: string;
   adminProxyIdentitySecret: string | null;
+  /**
+   * Lower-case header that the hosting edge overwrites with the real client IP.
+   * Null means rate limits key anonymous callers by the socket address only.
+   */
+  trustedClientIpHeader?: string | null;
   supabaseUrl?: string | null;
   supabaseJwtAudience?: string | null;
   supabasePublishableKey?: string | null;
@@ -422,6 +427,51 @@ function adminClientIpHeader(env: Environment, runtime: RuntimeEnvironment, secr
   return value;
 }
 
+/**
+ * Production administrator sessions must use the `__Host-` prefix so browsers
+ * enforce Secure, Path=/ and no Domain attribute, which keeps sibling
+ * subdomains from planting or reading the console session cookie.
+ */
+export const PRODUCTION_ADMIN_SESSION_COOKIE_PREFIX = "__Host-";
+
+function adminSessionCookieName(env: Environment, runtime: RuntimeEnvironment): string {
+  const value = env.ADMIN_SESSION_COOKIE_NAME?.trim() || "dabboba_admin_session";
+  if (!/^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,128}$/.test(value)) {
+    throw new Error("ADMIN_SESSION_COOKIE_NAME must be a valid cookie name");
+  }
+  if (runtime === "production"
+    && (!value.startsWith(PRODUCTION_ADMIN_SESSION_COOKIE_PREFIX)
+      || value.length === PRODUCTION_ADMIN_SESSION_COOKIE_PREFIX.length)) {
+    throw new Error("ADMIN_SESSION_COOKIE_NAME must start with __Host- in production");
+  }
+  return value;
+}
+
+const UNTRUSTABLE_CLIENT_IP_HEADERS = new Set([
+  "authorization",
+  "cookie",
+  "host",
+  "content-type",
+  "content-length",
+  "idempotency-key",
+  "x-request-id",
+  "x-admin-reason",
+  ...INTERNAL_ADMIN_IDENTITY_HEADERS,
+]);
+
+/**
+ * The client-IP header is trusted only when an operator names it explicitly
+ * after verifying that the hosting edge overwrites it on every request.
+ */
+function trustedClientIpHeader(env: Environment): string | null {
+  const value = optional(env, "TRUSTED_CLIENT_IP_HEADER")?.toLowerCase() || null;
+  if (value && (!/^[!#$%&'*+.^_`|~0-9a-z-]{1,64}$/.test(value)
+    || UNTRUSTABLE_CLIENT_IP_HEADERS.has(value) || value.startsWith("x-dabboba-"))) {
+    throw new Error("TRUSTED_CLIENT_IP_HEADER must be a valid dedicated client-IP header name");
+  }
+  return value;
+}
+
 function integer(env: Environment, key: string, fallback: number, minimum: number, maximum: number): number {
   const raw = env[key]?.trim();
   if (!raw) return fallback;
@@ -621,6 +671,7 @@ export function loadApiConfig(env: Environment = process.env): ApiConfig {
     adminOrigins,
     sessionTokenPepper: pepper,
     adminProxyIdentitySecret: proxyIdentitySecret,
+    trustedClientIpHeader: trustedClientIpHeader(env),
     ...supabaseAuth,
     communityEnabled: communityFlag === "true",
     commerceMode,
@@ -667,7 +718,7 @@ export function loadAdminConfig(env: Environment = process.env): AdminConfig {
     environmentTier,
     apiBaseUrl,
     publicApiBaseUrl,
-    sessionCookieName: env.ADMIN_SESSION_COOKIE_NAME?.trim() || "dabboba_admin_session",
+    sessionCookieName: adminSessionCookieName(env, runtime),
     adminProxyIdentitySecret: proxyIdentitySecret,
     adminEdgeClientIpHeader: edgeClientIpHeader,
   };

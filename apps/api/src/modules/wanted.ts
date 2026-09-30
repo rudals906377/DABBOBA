@@ -4,7 +4,7 @@ import { PRODUCT_CATEGORIES } from "@dabboba/domain";
 import { writeOutbox } from "../lib/audit.js";
 import { AppError, badRequest, conflict, forbidden, notFound } from "../lib/errors.js";
 import { beginIdempotency, completeIdempotency, idempotencyKey, requestHash } from "../lib/idempotency.js";
-import { booleanInput, enumInput, integerInput, objectInput, queryString, slugIdInput, stringInput, uuidInput } from "../lib/input.js";
+import { booleanInput, enumInput, integerInput, objectInput, queryString, slugIdInput, stringInput, uuidInput, likeContainsPattern } from "../lib/input.js";
 import { cursorPage, pagination } from "../lib/pagination.js";
 import { iso, numberValue } from "../lib/rows.js";
 import { assertUgcOperationsPolicyAccepted } from "../lib/ugc-policy.js";
@@ -140,7 +140,7 @@ export async function registerWantedRoutes(app: FastifyInstance, context: ApiCon
   app.get("/v1/wanted-requests", async (request) => {
     const viewerId = await optionalUserId(context, request);
     const query = (request.query || {}) as Record<string, unknown>;
-    const { limit, cursor } = pagination(query);
+    const { limit, cursor } = pagination(query, "uuid");
     const search = queryString(query.q);
     const category = query.category === undefined
       ? undefined
@@ -153,8 +153,8 @@ export async function registerWantedRoutes(app: FastifyInstance, context: ApiCon
       wantedBlockVisibility("$1", "w.user_id"),
     ];
     if (search) {
-      values.push(`%${search}%`);
-      filters.push(`(w.desired_item ILIKE $${values.length} OR w.details ILIKE $${values.length} OR w.ip_name_ko ILIKE $${values.length})`);
+      values.push(likeContainsPattern(search));
+      filters.push(`(w.desired_item ILIKE $${values.length} ESCAPE '\\' OR w.details ILIKE $${values.length} ESCAPE '\\' OR w.ip_name_ko ILIKE $${values.length} ESCAPE '\\')`);
     }
     if (category) {
       values.push(category);

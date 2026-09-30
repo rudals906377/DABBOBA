@@ -181,6 +181,50 @@ test("Edge API preserves customer request bytes and query while removing spoofed
   assert.match(response.headers.get("set-cookie") ?? "", /b=2/);
 });
 
+test("Edge API passes only the operator-verified client-IP header and maps it into the API config", async () => {
+  const captured: InjectOptions[] = [];
+  let trustedHeader: string | null | undefined;
+  const handler = createSupabaseEdgeApiHandler({
+    readEnvironment: () => edgeEnvironment({ DABBOBA_TRUSTED_CLIENT_IP_HEADER: "CF-Connecting-IP" }),
+    buildApp: async (config) => {
+      trustedHeader = config.trustedClientIpHeader;
+      return fakeApp(captured);
+    },
+  });
+  const response = await handler(new Request("https://example.test/functions/v1/dabboba-api/v1/catalog/products", {
+    headers: {
+      "cf-connecting-ip": "198.51.100.30",
+      "x-forwarded-for": "203.0.113.9",
+      "x-real-ip": "203.0.113.10",
+      forwarded: "for=203.0.113.11",
+    },
+  }), { remoteAddr: { hostname: "10.0.0.1" } });
+  assert.equal(response.status, 207);
+  assert.equal(trustedHeader, "cf-connecting-ip");
+  assert.equal(captured[0]?.headers["cf-connecting-ip"], "198.51.100.30");
+  assert.equal(captured[0]?.headers["x-forwarded-for"], undefined);
+  assert.equal(captured[0]?.headers["x-real-ip"], undefined);
+  assert.equal(captured[0]?.headers.forwarded, undefined);
+  assert.equal(captured[0]?.remoteAddress, "10.0.0.1");
+
+  const unconfigured: InjectOptions[] = [];
+  const defaultHandler = createSupabaseEdgeApiHandler({
+    readEnvironment: () => edgeEnvironment(),
+    buildApp: async (config) => {
+      assert.equal(config.trustedClientIpHeader, null);
+      return fakeApp(unconfigured);
+    },
+  });
+  await defaultHandler(new Request("https://example.test/functions/v1/dabboba-api/v1/catalog/products", {
+    headers: { "cf-connecting-ip": "198.51.100.30" },
+  }));
+  assert.equal(unconfigured[0]?.headers["cf-connecting-ip"], undefined);
+  assert.throws(
+    () => normalizeSupabaseEdgeApiEnvironment(edgeEnvironment({ TRUSTED_CLIENT_IP_HEADER: "cf-connecting-ip" })),
+    /forbidden legacy setting/,
+  );
+});
+
 test("Edge API injects the hosted WASM sanitizer into the shared media runtime", async () => {
   const sanitizeImage = async () => ({
     data: Buffer.from("webp"),

@@ -24,6 +24,7 @@ test(
         return {
           provider: "gcs",
           bucket: "catalog-media-test",
+          maxUploadBytes: 10 * 1024 * 1024,
           location: { provider: "gcs", bucket: "catalog-media-test" },
           file(name: string) {
             return {

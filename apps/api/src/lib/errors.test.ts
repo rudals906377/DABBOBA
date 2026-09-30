@@ -69,3 +69,23 @@ test("request failure logs exclude raw error data while retaining request correl
     await app.close();
   }
 });
+
+test("PostgreSQL input-cast failures are client errors, not server faults", async () => {
+  const app = Fastify({ logger: false });
+  registerErrorHandler(app);
+  for (const code of ["22P02", "22007", "22008"]) {
+    app.get(`/cast-${code}`, async () => {
+      throw Object.assign(new Error('invalid input syntax for type uuid: "private-value"'), { code });
+    });
+  }
+  try {
+    for (const code of ["22P02", "22007", "22008"]) {
+      const response = await app.inject({ method: "GET", url: `/cast-${code}` });
+      assert.equal(response.statusCode, 400, response.body);
+      assert.equal(response.json().error.code, "INVALID_REQUEST");
+      assert.doesNotMatch(response.body, /private-value|uuid/);
+    }
+  } finally {
+    await app.close();
+  }
+});

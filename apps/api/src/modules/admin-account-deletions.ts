@@ -3,7 +3,7 @@ import { withTransaction } from "@dabboba/db";
 import { adminMutationHeaders, writeAdminAudit, writeOutbox } from "../lib/audit.js";
 import { badRequest, conflict, notFound } from "../lib/errors.js";
 import { beginIdempotency, completeIdempotency, requestHash } from "../lib/idempotency.js";
-import { enumInput, objectInput, queryString, stringInput, uuidInput } from "../lib/input.js";
+import { enumInput, objectInput, queryString, stringInput, uuidInput, likeContainsPattern } from "../lib/input.js";
 import { cursorPage, pagination } from "../lib/pagination.js";
 import { iso, maskEmail, nullableIso, numberValue } from "../lib/rows.js";
 import type { ApiContext } from "../types.js";
@@ -197,7 +197,7 @@ export async function registerAdminAccountDeletionRoutes(app: FastifyInstance, c
     { preHandler: context.auth.requirePermission("account_deletions.read") },
     async (request) => {
       const query = queryOf(request);
-      const { limit, cursor } = pagination(query);
+      const { limit, cursor } = pagination(query, "uuid");
       const status = query.status === undefined || query.status === ""
         ? "OPEN"
         : enumInput(query, "status", ACCOUNT_DELETION_QUEUE_FILTERS)!;
@@ -207,8 +207,8 @@ export async function registerAdminAccountDeletionRoutes(app: FastifyInstance, c
       if (status === "OPEN") filters.push("d.status IN ('PENDING_REVIEW','BLOCKED','PROCESSING')");
       else { values.push(status); filters.push(`d.status=$${values.length}`); }
       if (search) {
-        values.push(`%${search}%`);
-        filters.push(`(d.id::text ILIKE $${values.length} OR d.user_id::text ILIKE $${values.length} OR u.nickname ILIKE $${values.length} OR u.email::text ILIKE $${values.length})`);
+        values.push(likeContainsPattern(search));
+        filters.push(`(d.id::text ILIKE $${values.length} ESCAPE '\\' OR d.user_id::text ILIKE $${values.length} ESCAPE '\\' OR u.nickname ILIKE $${values.length} ESCAPE '\\' OR u.email::text ILIKE $${values.length} ESCAPE '\\')`);
       }
       if (cursor) {
         values.push(cursor.createdAt, cursor.id);
