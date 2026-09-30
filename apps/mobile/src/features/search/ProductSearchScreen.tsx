@@ -1,7 +1,7 @@
 import Constants from "expo-constants";
 import { type Href, useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Keyboard, Platform, ScrollView, StyleSheet, View } from "react-native";
+import { ActivityIndicator, FlatList, Keyboard, Platform, StyleSheet, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import type { CatalogIp, CatalogProduct } from "@dabboba/contracts";
 import { CatalogProductRow } from "@/components/CatalogProductRow";
@@ -109,6 +109,10 @@ export function ProductSearchScreen() {
     router.push(`/product/${encodeURIComponent(product.id)}` as Href);
   };
 
+  // A load-more failure replaces the list with the retry state (as before),
+  // so automatic end-of-list loading cannot loop on a persistent error.
+  const showResults = !loading && !message && hasSearchConditions && products.length > 0;
+
   return (
     <SafeAreaView style={styles.safeArea} edges={["top", "bottom", "left", "right"]}>
       <View style={styles.header}>
@@ -137,8 +141,22 @@ export function ProductSearchScreen() {
         </SeedInputShell>
       </View>
 
-      <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>
-        {loading ? (
+      <FlatList
+        data={showResults ? products : []}
+        keyExtractor={(product) => product.id}
+        renderItem={({ item: product }) => (
+          <CatalogProductRow product={product} ipName={ipNames.get(product.ipId) ?? "등록 작품"} assetBaseUrl={runtime.assetBaseUrl} onPress={() => openProduct(product)} />
+        )}
+        ItemSeparatorComponent={ResultSeparator}
+        keyboardShouldPersistTaps="handled"
+        contentContainerStyle={styles.content}
+        ListHeaderComponent={showResults ? (
+          <View style={styles.resultHeader}>
+            <KoreanPixelTitle variant="section">검색 결과</KoreanPixelTitle>
+            <KoreanPixelTitleAccessory>{products.length}{nextCursor ? "+" : ""}개</KoreanPixelTitleAccessory>
+          </View>
+        ) : null}
+        ListEmptyComponent={loading ? (
           <State icon="search-outline" body="검색할 상품을 불러오는 중" loading />
         ) : message ? (
           <View style={styles.state}>
@@ -148,35 +166,31 @@ export function ProductSearchScreen() {
           </View>
         ) : !hasSearchConditions ? (
           <State icon="search-outline" title="무엇을 찾고 있나요?" body="상품명이나 작품 이름을 입력하면 등록 상품을 바로 찾아드려요." />
-        ) : products.length ? (
-          <>
-            <View style={styles.resultHeader}>
-              <KoreanPixelTitle variant="section">검색 결과</KoreanPixelTitle>
-              <KoreanPixelTitleAccessory>{products.length}{nextCursor ? "+" : ""}개</KoreanPixelTitleAccessory>
-            </View>
-            <View style={styles.list}>
-              {products.map((product) => (
-                <CatalogProductRow key={product.id} product={product} ipName={ipNames.get(product.ipId) ?? "등록 작품"} assetBaseUrl={runtime.assetBaseUrl} onPress={() => openProduct(product)} />
-              ))}
-            </View>
-            {nextCursor ? (
-              <SeedActionButton
-                label={loadingMore ? "불러오는 중" : "상품 더 보기"}
-                disabled={loadingMore}
-                loading={loadingMore}
-                size="small"
-                variant="neutralSolid"
-                onPress={() => void load(nextCursor)}
-                style={styles.loadMoreButton}
-              />
-            ) : null}
-          </>
         ) : (
           <State icon="search-outline" title="검색 결과가 없어요" body="띄어쓰기나 작품 이름을 바꿔 다시 검색해 보세요." />
         )}
-      </ScrollView>
+        ListFooterComponent={showResults && nextCursor ? (
+          <SeedActionButton
+            label={loadingMore ? "불러오는 중" : "상품 더 보기"}
+            disabled={loadingMore}
+            loading={loadingMore}
+            size="small"
+            variant="neutralSolid"
+            onPress={() => void load(nextCursor)}
+            style={styles.loadMoreButton}
+          />
+        ) : null}
+        onEndReached={() => {
+          if (showResults && nextCursor && !loadingMore) void load(nextCursor);
+        }}
+        onEndReachedThreshold={0.5}
+      />
     </SafeAreaView>
   );
+}
+
+function ResultSeparator() {
+  return <View style={styles.listGap} />;
 }
 
 function State({ icon, title, body, loading = false }: { icon: DecorativeIoniconName; title?: string; body: string; loading?: boolean }) {
@@ -210,7 +224,7 @@ const styles = StyleSheet.create({
   searchInput: { flex: 1, color: colors.ink, fontSize: 15, paddingVertical: 11 },
   content: { paddingHorizontal: seed.spacing.globalGutter, paddingTop: seed.spacing.x4, paddingBottom: seed.spacing.screenBottom },
   resultHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 14, ...subtleSectionHeaderRule },
-  list: { gap: 12 },
+  listGap: { height: 12 },
   state: { minHeight: 430, paddingHorizontal: 28, alignItems: "center", justifyContent: "center" },
   stateTitle: { color: colors.ink, ...seed.typography.subtitle, textAlign: "center", marginTop: 13 },
   stateBody: { color: colors.muted, fontSize: 13, lineHeight: 20, textAlign: "center", marginTop: 7 },
