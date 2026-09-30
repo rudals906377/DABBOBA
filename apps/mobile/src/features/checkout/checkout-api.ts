@@ -1,6 +1,6 @@
 import { randomUUID } from "expo-crypto";
 import type { SQLiteDatabase } from "expo-sqlite";
-import { errorMessage } from "@dabboba/api-client";
+import { errorMessage, requestTimeoutSignal } from "@dabboba/api-client";
 import type { components } from "@dabboba/contracts";
 import {
   attachOrderToGachaCheckoutIntent,
@@ -153,6 +153,9 @@ export async function confirmPortOnePayment(
     `${apiBaseUrl.replace(/\/$/, "")}/v1/payments/${encodeURIComponent(paymentId)}/confirm`,
     {
       method: "POST",
+      // Explicit deadline: a hung PG round trip must surface as a retryable
+      // network failure instead of blocking checkout recovery forever.
+      signal: requestTimeoutSignal(),
       headers: {
         authorization: `Bearer ${accessToken}`,
         "content-type": "application/json",
@@ -209,6 +212,7 @@ export async function abandonPortOnePayment(
     `${apiBaseUrl.replace(/\/$/, "")}/v1/payments/${encodeURIComponent(paymentId)}/abandon`,
     {
       method: "POST",
+      signal: requestTimeoutSignal(),
       headers: {
         authorization: `Bearer ${accessToken}`,
         "content-type": "application/json",
@@ -231,6 +235,7 @@ export async function claimPortOnePaymentAttempt(
     `${apiBaseUrl.replace(/\/$/, "")}/v1/payments/${encodeURIComponent(paymentId)}/attempt`,
     {
       method: "POST",
+      signal: requestTimeoutSignal(),
       headers: {
         authorization: `Bearer ${accessToken}`,
         "content-type": "application/json",

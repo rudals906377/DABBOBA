@@ -1,4 +1,5 @@
 import { randomUUID } from "expo-crypto";
+import { idempotencyKeyFrom, requestTimeoutSignal } from "@dabboba/api-client";
 import { isKujiRoomEndpointUnavailable } from "@/features/kuji/kuji-queue-state";
 
 export type KujiRoomEntryState =
@@ -65,8 +66,23 @@ export async function joinKujiRoom(
   apiBaseUrl: string,
   accessToken: string,
   productId: string,
+  options: { userId?: string | null } = {},
 ): Promise<KujiRoomSnapshot> {
-  return requestKujiRoom(apiBaseUrl, accessToken, productId, "POST");
+  return requestKujiRoom(apiBaseUrl, accessToken, productId, "POST", undefined, {
+    idempotencyKey: kujiRoomJoinIdempotencyKey(productId, options.userId),
+  });
+}
+
+/**
+ * Deterministic join key so a retry after a lost response is the same join.
+ * The server also dedupes joins by the actor's active entry and scopes any
+ * idempotency record to the authenticated actor, so the user segment only
+ * adds clarity; it is omitted when the caller does not know the user ID.
+ */
+export function kujiRoomJoinIdempotencyKey(productId: string, userId?: string | null): string {
+  return userId
+    ? idempotencyKeyFrom("kuji-join", userId, productId)
+    : idempotencyKeyFrom("kuji-join", productId);
 }
 
 export async function fetchKujiRoom(
@@ -99,15 +115,17 @@ async function requestKujiRoom(
   productId: string,
   method: "POST" | "GET" | "DELETE",
   entryId?: string,
+  options: { idempotencyKey?: string } = {},
 ): Promise<KujiRoomSnapshot> {
   const roomPath = `/v1/kuji/rooms/${encodeURIComponent(productId)}/entries`;
   const entryPath = entryId ? `${roomPath}/${encodeURIComponent(entryId)}` : roomPath;
   const response = await fetch(`${apiBaseUrl.replace(/\/$/, "")}${entryPath}`, {
     method,
+    signal: requestTimeoutSignal(),
     headers: {
       Authorization: `Bearer ${accessToken}`,
       "X-Request-Id": randomUUID(),
-      ...(method === "POST" ? { "Idempotency-Key": randomUUID() } : {}),
+      ...(method === "POST" ? { "Idempotency-Key": options.idempotencyKey ?? randomUUID() } : {}),
     },
   });
   const body = await readResponseBody(response);
