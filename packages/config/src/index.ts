@@ -40,7 +40,11 @@ export type ApiConfig = {
   customerLoginProviders?: CustomerLoginProvider[];
   /** Server-only AES-256-GCM key used to seal Apple refresh tokens before DB storage. */
   appleCredentialEncryption?: { key: string; keyVersion: number } | null;
-  /** Customer Dukroom/community API exposure. Disabled by default in environment-loaded builds. */
+  /**
+   * Customer Dukroom posts/comments/likes API exposure. Disabled by default in
+   * environment-loaded builds. Notices, inquiries, reports, and user blocks are
+   * customer support and stay mounted regardless of this flag.
+   */
   communityEnabled?: boolean;
   /** Server-side commerce kill switch. Production defaults to PRELAUNCH. */
   commerceMode?: CommerceLaunchMode;

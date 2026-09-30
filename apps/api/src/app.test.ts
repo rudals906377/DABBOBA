@@ -89,7 +89,82 @@ test("production admin surface keeps notice and moderation routes when public co
   }
 });
 
+test("customer support routes stay mounted on every surface while only Dukroom follows the community flag", async () => {
+  const supportRoutes = [
+    { method: "GET", url: "/v1/notices" },
+    { method: "GET", url: "/v1/inquiries" },
+    { method: "POST", url: "/v1/inquiries/:inquiryId/messages" },
+    { method: "POST", url: "/v1/reports" },
+    { method: "GET", url: "/v1/community/blocks" },
+    { method: "POST", url: "/v1/community/blocks/:userId" },
+    { method: "GET", url: "/v1/community/operations-policy" },
+    { method: "POST", url: "/v1/community/operations-policy/acceptance" },
+  ] as const;
+  const adminSupportRoutes = ["/v1/admin/notices", "/v1/admin/inquiries", "/v1/admin/reports"];
+  const dukroomRoutes = [
+    { method: "GET", url: "/v1/community/posts" },
+    { method: "POST", url: "/v1/community/posts" },
+    { method: "POST", url: "/v1/community/posts/:postId/like" },
+    { method: "GET", url: "/v1/community/posts/:postId/comments" },
+    { method: "DELETE", url: "/v1/community/comments/:commentId" },
+  ] as const;
+  const adminDukroomRoutes = ["/v1/admin/posts", "/v1/admin/comments"];
+  const cases = [
+    { surface: "customer", communityEnabled: false, dukroom: false },
+    { surface: "customer", communityEnabled: true, dukroom: true },
+    { surface: "all", communityEnabled: false, dukroom: false },
+    { surface: "admin", communityEnabled: false, dukroom: true },
+  ] as const;
+  for (const { surface, communityEnabled, dukroom } of cases) {
+    const config = { ...testConfig(surface), environment: "production" as const, communityEnabled };
+    const { app } = await buildApp({ config, pool: unusedPool });
+    const label = `${surface} surface, communityEnabled=${communityEnabled}`;
+    try {
+      for (const route of supportRoutes) {
+        assert.equal(app.hasRoute(route), surface !== "admin", `${label}: ${route.method} ${route.url}`);
+      }
+      for (const url of adminSupportRoutes) {
+        assert.equal(app.hasRoute({ method: "GET", url }), surface !== "customer", `${label}: GET ${url}`);
+      }
+      for (const route of dukroomRoutes) {
+        assert.equal(app.hasRoute(route), dukroom && surface !== "admin", `${label}: ${route.method} ${route.url}`);
+      }
+      for (const url of adminDukroomRoutes) {
+        assert.equal(app.hasRoute({ method: "GET", url }), dukroom && surface !== "customer", `${label}: GET ${url}`);
+      }
+    } finally {
+      await app.close();
+    }
+  }
+});
+
+test("production customer surface serves notices and reports with the Dukroom flag off", async () => {
+  const config = { ...testConfig("customer"), environment: "production" as const, communityEnabled: false };
+  const { app } = await buildApp({ config, pool: unusedPool });
+  try {
+    const notices = await app.inject({ method: "GET", url: "/v1/notices" });
+    assert.equal(notices.statusCode, 200, notices.body);
+    assert.deepEqual(notices.json().items, []);
+
+    const report = await app.inject({
+      method: "POST",
+      url: "/v1/reports",
+      payload: { targetType: "USER", targetId: "20000000-0000-4000-8000-000000000001", reason: "SPAM" },
+    });
+    assert.equal(report.statusCode, 401, report.body);
+
+    const blocks = await app.inject({ method: "GET", url: "/v1/community/blocks" });
+    assert.equal(blocks.statusCode, 401, blocks.body);
+
+    const posts = await app.inject({ method: "GET", url: "/v1/community/posts" });
+    assert.equal(posts.statusCode, 404, posts.body);
+  } finally {
+    await app.close();
+  }
+});
+
 test("Cloud Run health endpoints are not consumed by the global request limiter", async () => {
+
   const { app } = await buildApp({ config: testConfig("customer"), pool: unusedPool });
   try {
     for (let request = 0; request < 250; request += 1) {

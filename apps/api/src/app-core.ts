@@ -18,7 +18,7 @@ import { registerCatalogMediaRoutes } from "./modules/catalog-media.js";
 import { registerHomeCatalogRoutes } from "./modules/home-catalog.js";
 import { registerStorefrontCategoryRoutes } from "./modules/storefront-categories.js";
 import { registerCommerceRoutes } from "./modules/commerce.js";
-import { registerCommunityRoutes } from "./modules/community.js";
+import { registerCustomerSupportRoutes, registerDukroomRoutes } from "./modules/community.js";
 import { registerCustomerAuthRoutes } from "./modules/customer-auth.js";
 import { registerDrawRecoveryRoutes } from "./modules/draw-recovery.js";
 import { registerDemoRoutes, registerDemoSafetyHook } from "./modules/demo.js";
@@ -214,11 +214,15 @@ export async function buildAppCore(options: BuildAppCoreOptions) {
   await registerCatalogMediaRoutes(routeApp, context);
   await registerHomeCatalogRoutes(routeApp, context);
   await registerStorefrontCategoryRoutes(routeApp, context);
+  // Notices, inquiries, reports, user blocks, and the UGC operations policy are
+  // launch-critical customer support (Home ticker, 고객센터, 신고/차단), so they
+  // are mounted on every surface regardless of the community flag.
+  await registerCustomerSupportRoutes(routeApp, context);
   const communityEnabled = options.config.communityEnabled
     ?? options.config.environment !== "production";
-  // The public community can be disabled at launch while its privileged
-  // moderation and notice-management routes remain available to operators.
-  if (communityEnabled || surface === "admin") await registerCommunityRoutes(routeApp, context);
+  // Only the public Dukroom posts/comments/likes can be disabled at launch,
+  // while their privileged moderation routes remain available to operators.
+  if (communityEnabled || surface === "admin") await registerDukroomRoutes(routeApp, context);
   await registerWantedRoutes(routeApp, context);
   await registerExchangeRoutes(routeApp, context);
   await registerCommerceRoutes(routeApp, context);
