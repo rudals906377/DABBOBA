@@ -14,6 +14,8 @@
 8. **판매판 심사 자료.** `gacha-sales-store-preparation-2026-10-01.md`에 가챠-only 판매 설명, 정확한 유료 무작위 실물 제공 방식, 심사 안내, 일반 리뷰 계정 준비 서식, 실제 설치 후 캡처 목록과 데이터 선언 대조표를 작성했다. 사전오픈판 초안은 따로 보존하고 최신 iOS build 3과 실제 Google Play 제출 방식 결정을 반영했다. 콘솔 입력·제출·승인이나 법률 검토 완료를 의미하지 않는다.
 9. **의존성 재조회 및 후속 수정.** 최초 조회에서 production 의존성 audit의 high/critical은 0개, moderate는 `@fastify/rate-limit` 경유 `ip-address@10.5.0`의 4건이었다. 이 최초 증거는 `/tmp/dabboba-native-launch-qa.AMIG6I/dependency-audit.json`에 보존했다. 이후 기존 허용 범위 안의 `10.7.2`로 해당 전이 의존성만 갱신했고, 회귀 재현·수정 검사, API 356개 및 루트 1,028개·TypeScript 8개가 최종 통과했다. 새로운 production audit는 모든 심각도 0개다. 자세한 범위와 첫 시험 DB 로그인 실패를 포함한 증거는 `dependency-patch-2026-10-01.md`에 있다. 이는 로컬 준비 결과이며 운영 배포·전체 보안 무결함을 뜻하지 않는다.
 
+10. **실제 Deno 실행 환경 검사.** 최신 번들을 격리 Deno 2.9.6과 전용 루프백 DB로 실행했다. 고객·worker·실제 Fastify/제한 DB·이미지 WASM 검사 5개와 진입 파일 검사 3곳이 통과했다. 관리자 진입 파일의 실제 타입 오류를 발견해 정상 응답 보존/무응답 503 처리로 수정했고 회귀 검사 4개도 통과했다. 다른 앱·운영 계정·호스팅 함수는 사용하지 않았다. 최초 실패와 증거 경계는 `edge-runtime-preparation-2026-10-01.md`에 정리했다.
+
 ### 네이티브 컴파일의 현재 증거 경계
 
 임시 복사본 `/tmp/dabboba-native-launch-qa.AMIG6I`는 커밋 `dcf4143`의 모바일 소스로 생성했으며 비밀 환경 파일을 복사하지 않았다. 원본 node_modules를 의존성 참조 경로로 재사용했고 원본 package/lock 파일은 보존했다. 처음 pnpm exec가 임시 경로의 모듈 재설치를 거부하자 보호 장치를 우회하지 않고 기존 Expo CLI로 prebuild를 실행했다. iOS CocoaPods 준비는 성공했다.
