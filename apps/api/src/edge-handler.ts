@@ -348,6 +348,29 @@ export function assertSupabaseEdgeApiConfig(config: ApiConfig, surface: "custome
   }
 }
 
+/**
+ * Media upload completion needs the hosted WASM sanitizer. Both the customer
+ * and admin Edge functions inject it, so admin catalog-media completion works
+ * on the same terms as customer media.
+ */
+export function createEdgeMediaRuntime(
+  sanitizeImage?: ApiMediaRuntime["sanitizeImage"],
+): ApiMediaRuntime {
+  return sanitizeImage
+    ? {
+        ...edgeMediaRuntime,
+        completionAvailable: true,
+        async sanitizeImage(input, detectedMimeType) {
+          try {
+            return await sanitizeImage(input, detectedMimeType);
+          } catch {
+            throw new AppError(400, "MEDIA_IMAGE_INVALID", "이미지를 안전하게 처리할 수 없습니다.");
+          }
+        },
+      }
+    : edgeMediaRuntime;
+}
+
 async function defaultBuildApp(
   config: ApiConfig,
   sanitizeImage?: ApiMediaRuntime["sanitizeImage"],
@@ -368,19 +391,7 @@ async function defaultBuildApp(
     statementTimeoutMs: 1_000,
   });
   try {
-    const mediaRuntime: ApiMediaRuntime = sanitizeImage
-      ? {
-          ...edgeMediaRuntime,
-          completionAvailable: true,
-          async sanitizeImage(input, detectedMimeType) {
-            try {
-              return await sanitizeImage(input, detectedMimeType);
-            } catch {
-              throw new AppError(400, "MEDIA_IMAGE_INVALID", "이미지를 안전하게 처리할 수 없습니다.");
-            }
-          },
-        }
-      : edgeMediaRuntime;
+    const mediaRuntime = createEdgeMediaRuntime(sanitizeImage);
     const built = await buildAppCore({
       config,
       mediaRuntime,

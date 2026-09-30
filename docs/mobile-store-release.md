@@ -132,6 +132,9 @@ release-config gate fails when either public policy phone differs from the
 in-app business information. It then runs the target database's read-only release check.
 It does not create the profile, apply migrations, upload secrets, deploy a
 function, enable Cron, charge a card, or establish provider/store approval.
+After the same preflight and project check, `supabase:edge:deploy` builds and
+deploys `dabboba-api`, `dabboba-admin-api` (with the shared WASM image
+sanitizer, so admin catalog-media completion works), and `dabboba-worker`.
 The existing `supabase:edge:deploy` command remains PRELAUNCH-only; do not
 point it at a LIVE profile or treat this preflight as authorization to switch
 shared production secrets before a reviewed cutover and rollback sequence is

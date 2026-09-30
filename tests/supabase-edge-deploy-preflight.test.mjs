@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { SUPABASE_INTEGRATION_PROJECT_REF } from '../scripts/supabase-integration-profile.mjs';
 import { defaultReleaseCheck, runSupabaseEdgeReleasePreflight } from '../scripts/supabase-edge-release-preflight.mjs';
 import {
   deploySupabaseEdge,
@@ -438,6 +439,12 @@ test('Supabase Edge deployment performs both preflights before build, secret, or
   assert.equal(calls.some((call) => call.includes('build:supabase')), true);
   assert.equal(calls.some((call) => call.includes('functions deploy dabboba-api')), true);
   assert.ok(calls.indexOf('public-smoke') > calls.findIndex((call) => call.includes('functions deploy dabboba-worker')));
+  const adminBuild = calls.indexOf('corepack:pnpm --filter @dabboba/api build:supabase:admin');
+  const adminDeploy = calls.indexOf(`supabase:functions deploy dabboba-admin-api --no-verify-jwt --project-ref ${SUPABASE_INTEGRATION_PROJECT_REF}`);
+  assert.ok(adminBuild > calls.indexOf('project-access'), 'admin bundle is built only after both preflights');
+  assert.ok(adminDeploy > adminBuild, 'admin function is deployed from the freshly built admin bundle');
+  assert.ok(adminDeploy > calls.findIndex((call) => call.startsWith('supabase:secrets set')));
+  assert.ok(calls.indexOf('public-smoke') > adminDeploy);
 });
 
 test('a failed database preflight leaves build, secrets, and functions untouched', async () => {
@@ -484,4 +491,17 @@ test('deployment cannot report success when the mobile public API smoke fails', 
   }), /Public config returned HTTP 404/);
   assert.ok(calls.some((call) => call.includes('functions deploy dabboba-api')));
   assert.ok(calls.some((call) => call.includes('functions deploy dabboba-worker')));
+});
+
+test('admin Edge function injects the customer WASM image sanitizer for catalog media', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const admin = await readFile(new URL('../supabase/functions/dabboba-admin-api/index.ts', import.meta.url), 'utf8');
+  const adminConfig = JSON.parse(await readFile(new URL('../supabase/functions/dabboba-admin-api/deno.json', import.meta.url), 'utf8'));
+  const customerConfig = JSON.parse(await readFile(new URL('../supabase/functions/dabboba-api/deno.json', import.meta.url), 'utf8'));
+  assert.match(admin, /surface: "admin"/);
+  assert.match(admin, /import\("\.\.\/dabboba-api\/image-sanitizer\.ts"\)/);
+  assert.match(admin, /sanitizeImage: sanitizeEdgeImage/);
+  for (const specifier of ['@imagemagick/magick-wasm', '@imagemagick/magick-wasm/magick.wasm']) {
+    assert.equal(adminConfig.imports[specifier], customerConfig.imports[specifier]);
+  }
 });
