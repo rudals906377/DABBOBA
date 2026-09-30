@@ -198,7 +198,10 @@ export function KujiDrawScreen() {
 
   const goBack = () => {
     requestScope.invalidate();
-    if (router.canGoBack()) router.back();
+    // The stack below this route is the (now consumed) checkout or payment
+    // route; returning there would reopen an expired lease. Replace with the
+    // product detail instead. A paid draw stays recoverable from 내 주문.
+    if (productId) router.replace(`/product/${encodeURIComponent(productId)}` as Href);
     else router.replace("/(tabs)/kuji");
   };
 
