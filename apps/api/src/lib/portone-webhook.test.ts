@@ -9,6 +9,7 @@ import {
 const secretBytes = Buffer.from("synthetic-portone-webhook-secret");
 const webhookSecret = `whsec_${secretBytes.toString("base64")}`;
 const storeId = "store-test";
+const paymentId = "6f1d8a52-3b7e-4c1a-9f0e-2d4b5c6a7e81";
 
 function signedWebhook(
   body: Record<string, unknown>,
@@ -35,7 +36,7 @@ function transaction(type = "Transaction.Paid", changes: Record<string, unknown>
     type,
     timestamp: "2026-09-09T00:00:00.000Z",
     data: {
-      paymentId: "payment-test",
+      paymentId,
       storeId,
       transactionId: "portone-transaction-test",
       customer: { email: "must-not-escape@example.com" },
@@ -61,7 +62,7 @@ test("official SDK verification yields only a fresh-lookup trigger", async () =>
     eventId: "event-test",
     notificationType: "Transaction.Paid",
     occurredAt: "2026-09-09T00:00:00.000Z",
-    paymentId: "payment-test",
+    paymentId,
     storeId: "store-test",
     portOneTransactionId: "portone-transaction-test",
     cancellationId: null,
@@ -136,6 +137,16 @@ test("tampering, stale signatures, duplicate headers, and store mismatches fail 
     verifyPortOnePaymentWebhook({ webhookSecret, expectedStoreId: storeId, ...otherStore }),
     webhookError("WEBHOOK_CONTRACT_MISMATCH"),
   );
+
+  // A foreign (non-DABBOBA) payment ID on the same store is a contract
+  // mismatch, never a uuid database error.
+  for (const foreignPaymentId of ["payment-test", "order-123", `${paymentId}x`]) {
+    const foreign = signedWebhook(transaction("Transaction.Paid", { paymentId: foreignPaymentId }));
+    await assert.rejects(
+      verifyPortOnePaymentWebhook({ webhookSecret, expectedStoreId: storeId, ...foreign }),
+      webhookError("WEBHOOK_CONTRACT_MISMATCH"),
+    );
+  }
 });
 
 test("billing-key and oversized payloads cannot trigger payment lookup", async () => {

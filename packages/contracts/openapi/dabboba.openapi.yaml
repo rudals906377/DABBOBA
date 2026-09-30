@@ -1722,13 +1722,13 @@ paths:
     post:
       tags: [Commerce]
       operationId: confirmOwnPortOnePayment
-      description: Re-queries PortOne with the authenticated owner's payment ID and applies only the provider-authoritative state to the order. A client redirect or callback is never accepted as proof of payment.
+      description: Re-queries PortOne with the authenticated owner's payment ID and applies only the provider-authoritative state to the order. A client redirect or callback is never accepted as proof of payment. Limited to six calls per minute per client. An already settled local payment (PAID, FAILED, REFUNDED, or CANCELLED before any PG window claim) returns outcome already_settled without a provider call; providerStatus is then the provider-equivalent of that settled state and localStatus is included.
       security: [{ bearerAuth: [] }]
       parameters:
         - $ref: "#/components/parameters/PaymentId"
       responses:
         "200":
-          description: Fresh provider state was reconciled, or the payment is still pending.
+          description: Fresh provider state was reconciled, the payment is still pending, or it was already settled.
           headers:
             Cache-Control:
               schema: { type: string, const: no-store }
@@ -1738,6 +1738,7 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
+        "429": { $ref: "#/components/responses/RateLimited" }
         "502":
           description: PortOne could not be queried or its response failed contract validation.
           content:
@@ -1749,6 +1750,39 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/ErrorEnvelope" }
         "428": { $ref: "#/components/responses/LegalAcceptanceRequired" }
+  /v1/payments/{paymentId}/abandon:
+    post:
+      tags: [Commerce]
+      operationId: abandonOwnPortOnePaymentWindow
+      description: Owner-only release of an unpaid PortOne payment window. The server performs a fresh PortOne lookup and cancels the still-pending order (releasing stock reservations, the kuji room entry, coupons, and points) only when PortOne authoritatively reports no payment (READY with no money, or PAYMENT_NOT_FOUND). A terminal no-charge FAILED/CANCELLED provider state is applied through the canonical provider path. Any payment evidence (PAY_PENDING, virtual account, paid or cancelled amounts, cancellation records) returns 409 PAYMENT_EVIDENCE_PRESENT with no change. Replays with the same Idempotency-Key return the original response without another provider call.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PaymentId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: The order was released, or was already closed without payment.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PortOnePaymentAbandonment" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "428": { $ref: "#/components/responses/LegalAcceptanceRequired" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "502":
+          description: PortOne could not be queried or its response failed contract validation; nothing changed.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+        "503":
+          description: Commerce is unavailable in PRELAUNCH, or the PortOne channel is not configured.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
   /v1/payments/webhooks/portone:
     post:
       tags: [Commerce]
@@ -1790,6 +1824,7 @@ paths:
     post:
       tags: [Commerce]
       operationId: receivePaymentWebhook
+      description: Shared-secret HMAC event rail for the local/test TEST_PG and INTERNAL_ZERO providers only. The route is not registered (404) when PAYMENT_PROVIDER is PORTONE_V2_INICIS or UNCONFIGURED; PortOne events are applied in-process only after a fresh authenticated PortOne lookup.
       parameters:
         - name: provider
           in: path
@@ -1807,6 +1842,7 @@ paths:
       responses:
         "202": { description: Verified event accepted or previously processed. }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { description: The shared-secret rail is not registered for the configured payment provider. }
         "503": { $ref: "#/components/responses/CommerceUnavailable" }
   /v1/draws/{entitlementId}/consume:
     post:
@@ -3559,7 +3595,9 @@ paths:
                   providerStatus:
                     type: [string, "null"]
                     enum: [READY, PAY_PENDING, VIRTUAL_ACCOUNT_ISSUED, PAID, FAILED, CANCELLED, PARTIAL_CANCELLED, null]
-                  outcome: { type: string }
+                  outcome:
+                    type: string
+                    description: Canonical outcome. provider_not_found means PortOne authoritatively has no payment for this ID (providerStatus is null); no local state changed.
                   localStatus: { $ref: "#/components/schemas/PaymentStatus" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
@@ -3668,7 +3706,7 @@ paths:
     post:
       tags: [Admin, Commerce]
       operationId: requestAdminPortOneLateRefund
-      description: SUPER_ADMIN only. Requests one full cancellation for an unfulfilled late order or a paid gacha/kuji order whose draw entitlements are all unused. Uncertain results are never automatically retried.
+      description: SUPER_ADMIN only. Requests one full cancellation for an unfulfilled late order or a paid gacha/kuji order whose draw entitlements are all unused. The payment keeps one attempt row. A new request (new Idempotency-Key) may resume that row only from a stale PRECHECK, PRECHECK_FAILED, or REVIEW_REQUIRED with lastErrorCode LOCAL_STATE_CHANGED, PROVIDER_STATE_MISMATCH, or PROVIDER_CANCEL_FAILED, after a fresh provider read and full local recheck. CALLING, PROVIDER_PENDING, INDETERMINATE, and RECONCILED are never retried.
       security: [{ bearerAuth: [] }]
       parameters:
         - $ref: "#/components/parameters/PaymentId"
@@ -3693,7 +3731,7 @@ paths:
     post:
       tags: [Admin, Commerce]
       operationId: requestAdminPortOneFullDrawRefund
-      description: SUPER_ADMIN only. Atomically freezes a fully paid, entirely unused gacha/kuji order before making one full PortOne cancellation request. A stale or consumed draw is rejected. The provider result may require later reconciliation.
+      description: SUPER_ADMIN only. Atomically freezes a fully paid, entirely unused gacha/kuji order before making one full PortOne cancellation request. A stale or consumed draw is rejected. The provider result may require later reconciliation. Resumes the payment's single attempt row under the same rules as the refund-review cancel operation.
       security: [{ bearerAuth: [] }]
       parameters:
         - $ref: "#/components/parameters/PaymentId"
@@ -3738,6 +3776,32 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
+        "503": { description: LIVE commerce or PortOne provider is not configured. }
+  /v1/admin/commerce/refund-reviews/{paymentId}/cancellation/abort:
+    post:
+      tags: [Admin, Commerce]
+      operationId: abortAdminPortOneRefundCancellation
+      description: Requires refunds.cancel. Aborts a cancellation attempt that never reached a provider cancellation in flight (stale PRECHECK, or REVIEW_REQUIRED with LOCAL_STATE_CHANGED, PROVIDER_STATE_MISMATCH, or PROVIDER_CANCEL_FAILED) after a fresh PortOne read confirms the full amount is still paid with no cancellation. A normal draw order frozen by the attempt returns from REFUND_REVIEW to PAID (payment and order); a late-success review keeps its review state. The attempt becomes PRECHECK_FAILED with lastErrorCode ABORTED_BY_ADMIN and may be resumed later. Audited and idempotent.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PaymentId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/AdminReason"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AdminPortOneRefundReasonInput" }
+      responses:
+        "200":
+          description: Attempt aborted; localPaymentStatus reports the restored or retained payment status.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminPortOneRefundCancellation" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "502": { description: PortOne lookup failed; nothing changed. }
         "503": { description: LIVE commerce or PortOne provider is not configured. }
   /v1/admin/commerce/inventory:
     get:
@@ -5734,7 +5798,27 @@ components:
           enum: [READY, PAY_PENDING, VIRTUAL_ACCOUNT_ISSUED, PAID, FAILED, CANCELLED, PARTIAL_CANCELLED]
         outcome:
           type: string
-          description: Canonical reconciliation outcome. pending means no order transition was applied.
+          description: Canonical reconciliation outcome. pending means no order transition was applied; already_settled means the local payment was already settled and PortOne was not re-queried.
+        localStatus:
+          $ref: "#/components/schemas/PaymentStatus"
+          description: Present only with outcome already_settled.
+    PortOnePaymentAbandonment:
+      type: object
+      additionalProperties: false
+      required: [accepted, paymentId, orderId, outcome, providerStatus, localStatus, orderStatus]
+      properties:
+        accepted: { type: boolean, const: true }
+        paymentId: { type: string, format: uuid }
+        orderId: { type: string, format: uuid }
+        outcome:
+          type: string
+          enum: [cancelled, already_closed]
+          description: cancelled means this request released the pending order; already_closed means it was already cancelled without payment.
+        providerStatus:
+          type: string
+          enum: [READY, PAYMENT_NOT_FOUND, FAILED, CANCELLED]
+        localStatus: { $ref: "#/components/schemas/PaymentStatus" }
+        orderStatus: { type: string }
     DrawResult:
       type: object
       additionalProperties: false

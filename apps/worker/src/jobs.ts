@@ -127,7 +127,13 @@ export async function processWorkerJob(dependencies: JobDependencies, raw: unkno
       return reconcilePaymentBatch(
         dependencies.pool,
         dependencies.paymentProvider,
-        { batchSize: dependencies.config.outboxBatchSize, staleMinutes: dependencies.config.paymentStaleMinutes },
+        {
+          batchSize: dependencies.config.outboxBatchSize,
+          staleMinutes: dependencies.config.paymentStaleMinutes,
+          ...(dependencies.config.paymentWindowValidityMinutes === undefined
+            ? {}
+            : { paymentWindowValidityMinutes: dependencies.config.paymentWindowValidityMinutes }),
+        },
         dependencies.logger,
         new Date(),
         dependencies.shouldContinue,

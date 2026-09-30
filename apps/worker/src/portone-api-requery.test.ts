@@ -38,7 +38,40 @@ test("worker signs one bounded canonical API requery, not a payment mutation", a
     },
   });
   assert.deepEqual(await provider.observe(payment), {
-    state: "PAID", observedAt: now.toISOString(), canonicalStatus: "PAID",
+    state: "PAID", observedAt: now.toISOString(), canonicalStatus: "PAID", providerStatus: "PAID",
+  });
+});
+
+function providerReturning(body: Record<string, unknown>) {
+  return new PortOneApiReconciliationProvider({
+    apiBaseUrl: "https://api.example.test/functions/v1/dabboba-api",
+    secret: "separate-worker-requery-secret-for-tests",
+  }, {
+    now: () => new Date("2026-09-26T08:00:00.000Z"),
+    async fetch() {
+      return new Response(JSON.stringify({
+        accepted: true, paymentId: payment.id, orderId: payment.orderId, ...body,
+      }), { status: 200 });
+    },
+  });
+}
+
+test("an authoritative PortOne not-found is a no-payment observation, never a mutation", async () => {
+  assert.deepEqual(await providerReturning({
+    providerStatus: null, outcome: "provider_not_found", localStatus: "PENDING",
+  }).observe(payment), {
+    state: "PENDING", observedAt: "2026-09-26T08:00:00.000Z", canonicalStatus: "PENDING",
+    providerStatus: "PAYMENT_NOT_FOUND",
+  });
+  // A not-found outcome must not carry a provider status.
+  await assert.rejects(providerReturning({
+    providerStatus: "READY", outcome: "provider_not_found", localStatus: "PENDING",
+  }).observe(payment), /invalid canonical response/i);
+  // An already settled response keeps no provider status.
+  assert.deepEqual(await providerReturning({
+    providerStatus: null, outcome: "already_settled", localStatus: "PAID",
+  }).observe(payment), {
+    state: "UNKNOWN", observedAt: "2026-09-26T08:00:00.000Z", canonicalStatus: "PAID",
   });
 });
 

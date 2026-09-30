@@ -6,6 +6,7 @@ import { createDatabasePool } from "@dabboba/db";
 import { buildApp } from "../app.js";
 import { acceptRequiredPoliciesForIntegrationTest } from "../integration-test-fixtures.js";
 import { issueSession } from "../plugins/auth.js";
+import { applyCanonicalPaymentEvent, parseCanonicalPaymentEvent } from "./commerce.js";
 
 const databaseUrl = process.env.DABBOBA_TEST_DATABASE_URL;
 const webhookSecret = "shipping-refund-atomicity-test-secret";
@@ -27,7 +28,7 @@ test("a shipping fee refund does not restore only some items when the request ne
     },
     gcsBucket: null, gcsProjectId: null, logLevel: "silent",
   };
-  const { app } = await buildApp({ config, pool, redis: null });
+  const { app, context } = await buildApp({ config, pool, redis: null });
   t.after(async () => { await app.close(); await pool.end(); });
 
   const suffix = randomUUID().replaceAll("-", "").slice(0, 12);
@@ -98,13 +99,22 @@ test("a shipping fee refund does not restore only some items when the request ne
     eventId: `refund-${randomUUID()}`, eventType: "REFUND_SUCCEEDED", paymentId,
     providerPaymentId: `provider-${paymentId}`, occurredAt: new Date().toISOString(), amount: 3000,
   });
+  // PORTONE mode exposes no shared-secret webhook: a correctly signed
+  // external canonical event is not even routed.
   const signature = createHmac("sha256", webhookSecret).update(payload).digest("hex");
-  const response = await app.inject({
+  const external = await app.inject({
     method: "POST", url: "/v1/payments/webhooks/PORTONE_V2_INICIS",
     headers: { "content-type": "application/json", "x-dabboba-signature": signature }, payload,
   });
-  assert.equal(response.statusCode, 202, response.body);
-  assert.equal((response.json() as { outcome: string }).outcome, "review");
+  assert.equal(external.statusCode, 404, external.body);
+  // The in-process canonical handler is what PortOne flows call after a
+  // fresh authenticated provider read.
+  const outcome = await applyCanonicalPaymentEvent(
+    context,
+    parseCanonicalPaymentEvent("PORTONE_V2_INICIS", JSON.parse(payload), `test-${randomUUID()}`),
+    `shipping-refund-atomicity-${suffix}`,
+  );
+  assert.equal(outcome, "review");
   const state = await pool.query<{ inventory_status: string; request_status: string; payment_status: string }>(
     `SELECT i.status AS inventory_status,s.status AS request_status,p.status AS payment_status
        FROM inventory_units i

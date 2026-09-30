@@ -12,7 +12,7 @@ const RESPONSE_LIMIT = 8 * 1_024;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const LOCAL_STATUSES = new Set(["PENDING", "AUTHORIZED", "PAID", "FAILED", "CANCELLED", "REFUND_REVIEW", "REFUNDED"]);
 const PROVIDER_STATUSES = new Set(["READY", "PAY_PENDING", "VIRTUAL_ACCOUNT_ISSUED", "PAID", "FAILED", "CANCELLED", "PARTIAL_CANCELLED"]);
-const CANONICAL_OUTCOMES = new Set(["processed", "duplicate", "review", "ignored", "pending", "already_settled"]);
+const CANONICAL_OUTCOMES = new Set(["processed", "duplicate", "review", "ignored", "pending", "already_settled", "provider_not_found"]);
 
 export class PortOneApiRequeryError extends Error {
   constructor(message: string) {
@@ -53,7 +53,8 @@ async function boundedJson(response: Response): Promise<unknown> {
   }
 }
 
-function observedState(providerStatus: string | null, localStatus: string): PaymentObservation["state"] {
+function observedState(providerStatus: string | null, localStatus: string, outcome: string): PaymentObservation["state"] {
+  if (providerStatus === null && outcome === "provider_not_found") return "PENDING";
   if (providerStatus === "PAID") return "PAID";
   if (providerStatus === "FAILED") return "FAILED";
   if (providerStatus === "CANCELLED") return localStatus === "REFUNDED" ? "REFUNDED" : "CANCELLED";
@@ -107,10 +108,17 @@ export class PortOneApiReconciliationProvider implements PaymentReconciliationPr
       || typeof body.outcome !== "string" || !CANONICAL_OUTCOMES.has(body.outcome)) {
       fail("PortOne requery API returned an invalid canonical response");
     }
+    if (body.outcome === "provider_not_found" && body.providerStatus !== null) {
+      fail("PortOne requery API returned an invalid canonical response");
+    }
+    const providerStatus = body.outcome === "provider_not_found"
+      ? "PAYMENT_NOT_FOUND"
+      : typeof body.providerStatus === "string" ? body.providerStatus : undefined;
     return {
-      state: observedState(body.providerStatus, body.localStatus),
+      state: observedState(body.providerStatus, body.localStatus, body.outcome),
       observedAt: now.toISOString(),
       canonicalStatus: body.localStatus,
+      ...(providerStatus ? { providerStatus } : {}),
     };
   }
 }

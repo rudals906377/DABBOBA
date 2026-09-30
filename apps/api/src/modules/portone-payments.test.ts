@@ -2,7 +2,17 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import type { PortOneCardPayment } from "../lib/portone-v2.js";
-import { lateRefundBlocker, normalDrawRefundBlocker, normalizedPortOneEventForPayment } from "./portone-payments.js";
+import { isPortOnePaymentNotFound, PortOneV2Error } from "../lib/portone-v2.js";
+import {
+  lateRefundBlocker,
+  normalDrawRefundBlocker,
+  normalizedPortOneEventForPayment,
+  portOnePaymentEvidence,
+  portOnePaymentFullyCancellable,
+  refundAttemptAbortable,
+  refundAttemptResumable,
+  settledLocalPaymentProviderStatus,
+} from "./portone-payments.js";
 
 function payment(
   status: PortOneCardPayment["status"],
@@ -231,4 +241,65 @@ test("provider cancellation migration is durable, super-admin only, and backend-
   assert.doesNotMatch(sql, /'ADMIN', 'refunds\.cancel'/);
   assert.match(sql, /ENABLE ROW LEVEL SECURITY/);
   assert.match(sql, /GRANT SELECT, INSERT, UPDATE .*dabboba_runtime/);
+});
+
+test("abandon releases only on authoritative no-payment evidence", () => {
+  const none = { total: 12_000, paid: 0, cancelled: 0 };
+  assert.equal(portOnePaymentEvidence(payment("READY", none)), "NONE");
+  assert.equal(portOnePaymentEvidence(payment("FAILED", none)), "NONE");
+  assert.equal(portOnePaymentEvidence(payment("CANCELLED", none)), "NONE");
+  assert.equal(portOnePaymentEvidence(payment("PAY_PENDING", none)), "PRESENT");
+  assert.equal(portOnePaymentEvidence(payment("VIRTUAL_ACCOUNT_ISSUED", none)), "PRESENT");
+  assert.equal(portOnePaymentEvidence(payment("PAID")), "PRESENT");
+  assert.equal(portOnePaymentEvidence(payment("PARTIAL_CANCELLED", { total: 12_000, paid: 12_000, cancelled: 1_000 })), "PRESENT");
+  assert.equal(portOnePaymentEvidence(payment("READY", { total: 12_000, paid: 1, cancelled: 0 })), "PRESENT");
+  assert.equal(portOnePaymentEvidence({
+    ...payment("CANCELLED", none),
+    cancellations: [{ outcome: "SUCCEEDED", cancellationId: "c", pgCancellationId: null, totalAmount: 0, requestedAt: "2026-09-20T00:00:00.000Z", cancelledAt: null }],
+  }), "PRESENT");
+
+  assert.equal(isPortOnePaymentNotFound(new PortOneV2Error("UPSTREAM_REJECTED", "x", { httpStatus: 404, providerErrorType: "PAYMENT_NOT_FOUND" })), true);
+  assert.equal(isPortOnePaymentNotFound(new PortOneV2Error("UPSTREAM_REJECTED", "x", { httpStatus: 404, providerErrorType: "STORE_NOT_FOUND" })), false);
+  assert.equal(isPortOnePaymentNotFound(new PortOneV2Error("UPSTREAM_UNAVAILABLE", "x")), false);
+  assert.equal(isPortOnePaymentNotFound(new Error("PAYMENT_NOT_FOUND")), false);
+});
+
+test("confirm short-circuits only locally settled payments", () => {
+  assert.equal(settledLocalPaymentProviderStatus("PAID", null), "PAID");
+  assert.equal(settledLocalPaymentProviderStatus("FAILED", null), "FAILED");
+  assert.equal(settledLocalPaymentProviderStatus("REFUNDED", null), "CANCELLED");
+  assert.equal(settledLocalPaymentProviderStatus("CANCELLED", null), "CANCELLED");
+  // A cancellation after the PG window was claimed may still hide a late charge.
+  assert.equal(settledLocalPaymentProviderStatus("CANCELLED", new Date()), null);
+  for (const status of ["PENDING", "AUTHORIZED", "REFUND_REVIEW"]) {
+    assert.equal(settledLocalPaymentProviderStatus(status, null), null, status);
+  }
+});
+
+test("refund attempts resume or abort only before a provider cancellation can be in flight", () => {
+  const now = Date.parse("2026-09-30T00:00:00.000Z");
+  const attempt = (status: string, lastErrorCode: string | null, ageMs = 60_000) => ({
+    status, last_error_code: lastErrorCode, updated_at: new Date(now - ageMs),
+  });
+  assert.equal(refundAttemptResumable(attempt("PRECHECK", null), now), true);
+  assert.equal(refundAttemptResumable(attempt("PRECHECK", null, 5_000), now), false);
+  assert.equal(refundAttemptResumable(attempt("PRECHECK_FAILED", "ABORTED_BY_ADMIN"), now), true);
+  for (const code of ["LOCAL_STATE_CHANGED", "PROVIDER_STATE_MISMATCH", "PROVIDER_CANCEL_FAILED"]) {
+    assert.equal(refundAttemptResumable(attempt("REVIEW_REQUIRED", code), now), true, code);
+    assert.equal(refundAttemptAbortable(attempt("REVIEW_REQUIRED", code), now), true, code);
+  }
+  assert.equal(refundAttemptResumable(attempt("REVIEW_REQUIRED", "PROVIDER_REVIEW_REQUIRED"), now), false);
+  for (const status of ["CALLING", "PROVIDER_PENDING", "INDETERMINATE", "RECONCILED"]) {
+    assert.equal(refundAttemptResumable(attempt(status, null, 86_400_000), now), false, status);
+    assert.equal(refundAttemptAbortable(attempt(status, null, 86_400_000), now), false, status);
+  }
+  assert.equal(refundAttemptResumable(attempt("INDETERMINATE", "CANCEL_OUTCOME_UNKNOWN", 86_400_000), now), false);
+  assert.equal(refundAttemptAbortable(attempt("PRECHECK_FAILED", "ABORTED_BY_ADMIN"), now), false);
+
+  assert.equal(portOnePaymentFullyCancellable(payment("PAID"), 12_000), true);
+  assert.equal(portOnePaymentFullyCancellable(payment("PAID"), 11_000), false);
+  assert.equal(portOnePaymentFullyCancellable(payment("PARTIAL_CANCELLED", { total: 12_000, paid: 12_000, cancelled: 1 }), 12_000), false);
+  const cancellation = { cancellationId: "c", pgCancellationId: null, totalAmount: 12_000, requestedAt: "2026-09-20T00:00:00.000Z", cancelledAt: null };
+  assert.equal(portOnePaymentFullyCancellable({ ...payment("PAID"), cancellations: [{ ...cancellation, outcome: "FAILED" }] }, 12_000), true);
+  assert.equal(portOnePaymentFullyCancellable({ ...payment("PAID"), cancellations: [{ ...cancellation, outcome: "PENDING" }] }, 12_000), false);
 });

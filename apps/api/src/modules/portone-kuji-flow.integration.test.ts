@@ -147,8 +147,12 @@ test("verified PortOne kuji payment leads to sealed ticket results and owned inv
   assert.equal((confirmed.json() as { providerStatus: string }).providerStatus, "PAID");
   const confirmedAgain = await app.inject({ method: "POST", url: `/v1/payments/${order.paymentId}/confirm`, headers: auth(customer.token) });
   assert.equal(confirmedAgain.statusCode, 200, confirmedAgain.body);
-  assert.equal((confirmedAgain.json() as { outcome: string }).outcome, "duplicate");
-  assert.equal(providerLookups, 2);
+  // A settled payment short-circuits without another provider read.
+  assert.deepEqual(confirmedAgain.json(), {
+    accepted: true, paymentId: order.paymentId, orderId: order.id,
+    providerStatus: "PAID", outcome: "already_settled", localStatus: "PAID",
+  });
+  assert.equal(providerLookups, 1);
 
   const beforeDraw = await pool.query<{ payment_status: string; room_state: string; entitlement_count: string; ledger_count: string; on_hand: number; reserved: number }>(
     `SELECT p.status AS payment_status,r.state AS room_state,

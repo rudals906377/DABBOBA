@@ -35,6 +35,12 @@ export type WorkerConfig = {
   queueName: string;
   outboxBatchSize: number;
   paymentStaleMinutes: number;
+  /**
+   * How long a claimed PortOne window may stay READY/PAY_PENDING before the
+   * worker closes its reconciliation as PENDING_EXPIRED. Optional only for
+   * backwards-compatible programmatic fixtures; loaded configs always set it.
+   */
+  paymentWindowValidityMinutes?: number;
   mediaPendingTtlMinutes: number;
   mediaRejectedTtlHours: number;
   jobAttempts: number;
@@ -317,6 +323,7 @@ export function loadWorkerConfig(env: Environment = process.env): WorkerConfig {
     queueName,
     outboxBatchSize: integer(env, "WORKER_OUTBOX_BATCH_SIZE", 50, 1, 500),
     paymentStaleMinutes: integer(env, "WORKER_PAYMENT_STALE_MINUTES", 10, 1, 10_080),
+    paymentWindowValidityMinutes: integer(env, "WORKER_PAYMENT_WINDOW_VALIDITY_MINUTES", 30, 10, 1_440),
     mediaPendingTtlMinutes: integer(env, "WORKER_MEDIA_PENDING_TTL_MINUTES", 5, 5, 10_080),
     mediaRejectedTtlHours: integer(env, "WORKER_MEDIA_REJECTED_TTL_HOURS", 24, 1, 8_760),
     jobAttempts: integer(env, "WORKER_JOB_ATTEMPTS", 8, 1, 50),
