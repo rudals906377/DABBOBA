@@ -22,10 +22,12 @@
 - 모바일 보호 파일 28개 무결성 및 변경 공백 검사 통과.
 - 수정 후 전체 루트 단위 검사 1,032개와 TypeScript 검사 8개 통과. 실패·건너뛴 검사는 0개다.
 
+후속 보강에서는 실제 `Deno.serve`를 `127.0.0.1`의 자동 배정 포트에 열고 `fetch`로 HTTP 요청을 전송했다. health/readiness/catalog, 인증 401·관리자 404·CORS·HEAD, 원본 바이트 HMAC, 동시 8개 요청을 검사했고 응답 body를 모두 소비한 뒤 서버와 pool을 종료했다. Deno의 resource/op leak 검사는 끄지 않았다. 고객 관련 Deno 검사 5개(기존 4개와 새 HTTP 1개)는 모두 통과했다. `api-http-final.log`에 결과를 남겼다. Fastify 및 Deno의 기존 abort 동작 안내 경고는 남아 있다.
+
 첫 이미지 검사는 macOS `/tmp`가 `/private/tmp`로 해석되어 제한된 읽기 권한과 일치하지 않아 실패했다. 소스를 바꾸거나 전체 파일 읽기 권한을 주지 않고 이 전용 경로의 canonical 주소만 허용해 재실행했다. 최초 실패 로그를 보존했다. Fastify의 기존 deprecation 경고는 남아 있으며 경고가 없다고 주장하지 않는다.
 
 ## 증거와 한계
 
 실행 로그와 생성 번들은 `/tmp/dabboba-deno-release-qa.Dbd0on`에 있다. `admin-entry-check.log`는 수정 전 실패, `admin-entry-check-final.log`는 수정 후 통과다. `api-runtime-final.log`의 4개와 `worker-runtime-final.log`의 1개가 최종 실행 결과다. 임시 로그 폴더는 정기 보관소가 아니다. 검증 후 전용 컨테이너를 중지하고 DB는 재검사할 수 있게 남긴다.
 
-통합 검사는 Deno에서 실제 핸들러를 호출했지만 Supabase 호스팅·실제 HTTP ingress·운영 DB·PG·Apple 토큰 폐기·실기기 증거는 아니다. 운영 함수 배포, 소유 계정 확인, 비밀 설정, 원격 read-only 점검은 로그인 가능한 시점에 별도로 진행한다. PRELAUNCH 차단은 유지한다.
+통합 검사는 Deno의 직접 핸들러 호출과 로컬 실제 HTTP ingress를 확인했지만 Supabase 호스팅 ingress·운영 DB·PG·Apple 토큰 폐기·실기기 증거는 아니다. 운영 함수 배포, 소유 계정 확인, 비밀 설정, 원격 read-only 점검은 로그인 가능한 시점에 별도로 진행한다. PRELAUNCH 차단은 유지한다.
