@@ -216,11 +216,15 @@ export function ShopScreen({ category }: { category: ShopRootCategory }) {
     }
     if (lastSuccessfulLoadAt.current === null) {
       if (firstPageFailed.current) void loadProductsRef.current();
-    } else if (shouldRefreshShopOnFocus(lastSuccessfulLoadAt.current, Date.now())) {
+    } else if (
+      // Kuji remaining-tier counts must refresh whenever the shop regains focus.
+      category === "kuji"
+      || shouldRefreshShopOnFocus(lastSuccessfulLoadAt.current, Date.now())
+    ) {
       void loadProductsRef.current({ inPlace: true });
     }
     return undefined;
-  }, [loadIps]));
+  }, [category, loadIps]));
 
   // Changing the search, sort, filter or category conditions starts a new list.
   useEffect(() => {

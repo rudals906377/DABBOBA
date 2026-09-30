@@ -39,10 +39,12 @@ test("an in-place refresh keeps already loaded later pages and their continuatio
 });
 
 test("ShopScreen keeps items on focus, resets on condition changes and on pull-to-refresh", () => {
-  const focusEffect = shopSource.match(/useFocusEffect\(useCallback\(\(\) => \{[\s\S]*?\}, \[loadIps\]\)\);/)?.[0] ?? "";
+  const focusEffect = shopSource.match(/useFocusEffect\(useCallback\(\(\) => \{[\s\S]*?\}, \[category, loadIps\]\)\);/)?.[0] ?? "";
   assert.ok(focusEffect);
   assert.doesNotMatch(focusEffect, /setProducts|setNextCursor/);
   assert.match(focusEffect, /loadProductsRef\.current\(\{ inPlace: true \}\)/);
+  // Kuji remaining-tier counts refresh in place on every refocus (AGENTS.md).
+  assert.match(focusEffect, /category === "kuji"\s*\|\| shouldRefreshShopOnFocus/);
   assert.match(shopSource, /\} else if \(!inPlace\) \{\s*setLoading\(true\);\s*setProducts\(\[\]\);/);
   assert.match(shopSource, /const refresh = async \(\) => \{[\s\S]*?await loadProducts\(\{ manual: true \}\);/);
   assert.match(shopSource, /useEffect\(\(\) => \{\s*const timer = setTimeout\(\(\) => \{\s*void loadProducts\(\);[\s\S]*?\}, \[loadProducts\]\);/);

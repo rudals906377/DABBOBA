@@ -107,11 +107,16 @@ export function resolveCommerceRouteAccess(
  * Relative paths resolve against the runtime asset base, which the runtime
  * config already restricts to HTTPS outside development.
  */
+/** True only inside a development JS bundle; plain Node tests see false. */
+function isDevelopmentRuntime(): boolean {
+  return typeof __DEV__ !== "undefined" && __DEV__ === true;
+}
+
 export function resolveCatalogImageUrl(
   imageUrl: string | null,
   assetBaseUrl: string | null,
   version?: string | number,
-  development = false,
+  development = isDevelopmentRuntime(),
 ): string | null {
   if (!imageUrl) return null;
   let resolved: string | null;
