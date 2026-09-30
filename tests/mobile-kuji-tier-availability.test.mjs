@@ -79,6 +79,6 @@ test("Home overlays a compact summary while Kuji Shop renders the wide tier row 
   assert.match(homeSource, /<KujiPrizeTierRow tiers=\{remainingKujiTiers\} variant="overlay" \/>/);
   assert.match(shopSource, /<KujiPrizeTierRow tiers=\{product\.remainingKujiTiers\}/);
   assert.match(homeSource, /useFocusEffect\([\s\S]*?void load\(\)/);
-  assert.match(shopSource, /useFocusEffect\([\s\S]*?setFocusRevision\(\(current\) => current \+ 1\)/);
-  assert.match(shopSource, /useEffect\([\s\S]*?void loadProducts\(\)[\s\S]*?focusRevision/);
+  assert.match(shopSource, /useFocusEffect\([\s\S]*?shouldRefreshShopOnFocus\(lastSuccessfulLoadAt\.current, Date\.now\(\)\)[\s\S]*?loadProductsRef\.current\(\{ inPlace: true \}\)/);
+  assert.doesNotMatch(shopSource, /focusRevision/);
 });
