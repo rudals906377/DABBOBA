@@ -1,18 +1,12 @@
 import * as Notifications from "expo-notifications";
 import { Platform } from "react-native";
 import { buildKujiTurnCall } from "@/features/kuji/kuji-entry-state";
+import { ensureForegroundNotificationHandler } from "@/features/notifications/notification-handler";
 import { colors } from "@/theme";
 
 const KUJI_NOTIFICATION_CHANNEL = "kuji-turn";
 
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowBanner: true,
-    shouldShowList: true,
-    shouldPlaySound: true,
-    shouldSetBadge: false,
-  }),
-});
+ensureForegroundNotificationHandler();
 
 export async function scheduleKujiTurnExampleNotification(
   productId: string,

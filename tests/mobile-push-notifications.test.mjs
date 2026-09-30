@@ -35,8 +35,12 @@ test("permission prompts remain user-triggered and logout unregisters the instal
 });
 
 test("foreground push renders safely while taps always open validated notification detail", () => {
-  assert.match(observer, /setNotificationHandler/);
-  assert.match(observer, /shouldShowBanner:\s*true/);
-  assert.match(observer, /resolveAccountNotificationResponsePath/);
-  assert.match(observer, /getLastNotificationResponse/);
+  const handler = read("apps/mobile/src/features/notifications/notification-handler.ts");
+  const dispatcher = read("apps/mobile/src/features/notifications/notification-response.ts");
+  assert.match(observer, /ensureForegroundNotificationHandler\(\);/);
+  assert.match(handler, /setNotificationHandler/);
+  assert.match(handler, /shouldShowBanner:\s*true/);
+  assert.match(observer, /installNotificationResponseDispatcher/);
+  assert.match(dispatcher, /resolveAccountNotificationResponsePath/);
+  assert.match(dispatcher, /getLastNotificationResponse/);
 });
