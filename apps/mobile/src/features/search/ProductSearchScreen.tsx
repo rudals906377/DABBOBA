@@ -76,7 +76,7 @@ export function ProductSearchScreen() {
       setMessage("");
     } catch (error) {
       if (sequence !== requestSequence.current) return;
-      setMessage(error instanceof Error ? error.message : "검색할 상품을 불러오지 못했습니다.");
+      setMessage(error instanceof Error ? error.message : "검색할 상품을 불러오지 못했어요.");
     } finally {
       if (sequence === requestSequence.current) {
         setLoading(false);
@@ -212,7 +212,7 @@ const styles = StyleSheet.create({
   resultHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 14, ...subtleSectionHeaderRule },
   list: { gap: 12 },
   state: { minHeight: 430, paddingHorizontal: 28, alignItems: "center", justifyContent: "center" },
-  stateTitle: { color: colors.ink, fontSize: 17, lineHeight: 24, fontWeight: "900", textAlign: "center", marginTop: 13 },
+  stateTitle: { color: colors.ink, ...seed.typography.subtitle, textAlign: "center", marginTop: 13 },
   stateBody: { color: colors.muted, fontSize: 13, lineHeight: 20, textAlign: "center", marginTop: 7 },
   retryButton: { marginTop: seed.spacing.x4 },
   loadMoreButton: { alignSelf: "center", marginTop: seed.spacing.x4 },

@@ -64,7 +64,7 @@ export function InquiryDetailScreen() {
     const generation = ++loadGeneration.current;
     let requestedAccessToken: string | null = null;
     if (!inquiryId) {
-      setError("문의 번호를 확인할 수 없습니다.");
+      setError("문의 번호를 확인할 수 없어요.");
       setLoading(false);
       return;
     }
@@ -120,7 +120,7 @@ export function InquiryDetailScreen() {
         setError("");
         return;
       }
-      setError(cause instanceof Error ? cause.message : "문의 내역을 불러오지 못했습니다.");
+      setError(cause instanceof Error ? cause.message : "문의 내역을 불러오지 못했어요.");
     } finally {
       if (generation === loadGeneration.current) {
         setLoading(false);
@@ -198,7 +198,7 @@ export function InquiryDetailScreen() {
         void loadRef.current();
         return;
       }
-      setError(cause instanceof Error ? cause.message : "추가 답변을 보내지 못했습니다.");
+      setError(cause instanceof Error ? cause.message : "추가 답변을 보내지 못했어요.");
     } finally {
       if (generation === loadGeneration.current) setSending(false);
     }
@@ -349,7 +349,7 @@ const styles = StyleSheet.create({
   pressed: { opacity: seed.state.pressedOpacity, transform: [{ scale: seed.state.pressedScale }] },
   content: { paddingHorizontal: seed.spacing.globalGutter, paddingTop: seed.spacing.x4_5, paddingBottom: seed.spacing.screenBottom },
   state: { minHeight: 420, paddingHorizontal: seed.spacing.x7, alignItems: "center", justifyContent: "center" },
-  stateTitle: { color: colors.ink, fontSize: 17, lineHeight: 24, fontWeight: "900", textAlign: "center", marginTop: seed.spacing.x3_5 },
+  stateTitle: { color: colors.ink, ...seed.typography.subtitle, textAlign: "center", marginTop: seed.spacing.x3_5 },
   stateText: { color: colors.muted, fontSize: 13, lineHeight: 20, textAlign: "center", marginTop: seed.spacing.x2 },
   retryButton: { marginTop: seed.spacing.x4 },
   summaryCard: { borderRadius: seed.radius.r4, borderWidth: 1, borderColor: seed.color.stroke.neutral, padding: seed.spacing.x4, backgroundColor: seed.color.layer.default },

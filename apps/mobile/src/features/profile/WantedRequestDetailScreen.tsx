@@ -85,7 +85,7 @@ export function WantedRequestDetailScreen() {
               />
             ) : null}
             <View style={styles.card}>
-              {request.mediaUrl ? <Image source={{ uri: request.mediaUrl }} resizeMode="cover" style={styles.photo} /> : null}
+              {request.mediaUrl ? <Image accessible={false} source={{ uri: request.mediaUrl }} resizeMode="cover" style={styles.photo} /> : null}
               <Text style={styles.ipName}>{request.ipNameKo}</Text>
               <ReadablePageTitle variant="subtitle" style={styles.title}>{request.desiredItem}</ReadablePageTitle>
               <Text style={styles.details}>{request.details}</Text>
@@ -131,7 +131,7 @@ const styles = StyleSheet.create({
   title: { color: colors.ink, marginBottom: seed.spacing.x3 },
   details: { color: colors.ink, fontSize: 14, lineHeight: 23 },
   state: { minHeight: 420, alignItems: "center", justifyContent: "center", paddingHorizontal: seed.spacing.x6 },
-  stateTitle: { color: colors.ink, fontSize: 17, fontWeight: "900", marginTop: seed.spacing.x3 },
+  stateTitle: { color: colors.ink, ...seed.typography.subtitle, marginTop: seed.spacing.x3 },
   stateBody: { color: colors.muted, fontSize: 13, lineHeight: 20, textAlign: "center", marginTop: seed.spacing.x2 },
   stateAction: { alignSelf: "stretch", marginTop: seed.spacing.x4 },
   pressed: { opacity: seed.state.pressedOpacity, transform: [{ scale: seed.state.pressedScale }] },

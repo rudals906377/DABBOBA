@@ -174,7 +174,7 @@ export function ProfileShippingDetailScreen() {
         setDetailMessage("");
         return;
       }
-      setDetailMessage(error instanceof Error ? error.message : "배송 신청 정보를 불러오지 못했습니다.");
+      setDetailMessage(error instanceof Error ? error.message : "배송 신청 정보를 불러오지 못했어요.");
     } finally {
       if (generation === detailGeneration.current) {
         setDetailLoading(false);
@@ -520,7 +520,7 @@ function StatusCard({
   return (
     <View style={styles.statusCard}>
       <View style={[styles.statusIcon, success && styles.statusIconSuccess, critical && styles.statusIconCritical, refund && styles.statusIconRefund]}>
-        <DecorativeIonicon name={icon} size={24} color={critical ? colors.danger : refund ? "#4C5FA8" : success ? colors.greenInk : colors.muted} />
+        <DecorativeIonicon name={icon} size={24} color={critical ? colors.danger : refund ? seed.color.info.ink : success ? colors.greenInk : colors.muted} />
       </View>
       <View style={styles.statusText}>
         <Text style={[styles.statusBadge, success && styles.statusBadgeSuccess, critical && styles.statusBadgeCritical, refund && styles.statusBadgeRefund]}>{status}</Text>
@@ -716,7 +716,7 @@ const styles = StyleSheet.create({
   },
   statusIconSuccess: { backgroundColor: seed.color.background.brandWeak },
   statusIconCritical: { backgroundColor: seed.color.background.criticalWeak },
-  statusIconRefund: { backgroundColor: "#EEF0FA" },
+  statusIconRefund: { backgroundColor: seed.color.info.weak },
   statusText: { flex: 1, minWidth: 0 },
   statusBadge: {
     alignSelf: "flex-start",
@@ -734,12 +734,10 @@ const styles = StyleSheet.create({
     color: colors.danger,
     backgroundColor: seed.color.background.criticalWeak,
   },
-  statusBadgeRefund: { color: "#4C5FA8", backgroundColor: "#EEF0FA" },
+  statusBadgeRefund: { color: seed.color.info.ink, backgroundColor: seed.color.info.weak },
   statusTitle: {
     color: colors.ink,
-    fontSize: 17,
-    lineHeight: 23,
-    fontWeight: "900",
+    ...seed.typography.subtitle,
     marginTop: seed.spacing.x2,
   },
   statusBody: {
@@ -837,8 +835,7 @@ const styles = StyleSheet.create({
   },
   totalValue: {
     color: colors.ink,
-    fontSize: 19,
-    fontWeight: "900",
+    ...seed.typography.subtitle,
   },
   addressBlock: {
     padding: seed.spacing.x4,

@@ -134,7 +134,7 @@ export function useProfileSnapshot(scope: ProfileSnapshotScope = "full") {
       }
     } catch (error) {
       if (generation === loadGeneration.current) {
-        const failureMessage = error instanceof Error ? error.message : "내정보를 불러오지 못했습니다.";
+        const failureMessage = error instanceof Error ? error.message : "내정보를 불러오지 못했어요.";
         setSession((current) => (
           requestedAccessToken
           && current.status === "authenticated"

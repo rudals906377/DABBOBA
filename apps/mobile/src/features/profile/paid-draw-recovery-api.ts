@@ -11,7 +11,7 @@ export function createPaidDrawRecoverySource(
   return {
     async fetchActorId() {
       const result = await client.GET("/v1/account/profile", { signal });
-      if (!result.data) throw new Error(errorMessage(result.error, "로그인 계정을 확인하지 못했습니다."));
+      if (!result.data) throw new Error(errorMessage(result.error, "로그인 계정을 확인하지 못했어요."));
       return result.data.id;
     },
     async fetchPage(cursor) {
@@ -19,7 +19,7 @@ export function createPaidDrawRecoverySource(
         signal,
         params: { query: { status: "AVAILABLE", limit: 50, ...(cursor ? { cursor } : {}) } },
       });
-      if (!result.data) throw new Error(errorMessage(result.error, "남은 추첨권을 불러오지 못했습니다."));
+      if (!result.data) throw new Error(errorMessage(result.error, "남은 추첨권을 불러오지 못했어요."));
       return result.data;
     },
     async fetchOrder(orderId) {
@@ -27,7 +27,7 @@ export function createPaidDrawRecoverySource(
         signal,
         params: { path: { orderId } },
       });
-      if (!result.data) throw new Error(errorMessage(result.error, "주문 상태를 확인하지 못했습니다."));
+      if (!result.data) throw new Error(errorMessage(result.error, "주문 상태를 확인하지 못했어요."));
       return result.data;
     },
     async fetchKujiRecovery(orderId) {
@@ -35,7 +35,7 @@ export function createPaidDrawRecoverySource(
         signal,
         params: { path: { orderId } },
       });
-      if (!result.data) throw new Error(errorMessage(result.error, "쿠지 뽑기방 복구 정보를 확인하지 못했습니다."));
+      if (!result.data) throw new Error(errorMessage(result.error, "쿠지 뽑기방 복구 정보를 확인하지 못했어요."));
       return result.data;
     },
   };

@@ -142,10 +142,10 @@ export function ProfileHomeScreen() {
                   style={({ pressed }) => [styles.profileCard, pressed && styles.pressed]}
                 >
                   <View style={styles.avatar}>
-                    <DecorativeIonicon name="people-outline" size={28} color={colors.ink} />
+                    <DecorativeIonicon name="people-outline" size={28} color={seed.color.foreground.brand} />
                   </View>
                   <View style={styles.profileText}>
-                    <Text maxFontSizeMultiplier={2} style={styles.nickname}>{snapshot.profile.nickname}</Text>
+                    <Text variant="subtitle" maxFontSizeMultiplier={2} style={styles.nickname}>{snapshot.profile.nickname}</Text>
                     <Text maxFontSizeMultiplier={2} style={styles.bio}>{snapshot.profile.bio ?? "나만의 수집 프로필을 완성해 보세요."}</Text>
                   </View>
                   <DecorativeIonicon name="chevron-forward" size={22} color={colors.muted} />
@@ -274,7 +274,7 @@ function MenuGroup({
 }) {
   return (
     <View style={styles.menuSection}>
-      <Text style={styles.menuSectionTitle}>{title}</Text>
+      <KoreanPixelTitle variant="compact" style={styles.menuSectionTitle}>{title}</KoreanPixelTitle>
       <View style={styles.menuCard}>
         {items.map((item, index) => (
           <View key={item.section}>
@@ -315,9 +315,9 @@ const styles = StyleSheet.create({
   retryLabel: { color: colors.white, fontWeight: "900" },
   profileSummaryCard: { overflow: "hidden", marginTop: seed.spacing.x3, borderRadius: seed.radius.r4, borderWidth: 1, borderColor: seed.color.stroke.neutral, backgroundColor: seed.color.layer.default },
   profileCard: { minHeight: 92, flexDirection: "row", alignItems: "center", gap: seed.spacing.x3, paddingHorizontal: seed.spacing.x4, paddingVertical: seed.spacing.x3, backgroundColor: seed.color.layer.default },
-  avatar: { width: 56, height: 56, borderRadius: seed.radius.r3, alignItems: "center", justifyContent: "center", backgroundColor: colors.brand },
+  avatar: { width: 56, height: 56, borderRadius: seed.radius.r3, alignItems: "center", justifyContent: "center", backgroundColor: seed.color.background.brandWeak },
   profileText: { flex: 1, minWidth: 0 },
-  nickname: { color: colors.ink, fontSize: 19, fontWeight: "900" },
+  nickname: { color: colors.ink },
   bio: { color: colors.muted, fontSize: 12, lineHeight: 18, marginTop: seed.spacing.x1_5 },
   summaryDivider: { height: StyleSheet.hairlineWidth, marginHorizontal: seed.spacing.x4, backgroundColor: seed.color.stroke.muted },
   walletCard: { minHeight: 76, flexDirection: "row", alignItems: "stretch", backgroundColor: seed.color.layer.default },
@@ -337,7 +337,7 @@ const styles = StyleSheet.create({
   requestText: { flex: 1, minWidth: 0 },
   requestCaption: { color: seed.color.foreground.muted, fontSize: 11, lineHeight: 17, marginTop: 5 },
   menuSection: { marginTop: seed.spacing.x6 },
-  menuSectionTitle: { color: seed.color.foreground.neutral, ...seed.typography.subheading, marginBottom: seed.spacing.x2_5 },
+  menuSectionTitle: { marginBottom: seed.spacing.x2_5 },
   menuCard: { overflow: "hidden", borderRadius: seed.radius.r4, borderWidth: 1, borderColor: seed.color.stroke.neutral, backgroundColor: seed.color.layer.default },
   menuRow: { minHeight: 58, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: seed.spacing.x4, paddingHorizontal: seed.spacing.x4, paddingVertical: seed.spacing.x2 },
   menuRowWithCaption: { minHeight: 68 },

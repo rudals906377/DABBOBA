@@ -96,7 +96,7 @@ export function InquiryCreateScreen() {
         setError("");
         return;
       }
-      setError(cause instanceof Error ? cause.message : "문의를 접수하지 못했습니다.");
+      setError(cause instanceof Error ? cause.message : "문의를 접수하지 못했어요.");
     } finally {
       setSubmitting(false);
     }
