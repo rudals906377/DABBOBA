@@ -21,9 +21,13 @@ The production API checked again on 2026-09-26 still returned `PRELAUNCH` and an
 empty list of customer login methods (`methods: []`). Its filtered public catalog
 returned one gacha item and no Kuji item; this is not evidence that either can
 currently be purchased. The new read-only LIVE mobile API gate
-requires all requested login methods (`PHONE`, `KAKAO`, `NAVER`, `GOOGLE`,
-`APPLE`) and at least one genuinely purchasable, in-stock gacha and kuji
-product each. It is a candidate-screening check, not proof that a real account
+requires the social login methods (`KAKAO`, `NAVER`, `GOOGLE`, `APPLE`) and at
+least one genuinely purchasable, in-stock gacha and kuji product each. `PHONE`
+(SMS OTP) is required only when the build environment and the Edge profile both
+set `DABBOBA_PHONE_LOGIN_READY=true` after SMS delivery has been contracted and
+verified on real devices; without that flag a LIVE server that lists `PHONE`
+fails the gate, and `prepare-supabase-edge-profile.mjs` rejects a LIVE profile
+that enables `PHONE`. It is a candidate-screening check, not proof that a real account
 can sign in, a card can be charged/refunded, or a draw can complete.
 The production release workflow also checks the deployed worker's public
 boundary before bundling: `GET` must return the expected 405 handler response,

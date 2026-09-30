@@ -18,7 +18,9 @@ const LIVE_MOBILE_ROUTES = Object.freeze([
   ['/v1/catalog/products?category=gacha&saleStatus=ON_SALE&excludeSoldOut=true&limit=1', 'Gacha products'],
   ['/v1/catalog/products?category=kuji&saleStatus=ON_SALE&excludeSoldOut=true&limit=1', 'Kuji products'],
 ]);
-const REQUIRED_LIVE_LOGIN_METHODS = Object.freeze(['PHONE', 'KAKAO', 'NAVER', 'GOOGLE', 'APPLE']);
+// PHONE (SMS OTP) is required in LIVE only when the build attests verified SMS
+// delivery with DABBOBA_PHONE_LOGIN_READY=true; otherwise it must stay off.
+const REQUIRED_LIVE_LOGIN_METHODS = Object.freeze(['KAKAO', 'NAVER', 'GOOGLE', 'APPLE']);
 // App Store Review Guideline 4.8: offering a third-party social login requires
 // Sign in with Apple as an equivalent option, in every commerce mode.
 const THIRD_PARTY_LOGIN_METHODS = Object.freeze(['KAKAO', 'NAVER', 'GOOGLE']);
@@ -37,7 +39,7 @@ function exposesPrelaunchInventory(product) {
     || (Array.isArray(product.remainingKujiTiers) && product.remainingKujiTiers.length > 0);
 }
 
-function assertBody(route, body, expectedCommerceMode) {
+function assertBody(route, body, expectedCommerceMode, { requirePhoneLogin = false } = {}) {
   if (!isRecord(body)) throw new Error(`${route} contract is incomplete.`);
   if (route === 'Public config') {
     if (body.commerceMode !== expectedCommerceMode) {
@@ -92,9 +94,15 @@ function assertBody(route, body, expectedCommerceMode) {
       && !body.methods.includes('APPLE')) {
       throw new Error('Auth providers list a third-party login without Sign in with Apple.');
     }
+    const requiredLiveMethods = requirePhoneLogin
+      ? ['PHONE', ...REQUIRED_LIVE_LOGIN_METHODS]
+      : REQUIRED_LIVE_LOGIN_METHODS;
     if (expectedCommerceMode === 'LIVE' && (body.brokerExchangeConfigured !== true
-      || REQUIRED_LIVE_LOGIN_METHODS.some((method) => !body.methods.includes(method)))) {
+      || requiredLiveMethods.some((method) => !body.methods.includes(method)))) {
       throw new Error('LIVE customer login providers are incomplete.');
+    }
+    if (expectedCommerceMode === 'LIVE' && !requirePhoneLogin && body.methods.includes('PHONE')) {
+      throw new Error('LIVE customer login lists PHONE without DABBOBA_PHONE_LOGIN_READY=true.');
     }
   }
 }
@@ -126,7 +134,7 @@ function assertMobileApiBaseUrl(value) {
   return url.toString().replace(/\/+$/, '');
 }
 
-async function verifyRoutes(baseUrl, routes, fetchImpl, expectedCommerceMode) {
+async function verifyRoutes(baseUrl, routes, fetchImpl, expectedCommerceMode, options = {}) {
   if (!['PRELAUNCH', 'LIVE'].includes(expectedCommerceMode)) {
     throw new Error('Expected commerce mode is invalid.');
   }
@@ -147,7 +155,7 @@ async function verifyRoutes(baseUrl, routes, fetchImpl, expectedCommerceMode) {
     let body;
     try { body = await response.json(); }
     catch { throw new Error(`${label} did not return JSON.`); }
-    assertBody(label, body, expectedCommerceMode);
+    assertBody(label, body, expectedCommerceMode, options);
     if (label === 'Public config') {
       observed.commerceMode = body.commerceMode;
       // The public config currently exposes no payment provider. Record one
@@ -175,12 +183,13 @@ export async function verifyMobilePublicApiSurface({
   apiBaseUrl,
   fetchImpl = globalThis.fetch,
   expectedCommerceMode = 'PRELAUNCH',
+  requirePhoneLogin = false,
 } = {}) {
   const baseUrl = assertMobileApiBaseUrl(apiBaseUrl);
   const routes = expectedCommerceMode === 'LIVE'
     ? [...ROUTES, ...MOBILE_CATALOG_ROUTES, ...LIVE_MOBILE_ROUTES]
     : [...ROUTES, ...MOBILE_CATALOG_ROUTES];
-  return verifyRoutes(baseUrl, routes, fetchImpl, expectedCommerceMode);
+  return verifyRoutes(baseUrl, routes, fetchImpl, expectedCommerceMode, { requirePhoneLogin });
 }
 
 export async function waitForPublicEdgeSurface({

@@ -22,7 +22,7 @@ function fixtureFetch({ commerceMode, paymentProvider } = {}) {
       '/v1/catalog/recent-draws': { serverNow: '2026-09-24T00:00:00.000Z', items: [] },
       '/v1/catalog/home-sections': { configured: false, items: [] },
       '/v1/auth/providers': mode === 'LIVE'
-        ? { methods: ['PHONE', 'KAKAO', 'NAVER', 'GOOGLE', 'APPLE'], brokerExchangeConfigured: true }
+        ? { methods: ['KAKAO', 'NAVER', 'GOOGLE', 'APPLE'], brokerExchangeConfigured: true }
         : { methods: [], brokerExchangeConfigured: false },
       '/v1/catalog/ips': { items: [], nextCursor: null },
     };
@@ -102,4 +102,15 @@ test('an unapproved API host is rejected before any request', async () => {
     fetchImpl,
   }), /not an approved production API host/);
   assert.equal(calls.length, 0);
+});
+
+test('the build PHONE readiness flag is forwarded to the LIVE login check', async () => {
+  await assert.rejects(verifyMobilePublicApiFromEnvironment({
+    environment: env({ DABBOBA_PHONE_LOGIN_READY: 'true' }),
+    fetchImpl: fixtureFetch({ commerceMode: 'LIVE' }).fetchImpl,
+  }), /LIVE customer login providers are incomplete/);
+  await assert.rejects(verifyMobilePublicApiFromEnvironment({
+    environment: env({ DABBOBA_PHONE_LOGIN_READY: 'maybe' }),
+    fetchImpl: fixtureFetch({ commerceMode: 'LIVE' }).fetchImpl,
+  }), /must be true or false/);
 });

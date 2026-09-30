@@ -44,7 +44,16 @@ export async function verifyMobilePublicApiFromEnvironment({
     throw new Error(`DABBOBA_COMMERCE_MODE=${declaredServerMode} does not match EXPO_PUBLIC_COMMERCE_CAPABILITY=${expectedCommerceMode}.`);
   }
 
-  const result = await verifyMobilePublicApiSurface({ apiBaseUrl, fetchImpl, expectedCommerceMode });
+  const phoneFlag = trimmed(environment.DABBOBA_PHONE_LOGIN_READY);
+  if (phoneFlag && phoneFlag !== 'true' && phoneFlag !== 'false') {
+    throw new Error('DABBOBA_PHONE_LOGIN_READY must be true or false.');
+  }
+  const result = await verifyMobilePublicApiSurface({
+    apiBaseUrl,
+    fetchImpl,
+    expectedCommerceMode,
+    requirePhoneLogin: phoneFlag === 'true',
+  });
   const observedMode = result.observed?.commerceMode;
   if (observedMode !== declaredServerMode) {
     throw new Error(`Server reports commerceMode=${observedMode ?? 'unknown'}; build declares DABBOBA_COMMERCE_MODE=${declaredServerMode}.`);
