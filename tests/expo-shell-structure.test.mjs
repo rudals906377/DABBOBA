@@ -387,7 +387,7 @@ test("native Home follows the operator-defined editorial structure and layoutKin
   );
   assert.match(homeSource, /function HomeIntroBanner/);
   assert.match(homeSource, /<HomeIntroBanner \/>/);
-  assert.match(homeSource, /accessibilityRole="summary"[\s\S]*?accessibilityLabel="새 소식 준비 중/);
+  assert.match(homeSource, /function HomeIntroBanner[\s\S]*?accessibilityRole="button"[\s\S]*?router\.push\("\/events" as Href\)/);
   assert.doesNotMatch(homeSource, /<HomeCategoryNavigation|<SeedChip/);
   assert.doesNotMatch(homeSource, /<HomePopularIpSection|<HomeFeaturedProductsSection|<TodayDrawGroup/);
   assert.doesNotMatch(homeSource, /buildTodayDrawGroups|buildHomeFeaturedProducts|buildHomeCollections|DEFAULT_HOME_COLLECTION_IP_IDS/);
@@ -452,8 +452,9 @@ test("native Home uses the approved restrained arcade treatment", () => {
   assert.match(announcementTickerSource, /Animated\.loop\(Animated\.sequence/);
   assert.match(announcementTickerSource, /if \(reduceMotion \|\| paused\) return undefined/);
   assert.match(homeSource, /<HomeIntroBanner \/>/);
-  assert.match(homeSource, /style=\{\[styles\.hero, expanded && styles\.heroLargeText\]\}/);
-  assert.match(homeSource, /style=\{styles\.heroAction\}>새 소식 준비 중<\/Text>/);
+  assert.match(homeSource, /style=\{\(\{ pressed \}\) => \[styles\.hero, pressed && styles\.pressed\]\}/);
+  assert.doesNotMatch(homeSource, /styles\.heroAction|새 소식 준비 중<\/Text>/);
+  assert.match(homeSource, /hero: \{[\s\S]*?borderWidth: 1,[\s\S]*?borderColor: seed\.color\.stroke\.neutral,[\s\S]*?backgroundColor: seed\.color\.layer\.elevated/);
   assert.doesNotMatch(homeSource, />LIVE<\/Text>|실시간 상품/);
   assert.doesNotMatch(homeSource, /ArcadeDotTexture|ArcadeScanlineTexture|dotTexture|scanlineTexture/);
   assert.doesNotMatch(homeSource, /activityCard|activityProduct/);
@@ -526,7 +527,8 @@ test("readable app copy uses Noto Sans while fixed pixel brand surfaces stay iso
   assert.match(typographySource, /fontSize === 12[\s\S]*?"catalogMetadata"[\s\S]*?"caption"/);
   assert.match(typographySource, /fontSize === 15[\s\S]*?"articleBody"[\s\S]*?"body"/);
   assert.match(typographySource, /readableMetrics\(style, "input"\)/);
-  assert.match(rootFloatingTabBarSource, /fontFamily:\s*"NotoSansKR_700Bold"/);
+  assert.doesNotMatch(rootFloatingTabBarSource, /fontFamily:/);
+  assert.match(rootFloatingTabBarSource, /label: \{[\s\S]*?fontWeight: "700"/);
 
   const pixelOnlyNativeText = new Set([
     "apps/mobile/src/components/RootCategoryTitle.tsx",
@@ -544,7 +546,8 @@ test("readable app copy uses Noto Sans while fixed pixel brand surfaces stay iso
   assert.match(rootLayoutSource, /Galmuri11Readable:\s*require\("galmuri\/dist\/Galmuri11\.ttf"\)/);
   assert.match(rootCategoryTitleSource, /section:\s*\{[\s\S]*?fontSize:\s*19/);
   assert.match(rootHeaderActionsSource, /import \{ AppText as Text \} from "@\/components\/Typography"/);
-  assert.match(rootHeaderActionsSource, /<Text style=\{styles\.unreadBadge\}>/);
+  assert.match(rootHeaderActionsSource, /<Text variant="micro" style=\{styles\.unreadBadge\}>/);
+  assert.match(rootHeaderActionsSource, /unreadBadge: \{[\s\S]*?minHeight: 15,/);
   assert.doesNotMatch(rootHeaderActionsSource, /fontFamily:/);
 });
 
@@ -821,7 +824,7 @@ test("native root navigation stays flat and full-width with icon-and-label selec
   assert.match(rootFloatingTabBarSource, /style=\{\[styles\.label, selected && \{ color \}\]\}/);
   assert.doesNotMatch(rootFloatingTabBarSource, /selectionTrack|selectionIndicator|Animated\.spring|Animated\.multiply/);
   assert.match(rootFloatingTabBarSource, /backgroundColor: seed\.color\.layer\.default/);
-  assert.match(rootFloatingTabBarSource, /label:\s*\{[\s\S]*?fontSize:\s*11,[\s\S]*?lineHeight:\s*16/);
+  assert.match(rootFloatingTabBarSource, /variant="finePrint"/);
   assert.match(rootFloatingTabBarSource, /position: "absolute"/);
   assert.match(rootFloatingTabBarSource, /borderTopWidth: StyleSheet\.hairlineWidth/);
   assert.match(rootFloatingTabBarSource, /backgroundColor: seed\.color\.background\.transparent/);
@@ -879,7 +882,7 @@ test("native exchange room uses server records and opens registration, activity,
   assert.match(exchangeRoomSource, /writeExchangeRulesDismissed/);
   assert.match(localDatabaseSource, /DATABASE_VERSION = 4/);
   assert.match(localDatabaseSource, /CREATE TABLE IF NOT EXISTS app_preferences/);
-  assert.match(localDatabaseSource, /exchange\.rules\.dismissed\.v2/);
+  assert.match(localDatabaseSource, /exchange\.rules\.dismissed\.v3/);
   assert.match(localDatabaseSource, /exchange\.listings\.v3/);
   assert.match(exchangeRoomSource, /등록글은 7일 동안 공개/);
   assert.match(exchangeRoomSource, /남은 보관 기간이 14일보다 짧으면 14일로 연장/);
@@ -899,8 +902,12 @@ test("native exchange room uses server records and opens registration, activity,
   assert.match(exchangeApiSource, /items\.length === 0 && includePreview/);
   assert.match(exchangeApiSource, /query:\s*\{\s*limit:\s*30,\s*category,\s*q:\s*search\s*\}/);
   assert.match(exchangeRoomSource, /router\.push\("\/exchange\/new"\)/);
-  assert.match(exchangeRoomSource, />상품 올리기</);
-  assert.match(exchangeRoomSource, />현황</);
+  assert.match(exchangeRoomSource, />교환 상품 올리기</);
+  assert.match(exchangeRoomSource, />내 교환 현황</);
+  assert.match(exchangeRoomSource, /제안 \{item\.offerCount\}개 · D-\{daysLeft\}/);
+  assert.doesNotMatch(exchangeRoomSource, /applyTile|>교환 신청</);
+  assert.match(exchangeRoomSource, /animationType=\{reduceMotion \? "none" : "fade"\}/);
+  assert.match(exchangeRoomSource, /쿠지·피규어·카드 상품은 교환과 포인트 환급 대상이 아니에요\./);
   assert.match(exchangeRoomSource, /accessibilityLabel="교환 상품 올리기"/);
   assert.match(exchangeRoomSource, /accessibilityLabel="내 교환 현황"/);
   assert.match(exchangeActivityRouteSource, /ExchangeActivityScreen/);
@@ -1034,7 +1041,8 @@ test("native gacha and kuji shops coexist with the shared drawn-product storage 
   assert.match(productDetailSource, /heroContainer:\s*\{[^}]*marginHorizontal:\s*seed\.spacing\.x2/);
   assert.match(productDetailSource, /hero:\s*\{[^}]*width:\s*"100%"/);
   assert.match(homeSource, /\/product\//);
-  assert.doesNotMatch(homeSource, /router\.push\("\/events" as Href\)/);
+  // The always-mounted Home event slot routes to the native event surface (Operator Feed Contract).
+  assert.match(homeSource, /router\.push\("\/events" as Href\)/);
   assert.doesNotMatch(homeSource, /onIpPress|pathname:\s*"\/search"/);
 
   assert.match(storageRouteSource, /StorageRootScreen/);
@@ -1365,7 +1373,8 @@ test("storage removes the old lead guidance while shared profile leads keep bala
   const sectionLeadSource = profileSectionSource.slice(sectionLeadStart, sectionLeadEnd);
   assert.doesNotMatch(profileSectionSource, /묶음 배송하거나 가챠에서 뽑은 상품을 포인트로 환급할 수 있어요|직접 뽑아 보관 중인 상품을 묶어 배송받거나 포인트로 환급할 수 있어요/);
   assert.match(sectionLeadSource, /BalancedAppText/);
-  assert.doesNotMatch(sectionLeadSource, /numberOfLines|adjustsFontSizeToFit|allowFontScaling|minimumFontScale/);
+  assert.match(sectionLeadSource, /<KoreanPixelTitle variant="section" numberOfLines=\{0\}>/);
+  assert.doesNotMatch(sectionLeadSource, /numberOfLines=\{[1-9]|adjustsFontSizeToFit|allowFontScaling|minimumFontScale/);
 });
 
 test("native shipping request shows the category-sensitive free-shipping policy", () => {
