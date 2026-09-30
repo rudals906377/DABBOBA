@@ -2,6 +2,20 @@ import type { DatabasePool } from "@dabboba/db";
 import { errorFields, persistedErrorIdentity, type Logger } from "./logger.js";
 
 const MAX_PAYMENT_RECONCILIATION_DELAY_MS = 24 * 60 * 60 * 1_000;
+export const DEFAULT_PAYMENT_WINDOW_VALIDITY_MINUTES = 30;
+/**
+ * Provider statuses that prove only that a PG window was opened: no money was
+ * taken and no approval completed. After the window's validity they can never
+ * turn into a charge through that window, so the reconciliation may close.
+ */
+const NO_CHARGE_WINDOW_PROVIDER_STATUSES = new Set(["READY", "PAY_PENDING", "PAYMENT_NOT_FOUND"]);
+/**
+ * An expired, never-charged PG window is recorded as RECONCILED with this
+ * observed state (the PENDING_EXPIRED closure). The schedule table's check
+ * constraint has no distinct literal, so PENDING + RECONCILED on the current
+ * payment version is that closure.
+ */
+export const PENDING_EXPIRED_OBSERVED_STATE = "PENDING" as const;
 
 export type PaymentRecord = {
   id: string;
@@ -20,6 +34,12 @@ export type PaymentObservation = {
   observedAt: string;
   /** API state after a verified provider requery and canonical event dispatch. */
   canonicalStatus?: string;
+  /**
+   * Raw provider status from a verified requery, or PAYMENT_NOT_FOUND when the
+   * provider authoritatively has no payment for this ID. Absent for adapters
+   * that cannot report it.
+   */
+  providerStatus?: string;
 };
 
 export type PaymentReconciliationProvider = {
@@ -36,6 +56,7 @@ type PaymentRow = {
   currency: string;
   version: number;
   updated_at: Date;
+  pg_attempt_started_at?: Date | null;
   reconciliation_version?: number | null;
   reconciliation_attempts?: number | null;
 };
@@ -120,6 +141,28 @@ async function verifyCanonicalPaymentTransition(
   );
 }
 
+/**
+ * A claimed PG window whose validity has passed while the provider still only
+ * reports READY / PAY_PENDING (or no payment at all) is closed as
+ * PENDING_EXPIRED. The worker never changes the payment here: a still-PENDING
+ * order is cancelled by the reservation sweep or the customer's abandon, and
+ * that version change re-opens this schedule for one more verification.
+ */
+export function paymentWindowExpired(
+  payment: { status: string; pgAttemptStartedAt: Date | null },
+  observation: PaymentObservation,
+  now: Date,
+  windowValidityMinutes: number,
+): boolean {
+  if (!payment.pgAttemptStartedAt) return false;
+  if (payment.status !== "PENDING" && payment.status !== "CANCELLED") return false;
+  if (!observation.providerStatus || !NO_CHARGE_WINDOW_PROVIDER_STATUSES.has(observation.providerStatus)) return false;
+  // The canonical API must agree that nothing changed locally.
+  if (observation.canonicalStatus !== undefined && observation.canonicalStatus !== payment.status) return false;
+  const validityMs = Math.max(1, Math.trunc(windowValidityMinutes)) * 60_000;
+  return now.getTime() - payment.pgAttemptStartedAt.getTime() >= validityMs;
+}
+
 export function paymentReconciliationDelayMs(attempt: number, baseMinutes: number): number {
   const boundedAttempt = Math.max(1, Math.min(Math.trunc(attempt), 20));
   const boundedBaseMs = Math.max(60_000, Math.trunc(baseMinutes) * 60_000);
@@ -189,7 +232,7 @@ export async function reconcilePayment(
 export async function reconcilePaymentBatch(
   pool: DatabasePool,
   provider: PaymentReconciliationProvider,
-  options: { batchSize: number; staleMinutes: number },
+  options: { batchSize: number; staleMinutes: number; paymentWindowValidityMinutes?: number },
   logger: Logger,
   now = new Date(),
   shouldContinue: () => boolean = () => true,
@@ -198,7 +241,7 @@ export async function reconcilePaymentBatch(
   const staleBefore = new Date(now.getTime() - options.staleMinutes * 60_000);
   const rows = await pool.query<PaymentRow>(
     `SELECT p.id,p.order_id,p.provider,p.provider_payment_id,p.status,p.amount,p.currency,
-            p.version,p.updated_at,r.payment_version AS reconciliation_version,
+            p.version,p.updated_at,p.pg_attempt_started_at,r.payment_version AS reconciliation_version,
             r.attempts AS reconciliation_attempts
        FROM payments p
        LEFT JOIN worker_payment_reconciliations r ON r.payment_id=p.id
@@ -208,7 +251,10 @@ export async function reconcilePaymentBatch(
               AND p.pg_attempt_started_at IS NOT NULL)
         )
         AND p.updated_at <= $1
-        AND (p.status <> 'CANCELLED' OR r.payment_id IS NULL
+        -- A RECONCILED record for the current payment version is final: a
+        -- verified no-charge cancellation or an expired PG window. Any later
+        -- payment transition bumps the version and re-opens it.
+        AND (r.payment_id IS NULL
           OR r.payment_version IS DISTINCT FROM p.version
           OR r.last_outcome IS DISTINCT FROM 'RECONCILED')
         AND (
@@ -243,13 +289,29 @@ export async function reconcilePaymentBatch(
       if (result.outcome === "reconciled") {
         await verifyCanonicalPaymentTransition(pool, payment, result.observation, logger);
       }
+      const expired = result.outcome !== "reconciled" && paymentWindowExpired(
+        { status: payment.status, pgAttemptStartedAt: row.pg_attempt_started_at ?? null },
+        result.observation,
+        now,
+        options.paymentWindowValidityMinutes ?? DEFAULT_PAYMENT_WINDOW_VALIDITY_MINUTES,
+      );
+      if (expired) {
+        result.outcome = "reconciled";
+        logger.info(
+          {
+            paymentId: payment.id, orderId: payment.orderId, status: payment.status,
+            providerStatus: result.observation.providerStatus, observedState: "PENDING_EXPIRED",
+          },
+          "Expired PG window closed without a charge; the order is released by the reservation sweep or customer abandon",
+        );
+      }
       if (!shouldContinue()) throw new Error("Worker run deadline reached after payment observation");
       await recordPaymentReconciliation(pool, {
         paymentId: row.id,
         paymentVersion: row.version,
         attempt,
         outcome: result.outcome === "unknown" ? "UNKNOWN" : result.outcome === "reconciled" ? "RECONCILED" : "MANUAL_REVIEW",
-        observedState: result.observation.state,
+        observedState: expired ? PENDING_EXPIRED_OBSERVED_STATE : result.observation.state,
         errorMessage: null,
         attemptedAt: now,
         nextAttemptAt,

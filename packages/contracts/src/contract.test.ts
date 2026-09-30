@@ -53,6 +53,9 @@ test("generated contract includes public and privileged seams", () => {
     "/v1/admin/account-deletions",
     "/v1/admin/commerce/orders",
     "/v1/admin/commerce/refund-reviews/{paymentId}",
+    "/v1/admin/commerce/refund-reviews/{paymentId}/cancellation/abort",
+    "/v1/payments/{paymentId}/abandon",
+    "/v1/payments/{paymentId}/confirm",
     "/v1/admin/commerce/inventory/{productId}/adjustments",
     "/v1/admin/commerce/shipping/{shippingRequestId}/status",
     "/v1/admin/exchange/listings",
@@ -64,7 +67,7 @@ test("generated contract includes public and privileged seams", () => {
     "/v1/admin/reports/{reportId}/resolution",
     "/v1/admin/audit-logs",
   ];
-  assert.equal(requiredPaths.length, 57);
+  assert.equal(requiredPaths.length, 60);
 });
 
 test("notification contract is owner-scoped, cursor-paged, and uses finite navigation destinations", () => {

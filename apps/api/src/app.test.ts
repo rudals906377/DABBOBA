@@ -254,7 +254,7 @@ test("PRELAUNCH rejects every customer commerce mutation before its handler can 
   const guardedRequests = [
     { method: "POST", url: "/v1/orders" },
     { method: "POST", url: "/v1/payments/30000000-0000-4000-8000-000000000001/confirm" },
-    { method: "POST", url: "/v1/payments/webhooks/provider" },
+    { method: "POST", url: "/v1/payments/30000000-0000-4000-8000-000000000001/abandon" },
     { method: "POST", url: "/v1/payments/webhooks/portone" },
     { method: "POST", url: "/v1/draws/40000000-0000-4000-8000-000000000001/consume" },
     { method: "POST", url: "/v1/kuji/rooms/coming-soon-kuji/entries" },
@@ -281,6 +281,10 @@ test("PRELAUNCH rejects every customer commerce mutation before its handler can 
       assert.equal(response.statusCode, 503, `${request.method} ${request.url}: ${response.body}`);
       assert.equal(response.json().error.code, "COMMERCE_NOT_AVAILABLE");
     }
+    // The shared-secret HMAC rail is not registered unless a local/test
+    // provider is configured.
+    const sharedSecretWebhook = await app.inject({ method: "POST", url: "/v1/payments/webhooks/provider", headers: authorization });
+    assert.equal(sharedSecretWebhook.statusCode, 404, sharedSecretWebhook.body);
     const commerceHandlerQueries = observed.filter((sql) => (
       !sql.includes("WITH active_session AS MATERIALIZED")
       && !sql.includes("FROM account_deletion_requests")
@@ -404,5 +408,55 @@ test("PRELAUNCH also gates admin shipping-status and exchange-resolution mutatio
     }
   } finally {
     await app.close();
+
+test("the shared-secret payment webhook is registered only for local/test providers", async () => {
+  const portOneSecret = "portone-api-secret-for-route-tests";
+  const portOneConfig: ApiConfig = {
+    ...testConfig("customer"),
+    commerceMode: "LIVE",
+    paymentProvider: "PORTONE_V2_INICIS",
+    paymentWebhookSecret: "normalized-payment-webhook-secret-for-tests",
+    portOne: {
+      apiSecret: portOneSecret,
+      merchantId: "merchant-test",
+      storeId: "store-test",
+      channelKey: "channel-test",
+      channelEnvironment: "TEST",
+      webhookSecret: "portone-webhook-secret-for-route-tests",
+    },
+  };
+  const touched: string[] = [];
+  const pool = {
+    async query(sql: string) { touched.push(sql); return { rows: [], rowCount: 0 }; },
+    async connect() { throw new Error("A 404 route must not open a transaction."); },
+  } as unknown as DatabasePool;
+  const portOne = await buildApp({ config: portOneConfig, pool });
+  try {
+    assert.equal(portOne.app.hasRoute({ method: "POST", url: "/v1/payments/webhooks/:provider" }), false);
+    assert.equal(portOne.app.hasRoute({ method: "POST", url: "/v1/payments/webhooks/portone" }), true);
+    for (const provider of ["PORTONE_V2_INICIS", "TEST_PG", "INTERNAL_ZERO"]) {
+      const response = await portOne.app.inject({
+        method: "POST",
+        url: `/v1/payments/webhooks/${provider}`,
+        headers: { "content-type": "application/json", "x-dabboba-signature": `sha256=${"0".repeat(64)}` },
+        payload: JSON.stringify({ eventId: "evt", eventType: "PAYMENT_SUCCEEDED" }),
+      });
+      assert.equal(response.statusCode, 404, `${provider}: ${response.body}`);
+    }
+    assert.deepEqual(touched, []);
+  } finally {
+    await portOne.app.close();
+  }
+
+  for (const [paymentProvider, registered] of [["TEST_PG", true], ["INTERNAL_ZERO", true], ["UNCONFIGURED", false]] as const) {
+    const { app } = await buildApp({
+      config: { ...testConfig("customer"), commerceMode: "LIVE", paymentProvider, paymentWebhookSecret: "local-webhook-secret" },
+      pool: unusedPool,
+    });
+    try {
+      assert.equal(app.hasRoute({ method: "POST", url: "/v1/payments/webhooks/:provider" }), registered, paymentProvider);
+    } finally {
+      await app.close();
+    }
   }
 });

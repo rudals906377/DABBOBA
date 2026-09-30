@@ -490,6 +490,153 @@ async function lockRefundAssets(client:DatabaseClient,order:OrderRow):Promise<Re
 
 function signatureMatches(rawBody:Buffer,header:string,secret:string){const expected=createHmac("sha256",secret).update(rawBody).digest("hex");const supplied=header.startsWith("sha256=")?header.slice(7):header;if(!/^[0-9a-f]{64}$/i.test(supplied))return false;return timingSafeEqual(Buffer.from(expected,"hex"),Buffer.from(supplied,"hex"));}
 
+/** Payment providers whose events may arrive through the shared-secret HMAC webhook. */
+export const EXTERNAL_CANONICAL_WEBHOOK_PROVIDERS=["TEST_PG","INTERNAL_ZERO"] as const;
+export function externalCanonicalWebhookEnabled(paymentProvider:string){return (EXTERNAL_CANONICAL_WEBHOOK_PROVIDERS as readonly string[]).includes(paymentProvider);}
+
+export const CANONICAL_PAYMENT_EVENT_TYPES=["PAYMENT_SUCCEEDED","PAYMENT_FAILED","PAYMENT_CANCELLED","PAYMENT_STATE_ANOMALY","REFUND_SUCCEEDED","REFUND_PARTIAL"] as const;
+export type CanonicalPaymentEventType=(typeof CANONICAL_PAYMENT_EVENT_TYPES)[number];
+export type CanonicalPaymentOutcome="processed"|"duplicate"|"review"|"ignored";
+/** A provider-verified payment event in the canonical ledger format. */
+export type CanonicalPaymentEvent={
+  provider:string;eventId:string;eventType:CanonicalPaymentEventType;paymentId:string;providerPaymentId:string|null;
+  occurredAt:Date;amount:number;
+  observedStatus:"READY"|"PAY_PENDING"|"VIRTUAL_ACCOUNT_ISSUED"|"PAID"|"FAILED"|"PARTIAL_CANCELLED"|"CANCELLED"|null;
+  observedPaidAmount:number|null;observedCancelledAmount:number|null;
+  /** The exact verified event body. Replays compare it for duplicate detection. */
+  payload:Record<string,unknown>;
+  signatureDigest:string;
+};
+
+/** Validates an already authenticated canonical event body. It never proves authenticity itself. */
+export function parseCanonicalPaymentEvent(provider:string,rawBody:unknown,signatureDigest:string):CanonicalPaymentEvent{
+    const body=objectInput(rawBody);const eventId=stringInput(body,"eventId",{max:200})!;const eventType=enumInput(body,"eventType",CANONICAL_PAYMENT_EVENT_TYPES)!;const paymentId=uuidInput(body.paymentId,"paymentId");const providerPaymentId=nullableStringInput(body,"providerPaymentId",{max:200});const occurredAt=new Date(stringInput(body,"occurredAt",{max:40})!);if(Number.isNaN(occurredAt.getTime()))throw badRequest("occurredAt 값을 확인해 주세요.");const amount=integerInput(body,"amount",{min:0})!;
+    const providerObservation = eventType === "PAYMENT_STATE_ANOMALY" ? objectInput(body.providerObservation) : null;
+    const observedStatus = providerObservation ? enumInput(providerObservation, "status", [
+      "READY", "PAY_PENDING", "VIRTUAL_ACCOUNT_ISSUED", "PAID", "FAILED", "PARTIAL_CANCELLED", "CANCELLED",
+    ] as const)! : null;
+    const observedPaidAmount = providerObservation ? integerInput(providerObservation, "paidAmount", { min: 0 })! : null;
+    const observedCancelledAmount = providerObservation ? integerInput(providerObservation, "cancelledAmount", { min: 0 })! : null;
+    return {provider,eventId,eventType,paymentId,providerPaymentId:providerPaymentId||null,occurredAt,amount,observedStatus,observedPaidAmount,observedCancelledAmount,payload:body,signatureDigest};
+}
+
+/**
+ * Applies one provider-verified payment event to the canonical order, payment,
+ * inventory, entitlement, point, coupon, kuji-room and ledger state. Callers
+ * must authenticate the event first: the HMAC webhook for local/test rails, or
+ * a fresh authenticated PortOne read for PORTONE_V2_INICIS.
+ */
+export async function applyCanonicalPaymentEvent(context:ApiContext,event:CanonicalPaymentEvent,correlationId:string):Promise<CanonicalPaymentOutcome>{
+  const {provider,eventId,eventType,paymentId,providerPaymentId,occurredAt,amount,observedStatus,observedPaidAmount,observedCancelledAmount,signatureDigest}=event;const body=event.payload;
+  return withTransaction(context.pool,async(client):Promise<CanonicalPaymentOutcome>=>{const paymentLookup=await client.query<{order_id:string}>("SELECT order_id FROM payments WHERE id=$1",[paymentId]);if(!paymentLookup.rowCount)throw notFound("결제 정보를 찾을 수 없습니다.");const linkedKujiRoom=await lockLinkedKujiRoomForOrder(client,paymentLookup.rows[0]!.order_id);const payment=await client.query<{id:string;order_id:string;provider:string;status:string;amount:number;provider_payment_id:string|null}>("SELECT id,order_id,provider,status,amount,provider_payment_id FROM payments WHERE id=$1 FOR UPDATE",[paymentId]);if(!payment.rowCount)throw notFound("결제 정보를 찾을 수 없습니다.");const pay=payment.rows[0]!;if(pay.order_id!==paymentLookup.rows[0]!.order_id)throw new Error(`Payment order changed while locking ${paymentId}`);if(pay.provider!==provider)throw forbidden("결제 제공자가 일치하지 않습니다.");const inserted=await client.query<{id:string}>(`INSERT INTO payment_provider_events(provider,provider_event_id,event_type,payment_id,signature_digest,payload,occurred_at,processed_at) VALUES($1,$2,$3,$4,$5,$6,$7,now()) ON CONFLICT (provider,provider_event_id) DO NOTHING RETURNING id`,[provider,eventId,eventType,paymentId,signatureDigest,JSON.stringify(body),occurredAt]);if(!inserted.rowCount){const existingEvent=await client.query<{payment_id:string;event_type:string;payload_matches:boolean}>("SELECT payment_id,event_type,payload=$3::jsonb AS payload_matches FROM payment_provider_events WHERE provider=$1 AND provider_event_id=$2",[provider,eventId,JSON.stringify(body)]);const prior=existingEvent.rows[0];if(!prior||prior.payment_id!==paymentId||prior.event_type!==eventType||!prior.payload_matches)throw conflict("같은 결제 이벤트 ID의 내용이 일치하지 않습니다.");return "duplicate" as const;}const orderResult=await client.query<OrderRow & {cancelled_at:Date|null}>("SELECT o.*,p.id AS payment_id FROM orders o JOIN payments p ON p.order_id=o.id WHERE o.id=$1 FOR UPDATE OF o",[pay.order_id]);const order=orderResult.rows[0]!;
+      const markReview=async(reason:string,payload:Record<string,unknown>={})=>{await client.query("UPDATE payments SET status='REFUND_REVIEW',provider_payment_id=COALESCE($2,provider_payment_id),version=version+1 WHERE id=$1",[pay.id,providerPaymentId||null]);await client.query("UPDATE orders SET status='REFUND_REVIEW',version=version+1 WHERE id=$1",[order.id]);await writeOutbox(client,correlationId,{aggregateType:"PAYMENT",aggregateId:pay.id,eventType:reason,payload:{paymentId:pay.id,orderId:order.id,providerEventId:eventId,...payload}});return "review" as const;};
+      if(eventType==="PAYMENT_STATE_ANOMALY"){
+        const observation={providerStatus:observedStatus,providerPaidAmount:observedPaidAmount,providerCancelledAmount:observedCancelledAmount,previousPaymentStatus:pay.status};
+        if(pay.status==="REFUNDED"){
+          await writeOutbox(client,correlationId,{aggregateType:"PAYMENT",aggregateId:pay.id,eventType:"payment.provider_state_anomaly_after_refund_observed",payload:{paymentId:pay.id,orderId:order.id,providerEventId:eventId,...observation}});
+          return "ignored" as const;
+        }
+        return markReview("payment.provider_state_anomaly_requires_reconciliation",observation);
+      }
+      if(eventType==="REFUND_PARTIAL"){
+        return markReview("payment.partial_refund_requires_reconciliation",{providerCancelledAmount:amount,previousPaymentStatus:pay.status});
+      }
+      if(amount!==numberValue(pay.amount)){if(pay.status==="REFUNDED"){await writeOutbox(client,correlationId,{aggregateType:"PAYMENT",aggregateId:pay.id,eventType:"payment.amount_mismatch_after_refund_observed",payload:{paymentId:pay.id,orderId:order.id,providerEventId:eventId,providerAmount:amount,ledgerAmount:numberValue(pay.amount),eventType}});return "ignored" as const;}return markReview("payment.amount_mismatch_requires_reconciliation",{providerAmount:amount,ledgerAmount:numberValue(pay.amount),eventType});}
+
+      if(eventType==="PAYMENT_SUCCEEDED"){
+        if(pay.status==="REFUNDED"){await writeOutbox(client,correlationId,{aggregateType:"PAYMENT",aggregateId:pay.id,eventType:"payment.success_after_refund_observed",payload:{paymentId:pay.id,orderId:order.id,providerEventId:eventId}});return "ignored" as const;}
+        if(pay.status==="PAID")return "processed" as const;
+        if(["CANCELLED","FAILED","REFUND_REVIEW"].includes(pay.status)){if(pay.status!=="REFUND_REVIEW"){await client.query("UPDATE payments SET status='REFUND_REVIEW',provider_payment_id=COALESCE($2,provider_payment_id),paid_at=COALESCE(paid_at,$3),version=version+1 WHERE id=$1",[pay.id,providerPaymentId||null,occurredAt]);await client.query("UPDATE orders SET status='REFUND_REVIEW',paid_at=COALESCE(paid_at,$2),version=version+1 WHERE id=$1",[order.id,occurredAt]);}await recordPaymentLedger(client,pay,order.id,eventId,"Verified late provider success");await writeOutbox(client,correlationId,{aggregateType:"PAYMENT",aggregateId:pay.id,eventType:"payment.late_success_requires_reconciliation",payload:{paymentId:pay.id,orderId:order.id,providerEventId:eventId,previousPaymentStatus:pay.status}});return "review" as const;}
+        if(!["PENDING","AUTHORIZED"].includes(pay.status))return markReview("payment.state_requires_reconciliation",{eventType,previousPaymentStatus:pay.status});
+        if(linkedKujiRoom&&(
+          linkedKujiRoom.state!=="CHECKOUT_PENDING"
+          || linkedKujiRoom.checkout_expires_at===null
+          || occurredAt.getTime()<order.created_at.getTime()
+          || occurredAt.getTime()>=linkedKujiRoom.checkout_expires_at.getTime()
+        )){
+          const reconciliationTime=await client.query<{server_now:Date}>("SELECT clock_timestamp() AS server_now");
+          const serverNow=reconciliationTime.rows[0]!.server_now;
+          await releasePendingOrder(client,order,"KUJI_PAYMENT_SUCCEEDED_OUTSIDE_LEASE");
+          await client.query("UPDATE payments SET status='REFUND_REVIEW',provider_payment_id=COALESCE($2,provider_payment_id),paid_at=COALESCE(paid_at,$3),version=version+1 WHERE id=$1",[pay.id,providerPaymentId||null,occurredAt]);
+          await client.query("UPDATE orders SET status='REFUND_REVIEW',paid_at=COALESCE(paid_at,$2),cancelled_at=COALESCE(cancelled_at,$3),version=version+1 WHERE id=$1",[order.id,occurredAt,serverNow]);
+          await releaseLockedKujiOrderRoom(client,{orderId:order.id,serverNow,terminalState:"EXPIRED"});
+          await recordPaymentLedger(client,pay,order.id,eventId,"Verified success outside kuji checkout lease");
+          await writeOutbox(client,correlationId,{aggregateType:"PAYMENT",aggregateId:pay.id,eventType:"payment.kuji_checkout_lease_requires_reconciliation",payload:{paymentId:pay.id,orderId:order.id,providerEventId:eventId,roomEntryId:linkedKujiRoom.id,roomState:linkedKujiRoom.state,checkoutExpiresAt:linkedKujiRoom.checkout_expires_at?.toISOString()??null,localAssetsReleased:true}});
+          return "review" as const;
+        }
+        if(order.order_kind==="SHIPPING_FEE"){
+          if(!order.shipping_request_id)return markReview("payment.shipping_request_missing",{eventType});
+          const shipping=await client.query<{status:string}>("SELECT status FROM shipping_requests WHERE id=$1 AND user_id=$2 FOR UPDATE",[order.shipping_request_id,order.user_id]);
+          const counts=await client.query<{item_count:string;shipping_count:string}>(`SELECT
+            count(item.inventory_unit_id)::text AS item_count,
+            count(item.inventory_unit_id) FILTER (WHERE inventory.status='SHIPPING')::text AS shipping_count
+            FROM shipping_request_items item
+            JOIN inventory_units inventory ON inventory.id=item.inventory_unit_id
+            WHERE item.shipping_request_id=$1`,[order.shipping_request_id]);
+          const shippingRow=shipping.rows[0]&&counts.rows[0]?{...shipping.rows[0],...counts.rows[0]}:null;
+          if(!shippingRow
+            || shippingRow.status!=="PAYMENT_PENDING"
+            || numberValue(shippingRow.item_count)<1
+            || numberValue(shippingRow.item_count)!==numberValue(shippingRow.shipping_count)){
+            await recordPaymentLedger(client,pay,order.id,eventId,"Verified shipping fee payment requiring reconciliation");
+            return markReview("payment.shipping_fulfillment_requires_reconciliation",{
+              shippingRequestId:order.shipping_request_id,
+              shippingStatus:shippingRow?.status??null,
+              itemCount:shippingRow?numberValue(shippingRow.item_count):0,
+              shippingItemCount:shippingRow?numberValue(shippingRow.shipping_count):0,
+            });
+          }
+          const promoted=await client.query("UPDATE shipping_requests SET status='REQUESTED',version=version+1 WHERE id=$1 AND user_id=$2 AND status='PAYMENT_PENDING' RETURNING id",[order.shipping_request_id,order.user_id]);
+          if(!promoted.rowCount)return markReview("payment.shipping_promotion_requires_reconciliation",{shippingRequestId:order.shipping_request_id});
+        }
+        const lines=await client.query<OrderLineRow>("SELECT * FROM order_lines WHERE order_id=$1 ORDER BY product_id FOR UPDATE",[order.id]);const reservations=await client.query<{order_line_id:string;product_id:string;quantity:number}>("SELECT order_line_id,product_id,quantity FROM stock_reservations WHERE order_id=$1 AND status='ACTIVE' ORDER BY product_id,order_line_id FOR UPDATE",[order.id]);const reservationByLine=new Map(reservations.rows.map((item)=>[item.order_line_id,item]));let reservationSafe=reservations.rows.length===lines.rows.length;for(const line of lines.rows){const reservation=reservationByLine.get(line.id);const stock=await client.query<{on_hand:number;reserved:number}>("SELECT on_hand,reserved FROM product_stock WHERE product_id=$1 FOR UPDATE",[line.product_id]);if(!reservation||reservation.product_id!==line.product_id||numberValue(reservation.quantity)!==numberValue(line.quantity)||!stock.rowCount||numberValue(stock.rows[0]!.on_hand)<numberValue(line.quantity)||numberValue(stock.rows[0]!.reserved)<numberValue(line.quantity))reservationSafe=false;}
+        if(!reservationSafe){await recordPaymentLedger(client,pay,order.id,eventId,"Verified success without fulfillable reservation");return markReview("payment.fulfillment_requires_reconciliation",{previousPaymentStatus:pay.status});}
+        for(const line of lines.rows){await client.query("UPDATE product_stock SET on_hand=on_hand-$2,reserved=reserved-$2,version=version+1 WHERE product_id=$1",[line.product_id,line.quantity]);await client.query("UPDATE stock_reservations SET status='COMMITTED',resolved_at=now() WHERE order_line_id=$1 AND status='ACTIVE'",[line.id]);if(isDrawCategory(line.category_snapshot)){for(let i=0;i<line.quantity;i+=1)await client.query("INSERT INTO draw_entitlements(order_line_id,user_id,product_id,probability_version_id) VALUES($1,$2,$3,$4)",[line.id,order.user_id,line.product_id,line.probability_version_id]);}else{for(let i=0;i<line.quantity;i+=1)await client.query("INSERT INTO inventory_units(owner_id,product_id,source_type,source_id) VALUES($1,$2,'PURCHASE',$3)",[order.user_id,line.product_id,line.id]);}}
+        await client.query("UPDATE coupon_redemptions SET status='COMMITTED' WHERE order_id=$1 AND status='RESERVED'",[order.id]);await client.query("UPDATE payments SET status='PAID',provider_payment_id=COALESCE($2,provider_payment_id),paid_at=$3,version=version+1 WHERE id=$1",[pay.id,providerPaymentId||null,occurredAt]);await client.query("UPDATE orders SET status='PAID',paid_at=$2,version=version+1 WHERE id=$1",[order.id,occurredAt]);if(linkedKujiRoom){const drawingTime=await client.query<{server_now:Date}>("SELECT clock_timestamp() AS server_now");if(!(await startLockedKujiOrderDrawing(client,{orderId:order.id,serverNow:drawingTime.rows[0]!.server_now})))throw new Error(`Kuji room did not enter DRAWING for order ${order.id}`);}await recordPaymentLedger(client,pay,order.id,eventId,"Verified provider webhook");await writeOutbox(client,correlationId,{aggregateType:order.order_kind==="SHIPPING_FEE"?"SHIPPING_REQUEST":"ORDER",aggregateId:order.order_kind==="SHIPPING_FEE"?order.shipping_request_id!:order.id,eventType:order.order_kind==="SHIPPING_FEE"?"shipping.requested":"order.paid",payload:{orderId:order.id,userId:order.user_id,...(order.shipping_request_id?{shippingRequestId:order.shipping_request_id}:{})}});return "processed" as const;
+      }
+
+      if(eventType==="PAYMENT_FAILED"||eventType==="PAYMENT_CANCELLED"){if(["PENDING","AUTHORIZED"].includes(pay.status)){await releasePendingOrder(client,order,eventType);await client.query("UPDATE payments SET status=$2,provider_payment_id=COALESCE($3,provider_payment_id),version=version+1 WHERE id=$1",[pay.id,eventType==="PAYMENT_FAILED"?"FAILED":"CANCELLED",providerPaymentId||null]);await client.query("UPDATE orders SET status='CANCELLED',cancelled_at=$2,version=version+1 WHERE id=$1",[order.id,occurredAt]);if(linkedKujiRoom){const releaseTime=await client.query<{server_now:Date}>("SELECT clock_timestamp() AS server_now");await releaseLockedKujiOrderRoom(client,{orderId:order.id,serverNow:releaseTime.rows[0]!.server_now,terminalState:"CANCELLED"});}await writeOutbox(client,correlationId,{aggregateType:"ORDER",aggregateId:order.id,eventType:"order.cancelled",payload:{orderId:order.id,reason:eventType}});return "processed" as const;}await writeOutbox(client,correlationId,{aggregateType:"PAYMENT",aggregateId:pay.id,eventType:"payment.terminal_event_observed",payload:{paymentId:pay.id,orderId:order.id,providerEventId:eventId,eventType,previousPaymentStatus:pay.status}});return "ignored" as const;}
+
+      if(pay.status==="REFUNDED")return "processed" as const;
+      if(["PENDING","AUTHORIZED","FAILED","CANCELLED"].includes(pay.status)){if(["PENDING","AUTHORIZED"].includes(pay.status)){await releasePendingOrder(client,order,"PROVIDER_REFUND_BEFORE_SUCCESS");if(linkedKujiRoom){const releaseTime=await client.query<{server_now:Date}>("SELECT clock_timestamp() AS server_now");await releaseLockedKujiOrderRoom(client,{orderId:order.id,serverNow:releaseTime.rows[0]!.server_now,terminalState:"CANCELLED"});}}await recordPaymentLedger(client,pay,order.id,eventId,"Payment inferred from verified provider refund");await recordRefundLedger(client,pay,order.id,eventId,"Verified provider refund before local fulfillment");await client.query("UPDATE payments SET status='REFUNDED',provider_payment_id=COALESCE($2,provider_payment_id),paid_at=COALESCE(paid_at,$3),refunded_at=$3,version=version+1 WHERE id=$1",[pay.id,providerPaymentId||null,occurredAt]);await client.query("UPDATE orders SET status='REFUNDED',paid_at=COALESCE(paid_at,$2),refunded_at=$2,version=version+1 WHERE id=$1",[order.id,occurredAt]);await writeOutbox(client,correlationId,{aggregateType:"ORDER",aggregateId:order.id,eventType:"order.refunded",payload:{orderId:order.id,userId:order.user_id,withoutLocalFulfillment:true}});return "processed" as const;}
+      if(!["PAID","REFUND_REVIEW"].includes(pay.status))return markReview("payment.refund_state_requires_reconciliation",{previousPaymentStatus:pay.status});
+      if(order.order_kind==="SHIPPING_FEE"){
+        if(!order.shipping_request_id){await recordRefundLedger(client,pay,order.id,eventId,"Verified shipping fee refund missing request");return markReview("payment.shipping_refund_requires_reconciliation",{});}
+        const shipping=await client.query<{status:string}>("SELECT status FROM shipping_requests WHERE id=$1 AND user_id=$2 FOR UPDATE",[order.shipping_request_id,order.user_id]);
+        const shippingStatus=shipping.rows[0]?.status;
+        await recordRefundLedger(client,pay,order.id,eventId,"Verified shipping fee refund");
+        if(shippingStatus==="REQUESTED"){
+          const expected=await client.query<{count:string}>("SELECT count(*)::text AS count FROM shipping_request_items WHERE shipping_request_id=$1",[order.shipping_request_id]);
+          await client.query("SAVEPOINT shipping_refund_inventory_transition");
+          const restored=await client.query(`UPDATE inventory_units inventory SET status='OWNED'
+            FROM shipping_request_items item
+            WHERE item.shipping_request_id=$1 AND item.inventory_unit_id=inventory.id
+              AND inventory.owner_id=$2 AND inventory.status='SHIPPING'
+            RETURNING inventory.id`,[order.shipping_request_id,order.user_id]);
+          if(restored.rowCount!==numberValue(expected.rows[0]?.count??0)||restored.rowCount===0){
+            await client.query("ROLLBACK TO SAVEPOINT shipping_refund_inventory_transition");
+            await client.query("RELEASE SAVEPOINT shipping_refund_inventory_transition");
+            return markReview("payment.shipping_refund_requires_reconciliation",{shippingRequestId:order.shipping_request_id,shippingStatus,transitionMismatch:true});
+          }
+          await client.query("RELEASE SAVEPOINT shipping_refund_inventory_transition");
+          await client.query("UPDATE shipping_requests SET status='CANCELLED',version=version+1 WHERE id=$1 AND status='REQUESTED'",[order.shipping_request_id]);
+        }else if(shippingStatus!=="CANCELLED"){
+          return markReview("payment.shipping_refund_requires_reconciliation",{shippingRequestId:order.shipping_request_id,shippingStatus:shippingStatus??null});
+        }
+        await client.query("UPDATE payments SET status='REFUNDED',provider_payment_id=COALESCE($2,provider_payment_id),refunded_at=$3,version=version+1 WHERE id=$1",[pay.id,providerPaymentId||null,occurredAt]);
+        await client.query("UPDATE orders SET status='REFUNDED',refunded_at=$2,version=version+1 WHERE id=$1",[order.id,occurredAt]);
+        await writeOutbox(client,correlationId,{aggregateType:"SHIPPING_REQUEST",aggregateId:order.shipping_request_id,eventType:"shipping.fee_refunded",payload:{shippingRequestId:order.shipping_request_id,orderId:order.id,userId:order.user_id}});
+        return "processed" as const;
+      }
+      const assets=await lockRefundAssets(client,order);const lateSuccessWithoutAssets=pay.status==="REFUND_REVIEW"&&Boolean(order.cancelled_at)&&assets.inventoryIds.length===0&&assets.entitlementIds.length===0;if(!lateSuccessWithoutAssets&&refundRequiresReview(assets.safety)){await recordRefundLedger(client,pay,order.id,eventId,"Verified provider refund with assets requiring reconciliation");return markReview("payment.refund_requires_reconciliation",assets.safety);}
+      if(lateSuccessWithoutAssets){await recordRefundLedger(client,pay,order.id,eventId,"Verified provider refund after late success");await client.query("UPDATE payments SET status='REFUNDED',provider_payment_id=COALESCE($2,provider_payment_id),refunded_at=$3,version=version+1 WHERE id=$1",[pay.id,providerPaymentId||null,occurredAt]);await client.query("UPDATE orders SET status='REFUNDED',refunded_at=$2,version=version+1 WHERE id=$1",[order.id,occurredAt]);await writeOutbox(client,correlationId,{aggregateType:"ORDER",aggregateId:order.id,eventType:"order.refunded",payload:{orderId:order.id,userId:order.user_id,lateSuccessReconciled:true}});return "processed" as const;}
+      await client.query("SAVEPOINT refund_asset_transition");const inventoryTransition=await client.query("UPDATE inventory_units SET status='REFUNDED' WHERE id=ANY($1::uuid[]) AND owner_id=$2 AND status='OWNED' RETURNING id",[assets.inventoryIds,order.user_id]);const entitlementTransition=await client.query("UPDATE draw_entitlements SET status='CANCELLED' WHERE id=ANY($1::uuid[]) AND status='AVAILABLE' RETURNING id",[assets.entitlementIds]);if(inventoryTransition.rowCount!==assets.inventoryIds.length||entitlementTransition.rowCount!==assets.entitlementIds.length){await client.query("ROLLBACK TO SAVEPOINT refund_asset_transition");await client.query("RELEASE SAVEPOINT refund_asset_transition");await recordRefundLedger(client,pay,order.id,eventId,"Verified provider refund with concurrent asset transition");return markReview("payment.refund_requires_reconciliation",{...assets.safety,transitionMismatch:true});}await client.query("RELEASE SAVEPOINT refund_asset_transition");
+      for(const line of assets.lines){if(isDrawCategory(line.category_snapshot)){const activeVersionId=assets.activeDrawVersionByProduct.get(line.product_id)??null;if(!shouldRelistRefundedDrawStock(line.probability_version_id,activeVersionId)){await writeOutbox(client,correlationId,{aggregateType:"ORDER",aggregateId:order.id,eventType:"draw.refund_stock_not_relisted",payload:{orderId:order.id,orderLineId:line.id,productId:line.product_id,quantity:line.quantity,refundedVersionId:line.probability_version_id,activeVersionId}});continue;}}await client.query("UPDATE product_stock SET on_hand=on_hand+$2,version=version+1 WHERE product_id=$1",[line.product_id,line.quantity]);}
+      if(linkedKujiRoom){const refundTime=await client.query<{server_now:Date}>("SELECT clock_timestamp() AS server_now");await releaseRefundedKujiOrderRoom(client,{orderId:order.id,serverNow:refundTime.rows[0]!.server_now});}
+      if(numberValue(order.point_total)>0){const pointLedger=await client.query("INSERT INTO point_ledger_entries(user_id,entry_type,amount,reference_type,reference_id,reason) VALUES($1,'REFUND',$2,'ORDER',$3,'Paid order refunded') ON CONFLICT DO NOTHING RETURNING id",[order.user_id,order.point_total,order.id]);if(pointLedger.rowCount)await client.query("UPDATE point_accounts SET balance=balance+$2,version=version+1 WHERE user_id=$1",[order.user_id,order.point_total]);}const coupon=await client.query<{coupon_id:string}>("UPDATE coupon_redemptions SET status='REFUNDED' WHERE order_id=$1 AND status='COMMITTED' RETURNING coupon_id",[order.id]);if(coupon.rowCount)await client.query("UPDATE coupons SET used_count=GREATEST(0,used_count-1) WHERE id=$1",[coupon.rows[0]!.coupon_id]);await client.query("UPDATE payments SET status='REFUNDED',provider_payment_id=COALESCE($2,provider_payment_id),refunded_at=$3,version=version+1 WHERE id=$1",[pay.id,providerPaymentId||null,occurredAt]);await client.query("UPDATE orders SET status='REFUNDED',refunded_at=$2,version=version+1 WHERE id=$1",[order.id,occurredAt]);await recordRefundLedger(client,pay,order.id,eventId,"Verified provider refund");await writeOutbox(client,correlationId,{aggregateType:"ORDER",aggregateId:order.id,eventType:"order.refunded",payload:{orderId:order.id,userId:order.user_id}});return "processed" as const;
+  });
+}
+
 export async function registerCommerceRoutes(app:FastifyInstance,context:ApiContext){
   app.get("/v1/catalog/products/:productId/draw-odds",async(request,reply)=>{
     reply.header("cache-control","no-store");
@@ -551,121 +698,16 @@ export async function registerCommerceRoutes(app:FastifyInstance,context:ApiCont
     return orderResponse(context.pool,uuidInput((request.params as Record<string,unknown>).orderId,"orderId"),request.actor!.userId);
   });
 
-  app.post("/v1/payments/webhooks/:provider",{preHandler:requireLiveCommerce(context)},async(request,reply)=>{const provider=stringInput(request.params as Record<string,unknown>,"provider",{max:40})!;if(context.config.paymentProvider==="UNCONFIGURED"||!context.config.paymentWebhookSecret)throw new AppError(503,"PAYMENT_NOT_CONFIGURED","결제 웹훅이 구성되지 않았습니다.");if(provider==="INTERNAL_ZERO"||provider!==context.config.paymentProvider)throw forbidden("현재 구성된 결제 제공자가 아닙니다.");const signatureHeader=request.headers["x-dabboba-signature"];const signature=Array.isArray(signatureHeader)?signatureHeader[0]:signatureHeader;if(!signature||!request.rawBody||!signatureMatches(request.rawBody,signature,context.config.paymentWebhookSecret))throw unauthorized("결제 웹훅 서명이 유효하지 않습니다.");const body=objectInput(request.body);const eventId=stringInput(body,"eventId",{max:200})!;const eventType=enumInput(body,"eventType",["PAYMENT_SUCCEEDED","PAYMENT_FAILED","PAYMENT_CANCELLED","PAYMENT_STATE_ANOMALY","REFUND_SUCCEEDED","REFUND_PARTIAL"] as const)!;const paymentId=uuidInput(body.paymentId,"paymentId");const providerPaymentId=nullableStringInput(body,"providerPaymentId",{max:200});const occurredAt=new Date(stringInput(body,"occurredAt",{max:40})!);if(Number.isNaN(occurredAt.getTime()))throw badRequest("occurredAt 값을 확인해 주세요.");const amount=integerInput(body,"amount",{min:0})!;const signatureDigest=createHash("sha256").update(signature).digest("hex");
-    const providerObservation = eventType === "PAYMENT_STATE_ANOMALY" ? objectInput(body.providerObservation) : null;
-    const observedStatus = providerObservation ? enumInput(providerObservation, "status", [
-      "READY", "PAY_PENDING", "VIRTUAL_ACCOUNT_ISSUED", "PAID", "FAILED", "PARTIAL_CANCELLED", "CANCELLED",
-    ] as const)! : null;
-    const observedPaidAmount = providerObservation ? integerInput(providerObservation, "paidAmount", { min: 0 })! : null;
-    const observedCancelledAmount = providerObservation ? integerInput(providerObservation, "cancelledAmount", { min: 0 })! : null;
-    const outcome=await withTransaction(context.pool,async(client)=>{const paymentLookup=await client.query<{order_id:string}>("SELECT order_id FROM payments WHERE id=$1",[paymentId]);if(!paymentLookup.rowCount)throw notFound("결제 정보를 찾을 수 없습니다.");const linkedKujiRoom=await lockLinkedKujiRoomForOrder(client,paymentLookup.rows[0]!.order_id);const payment=await client.query<{id:string;order_id:string;provider:string;status:string;amount:number;provider_payment_id:string|null}>("SELECT id,order_id,provider,status,amount,provider_payment_id FROM payments WHERE id=$1 FOR UPDATE",[paymentId]);if(!payment.rowCount)throw notFound("결제 정보를 찾을 수 없습니다.");const pay=payment.rows[0]!;if(pay.order_id!==paymentLookup.rows[0]!.order_id)throw new Error(`Payment order changed while locking ${paymentId}`);if(pay.provider!==provider)throw forbidden("결제 제공자가 일치하지 않습니다.");const inserted=await client.query<{id:string}>(`INSERT INTO payment_provider_events(provider,provider_event_id,event_type,payment_id,signature_digest,payload,occurred_at,processed_at) VALUES($1,$2,$3,$4,$5,$6,$7,now()) ON CONFLICT (provider,provider_event_id) DO NOTHING RETURNING id`,[provider,eventId,eventType,paymentId,signatureDigest,JSON.stringify(body),occurredAt]);if(!inserted.rowCount){const existingEvent=await client.query<{payment_id:string;event_type:string;payload_matches:boolean}>("SELECT payment_id,event_type,payload=$3::jsonb AS payload_matches FROM payment_provider_events WHERE provider=$1 AND provider_event_id=$2",[provider,eventId,JSON.stringify(body)]);const prior=existingEvent.rows[0];if(!prior||prior.payment_id!==paymentId||prior.event_type!==eventType||!prior.payload_matches)throw conflict("같은 결제 이벤트 ID의 내용이 일치하지 않습니다.");return "duplicate" as const;}const orderResult=await client.query<OrderRow & {cancelled_at:Date|null}>("SELECT o.*,p.id AS payment_id FROM orders o JOIN payments p ON p.order_id=o.id WHERE o.id=$1 FOR UPDATE OF o",[pay.order_id]);const order=orderResult.rows[0]!;
-      const markReview=async(reason:string,payload:Record<string,unknown>={})=>{await client.query("UPDATE payments SET status='REFUND_REVIEW',provider_payment_id=COALESCE($2,provider_payment_id),version=version+1 WHERE id=$1",[pay.id,providerPaymentId||null]);await client.query("UPDATE orders SET status='REFUND_REVIEW',version=version+1 WHERE id=$1",[order.id]);await writeOutbox(client,request.id,{aggregateType:"PAYMENT",aggregateId:pay.id,eventType:reason,payload:{paymentId:pay.id,orderId:order.id,providerEventId:eventId,...payload}});return "review" as const;};
-      if(eventType==="PAYMENT_STATE_ANOMALY"){
-        const observation={providerStatus:observedStatus,providerPaidAmount:observedPaidAmount,providerCancelledAmount:observedCancelledAmount,previousPaymentStatus:pay.status};
-        if(pay.status==="REFUNDED"){
-          await writeOutbox(client,request.id,{aggregateType:"PAYMENT",aggregateId:pay.id,eventType:"payment.provider_state_anomaly_after_refund_observed",payload:{paymentId:pay.id,orderId:order.id,providerEventId:eventId,...observation}});
-          return "ignored" as const;
-        }
-        return markReview("payment.provider_state_anomaly_requires_reconciliation",observation);
-      }
-      if(eventType==="REFUND_PARTIAL"){
-        return markReview("payment.partial_refund_requires_reconciliation",{providerCancelledAmount:amount,previousPaymentStatus:pay.status});
-      }
-      if(amount!==numberValue(pay.amount)){if(pay.status==="REFUNDED"){await writeOutbox(client,request.id,{aggregateType:"PAYMENT",aggregateId:pay.id,eventType:"payment.amount_mismatch_after_refund_observed",payload:{paymentId:pay.id,orderId:order.id,providerEventId:eventId,providerAmount:amount,ledgerAmount:numberValue(pay.amount),eventType}});return "ignored" as const;}return markReview("payment.amount_mismatch_requires_reconciliation",{providerAmount:amount,ledgerAmount:numberValue(pay.amount),eventType});}
-
-      if(eventType==="PAYMENT_SUCCEEDED"){
-        if(pay.status==="REFUNDED"){await writeOutbox(client,request.id,{aggregateType:"PAYMENT",aggregateId:pay.id,eventType:"payment.success_after_refund_observed",payload:{paymentId:pay.id,orderId:order.id,providerEventId:eventId}});return "ignored" as const;}
-        if(pay.status==="PAID")return "processed" as const;
-        if(["CANCELLED","FAILED","REFUND_REVIEW"].includes(pay.status)){if(pay.status!=="REFUND_REVIEW"){await client.query("UPDATE payments SET status='REFUND_REVIEW',provider_payment_id=COALESCE($2,provider_payment_id),paid_at=COALESCE(paid_at,$3),version=version+1 WHERE id=$1",[pay.id,providerPaymentId||null,occurredAt]);await client.query("UPDATE orders SET status='REFUND_REVIEW',paid_at=COALESCE(paid_at,$2),version=version+1 WHERE id=$1",[order.id,occurredAt]);}await recordPaymentLedger(client,pay,order.id,eventId,"Verified late provider success");await writeOutbox(client,request.id,{aggregateType:"PAYMENT",aggregateId:pay.id,eventType:"payment.late_success_requires_reconciliation",payload:{paymentId:pay.id,orderId:order.id,providerEventId:eventId,previousPaymentStatus:pay.status}});return "review" as const;}
-        if(!["PENDING","AUTHORIZED"].includes(pay.status))return markReview("payment.state_requires_reconciliation",{eventType,previousPaymentStatus:pay.status});
-        if(linkedKujiRoom&&(
-          linkedKujiRoom.state!=="CHECKOUT_PENDING"
-          || linkedKujiRoom.checkout_expires_at===null
-          || occurredAt.getTime()<order.created_at.getTime()
-          || occurredAt.getTime()>=linkedKujiRoom.checkout_expires_at.getTime()
-        )){
-          const reconciliationTime=await client.query<{server_now:Date}>("SELECT clock_timestamp() AS server_now");
-          const serverNow=reconciliationTime.rows[0]!.server_now;
-          await releasePendingOrder(client,order,"KUJI_PAYMENT_SUCCEEDED_OUTSIDE_LEASE");
-          await client.query("UPDATE payments SET status='REFUND_REVIEW',provider_payment_id=COALESCE($2,provider_payment_id),paid_at=COALESCE(paid_at,$3),version=version+1 WHERE id=$1",[pay.id,providerPaymentId||null,occurredAt]);
-          await client.query("UPDATE orders SET status='REFUND_REVIEW',paid_at=COALESCE(paid_at,$2),cancelled_at=COALESCE(cancelled_at,$3),version=version+1 WHERE id=$1",[order.id,occurredAt,serverNow]);
-          await releaseLockedKujiOrderRoom(client,{orderId:order.id,serverNow,terminalState:"EXPIRED"});
-          await recordPaymentLedger(client,pay,order.id,eventId,"Verified success outside kuji checkout lease");
-          await writeOutbox(client,request.id,{aggregateType:"PAYMENT",aggregateId:pay.id,eventType:"payment.kuji_checkout_lease_requires_reconciliation",payload:{paymentId:pay.id,orderId:order.id,providerEventId:eventId,roomEntryId:linkedKujiRoom.id,roomState:linkedKujiRoom.state,checkoutExpiresAt:linkedKujiRoom.checkout_expires_at?.toISOString()??null,localAssetsReleased:true}});
-          return "review" as const;
-        }
-        if(order.order_kind==="SHIPPING_FEE"){
-          if(!order.shipping_request_id)return markReview("payment.shipping_request_missing",{eventType});
-          const shipping=await client.query<{status:string}>("SELECT status FROM shipping_requests WHERE id=$1 AND user_id=$2 FOR UPDATE",[order.shipping_request_id,order.user_id]);
-          const counts=await client.query<{item_count:string;shipping_count:string}>(`SELECT
-            count(item.inventory_unit_id)::text AS item_count,
-            count(item.inventory_unit_id) FILTER (WHERE inventory.status='SHIPPING')::text AS shipping_count
-            FROM shipping_request_items item
-            JOIN inventory_units inventory ON inventory.id=item.inventory_unit_id
-            WHERE item.shipping_request_id=$1`,[order.shipping_request_id]);
-          const shippingRow=shipping.rows[0]&&counts.rows[0]?{...shipping.rows[0],...counts.rows[0]}:null;
-          if(!shippingRow
-            || shippingRow.status!=="PAYMENT_PENDING"
-            || numberValue(shippingRow.item_count)<1
-            || numberValue(shippingRow.item_count)!==numberValue(shippingRow.shipping_count)){
-            await recordPaymentLedger(client,pay,order.id,eventId,"Verified shipping fee payment requiring reconciliation");
-            return markReview("payment.shipping_fulfillment_requires_reconciliation",{
-              shippingRequestId:order.shipping_request_id,
-              shippingStatus:shippingRow?.status??null,
-              itemCount:shippingRow?numberValue(shippingRow.item_count):0,
-              shippingItemCount:shippingRow?numberValue(shippingRow.shipping_count):0,
-            });
-          }
-          const promoted=await client.query("UPDATE shipping_requests SET status='REQUESTED',version=version+1 WHERE id=$1 AND user_id=$2 AND status='PAYMENT_PENDING' RETURNING id",[order.shipping_request_id,order.user_id]);
-          if(!promoted.rowCount)return markReview("payment.shipping_promotion_requires_reconciliation",{shippingRequestId:order.shipping_request_id});
-        }
-        const lines=await client.query<OrderLineRow>("SELECT * FROM order_lines WHERE order_id=$1 ORDER BY product_id FOR UPDATE",[order.id]);const reservations=await client.query<{order_line_id:string;product_id:string;quantity:number}>("SELECT order_line_id,product_id,quantity FROM stock_reservations WHERE order_id=$1 AND status='ACTIVE' ORDER BY product_id,order_line_id FOR UPDATE",[order.id]);const reservationByLine=new Map(reservations.rows.map((item)=>[item.order_line_id,item]));let reservationSafe=reservations.rows.length===lines.rows.length;for(const line of lines.rows){const reservation=reservationByLine.get(line.id);const stock=await client.query<{on_hand:number;reserved:number}>("SELECT on_hand,reserved FROM product_stock WHERE product_id=$1 FOR UPDATE",[line.product_id]);if(!reservation||reservation.product_id!==line.product_id||numberValue(reservation.quantity)!==numberValue(line.quantity)||!stock.rowCount||numberValue(stock.rows[0]!.on_hand)<numberValue(line.quantity)||numberValue(stock.rows[0]!.reserved)<numberValue(line.quantity))reservationSafe=false;}
-        if(!reservationSafe){await recordPaymentLedger(client,pay,order.id,eventId,"Verified success without fulfillable reservation");return markReview("payment.fulfillment_requires_reconciliation",{previousPaymentStatus:pay.status});}
-        for(const line of lines.rows){await client.query("UPDATE product_stock SET on_hand=on_hand-$2,reserved=reserved-$2,version=version+1 WHERE product_id=$1",[line.product_id,line.quantity]);await client.query("UPDATE stock_reservations SET status='COMMITTED',resolved_at=now() WHERE order_line_id=$1 AND status='ACTIVE'",[line.id]);if(isDrawCategory(line.category_snapshot)){for(let i=0;i<line.quantity;i+=1)await client.query("INSERT INTO draw_entitlements(order_line_id,user_id,product_id,probability_version_id) VALUES($1,$2,$3,$4)",[line.id,order.user_id,line.product_id,line.probability_version_id]);}else{for(let i=0;i<line.quantity;i+=1)await client.query("INSERT INTO inventory_units(owner_id,product_id,source_type,source_id) VALUES($1,$2,'PURCHASE',$3)",[order.user_id,line.product_id,line.id]);}}
-        await client.query("UPDATE coupon_redemptions SET status='COMMITTED' WHERE order_id=$1 AND status='RESERVED'",[order.id]);await client.query("UPDATE payments SET status='PAID',provider_payment_id=COALESCE($2,provider_payment_id),paid_at=$3,version=version+1 WHERE id=$1",[pay.id,providerPaymentId||null,occurredAt]);await client.query("UPDATE orders SET status='PAID',paid_at=$2,version=version+1 WHERE id=$1",[order.id,occurredAt]);if(linkedKujiRoom){const drawingTime=await client.query<{server_now:Date}>("SELECT clock_timestamp() AS server_now");if(!(await startLockedKujiOrderDrawing(client,{orderId:order.id,serverNow:drawingTime.rows[0]!.server_now})))throw new Error(`Kuji room did not enter DRAWING for order ${order.id}`);}await recordPaymentLedger(client,pay,order.id,eventId,"Verified provider webhook");await writeOutbox(client,request.id,{aggregateType:order.order_kind==="SHIPPING_FEE"?"SHIPPING_REQUEST":"ORDER",aggregateId:order.order_kind==="SHIPPING_FEE"?order.shipping_request_id!:order.id,eventType:order.order_kind==="SHIPPING_FEE"?"shipping.requested":"order.paid",payload:{orderId:order.id,userId:order.user_id,...(order.shipping_request_id?{shippingRequestId:order.shipping_request_id}:{})}});return "processed" as const;
-      }
-
-      if(eventType==="PAYMENT_FAILED"||eventType==="PAYMENT_CANCELLED"){if(["PENDING","AUTHORIZED"].includes(pay.status)){await releasePendingOrder(client,order,eventType);await client.query("UPDATE payments SET status=$2,provider_payment_id=COALESCE($3,provider_payment_id),version=version+1 WHERE id=$1",[pay.id,eventType==="PAYMENT_FAILED"?"FAILED":"CANCELLED",providerPaymentId||null]);await client.query("UPDATE orders SET status='CANCELLED',cancelled_at=$2,version=version+1 WHERE id=$1",[order.id,occurredAt]);if(linkedKujiRoom){const releaseTime=await client.query<{server_now:Date}>("SELECT clock_timestamp() AS server_now");await releaseLockedKujiOrderRoom(client,{orderId:order.id,serverNow:releaseTime.rows[0]!.server_now,terminalState:"CANCELLED"});}await writeOutbox(client,request.id,{aggregateType:"ORDER",aggregateId:order.id,eventType:"order.cancelled",payload:{orderId:order.id,reason:eventType}});return "processed" as const;}await writeOutbox(client,request.id,{aggregateType:"PAYMENT",aggregateId:pay.id,eventType:"payment.terminal_event_observed",payload:{paymentId:pay.id,orderId:order.id,providerEventId:eventId,eventType,previousPaymentStatus:pay.status}});return "ignored" as const;}
-
-      if(pay.status==="REFUNDED")return "processed" as const;
-      if(["PENDING","AUTHORIZED","FAILED","CANCELLED"].includes(pay.status)){if(["PENDING","AUTHORIZED"].includes(pay.status)){await releasePendingOrder(client,order,"PROVIDER_REFUND_BEFORE_SUCCESS");if(linkedKujiRoom){const releaseTime=await client.query<{server_now:Date}>("SELECT clock_timestamp() AS server_now");await releaseLockedKujiOrderRoom(client,{orderId:order.id,serverNow:releaseTime.rows[0]!.server_now,terminalState:"CANCELLED"});}}await recordPaymentLedger(client,pay,order.id,eventId,"Payment inferred from verified provider refund");await recordRefundLedger(client,pay,order.id,eventId,"Verified provider refund before local fulfillment");await client.query("UPDATE payments SET status='REFUNDED',provider_payment_id=COALESCE($2,provider_payment_id),paid_at=COALESCE(paid_at,$3),refunded_at=$3,version=version+1 WHERE id=$1",[pay.id,providerPaymentId||null,occurredAt]);await client.query("UPDATE orders SET status='REFUNDED',paid_at=COALESCE(paid_at,$2),refunded_at=$2,version=version+1 WHERE id=$1",[order.id,occurredAt]);await writeOutbox(client,request.id,{aggregateType:"ORDER",aggregateId:order.id,eventType:"order.refunded",payload:{orderId:order.id,userId:order.user_id,withoutLocalFulfillment:true}});return "processed" as const;}
-      if(!["PAID","REFUND_REVIEW"].includes(pay.status))return markReview("payment.refund_state_requires_reconciliation",{previousPaymentStatus:pay.status});
-      if(order.order_kind==="SHIPPING_FEE"){
-        if(!order.shipping_request_id){await recordRefundLedger(client,pay,order.id,eventId,"Verified shipping fee refund missing request");return markReview("payment.shipping_refund_requires_reconciliation",{});}
-        const shipping=await client.query<{status:string}>("SELECT status FROM shipping_requests WHERE id=$1 AND user_id=$2 FOR UPDATE",[order.shipping_request_id,order.user_id]);
-        const shippingStatus=shipping.rows[0]?.status;
-        await recordRefundLedger(client,pay,order.id,eventId,"Verified shipping fee refund");
-        if(shippingStatus==="REQUESTED"){
-          const expected=await client.query<{count:string}>("SELECT count(*)::text AS count FROM shipping_request_items WHERE shipping_request_id=$1",[order.shipping_request_id]);
-          await client.query("SAVEPOINT shipping_refund_inventory_transition");
-          const restored=await client.query(`UPDATE inventory_units inventory SET status='OWNED'
-            FROM shipping_request_items item
-            WHERE item.shipping_request_id=$1 AND item.inventory_unit_id=inventory.id
-              AND inventory.owner_id=$2 AND inventory.status='SHIPPING'
-            RETURNING inventory.id`,[order.shipping_request_id,order.user_id]);
-          if(restored.rowCount!==numberValue(expected.rows[0]?.count??0)||restored.rowCount===0){
-            await client.query("ROLLBACK TO SAVEPOINT shipping_refund_inventory_transition");
-            await client.query("RELEASE SAVEPOINT shipping_refund_inventory_transition");
-            return markReview("payment.shipping_refund_requires_reconciliation",{shippingRequestId:order.shipping_request_id,shippingStatus,transitionMismatch:true});
-          }
-          await client.query("RELEASE SAVEPOINT shipping_refund_inventory_transition");
-          await client.query("UPDATE shipping_requests SET status='CANCELLED',version=version+1 WHERE id=$1 AND status='REQUESTED'",[order.shipping_request_id]);
-        }else if(shippingStatus!=="CANCELLED"){
-          return markReview("payment.shipping_refund_requires_reconciliation",{shippingRequestId:order.shipping_request_id,shippingStatus:shippingStatus??null});
-        }
-        await client.query("UPDATE payments SET status='REFUNDED',provider_payment_id=COALESCE($2,provider_payment_id),refunded_at=$3,version=version+1 WHERE id=$1",[pay.id,providerPaymentId||null,occurredAt]);
-        await client.query("UPDATE orders SET status='REFUNDED',refunded_at=$2,version=version+1 WHERE id=$1",[order.id,occurredAt]);
-        await writeOutbox(client,request.id,{aggregateType:"SHIPPING_REQUEST",aggregateId:order.shipping_request_id,eventType:"shipping.fee_refunded",payload:{shippingRequestId:order.shipping_request_id,orderId:order.id,userId:order.user_id}});
-        return "processed" as const;
-      }
-      const assets=await lockRefundAssets(client,order);const lateSuccessWithoutAssets=pay.status==="REFUND_REVIEW"&&Boolean(order.cancelled_at)&&assets.inventoryIds.length===0&&assets.entitlementIds.length===0;if(!lateSuccessWithoutAssets&&refundRequiresReview(assets.safety)){await recordRefundLedger(client,pay,order.id,eventId,"Verified provider refund with assets requiring reconciliation");return markReview("payment.refund_requires_reconciliation",assets.safety);}
-      if(lateSuccessWithoutAssets){await recordRefundLedger(client,pay,order.id,eventId,"Verified provider refund after late success");await client.query("UPDATE payments SET status='REFUNDED',provider_payment_id=COALESCE($2,provider_payment_id),refunded_at=$3,version=version+1 WHERE id=$1",[pay.id,providerPaymentId||null,occurredAt]);await client.query("UPDATE orders SET status='REFUNDED',refunded_at=$2,version=version+1 WHERE id=$1",[order.id,occurredAt]);await writeOutbox(client,request.id,{aggregateType:"ORDER",aggregateId:order.id,eventType:"order.refunded",payload:{orderId:order.id,userId:order.user_id,lateSuccessReconciled:true}});return "processed" as const;}
-      await client.query("SAVEPOINT refund_asset_transition");const inventoryTransition=await client.query("UPDATE inventory_units SET status='REFUNDED' WHERE id=ANY($1::uuid[]) AND owner_id=$2 AND status='OWNED' RETURNING id",[assets.inventoryIds,order.user_id]);const entitlementTransition=await client.query("UPDATE draw_entitlements SET status='CANCELLED' WHERE id=ANY($1::uuid[]) AND status='AVAILABLE' RETURNING id",[assets.entitlementIds]);if(inventoryTransition.rowCount!==assets.inventoryIds.length||entitlementTransition.rowCount!==assets.entitlementIds.length){await client.query("ROLLBACK TO SAVEPOINT refund_asset_transition");await client.query("RELEASE SAVEPOINT refund_asset_transition");await recordRefundLedger(client,pay,order.id,eventId,"Verified provider refund with concurrent asset transition");return markReview("payment.refund_requires_reconciliation",{...assets.safety,transitionMismatch:true});}await client.query("RELEASE SAVEPOINT refund_asset_transition");
-      for(const line of assets.lines){if(isDrawCategory(line.category_snapshot)){const activeVersionId=assets.activeDrawVersionByProduct.get(line.product_id)??null;if(!shouldRelistRefundedDrawStock(line.probability_version_id,activeVersionId)){await writeOutbox(client,request.id,{aggregateType:"ORDER",aggregateId:order.id,eventType:"draw.refund_stock_not_relisted",payload:{orderId:order.id,orderLineId:line.id,productId:line.product_id,quantity:line.quantity,refundedVersionId:line.probability_version_id,activeVersionId}});continue;}}await client.query("UPDATE product_stock SET on_hand=on_hand+$2,version=version+1 WHERE product_id=$1",[line.product_id,line.quantity]);}
-      if(linkedKujiRoom){const refundTime=await client.query<{server_now:Date}>("SELECT clock_timestamp() AS server_now");await releaseRefundedKujiOrderRoom(client,{orderId:order.id,serverNow:refundTime.rows[0]!.server_now});}
-      if(numberValue(order.point_total)>0){const pointLedger=await client.query("INSERT INTO point_ledger_entries(user_id,entry_type,amount,reference_type,reference_id,reason) VALUES($1,'REFUND',$2,'ORDER',$3,'Paid order refunded') ON CONFLICT DO NOTHING RETURNING id",[order.user_id,order.point_total,order.id]);if(pointLedger.rowCount)await client.query("UPDATE point_accounts SET balance=balance+$2,version=version+1 WHERE user_id=$1",[order.user_id,order.point_total]);}const coupon=await client.query<{coupon_id:string}>("UPDATE coupon_redemptions SET status='REFUNDED' WHERE order_id=$1 AND status='COMMITTED' RETURNING coupon_id",[order.id]);if(coupon.rowCount)await client.query("UPDATE coupons SET used_count=GREATEST(0,used_count-1) WHERE id=$1",[coupon.rows[0]!.coupon_id]);await client.query("UPDATE payments SET status='REFUNDED',provider_payment_id=COALESCE($2,provider_payment_id),refunded_at=$3,version=version+1 WHERE id=$1",[pay.id,providerPaymentId||null,occurredAt]);await client.query("UPDATE orders SET status='REFUNDED',refunded_at=$2,version=version+1 WHERE id=$1",[order.id,occurredAt]);await recordRefundLedger(client,pay,order.id,eventId,"Verified provider refund");await writeOutbox(client,request.id,{aggregateType:"ORDER",aggregateId:order.id,eventType:"order.refunded",payload:{orderId:order.id,userId:order.user_id}});return "processed" as const;
-    });return reply.code(202).send({accepted:true,outcome});
+  // The shared-secret HMAC rail exists only for local/test providers. PortOne
+  // flows authenticate with PortOne itself and call the canonical handler
+  // in-process, so the shared secret is never an external entry point there.
+  if(externalCanonicalWebhookEnabled(context.config.paymentProvider)){
+  app.post("/v1/payments/webhooks/:provider",{preHandler:requireLiveCommerce(context)},async(request,reply)=>{const provider=stringInput(request.params as Record<string,unknown>,"provider",{max:40})!;if(context.config.paymentProvider==="UNCONFIGURED"||!context.config.paymentWebhookSecret)throw new AppError(503,"PAYMENT_NOT_CONFIGURED","결제 웹훅이 구성되지 않았습니다.");if(provider==="INTERNAL_ZERO"||provider!==context.config.paymentProvider)throw forbidden("현재 구성된 결제 제공자가 아닙니다.");const signatureHeader=request.headers["x-dabboba-signature"];const signature=Array.isArray(signatureHeader)?signatureHeader[0]:signatureHeader;if(!signature||!request.rawBody||!signatureMatches(request.rawBody,signature,context.config.paymentWebhookSecret))throw unauthorized("결제 웹훅 서명이 유효하지 않습니다.");const signatureDigest=createHash("sha256").update(signature).digest("hex");
+    const event=parseCanonicalPaymentEvent(provider,request.body,signatureDigest);
+    const outcome=await applyCanonicalPaymentEvent(context,event,request.id);
+    return reply.code(202).send({accepted:true,outcome});
   });
+  }
 
   await registerPortOnePaymentRoutes(app, context);
 
@@ -676,7 +718,7 @@ export async function registerCommerceRoutes(app:FastifyInstance,context:ApiCont
     const result=await withTransaction(context.pool,async(client)=>{
       const idem=await beginIdempotency(client,{actorId:request.actor!.userId,scope:"CONSUME_DRAW",key,hash});
       if(!idem.fresh)return {replay:true,statusCode:idem.statusCode,body:idem.body};
-      const lookup=await client.query<{product_id:string;probability_version_id:string;order_id:string}>("SELECT e.product_id,e.probability_version_id,l.order_id FROM draw_entitlements e JOIN order_lines l ON l.id=e.order_line_id WHERE e.id=$1",[entitlementId]);if(!lookup.rowCount)throw notFound("추첨권을 찾을 수 없습니다.");const lockTarget=lookup.rows[0]!;const linkedKujiRoom=await lockLinkedKujiRoomForOrder(client,lockTarget.order_id);const linkedOrder=await client.query<{status:string}>("SELECT status FROM orders WHERE id=$1 FOR UPDATE",[lockTarget.order_id]);if(!linkedOrder.rowCount||!["PAID","FULFILLED"].includes(linkedOrder.rows[0]!.status))throw conflict("결제 완료된 추첨권만 사용할 수 있습니다.");if(linkedKujiRoom){const roomTime=await client.query<{server_now:Date}>("SELECT clock_timestamp() AS server_now");const serverNow=roomTime.rows[0]!.server_now;if(linkedKujiRoom.state==="DRAWING"){if(linkedKujiRoom.drawing_expires_at===null)throw conflict("쿠지 뽑기 시간을 확인할 수 없습니다.");if(serverNow.getTime()>=linkedKujiRoom.drawing_expires_at.getTime()){const expiredRoom=await expireLockedKujiOrderDrawing(client,{orderId:lockTarget.order_id,serverNow});if(expiredRoom)await writeOutbox(client,request.id,{aggregateType:"ORDER",aggregateId:lockTarget.order_id,eventType:"kuji.drawing_lease_expired",payload:{orderId:lockTarget.order_id,roomEntryId:linkedKujiRoom.id,entitlementsRemainConsumable:true}});}}else if(!["EXPIRED","COMPLETED"].includes(linkedKujiRoom.state)){throw conflict("현재 쿠지 추첨권을 사용할 수 없습니다.");}}await client.query("SELECT p.id FROM catalog_products p JOIN product_stock s ON s.product_id=p.id WHERE p.id=$1 FOR UPDATE OF p,s",[lockTarget.product_id]);await client.query("SELECT id FROM draw_probability_versions WHERE id=$1 FOR UPDATE",[lockTarget.probability_version_id]);await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1::text,0))",[`draw-capacity:${lockTarget.probability_version_id}`]);
+      const lookup=await client.query<{product_id:string;probability_version_id:string;order_id:string}>("SELECT e.product_id,e.probability_version_id,l.order_id FROM draw_entitlements e JOIN order_lines l ON l.id=e.order_line_id WHERE e.id=$1 AND e.user_id=$2",[entitlementId,request.actor!.userId]);if(!lookup.rowCount)throw notFound("추첨권을 찾을 수 없습니다.");const lockTarget=lookup.rows[0]!;const linkedKujiRoom=await lockLinkedKujiRoomForOrder(client,lockTarget.order_id);const linkedOrder=await client.query<{status:string}>("SELECT status FROM orders WHERE id=$1 FOR UPDATE",[lockTarget.order_id]);if(!linkedOrder.rowCount||!["PAID","FULFILLED"].includes(linkedOrder.rows[0]!.status))throw conflict("결제 완료된 추첨권만 사용할 수 있습니다.");if(linkedKujiRoom){const roomTime=await client.query<{server_now:Date}>("SELECT clock_timestamp() AS server_now");const serverNow=roomTime.rows[0]!.server_now;if(linkedKujiRoom.state==="DRAWING"){if(linkedKujiRoom.drawing_expires_at===null)throw conflict("쿠지 뽑기 시간을 확인할 수 없습니다.");if(serverNow.getTime()>=linkedKujiRoom.drawing_expires_at.getTime()){const expiredRoom=await expireLockedKujiOrderDrawing(client,{orderId:lockTarget.order_id,serverNow});if(expiredRoom)await writeOutbox(client,request.id,{aggregateType:"ORDER",aggregateId:lockTarget.order_id,eventType:"kuji.drawing_lease_expired",payload:{orderId:lockTarget.order_id,roomEntryId:linkedKujiRoom.id,entitlementsRemainConsumable:true}});}}else if(!["EXPIRED","COMPLETED"].includes(linkedKujiRoom.state)){throw conflict("현재 쿠지 추첨권을 사용할 수 없습니다.");}}await client.query("SELECT p.id FROM catalog_products p JOIN product_stock s ON s.product_id=p.id WHERE p.id=$1 FOR UPDATE OF p,s",[lockTarget.product_id]);await client.query("SELECT id FROM draw_probability_versions WHERE id=$1 FOR UPDATE",[lockTarget.probability_version_id]);await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1::text,0))",[`draw-capacity:${lockTarget.probability_version_id}`]);
       const entitlement=await client.query<{id:string;user_id:string;product_id:string;probability_version_id:string;status:string;version:number}>(`SELECT e.*,v.version FROM draw_entitlements e JOIN draw_probability_versions v ON v.id=e.probability_version_id WHERE e.id=$1 FOR UPDATE OF e`,[entitlementId]);
       if(!entitlement.rowCount)throw notFound("추첨권을 찾을 수 없습니다.");
       const ticket=entitlement.rows[0]!;

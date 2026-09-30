@@ -1,11 +1,13 @@
 import { createHash, createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { lockLinkedKujiRoomForOrder, withTransaction } from "@dabboba/db";
-import { adminMutationHeaders, writeAdminAudit } from "../lib/audit.js";
+import { lockLinkedKujiRoomForOrder, releaseLockedKujiOrderRoom, withTransaction } from "@dabboba/db";
+import { adminIdempotentMutation, sendAdminMutation } from "../lib/admin-idempotency.js";
+import { adminMutationHeaders, writeAdminAudit, writeOutbox } from "../lib/audit.js";
 import { AppError, badRequest, conflict, notFound, unauthorized } from "../lib/errors.js";
 import { requireLiveCommerce } from "../lib/commerce-mode.js";
 import {
   createPortOneV2Adapter,
+  isPortOnePaymentNotFound,
   PortOneV2Error,
   type PortOneCardPayment,
 } from "../lib/portone-v2.js";
@@ -13,10 +15,12 @@ import {
   PortOneWebhookError,
   verifyPortOnePaymentWebhook,
 } from "../lib/portone-webhook.js";
-import { requestHash } from "../lib/idempotency.js";
+import { beginIdempotency, completeIdempotency, idempotencyKey, requestHash } from "../lib/idempotency.js";
 import { objectInput, stringInput, uuidInput } from "../lib/input.js";
+import { releasePendingOrder } from "../lib/pending-order-release.js";
 import { numberValue } from "../lib/rows.js";
 import type { ApiContext } from "../types.js";
+import { applyCanonicalPaymentEvent, parseCanonicalPaymentEvent } from "./commerce.js";
 
 const PORTONE_PROVIDER = "PORTONE_V2_INICIS";
 
@@ -140,6 +144,63 @@ export const REFUND_CANDIDATE_LOOKUP_SQL = `SELECT p.id,p.order_id,p.provider,p.
   LEFT JOIN shipping_requests shipping ON shipping.id=o.shipping_request_id WHERE p.id=$1`;
 const REFUND_CANDIDATE_SQL = `${REFUND_CANDIDATE_LOOKUP_SQL} FOR UPDATE OF p,o`;
 
+const PRECHECK_STALE_MS = 30_000;
+// Review codes where no provider cancellation can be in flight or have moved
+// money: the local state changed before CALLING, the provider state did not
+// match before CALLING, the provider itself reported the cancellation FAILED,
+// or an operator aborted the attempt.
+const RESUMABLE_REVIEW_CODES = new Set([
+  "LOCAL_STATE_CHANGED",
+  "PROVIDER_STATE_MISMATCH",
+  "PROVIDER_CANCEL_FAILED",
+]);
+
+/**
+ * Whether a later request may reuse this payment's single attempt row after a
+ * fresh provider read and full local recheck. CALLING, PROVIDER_PENDING,
+ * INDETERMINATE and RECONCILED are never resumable: a cancellation may be in
+ * flight or already applied.
+ */
+export function refundAttemptResumable(
+  attempt: Pick<RefundAttempt, "status" | "last_error_code" | "updated_at">,
+  now = Date.now(),
+): boolean {
+  if (attempt.status === "PRECHECK") return now - attempt.updated_at.getTime() >= PRECHECK_STALE_MS;
+  if (attempt.status === "PRECHECK_FAILED") return true;
+  return attempt.status === "REVIEW_REQUIRED" && RESUMABLE_REVIEW_CODES.has(attempt.last_error_code ?? "");
+}
+
+/** Aborting is resumable-state only, and not already aborted. */
+export function refundAttemptAbortable(
+  attempt: Pick<RefundAttempt, "status" | "last_error_code" | "updated_at">,
+  now = Date.now(),
+): boolean {
+  return attempt.status !== "PRECHECK_FAILED" && refundAttemptResumable(attempt, now);
+}
+
+export function refundCandidateEligibility(
+  candidate: NormalDrawRefundCandidate,
+  resuming: boolean,
+): { blocker: string | null; normalDraw: boolean; freeze: boolean } {
+  if (candidate.status === "PAID" && candidate.order_status === "PAID") {
+    return { blocker: normalDrawRefundBlocker(candidate, "PAID"), normalDraw: true, freeze: true };
+  }
+  // A resumed normal-draw attempt finds the order still frozen by the first.
+  if (resuming && !candidate.cancelled_at
+    && candidate.status === "REFUND_REVIEW" && candidate.order_status === "REFUND_REVIEW") {
+    return { blocker: normalDrawRefundBlocker(candidate, "REFUND_REVIEW"), normalDraw: true, freeze: false };
+  }
+  return { blocker: lateRefundBlocker(candidate), normalDraw: false, freeze: false };
+}
+
+/** The provider holds exactly the full paid amount with no cancellation of any kind. */
+export function portOnePaymentFullyCancellable(payment: PortOneCardPayment, expectedAmount: number): boolean {
+  return payment.status === "PAID"
+    && payment.amount.paid === expectedAmount
+    && payment.amount.cancelled === 0
+    && payment.cancellations.every((cancellation) => cancellation.outcome === "FAILED");
+}
+
 function refundAttemptView(row: RefundAttempt, localPaymentStatus?: string) {
   return {
     paymentId: row.payment_id,
@@ -175,6 +236,39 @@ type NormalizedProviderEvent = {
   };
 };
 
+const CONFIRM_RATE_LIMIT_PER_MINUTE = 6;
+const ABANDON_IDEMPOTENCY_SCOPE = "ABANDON_PAYMENT_WINDOW";
+
+/**
+ * Provider-equivalent status for a local payment that no customer confirm can
+ * change. A cancellation after the PG window was claimed stays open: PortOne
+ * may still report a late charge that needs refund review.
+ */
+export function settledLocalPaymentProviderStatus(
+  localStatus: string,
+  pgAttemptStartedAt: Date | null,
+): PortOneCardPayment["status"] | null {
+  if (localStatus === "PAID") return "PAID";
+  if (localStatus === "FAILED") return "FAILED";
+  if (localStatus === "REFUNDED") return "CANCELLED";
+  if (localStatus === "CANCELLED" && !pgAttemptStartedAt) return "CANCELLED";
+  return null;
+}
+
+/**
+ * NONE only when PortOne holds no money and no approval is in flight. READY
+ * (window opened, nothing submitted) and terminal no-charge FAILED/CANCELLED
+ * qualify; PAY_PENDING, virtual accounts, any paid/cancelled amount, or any
+ * cancellation record are evidence that the order must not be released.
+ */
+export function portOnePaymentEvidence(payment: PortOneCardPayment): "NONE" | "PRESENT" {
+  const noMoney = payment.amount.paid === 0 && payment.amount.cancelled === 0 && payment.cancellations.length === 0;
+  if (!noMoney) return "PRESENT";
+  return payment.status === "READY" || payment.status === "FAILED" || payment.status === "CANCELLED"
+    ? "NONE"
+    : "PRESENT";
+}
+
 function configuredContext(context: ApiContext) {
   if (
     context.config.paymentProvider !== PORTONE_PROVIDER
@@ -200,7 +294,9 @@ function providerError(error: unknown): AppError {
     );
   }
   if (error instanceof PortOneWebhookError) {
-    const status = error.code === "WEBHOOK_TOO_LARGE" ? 413 : 401;
+    const status = error.code === "WEBHOOK_TOO_LARGE"
+      ? 413
+      : error.code === "WEBHOOK_CONTRACT_MISMATCH" ? 422 : 401;
     return new AppError(status, error.code, "포트원 웹훅을 검증하지 못했습니다.");
   }
   return new AppError(502, "PAYMENT_PROVIDER_UNAVAILABLE", "결제사 상태를 확인하지 못했습니다.");
@@ -282,38 +378,30 @@ export function normalizedPortOneEventForPayment(
 }
 
 async function dispatchCanonicalEvent(
-  app: FastifyInstance,
   context: ApiContext,
   event: NormalizedProviderEvent,
+  correlationId: string,
 ) {
-  const secret = context.config.paymentWebhookSecret!;
+  // The event was derived from a fresh authenticated PortOne read, so it is
+  // applied in-process. No shared-secret HTTP hop exists in PortOne mode.
   const rawBody = JSON.stringify(event);
-  const signature = createHmac("sha256", secret).update(rawBody).digest("hex");
-  const response = await app.inject({
-    method: "POST",
-    url: `/v1/payments/webhooks/${PORTONE_PROVIDER}`,
-    headers: {
-      "content-type": "application/json",
-      "x-dabboba-signature": `sha256=${signature}`,
-    },
-    payload: rawBody,
-  });
-  const body = response.json() as { outcome?: string; error?: { code?: string; message?: string } };
-  if (response.statusCode < 200 || response.statusCode >= 300) {
-    throw new AppError(
-      response.statusCode,
-      body.error?.code || "PAYMENT_RECONCILIATION_FAILED",
-      body.error?.message || "결제 승인 상태를 주문에 반영하지 못했습니다.",
-    );
-  }
-  return body.outcome || "processed";
+  const payload = JSON.parse(rawBody) as Record<string, unknown>;
+  const digest = createHash("sha256").update(`internal:${PORTONE_PROVIDER}:${rawBody}`).digest("hex");
+  return applyCanonicalPaymentEvent(
+    context,
+    parseCanonicalPaymentEvent(PORTONE_PROVIDER, payload, digest),
+    correlationId,
+  );
 }
 
 async function reconcilePayment(
-  app: FastifyInstance,
   context: ApiContext,
+  correlationId: string,
   localPayment: LocalPayment,
-  { retryReviewedRefund = false }: { retryReviewedRefund?: boolean } = {},
+  {
+    retryReviewedRefund = false,
+    reportMissingProviderPayment = false,
+  }: { retryReviewedRefund?: boolean; reportMissingProviderPayment?: boolean } = {},
 ) {
   const config = configuredContext(context);
   const adapter = createPortOneV2Adapter(config);
@@ -324,6 +412,11 @@ async function reconcilePayment(
       expectedTotalAmount: numberValue(localPayment.amount),
     });
   } catch (error) {
+    // Only the worker requery reports an authoritative "no payment" result;
+    // it never changes local state here.
+    if (reportMissingProviderPayment && isPortOnePaymentNotFound(error)) {
+      return { providerStatus: null, outcome: "provider_not_found" as const };
+    }
     throw providerError(error);
   }
   const observedEvent = normalizedPortOneEventForPayment(payment);
@@ -338,7 +431,7 @@ async function reconcilePayment(
   if (!event) {
     return { providerStatus: payment.status, outcome: "pending" as const };
   }
-  const outcome = await dispatchCanonicalEvent(app, context, event);
+  const outcome = await dispatchCanonicalEvent(context, event, correlationId);
   return { providerStatus: payment.status, outcome };
 }
 
@@ -385,7 +478,7 @@ export async function registerPortOnePaymentRoutes(
           providerStatus: null, outcome: "already_settled", localStatus: current.status,
         });
       }
-      const result = await reconcilePayment(app, context, current);
+      const result = await reconcilePayment(context, request.id, current, { reportMissingProviderPayment: true });
       const updated = await context.pool.query<{ status: string }>("SELECT status FROM payments WHERE id=$1", [paymentId]);
       return reply.code(200).send({
         accepted: true, paymentId, orderId: current.order_id,
@@ -420,7 +513,7 @@ export async function registerPortOnePaymentRoutes(
           metadata: { providerCancellationRequested: false },
         });
       });
-      const result = await reconcilePayment(app, context, current, {
+      const result = await reconcilePayment(context, request.id, current, {
         retryReviewedRefund: current.status === "REFUND_REVIEW",
       });
       return reply.code(200).send({ accepted: true, paymentId, orderId: current.order_id, ...result });
@@ -464,13 +557,14 @@ export async function registerPortOnePaymentRoutes(
       const localBefore = await context.pool.query<{ status: string }>(
         "SELECT status FROM payments WHERE id=$1", [paymentId],
       );
-      const observation = await reconcilePayment(app, context, {
+      const observation = await reconcilePayment(context, request.id, {
         id: paymentId, order_id: current.order_id, amount: numberValue(current.amount),
       }, { retryReviewedRefund: localBefore.rows[0]?.status === "REFUND_REVIEW" });
       const local = await context.pool.query<{ status: string }>("SELECT status FROM payments WHERE id=$1", [paymentId]);
+      const providerReview = observation.providerStatus === "PARTIAL_CANCELLED" || observation.outcome === "review";
       const status = observation.providerStatus === "CANCELLED" && local.rows[0]?.status === "REFUNDED"
         ? "RECONCILED"
-        : observation.providerStatus === "PARTIAL_CANCELLED" || observation.outcome === "review"
+        : providerReview
           ? "REVIEW_REQUIRED"
           : current.status === "INDETERMINATE" || current.status === "CALLING"
             ? "INDETERMINATE" : current.status;
@@ -479,9 +573,10 @@ export async function registerPortOnePaymentRoutes(
           `UPDATE portone_refund_cancellation_attempts
            SET status=$2,provider_status=$3,last_error_code=CASE
              WHEN $2='RECONCILED' THEN NULL
-             WHEN $2='REVIEW_REQUIRED' THEN 'PROVIDER_REVIEW_REQUIRED'
+             WHEN $4::boolean THEN 'PROVIDER_REVIEW_REQUIRED'
+             WHEN $2='REVIEW_REQUIRED' AND last_error_code IS NULL THEN 'PROVIDER_REVIEW_REQUIRED'
              ELSE last_error_code END
-           WHERE payment_id=$1 RETURNING *`, [paymentId, status, observation.providerStatus],
+           WHERE payment_id=$1 RETURNING *`, [paymentId, status, observation.providerStatus, providerReview],
         );
         await writeAdminAudit(client, request, request.actor!, {
           action: "PORTONE_REFUND_RECONCILED", targetType: "PAYMENT", targetId: paymentId, reason,
@@ -506,13 +601,20 @@ export async function registerPortOnePaymentRoutes(
         "SELECT * FROM portone_refund_cancellation_attempts WHERE payment_id=$1",
         [paymentId],
       );
+      // One durable attempt row per payment. A different request may resume it
+      // only when no provider cancellation can be in flight (see
+      // refundAttemptResumable); otherwise it stays an operator review item.
+      let resuming = false;
       if (existingAttempt.rowCount) {
         const attempt = existingAttempt.rows[0]!;
-        if (attempt.idempotency_key !== headers.idempotencyKey || attempt.request_hash !== hash) {
+        if (attempt.idempotency_key === headers.idempotencyKey && attempt.request_hash === hash) {
+          reply.header("x-idempotent-replay", "true");
+          return reply.code(202).send(refundAttemptView(attempt));
+        }
+        if (!refundAttemptResumable(attempt)) {
           throw conflict("이 결제에는 이미 취소 요청이 있습니다. 결과를 대사한 뒤 운영 검토해 주세요.");
         }
-        reply.header("x-idempotent-replay", "true");
-        return reply.code(202).send(refundAttemptView(attempt));
+        resuming = true;
       }
       const candidateBeforeLookup = await context.pool.query<NormalDrawRefundCandidate>(
         REFUND_CANDIDATE_LOOKUP_SQL,
@@ -520,9 +622,7 @@ export async function registerPortOnePaymentRoutes(
       );
       if (!candidateBeforeLookup.rowCount) throw notFound("결제 정보를 찾을 수 없습니다.");
       const preflight = candidateBeforeLookup.rows[0]!;
-      const preflightBlocker = preflight.status === "PAID" && preflight.order_status === "PAID"
-        ? normalDrawRefundBlocker(preflight, "PAID")
-        : lateRefundBlocker(preflight);
+      const preflightBlocker = refundCandidateEligibility(preflight, resuming).blocker;
       if (preflightBlocker) throw conflict(preflightBlocker);
 
       // A provider read is safe before the order freeze: the locked transaction
@@ -545,54 +645,80 @@ export async function registerPortOnePaymentRoutes(
           "SELECT * FROM portone_refund_cancellation_attempts WHERE payment_id=$1 FOR UPDATE",
           [paymentId],
         );
-        if (existing.rowCount) {
-          const attempt = existing.rows[0]!;
-          if (attempt.idempotency_key !== headers.idempotencyKey || attempt.request_hash !== hash) {
+        const previous = existing.rows[0] ?? null;
+        if (previous) {
+          if (previous.idempotency_key === headers.idempotencyKey && previous.request_hash === hash) {
+            return { attempt: previous, replay: true };
+          }
+          if (!refundAttemptResumable(previous)) {
             throw conflict("이 결제에는 이미 취소 요청이 있습니다. 결과를 대사한 뒤 운영 검토해 주세요.");
           }
-          return { attempt, replay: true };
         }
         const candidate = payment.rows[0]!;
-        const normalDraw = candidate.status === "PAID" && candidate.order_status === "PAID";
-        const blocker = normalDraw
-          ? normalDrawRefundBlocker(candidate, "PAID")
-          : lateRefundBlocker(candidate);
-        if (blocker) throw conflict(blocker);
-        const inserted = await client.query<RefundAttempt>(
-          `INSERT INTO portone_refund_cancellation_attempts(payment_id,admin_id,idempotency_key,request_hash,reason)
-           VALUES($1,$2,$3,$4,$5) RETURNING *`,
-          [paymentId, request.actor!.userId, headers.idempotencyKey, hash, reason],
-        );
-        if (normalDraw) {
+        const eligibility = refundCandidateEligibility(candidate, Boolean(previous));
+        if (eligibility.blocker) throw conflict(eligibility.blocker);
+        const attempt = previous
+          ? await client.query<RefundAttempt>(
+            `UPDATE portone_refund_cancellation_attempts
+                SET admin_id=$2,idempotency_key=$3,request_hash=$4,reason=$5,status='PRECHECK',
+                    provider_cancellation_id=NULL,provider_status=NULL,last_error_code=NULL
+              WHERE payment_id=$1 AND idempotency_key=$6 AND status=$7 RETURNING *`,
+            [paymentId, request.actor!.userId, headers.idempotencyKey, hash, reason,
+              previous.idempotency_key, previous.status],
+          )
+          : await client.query<RefundAttempt>(
+            `INSERT INTO portone_refund_cancellation_attempts(payment_id,admin_id,idempotency_key,request_hash,reason)
+             VALUES($1,$2,$3,$4,$5) RETURNING *`,
+            [paymentId, request.actor!.userId, headers.idempotencyKey, hash, reason],
+          );
+        if (!attempt.rowCount) throw conflict("취소 요청 상태가 변경되었습니다. 다시 조회해 주세요.");
+        if (eligibility.freeze) {
           // The draw endpoint locks this order before consuming an entitlement.
           // Commit the freeze before making any external cancellation request.
           await client.query("UPDATE payments SET status='REFUND_REVIEW',version=version+1 WHERE id=$1", [paymentId]);
           await client.query("UPDATE orders SET status='REFUND_REVIEW',version=version+1 WHERE id=$1", [candidate.order_id]);
         }
         await writeAdminAudit(client, request, request.actor!, {
-          action: normalDraw ? "PORTONE_DRAW_REFUND_PREPARED" : "PORTONE_LATE_REFUND_PREPARED",
+          action: previous
+            ? "PORTONE_REFUND_ATTEMPT_RESUMED"
+            : eligibility.normalDraw ? "PORTONE_DRAW_REFUND_PREPARED" : "PORTONE_LATE_REFUND_PREPARED",
           targetType: "PAYMENT", targetId: paymentId, reason,
-          before: { paymentStatus: candidate.status, orderStatus: candidate.order_status },
+          before: {
+            paymentStatus: candidate.status, orderStatus: candidate.order_status,
+            ...(previous ? {
+              cancellationAttemptStatus: previous.status,
+              lastErrorCode: previous.last_error_code,
+              providerCancellationId: previous.provider_cancellation_id,
+              providerStatus: previous.provider_status,
+            } : {}),
+          },
           after: { cancellationAttemptStatus: "PRECHECK" },
-          metadata: { orderId: candidate.order_id, fullAmount: numberValue(candidate.amount), drawFrozen: normalDraw },
+          metadata: {
+            orderId: candidate.order_id, fullAmount: numberValue(candidate.amount),
+            drawFrozen: eligibility.freeze, normalDraw: eligibility.normalDraw,
+            freshProviderStatus: providerPayment.status,
+          },
         });
-        return { attempt: inserted.rows[0]!, replay: false };
+        return { attempt: attempt.rows[0]!, replay: false };
       });
       if (prepared.replay) {
         reply.header("x-idempotent-replay", "true");
         return reply.code(202).send(refundAttemptView(prepared.attempt));
       }
+      const ownKey = headers.idempotencyKey;
 
       const local = await context.pool.query<{ amount: number; order_id: string }>(
         "SELECT amount,order_id FROM payments WHERE id=$1", [paymentId],
       );
       const expectedAmount = numberValue(local.rows[0]!.amount);
-      if (providerPayment.status !== "PAID" || providerPayment.amount.paid !== expectedAmount || providerPayment.amount.cancelled !== 0) {
+      if (!portOnePaymentFullyCancellable(providerPayment, expectedAmount)) {
         const review = await context.pool.query<RefundAttempt>(
           `UPDATE portone_refund_cancellation_attempts SET status='REVIEW_REQUIRED',provider_status=$2,
-             last_error_code='PROVIDER_STATE_MISMATCH' WHERE payment_id=$1 AND status='PRECHECK' RETURNING *`,
-          [paymentId, providerPayment.status],
+             last_error_code='PROVIDER_STATE_MISMATCH'
+           WHERE payment_id=$1 AND status='PRECHECK' AND idempotency_key=$3 RETURNING *`,
+          [paymentId, providerPayment.status, ownKey],
         );
+        if (!review.rowCount) throw conflict("취소 요청 상태가 변경되었습니다. 다시 조회해 주세요.");
         // An already cancelled payment is reconciled by the verified webhook
         // or confirm path, never by sending another cancellation request.
         return reply.code(202).send(refundAttemptView(review.rows[0]!));
@@ -608,14 +734,19 @@ export async function registerPortOnePaymentRoutes(
         if (blocker) {
           const review = await client.query<RefundAttempt>(
             `UPDATE portone_refund_cancellation_attempts SET status='REVIEW_REQUIRED',last_error_code='LOCAL_STATE_CHANGED'
-             WHERE payment_id=$1 AND status='PRECHECK' RETURNING *`, [paymentId],
+             WHERE payment_id=$1 AND status='PRECHECK' AND idempotency_key=$2 RETURNING *`, [paymentId, ownKey],
           );
+          if (!review.rowCount) throw conflict("취소 요청 상태가 변경되었습니다. 다시 조회해 주세요.");
           return { attempt: review.rows[0]!, execute: false };
         }
+        // Scoping to this request's key means a stale request whose attempt
+        // was resumed by another operator can never reach the provider call.
         const changed = await client.query<RefundAttempt>(
           `UPDATE portone_refund_cancellation_attempts SET status='CALLING',provider_status=$2
-           WHERE payment_id=$1 AND status='PRECHECK' RETURNING *`, [paymentId, providerPayment.status],
+           WHERE payment_id=$1 AND status='PRECHECK' AND idempotency_key=$3 RETURNING *`,
+          [paymentId, providerPayment.status, ownKey],
         );
+        if (!changed.rowCount) throw conflict("취소 요청 상태가 변경되었습니다. 다시 조회해 주세요.");
         return { attempt: changed.rows[0]!, execute: true };
       });
       if (!calling.execute) return reply.code(202).send(refundAttemptView(calling.attempt));
@@ -630,17 +761,18 @@ export async function registerPortOnePaymentRoutes(
         cancellationId = cancellation.cancellationId;
         cancellationOutcome = cancellation.outcome;
       } catch {
+        // INDETERMINATE is terminal for automation: it is never resumable.
         const unknown = await context.pool.query<RefundAttempt>(
           `UPDATE portone_refund_cancellation_attempts SET status='INDETERMINATE',last_error_code='CANCEL_OUTCOME_UNKNOWN'
-           WHERE payment_id=$1 AND status='CALLING' RETURNING *`, [paymentId],
+           WHERE payment_id=$1 AND status='CALLING' AND idempotency_key=$2 RETURNING *`, [paymentId, ownKey],
         );
         return reply.code(202).send(refundAttemptView(unknown.rows[0]!));
       }
       let finalStatus = cancellationOutcome === "FAILED" ? "REVIEW_REQUIRED" : "PROVIDER_PENDING";
-      let providerStatus: string = providerPayment.status;
+      let providerStatus: string | null = providerPayment.status;
       if (cancellationOutcome !== "FAILED") {
         try {
-          const result = await reconcilePayment(app, context, {
+          const result = await reconcilePayment(context, request.id, {
             id: paymentId, order_id: local.rows[0]!.order_id, amount: expectedAmount,
           });
           providerStatus = result.providerStatus;
@@ -651,19 +783,120 @@ export async function registerPortOnePaymentRoutes(
           finalStatus = "INDETERMINATE";
         }
       }
+      // A provider-reported FAILED cancellation moved no money, so it keeps a
+      // distinct code that a later request may resume after a fresh read.
       const recorded = await context.pool.query<RefundAttempt>(
         `UPDATE portone_refund_cancellation_attempts
          SET status=$2,provider_cancellation_id=$3,provider_status=$4,
              last_error_code=CASE WHEN $2='INDETERMINATE' THEN 'REQUERY_FAILED'
+               WHEN $2='REVIEW_REQUIRED' AND $6::boolean THEN 'PROVIDER_CANCEL_FAILED'
                WHEN $2='REVIEW_REQUIRED' THEN 'PROVIDER_REVIEW_REQUIRED' ELSE NULL END
-         WHERE payment_id=$1 AND status='CALLING' RETURNING *`,
-        [paymentId, finalStatus, cancellationId, providerStatus],
+         WHERE payment_id=$1 AND status='CALLING' AND idempotency_key=$5 RETURNING *`,
+        [paymentId, finalStatus, cancellationId, providerStatus, ownKey, cancellationOutcome === "FAILED"],
       );
       return reply.code(202).send(refundAttemptView(recorded.rows[0]!));
   };
   const refundGuard = { preHandler: [requireLiveCommerce(context), context.auth.requirePermission("refunds.cancel")] };
   app.post("/v1/admin/commerce/refund-reviews/:paymentId/cancel", refundGuard, refundHandler);
   app.post("/v1/admin/commerce/payments/:paymentId/refund", refundGuard, refundHandler);
+
+  app.post(
+    "/v1/admin/commerce/refund-reviews/:paymentId/cancellation/abort",
+    { preHandler: [requireLiveCommerce(context), context.auth.requirePermission("refunds.cancel")] },
+    async (request, reply) => {
+      const config = configuredContext(context);
+      const paymentId = uuidInput((request.params as Record<string, unknown>).paymentId, "paymentId");
+      const body = objectInput(request.body);
+      const reason = stringInput(body, "reason", { min: 2, max: 500 })!;
+      adminMutationHeaders(request, reason);
+      const attempt = await context.pool.query<RefundAttempt & { amount: number }>(
+        `SELECT a.*,p.amount FROM portone_refund_cancellation_attempts a
+         JOIN payments p ON p.id=a.payment_id WHERE a.payment_id=$1`, [paymentId],
+      );
+      if (!attempt.rowCount) throw notFound("결제 취소 요청 내역을 찾을 수 없습니다.");
+      const expectedAmount = numberValue(attempt.rows[0]!.amount);
+      // Fresh authoritative read: aborting is allowed only while PortOne
+      // confirms the full payment is intact and no cancellation exists.
+      let providerPayment: PortOneCardPayment;
+      try {
+        providerPayment = await createPortOneV2Adapter(config).getPayment({ paymentId, expectedTotalAmount: expectedAmount });
+      } catch (error) {
+        throw providerError(error);
+      }
+      const result = await adminIdempotentMutation(context, request, {
+        target: { type: "PORTONE_REFUND_ATTEMPT", paymentId },
+        bodyReason: reason,
+        work: async (client) => {
+          const payment = await client.query<NormalDrawRefundCandidate>(REFUND_CANDIDATE_SQL, [paymentId]);
+          if (!payment.rowCount) throw notFound("결제 정보를 찾을 수 없습니다.");
+          const locked = await client.query<RefundAttempt>(
+            "SELECT * FROM portone_refund_cancellation_attempts WHERE payment_id=$1 FOR UPDATE", [paymentId],
+          );
+          const current = locked.rows[0];
+          if (!current) throw notFound("결제 취소 요청 내역을 찾을 수 없습니다.");
+          if (!refundAttemptAbortable(current)) {
+            throw conflict("결제사 취소 요청 이전 단계의 요청만 중단할 수 있습니다.");
+          }
+          if (!portOnePaymentFullyCancellable(providerPayment, expectedAmount)) {
+            throw new AppError(409, "PROVIDER_STATE_MISMATCH", "결제사에서 취소 또는 금액 변경이 확인되어 중단할 수 없습니다. 결제 상태를 대사해 주세요.");
+          }
+          const candidate = payment.rows[0]!;
+          // A normal draw refund froze PAID/PAID into REFUND_REVIEW before the
+          // attempt. Restore exactly that paid state after rechecking every
+          // local asset; any other state (e.g. a late-success review) stays.
+          const frozenDraw = !candidate.cancelled_at
+            && candidate.status === "REFUND_REVIEW" && candidate.order_status === "REFUND_REVIEW";
+          if (frozenDraw) {
+            const blocker = normalDrawRefundBlocker(candidate, "REFUND_REVIEW");
+            if (blocker) throw conflict(blocker);
+            const restoredPayment = await client.query(
+              "UPDATE payments SET status='PAID',version=version+1 WHERE id=$1 AND status='REFUND_REVIEW' RETURNING id",
+              [paymentId],
+            );
+            const restoredOrder = await client.query(
+              "UPDATE orders SET status='PAID',version=version+1 WHERE id=$1 AND status='REFUND_REVIEW' RETURNING id",
+              [candidate.order_id],
+            );
+            if (!restoredPayment.rowCount || !restoredOrder.rowCount) throw conflict("결제 상태가 변경되었습니다.");
+          }
+          const aborted = await client.query<RefundAttempt>(
+            `UPDATE portone_refund_cancellation_attempts
+                SET status='PRECHECK_FAILED',last_error_code='ABORTED_BY_ADMIN',provider_status=$2
+              WHERE payment_id=$1 AND status=$3 AND idempotency_key=$4 RETURNING *`,
+            [paymentId, providerPayment.status, current.status, current.idempotency_key],
+          );
+          if (!aborted.rowCount) throw conflict("취소 요청 상태가 변경되었습니다. 다시 조회해 주세요.");
+          const after = await client.query<{ status: string; order_status: string }>(
+            "SELECT p.status,o.status AS order_status FROM payments p JOIN orders o ON o.id=p.order_id WHERE p.id=$1",
+            [paymentId],
+          );
+          await writeAdminAudit(client, request, request.actor!, {
+            action: "PORTONE_REFUND_ATTEMPT_ABORTED", targetType: "PAYMENT", targetId: paymentId, reason,
+            before: {
+              cancellationAttemptStatus: current.status, lastErrorCode: current.last_error_code,
+              paymentStatus: candidate.status, orderStatus: candidate.order_status,
+            },
+            after: {
+              cancellationAttemptStatus: "PRECHECK_FAILED",
+              paymentStatus: after.rows[0]!.status, orderStatus: after.rows[0]!.order_status,
+            },
+            metadata: { orderId: candidate.order_id, unfrozen: frozenDraw, providerStatus: providerPayment.status },
+          });
+          await writeOutbox(client, request.id, {
+            aggregateType: "PAYMENT", aggregateId: paymentId, eventType: "payment.refund_attempt_aborted",
+            payload: { paymentId, orderId: candidate.order_id, unfrozen: frozenDraw },
+          });
+          return {
+            statusCode: 200,
+            body: refundAttemptView(aborted.rows[0]!, after.rows[0]!.status),
+            resourceType: "PAYMENT",
+            resourceId: paymentId,
+          };
+        },
+      });
+      return sendAdminMutation(reply, result);
+    },
+  );
 
   app.post(
     "/v1/payments/:paymentId/attempt",
@@ -749,28 +982,209 @@ export async function registerPortOnePaymentRoutes(
 
   app.post(
     "/v1/payments/:paymentId/confirm",
-    { preHandler: [requireLiveCommerce(context), context.auth.requireUser] },
+    {
+      preHandler: [requireLiveCommerce(context), context.auth.requireUser],
+      // Every call is a live PortOne read. Bound it per client so a looping
+      // client cannot exhaust the provider API quota for everyone.
+      config: { rateLimit: { max: CONFIRM_RATE_LIMIT_PER_MINUTE, timeWindow: "1 minute" } },
+    },
     async (request, reply) => {
+      reply.header("cache-control", "no-store");
       configuredContext(context);
       const paymentId = uuidInput(
         (request.params as Record<string, unknown>).paymentId,
         "paymentId",
       );
-      const payment = await context.pool.query<LocalPayment>(
-        `SELECT p.id,p.order_id,p.amount
+      const payment = await context.pool.query<LocalPayment & { status: string; pg_attempt_started_at: Date | null }>(
+        `SELECT p.id,p.order_id,p.amount,p.status,p.pg_attempt_started_at
            FROM payments p
            JOIN orders o ON o.id=p.order_id
           WHERE p.id=$1 AND o.user_id=$2`,
         [paymentId, request.actor!.userId],
       );
       if (!payment.rowCount) throw notFound("결제 정보를 찾을 수 없습니다.");
-      const result = await reconcilePayment(app, context, payment.rows[0]!);
+      const current = payment.rows[0]!;
+      const settledProviderStatus = settledLocalPaymentProviderStatus(current.status, current.pg_attempt_started_at);
+      if (settledProviderStatus) {
+        // A settled payment cannot change through a customer confirm. Late
+        // provider changes still arrive through the PortOne webhook, the
+        // worker requery, and the audited admin requery.
+        return reply.code(200).send({
+          accepted: true,
+          paymentId,
+          orderId: current.order_id,
+          providerStatus: settledProviderStatus,
+          outcome: "already_settled",
+          localStatus: current.status,
+        });
+      }
+      const result = await reconcilePayment(context, request.id, current);
       return reply.code(200).send({
         accepted: true,
         paymentId,
-        orderId: payment.rows[0]!.order_id,
+        orderId: current.order_id,
         ...result,
       });
+    },
+  );
+
+  app.post(
+    "/v1/payments/:paymentId/abandon",
+    {
+      preHandler: [requireLiveCommerce(context), context.auth.requireUser],
+      config: { rateLimit: { max: CONFIRM_RATE_LIMIT_PER_MINUTE, timeWindow: "1 minute" } },
+    },
+    async (request, reply) => {
+      reply.header("cache-control", "no-store");
+      const config = configuredContext(context);
+      const paymentId = uuidInput((request.params as Record<string, unknown>).paymentId, "paymentId");
+      const key = idempotencyKey(request.headers);
+      const hash = requestHash({ paymentId });
+      const actorId = request.actor!.userId;
+
+      // Replays never repeat the provider read. The key row is only written by
+      // the committing transaction below, so a crash cannot strand it.
+      const prior = await context.pool.query<{
+        request_hash: string; state: string; response_status: number | null; response_body: unknown;
+      }>(
+        `SELECT request_hash,state,response_status,response_body FROM idempotency_keys
+          WHERE actor_id=$1 AND scope=$2 AND idempotency_key=$3 AND expires_at>now()`,
+        [actorId, ABANDON_IDEMPOTENCY_SCOPE, key],
+      );
+      const priorRow = prior.rows[0];
+      if (priorRow) {
+        if (priorRow.request_hash !== hash) throw conflict("같은 Idempotency-Key를 다른 요청에 재사용할 수 없습니다.");
+        if (priorRow.state === "COMPLETED" && priorRow.response_status && priorRow.response_body !== null) {
+          reply.header("x-idempotent-replay", "true");
+          return reply.code(priorRow.response_status).send(priorRow.response_body);
+        }
+      }
+
+      const owned = await context.pool.query<LocalPayment & { provider: string }>(
+        `SELECT p.id,p.order_id,p.amount,p.provider FROM payments p JOIN orders o ON o.id=p.order_id
+          WHERE p.id=$1 AND o.user_id=$2`,
+        [paymentId, actorId],
+      );
+      if (!owned.rowCount) throw notFound("결제 정보를 찾을 수 없습니다.");
+      const local = owned.rows[0]!;
+      if (local.provider !== PORTONE_PROVIDER) throw conflict("카드 결제 주문이 아닙니다.");
+
+      // Fresh authoritative read. Only "PortOne has no payment for this
+      // window" may release the order; any money movement or in-flight
+      // approval leaves every local record untouched.
+      let providerStatus: "READY" | "PAYMENT_NOT_FOUND" | "FAILED" | "CANCELLED";
+      let providerPayment: PortOneCardPayment | null = null;
+      try {
+        providerPayment = await createPortOneV2Adapter(config).getPayment({
+          paymentId,
+          expectedTotalAmount: numberValue(local.amount),
+        });
+      } catch (error) {
+        if (!isPortOnePaymentNotFound(error)) throw providerError(error);
+      }
+      if (!providerPayment) {
+        providerStatus = "PAYMENT_NOT_FOUND";
+      } else {
+        const evidence = portOnePaymentEvidence(providerPayment);
+        if (evidence !== "NONE") {
+          throw new AppError(
+            409,
+            "PAYMENT_EVIDENCE_PRESENT",
+            "결제사에 결제 진행 기록이 있어 결제를 취소할 수 없습니다. 결제 상태를 다시 확인해 주세요.",
+          );
+        }
+        providerStatus = providerPayment.status as typeof providerStatus;
+        if (providerPayment.status !== "READY") {
+          // PortOne already closed the window without money. Apply that
+          // provider-authoritative terminal state through the canonical path.
+          const event = normalizedPortOneEventForPayment(providerPayment);
+          if (!event || (event.eventType !== "PAYMENT_FAILED" && event.eventType !== "PAYMENT_CANCELLED")) {
+            throw new AppError(409, "PAYMENT_EVIDENCE_PRESENT", "결제사 상태를 다시 확인해 주세요.");
+          }
+          await dispatchCanonicalEvent(context, event, request.id);
+        }
+      }
+
+      const result = await withTransaction(context.pool, async (client) => {
+        const idem = await beginIdempotency(client, {
+          actorId, scope: ABANDON_IDEMPOTENCY_SCOPE, key, hash,
+        });
+        if (!idem.fresh) return { replay: true, statusCode: idem.statusCode, body: idem.body };
+        // Match the canonical webhook lock order: room, then payment/order.
+        const room = await lockLinkedKujiRoomForOrder(client, local.order_id);
+        const rows = await client.query<{
+          payment_status: string; provider: string; order_id: string; user_id: string;
+          order_status: string; point_total: number; order_kind: "PRODUCT" | "SHIPPING_FEE";
+          shipping_request_id: string | null;
+        }>(
+          `SELECT p.status AS payment_status,p.provider,o.id AS order_id,o.user_id,o.status AS order_status,
+                  o.point_total,o.order_kind,o.shipping_request_id
+             FROM payments p JOIN orders o ON o.id=p.order_id
+            WHERE p.id=$1 AND o.user_id=$2 FOR UPDATE OF p,o`,
+          [paymentId, actorId],
+        );
+        if (!rows.rowCount) throw notFound("결제 정보를 찾을 수 없습니다.");
+        const row = rows.rows[0]!;
+        if (row.order_id !== local.order_id || row.provider !== PORTONE_PROVIDER) {
+          throw conflict("결제 정보가 변경되었습니다.");
+        }
+        let outcome: "cancelled" | "already_closed";
+        if (row.payment_status === "PENDING" && row.order_status === "PENDING_PAYMENT") {
+          const serverNow = (await client.query<{ server_now: Date }>("SELECT clock_timestamp() AS server_now")).rows[0]!.server_now;
+          await releasePendingOrder(client, {
+            id: row.order_id, user_id: row.user_id, point_total: row.point_total,
+            order_kind: row.order_kind, shipping_request_id: row.shipping_request_id,
+          }, "PAYMENT_WINDOW_ABANDONED");
+          await client.query(
+            "UPDATE payments SET status='CANCELLED',version=version+1 WHERE id=$1 AND status='PENDING'",
+            [paymentId],
+          );
+          await client.query(
+            "UPDATE orders SET status='CANCELLED',cancelled_at=$2,version=version+1 WHERE id=$1 AND status='PENDING_PAYMENT'",
+            [row.order_id, serverNow],
+          );
+          if (room) {
+            await releaseLockedKujiOrderRoom(client, { orderId: row.order_id, serverNow, terminalState: "CANCELLED" });
+          }
+          await writeOutbox(client, request.id, {
+            aggregateType: "ORDER", aggregateId: row.order_id, eventType: "order.cancelled",
+            payload: { orderId: row.order_id, reason: "PAYMENT_WINDOW_ABANDONED" },
+          });
+          await writeOutbox(client, request.id, {
+            aggregateType: "PAYMENT", aggregateId: paymentId, eventType: "payment.window_abandoned",
+            payload: { paymentId, orderId: row.order_id, userId: actorId, providerStatus },
+          });
+          outcome = "cancelled";
+        } else if (["CANCELLED", "FAILED"].includes(row.payment_status) && row.order_status === "CANCELLED") {
+          outcome = "already_closed";
+        } else {
+          throw new AppError(
+            409,
+            "PAYMENT_EVIDENCE_PRESENT",
+            "이미 결제 상태가 변경된 주문입니다. 결제 상태를 다시 확인해 주세요.",
+          );
+        }
+        const status = await client.query<{ payment_status: string; order_status: string }>(
+          `SELECT p.status AS payment_status,o.status AS order_status
+             FROM payments p JOIN orders o ON o.id=p.order_id WHERE p.id=$1`,
+          [paymentId],
+        );
+        const body = {
+          accepted: true,
+          paymentId,
+          orderId: row.order_id,
+          outcome,
+          providerStatus,
+          localStatus: status.rows[0]!.payment_status,
+          orderStatus: status.rows[0]!.order_status,
+        };
+        await completeIdempotency(client, idem.id, {
+          statusCode: 200, body, resourceType: "PAYMENT", resourceId: paymentId,
+        });
+        return { replay: false, statusCode: 200, body };
+      });
+      if (result.replay) reply.header("x-idempotent-replay", "true");
+      return reply.code(result.statusCode).send(result.body);
     },
   );
 
@@ -793,7 +1207,7 @@ export async function registerPortOnePaymentRoutes(
       [trigger.paymentId, PORTONE_PROVIDER],
     );
     if (!payment.rowCount) throw notFound("결제 정보를 찾을 수 없습니다.");
-    const result = await reconcilePayment(app, context, payment.rows[0]!);
+    const result = await reconcilePayment(context, request.id, payment.rows[0]!);
     return reply.code(202).send({ accepted: true, ...result });
   });
 }

@@ -4,6 +4,7 @@ const MAX_WEBHOOK_BODY_BYTES = 65_536;
 const MAX_WEBHOOK_ID_LENGTH = 200;
 const MAX_WEBHOOK_SIGNATURE_LENGTH = 4_096;
 const MAX_WEBHOOK_TIMESTAMP_LENGTH = 32;
+const PAYMENT_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const PAYMENT_NOTIFICATION_TYPES = [
   "Transaction.Ready",
@@ -160,12 +161,22 @@ export async function verifyPortOnePaymentWebhook(input: {
     throw new PortOneWebhookError("UNSUPPORTED_WEBHOOK", "PortOne webhook timestamp is invalid.");
   }
 
+  // DABBOBA payment IDs are server-issued UUIDs. Anything else on this store
+  // cannot belong to a DABBOBA order and must not reach a uuid database query.
+  const paymentId = requiredString(data.paymentId);
+  if (!PAYMENT_ID_PATTERN.test(paymentId)) {
+    throw new PortOneWebhookError(
+      "WEBHOOK_CONTRACT_MISMATCH",
+      "PortOne webhook payment ID is not a DABBOBA payment.",
+    );
+  }
+
   return {
     requiresFreshPaymentLookup: true,
     eventId,
     notificationType: webhook.type,
     occurredAt,
-    paymentId: requiredString(data.paymentId),
+    paymentId,
     storeId,
     portOneTransactionId: requiredString(data.transactionId),
     cancellationId: optionalString(data.cancellationId),
