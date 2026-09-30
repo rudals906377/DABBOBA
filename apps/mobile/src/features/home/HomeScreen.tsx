@@ -15,6 +15,7 @@ import {
 import type { CatalogProduct, HomeRecentDrawActivity } from "@dabboba/contracts";
 import { CatalogDiscoveryImage } from "@/components/CatalogDiscoveryImage";
 import { CatalogProductTopIndicator } from "@/components/CatalogProductTopIndicator";
+import { DecorativeIonicon } from "@/components/DecorativeIonicon";
 import { GachaMachineFrame } from "@/components/GachaMachineFrame";
 import { KujiPrizeTierRow } from "@/components/KujiPrizeTierRow";
 import { KujiProductFrame } from "@/components/KujiProductFrame";
@@ -53,7 +54,6 @@ import {
   getRecentDrawReelWindow,
   homeAnnouncementMessages,
   resolveHomeProductBadge,
-  shouldExpandHomeHero,
   shouldExpandHomeRecentDraw,
   type ConfiguredHomeCollection,
   type HomeProductBadge,
@@ -372,14 +372,13 @@ function HomeCatalogFeedState({
 }
 
 function HomeIntroBanner() {
-  const { fontScale } = useWindowDimensions();
-  const expanded = shouldExpandHomeHero(fontScale);
+  const router = useRouter();
   return (
-    <View
-      accessible
-      accessibilityRole="summary"
-      accessibilityLabel="새 소식 준비 중. 새로운 이벤트 소식이 등록되면 알려드릴게요."
-      style={[styles.hero, expanded && styles.heroLargeText]}
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel="이벤트, 새 소식을 준비하고 있어요. 이벤트가 등록되면 이곳에서 알려드릴게요."
+      onPress={() => router.push("/events" as Href)}
+      style={({ pressed }) => [styles.hero, pressed && styles.pressed]}
     >
       <Image
         accessible={false}
@@ -388,12 +387,14 @@ function HomeIntroBanner() {
         resizeMode="contain"
         style={styles.heroMachine}
       />
-      <KoreanPixelTitle variant="hero" numberOfLines={expanded ? 3 : 2} style={styles.heroTitle}>
-        새 소식을{"\n"}준비하고 있어요.
-      </KoreanPixelTitle>
-      <Text variant="bodyCompact" maxFontSizeMultiplier={2} style={styles.heroBody}>새로운 이벤트 소식이 등록되면 이곳에서 알려드릴게요.</Text>
-      <Text variant="label" maxFontSizeMultiplier={2} style={styles.heroAction}>새 소식 준비 중</Text>
-    </View>
+      <View style={styles.heroCopy}>
+        <KoreanPixelTitle variant="compact" numberOfLines={2} style={styles.heroTitle}>
+          새 소식을 준비하고 있어요
+        </KoreanPixelTitle>
+        <Text variant="caption" maxFontSizeMultiplier={2} style={styles.heroBody}>이벤트가 등록되면 이곳에서 알려드릴게요.</Text>
+      </View>
+      <DecorativeIonicon name="chevron-forward" size={18} color={colors.muted} />
+    </Pressable>
   );
 }
 
@@ -784,22 +785,23 @@ const styles = StyleSheet.create({
   retryCacheLargeText: { borderLeftWidth: 0, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: seed.color.stroke.brand },
   retryLabelCache: { color: colors.greenInk },
   hero: {
-    position: "relative",
-    minHeight: seed.spacing.x16 + seed.spacing.x16 + seed.spacing.x9,
-    overflow: "hidden",
+    minHeight: seed.spacing.x16,
     marginHorizontal: seed.spacing.globalGutter,
     marginTop: seed.spacing.x3_5,
     borderRadius: seed.radius.r4,
-    paddingHorizontal: seed.spacing.x5,
-    paddingVertical: seed.spacing.x6,
-    justifyContent: "center",
-    backgroundColor: colors.black,
+    borderWidth: 1,
+    borderColor: seed.color.stroke.neutral,
+    paddingHorizontal: seed.spacing.x4,
+    paddingVertical: seed.spacing.x2_5,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: seed.spacing.x3,
+    backgroundColor: seed.color.layer.elevated,
   },
-  heroLargeText: { minHeight: 220 },
-  heroTitle: { width: "66%", color: colors.white },
-  heroBody: { width: "64%", marginTop: seed.spacing.x3, color: "#B9C1B9", ...seed.typography.bodyCompact },
-  heroAction: { width: "64%", marginTop: seed.spacing.x3, color: colors.white, fontWeight: "800" },
-  heroMachine: { position: "absolute", top: -21, right: -10, width: "50%", height: "122%", opacity: 1 },
+  heroCopy: { flex: 1, minWidth: 0 },
+  heroTitle: { color: seed.color.foreground.neutral },
+  heroBody: { marginTop: seed.spacing.x0_5, color: seed.color.foreground.muted },
+  heroMachine: { width: seed.spacing.x10, height: seed.spacing.x10 },
   sectionHeader: {
     marginTop: seed.spacing.x8,
     marginBottom: seed.spacing.x4,
@@ -843,7 +845,7 @@ const styles = StyleSheet.create({
   recentDrawImage: { width: "100%", height: "100%" },
   recentDrawImageFallback: { width: "100%", height: "100%", alignItems: "center", justifyContent: "center", backgroundColor: seed.color.background.brandWeak },
   recentDrawImageFallbackLabel: { color: colors.greenInk, fontWeight: "800" },
-  recentDrawSilhouetteOverlay: { position: "absolute", top: 0, right: 0, bottom: 0, left: 0, backgroundColor: "rgba(17, 20, 17, 0.16)" },
+  recentDrawSilhouetteOverlay: { position: "absolute", top: 0, right: 0, bottom: 0, left: 0, backgroundColor: seed.color.foreground.neutral, opacity: 0.16 },
   recentDrawCopy: { minWidth: 0, flex: 1 },
   recentDrawPrize: { color: colors.ink, fontWeight: "800" },
   recentDrawPrizeGhost: { color: colors.muted, fontWeight: "700" },

@@ -26,7 +26,7 @@ import {
   AppText as Text,
   BalancedAppText,
 } from "@/components/Typography";
-import { SeedInlineGuidance, SeedTextInput } from "@/design-system/components";
+import { SeedActionButton, SeedInlineGuidance, SeedTextInput } from "@/design-system/components";
 import { catalogProductCardSurface, catalogProductImageSurface } from "@/design-system/catalog";
 import { seed } from "@/design-system/seed";
 import { openCustomerLogin } from "@/features/auth/login-navigation";
@@ -323,7 +323,7 @@ export function StorageHubContent({
       </View>
       {!commerceEnabled ? (
         <SeedInlineGuidance style={styles.prelaunchStorageGuidance}>
-          사전오픈 기간에는 보관 상품과 기존 진행 내역만 확인할 수 있어요. 배송·포인트 환급 신청은 정식 오픈 후 제공됩니다.
+          사전오픈 기간에는 보관 상품과 기존 진행 내역만 확인할 수 있어요. 배송·포인트 환급 신청은 정식 오픈 후 제공돼요.
         </SeedInlineGuidance>
       ) : null}
       {inventoryFailure || !storedDrawItems || !exchangeOrShippingItems || !pointReturnItems ? (
@@ -906,7 +906,7 @@ function Orders({ profileState }: { profileState: ReturnType<typeof useProfileSn
         />
       ) : null}
       {failure ? <ProfileSectionErrorState message={failure} onRetry={profileState.reload} /> : <>
-      <SectionLead title={`주문 ${orders.length}건`} description="서버에서 확정한 결제 금액과 주문 상태를 그대로 표시합니다." />
+      <SectionLead title={`주문 ${orders.length}건`} description="서버에서 확정한 결제 금액과 주문 상태를 그대로 표시해요." />
       {orders.length ? orders.map((order) => (
         <Pressable key={order.id} accessibilityRole="button" accessibilityLabel={`${formatDate(order.createdAt)} 주문 상세`} onPress={() => router.push(`/profile/orders/${encodeURIComponent(order.id)}` as Href)} style={({ pressed }) => [styles.historyCard, pressed && styles.pressed]}>
           <View style={styles.historyTop}>
@@ -924,7 +924,7 @@ function Orders({ profileState }: { profileState: ReturnType<typeof useProfileSn
               ipNames={snapshot.ipNames}
             />
           ))}
-          <View style={styles.totalRow}><Text style={styles.totalLabel}>결제 금액</Text><Text style={styles.totalValue}>{order.total.toLocaleString("ko-KR")}원</Text></View>
+          <View style={styles.totalRow}><Text style={styles.totalLabel}>결제 금액</Text><Text variant="subtitle" style={styles.totalValue}>{order.total.toLocaleString("ko-KR")}원</Text></View>
         </Pressable>
       )) : <EmptyState icon="receipt-outline" title="구매 내역이 없어요" body="결제가 완료된 주문이 이곳에 표시돼요." />}
       </>}
@@ -944,7 +944,7 @@ function Points({ profileState }: { profileState: ReturnType<typeof useProfileSn
   return (
     <>
       <View style={styles.pointHero}><Text style={styles.pointCaption}>사용 가능한 포인트</Text><Text style={styles.pointBalance}>{pointBalance.toLocaleString("ko-KR")}P</Text></View>
-      <Text style={styles.listHeading}>적립·사용 내역</Text>
+      <KoreanPixelTitle variant="compact" style={styles.listHeading}>적립·사용 내역</KoreanPixelTitle>
       {pointHistory.length ? pointHistory.map((entry) => (
         <View key={entry.id} style={styles.pointRow}>
           <View><Text style={styles.pointReason}>{entry.reason}</Text><Text style={styles.historyMeta}>{formatDate(entry.createdAt)}</Text></View>
@@ -974,13 +974,13 @@ function RequestRoom({ profileState }: { profileState: ReturnType<typeof useProf
   };
   return (
     <>
-      <View style={styles.requestLead}><Text style={styles.requestLeadTitle}>찾는 상품이 아직 없나요?</Text><Text style={styles.requestLeadBody}>작품·카테고리·원하는 상품을 등록하고 다른 수집가의 관심을 모아보세요.</Text><PrimaryButton label="새 신청 작성" onPress={() => router.push("/profile/requests/new" as Href)} /></View>
-      <Text style={styles.listHeading}>함께 기다리는 신청</Text>
+      <View style={styles.requestLead}><SeedActionButton label="새 신청 작성" onPress={() => router.push("/profile/requests/new" as Href)} /><SeedInlineGuidance style={styles.requestLeadGuidance}>찾는 상품이 없다면 작품과 원하는 상품을 등록해 보세요.</SeedInlineGuidance></View>
+      <KoreanPixelTitle variant="compact" style={styles.listHeading}>함께 기다리는 신청</KoreanPixelTitle>
       {snapshot.sectionErrors.wanted ? <ProfileSectionErrorState message={snapshot.sectionErrors.wanted} onRetry={profileState.reload} style={styles.sectionErrorState} /> : null}
       {snapshot.wantedRequests.map((request) => (
         <View key={request.id} style={styles.requestItem}>
           <Pressable accessibilityRole="button" accessibilityLabel={`${request.desiredItem} 신청 상세`} onPress={() => router.push(`/profile/requests/${encodeURIComponent(request.id)}` as Href)} style={({ pressed }) => [pressed && styles.pressed]}>
-            {request.mediaUrl ? <Image source={{ uri: request.mediaUrl }} resizeMode="cover" style={styles.requestPhoto} /> : null}
+            {request.mediaUrl ? <Image accessible={false} source={{ uri: request.mediaUrl }} resizeMode="cover" style={styles.requestPhoto} /> : null}
             <View style={styles.historyTop}><Text style={styles.requestAuthor}>@{request.authorNickname}</Text><Text style={styles.categoryBadge}>{categoryLabel(request.category)}</Text></View>
             <Text style={styles.requestItemTitle}>{request.desiredItem}</Text>
             <Text style={styles.requestIp}>{request.ipNameKo}</Text>
@@ -1003,13 +1003,13 @@ function Support({ profileState }: { profileState: ReturnType<typeof useProfileS
     <>
       <SectionLead title="무엇을 도와드릴까요?" description="신청방은 상품 요청 공간이고, 고객센터는 공지·이용 안내·문의 처리를 담당해요." />
       <View style={styles.supportContact}><DecorativeIonicon name="chatbubble-ellipses-outline" size={22} color={colors.greenInk} /><View><Text style={styles.supportTitle}>문의 안내</Text><Text style={styles.supportBody}>문의는 1:1 문의에서 접수할 수 있어요.</Text></View></View>
-      <Text style={styles.listHeading}>자주 묻는 질문</Text>
+      <KoreanPixelTitle variant="compact" style={styles.listHeading}>자주 묻는 질문</KoreanPixelTitle>
       <Faq title="보관 상품은 언제 배송할 수 있나요?" body={commerceEnabled ? "보관함에 보관 중인 상품을 선택해 배송 신청할 수 있어요." : "사전오픈 기간에는 배송 신청을 이용할 수 없어요."} />
       {commerceEnabled ? <Faq title="교환 중인 상품도 배송할 수 있나요?" body="교환 등록이나 제안에 사용 중인 상품은 교환을 취소하거나 종료한 뒤 배송할 수 있어요." /> : null}
-      <Text style={styles.listHeading}>공지사항</Text>
+      <KoreanPixelTitle variant="compact" style={styles.listHeading}>공지사항</KoreanPixelTitle>
       {snapshot.sectionErrors.notices ? <ProfileSectionErrorState message={snapshot.sectionErrors.notices} onRetry={profileState.reload} style={styles.sectionErrorState} /> : null}
       {snapshot.notices.map((notice) => <Pressable key={notice.id} accessibilityRole="button" accessibilityLabel={`${notice.title} 공지 상세`} onPress={() => router.push(`/profile/notices/${encodeURIComponent(notice.id)}` as Href)} style={({ pressed }) => [styles.noticeCard, pressed && styles.pressed]}><Text style={styles.noticeTitle}>{notice.isPinned ? "[중요] " : ""}{notice.title}</Text><Text numberOfLines={3} style={styles.noticeBody}>{notice.content}</Text><Text style={styles.historyMeta}>{formatDate(notice.publishedAt ?? notice.createdAt)}</Text></Pressable>)}
-      <Text style={styles.listHeading}>내 문의</Text>
+      <KoreanPixelTitle variant="compact" style={styles.listHeading}>내 문의</KoreanPixelTitle>
       {blockedStatus ? (
         <ProfileSessionGate
           status={blockedStatus}
@@ -1028,7 +1028,7 @@ function Support({ profileState }: { profileState: ReturnType<typeof useProfileS
 function MemberInfoMenu() {
   return (
     <>
-      <SectionLead title="회원정보를 안전하게 관리해요" description="개인정보와 배송지는 필요한 범위에서만 관리합니다." />
+      <SectionLead title="회원정보를 안전하게 관리해요" description="개인정보와 배송지는 필요한 범위에서만 관리해요." />
       <View style={styles.menuCard}>
         <MemberLink section="personal" label="개인정보" caption="닉네임 · 휴대폰 · 이메일 · 생년월일" icon="id-card-outline" />
         <MemberLink section="address" label="기본 배송지" caption="받는 사람 · 연락처 · 주소" icon="location-outline" />
@@ -1042,7 +1042,7 @@ function MemberInfoMenu() {
 function SettingsMenu() {
   return (
     <>
-      <SectionLead title="앱과 계정을 설정해요" description="주문·배송 필수 알림과 선택 알림을 분리해서 관리합니다." />
+      <SectionLead title="앱과 계정을 설정해요" description="주문·배송 필수 알림과 선택 알림을 분리해서 관리해요." />
       <View style={styles.menuCard}>
         <MemberLink section="notifications" label="알림 수신설정" caption="주문 · 교환 · 신청방 · 마케팅" icon="notifications-outline" />
         <MemberLink section="personal" label="계정정보" caption="회원정보와 연락처" icon="person-circle-outline" />
@@ -1085,7 +1085,7 @@ function OrderProductLine({ line, catalogProducts, ipNames }: { line: components
 
 function ProductThumb({ product, assetBaseUrl, catalogFrameCategory }: { product: { name: string; imageUrl: string | null; version?: number }; assetBaseUrl: string | null; catalogFrameCategory?: CatalogProduct["category"] }) {
   const uri = resolveCatalogImageUrl(product.imageUrl, assetBaseUrl, product.version ?? 1);
-  const thumb = <View style={styles.thumb}>{uri ? <Image source={{ uri }} resizeMode={catalogFrameCategory === "kuji" ? "contain" : "cover"} style={styles.thumbImage} /> : <DecorativeIonicon name="image-outline" size={24} color={colors.muted} />}</View>;
+  const thumb = <View style={styles.thumb}>{uri ? <Image accessible={false} source={{ uri }} resizeMode={catalogFrameCategory === "kuji" ? "contain" : "cover"} style={styles.thumbImage} /> : <DecorativeIonicon name="image-outline" size={24} color={colors.muted} />}</View>;
   return catalogFrameCategory ? <GachaMachineFrame category={catalogFrameCategory} clean><KujiProductFrame category={catalogFrameCategory} clean>{thumb}</KujiProductFrame></GachaMachineFrame> : thumb;
 }
 
@@ -1161,7 +1161,7 @@ export function DetailHeader({ title }: { title: string }) {
 }
 
 function SectionLead({ title, description }: { title: string; description?: string }) {
-  return <View style={styles.sectionLead}><Text style={styles.sectionLeadTitle}>{title}</Text>{description ? <BalancedAppText style={styles.sectionLeadBody}>{description}</BalancedAppText> : null}</View>;
+  return <View style={styles.sectionLead}><KoreanPixelTitle variant="section" numberOfLines={0}>{title}</KoreanPixelTitle>{description ? <BalancedAppText style={styles.sectionLeadBody}>{description}</BalancedAppText> : null}</View>;
 }
 
 function FieldLabel({ label, caption }: { label: string; caption: string }) {
@@ -1260,7 +1260,6 @@ const styles = StyleSheet.create({
   sectionErrorState: { marginBottom: seed.spacing.x3 },
   storageLoadFailure: { marginTop: seed.spacing.x4 },
   sectionLead: { marginBottom: 18 },
-  sectionLeadTitle: { color: seed.color.foreground.neutral, ...seed.typography.sectionTitle },
   sectionLeadBody: { color: colors.muted, ...seed.typography.bodyCompact, marginTop: seed.spacing.x2 },
   storageRootHub: { flex: 1, minHeight: 0 },
   prelaunchStorageGuidance: { marginTop: seed.spacing.x3, marginBottom: seed.spacing.x1 },
@@ -1308,7 +1307,7 @@ const styles = StyleSheet.create({
   statusBadgeProgress: { color: colors.greenInk, backgroundColor: seed.color.background.brandWeak },
   statusBadgeSuccess: { color: colors.greenInk, backgroundColor: seed.color.background.brandWeak },
   statusBadgeCritical: { color: seed.color.foreground.critical, backgroundColor: seed.color.background.criticalWeak },
-  statusBadgeRefund: { color: "#4C5FA8", backgroundColor: "#EEF0FA" },
+  statusBadgeRefund: { color: seed.color.info.ink, backgroundColor: seed.color.info.weak },
   pointReturnSummary: { flexDirection: "row", alignItems: "flex-end", justifyContent: "space-between", gap: seed.spacing.x3, borderRadius: seed.radius.r4, borderWidth: 1, borderColor: seed.color.stroke.neutral, padding: seed.spacing.x4, marginBottom: seed.spacing.x3_5, backgroundColor: seed.color.layer.default },
   pointReturnEstimate: { color: colors.greenInk, fontSize: 11, lineHeight: 17, fontWeight: "800", marginTop: seed.spacing.x1 },
   storageExpiryPolicy: { color: colors.muted, ...seed.typography.finePrint, fontWeight: "700", marginTop: seed.spacing.x1_5 },
@@ -1335,7 +1334,7 @@ const styles = StyleSheet.create({
   shippingSubmitLabelDisabled: { color: colors.muted },
   compactStorageEmpty: { flex: 1, minHeight: 240, alignItems: "center", justifyContent: "center", paddingHorizontal: seed.spacing.x6 },
   compactStorageEmptyText: { color: colors.muted, fontSize: 13, lineHeight: 20, textAlign: "center" },
-  listHeading: { color: colors.ink, fontSize: 16, fontWeight: "900", marginTop: 25, marginBottom: 11 },
+  listHeading: { marginTop: seed.spacing.x6, marginBottom: seed.spacing.x2_5 },
   selectRow: { minHeight: 88, flexDirection: "row", alignItems: "center", ...catalogProductCardSurface, borderWidth: 1, borderColor: seed.color.stroke.neutral, padding: seed.spacing.x1_5, marginBottom: seed.spacing.x2_5 },
   selectRowActive: { borderWidth: 2, borderColor: colors.greenInk },
   selectProductLink: { minHeight: 76, flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", gap: 11, padding: 4 },
@@ -1350,7 +1349,7 @@ const styles = StyleSheet.create({
   orderLine: { color: colors.ink, ...seed.typography.catalogTitle, fontWeight: "800", marginTop: 2 },
   totalRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.line, marginTop: 12, paddingTop: 12 },
   totalLabel: { color: colors.muted, fontSize: 11 },
-  totalValue: { color: colors.ink, fontSize: 17, fontWeight: "900" },
+  totalValue: { color: colors.ink },
   pointHero: { borderRadius: seed.radius.r5, borderWidth: 1, borderColor: seed.color.stroke.neutral, padding: seed.spacing.x6, backgroundColor: seed.color.background.brandWeak },
   pointCaption: { color: colors.greenInk, fontSize: 11, fontWeight: "800" },
   pointBalance: { color: colors.ink, fontSize: 34, lineHeight: 42, fontWeight: "900", marginTop: 5 },
@@ -1359,9 +1358,8 @@ const styles = StyleSheet.create({
   pointAmount: { fontSize: 14, fontWeight: "900" },
   pointPlus: { color: colors.greenInk },
   pointMinus: { color: colors.ink },
-  requestLead: { borderRadius: seed.radius.r5, padding: seed.spacing.x5, backgroundColor: colors.ink },
-  requestLeadTitle: { color: colors.white, fontSize: 20, fontWeight: "900" },
-  requestLeadBody: { color: "#B8C0B9", fontSize: 12, lineHeight: 19, marginTop: 7 },
+  requestLead: { gap: seed.spacing.x2 },
+  requestLeadGuidance: { textAlign: "center" },
   requestItem: { borderRadius: seed.radius.r4, borderWidth: 1, borderColor: colors.line, padding: seed.spacing.x4, marginBottom: seed.spacing.x3, backgroundColor: colors.surface },
   requestPhoto: { width: "100%", aspectRatio: 16 / 9, borderRadius: seed.radius.r3, marginBottom: seed.spacing.x3, backgroundColor: seed.color.layer.basement },
   requestAuthor: { color: colors.muted, fontSize: 11, fontWeight: "800" },
@@ -1386,7 +1384,7 @@ const styles = StyleSheet.create({
   menuCard: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: seed.color.stroke.neutral, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: seed.color.stroke.neutral, backgroundColor: seed.color.layer.default },
   memberRow: { minHeight: 76, flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 14 },
   memberRowBorder: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.line },
-  memberIcon: { width: 40, height: 40, borderRadius: seed.radius.r3, alignItems: "center", justifyContent: "center", backgroundColor: "#EEF1EC" },
+  memberIcon: { width: 40, height: 40, borderRadius: seed.radius.r3, alignItems: "center", justifyContent: "center", backgroundColor: seed.color.background.neutralWeak },
   memberText: { flex: 1, minWidth: 0 },
   memberLabel: { color: colors.ink, fontSize: 14, fontWeight: "900" },
   memberCaption: { color: colors.muted, ...seed.typography.finePrint, marginTop: seed.spacing.x1 },

@@ -333,7 +333,7 @@ const styles = StyleSheet.create({
   photoPickerLabel: { color: colors.greenInk, fontSize: 13, fontWeight: "800" },
   photoPreview: { position: "relative", borderRadius: seed.radius.r3, overflow: "hidden", backgroundColor: seed.color.layer.default },
   photo: { width: "100%", aspectRatio: 4 / 3 },
-  photoRemove: { position: "absolute", top: seed.spacing.x2, right: seed.spacing.x2, width: seed.size.touchTarget, height: seed.size.touchTarget, borderRadius: seed.size.touchTarget / 2, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.92)" },
+  photoRemove: { position: "absolute", top: seed.spacing.x2, right: seed.spacing.x2, width: seed.size.touchTarget, height: seed.size.touchTarget, borderRadius: seed.size.touchTarget / 2, alignItems: "center", justifyContent: "center", backgroundColor: seed.color.layer.elevated },
   submit: { marginTop: seed.spacing.x5 },
   pressed: { opacity: seed.state.pressedOpacity, transform: [{ scale: seed.state.pressedScale }] },
 });

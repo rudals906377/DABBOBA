@@ -24,7 +24,7 @@ import {
 import { ProductInfoDivider } from "@/components/ProductInfoDivider";
 import { KoreanPixelTitle } from "@/components/RootCategoryTitle";
 import { AppText as Text, BalancedParagraphText } from "@/components/Typography";
-import { SeedActionButton, SeedTextInput } from "@/design-system/components";
+import { SeedActionButton, SeedInlineGuidance, SeedTextInput } from "@/design-system/components";
 import { catalogProductCardSurface, catalogProductImageSurface } from "@/design-system/catalog";
 import { subtleSectionHeaderRule } from "@/design-system/section";
 import { seed } from "@/design-system/seed";
@@ -35,7 +35,6 @@ import {
   fetchExchangeListingInventory,
   type ExchangeListingInventorySnapshot,
 } from "@/features/exchange/exchange-api";
-import { ExchangeRuleList, ExchangeSafetyNotice } from "@/features/exchange/ExchangeGuidance";
 import { toggleExchangeInventorySelection } from "@/features/exchange/exchange-selection";
 import { ProfileSessionGate } from "@/features/profile/ProfileSessionGate";
 import { ProfileApiError } from "@/features/profile/profile-api";
@@ -122,7 +121,7 @@ export function ExchangeCreateScreen() {
         return;
       }
       setSessionStatus("error");
-      setError(cause instanceof Error ? cause.message : "보관함 상품을 불러오지 못했습니다.");
+      setError(cause instanceof Error ? cause.message : "보관함 상품을 불러오지 못했어요.");
     } finally {
       if (generation === loadGeneration.current) setRefreshing(false);
     }
@@ -233,37 +232,6 @@ export function ExchangeCreateScreen() {
             </View>
           ) : null}
 
-          {sessionStatus === "authenticated" && snapshot ? (
-            <>
-              <ExchangeSafetyNotice />
-              <View style={styles.formSection}>
-                <KoreanPixelTitle variant="section">교환 메시지</KoreanPixelTitle>
-                <Text style={styles.description}>상대방이 목록에서 바로 이해할 수 있도록 짧게 적어 주세요.</Text>
-                <FieldLabel label="메시지" count={`${title.length}/${TITLE_LIMIT}`} />
-                <SeedTextInput
-                  value={title}
-                  onChangeText={setTitle}
-                  maxLength={TITLE_LIMIT}
-                  placeholder="예: 중복 상품 교환해요"
-                  placeholderTextColor={colors.muted}
-                  returnKeyType="next"
-                  style={styles.titleInput}
-                />
-                <FieldLabel label="추가 설명 (선택)" count={`${details.length}/${DETAILS_LIMIT}`} />
-                <SeedTextInput
-                  value={details}
-                  onChangeText={setDetails}
-                  maxLength={DETAILS_LIMIT}
-                  multiline
-                  textAlignVertical="top"
-                  placeholder="상품 상태나 원하는 조건이 있다면 알려주세요."
-                  placeholderTextColor={colors.muted}
-                  style={styles.detailsInput}
-                />
-              </View>
-            </>
-          ) : null}
-
           {snapshot && snapshot.items.length === 0 ? (
             <View style={styles.stateBox}>
               <DecorativeIonicon name="cube-outline" size={38} color={colors.muted} />
@@ -305,7 +273,33 @@ export function ExchangeCreateScreen() {
             />
           ))}
 
-          {sessionStatus === "authenticated" && snapshot ? <ExchangeRuleList /> : null}
+          {sessionStatus === "authenticated" && hasEligibleItems ? (
+            <View style={styles.formSection}>
+              <KoreanPixelTitle variant="section">교환 메시지</KoreanPixelTitle>
+              <SeedInlineGuidance style={styles.description}>목록에서 바로 이해할 수 있도록 짧게 적어 주세요.</SeedInlineGuidance>
+              <FieldLabel label="메시지" count={`${title.length}/${TITLE_LIMIT}`} />
+              <SeedTextInput
+                value={title}
+                onChangeText={setTitle}
+                maxLength={TITLE_LIMIT}
+                placeholder="예: 중복 상품 교환해요"
+                placeholderTextColor={colors.muted}
+                returnKeyType="next"
+                style={styles.titleInput}
+              />
+              <FieldLabel label="추가 설명 (선택)" count={`${details.length}/${DETAILS_LIMIT}`} />
+              <SeedTextInput
+                value={details}
+                onChangeText={setDetails}
+                maxLength={DETAILS_LIMIT}
+                multiline
+                textAlignVertical="top"
+                placeholder="상품 상태나 원하는 조건이 있다면 알려주세요."
+                placeholderTextColor={colors.muted}
+                style={styles.detailsInput}
+              />
+            </View>
+          ) : null}
         </ScrollView>
 
       {sessionStatus === "authenticated" && hasEligibleItems ? <FloatingBottomActionPanel>
@@ -363,9 +357,9 @@ function InventoryChoice({
     >
       <View style={styles.imageFrame}>
         {imageUri ? (
-          <Image source={{ uri: imageUri }} resizeMode="cover" style={styles.image} />
+          <Image accessible={false} source={{ uri: imageUri }} resizeMode="cover" style={styles.image} />
         ) : (
-          <View style={styles.imagePlaceholder}><Text style={styles.imagePlaceholderText}>이미지 없음</Text></View>
+          <View style={styles.imagePlaceholder}><Text variant="finePrint" style={styles.imagePlaceholderText}>이미지 없음</Text></View>
         )}
       </View>
       <View style={styles.productInfo}>
@@ -396,7 +390,7 @@ const styles = StyleSheet.create({
   backButton: { width: seed.size.touchTarget, height: seed.size.touchTarget, alignItems: "center", justifyContent: "center" },
   headerSpacer: { width: seed.size.touchTarget },
   content: { paddingHorizontal: seed.spacing.globalGutter, paddingTop: seed.spacing.x5, paddingBottom: seed.spacing.x7 },
-  description: { color: colors.muted, fontSize: 13, lineHeight: 21, marginTop: seed.spacing.x2_5, marginBottom: seed.spacing.x2 },
+  description: { marginTop: seed.spacing.x2_5, marginBottom: seed.spacing.x2 },
   selectionHeader: { marginTop: seed.spacing.x3, ...subtleSectionHeaderRule, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: seed.spacing.x3 },
   selectionSummary: { alignItems: "flex-end" },
   selectionCount: { color: colors.greenInk, ...seed.typography.caption, fontWeight: "800" },
@@ -410,7 +404,7 @@ const styles = StyleSheet.create({
   imageFrame: { width: 106, aspectRatio: 1, ...catalogProductImageSurface },
   image: { width: "100%", height: "100%" },
   imagePlaceholder: { flex: 1, alignItems: "center", justifyContent: "center" },
-  imagePlaceholderText: { color: colors.muted, fontFamily: "monospace", ...seed.typography.finePrint, fontWeight: "800" },
+  imagePlaceholderText: { color: colors.muted, fontWeight: "700" },
   productInfo: { flex: 1, minWidth: 0 },
   ipName: { color: colors.muted, ...seed.typography.catalogMetadata },
   productName: { color: colors.ink, ...seed.typography.catalogTitle, marginTop: 3 },

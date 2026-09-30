@@ -118,17 +118,17 @@ export async function fetchProfileSnapshot(
   if (!productsResult.data) {
     throw new ProfileApiError(
       productsResult.response.status,
-      errorMessage(productsResult.error, "상품 정보를 불러오지 못했습니다."),
+      errorMessage(productsResult.error, "상품 정보를 불러오지 못했어요."),
     );
   }
   if (!ipsResult.data) {
     throw new ProfileApiError(
       ipsResult.response.status,
-      errorMessage(ipsResult.error, "작품 정보를 불러오지 못했습니다."),
+      errorMessage(ipsResult.error, "작품 정보를 불러오지 못했어요."),
     );
   }
-  if (!wantedResult.data) sectionErrors.wanted = errorMessage(wantedResult.error, "신청방을 불러오지 못했습니다.");
-  if (!noticesResult.data) sectionErrors.notices = errorMessage(noticesResult.error, "공지사항을 불러오지 못했습니다.");
+  if (!wantedResult.data) sectionErrors.wanted = errorMessage(wantedResult.error, "신청방을 불러오지 못했어요.");
+  if (!noticesResult.data) sectionErrors.notices = errorMessage(noticesResult.error, "공지사항을 불러오지 못했어요.");
   const products = productsResult.data.items;
   const ipNames = Object.fromEntries(
     ipsResult.data.items.map((ip) => [ip.id, ip.nameKo]),
@@ -183,12 +183,12 @@ export async function fetchProfileSnapshot(
     const failed = !meResult.data ? meResult : !profileResult.data ? profileResult : basicInfoResult;
     throw new ProfileApiError(
       failed.response.status,
-      errorMessage(failed.error, "로그인 정보를 확인하지 못했습니다."),
+      errorMessage(failed.error, "로그인 정보를 확인하지 못했어요."),
     );
   }
   const defaultAddress = addressResult.data ?? null;
   if (!addressResult.data && addressResult.response.status !== 404) {
-    sectionErrors.address = errorMessage(addressResult.error, "기본 배송지를 불러오지 못했습니다.");
+    sectionErrors.address = errorMessage(addressResult.error, "기본 배송지를 불러오지 못했어요.");
   }
   if (!wishlistResult.data) sectionErrors.wishlist = errorMessage(wishlistResult.error, "찜 목록을 불러오지 못했어요.");
   if (!inventoryResult.data) sectionErrors.inventory = errorMessage(inventoryResult.error, "보관함을 불러오지 못했어요.");
@@ -203,7 +203,7 @@ export async function fetchProfileSnapshot(
   let inventoryCursor = inventoryResult.data?.nextCursor ?? undefined;
   while (inventoryCursor) {
     if (seenInventoryCursors.has(inventoryCursor)) {
-      throw new ProfileApiError(502, "보관함 페이지가 반복되어 전체 목록을 확인하지 못했습니다.");
+      throw new ProfileApiError(502, "보관함 페이지가 반복되어 전체 목록을 확인하지 못했어요.");
     }
     seenInventoryCursors.add(inventoryCursor);
     const pageResult = await client.GET("/v1/account/inventory", {
@@ -264,26 +264,26 @@ async function fetchStorageProfileSnapshot(
   if (!meResult.data) {
     throw new ProfileApiError(
       meResult.response.status,
-      errorMessage(meResult.error, "로그인 정보를 확인하지 못했습니다."),
+      errorMessage(meResult.error, "로그인 정보를 확인하지 못했어요."),
     );
   }
   if (!inventoryResult.data) {
     throw new ProfileApiError(
       inventoryResult.response.status,
-      errorMessage(inventoryResult.error, "보관함을 불러오지 못했습니다."),
+      errorMessage(inventoryResult.error, "보관함을 불러오지 못했어요."),
     );
   }
 
   const sectionErrors: ProfileSnapshot["sectionErrors"] = {};
   if (!productsResult.data || !ipsResult.data) {
-    sectionErrors.catalog = "일부 작품 정보를 불러오지 못했습니다. 보관 상품은 계속 확인할 수 있어요.";
+    sectionErrors.catalog = "일부 작품 정보를 불러오지 못했어요. 보관 상품은 계속 확인할 수 있어요.";
   }
   if (!profileResult.data || !basicInfoResult.data) {
     sectionErrors.profile = "계정 표시 정보 일부를 불러오지 못했어요.";
   }
   const defaultAddress = addressResult.data ?? null;
   if (!addressResult.data && addressResult.response.status !== 404) {
-    sectionErrors.address = errorMessage(addressResult.error, "기본 배송지를 불러오지 못했습니다.");
+    sectionErrors.address = errorMessage(addressResult.error, "기본 배송지를 불러오지 못했어요.");
   }
 
   const inventoryItems = [...inventoryResult.data.items];
@@ -291,7 +291,7 @@ async function fetchStorageProfileSnapshot(
   let inventoryCursor = inventoryResult.data.nextCursor ?? undefined;
   while (inventoryCursor) {
     if (seenInventoryCursors.has(inventoryCursor)) {
-      throw new ProfileApiError(502, "보관함 페이지가 반복되어 전체 목록을 확인하지 못했습니다.");
+      throw new ProfileApiError(502, "보관함 페이지가 반복되어 전체 목록을 확인하지 못했어요.");
     }
     seenInventoryCursors.add(inventoryCursor);
     const pageResult = await client.GET("/v1/account/inventory", {
@@ -300,7 +300,7 @@ async function fetchStorageProfileSnapshot(
     if (!pageResult.data) {
       throw new ProfileApiError(
         pageResult.response.status,
-        errorMessage(pageResult.error, "보관함을 모두 불러오지 못했습니다."),
+        errorMessage(pageResult.error, "보관함을 모두 불러오지 못했어요."),
       );
     }
     inventoryItems.push(...pageResult.data.items);
@@ -360,7 +360,7 @@ export async function updateAccountProfile(
     params: { header: { "Idempotency-Key": randomUUID() } },
     body: input,
   });
-  if (!result.data) throw new Error(errorMessage(result.error, "프로필을 저장하지 못했습니다."));
+  if (!result.data) throw new Error(errorMessage(result.error, "프로필을 저장하지 못했어요."));
   return result.data;
 }
 
@@ -374,7 +374,7 @@ export async function updateAccountBasicInfo(
     params: { header: { "Idempotency-Key": randomUUID() } },
     body: input,
   });
-  if (!result.data) throw new Error(errorMessage(result.error, "계정 기본정보를 저장하지 못했습니다."));
+  if (!result.data) throw new Error(errorMessage(result.error, "계정 기본정보를 저장하지 못했어요."));
   return result.data;
 }
 
@@ -390,7 +390,7 @@ export async function removeWishlistItem(
       header: { "Idempotency-Key": randomUUID() },
     },
   });
-  if (!result.data) throw new Error(errorMessage(result.error, "찜을 해제하지 못했습니다."));
+  if (!result.data) throw new Error(errorMessage(result.error, "찜을 해제하지 못했어요."));
 }
 
 export async function createShippingQuote(
@@ -402,7 +402,7 @@ export async function createShippingQuote(
   const result = await client.POST("/v1/account/shipping-quotes", {
     body: { inventoryUnitIds },
   });
-  if (!result.data) throw new Error(errorMessage(result.error, "배송 금액을 확인하지 못했습니다."));
+  if (!result.data) throw new Error(errorMessage(result.error, "배송 금액을 확인하지 못했어요."));
   return result.data;
 }
 
@@ -416,7 +416,7 @@ export async function createShippingRequest(
     params: { header: { "Idempotency-Key": randomUUID() } },
     body: { quoteId: input.id, addressVersion: input.addressVersion },
   });
-  if (!result.data) throw new Error(errorMessage(result.error, "배송을 신청하지 못했습니다."));
+  if (!result.data) throw new Error(errorMessage(result.error, "배송을 신청하지 못했어요."));
   return result.data;
 }
 
@@ -430,7 +430,7 @@ export async function createPointReturn(
     params: { header: { "Idempotency-Key": randomUUID() } },
     body: { inventoryUnitIds },
   });
-  if (!result.data) throw new Error(errorMessage(result.error, "포인트 환급을 신청하지 못했습니다."));
+  if (!result.data) throw new Error(errorMessage(result.error, "포인트 환급을 신청하지 못했어요."));
   return result.data;
 }
 
@@ -448,7 +448,7 @@ export async function setWantedRequestLike(
     },
     body: { liked },
   });
-  if (!result.data) throw new Error(errorMessage(result.error, "신청방 반응을 저장하지 못했습니다."));
+  if (!result.data) throw new Error(errorMessage(result.error, "신청방 반응을 저장하지 못했어요."));
   return result.data;
 }
 
@@ -462,20 +462,20 @@ export async function updateNotificationPreferences(
     params: { header: { "Idempotency-Key": randomUUID() } },
     body: input,
   });
-  if (!result.data) throw new Error(errorMessage(result.error, "알림 설정을 저장하지 못했습니다."));
+  if (!result.data) throw new Error(errorMessage(result.error, "알림 설정을 저장하지 못했어요."));
   return result.data;
 }
 
 export async function logoutAccount(apiBaseUrl: string, accessToken: string): Promise<void> {
   const client = authorizedClient(apiBaseUrl, accessToken);
   const result = await client.POST("/v1/auth/logout", {});
-  if (!result.response.ok) throw new Error(errorMessage(result.error, "로그아웃하지 못했습니다."));
+  if (!result.response.ok) throw new Error(errorMessage(result.error, "로그아웃하지 못했어요."));
 }
 
 export async function logoutOtherAccountSessions(apiBaseUrl: string, accessToken: string): Promise<void> {
   const client = authorizedClient(apiBaseUrl, accessToken);
   const result = await client.POST("/v1/auth/logout-others", {});
-  if (!result.response.ok) throw new Error(errorMessage(result.error, "다른 기기에서 로그아웃하지 못했습니다."));
+  if (!result.response.ok) throw new Error(errorMessage(result.error, "다른 기기에서 로그아웃하지 못했어요."));
 }
 
 function authorizedClient(apiBaseUrl: string, accessToken: string) {

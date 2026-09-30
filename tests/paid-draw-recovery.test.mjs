@@ -65,7 +65,7 @@ test("fresh status and identity checks reject refunded, pending, cross-account a
   await assert.rejects(preparePaidDrawRecovery(group(), actorId, source({ fetchActorId: async () => "another-user" })), /계정/);
   await assert.rejects(preparePaidDrawRecovery(group(), actorId, source({ fetchOrder: async () => order({ userId: "another-user" }) })), /계정/);
   await assert.rejects(preparePaidDrawRecovery(group(), actorId, source({ fetchOrder: async () => order({ drawEntitlementIds: [ids[0]] }) })), /추첨권/);
-  await assert.rejects(preparePaidDrawRecovery(group(), actorId, source({ fetchPage: async () => page([]) })), /추첨권이 없습니다/);
+  await assert.rejects(preparePaidDrawRecovery(group(), actorId, source({ fetchPage: async () => page([]) })), /추첨권이 없어요/);
 });
 
 test("an entitlement consumed on another device disappears from the recovered sequence", async () => {
@@ -150,7 +150,7 @@ test("kuji rejects incomplete, duplicate, foreign or invalid slot mapping and ve
 test("a kuji snapshot consumed meanwhile reports no remaining rights without reopening selection", async () => {
   await assert.rejects(preparePaidDrawRecovery(kujiGroup(), actorId, kujiSource({
     roomState: "COMPLETED", entitlementIds: [], bindings: [],
-  })), /추첨권이 없습니다/);
+  })), /추첨권이 없어요/);
 });
 
 test("the kuji recovery snapshot can remove a right consumed after the account page was fetched", async () => {

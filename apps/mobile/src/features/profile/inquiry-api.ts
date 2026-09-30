@@ -20,7 +20,7 @@ export async function createInquiry(
     params: { header: { "Idempotency-Key": randomUUID() } },
     body: input,
   });
-  if (!result.data) throw new ProfileApiError(result.response.status, errorMessage(result.error, "문의를 접수하지 못했습니다."));
+  if (!result.data) throw new ProfileApiError(result.response.status, errorMessage(result.error, "문의를 접수하지 못했어요."));
   return result.data;
 }
 
@@ -33,7 +33,7 @@ export async function fetchInquiryDetail(
   const result = await client.GET("/v1/inquiries/{inquiryId}", {
     params: { path: { inquiryId } },
   });
-  if (!result.data) throw new ProfileApiError(result.response.status, errorMessage(result.error, "문의 내역을 불러오지 못했습니다."));
+  if (!result.data) throw new ProfileApiError(result.response.status, errorMessage(result.error, "문의 내역을 불러오지 못했어요."));
   return result.data;
 }
 
@@ -48,7 +48,7 @@ export async function addInquiryMessage(
     params: { path: { inquiryId } },
     body: { content, mediaIds: [] },
   });
-  if (!result.data) throw new ProfileApiError(result.response.status, errorMessage(result.error, "추가 답변을 보내지 못했습니다."));
+  if (!result.data) throw new ProfileApiError(result.response.status, errorMessage(result.error, "추가 답변을 보내지 못했어요."));
   return result.data;
 }
 

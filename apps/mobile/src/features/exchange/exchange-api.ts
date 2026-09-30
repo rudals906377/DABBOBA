@@ -93,10 +93,10 @@ export async function fetchExchangeRoom(
   ]);
 
   if (!listingResult.data) {
-    throw new Error(errorMessage(listingResult.error, "교환 글을 불러오지 못했습니다."));
+    throw new Error(errorMessage(listingResult.error, "교환 글을 불러오지 못했어요."));
   }
   if (!ipResult.data) {
-    throw new Error(errorMessage(ipResult.error, "작품 정보를 불러오지 못했습니다."));
+    throw new Error(errorMessage(ipResult.error, "작품 정보를 불러오지 못했어요."));
   }
 
   const ipNames = Object.fromEntries(ipResult.data.items.map((ip) => [ip.id, ip.nameKo]));
@@ -113,7 +113,7 @@ export async function fetchExchangeRoom(
       params: { query: { limit: 100, category } },
     });
     if (!productResult.data) {
-      throw new Error(errorMessage(productResult.error, "상품 정보를 불러오지 못했습니다."));
+      throw new Error(errorMessage(productResult.error, "상품 정보를 불러오지 못했어요."));
     }
     items = createExampleItems(productResult.data.items, category, search, ipSearchTerms);
   }
@@ -135,7 +135,7 @@ export async function fetchExchangeDetail(
     params: { query: { limit: 100 } },
   });
   if (!ipResult.data) {
-    throw new Error(errorMessage(ipResult.error, "작품 정보를 불러오지 못했습니다."));
+    throw new Error(errorMessage(ipResult.error, "작품 정보를 불러오지 못했어요."));
   }
 
   const ipNames = Object.fromEntries(ipResult.data.items.map((ip) => [ip.id, ip.nameKo]));
@@ -145,12 +145,12 @@ export async function fetchExchangeDetail(
       params: { query: { limit: 100 } },
     });
     if (!productResult.data) {
-      throw new Error(errorMessage(productResult.error, "상품 정보를 불러오지 못했습니다."));
+      throw new Error(errorMessage(productResult.error, "상품 정보를 불러오지 못했어요."));
     }
     const item = createExampleItems(productResult.data.items).find(
       (candidate) => candidate.product.id === productId,
     );
-    if (!item) throw new Error("교환 글을 찾을 수 없습니다.");
+    if (!item) throw new Error("교환 글을 찾을 수 없어요.");
     return {
       item,
       ipName: ipNames[item.product.ipId] ?? null,
@@ -170,7 +170,7 @@ export async function fetchExchangeDetail(
       : Promise.resolve({ data: undefined }),
   ]);
   if (!listingResult.data) {
-    throw new Error(errorMessage(listingResult.error, "교환 글을 불러오지 못했습니다."));
+    throw new Error(errorMessage(listingResult.error, "교환 글을 불러오지 못했어요."));
   }
 
   const listing = listingResult.data;
@@ -179,7 +179,7 @@ export async function fetchExchangeDetail(
     throw new Error("가챠로 뽑은 상품만 교환할 수 있어요.");
   }
   if (!areCustomerVisibleExchangeProducts(listingInventories.map((inventory) => inventory.product))) {
-    throw new Error("현재 참여할 수 없는 교환 상품입니다.");
+    throw new Error("현재 참여할 수 없는 교환 상품이에요.");
   }
   const item = toCardItem(listing);
   return {
@@ -210,13 +210,13 @@ export async function fetchMyExchangeActivity(
   if (!activityResult.data) {
     throw new ProfileApiError(
       activityResult.response.status,
-      errorMessage(activityResult.error, "내 교환 현황을 불러오지 못했습니다."),
+      errorMessage(activityResult.error, "내 교환 현황을 불러오지 못했어요."),
     );
   }
   if (!ipResult.data) {
     throw new ProfileApiError(
       ipResult.response.status,
-      errorMessage(ipResult.error, "작품 정보를 불러오지 못했습니다."),
+      errorMessage(ipResult.error, "작품 정보를 불러오지 못했어요."),
     );
   }
   return {
@@ -250,7 +250,7 @@ export async function decideExchangeOffer(
     body: { decision },
   });
   if (!result.data) {
-    throw new Error(errorMessage(result.error, "교환 제안을 처리하지 못했습니다."));
+    throw new Error(errorMessage(result.error, "교환 제안을 처리하지 못했어요."));
   }
   return result.data;
 }
@@ -291,10 +291,10 @@ async function fetchExchangeInventory(
     client.GET("/v1/catalog/ips", { params: { query: { limit: 100 } } }),
   ]);
   if (!inventoryResult.data) {
-    throw new ProfileApiError(inventoryResult.response.status, errorMessage(inventoryResult.error, "보관함 상품을 불러오지 못했습니다."));
+    throw new ProfileApiError(inventoryResult.response.status, errorMessage(inventoryResult.error, "보관함 상품을 불러오지 못했어요."));
   }
   if (!ipResult.data) {
-    throw new ProfileApiError(ipResult.response.status, errorMessage(ipResult.error, "작품 정보를 불러오지 못했습니다."));
+    throw new ProfileApiError(ipResult.response.status, errorMessage(ipResult.error, "작품 정보를 불러오지 못했어요."));
   }
   return {
     items: inventoryResult.data.items,
@@ -325,7 +325,7 @@ export async function createExchangeListing(
     body: input,
   });
   if (!result.data) {
-    throw new Error(errorMessage(result.error, "교환 상품을 올리지 못했습니다."));
+    throw new Error(errorMessage(result.error, "교환 상품을 올리지 못했어요."));
   }
   return result.data;
 }
@@ -349,7 +349,7 @@ export async function createExchangeOffer(
     body: { offeredInventoryUnitIds },
   });
   if (!result.data) {
-    throw new Error(errorMessage(result.error, "교환 신청을 보내지 못했습니다."));
+    throw new Error(errorMessage(result.error, "교환 신청을 보내지 못했어요."));
   }
   return result.data;
 }

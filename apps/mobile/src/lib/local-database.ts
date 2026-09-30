@@ -5,7 +5,7 @@ import { isCurrentHomeSectionList } from "../features/home/home-catalog-contract
 
 const DATABASE_VERSION = 4;
 const HOME_CATALOG_KEY = "home.catalog.v1";
-const EXCHANGE_RULES_DISMISSED_KEY = "exchange.rules.dismissed.v2";
+const EXCHANGE_RULES_DISMISSED_KEY = "exchange.rules.dismissed.v3";
 const DRAW_SOUND_ENABLED_KEY = "draw.sound.enabled.v1";
 
 export async function initializeLocalDatabase(db: SQLiteDatabase): Promise<void> {

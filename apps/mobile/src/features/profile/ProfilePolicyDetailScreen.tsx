@@ -77,7 +77,7 @@ const styles = StyleSheet.create({
   publicLink: { minHeight: seed.size.touchTarget, marginTop: seed.spacing.x4, paddingHorizontal: seed.spacing.x4, borderWidth: StyleSheet.hairlineWidth, borderColor: seed.color.stroke.neutral, borderRadius: seed.radius.r3, backgroundColor: seed.color.layer.default, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   publicLinkLabel: { color: colors.greenInk, fontSize: 13, fontWeight: "800" },
   state: { minHeight: 430, alignItems: "center", justifyContent: "center", paddingHorizontal: seed.spacing.x6 },
-  stateTitle: { color: colors.ink, fontSize: 17, fontWeight: "900", marginTop: seed.spacing.x3 },
+  stateTitle: { color: colors.ink, ...seed.typography.subtitle, marginTop: seed.spacing.x3 },
   stateBody: { color: colors.muted, fontSize: 13, textAlign: "center", marginTop: seed.spacing.x2 },
   pressed: { opacity: seed.state.pressedOpacity, transform: [{ scale: seed.state.pressedScale }] },
 });

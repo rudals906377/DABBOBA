@@ -31,7 +31,7 @@ export async function searchWantedIps(apiBaseUrl: string, query: string): Promis
   const result = await clientFor(apiBaseUrl).GET("/v1/catalog/ips", {
     params: { query: { q: query.trim(), limit: 5 } },
   });
-  if (!result.data) throw new Error(errorMessage(result.error, "작품 추천을 불러오지 못했습니다."));
+  if (!result.data) throw new Error(errorMessage(result.error, "작품 추천을 불러오지 못했어요."));
   return result.data.items;
 }
 
@@ -63,13 +63,13 @@ export async function uploadWantedRequestImage(
   image: WantedRequestImage,
 ): Promise<string> {
   const localResponse = await fetchRawUpload(image.uri);
-  if (!localResponse.ok) throw new Error("선택한 사진을 읽지 못했습니다.");
+  if (!localResponse.ok) throw new Error("선택한 사진을 읽지 못했어요.");
   // Both transports must upload the same snapshot that supplies the size and checksum.
   // Clone before consuming: native Blob does not universally expose arrayBuffer().
   const multipartResponse = localResponse.clone();
   const bytes = await localResponse.arrayBuffer();
   if (!bytes.byteLength || bytes.byteLength > MAX_IMAGE_BYTES) {
-    throw new Error("사진은 10MB 이하만 첨부할 수 있습니다.");
+    throw new Error("사진은 10MB 이하만 첨부할 수 있어요.");
   }
   const checksumSha256 = toHex(await digest(CryptoDigestAlgorithm.SHA256, bytes));
   const client = clientFor(apiBaseUrl, accessToken);
@@ -84,7 +84,7 @@ export async function uploadWantedRequestImage(
       acceptedUploadMethods: ["POST", "PUT"],
     },
   });
-  if (!intentResult.data) throw new Error(errorMessage(intentResult.error, "사진 업로드를 준비하지 못했습니다."));
+  if (!intentResult.data) throw new Error(errorMessage(intentResult.error, "사진 업로드를 준비하지 못했어요."));
   const intent = intentResult.data;
   const upload = validateWantedImageUpload(intent, image.mimeType, bytes.byteLength, checksumSha256);
   let body: ArrayBuffer | FormData = bytes;
@@ -102,14 +102,14 @@ export async function uploadWantedRequestImage(
     ...(upload.headers ? { headers: upload.headers } : {}),
     credentials: "omit", redirect: "error",
   });
-  if (!uploaded.ok || uploaded.redirected) throw new Error("사진을 업로드하지 못했습니다. 다시 시도해 주세요.");
+  if (!uploaded.ok || uploaded.redirected) throw new Error("사진을 업로드하지 못했어요. 다시 시도해 주세요.");
   const completed = await client.POST("/v1/media/{mediaId}/complete", {
     params: {
       path: { mediaId: intent.mediaId },
       header: { "Idempotency-Key": randomUUID() },
     },
   });
-  if (!completed.data) throw new Error(errorMessage(completed.error, "사진 업로드를 완료하지 못했습니다."));
+  if (!completed.data) throw new Error(errorMessage(completed.error, "사진 업로드를 완료하지 못했어요."));
   return completed.data.mediaId;
 }
 
@@ -123,13 +123,13 @@ function validateWantedImageUpload(
   byteSize: number,
   checksumSha256: string,
 ): { url: URL; headers?: Record<string, string> } {
-  const invalid = () => new Error("사진 업로드 정책이 선택한 파일과 일치하지 않습니다.");
+  const invalid = () => new Error("사진 업로드 정책이 선택한 파일과 일치하지 않아요.");
   if (!intent || intent.maxBytes !== byteSize || !Number.isSafeInteger(intent.maxBytes)
     || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(intent.mediaId)) throw invalid();
   const expiresAt = Date.parse(intent.expiresAt);
   if (!Number.isFinite(expiresAt)) throw invalid();
   if (Date.now() >= expiresAt) {
-    throw Object.assign(new Error("사진 업로드 주소가 만료됐습니다. 다시 시도해 주세요."), { code: "MEDIA_UPLOAD_INTENT_EXPIRED" });
+    throw Object.assign(new Error("사진 업로드 주소가 만료됐어요. 다시 시도해 주세요."), { code: "MEDIA_UPLOAD_INTENT_EXPIRED" });
   }
   let url: URL;
   try { url = new URL(intent.uploadUrl); } catch { throw invalid(); }
@@ -175,7 +175,7 @@ export async function createWantedRequest(
     body: input,
   });
   if (!result.data) {
-    throw new Error(errorMessage(result.error, "신청을 등록하지 못했습니다."));
+    throw new Error(errorMessage(result.error, "신청을 등록하지 못했어요."));
   }
   return result.data;
 }
