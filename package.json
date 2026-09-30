@@ -47,6 +47,7 @@
     "mobile:auth:android": "corepack pnpm --filter @dabboba/mobile auth:android",
     "release:mobile:check": "node scripts/check-mobile-release-config.mjs",
     "release:mobile:api:verify": "node scripts/verify-mobile-public-api.mjs",
+    "release:ios:artifact:verify": "node scripts/verify-ios-artifact-team.mjs",
     "release:edge:worker:verify": "node scripts/verify-live-edge-worker-boundary.mjs",
     "release:mobile:bundle:check": "node scripts/check-mobile-production-bundle.mjs",
     "ios:local": "corepack pnpm mobile:ios",

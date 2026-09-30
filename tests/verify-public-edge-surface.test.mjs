@@ -4,11 +4,12 @@ import test from 'node:test';
 import { verifyPublicEdgeSurface, waitForPublicEdgeSurface } from '../scripts/verify-public-edge-surface.mjs';
 import * as publicApiSmoke from '../scripts/verify-public-edge-surface.mjs';
 
+const policyVersions = { terms: '2026-09-24', privacy: '2026-09-24' };
 const responses = {
-  '/v1/public/config': { commerceMode: 'PRELAUNCH', requiredPolicyVersions: { terms: '2026-09-24', privacy: '2026-09-24' } },
+  '/v1/public/config': { commerceMode: 'PRELAUNCH', requiredPolicyVersions: policyVersions },
   '/v1/catalog/recent-draws': { serverNow: '2026-09-24T00:00:00.000Z', items: [] },
   '/v1/catalog/home-sections': { configured: false, items: [], bestProductId: null, evaluatedAt: '2026-09-24T00:00:00.000Z' },
-  '/v1/auth/providers': { methods: [], brokerExchangeConfigured: false },
+  '/v1/auth/providers': { methods: [], brokerExchangeConfigured: false, requiredPolicyVersions: policyVersions },
 };
 
 function fixtureFetch(overrides = {}) {
@@ -75,19 +76,27 @@ test('deployment retries a briefly unavailable Edge route without hiding a persi
   }), /persistent 404/);
 });
 
+const catalogImage = 'https://cdn.dabboba.net/catalog/gacha.png';
+const imageResponse = () => new Response(new Uint8Array([0x89, 0x50, 0x4e, 0x47]), {
+  status: 200,
+  headers: { 'content-type': 'image/png' },
+});
+const prelaunchProduct = (category) => ({
+  id: `${category}-1`, name: `${category} 상품`, category, availableQuantity: 0, totalQuantity: null, imageUrl: catalogImage,
+});
+
 test('mobile release smoke verifies the configured customer API, not only the Edge default URL', async () => {
   assert.equal(typeof publicApiSmoke.verifyMobilePublicApiSurface, 'function');
   const calls = [];
-  const productPage = {
-    items: [{ id: 'product-1', name: '가챠 상품', category: 'gacha', availableQuantity: 0, totalQuantity: null }],
-    nextCursor: null,
-  };
   const fetchImpl = async (url, init) => {
-    calls.push({ url, method: init.method, signal: init.signal });
-    const pathname = new URL(url).pathname;
-    const body = pathname === '/v1/catalog/products' || pathname === '/v1/catalog/ips'
-      ? productPage
-      : responses[pathname];
+    calls.push({ url, method: init.method, signal: init.signal, redirect: init.redirect });
+    if (url === catalogImage) return imageResponse();
+    const parsed = new URL(url);
+    const body = parsed.pathname === '/v1/catalog/products'
+      ? { items: parsed.searchParams.get('category') === 'gacha' ? [prelaunchProduct('gacha')] : [], nextCursor: null }
+      : parsed.pathname === '/v1/catalog/ips'
+        ? { items: [], nextCursor: null }
+        : responses[parsed.pathname];
     return new Response(JSON.stringify(body), { status: 200 });
   };
   const result = await publicApiSmoke.verifyMobilePublicApiSurface({
@@ -95,17 +104,52 @@ test('mobile release smoke verifies the configured customer API, not only the Ed
     fetchImpl,
   });
   assert.equal(result.commerceMode, 'PRELAUNCH');
-  assert.deepEqual(calls.map(({ url }) => new URL(url).hostname), Array(6).fill('api.dabboba.net'));
-  assert.deepEqual(calls.map(({ url }) => new URL(url).pathname), [
+  assert.equal(result.observed.catalogImageVerified, true);
+  const apiCalls = calls.slice(0, -1);
+  assert.deepEqual(apiCalls.map(({ url }) => new URL(url).hostname), Array(7).fill('api.dabboba.net'));
+  assert.deepEqual(apiCalls.map(({ url }) => `${new URL(url).pathname}${new URL(url).search}`), [
     '/v1/public/config',
     '/v1/catalog/recent-draws',
     '/v1/catalog/home-sections',
     '/v1/auth/providers',
-    '/v1/catalog/products',
+    '/v1/catalog/products?category=gacha&limit=1',
+    '/v1/catalog/products?category=kuji&limit=1',
     '/v1/catalog/ips',
   ]);
-  assert.equal(new URL(calls[4].url).search, '?category=gacha&limit=1');
+  // The first catalog image is followed through the media redirect to real image bytes.
+  assert.equal(calls.at(-1).url, catalogImage);
+  assert.equal(calls.at(-1).redirect, 'follow');
   assert.equal(calls.every(({ method, signal }) => method === 'GET' && signal instanceof AbortSignal), true);
+});
+
+test('mobile release smoke rejects a broken catalog image, a mixed category or mismatched policy versions', async () => {
+  const fetchWith = ({ image = imageResponse, kujiItems = [], providers = responses['/v1/auth/providers'] } = {}) => async (url) => {
+    if (url === catalogImage) return image();
+    const parsed = new URL(url);
+    if (parsed.pathname === '/v1/catalog/products') {
+      const items = parsed.searchParams.get('category') === 'gacha' ? [prelaunchProduct('gacha')] : kujiItems;
+      return new Response(JSON.stringify({ items, nextCursor: null }), { status: 200 });
+    }
+    if (parsed.pathname === '/v1/catalog/ips') return new Response(JSON.stringify({ items: [], nextCursor: null }), { status: 200 });
+    if (parsed.pathname === '/v1/auth/providers') return new Response(JSON.stringify(providers), { status: 200 });
+    return new Response(JSON.stringify(responses[parsed.pathname]), { status: 200 });
+  };
+  const verify = (options) => publicApiSmoke.verifyMobilePublicApiSurface({
+    apiBaseUrl: 'https://api.dabboba.net',
+    fetchImpl: fetchWith(options),
+  });
+  await verify();
+  await assert.rejects(verify({ image: () => new Response('{}', { status: 503, headers: { 'content-type': 'application/json' } }) }), /Catalog image returned HTTP 503/);
+  await assert.rejects(verify({ image: () => new Response('<html>', { status: 200, headers: { 'content-type': 'text/html' } }) }), /expected an image/);
+  await assert.rejects(verify({ kujiItems: [prelaunchProduct('gacha')] }), /Kuji catalog returned a product outside the kuji category/);
+  await assert.rejects(verify({ kujiItems: [{ ...prelaunchProduct('kuji'), availableQuantity: 5 }] }), /Kuji catalog exposes inventory during PRELAUNCH/);
+  await assert.rejects(verify({
+    providers: { ...responses['/v1/auth/providers'], requiredPolicyVersions: { terms: '2026-09-30', privacy: '2026-09-24' } },
+  }), /different policy versions/);
+  await assert.rejects(verify({
+    providers: { ...responses['/v1/auth/providers'], deletionMethods: ['EMAIL', 'FAX'] },
+  }), /Auth providers contract is incomplete/);
+  await verify({ providers: { ...responses['/v1/auth/providers'], deletionMethods: ['EMAIL'] } });
 });
 
 test('mobile release smoke rejects unsafe origins and broken product catalog routes', async () => {
@@ -142,13 +186,13 @@ test('mobile release smoke rejects a prelaunch catalog that exposes invented sto
     fetchImpl: async (url) => {
       const pathname = new URL(url).pathname;
       const body = pathname === '/v1/catalog/products'
-        ? { items: [{ id: 'product-1', availableQuantity: 100, totalQuantity: 100 }], nextCursor: null }
+        ? { items: [{ id: 'product-1', category: new URL(url).searchParams.get('category'), availableQuantity: 100, totalQuantity: 100 }], nextCursor: null }
         : pathname === '/v1/catalog/ips'
           ? { items: [], nextCursor: null }
           : responses[pathname];
       return new Response(JSON.stringify(body), { status: 200 });
     },
-  }), /Products expose inventory during PRELAUNCH/);
+  }), /Products exposes inventory during PRELAUNCH/);
 });
 
 test('LIVE mobile release requires configured login and purchasable gacha and kuji catalogs', async () => {
@@ -158,6 +202,7 @@ test('LIVE mobile release requires configured login and purchasable gacha and ku
     '/v1/auth/providers': {
       methods: ['KAKAO', 'NAVER', 'GOOGLE', 'APPLE'],
       brokerExchangeConfigured: true,
+      requiredPolicyVersions: policyVersions,
     },
   };
   const product = (category) => ({
@@ -168,7 +213,8 @@ test('LIVE mobile release requires configured login and purchasable gacha and ku
     const calls = [];
     const fetchImpl = async (url, init) => {
       const parsed = new URL(url);
-      calls.push({ path: parsed.pathname, search: parsed.search, method: init.method });
+      calls.push({ path: parsed.pathname, search: parsed.search, method: init.method, host: parsed.hostname });
+      if (parsed.hostname === 'cdn.dabboba.net') return imageResponse();
       const body = overrides[`${parsed.pathname}${parsed.search}`]
         ?? overrides[parsed.pathname]
         ?? (parsed.pathname === '/v1/catalog/products'
@@ -186,23 +232,25 @@ test('LIVE mobile release requires configured login and purchasable gacha and ku
     apiBaseUrl: 'https://api.dabboba.net', expectedCommerceMode: 'LIVE', fetchImpl: valid.fetchImpl,
   });
   assert.equal(result.commerceMode, 'LIVE');
-  assert.equal(valid.calls.length, 8);
+  const apiCalls = valid.calls.filter((call) => call.host === 'api.dabboba.net');
+  assert.equal(apiCalls.length, 9);
+  assert.deepEqual(valid.calls.filter((call) => call.host === 'cdn.dabboba.net').map((call) => call.path), ['/gacha.jpg']);
   assert.equal(valid.calls.every((call) => call.method === 'GET'), true);
-  assert.equal(valid.calls[3].path, '/v1/auth/providers');
-  assert.deepEqual(valid.calls.slice(-2).map(({ path, search }) => `${path}${search}`), [
+  assert.equal(apiCalls[3].path, '/v1/auth/providers');
+  assert.deepEqual(apiCalls.slice(-2).map(({ path, search }) => `${path}${search}`), [
     '/v1/catalog/products?category=gacha&saleStatus=ON_SALE&excludeSoldOut=true&limit=1',
     '/v1/catalog/products?category=kuji&saleStatus=ON_SALE&excludeSoldOut=true&limit=1',
   ]);
 
   const missingLogin = fetchLive({
-    '/v1/auth/providers': { methods: [], brokerExchangeConfigured: true },
+    '/v1/auth/providers': { methods: [], brokerExchangeConfigured: true, requiredPolicyVersions: policyVersions },
   });
   await assert.rejects(publicApiSmoke.verifyMobilePublicApiSurface({
     apiBaseUrl: 'https://api.dabboba.net', expectedCommerceMode: 'LIVE', fetchImpl: missingLogin.fetchImpl,
   }), /LIVE customer login providers are incomplete/);
 
   const withPhone = fetchLive({
-    '/v1/auth/providers': { methods: ['PHONE', 'KAKAO', 'NAVER', 'GOOGLE', 'APPLE'], brokerExchangeConfigured: true },
+    '/v1/auth/providers': { methods: ['PHONE', 'KAKAO', 'NAVER', 'GOOGLE', 'APPLE'], brokerExchangeConfigured: true, requiredPolicyVersions: policyVersions },
   });
   await assert.rejects(publicApiSmoke.verifyMobilePublicApiSurface({
     apiBaseUrl: 'https://api.dabboba.net', expectedCommerceMode: 'LIVE', fetchImpl: withPhone.fetchImpl,
@@ -235,7 +283,7 @@ test('LIVE mobile release requires configured login and purchasable gacha and ku
 
 test('every profile rejects a third-party login listed without Sign in with Apple', async () => {
   for (const methods of [['KAKAO'], ['PHONE', 'NAVER'], ['GOOGLE'], ['PHONE', 'KAKAO', 'NAVER', 'GOOGLE']]) {
-    const { fetchImpl } = fixtureFetch({ '/v1/auth/providers': { methods, brokerExchangeConfigured: true } });
+    const { fetchImpl } = fixtureFetch({ '/v1/auth/providers': { methods, brokerExchangeConfigured: true, requiredPolicyVersions: policyVersions } });
     await assert.rejects(
       verifyPublicEdgeSurface({ fetchImpl }),
       /third-party login without Sign in with Apple/,
@@ -245,7 +293,7 @@ test('every profile rejects a third-party login listed without Sign in with Appl
       verifyPublicEdgeSurface({
         fetchImpl: fixtureFetch({
           '/v1/public/config': { ...responses['/v1/public/config'], commerceMode: 'LIVE' },
-          '/v1/auth/providers': { methods, brokerExchangeConfigured: true },
+          '/v1/auth/providers': { methods, brokerExchangeConfigured: true, requiredPolicyVersions: policyVersions },
         }).fetchImpl,
         expectedCommerceMode: 'LIVE',
       }),
@@ -254,7 +302,7 @@ test('every profile rejects a third-party login listed without Sign in with Appl
     );
   }
   for (const methods of [[], ['PHONE'], ['PHONE', 'KAKAO', 'APPLE'], ['APPLE']]) {
-    const { fetchImpl } = fixtureFetch({ '/v1/auth/providers': { methods, brokerExchangeConfigured: methods.length > 0 } });
+    const { fetchImpl } = fixtureFetch({ '/v1/auth/providers': { methods, brokerExchangeConfigured: methods.length > 0, requiredPolicyVersions: policyVersions } });
     await verifyPublicEdgeSurface({ fetchImpl });
   }
   await assert.rejects(

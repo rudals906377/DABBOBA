@@ -414,6 +414,15 @@ function validateLegalBusinessPhone(rootDir, phone, errors) {
   }
 }
 
+/**
+ * A mobile-number representative phone blocks every full release check,
+ * including the PRELAUNCH store-build and submit profile. Only the
+ * structure-only check (no environment, no artifact) may report it as a warning.
+ */
+export function representativePhoneMustBeLandline({ structureOnly = false, pgReview = false } = {}) {
+  return pgReview || !structureOnly;
+}
+
 export function validateCardReviewBusinessPhone(rootDir, errors, warnings, strict) {
   const businessInfoPath = path.join(
     rootDir,
@@ -644,12 +653,11 @@ export function inspectMobileReleaseConfig({
   validateEasConfiguration(resolvedRoot, errors);
   validateSourceGates(resolvedRoot, errors);
   validateEnvironmentExample(resolvedRoot, errors);
-  const commerceCapability = environment.EXPO_PUBLIC_COMMERCE_CAPABILITY?.trim();
   validateCardReviewBusinessPhone(
     resolvedRoot,
     errors,
     warnings,
-    pgReview || (!structureOnly && commerceCapability !== "PRELAUNCH"),
+    representativePhoneMustBeLandline({ structureOnly, pgReview }),
   );
   if (pgReview) {
     validatePgReviewEnvironment(resolvedRoot, environment, errors);

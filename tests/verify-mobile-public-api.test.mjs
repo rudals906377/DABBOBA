@@ -12,25 +12,29 @@ function fixtureFetch({ commerceMode, paymentProvider } = {}) {
   const fetchImpl = async (url) => {
     const parsed = new URL(url);
     calls.push(parsed.hostname);
+    if (parsed.hostname === 'cdn.dabboba.net') {
+      return new Response(new Uint8Array([0xff, 0xd8]), { status: 200, headers: { 'content-type': 'image/jpeg' } });
+    }
     const mode = commerceMode;
+    const policyVersions = { terms: '2026-09-24', privacy: '2026-09-24' };
     const bodies = {
       '/v1/public/config': {
         commerceMode: mode,
-        requiredPolicyVersions: { terms: '2026-09-24', privacy: '2026-09-24' },
+        requiredPolicyVersions: policyVersions,
         ...(paymentProvider === undefined ? {} : { paymentProvider }),
       },
       '/v1/catalog/recent-draws': { serverNow: '2026-09-24T00:00:00.000Z', items: [] },
-      '/v1/catalog/home-sections': { configured: false, items: [] },
+      '/v1/catalog/home-sections': { configured: false, items: [], bestProductId: null, evaluatedAt: '2026-09-24T00:00:00.000Z' },
       '/v1/auth/providers': mode === 'LIVE'
-        ? { methods: ['KAKAO', 'NAVER', 'GOOGLE', 'APPLE'], brokerExchangeConfigured: true }
-        : { methods: [], brokerExchangeConfigured: false },
+        ? { methods: ['KAKAO', 'NAVER', 'GOOGLE', 'APPLE'], brokerExchangeConfigured: true, requiredPolicyVersions: policyVersions }
+        : { methods: [], brokerExchangeConfigured: false, requiredPolicyVersions: policyVersions },
       '/v1/catalog/ips': { items: [], nextCursor: null },
     };
     let body = bodies[parsed.pathname];
     if (parsed.pathname === '/v1/catalog/products') {
       body = mode === 'LIVE'
         ? { items: [product(parsed.searchParams.get('category'))], nextCursor: null }
-        : { items: [{ id: 'p', category: 'gacha', availableQuantity: 0, totalQuantity: null }], nextCursor: null };
+        : { items: [{ id: 'p', category: parsed.searchParams.get('category'), availableQuantity: 0, totalQuantity: null, imageUrl: 'https://cdn.dabboba.net/p.jpg' }], nextCursor: null };
     }
     return new Response(JSON.stringify(body), { status: 200 });
   };
@@ -50,7 +54,9 @@ test('commerce mode is attested against the server; provider is reported as unat
   const result = await verifyMobilePublicApiFromEnvironment({ environment: env(), fetchImpl });
   assert.equal(result.commerceModeAttested, true);
   assert.equal(result.paymentProviderAttested, false);
-  assert.equal(calls.every((host) => host === 'api.dabboba.net'), true);
+  // Every API read targets the configured origin; only the followed catalog image leaves it.
+  assert.equal(calls.filter((host) => host !== 'cdn.dabboba.net').every((host) => host === 'api.dabboba.net'), true);
+  assert.equal(calls.filter((host) => host === 'cdn.dabboba.net').length, 1);
 
   const prelaunch = fixtureFetch({ commerceMode: 'PRELAUNCH' });
   const prelaunchResult = await verifyMobilePublicApiFromEnvironment({

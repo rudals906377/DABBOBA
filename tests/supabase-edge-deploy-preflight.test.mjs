@@ -142,6 +142,13 @@ test('production Edge deployment checks CLI access to the exact active target pr
   assert.throws(() => verifySupabaseTargetProjectAccess({
     runCommand: () => ({ status: 1, stdout: 'not-json' }),
   }), /project access could not be verified/);
+  // The pinned CLI serializes the project reference as `id`.
+  assert.doesNotThrow(() => verifySupabaseTargetProjectAccess({
+    runCommand: () => ({ status: 0, stdout: JSON.stringify([{ id: 'rconfxsykttfvznakile', name: 'dabboba', status: 'ACTIVE_HEALTHY' }]) }),
+  }));
+  assert.throws(() => verifySupabaseTargetProjectAccess({
+    runCommand: () => ({ status: 0, stdout: JSON.stringify([{ id: 'another-project', status: 'ACTIVE_HEALTHY' }]) }),
+  }), /expected active production project/);
 });
 
 test('Supabase Edge release profile distinguishes required auth from optional remote push', () => {
@@ -434,18 +441,46 @@ test('Supabase Edge deployment performs both preflights before build, secret, or
     verifyProjectAccess() { calls.push('project-access'); },
     run(command, args) { calls.push(`${command}:${args.join(' ')}`); },
     supabase(...args) { calls.push(`supabase:${args.join(' ')}`); },
-    verifyPublicSurface() { calls.push('public-smoke'); },
+    verifyPublicSurface({ expectedCommerceMode }) { calls.push(`public-smoke:${expectedCommerceMode}`); },
   });
   assert.deepEqual(calls.slice(0, 4), ['profile', 'profile-read', 'preflight', 'project-access']);
+  // The post-deploy smoke expects the mode that was just deployed.
+  assert.equal(calls.at(-1), `public-smoke:${edgeProfile.DABBOBA_API_COMMERCE_MODE}`);
   assert.equal(calls.some((call) => call.includes('build:supabase')), true);
   assert.equal(calls.some((call) => call.includes('functions deploy dabboba-api')), true);
-  assert.ok(calls.indexOf('public-smoke') > calls.findIndex((call) => call.includes('functions deploy dabboba-worker')));
+  assert.ok(calls.findIndex((call) => call.startsWith('public-smoke')) > calls.findIndex((call) => call.includes('functions deploy dabboba-worker')));
   const adminBuild = calls.indexOf('corepack:pnpm --filter @dabboba/api build:supabase:admin');
   const adminDeploy = calls.indexOf(`supabase:functions deploy dabboba-admin-api --no-verify-jwt --project-ref ${SUPABASE_INTEGRATION_PROJECT_REF}`);
   assert.ok(adminBuild > calls.indexOf('project-access'), 'admin bundle is built only after both preflights');
   assert.ok(adminDeploy > adminBuild, 'admin function is deployed from the freshly built admin bundle');
   assert.ok(adminDeploy > calls.findIndex((call) => call.startsWith('supabase:secrets set')));
-  assert.ok(calls.indexOf('public-smoke') > adminDeploy);
+  assert.ok(calls.findIndex((call) => call.startsWith('public-smoke')) > adminDeploy);
+});
+
+test('a LIVE Edge profile is smoke-tested as LIVE and an unknown mode is refused before any mutation', async () => {
+  const modes = [];
+  await deploySupabaseEdge({
+    prepareProfile: () => ({ ...edgeProfile, DABBOBA_API_COMMERCE_MODE: 'LIVE' }),
+    readEdgeProfile: () => ({}),
+    preflight: async () => ({ sourceHead: 'a'.repeat(40), targetHash: 'b'.repeat(64), releaseConfiguration: assertSupabaseEdgeReleaseConfiguration(edgeProfile) }),
+    verifyProjectAccess: () => {},
+    run: () => {},
+    supabase: () => {},
+    verifyPublicSurface: ({ expectedCommerceMode }) => { modes.push(expectedCommerceMode); },
+  });
+  assert.deepEqual(modes, ['LIVE']);
+
+  const commands = [];
+  await assert.rejects(deploySupabaseEdge({
+    prepareProfile: () => ({ ...edgeProfile, DABBOBA_API_COMMERCE_MODE: '' }),
+    readEdgeProfile: () => ({}),
+    preflight: async () => { commands.push('preflight'); },
+    verifyProjectAccess: () => commands.push('project-access'),
+    run: (...args) => commands.push(args),
+    supabase: (...args) => commands.push(args),
+    verifyPublicSurface: () => commands.push('public-smoke'),
+  }), /DABBOBA_API_COMMERCE_MODE to PRELAUNCH or LIVE/);
+  assert.deepEqual(commands, []);
 });
 
 test('a failed database preflight leaves build, secrets, and functions untouched', async () => {

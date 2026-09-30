@@ -9,6 +9,7 @@ import {
   PG_REVIEW_PUBLIC_BUILD_VARIABLES,
   REQUIRED_PUBLIC_BUILD_VARIABLES,
   inspectMobileReleaseConfig,
+  representativePhoneMustBeLandline,
   validateCardReviewBusinessPhone,
 } from "../scripts/check-mobile-release-config.mjs";
 
@@ -216,6 +217,19 @@ function businessPhoneIssues(options) {
   }
   return { errors: errors.map((issue) => issue.code), warnings: warnings.map((issue) => issue.code) };
 }
+
+test("a mobile representative number blocks every full release check, PRELAUNCH store builds included", () => {
+  assert.equal(representativePhoneMustBeLandline({ structureOnly: false }), true);
+  assert.equal(representativePhoneMustBeLandline({ pgReview: true }), true);
+  assert.equal(representativePhoneMustBeLandline({ structureOnly: true }), false);
+  const { errors, warnings } = businessPhoneIssues({
+    appPhone: "010-6374-4900",
+    termsPhone: "010-6374-4900",
+    privacyPhone: "010-6374-4900",
+  });
+  assert.deepEqual(errors, ["PG_REVIEW_BUSINESS_PHONE_MOBILE"]);
+  assert.deepEqual(warnings, []);
+});
 
 test("business phone gate accepts matching app and public legal phones", () => {
   assert.deepEqual(businessPhoneIssues(), { errors: [], warnings: [] });

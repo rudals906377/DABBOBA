@@ -423,7 +423,16 @@ physical-device QA, Google Play testing, or public App Store approval.
 ## Signed artifact and device QA
 
 Record the exact Git commit, EAS build IDs, version/build numbers, tester,
-device/OS, date, and result. At minimum verify both platforms for:
+device/OS, date, and result.
+
+Before uploading any iOS release artifact, run
+`node scripts/verify-ios-artifact-team.mjs <path-to.ipa>`. The source
+`appleTeamId` pin cannot prove which EAS credentials signed the binary; this
+check reads the embedded provisioning profile and requires Team `MCZ4884P7F`,
+application identifier `MCZ4884P7F.com.dabboba.mobile`, `get-task-allow` false,
+and an App Store (device-free) profile. It rejects Team `52HC8BV2BL`.
+
+At minimum verify both platforms for:
 
 - installed display name, launcher icon/adaptive masks, splash, orientation,
   status/navigation safe areas, and cold/warm start;

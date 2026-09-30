@@ -1,6 +1,9 @@
 #!/usr/bin/env node
 
 import { pathToFileURL } from 'node:url';
+// The signed app accepts a Home response only through this validator, so the
+// release smoke reuses it instead of keeping a weaker copy of the contract.
+import { isCurrentHomeSectionList } from '../apps/mobile/src/features/home/home-catalog-contract.ts';
 import { SUPABASE_INTEGRATION_PROJECT_REF } from './supabase-integration-profile.mjs';
 
 const BASE_URL = `https://${SUPABASE_INTEGRATION_PROJECT_REF}.supabase.co/functions/v1/dabboba-api`;
@@ -12,8 +15,10 @@ const ROUTES = Object.freeze([
 ]);
 const MOBILE_CATALOG_ROUTES = Object.freeze([
   ['/v1/catalog/products?category=gacha&limit=1', 'Products'],
+  ['/v1/catalog/products?category=kuji&limit=1', 'Kuji catalog'],
   ['/v1/catalog/ips', 'IPs'],
 ]);
+const DELETION_METHODS = new Set(['PHONE', 'KAKAO', 'NAVER', 'GOOGLE', 'APPLE', 'EMAIL']);
 const LIVE_MOBILE_ROUTES = Object.freeze([
   ['/v1/catalog/products?category=gacha&saleStatus=ON_SALE&excludeSoldOut=true&limit=1', 'Gacha products'],
   ['/v1/catalog/products?category=kuji&saleStatus=ON_SALE&excludeSoldOut=true&limit=1', 'Kuji products'],
@@ -25,8 +30,6 @@ const REQUIRED_LIVE_LOGIN_METHODS = Object.freeze(['KAKAO', 'NAVER', 'GOOGLE', '
 // Sign in with Apple as an equivalent option, in every commerce mode.
 const THIRD_PARTY_LOGIN_METHODS = Object.freeze(['KAKAO', 'NAVER', 'GOOGLE']);
 const POLICY_VERSION = /^\d{4}-\d{2}-\d{2}$/;
-const SECTION_LAYOUTS = new Set(['gacha', 'kuji']);
-const SECTION_SOURCES = new Set(['MANUAL', 'IP', 'NEW', 'POPULAR']);
 
 function isRecord(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -56,18 +59,14 @@ function assertBody(route, body, expectedCommerceMode, { requirePhoneLogin = fal
       throw new Error('Recent draws contract is incomplete.');
     }
   } else if (route === 'Home sections') {
-    if (typeof body.configured !== 'boolean' || !Array.isArray(body.items)
-      || body.items.some((item) => !isRecord(item)
-        || !SECTION_LAYOUTS.has(item.layoutKind)
-        || !SECTION_SOURCES.has(item.sourceKind)
-        || !Array.isArray(item.products))) {
+    if (!isCurrentHomeSectionList(body)) {
       throw new Error('Home sections contract is incomplete.');
     }
     if (expectedCommerceMode === 'PRELAUNCH'
       && body.items.some((item) => item.products.some(exposesPrelaunchInventory))) {
       throw new Error('Home sections expose inventory during PRELAUNCH.');
     }
-  } else if (route === 'Products' || route === 'IPs') {
+  } else if (route === 'Products' || route === 'Kuji catalog' || route === 'IPs') {
     if (!Array.isArray(body.items)
       || !(body.nextCursor === null || typeof body.nextCursor === 'string')) {
       throw new Error(`${route} catalog contract is incomplete.`);
@@ -75,9 +74,14 @@ function assertBody(route, body, expectedCommerceMode, { requirePhoneLogin = fal
     if (route === 'Products' && body.items.length === 0) {
       throw new Error('Products catalog is empty; a catalog-only mobile release needs a public gacha product.');
     }
-    if (route === 'Products' && expectedCommerceMode === 'PRELAUNCH'
+    // Each shop is filtered by category on the server; a wrong item would render in the wrong shop.
+    const category = route === 'Products' ? 'gacha' : route === 'Kuji catalog' ? 'kuji' : null;
+    if (category && body.items.some((product) => !isRecord(product) || product.category !== category)) {
+      throw new Error(`${route} returned a product outside the ${category} category.`);
+    }
+    if (category && expectedCommerceMode === 'PRELAUNCH'
       && body.items.some(exposesPrelaunchInventory)) {
-      throw new Error('Products expose inventory during PRELAUNCH.');
+      throw new Error(`${route} exposes inventory during PRELAUNCH.`);
     }
   } else if (route === 'Gacha products' || route === 'Kuji products') {
     const category = route === 'Gacha products' ? 'gacha' : 'kuji';
@@ -87,7 +91,12 @@ function assertBody(route, body, expectedCommerceMode, { requirePhoneLogin = fal
       throw new Error(`LIVE ${category} catalog has no purchasable product.`);
     }
   } else if (route === 'Auth providers') {
-    if (!Array.isArray(body.methods) || typeof body.brokerExchangeConfigured !== 'boolean') {
+    if (!Array.isArray(body.methods) || typeof body.brokerExchangeConfigured !== 'boolean'
+      || !isRecord(body.requiredPolicyVersions)
+      || !POLICY_VERSION.test(body.requiredPolicyVersions.terms)
+      || !POLICY_VERSION.test(body.requiredPolicyVersions.privacy)
+      || (body.deletionMethods !== undefined && (!Array.isArray(body.deletionMethods)
+        || body.deletionMethods.some((method) => !DELETION_METHODS.has(method))))) {
       throw new Error('Auth providers contract is incomplete.');
     }
     if (THIRD_PARTY_LOGIN_METHODS.some((method) => body.methods.includes(method))
@@ -140,6 +149,8 @@ async function verifyRoutes(baseUrl, routes, fetchImpl, expectedCommerceMode, op
   }
   if (typeof fetchImpl !== 'function') throw new Error('Fetch is unavailable.');
   const observed = {};
+  const policyVersions = {};
+  let catalogImageUrl = null;
   for (const [path, label] of routes) {
     let response;
     try {
@@ -156,6 +167,14 @@ async function verifyRoutes(baseUrl, routes, fetchImpl, expectedCommerceMode, op
     try { body = await response.json(); }
     catch { throw new Error(`${label} did not return JSON.`); }
     assertBody(label, body, expectedCommerceMode, options);
+    if (label === 'Public config' || label === 'Auth providers') {
+      policyVersions[label] = body.requiredPolicyVersions;
+    }
+    if (label === 'Products' && !catalogImageUrl) {
+      catalogImageUrl = body.items
+        .map((product) => (product.storefrontImageUrl || product.imageUrl || '').trim())
+        .find(Boolean) ?? null;
+    }
     if (label === 'Public config') {
       observed.commerceMode = body.commerceMode;
       // The public config currently exposes no payment provider. Record one
@@ -165,11 +184,47 @@ async function verifyRoutes(baseUrl, routes, fetchImpl, expectedCommerceMode, op
       }
     }
   }
+  const configVersions = policyVersions['Public config'];
+  const providerVersions = policyVersions['Auth providers'];
+  if (configVersions && providerVersions && (configVersions.terms !== providerVersions.terms
+    || configVersions.privacy !== providerVersions.privacy)) {
+    throw new Error('Auth providers and public config require different policy versions.');
+  }
+  if (options.verifyCatalogImage) {
+    if (!catalogImageUrl) throw new Error('Products catalog has no image to verify.');
+    await verifyCatalogImage(catalogImageUrl, fetchImpl);
+    observed.catalogImageVerified = true;
+  }
   return {
     commerceMode: expectedCommerceMode,
     checkedRoutes: routes.map(([path]) => path),
     observed,
   };
+}
+
+// A product record can be served while its media route is broken (for example a
+// missing delivery base or object). Follow one catalog image to its bytes.
+async function verifyCatalogImage(imageUrl, fetchImpl) {
+  let url;
+  try { url = new URL(imageUrl); }
+  catch { throw new Error('Catalog image URL is invalid.'); }
+  if (url.protocol !== 'https:') throw new Error('Catalog image URL must use HTTPS.');
+  let response;
+  try {
+    response = await fetchImpl(url.toString(), {
+      method: 'GET',
+      redirect: 'follow',
+      headers: { accept: 'image/*' },
+      signal: AbortSignal.timeout(8_000),
+    });
+  } catch {
+    throw new Error('Catalog image could not be fetched.');
+  }
+  const contentType = response.headers?.get?.('content-type') ?? '';
+  if (response.status < 200 || response.status >= 300 || !/^image\//i.test(contentType)) {
+    throw new Error(`Catalog image returned HTTP ${response.status} (${contentType || 'no content type'}); expected an image.`);
+  }
+  await response.body?.cancel?.().catch?.(() => undefined);
 }
 
 export async function verifyPublicEdgeSurface({
@@ -189,20 +244,24 @@ export async function verifyMobilePublicApiSurface({
   const routes = expectedCommerceMode === 'LIVE'
     ? [...ROUTES, ...MOBILE_CATALOG_ROUTES, ...LIVE_MOBILE_ROUTES]
     : [...ROUTES, ...MOBILE_CATALOG_ROUTES];
-  return verifyRoutes(baseUrl, routes, fetchImpl, expectedCommerceMode, { requirePhoneLogin });
+  return verifyRoutes(baseUrl, routes, fetchImpl, expectedCommerceMode, {
+    requirePhoneLogin,
+    verifyCatalogImage: true,
+  });
 }
 
 export async function waitForPublicEdgeSurface({
   verify = verifyPublicEdgeSurface,
   pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   attempts = 3,
+  expectedCommerceMode = 'PRELAUNCH',
 } = {}) {
   if (!Number.isSafeInteger(attempts) || attempts < 1 || attempts > 3) {
     throw new Error('Public Edge smoke attempt limit is invalid.');
   }
   let lastError;
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
-    try { return await verify(); }
+    try { return await verify({ expectedCommerceMode }); }
     catch (error) { lastError = error; }
     if (attempt < attempts) await pause(2_000);
   }

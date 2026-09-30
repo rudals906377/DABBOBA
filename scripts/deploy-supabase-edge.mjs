@@ -33,7 +33,9 @@ export function verifySupabaseTargetProjectAccess({
     throw new Error('Supabase CLI project access could not be verified.');
   }
   if (result.error || result.status !== 0 || !Array.isArray(projects)
-    || !projects.some((project) => project.ref === projectRef && project.status === 'ACTIVE_HEALTHY')) {
+    // The pinned CLI serializes the project reference as `id`; older output used `ref`.
+    || !projects.some((project) => (project.id === projectRef || project.ref === projectRef)
+      && project.status === 'ACTIVE_HEALTHY')) {
     throw new Error('Supabase CLI is not authenticated for the expected active production project.');
   }
 }
@@ -61,6 +63,11 @@ export async function deploySupabaseEdge({
   verifyPublicSurface = waitForPublicEdgeSurface,
 } = {}) {
   const profile = prepareProfile();
+  // The post-deploy smoke must expect the mode being deployed; resolve it before any mutation.
+  const expectedCommerceMode = profile.DABBOBA_API_COMMERCE_MODE;
+  if (expectedCommerceMode !== 'PRELAUNCH' && expectedCommerceMode !== 'LIVE') {
+    throw new Error('The Edge profile must set DABBOBA_API_COMMERCE_MODE to PRELAUNCH or LIVE.');
+  }
   if (!profile.DABBOBA_STORAGE_S3_ACCESS_KEY_ID || !profile.DABBOBA_STORAGE_S3_SECRET_ACCESS_KEY) {
     throw new Error('Supabase Storage S3 access key is not prepared.');
   }
@@ -78,7 +85,7 @@ export async function deploySupabaseEdge({
   runSupabase('functions', 'deploy', 'dabboba-api', '--no-verify-jwt', '--project-ref', SUPABASE_INTEGRATION_PROJECT_REF);
   runSupabase('functions', 'deploy', 'dabboba-admin-api', '--no-verify-jwt', '--project-ref', SUPABASE_INTEGRATION_PROJECT_REF);
   runSupabase('functions', 'deploy', 'dabboba-worker', '--no-verify-jwt', '--project-ref', SUPABASE_INTEGRATION_PROJECT_REF);
-  await verifyPublicSurface();
+  await verifyPublicSurface({ expectedCommerceMode });
   process.stdout.write(`Database release ${release.targetHash.slice(0, 12)} and source ${release.sourceHead.slice(0, 12)} passed preflight.\n`);
   process.stdout.write(`Customer auth providers: ${release.releaseConfiguration.customerAuthProviders.join(',')}; Apple revocation: ${release.releaseConfiguration.appleRevocationConfigured ? 'configured' : 'not required'}; remote push: ${release.releaseConfiguration.remotePushConfigured ? 'configured' : 'disabled (in-app notifications remain available)'}.\n`);
   process.stdout.write('DABBOBA Supabase Edge Functions were deployed and the public mobile API surface passed verification.\n');
