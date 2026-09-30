@@ -10,6 +10,19 @@
 4. **최신 구조의 암호화 복원 훈련.** 예전 훈련 도구의 고정 migration 51개 가정을 제거하고 현재 소스의 모든 version/checksum을 검증하도록 수정했다. 새 컨테이너 사용은 전용 이름·명시적 승인·정확한 이미지 digest·전용 label·단일 루프백 포트를 모두 요구한다. 관련 경계/백업 단위 검사 10개 통과.
 5. **실제 로컬 복원 결과.** 새 빈 DB에 최신 migration을 적용하고 전용 복원 fixture만 넣어 훈련했다. 마이그레이션 82개, 테이블 98개, 제약조건 578개, CHECK 재해석 262개를 비교했다. 행·큐/보관 메시지·sequence·RLS/policy·trigger·index 일치, 같은 snapshot에서 동시 commit 제외, 원본 불변, 비어 있지 않거나 함수만 있는 대상 거부, 복원 후반 오류의 전체 rollback이 모두 통과했다. 작은 fixture 실행 6.2초는 운영 RTO가 아니다. 역할 GRANT, Supabase Auth/Storage/관리 schema 및 실제 운영 백업의 복원은 별도다.
 6. **최종 로컬 회귀.** 훈련 도구 수정 후 루트 검사 1,023개와 TypeScript 검사 8개가 모두 통과했다. 준비한 읽기 전용 이력 SQL도 전용 로컬 DB에서 `transaction_read_only=on`으로 실행해 성공했다. 운영 SQL 실행 증거는 아니다.
+7. **네이티브 설정 누락 수정.** 격리 복사본에서 SDK 57 iOS·Android prebuild를 실제 실행했다. `usesAppleSignIn: true`만으로 Apple 네이티브 entitlement가 생성되지 않는 것을 확인해, 기존 브라우저 OAuth 구현은 바꾸지 않고 `com.apple.developer.applesignin=[Default]`를 app.json에 명시했다. 누락·빈 배열·문자열·다른 값·추가 값은 출시 구조 검사에서 거부한다. 수정 후 Expo introspection에 실제 entitlement가 표시됐고, 관련 70개 및 전체 단위 1,025개·TypeScript 8개가 통과했다. 친구 팀·앱 식별자·iPhone 전용·사진 권한 설명·딥링크도 생성 설정에서 확인했다. 최종 서명 프로파일과 실기기 재검증은 별도다.
+8. **판매판 심사 자료.** `gacha-sales-store-preparation-2026-10-01.md`에 가챠-only 판매 설명, 정확한 유료 무작위 실물 제공 방식, 심사 안내, 일반 리뷰 계정 준비 서식, 실제 설치 후 캡처 목록과 데이터 선언 대조표를 작성했다. 사전오픈판 초안은 따로 보존하고 최신 iOS build 3과 실제 Google Play 제출 방식 결정을 반영했다. 콘솔 입력·제출·승인이나 법률 검토 완료를 의미하지 않는다.
+9. **의존성 재조회.** production 의존성 audit의 high/critical은 0개, moderate는 `@fastify/rate-limit` 경유 `ip-address@10.5.0`의 기존 4건이다. 원본 audit는 `/tmp/dabboba-native-launch-qa.AMIG6I/dependency-audit.json`에 있다. 잔여 경고를 0건으로 표시하지 않았다. 이번 slice에서 잠금 파일이나 이 의존성을 수정하지 않았다.
+
+### 네이티브 컴파일의 현재 증거 경계
+
+임시 복사본 `/tmp/dabboba-native-launch-qa.AMIG6I`는 커밋 `dcf4143`의 모바일 소스로 생성했으며 비밀 환경 파일을 복사하지 않았다. 원본 node_modules를 읽기 전용 의존성 경로로 재사용했고 원본 package/lock 파일은 보존했다. 처음 pnpm exec가 임시 경로의 모듈 재설치를 거부하자 보호 장치를 우회하지 않고 기존 Expo CLI로 prebuild를 실행했다. iOS CocoaPods 준비는 성공했다.
+
+빌드 대상은 다뽀바 전용 `DABBOBA SDK57`이며 Release/PRELAUNCH·코드 서명 제외·동시 작업 2개로 **컴파일만** 실행했다. 기기/시뮬레이터 실행·설치·삭제는 하지 않았다. iOS 지침에 따라 꺼진 전용 시뮬레이터를 임의로 켜거나 실행 중인 FINDE 환경을 재사용하지 않았다.
+
+XcodeBuildMCP의 300초 응답 대기가 만료됐지만 실제 `xcodebuild` PID 91076이 계속 컴파일 중인 것을 확인했다. 따라서 실패/성공으로 판정하거나 같은 빌드를 재시작하지 않았다. 현재 종료 대기는 실행 session 70170으로 추적한다. **네이티브 컴파일 완료 증거는 아직 없다.** 종료 후 새 app.json 설정을 격리 복사본에 반영하고 최종 컴파일/결과를 확인해야 한다. 원래 생성본에는 Apple entitlement 수정이 포함되지 않았음을 명확히 남긴다.
+
+Android 네이티브 프로젝트는 생성됐지만 이 Mac의 SDK 경로·환경 설정이 없어 APK/AAB 컴파일은 실행하지 않았다. 생성 manifest에 `allowBackup=false`, `dabboba` 복귀 scheme, 카메라·마이크·외부 저장소·오버레이 권한 제거 선언을 확인했다. 이것은 최종 merged manifest 검사나 서명 AAB가 아니다. SDK 설치/약관 또는 친구 소유 원격 빌드 환경과 실기기 확인을 통해 마쳐야 한다.
 
 처음에는 통합 테스트가 끝난 DB를 clone했으나 테스트 정리 뒤 남은 `notification_preference_events` 외래키 불일치로 복원이 거부됐다. 이 실패를 성공으로 재분류하지 않았다. 깨끗한 migration-only DB와 전용 fixture를 새로 만들어 위 훈련을 통과시켰다. 기존 테스트 DB의 데이터는 운영 데이터가 아니며, 이 문제를 운영 장애라고 단정하지 않는다.
 
