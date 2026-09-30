@@ -48,6 +48,11 @@ test("an abandoned PortOne window releases only an authoritatively unpaid order,
   const waiter = await actor("waiter");
   const stranger = await actor("stranger");
   const auth = (token: string) => ({ authorization: `Bearer ${token}` });
+  // The abandon route is limited per session (6/min). Each scenario block uses
+  // a fresh session for the same owner so the blocks stay independent.
+  const ownerSession = async () => (await issueSession(pool, config, {
+    userId: owner.id, kind: "USER", ip: "203.0.113.95", userAgent: "PortOne abandon integration test",
+  })).token;
 
   // Provider state is chosen per payment; every lookup is counted.
   const providerState = new Map<string, ProviderState>();
@@ -184,10 +189,11 @@ test("an abandoned PortOne window releases only an authoritatively unpaid order,
 
   // 2) Payment evidence: PAID and PAY_PENDING are 409 with no local change;
   //    a failed provider read is 502 with no local change.
+  const evidenceToken = await ownerSession();
   for (const [state, remote] of [["PAID", "198.51.100.3"], ["PAY_PENDING", "198.51.100.3"], ["UNAVAILABLE", "198.51.100.3"]] as const) {
     const evidence = await gachaOrder(owner.id, 0);
     providerState.set(evidence.paymentId, state);
-    const refused = await abandon(evidence.paymentId, owner.token, `abandon-${state}-${randomUUID()}`, remote);
+    const refused = await abandon(evidence.paymentId, evidenceToken, `abandon-${state}-${randomUUID()}`, remote);
     assert.equal(refused.statusCode, state === "UNAVAILABLE" ? 502 : 409, refused.body);
     if (state !== "UNAVAILABLE") {
       assert.equal((refused.json() as { error: { code: string } }).error.code, "PAYMENT_EVIDENCE_PRESENT");
@@ -207,9 +213,10 @@ test("an abandoned PortOne window releases only an authoritatively unpaid order,
   }
 
   // 3) PAYMENT_NOT_FOUND: the window was never submitted to PortOne.
+  const laterToken = await ownerSession();
   const notFound = await gachaOrder(owner.id, 0);
   providerState.set(notFound.paymentId, "NOT_FOUND");
-  const notFoundRelease = await abandon(notFound.paymentId, owner.token, `abandon-missing-${randomUUID()}`, "198.51.100.4");
+  const notFoundRelease = await abandon(notFound.paymentId, laterToken, `abandon-missing-${randomUUID()}`, "198.51.100.4");
   assert.equal(notFoundRelease.statusCode, 200, notFoundRelease.body);
   assert.equal((notFoundRelease.json() as { providerStatus: string }).providerStatus, "PAYMENT_NOT_FOUND");
   assert.equal((await orderState(notFound.orderId)).order_status, "CANCELLED");
@@ -269,7 +276,7 @@ test("an abandoned PortOne window releases only an authoritatively unpaid order,
   const claim = await app.inject({ method: "POST", url: `/v1/payments/${kujiOrder.paymentId}/attempt`, headers: auth(owner.token) });
   assert.equal(claim.statusCode, 200, claim.body);
   providerState.set(kujiOrder.paymentId, "READY");
-  const kujiRelease = await abandon(kujiOrder.paymentId, owner.token, `abandon-kuji-${randomUUID()}`, "198.51.100.5");
+  const kujiRelease = await abandon(kujiOrder.paymentId, laterToken, `abandon-kuji-${randomUUID()}`, "198.51.100.5");
   assert.equal(kujiRelease.statusCode, 200, kujiRelease.body);
   assert.equal((kujiRelease.json() as { outcome: string }).outcome, "cancelled");
   const rooms = await pool.query<{ id: string; state: string }>(
@@ -286,7 +293,7 @@ test("an abandoned PortOne window releases only an authoritatively unpaid order,
   await pool.query("UPDATE payments SET status='PAID',paid_at=now(),version=version+1 WHERE id=$1", [lagging.paymentId]);
   await pool.query("UPDATE orders SET status='PAID',paid_at=now(),version=version+1 WHERE id=$1", [lagging.orderId]);
   providerState.set(lagging.paymentId, "READY");
-  const paidRefused = await abandon(lagging.paymentId, owner.token, `abandon-paid-${randomUUID()}`, "198.51.100.6");
+  const paidRefused = await abandon(lagging.paymentId, laterToken, `abandon-paid-${randomUUID()}`, "198.51.100.6");
   assert.equal(paidRefused.statusCode, 409, paidRefused.body);
   assert.equal((await orderState(lagging.orderId)).order_status, "PAID");
 });

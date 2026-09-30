@@ -408,6 +408,8 @@ test("PRELAUNCH also gates admin shipping-status and exchange-resolution mutatio
     }
   } finally {
     await app.close();
+  }
+});
 
 test("the shared-secret payment webhook is registered only for local/test providers", async () => {
   const portOneSecret = "portone-api-secret-for-route-tests";
