@@ -368,7 +368,32 @@ function validateLiveLegalDocuments(rootDir, environment, errors) {
   }
 }
 
-function validateCardReviewBusinessPhone(rootDir, errors, warnings, strict) {
+const LEGAL_BUSINESS_PHONE_DOCUMENTS = Object.freeze([
+  "public/legal/terms/index.html",
+  "public/legal/privacy/index.html",
+]);
+
+function validateLegalBusinessPhone(rootDir, phone, errors) {
+  for (const relativePath of LEGAL_BUSINESS_PHONE_DOCUMENTS) {
+    const filePath = path.join(rootDir, relativePath);
+    if (!existsSync(filePath)) {
+      addIssue(errors, "LEGAL_BUSINESS_PHONE_DOCUMENT_MISSING", `${relativePath} 공개 문서가 없습니다.`);
+      continue;
+    }
+    const html = readFileSync(filePath, "utf8");
+    const links = [...html.matchAll(/<a\s[^>]*href="tel:([^"]*)"[^>]*>([^<]*)<\/a>/gi)];
+    const published = links.flatMap(([, href, label]) => [href, label].map((value) => value.replace(/\D/g, "")));
+    if (published.length === 0 || published.some((value) => value !== phone)) {
+      addIssue(
+        errors,
+        "LEGAL_BUSINESS_PHONE_MISMATCH",
+        `${relativePath}의 사업자 대표전화가 앱 내 사업자 정보와 일치해야 합니다.`,
+      );
+    }
+  }
+}
+
+export function validateCardReviewBusinessPhone(rootDir, errors, warnings, strict) {
   const businessInfoPath = path.join(
     rootDir,
     "apps/mobile/src/features/profile/business-information.ts",
@@ -398,6 +423,7 @@ function validateCardReviewBusinessPhone(rootDir, errors, warnings, strict) {
       "PG·카드사 심사용 대표전화는 휴대폰 번호가 아닌 사업자 유선 또는 대표번호로 교체해야 합니다.",
     );
   }
+  validateLegalBusinessPhone(rootDir, phone, errors);
 }
 
 function validateHttpsEnvironment(environment, errors, options = {}) {

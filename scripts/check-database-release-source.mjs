@@ -143,6 +143,11 @@ export const DATABASE_RELEASE_MIGRATIONS = Object.freeze([
     path: 'packages/db/migrations/0075_shipping_request_retry_after_cancellation.sql',
     sha256: 'b2cceb7a6b01e9e9f4a399420a560f2cd7c2d445fcf813760b451e04f95a4494',
   }),
+  Object.freeze({
+    file: '0076_legal_policy_business_phone.sql',
+    path: 'packages/db/migrations/0076_legal_policy_business_phone.sql',
+    sha256: '48df0f0441e93e754168ce87936ba3c2989e3ce66c807c07e5cf2c1e3d4cd581',
+  }),
 ]);
 
 export const MINIMUM_DATABASE_RELEASE_VERSION =
