@@ -63,6 +63,50 @@ SUPABASE_PUBLISHABLE_KEY=<운영 publishable key>
 - Preview 환경에는 운영 인증값을 복사하지 않는다. 필요하면 별도 staging 값만 사용한다.
 - 위 값을 등록하기 전에는 `dabboba.net`을 운영 API의 허용 origin에 추가하지 않는다.
 - 값 등록 후 이메일 OTP 요청·검증, 탈퇴 가능 상태 확인, 탈퇴 요청, 접수번호 조회를 실제 운영 계정으로 다시 검수한다.
+- 값 등록 전에 아래 `계정삭제 OTP 남용 방지` 필수 수동 단계를 먼저 완료한다.
+
+### 계정삭제 OTP 남용 방지 — 필수 수동 단계
+
+`/account-deletion/auth/email-otp`와 `/account-deletion/auth/phone-otp`는 인증번호 메일·SMS 발송을 일으키는 익명 `POST` 경로다. 두 경로를 처리하는 `worker/index.js`는 보호된 런타임 파일이라 이번 변경에서 코드로 속도 제한이나 Turnstile 검증을 추가하지 않았다. 따라서 **위 운영 변수를 등록해 두 경로가 `503`에서 열리기 전에** 아래 Cloudflare 설정을 서비스 소유자 계정에서 직접 적용하고 결과를 기록해야 한다. 이 설정이 없으면 공개 전 체크리스트를 통과한 것으로 보지 않는다.
+
+**1) Rate limiting rule (필수)** — `dabboba.net` zone → Security → WAF → Rate limiting rules → Create rule
+
+- Rule name: `account-deletion-otp-per-ip`
+- Expression (Edit expression):
+
+  ```text
+  (http.host eq "dabboba.net" and http.request.method eq "POST" and http.request.uri.path in {"/account-deletion/auth/email-otp" "/account-deletion/auth/phone-otp"})
+  ```
+
+- Characteristics: `IP` (같은 IP의 두 경로 요청을 합산하려면 경로를 characteristic에 넣지 않는다)
+- 목표 한도: IP당 **10분에 약 5회**. Requests `5`, Period `10 minutes`, Action `Block`, Duration `10 minutes`를 우선 선택한다.
+- 플랜에 따라 고를 수 있는 Period·Duration이 다르다. 10분 period를 고를 수 없으면 선택 가능한 가장 가까운 조합(예: 더 짧은 period에서 1~2회, block duration은 가능한 최대)으로 설정하고, 실제 적용 값과 플랜을 아래 기록에 남긴다. 한도를 더 느슨하게 올리지 않는다.
+- 응답 본문은 기본 `429`를 사용하고, 계정삭제 페이지의 `support@dabboba.net` 이메일 요청 경로는 이 규칙과 무관하게 계속 열려 있어야 한다.
+
+**2) Turnstile (필수, 페이지 연동 포함)** — Cloudflare → Turnstile → Add widget
+
+- Widget name `dabboba-account-deletion`, Hostname `dabboba.net`만 등록, Widget mode `Managed`.
+- **Pre-clearance**를 켜고 clearance level을 `Managed`(또는 더 엄격한 값)로 둔다. 보호된 worker는 Turnstile 토큰을 서버에서 검증하지 않으므로, 토큰 검증 대신 Cloudflare가 발급하는 `cf_clearance` 쿠키로 WAF에서 차단해야 한다.
+- 계정삭제 페이지(`public/account-deletion/`)가 OTP 요청 전에 해당 site key로 Turnstile 위젯을 렌더링하도록 별도 코드 변경이 필요하다. 이 페이지 변경은 이번 변경에 포함되지 않았다. 또한 공개 페이지의 CSP(`script-src 'self'`, frame 미허용)는 보호된 `worker/index.js`가 설정하므로 `https://challenges.cloudflare.com`의 script/frame 허용은 런타임 변경 승인을 받은 별도 작업으로만 반영할 수 있다. 두 변경이 배포·확인되기 전까지 이 항목은 미완료다. Secret key는 Pages 변수나 저장소에 넣지 않는다.
+- Security → WAF → Custom rules → Create rule: 이름 `account-deletion-otp-turnstile`, 위 rate-limit와 같은 expression, Action `Managed Challenge`. Pre-clearance 쿠키가 없는 요청은 challenge 단계에서 막힌다. WAF custom rule은 rate limiting rule보다 먼저 평가되므로 challenge를 통과한 요청만 IP 한도에 집계된다.
+- 휴대폰 OTP를 제공하지 않는 동안에도 `/account-deletion/auth/phone-otp`를 규칙에서 빼지 않는다.
+
+**3) 확인과 기록**
+
+- 쿠키 없는 `curl -X POST` 요청이 challenge(`403`) 또는 rate limit(`429`)로 막히는지 확인한다. 잘못된 JSON 본문으로 시험해 실제 인증번호가 발송되지 않게 한다.
+
+  ```sh
+  for i in 1 2 3 4 5 6 7; do
+    curl -sS -o /dev/null -w '%{http_code}\n' -X POST -H 'content-type: application/json' \
+      --data '{"invalid":true}' https://dabboba.net/account-deletion/auth/email-otp
+  done
+  ```
+
+- 실제 브라우저에서 위젯 통과 후 이메일 OTP 요청 1회가 정상 처리되는지 확인한다.
+- 규칙 이름, expression, 실제 Requests/Period/Duration, 플랜, 위젯 site key(공개 값), 확인 날짜를 운영 기록에 남긴다.
+- [ ] Rate limiting rule 적용·확인
+- [ ] Turnstile 위젯·pre-clearance·WAF custom rule 적용
+- [ ] 계정삭제 페이지 Turnstile 연동 코드 변경 배포·확인
 
 ## 4. `dabboba.net` 도메인과 DNS
 

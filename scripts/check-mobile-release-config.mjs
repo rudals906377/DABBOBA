@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { SUPABASE_INTEGRATION_PROJECT_REF } from "./supabase-integration-profile.mjs";
 
 export const REQUIRED_PUBLIC_BUILD_VARIABLES = Object.freeze([
   "EXPO_PUBLIC_DABBOBA_API_URL",
@@ -78,6 +79,26 @@ const PRELAUNCH_LEGAL_MARKERS = /사전오픈판|결제(?:와|·주문·뽑기·
 const PORTONE_CONFIG_PLUGIN = "@portone/react-native-sdk/plugin";
 const EXPECTED_IOS_RELEASE_TEAM_ID = "MCZ4884P7F";
 const require = createRequire(import.meta.url);
+
+// Production (PRELAUNCH and LIVE store builds) may only call the approved
+// DABBOBA backend: the pinned Supabase project's Edge host or an explicitly
+// approved custom domain that fronts it. Extend this list deliberately.
+export const APPROVED_PRODUCTION_API_HOSTS = Object.freeze([
+  `${SUPABASE_INTEGRATION_PROJECT_REF}.supabase.co`,
+  "api.dabboba.net",
+]);
+
+export function isApprovedProductionApiUrl(rawValue) {
+  if (typeof rawValue !== "string" || !rawValue.trim()) return false;
+  try {
+    const url = new URL(rawValue.trim());
+    return url.protocol === "https:"
+      && !url.port
+      && APPROVED_PRODUCTION_API_HOSTS.includes(url.hostname.toLowerCase());
+  } catch {
+    return false;
+  }
+}
 
 function addIssue(collection, code, message) {
   collection.push({ code, message });
@@ -476,6 +497,18 @@ function validateHttpsEnvironment(environment, errors, options = {}) {
   }
 }
 
+function validateProductionApiHost(environment, errors) {
+  const rawValue = environment.EXPO_PUBLIC_DABBOBA_API_URL?.trim();
+  if (!rawValue) return;
+  if (!isApprovedProductionApiUrl(rawValue)) {
+    addIssue(
+      errors,
+      "ENV_EXPO_PUBLIC_DABBOBA_API_URL_HOST_NOT_APPROVED",
+      `운영 빌드의 EXPO_PUBLIC_DABBOBA_API_URL 호스트는 ${APPROVED_PRODUCTION_API_HOSTS.join(", ")} 중 하나여야 합니다.`,
+    );
+  }
+}
+
 function validateCheckoutPaymentSource(rootDir, errors) {
   const connectionRoutePath = path.join(rootDir, "apps/mobile/app/checkout/connect/[productId].tsx");
   const checkoutScreenPath = path.join(
@@ -622,6 +655,7 @@ export function inspectMobileReleaseConfig({
     validatePgReviewEnvironment(resolvedRoot, environment, errors);
   } else if (!structureOnly) {
     validateHttpsEnvironment(environment, errors);
+    validateProductionApiHost(environment, errors);
     validateLiveLegalDocuments(resolvedRoot, environment, errors);
     validateProductionPaymentBoundary(resolvedRoot, environment, errors);
   }

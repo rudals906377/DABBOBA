@@ -26,7 +26,11 @@ function fixtureFetch(overrides = {}) {
 test('public Edge smoke verifies the four mobile Home/config/login contracts with GET only', async () => {
   const { calls, fetchImpl } = fixtureFetch();
   const result = await verifyPublicEdgeSurface({ fetchImpl });
-  assert.deepEqual(result, { commerceMode: 'PRELAUNCH', checkedRoutes: Object.keys(responses) });
+  assert.deepEqual(result, {
+    commerceMode: 'PRELAUNCH',
+    checkedRoutes: Object.keys(responses),
+    observed: { commerceMode: 'PRELAUNCH' },
+  });
   assert.deepEqual(calls.map((call) => call.path), Object.keys(responses));
   assert.equal(calls.every((call) => call.method === 'GET' && call.signal instanceof AbortSignal), true);
 });
@@ -152,7 +156,7 @@ test('LIVE mobile release requires configured login and purchasable gacha and ku
     ...responses,
     '/v1/public/config': { ...responses['/v1/public/config'], commerceMode: 'LIVE' },
     '/v1/auth/providers': {
-      methods: ['PHONE', 'KAKAO', 'NAVER', 'GOOGLE', 'APPLE'],
+      methods: ['KAKAO', 'NAVER', 'GOOGLE', 'APPLE'],
       brokerExchangeConfigured: true,
     },
   };
@@ -195,6 +199,21 @@ test('LIVE mobile release requires configured login and purchasable gacha and ku
   });
   await assert.rejects(publicApiSmoke.verifyMobilePublicApiSurface({
     apiBaseUrl: 'https://api.dabboba.net', expectedCommerceMode: 'LIVE', fetchImpl: missingLogin.fetchImpl,
+  }), /LIVE customer login providers are incomplete/);
+
+  const withPhone = fetchLive({
+    '/v1/auth/providers': { methods: ['PHONE', 'KAKAO', 'NAVER', 'GOOGLE', 'APPLE'], brokerExchangeConfigured: true },
+  });
+  await assert.rejects(publicApiSmoke.verifyMobilePublicApiSurface({
+    apiBaseUrl: 'https://api.dabboba.net', expectedCommerceMode: 'LIVE', fetchImpl: withPhone.fetchImpl,
+  }), /PHONE without DABBOBA_PHONE_LOGIN_READY=true/);
+  await publicApiSmoke.verifyMobilePublicApiSurface({
+    apiBaseUrl: 'https://api.dabboba.net', expectedCommerceMode: 'LIVE', fetchImpl: withPhone.fetchImpl,
+    requirePhoneLogin: true,
+  });
+  await assert.rejects(publicApiSmoke.verifyMobilePublicApiSurface({
+    apiBaseUrl: 'https://api.dabboba.net', expectedCommerceMode: 'LIVE', fetchImpl: valid.fetchImpl,
+    requirePhoneLogin: true,
   }), /LIVE customer login providers are incomplete/);
 
   const unsellableGacha = fetchLive({

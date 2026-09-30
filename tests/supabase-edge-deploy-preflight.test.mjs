@@ -44,6 +44,7 @@ const completeAppleProfile = {
 const liveEdgeProfile = {
   ...completeAppleProfile,
   DABBOBA_API_CUSTOMER_AUTH_ENABLED_PROVIDERS: 'PHONE,KAKAO,NAVER,GOOGLE,APPLE',
+  DABBOBA_PHONE_LOGIN_READY: 'true',
   DABBOBA_API_COMMERCE_MODE: 'LIVE',
   DABBOBA_API_PAYMENT_PROVIDER: 'PORTONE_V2_INICIS',
   DABBOBA_API_PAYMENT_WEBHOOK_SECRET: 'normalized-payment-webhook-secret-for-tests',
@@ -504,4 +505,44 @@ test('admin Edge function injects the customer WASM image sanitizer for catalog 
   for (const specifier of ['@imagemagick/magick-wasm', '@imagemagick/magick-wasm/magick.wasm']) {
     assert.equal(adminConfig.imports[specifier], customerConfig.imports[specifier]);
   }
+});
+
+test('LIVE Edge requires PHONE only when verified SMS delivery is explicitly attested', () => {
+  const socialOnly = {
+    ...liveEdgeProfile,
+    DABBOBA_API_CUSTOMER_AUTH_ENABLED_PROVIDERS: 'KAKAO,NAVER,GOOGLE,APPLE',
+  };
+  delete socialOnly.DABBOBA_PHONE_LOGIN_READY;
+  assert.deepEqual(
+    assertSupabaseEdgeReleaseConfiguration(socialOnly, { expectedCommerceMode: 'LIVE' }).customerAuthProviders,
+    ['KAKAO', 'NAVER', 'GOOGLE', 'APPLE'],
+  );
+  assert.deepEqual(
+    assertSupabaseEdgeReleaseConfiguration(
+      { ...socialOnly, DABBOBA_PHONE_LOGIN_READY: 'false' },
+      { expectedCommerceMode: 'LIVE' },
+    ).customerAuthProviders,
+    ['KAKAO', 'NAVER', 'GOOGLE', 'APPLE'],
+  );
+  assert.throws(() => assertSupabaseEdgeReleaseConfiguration(
+    { ...socialOnly, DABBOBA_PHONE_LOGIN_READY: 'true' },
+    { expectedCommerceMode: 'LIVE' },
+  ), /all requested customer login methods/);
+  assert.throws(() => assertSupabaseEdgeReleaseConfiguration(
+    { ...socialOnly, DABBOBA_API_CUSTOMER_AUTH_ENABLED_PROVIDERS: 'PHONE,KAKAO,NAVER,GOOGLE,APPLE' },
+    { expectedCommerceMode: 'LIVE' },
+  ), /PHONE login without DABBOBA_PHONE_LOGIN_READY=true/);
+  assert.throws(() => assertSupabaseEdgeReleaseConfiguration(
+    { ...socialOnly, DABBOBA_PHONE_LOGIN_READY: 'yes' },
+    { expectedCommerceMode: 'LIVE' },
+  ), /DABBOBA_PHONE_LOGIN_READY must be true or false/);
+  assert.throws(() => assertSupabaseEdgeReleaseConfiguration(
+    { ...socialOnly, DABBOBA_API_CUSTOMER_AUTH_ENABLED_PROVIDERS: 'KAKAO,NAVER,GOOGLE' },
+    { expectedCommerceMode: 'LIVE' },
+  ));
+  assert.equal(SUPABASE_EDGE_EXTERNAL_OPTIONAL_KEYS.includes('DABBOBA_PHONE_LOGIN_READY'), true);
+  assert.equal(
+    edgeExternalValuesFromSource({ DABBOBA_PHONE_LOGIN_READY: 'true' }).DABBOBA_PHONE_LOGIN_READY,
+    'true',
+  );
 });
