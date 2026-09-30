@@ -1,6 +1,6 @@
 import { randomUUID } from "expo-crypto";
 import { errorMessage } from "@dabboba/api-client";
-import type { CatalogIp, CatalogProduct, components } from "@dabboba/contracts";
+import type { CatalogIp, CatalogProduct, HomeRecentDrawActivity, components } from "@dabboba/contracts";
 import {
   isCustomerBrowsableCatalogCategory,
   isCustomerVisibleProductCategory,
@@ -47,12 +47,29 @@ export type ProductDetailSnapshot = {
   product: CatalogProduct;
   ip: CatalogIp | null;
   wishedByViewer: boolean;
+  wishlistLoaded: boolean;
   drawOdds: PublicDrawOdds | null;
   /** Prizes and their composition quantities, used when odds are not disclosed (before LIVE). */
   prizeLineup: PublicPrizeLineup | null;
+  includedProducts: components["schemas"]["CatalogIncludedProduct"][];
+  includedProductsLoaded: boolean;
   ownedCollectible: boolean;
   exchangeReference: boolean;
 };
+
+export async function fetchProductRecentDraws(
+  apiBaseUrl: string,
+  productId: string,
+  signal?: AbortSignal,
+): Promise<HomeRecentDrawActivity[]> {
+  const client = createDabbobaClient({ baseUrl: apiBaseUrl, requestId: randomUUID });
+  const result = await client.GET("/v1/catalog/products/{productId}/recent-draws", {
+    params: { path: { productId } },
+    signal,
+  });
+  if (!result.data) throw new Error(errorMessage(result.error, "최근 뽑기 기록을 불러오지 못했습니다."));
+  return result.data.items;
+}
 
 type ProductDetailContext = {
   exchangeListingId?: string;
@@ -87,6 +104,34 @@ export async function fetchShopIps(apiBaseUrl: string): Promise<CatalogIp[]> {
   const result = await client.GET("/v1/catalog/ips", { params: { query: { limit: 100 } } });
   if (!result.data) throw new Error(errorMessage(result.error, "작품 정보를 불러오지 못했습니다."));
   return result.data.items;
+}
+
+export async function fetchShopWishlistProductIds(
+  apiBaseUrl: string,
+  accessToken: string,
+  signal?: AbortSignal,
+): Promise<Set<string>> {
+  const client = createDabbobaClient({
+    baseUrl: apiBaseUrl,
+    token: () => accessToken,
+    requestId: randomUUID,
+  });
+  const ids = new Set<string>();
+  const seenCursors = new Set<string>();
+  let cursor: string | null = null;
+  for (let page = 0; page < 50; page += 1) {
+    const result: { data?: components["schemas"]["WishlistPage"]; error?: unknown } = await client.GET("/v1/account/wishlist", {
+      params: { query: { limit: 100, ...(cursor ? { cursor } : {}) } },
+      signal,
+    });
+    if (!result.data) throw new Error(errorMessage(result.error, "찜 목록을 불러오지 못했습니다."));
+    for (const item of result.data.items) ids.add(item.product.id);
+    cursor = result.data.nextCursor;
+    if (!cursor) return ids;
+    if (seenCursors.has(cursor)) break;
+    seenCursors.add(cursor);
+  }
+  throw new Error("찜 목록 페이지를 끝까지 확인하지 못했습니다.");
 }
 
 export async function fetchShopProductPage(
@@ -148,12 +193,12 @@ export async function fetchProductDetail(
     requestId: randomUUID,
     ...(accessToken ? { token: () => accessToken } : {}),
   });
-  const [productResult, ipResult, wishlistResult] = await Promise.all([
+  const [productResult, ipResult, wishlistIds] = await Promise.all([
     client.GET("/v1/catalog/products/{productId}", { params: { path: { productId } }, signal: context.signal }),
     client.GET("/v1/catalog/ips", { params: { query: { limit: 100 } }, signal: context.signal }),
     accessToken
-      ? client.GET("/v1/account/wishlist", { params: { query: { limit: 100 } }, signal: context.signal })
-      : Promise.resolve({ data: undefined }),
+      ? fetchShopWishlistProductIds(apiBaseUrl, accessToken, context.signal).catch(() => null)
+      : Promise.resolve(null),
   ]);
 
   const publicProduct = productResult.data
@@ -211,9 +256,13 @@ export async function fetchProductDetail(
     ip: ipResult.data?.items.find((item) => item.id === product.ipId) ?? null,
     wishedByViewer: !ownedCollectible
       && !exchangeReference
-      && (wishlistResult.data?.items.some((item) => item.product.id === productId) ?? false),
+      && (wishlistIds?.has(productId) ?? false),
+    wishlistLoaded: !accessToken || wishlistIds !== null,
     drawOdds,
     prizeLineup,
+    includedProducts: drawOdds?.entries.map((entry) => ({ id: entry.prizeProductId, name: entry.prizeName, imageUrl: entry.prizeImageUrl }))
+      ?? prizeLineup?.entries.map((entry) => ({ id: entry.prizeProductId, name: entry.prizeName, imageUrl: entry.prizeImageUrl })) ?? [],
+    includedProductsLoaded: Boolean(drawOdds || prizeLineup),
     ownedCollectible,
     exchangeReference,
   };
@@ -248,7 +297,7 @@ export function categoryLabel(category: ProductCategory): string {
   return productCategoryLabel(category);
 }
 
-export function isDrawCategory(category: ProductCategory): boolean {
+export function isDrawCategory(category: ProductCategory): category is Extract<ProductCategory, "gacha" | "kuji"> {
   return category === "gacha" || category === "kuji";
 }
 

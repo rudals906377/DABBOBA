@@ -1040,7 +1040,7 @@ test("native gacha and kuji shops coexist with the shared drawn-product storage 
   assert.match(productDetailSource, /\[styles\.hero, \{ aspectRatio: heroAspectRatio \}\]/);
   assert.doesNotMatch(productDetailSource, /heroGacha|heroKuji/);
   assert.match(productDetailSource, /resizeMode="contain"/);
-  assert.match(productDetailSource, /heroContainer:\s*\{[^}]*marginHorizontal:\s*seed\.spacing\.x2/);
+  assert.match(productDetailSource, /heroContainer:\s*\{[^}]*marginBottom:\s*seed\.spacing\.x2_5/);
   assert.match(productDetailSource, /hero:\s*\{[^}]*width:\s*"100%"/);
   assert.match(homeSource, /\/product\//);
   // The always-mounted Home event slot routes to the native event surface (Operator Feed Contract).

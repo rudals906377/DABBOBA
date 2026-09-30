@@ -43,6 +43,7 @@ function productRow(overrides: Record<string, unknown> = {}) {
     price: 0,
     available_quantity: 0,
     total_quantity: null,
+    opened_quantity: null,
     metadata: {},
     image_url: "https://cdn.example.test/anya.webp",
     storefront_image_url: null,
@@ -58,7 +59,7 @@ function productRow(overrides: Record<string, unknown> = {}) {
 }
 
 function contextWithPool(pool: Record<string, unknown>) {
-  return { pool, auth: authStub } as unknown as ApiContext;
+  return { pool, auth: authStub, config: { catalogMediaBaseUrl: null } } as unknown as ApiContext;
 }
 
 function transactionPool(query: (sql: string, values?: unknown[]) => Promise<{ rowCount: number; rows: unknown[] }>) {
@@ -103,6 +104,52 @@ function replyCapture() {
 }
 
 const readReply = { header() { return this; } };
+
+test("public included products list exposes names and images, never prize stock or odds", async () => {
+  const { app, routes } = routeHarness();
+  const queries: string[] = [];
+  const context = contextWithPool({
+    async query(sql: string) {
+      queries.push(sql);
+      return queries.length === 1
+        ? { rowCount: 1, rows: [{ id: "gacha-example", sale_status: "COMING_SOON" }] }
+        : { rowCount: 1, rows: [{ id: "prize-a", name: "상품 A", image_url: "https://cdn.example.test/a.webp" }] };
+    },
+  });
+  await registerCatalogRoutes(app, context);
+  const handler = routes.get("GET /v1/catalog/products/:productId/included-products");
+  assert.ok(handler);
+  const result = await handler({ params: { productId: "gacha-example" } }, readReply);
+  assert.deepEqual(result, { items: [{ id: "prize-a", name: "상품 A", imageUrl: "https://cdn.example.test/a.webp" }] });
+  assert.match(queries[0]!, /sale_status IN \('COMING_SOON','ON_SALE'\)/);
+  assert.match(queries[0]!, /active_version\.status='ACTIVE'/);
+  assert.match(queries[1]!, /is_prize_only=true/);
+  assert.match(queries[1]!, /metadata->>'parentProductId'/);
+  assert.doesNotMatch(JSON.stringify(result), /remainingQuantity|probabilityPercent|weight/);
+});
+
+test("on-sale included products come from the active immutable draw version, not extra catalog SKUs", async () => {
+  const { app, routes } = routeHarness();
+  const queries: string[] = [];
+  const context = contextWithPool({
+    async query(sql: string) {
+      queries.push(sql);
+      return queries.length === 1
+        ? { rowCount: 1, rows: [{ id: "gacha-example", sale_status: "ON_SALE" }] }
+        : { rowCount: 1, rows: [{ id: "prize-current", name: "현재 구성 상품", image_url: "https://cdn.example.test/current.webp" }] };
+    },
+  });
+  await registerCatalogRoutes(app, context);
+  const handler = routes.get("GET /v1/catalog/products/:productId/included-products");
+  assert.ok(handler);
+  const result = await handler({ params: { productId: "gacha-example" } }, readReply);
+  assert.deepEqual(result, { items: [{ id: "prize-current", name: "현재 구성 상품", imageUrl: "https://cdn.example.test/current.webp" }] });
+  assert.match(queries[1]!, /JOIN draw_pool_entries entry ON entry\.probability_version_id=version\.id/);
+  assert.match(queries[1]!, /version\.status='ACTIVE'/);
+  assert.match(queries[1]!, /entry\.prize_name_snapshot AS name/);
+  assert.doesNotMatch(queries[1]!, /metadata->>'parentProductId'/);
+  assert.doesNotMatch(JSON.stringify(result), /remainingQuantity|probabilityPercent|weight/);
+});
 
 test("public characters expose only active rows for an active IP with cursor pagination", async () => {
   const { app, routes } = routeHarness();
@@ -203,6 +250,7 @@ test("prelaunch customer catalog conceals unconfirmed stock while admin retains 
     sale_status: "COMING_SOON",
     available_quantity: 100,
     total_quantity: 100,
+    opened_quantity: 15,
     remaining_kuji_tiers: [{
       tierCode: "A", tierRank: "0", label: "A상", initialQuantity: "1", remainingQuantity: "1",
     }],
@@ -223,11 +271,44 @@ test("prelaunch customer catalog conceals unconfirmed stock while admin retains 
   for (const product of [list.items[0], detail]) {
     assert.equal(product?.availableQuantity, 0);
     assert.equal(product?.totalQuantity, null);
+    assert.equal(product?.openedQuantity, null);
     assert.deepEqual(product?.remainingKujiTiers, []);
     assert.equal(product?.purchasable, false);
   }
   assert.equal(admin.availableQuantity, 100);
   assert.equal(admin.totalQuantity, 100);
+  assert.equal(admin.openedQuantity, 15);
+});
+
+test("live public product detail exposes committed opens separately from remaining stock", async () => {
+  const { app, routes } = routeHarness();
+  let capturedSql = "";
+  const row = productRow({
+    category: "gacha",
+    is_prize_only: false,
+    sale_status: "ON_SALE",
+    available_quantity: 42,
+    total_quantity: 202,
+    opened_quantity: 37,
+  });
+  const context = {
+    ...contextWithPool({ async query(sql: string) { capturedSql = sql; return { rowCount: 1, rows: [row] }; } }),
+    config: { environment: "test", commerceMode: "LIVE" },
+  } as unknown as ApiContext;
+  await registerCatalogRoutes(app, context);
+  const detailHandler = routes.get("GET /v1/catalog/products/:productId");
+  assert.ok(detailHandler);
+
+  const detail = await detailHandler({ params: { productId: row.id } }, readReply) as Record<string, unknown>;
+  assert.equal(detail.availableQuantity, 42);
+  assert.equal(detail.totalQuantity, 202);
+  assert.equal(detail.openedQuantity, 37);
+  assert.match(capturedSql, /FROM draw_results result/);
+  assert.match(capturedSql, /version\.status='ACTIVE'/);
+  assert.match(capturedSql, /version\.version=result\.probability_version/);
+  assert.equal(detail.purchasable, true);
+  assert.equal("prizeQuantity" in detail, false);
+  assert.equal("probabilityPercent" in detail, false);
 });
 
 test("public product discovery applies server search, stock filter, stable popularity ordering, and cursor", async () => {
@@ -504,6 +585,7 @@ test("admin product creation defaults omitted isPrizeOnly to false", async () =>
       price: null,
       availableQuantity: 0,
       totalQuantity: null,
+      openedQuantity: null,
       metadata: {},
       imageUrl: null,
       storefrontImageUrl: null,

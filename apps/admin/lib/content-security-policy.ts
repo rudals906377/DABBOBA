@@ -13,7 +13,7 @@ export function adminContentSecurityPolicy(nonce: string, development: boolean):
     "object-src 'none'",
     `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${development ? " 'unsafe-eval'" : ""}`,
     "style-src 'self' 'unsafe-inline'",
-    "img-src 'self' data: https:",
+    "img-src 'self' data: blob: https:",
     "connect-src 'self'",
     "font-src 'self' data:",
   ].join("; ");

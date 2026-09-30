@@ -575,6 +575,44 @@ test("public Home recent draws expose only immutable prize snapshots without cus
   assert.doesNotMatch(observed.find(({ sql }) => sql.includes("FROM draw_results result"))!.sql, /JOIN users|nickname|user_id/i);
 });
 
+test("product detail recent draws stay product-scoped and omit customer identity", async () => {
+  const { app, routes } = routeHarness();
+  const observed: Array<{ sql: string; values: unknown[] }> = [];
+  const pool = transactionPool(async (sql, values = []) => {
+    observed.push({ sql, values });
+    if (sql.includes("FROM draw_results result")) {
+      return {
+        rowCount: 1,
+        rows: [{
+          id: "55555555-5555-4555-8555-555555555555",
+          product_id: productRow.id,
+          category: "gacha",
+          prize_name_snapshot: "리치 피규어",
+          prize_image_url_snapshot: null,
+          rarity: "A",
+          committed_at: new Date("2026-09-12T07:30:00.000Z"),
+        }],
+      };
+    }
+    return { rowCount: 0, rows: [] };
+  });
+  await registerHomeCatalogRoutes(app, contextWithPool(pool));
+  const handler = routes.get("GET /v1/catalog/products/:productId/recent-draws");
+  assert.ok(handler);
+  const result = await handler({ params: { productId: productRow.id } }, replyCapture().reply) as {
+    items: Array<Record<string, unknown>>;
+  };
+  assert.equal(result.items.length, 1);
+  assert.equal(result.items[0]?.productId, productRow.id);
+  assert.equal(Object.hasOwn(result.items[0]!, "userId"), false);
+  assert.equal(Object.hasOwn(result.items[0]!, "nickname"), false);
+  const activityQuery = observed.find(({ sql }) => sql.includes("FROM draw_results result"));
+  assert.deepEqual(activityQuery?.values, [productRow.id, null, [...DEMO_SELLER_PRODUCT_IDS], 8]);
+  assert.match(activityQuery?.sql ?? "", /result\.product_id=\$1/);
+  assert.match(activityQuery?.sql ?? "", /draw_product\.sale_status IN \('ON_SALE','PAUSED'\)/);
+  assert.doesNotMatch(activityQuery?.sql ?? "", /JOIN users|nickname|user_id/i);
+});
+
 test("Home product clicks are recorded once and immediately update the BEST product", async () => {
   const { app, routes, options } = routeHarness();
   const eventId = "55555555-5555-4555-8555-555555555555";

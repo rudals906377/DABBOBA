@@ -403,11 +403,27 @@ export function assertDrawVersionCategoryConfiguration(
 
   if (totalSlots !== null) throw badRequest("가챠·일반 구매 상품에는 쿠지 전체 장수를 보낼 수 없습니다.");
   for (const entry of entries) {
-    if (entry.weight === null) throw badRequest("가챠 경품마다 가중치가 필요합니다.");
+    if (entry.weight !== 1) throw badRequest("가챠는 상세상품별 남은 수량만으로 확률을 계산하므로 가중치는 1이어야 합니다.");
+    if (entry.quantity === null) throw badRequest("가챠 경품마다 유한한 상세상품 수량이 필요합니다.");
     if (entry.tierCode !== null || entry.tierRank !== null) {
       throw badRequest("가챠 확률표에는 쿠지 tierCode 또는 tierRank를 보낼 수 없습니다.");
     }
   }
+}
+
+export function gachaRemainingQuantityWeights(
+  entries: readonly { weight: number; remaining_quantity: number | null }[],
+): { weights: number[]; total: number } {
+  if (entries.length === 0 || entries.some((entry) =>
+    numberValue(entry.weight) !== 1
+    || entry.remaining_quantity === null
+    || !Number.isSafeInteger(numberValue(entry.remaining_quantity))
+    || numberValue(entry.remaining_quantity) < 0
+  )) throw conflict("가챠 상세상품의 수량 비례 확률을 확인할 수 없습니다. 확률표 구성을 다시 확인해 주세요.");
+  const weights = entries.map((entry) => numberValue(entry.remaining_quantity));
+  const total = weights.reduce((sum, quantity) => sum + quantity, 0);
+  if (!Number.isSafeInteger(total) || total <= 0) throw conflict("남은 가챠 경품 수량이 없습니다.");
+  return { weights, total };
 }
 
 type LockedKujiCheckoutEntry = {
@@ -664,7 +680,7 @@ export async function registerCommerceRoutes(app:FastifyInstance,context:ApiCont
     reply.header("cache-control","no-store");
     const productId=slugIdInput((request.params as Record<string,unknown>).productId,"productId");
     if(demoProfileRequested()&&!DEMO_SELLER_PRODUCT_IDS.includes(productId as typeof DEMO_SELLER_PRODUCT_IDS[number]))throw notFound("공개 중인 가챠·쿠지 확률표를 찾을 수 없습니다.");
-    const version=await context.pool.query<{id:string;product_id:string;version:number;published_at:Date}>(`SELECT v.id,v.product_id,v.version,v.published_at
+    const version=await context.pool.query<{id:string;product_id:string;version:number;published_at:Date;category:ProductOrderRow["category"]}>(`SELECT v.id,v.product_id,v.version,v.published_at,p.category
       FROM draw_probability_versions v
       JOIN catalog_products p ON p.id=v.product_id
       WHERE v.product_id=$1 AND v.status='ACTIVE' AND p.is_active=true AND p.is_prize_only=false
@@ -675,10 +691,11 @@ export async function registerCommerceRoutes(app:FastifyInstance,context:ApiCont
       FROM draw_pool_entries e
       WHERE e.probability_version_id=$1
       ORDER BY e.rarity,e.id`,[active.id]);
-    const weighted=entries.rows.map((entry)=>({entry,effectiveWeight:numberValue(entry.weight)*(entry.remaining_quantity===null?1:numberValue(entry.remaining_quantity))}));
+    const gachaWeights=active.category==="gacha"?gachaRemainingQuantityWeights(entries.rows):null;
+    const weighted=entries.rows.map((entry,index)=>({entry,effectiveWeight:gachaWeights?gachaWeights.weights[index]!:numberValue(entry.weight)*(entry.remaining_quantity===null?1:numberValue(entry.remaining_quantity))}));
     const totalEffectiveWeight=weighted.reduce((sum,item)=>sum+item.effectiveWeight,0);
     if(!Number.isSafeInteger(totalEffectiveWeight)||totalEffectiveWeight<=0)throw conflict("현재 확률표를 안전하게 계산할 수 없습니다.");
-    return{id:active.id,productId:active.product_id,version:numberValue(active.version),publishedAt:iso(active.published_at),calculatedAt:new Date().toISOString(),calculation:"WEIGHT_X_REMAINING_QUANTITY",totalEffectiveWeight,entries:weighted.map(({entry,effectiveWeight})=>({id:entry.id,prizeProductId:entry.prize_product_id,...drawPrizeSnapshotFields(entry,context.config.catalogMediaBaseUrl),rarity:entry.rarity,weight:numberValue(entry.weight),initialQuantity:entry.initial_quantity===null?null:numberValue(entry.initial_quantity),remainingQuantity:entry.remaining_quantity===null?null:numberValue(entry.remaining_quantity),effectiveWeight,probabilityNumerator:effectiveWeight,probabilityDenominator:totalEffectiveWeight,probabilityPercent:Math.round((effectiveWeight/totalEffectiveWeight)*100_000_000)/1_000_000}))};
+    return{id:active.id,productId:active.product_id,version:numberValue(active.version),publishedAt:iso(active.published_at),calculatedAt:new Date().toISOString(),calculation:active.category==="gacha"?"REMAINING_QUANTITY_RATIO":"WEIGHT_X_REMAINING_QUANTITY",totalEffectiveWeight,entries:weighted.map(({entry,effectiveWeight})=>({id:entry.id,prizeProductId:entry.prize_product_id,...drawPrizeSnapshotFields(entry,context.config.catalogMediaBaseUrl),rarity:entry.rarity,weight:numberValue(entry.weight),initialQuantity:entry.initial_quantity===null?null:numberValue(entry.initial_quantity),remainingQuantity:entry.remaining_quantity===null?null:numberValue(entry.remaining_quantity),effectiveWeight,probabilityNumerator:effectiveWeight,probabilityDenominator:totalEffectiveWeight,probabilityPercent:Math.round((effectiveWeight/totalEffectiveWeight)*100_000_000)/1_000_000}))};
   });
 
   app.post("/v1/orders",{preHandler:[requireLiveCommerce(context),context.auth.requireUser]},async(request,reply)=>{
@@ -704,7 +721,7 @@ export async function registerCommerceRoutes(app:FastifyInstance,context:ApiCont
               AND (p.category<>'kuji' OR EXISTS (
                 SELECT 1 FROM kuji_decks deck WHERE deck.probability_version_id=v.id
               ))) AS probability_version
-          FROM catalog_products p JOIN product_stock s ON s.product_id=p.id WHERE p.id=$1 FOR UPDATE OF p,s`,[item.productId]);if(!product.rowCount||!product.rows[0]!.is_active)throw notFound(`판매 중인 상품을 찾을 수 없습니다: ${item.productId}`);const row=product.rows[0]!;if(row.sale_status!=="ON_SALE"||numberValue(row.price)<=0)throw conflict(`${row.name} 상품은 아직 구매할 수 없습니다.`);if(!isCustomerPurchasableCategory(row.category))throw conflict(`${row.name} 상품은 아직 구매할 수 없습니다.`);assertDirectPurchaseAllowed({name:row.name,isPrizeOnly:row.is_prize_only});if(row.on_hand-row.reserved<item.quantity)throw conflict(`${row.name} 재고가 부족합니다.`);if(isDrawCategory(row.category)){if(!row.probability_version_id||row.probability_version===null)throw conflict(`${row.name} 추첨 확률표가 아직 공개되지 않았습니다.`);if(item.expectedDrawVersion===null)throw badRequest(`${row.name} 결제 전 확인한 확률표 버전이 필요합니다.`);if(numberValue(row.probability_version)!==item.expectedDrawVersion)throw conflict(`${row.name} 확률표가 변경됐습니다. 최신 경품·확률을 다시 확인해 주세요.`);}else if(item.expectedDrawVersion!==null)throw badRequest("일반 구매 상품에는 확률표 버전을 보낼 수 없습니다.");if(row.probability_version_id)await assertDrawCapacity(client,{probabilityVersionId:row.probability_version_id,productId:row.id,onHand:numberValue(row.on_hand)});productRows.push(row);}assertKujiRoomOrderBinding(productRows,input.kujiRoomEntryId);
+          FROM catalog_products p JOIN product_stock s ON s.product_id=p.id WHERE p.id=$1 FOR UPDATE OF p,s`,[item.productId]);if(!product.rowCount||!product.rows[0]!.is_active)throw notFound(`판매 중인 상품을 찾을 수 없습니다: ${item.productId}`);const row=product.rows[0]!;if(row.sale_status!=="ON_SALE"||numberValue(row.price)<=0)throw conflict(`${row.name} 상품은 아직 구매할 수 없습니다.`);if(!isCustomerPurchasableCategory(row.category))throw conflict(`${row.name} 상품은 아직 구매할 수 없습니다.`);assertDirectPurchaseAllowed({name:row.name,isPrizeOnly:row.is_prize_only});if(row.on_hand-row.reserved<item.quantity)throw conflict(`${row.name} 재고가 부족합니다.`);if(isDrawCategory(row.category)){if(!row.probability_version_id||row.probability_version===null)throw conflict(`${row.name} 추첨 확률표가 아직 공개되지 않았습니다.`);if(item.expectedDrawVersion===null)throw badRequest(`${row.name} 결제 전 확인한 확률표 버전이 필요합니다.`);if(numberValue(row.probability_version)!==item.expectedDrawVersion)throw conflict(`${row.name} 확률표가 변경됐습니다. 최신 경품·확률을 다시 확인해 주세요.`);}else if(item.expectedDrawVersion!==null)throw badRequest("일반 구매 상품에는 확률표 버전을 보낼 수 없습니다.");if(row.probability_version_id)await assertDrawCapacity(client,{probabilityVersionId:row.probability_version_id,productId:row.id,onHand:numberValue(row.on_hand),requireQuantityRatio:row.category==="gacha"});productRows.push(row);}assertKujiRoomOrderBinding(productRows,input.kujiRoomEntryId);
       const subtotal=input.items.reduce((sum,item)=>sum+productRows.find((product)=>product.id===item.productId)!.price*item.quantity,0);let couponId:string|null=null;let discountTotal=0;
       if(input.couponCode){const coupon=await client.query<{id:string;discount_type:"FIXED"|"PERCENT";discount_value:number;maximum_discount:number|null;minimum_order:number;usage_limit:number|null;used_count:number}>(`SELECT id,discount_type,discount_value,maximum_discount,minimum_order,usage_limit,used_count FROM coupons WHERE code=$1 AND is_active=true AND starts_at<=now() AND ends_at>now() FOR UPDATE`,[input.couponCode]);if(!coupon.rowCount)throw conflict("사용할 수 없는 쿠폰입니다.");const value=coupon.rows[0]!;if(subtotal<value.minimum_order||value.usage_limit!==null&&value.used_count>=value.usage_limit)throw conflict("쿠폰 사용 조건을 충족하지 못했습니다.");discountTotal=value.discount_type==="FIXED"?value.discount_value:Math.floor(subtotal*value.discount_value/100);if(value.maximum_discount!==null)discountTotal=Math.min(discountTotal,value.maximum_discount);discountTotal=Math.min(discountTotal,subtotal);couponId=value.id;await client.query("UPDATE coupons SET used_count=used_count+1 WHERE id=$1",[value.id]);}
       const afterDiscount=subtotal-discountTotal;if(input.pointAmount>afterDiscount)throw conflict("주문 금액보다 많은 포인트를 사용할 수 없습니다.");const orderTotal=afterDiscount-input.pointAmount;const paymentProvider=paymentProviderForOrder(context.config.paymentProvider,orderTotal);if(input.pointAmount>0){await client.query("INSERT INTO point_accounts(user_id,balance) VALUES($1,0) ON CONFLICT DO NOTHING",[request.actor!.userId]);const spent=await client.query("UPDATE point_accounts SET balance=balance-$2,version=version+1 WHERE user_id=$1 AND balance>=$2 RETURNING balance",[request.actor!.userId,input.pointAmount]);if(!spent.rowCount)throw conflict("사용 가능한 포인트가 부족합니다.");}
@@ -778,7 +795,8 @@ export async function registerCommerceRoutes(app:FastifyInstance,context:ApiCont
       }else{
         const entries=await client.query<ConsumableDrawPoolRow>("SELECT id,prize_product_id,prize_name_snapshot,prize_image_url_snapshot,prize_sku_snapshot,prize_ip_id_snapshot,prize_category_snapshot,rarity,weight,remaining_quantity FROM draw_pool_entries WHERE probability_version_id=$1 AND (remaining_quantity IS NULL OR remaining_quantity>0) ORDER BY id FOR UPDATE",[ticket.probability_version_id]);
         if(!entries.rowCount)throw conflict("남은 경품이 없습니다.");
-        const weighted=entries.rows.map((entry)=>({entry,effective:numberValue(entry.weight)*(entry.remaining_quantity===null?1:numberValue(entry.remaining_quantity))}));
+        const gachaWeights=gachaRemainingQuantityWeights(entries.rows);
+        const weighted=entries.rows.map((entry,index)=>({entry,effective:gachaWeights.weights[index]!}));
         totalWeight=weighted.reduce((sum,item)=>sum+item.effective,0);
         if(!Number.isSafeInteger(totalWeight)||totalWeight<=0)throw conflict("추첨 확률표가 올바르지 않습니다.");
         const evidence=createDrawSelectionEvidence(totalWeight);
@@ -882,7 +900,8 @@ export async function registerCommerceRoutes(app:FastifyInstance,context:ApiCont
       await assertNoUnfinishedKujiVersion(client,{productId,category:stock.rows[0]!.category});
       const versionNumber=numberValue(version.rows[0]!.version);
       await assertLatestDrawDraft(client,{productId,version:versionNumber});
-      const prizeEntries=await client.query<{prize_product_id:string} & DrawPrizeSnapshotRow>("SELECT prize_product_id,prize_name_snapshot,prize_image_url_snapshot,prize_sku_snapshot,prize_ip_id_snapshot,prize_category_snapshot FROM draw_pool_entries WHERE probability_version_id=$1 ORDER BY created_at,id FOR UPDATE",[versionId]);
+      const prizeEntries=await client.query<{prize_product_id:string;weight:number;remaining_quantity:number|null} & DrawPrizeSnapshotRow>("SELECT prize_product_id,prize_name_snapshot,prize_image_url_snapshot,prize_sku_snapshot,prize_ip_id_snapshot,prize_category_snapshot,weight,remaining_quantity FROM draw_pool_entries WHERE probability_version_id=$1 ORDER BY created_at,id FOR UPDATE",[versionId]);
+      if(stock.rows[0]!.category==="gacha")gachaRemainingQuantityWeights(prizeEntries.rows);
       const currentPrizeSnapshots=await loadValidatedDrawPrizeSnapshots(client,{drawIpId:stock.rows[0]!.ip_id,prizeProductIds:prizeEntries.rows.map((entry)=>entry.prize_product_id)});
       assertDrawPrizeSnapshotsCurrent(prizeEntries.rows,currentPrizeSnapshots);
       const count=await client.query<{count:string;drawable_count:string;effective_weight:string}>(`SELECT count(*) AS count,
@@ -894,7 +913,7 @@ export async function registerCommerceRoutes(app:FastifyInstance,context:ApiCont
       if(Number(pool.drawable_count)!==Number(pool.count))throw conflict("수량이 0인 경품은 공개할 수 없습니다.");
       const effectiveWeight=Number(pool.effective_weight);
       if(!Number.isSafeInteger(effectiveWeight)||effectiveWeight<=0)throw conflict("경품 가중치 합계를 확인해 주세요.");
-      await assertDrawCapacity(client,{probabilityVersionId:versionId,productId,onHand:numberValue(stock.rows[0]!.on_hand)});
+      await assertDrawCapacity(client,{probabilityVersionId:versionId,productId,onHand:numberValue(stock.rows[0]!.on_hand),requireQuantityRatio:stock.rows[0]!.category==="gacha"});
       let sealedSlotTotal:null|number=null;
       if(stock.rows[0]!.category==="kuji"){
         const deck=await client.query<{total_slots:number}>("SELECT total_slots FROM kuji_decks WHERE probability_version_id=$1",[versionId]);

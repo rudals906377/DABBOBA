@@ -280,7 +280,7 @@ function canonicalGachaCheckoutOrderPayload(
     throw new Error("가챠 주문 수량을 확인할 수 없어요.");
   }
   if (!Number.isInteger(payload.expectedDrawVersion) || payload.expectedDrawVersion < 1) {
-    throw new Error("가챠 확률표 버전을 확인할 수 없어요.");
+    throw new Error("가챠 구성 버전을 확인할 수 없어요.");
   }
   if (!Number.isInteger(payload.pointAmount) || payload.pointAmount < 0) {
     throw new Error("가챠 주문 포인트를 확인할 수 없어요.");

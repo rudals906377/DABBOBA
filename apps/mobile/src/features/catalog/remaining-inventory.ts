@@ -49,6 +49,28 @@ export function visibleInventoryQuantityLabel(
   return `${quantity}${category === "kuji" ? "장" : "개"} 남음`;
 }
 
+export function includedProductOpenQuantityLabel(
+  inventory: Pick<CatalogProduct, "totalQuantity" | "openedQuantity">,
+  includedProductCount: number,
+): string | null {
+  if (!Number.isSafeInteger(includedProductCount) || includedProductCount <= 0) return null;
+
+  const { openedQuantity, totalQuantity } = inventory;
+  if (
+    typeof totalQuantity !== "number"
+    || !Number.isSafeInteger(totalQuantity)
+    || totalQuantity <= 0
+    || typeof openedQuantity !== "number"
+    || !Number.isSafeInteger(openedQuantity)
+    || openedQuantity < 0
+    || openedQuantity > totalQuantity
+  ) {
+    return `${includedProductCount}종`;
+  }
+
+  return `${totalQuantity.toLocaleString("ko-KR")}개 중 ${openedQuantity.toLocaleString("ko-KR")}개 오픈`;
+}
+
 export function remainingInventoryRatio(
   inventory: Pick<CatalogProduct, "availableQuantity" | "totalQuantity">,
 ): number | null {

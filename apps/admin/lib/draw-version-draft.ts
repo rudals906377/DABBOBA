@@ -17,6 +17,15 @@ export type DrawVersionDraftPayload = {
 const PRIZE_PRODUCT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/;
 const KUJI_TIER_CODE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,39}$/;
 
+// Internal draw-pool slots, not a claim about the physical count of each SKU.
+export function allocateGachaDrawQuantities(total: number, entryCount: number): number[] | null {
+  if (!Number.isSafeInteger(total) || !Number.isSafeInteger(entryCount)
+    || entryCount < 1 || entryCount > 200 || total < entryCount || total > 10_000 * entryCount) return null;
+  const base = Math.floor(total / entryCount);
+  const remainder = total % entryCount;
+  return Array.from({ length: entryCount }, (_, index) => base + (index < remainder ? 1 : 0));
+}
+
 function record(value: unknown, index: number): Record<string, unknown> {
   if (!value || Array.isArray(value) || typeof value !== "object") {
     throw new Error(`경품 ${index + 1}의 입력 형식이 올바르지 않습니다.`);
@@ -72,9 +81,8 @@ export function buildDrawVersionDraftPayload(
     quantityTotal += quantity;
 
     if (category === "gacha") {
-      const weight = integerValue(entry.weight, 1, 1_000_000);
-      if (weight === null) {
-        throw new Error(`경품 ${index + 1}의 가중치는 1~1,000,000 정수여야 합니다.`);
+      if (isProvided(entry.weight) && integerValue(entry.weight, 1, 1) !== 1) {
+        throw new Error(`경품 ${index + 1}의 가중치는 1이어야 합니다. 확률은 상세상품의 남은 수량으로 계산합니다.`);
       }
       if (isProvided(entry.tierCode)) {
         throw new Error("가챠 경품에는 쿠지 tierCode를 입력할 수 없습니다.");
@@ -82,7 +90,7 @@ export function buildDrawVersionDraftPayload(
       if (isProvided(entry.tierRank)) {
         throw new Error("가챠 경품에는 쿠지 tierRank를 입력할 수 없습니다.");
       }
-      return { prizeProductId, rarity, weight, quantity };
+      return { prizeProductId, rarity, weight: 1, quantity };
     }
 
     if (isProvided(entry.weight)) {
