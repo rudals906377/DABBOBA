@@ -28,6 +28,7 @@ import {
 import { CUSTOMER_SUBJECT_LOOKUP_PROVIDERS } from "../lib/supabase-auth.js";
 import { requiredPolicyAcceptance } from "./customer-auth.js";
 import type { ApiContext } from "../types.js";
+import { rebaseLegacyCatalogMediaUrl } from "./catalog-media-url.js";
 
 type ProfileRow = {
   id: string;
@@ -734,14 +735,15 @@ const mapShippingRequest = (row: ShippingRequestRow) => ({
   trackingNumber: row.tracking_number,
 });
 
-const mapShippingRequestItem = (row: ShippingRequestItemRow) => ({
+const mapShippingRequestItem = (row: ShippingRequestItemRow, catalogMediaBaseUrl?: string | null) => ({
   inventoryUnitId: row.inventory_unit_id,
   productId: row.product_id,
   productName: row.product_name,
   ipId: row.ip_id,
   ipNameKo: row.ip_name_ko,
   category: row.category,
-  imageUrl: row.image_url,
+  // Request-time snapshots stay immutable; only the legacy media host is translated on read.
+  imageUrl: rebaseLegacyCatalogMediaUrl(catalogMediaBaseUrl, row.image_url),
   productVersion: row.product_version,
 });
 
@@ -985,7 +987,11 @@ const shippingRequestSelect = `SELECT s.id,s.status,s.version,s.address_snapshot
     WHERE i.shipping_request_id=s.id ORDER BY i.inventory_unit_id) AS inventory_unit_ids
   FROM shipping_requests s`;
 
-async function loadShippingRequestItems(queryable: Queryable, shippingRequestId: string) {
+async function loadShippingRequestItems(
+  queryable: Queryable,
+  shippingRequestId: string,
+  catalogMediaBaseUrl?: string | null,
+) {
   const result = await queryable.query<ShippingRequestItemRow>(
     `SELECT item.inventory_unit_id,
       item.product_snapshot->>'productId' AS product_id,
@@ -1000,7 +1006,7 @@ async function loadShippingRequestItems(queryable: Queryable, shippingRequestId:
      ORDER BY item.inventory_unit_id`,
     [shippingRequestId],
   );
-  return result.rows.map(mapShippingRequestItem);
+  return result.rows.map((row) => mapShippingRequestItem(row, catalogMediaBaseUrl));
 }
 
 export async function registerAccountRoutes(app: FastifyInstance, context: ApiContext) {
@@ -1689,7 +1695,11 @@ export async function registerAccountRoutes(app: FastifyInstance, context: ApiCo
       [shippingRequestId, request.actor!.userId],
     );
     if (!result.rowCount) throw notFound("배송 신청을 찾을 수 없습니다.");
-    const items = await loadShippingRequestItems(context.pool, shippingRequestId);
+    const items = await loadShippingRequestItems(
+      context.pool,
+      shippingRequestId,
+      context.config.catalogMediaBaseUrl,
+    );
     return { ...mapShippingRequest(result.rows[0]!), items };
   });
 

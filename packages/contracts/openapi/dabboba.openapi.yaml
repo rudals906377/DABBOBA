@@ -149,7 +149,7 @@ paths:
     post:
       tags: [Auth]
       operationId: exchangeExistingCustomerForAccountDeletion
-      description: Verifies a live Supabase social-provider session for an already linked DABBOBA customer and issues an ephemeral ACCOUNT_DELETION-scoped customer session used by the public account-deletion flow. That session is accepted only by the account-deletion preview, request, and status routes and by logout; every other authenticated route answers 403 SESSION_SCOPE_FORBIDDEN. A provider that is not currently enabled is refused unless the verified identity is already linked to an existing account. This endpoint never creates a user or links an unknown provider subject.
+      description: Verifies a live Supabase social-provider session for an already linked DABBOBA customer and issues an ephemeral ACCOUNT_DELETION-scoped customer session used by the public account-deletion flow. That session is accepted only by the account-deletion preview, request, and status routes and by logout; every other authenticated route answers 403 SESSION_SCOPE_FORBIDDEN. A provider that is not currently enabled is refused unless the verified identity is already linked to an existing account; EMAIL is accepted only in that already-linked form so legacy email-only customers can delete their account. This endpoint never creates a user or links an unknown provider subject.
       requestBody:
         required: true
         content:
@@ -1433,6 +1433,7 @@ paths:
               schema: { $ref: "#/components/schemas/PublicDrawOdds" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
+        "503": { $ref: "#/components/responses/CommerceUnavailable" }
   /v1/catalog/products/{productId}/kuji-slots:
     get:
       tags: [Catalog, Kuji, Commerce]
@@ -1450,6 +1451,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/PublicKujiDeckSnapshot" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "503": { $ref: "#/components/responses/CommerceUnavailable" }
   /v1/kuji/rooms/{productId}/entries:
     post:
       tags: [Kuji, Commerce]
@@ -4118,7 +4120,7 @@ components:
     CustomerLoginProviders:
       type: object
       additionalProperties: false
-      required: [methods, brokerExchangeConfigured, requiredPolicyVersions]
+      required: [methods, deletionMethods, brokerExchangeConfigured, requiredPolicyVersions]
       properties:
         methods:
           type: array
@@ -4126,6 +4128,13 @@ components:
           maxItems: 5
           uniqueItems: true
           items: { $ref: "#/components/schemas/CustomerAuthProvider" }
+        deletionMethods:
+          type: array
+          minItems: 0
+          maxItems: 6
+          uniqueItems: true
+          description: Methods accepted by the account-deletion exchange. It adds EMAIL so a customer whose only identity is a legacy verified EMAIL link can still delete the account; EMAIL is never a new login method.
+          items: { type: string, enum: [PHONE, KAKAO, NAVER, GOOGLE, APPLE, EMAIL] }
         brokerExchangeConfigured: { type: boolean }
         requiredPolicyVersions:
           type: object
@@ -4160,7 +4169,7 @@ components:
       required: [accessToken, acceptedPolicies, loginProvider]
       properties:
         accessToken: { type: string, minLength: 64, maxLength: 16384, writeOnly: true }
-        loginProvider: { type: string, enum: [PHONE, KAKAO, NAVER, GOOGLE, APPLE] }
+        loginProvider: { type: string, enum: [PHONE, KAKAO, NAVER, GOOGLE, APPLE, EMAIL] }
         appleRefreshToken:
           type: string
           minLength: 32

@@ -448,7 +448,12 @@ export async function registerCatalogRoutes(app: FastifyInstance, context: ApiCo
     if (saleStatus) { values.push(saleStatus); filters.push(`p.sale_status = $${values.length}`); }
     if (ipId) { values.push(ipId); filters.push(`p.ip_id = $${values.length}`); }
     if (characterId) { values.push(characterId); filters.push(`EXISTS (SELECT 1 FROM product_characters pc_filter WHERE pc_filter.product_id=p.id AND pc_filter.character_id=$${values.length})`); }
-    if (excludeSoldOut) filters.push("COALESCE(s.on_hand-s.reserved,0) > 0");
+    // Stock may only shape the result set where the response itself would disclose it:
+    // ON_SALE products in LIVE. Otherwise the filter is ignored so which IDs drop out
+    // cannot reveal hidden inventory.
+    if (excludeSoldOut && commerceMode === "LIVE") {
+      filters.push("(p.sale_status <> 'ON_SALE' OR COALESCE(s.on_hand-s.reserved,0) > 0)");
+    }
 
     const pageFilters: string[] = [];
     if (cursor) {

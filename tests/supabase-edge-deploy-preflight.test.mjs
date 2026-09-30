@@ -282,12 +282,12 @@ test('LIVE Edge preflight refuses incomplete payment configuration before source
   assert.equal(databaseCalled, false);
 });
 
-test('LIVE Edge preflight requires complete isolated roles and migration 0080 before database access', async () => {
+test('LIVE Edge preflight requires complete isolated roles and migration 0081 before database access', async () => {
   let databaseCalled = false;
   await assert.rejects(runSupabaseEdgeReleasePreflight({
     edgeProfile: { ...fullLiveEdgeProfile, DABBOBA_ENABLE_PRODUCTION_WORKER: '' },
     expectedCommerceMode: 'LIVE',
-    checkSource: () => ({ status: 'pass', head: 'a'.repeat(40), latestMigration: '0080_retention_indexes.sql', worktreeClean: true }),
+    checkSource: () => ({ status: 'pass', head: 'a'.repeat(40), latestMigration: '0081_draft_draw_snapshot_media_rebase.sql', worktreeClean: true }),
     runReleaseCheck() { databaseCalled = true; },
   }), /DABBOBA_ENABLE_PRODUCTION_WORKER/);
   assert.equal(databaseCalled, false);
@@ -296,7 +296,7 @@ test('LIVE Edge preflight requires complete isolated roles and migration 0080 be
     expectedCommerceMode: 'LIVE',
     checkSource: () => ({ status: 'pass', head: 'a'.repeat(40), latestMigration: '0075_shipping_request_retry_after_cancellation.sql', worktreeClean: true }),
     runReleaseCheck() { databaseCalled = true; },
-  }), /migration 0080/);
+  }), /migration 0081/);
   assert.equal(databaseCalled, false);
 });
 
@@ -307,14 +307,14 @@ test('complete LIVE Edge candidate reaches the read-only target database release
     sourceEnvironment: { DATABASE_MIGRATION_URL: 'postgresql://migration:fixture@migration.example.test/postgres' },
     checkSource: () => ({
       status: 'pass', head: 'a'.repeat(40),
-      latestMigration: '0080_retention_indexes.sql', worktreeClean: true,
+      latestMigration: '0081_draft_draw_snapshot_media_rebase.sql', worktreeClean: true,
     }),
     runReleaseCheck: () => ({ status: 0, stdout: JSON.stringify({
       scope: 'database-release-check/v1', status: 'pass',
       environmentTier: 'PRODUCTION', targetHash: 'b'.repeat(64),
     }) }),
   });
-  assert.equal(result.latestMigration, '0080_retention_indexes.sql');
+  assert.equal(result.latestMigration, '0081_draft_draw_snapshot_media_rebase.sql');
   assert.equal(result.targetHash, 'b'.repeat(64));
   assert.deepEqual(result.releaseConfiguration.customerAuthProviders, ['PHONE', 'KAKAO', 'NAVER', 'GOOGLE', 'APPLE']);
 });
@@ -347,7 +347,7 @@ test('Supabase Edge release preflight requires a committed source and a passing 
     },
     checkSource() {
       calls.push('source');
-      return { status: 'pass', head: 'a'.repeat(40), latestMigration: '0080_retention_indexes.sql', worktreeClean: true, blockers: [] };
+      return { status: 'pass', head: 'a'.repeat(40), latestMigration: '0081_draft_draw_snapshot_media_rebase.sql', worktreeClean: true, blockers: [] };
     },
     runReleaseCheck({ environment }) {
       calls.push('database');

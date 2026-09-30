@@ -244,6 +244,50 @@ test(
     assert.doesNotMatch(detail.body, /김영민|01012345678|문 앞|이변경|01099990000|변경로 2/);
     assert.doesNotMatch(detail.body, /변경된 배송 조회|changed-product/);
 
+    // A request snapshot taken before the media-host cutover keeps its stored
+    // URL (snapshots are immutable), but the response translates the legacy host.
+    const legacyOwner = await createActor("USER", "shipping-legacy-media");
+    const legacyMediaId = randomUUID();
+    const currentMediaBase = "https://rconfxsykttfvznakile.supabase.co/functions/v1/dabboba-api";
+    const legacyImageUrl = `https://yxkmvgfruphgghowzvmo.supabase.co/functions/v1/dabboba-api/v1/catalog/media/${legacyMediaId}/image`;
+    const legacyProductId = `shipping-legacy-media-${suffix}`;
+    await pool.query(
+      "INSERT INTO catalog_products(id,sku,ip_id,category,name,price,image_url) VALUES($1,$2,$3,'gacha',$4,10000,$5)",
+      [legacyProductId, `SHIP-LEGACY-${suffix}`.toUpperCase(), ipId, `배송 이전 이미지 ${suffix}`, legacyImageUrl],
+    );
+    const legacyInventory = await pool.query<{ id: string }>(
+      "INSERT INTO inventory_units(owner_id,product_id,source_type,status) VALUES($1,$2,'GACHA','OWNED') RETURNING id",
+      [legacyOwner.id, legacyProductId],
+    );
+    const legacyRequest = await pool.query<{ id: string }>(
+      `INSERT INTO shipping_requests(user_id,status,address_snapshot,reference_subtotal,free_shipping_threshold,
+         qualifies_for_free_shipping,contains_kuji,shipping_fee)
+       VALUES($1,'PAYMENT_PENDING','{}'::jsonb,10000,24900,false,false,3000) RETURNING id`,
+      [legacyOwner.id],
+    );
+    await pool.query(
+      `INSERT INTO shipping_request_items(shipping_request_id,inventory_unit_id,product_snapshot)
+       SELECT $1,$2,jsonb_build_object('productId',p.id,'productName',p.name,'ipId',p.ip_id,
+         'ipNameKo',ip.name_ko,'category',p.category,'imageUrl',p.image_url,'productVersion',p.version)
+       FROM catalog_products p JOIN catalog_ips ip ON ip.id=p.ip_id WHERE p.id=$3`,
+      [legacyRequest.rows[0]!.id, legacyInventory.rows[0]!.id, legacyProductId],
+    );
+    const mediaApp = (await buildApp({ config: { ...config, catalogMediaBaseUrl: currentMediaBase }, pool, redis: null })).app;
+    try {
+      const rebased = await mediaApp.inject({
+        method: "GET",
+        url: `/v1/account/shipping-requests/${legacyRequest.rows[0]!.id}`,
+        headers: auth(legacyOwner.token),
+      });
+      assert.equal(rebased.statusCode, 200, rebased.body);
+      assert.equal(
+        (rebased.json() as { items: Array<{ imageUrl: string | null }> }).items[0]!.imageUrl,
+        `${currentMediaBase}/v1/catalog/media/${legacyMediaId}/image`,
+      );
+    } finally {
+      await mediaApp.close();
+    }
+
     const firstPage = await app.inject({
       method: "GET",
       url: "/v1/account/shipping-requests?limit=1",

@@ -167,6 +167,11 @@ export const DATABASE_RELEASE_MIGRATIONS = Object.freeze([
     path: 'packages/db/migrations/0080_retention_indexes.sql',
     sha256: 'dbae9f62136ac8cf48be8cebc0ab325c9162d1616838fea12af8eee88c60d10d',
   }),
+  Object.freeze({
+    file: '0081_draft_draw_snapshot_media_rebase.sql',
+    path: 'packages/db/migrations/0081_draft_draw_snapshot_media_rebase.sql',
+    sha256: '7846f17121e9a2d720d1ea53bea32877317b1b8d609d41991d9282fd7ca7c281',
+  }),
 ]);
 
 export const MINIMUM_DATABASE_RELEASE_VERSION =

@@ -147,7 +147,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** @description Verifies a live Supabase social-provider session for an already linked DABBOBA customer and issues an ephemeral ACCOUNT_DELETION-scoped customer session used by the public account-deletion flow. That session is accepted only by the account-deletion preview, request, and status routes and by logout; every other authenticated route answers 403 SESSION_SCOPE_FORBIDDEN. A provider that is not currently enabled is refused unless the verified identity is already linked to an existing account. This endpoint never creates a user or links an unknown provider subject. */
+        /** @description Verifies a live Supabase social-provider session for an already linked DABBOBA customer and issues an ephemeral ACCOUNT_DELETION-scoped customer session used by the public account-deletion flow. That session is accepted only by the account-deletion preview, request, and status routes and by logout; every other authenticated route answers 403 SESSION_SCOPE_FORBIDDEN. A provider that is not currently enabled is refused unless the verified identity is already linked to an existing account; EMAIL is accepted only in that already-linked form so legacy email-only customers can delete their account. This endpoint never creates a user or links an unknown provider subject. */
         post: operations["exchangeExistingCustomerForAccountDeletion"];
         delete?: never;
         options?: never;
@@ -2727,6 +2727,8 @@ export interface components {
         CustomerAuthProvider: "PHONE" | "KAKAO" | "NAVER" | "GOOGLE" | "APPLE";
         CustomerLoginProviders: {
             methods: components["schemas"]["CustomerAuthProvider"][];
+            /** @description Methods accepted by the account-deletion exchange. It adds EMAIL so a customer whose only identity is a legacy verified EMAIL link can still delete the account; EMAIL is never a new login method. */
+            deletionMethods: ("PHONE" | "KAKAO" | "NAVER" | "GOOGLE" | "APPLE" | "EMAIL")[];
             brokerExchangeConfigured: boolean;
             requiredPolicyVersions: {
                 terms: string;
@@ -2746,7 +2748,7 @@ export interface components {
         AccountDeletionAccessTokenExchangeInput: {
             accessToken: string;
             /** @enum {string} */
-            loginProvider: "PHONE" | "KAKAO" | "NAVER" | "GOOGLE" | "APPLE";
+            loginProvider: "PHONE" | "KAKAO" | "NAVER" | "GOOGLE" | "APPLE" | "EMAIL";
             /** @description Optional fresh Apple provider refresh token. When absent, an existing encrypted revocation credential is required. */
             appleRefreshToken?: string;
             acceptedPolicies: components["schemas"]["RequiredPolicyVersions"];
@@ -7318,6 +7320,7 @@ export interface operations {
             };
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            503: components["responses"]["CommerceUnavailable"];
         };
     };
     getProductKujiSlots: {
@@ -7342,6 +7345,7 @@ export interface operations {
                 };
             };
             404: components["responses"]["NotFound"];
+            503: components["responses"]["CommerceUnavailable"];
         };
     };
     joinKujiRoom: {
