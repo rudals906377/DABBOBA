@@ -51,7 +51,7 @@ export function validateKujiSlotBinding(
     || actualSlotNumbers.some((slotNumber, index) => slotNumber !== expectedSlotNumbers[index])
     || result.bindings.some((binding) => binding.state !== "RESERVED" && binding.state !== "CONSUMED")
   ) {
-    throw new Error("서버에서 확정한 쿠지 번호와 결제한 추첨권 정보가 일치하지 않습니다.");
+    throw new Error("서버에서 확정한 쿠지 번호와 결제한 추첨권 정보가 일치하지 않아요.");
   }
   return result.bindings;
 }

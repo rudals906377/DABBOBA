@@ -78,7 +78,7 @@ test("a promoted waiter notification re-enters through the authoritative room ga
     serverNow,
   );
 
-  assert.equal(call.title, "차례가 되었습니다");
+  assert.equal(call.title, "차례가 됐어요");
   assert.equal(call.body, "결제 대기 시간이 시작되었어요.");
   assert.equal(call.entryId, "entry-1");
   assert.equal(resolveKujiTurnNotificationPath(call, now + 179_000), "/kuji/queue/one-piece-kuji");
@@ -104,7 +104,7 @@ test("native kuji products expose a footer-free room gate with live results befo
   assert.match(checkoutScreen, /`\/kuji\/draw\/\$\{encodeURIComponent\(product\.id\)\}\?\$\{query\.toString\(\)\}`/);
   assert.match(checkoutScreen, /checkoutNeedsAgreement/);
   assert.match(checkoutScreen, /결제 수단 준비 중/);
-  assert.match(checkoutScreen, /포인트로 구매하기/);
+  assert.match(checkoutScreen, /label=\{!recoveringGachaOrder && paymentAvailability === "unavailable"\s*\? "결제 수단 준비 중"\s*: "구매하기"\}/);
   assert.match(queueRoute, /KujiQueueScreen/);
   assert.doesNotMatch(queueRoute, /Redirect|__DEV__/);
   for (const copy of ["쿠지 대기실", "실시간 뽑기 현황", "최근 결과", "내 순서", "앞에", "대기 중", "다른 상품 둘러보기", "대기 취소"]){

@@ -27,7 +27,7 @@ export async function fetchKujiSlotBoard(
   });
   if (!result.data) {
     throw new KujiSlotApiError(
-      errorMessage(result.error, "쿠지 번호판을 불러오지 못했습니다."),
+      errorMessage(result.error, "쿠지 번호판을 불러오지 못했어요."),
       result.response.status,
     );
   }
@@ -46,12 +46,12 @@ export async function fetchPaidKujiSelection(
   ]);
   if (!actor.data || !result.data) {
     throw new KujiSlotApiError(
-      errorMessage(result.error ?? actor.error, "구매한 쿠지 번호판을 불러오지 못했습니다."),
+      errorMessage(result.error ?? actor.error, "구매한 쿠지 번호판을 불러오지 못했어요."),
       !actor.data ? actor.response.status : result.response.status,
     );
   }
   if (result.data.recovery.userId !== actor.data.actor?.userId) {
-    throw new KujiSlotApiError("로그인 계정과 쿠지 주문 정보가 일치하지 않습니다.", 409);
+    throw new KujiSlotApiError("로그인 계정과 쿠지 주문 정보가 일치하지 않아요.", 409);
   }
   return result.data;
 }
@@ -86,7 +86,7 @@ export async function bindPaidKujiSlots(
   });
   if (!result.data) {
     throw new KujiSlotApiError(
-      errorMessage(result.error, "선택한 쿠지 번호를 확정하지 못했습니다."),
+      errorMessage(result.error, "선택한 쿠지 번호를 확정하지 못했어요."),
       result.response.status,
     );
   }

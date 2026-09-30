@@ -123,7 +123,7 @@ async function readResponseBody(response: Response): Promise<unknown> {
   try {
     return JSON.parse(text) as unknown;
   } catch {
-    throw new KujiRoomApiError("쿠지 대기실 응답을 확인하지 못했습니다.", response.status);
+    throw new KujiRoomApiError("쿠지 대기실 응답을 확인하지 못했어요.", response.status);
   }
 }
 
@@ -136,7 +136,7 @@ function readErrorMessage(body: unknown, status: number): string {
   }
   if (status === 409) return "다른 쿠지 상품에서 이미 대기하거나 진행 중이에요.";
   if (status === 401) return "로그인 정보를 다시 확인해 주세요.";
-  return "쿠지 대기실을 불러오지 못했습니다.";
+  return "쿠지 대기실을 불러오지 못했어요.";
 }
 
 function parseKujiRoomSnapshot(value: unknown): KujiRoomSnapshot {
@@ -260,13 +260,13 @@ function readRoomState(value: unknown): KujiRoomEntryState {
 
 function readNonNegativeInteger(value: unknown, field: string): number {
   if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
-    throw new KujiRoomApiError(`쿠지 대기실의 ${field} 값이 올바르지 않습니다.`, 500);
+    throw new KujiRoomApiError(`쿠지 대기실의 ${field} 값이 올바르지 않아요.`, 500);
   }
   return value;
 }
 
 function invalidSnapshot(): KujiRoomApiError {
-  return new KujiRoomApiError("쿠지 대기실 응답 형식이 올바르지 않습니다.", 500);
+  return new KujiRoomApiError("쿠지 대기실 응답 형식이 올바르지 않아요.", 500);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

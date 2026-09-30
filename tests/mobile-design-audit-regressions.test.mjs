@@ -131,7 +131,10 @@ test("dynamic policy titles wrap readably and kuji selection reserves its border
   const kujiSource = readSource("apps/mobile/src/features/kuji/KujiDrawScreen.tsx");
 
   assert.match(policySource, /<DetailPageHeader title=\{title\} titleMode="readable" titleNumberOfLines=\{2\}/);
-  assert.match(kujiSource, /ticket:\s*\{[^}]*borderWidth:\s*2/);
+  assert.match(kujiSource, /ticketCard:\s*\{[^}]*aspectRatio:\s*KUJI_TICKET_ASPECT_RATIO[^}]*borderWidth:\s*2/);
+  assert.match(kujiSource, /const KUJI_TICKET_ASPECT_RATIO = 1517 \/ 1037;/);
+  assert.match(kujiSource, /resizeMode="contain"\s*source=\{require\("\.\.\/\.\.\/\.\.\/assets\/draw\/kuji\/kuji-ticket-front\.png"\)\}/);
+  assert.doesNotMatch(kujiSource, /resizeMode="stretch"/);
   assert.doesNotMatch(kujiSource, /ticketSelected:\s*\{[^}]*borderWidth/);
 });
 

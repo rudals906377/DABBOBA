@@ -27,16 +27,16 @@ export function preparePaidKujiSelection(
     || ids.some((id) => !UUID_PATTERN.test(id) || !expectedIds.has(id))
     || snapshot.product.category !== "kuji" || !snapshot.product.name.trim()
     || !Number.isSafeInteger(snapshot.product.unitPrice) || snapshot.product.unitPrice < 0
-  ) throw new Error("결제한 주문과 쿠지 번호판 정보가 일치하지 않습니다.");
+  ) throw new Error("결제한 주문과 쿠지 번호판 정보가 일치하지 않아요.");
   if (!ids.length) {
     if (recovery.bindings.length || snapshot.board) throw new Error("완료된 쿠지 주문 정보를 다시 확인해 주세요.");
     return { kind: "DONE" };
   }
   if (recovery.roomState !== "DRAWING" && recovery.roomState !== "EXPIRED") {
-    throw new Error("결제한 쿠지 뽑기방 상태를 확인할 수 없습니다.");
+    throw new Error("결제한 쿠지 뽑기방 상태를 확인할 수 없어요.");
   }
   if (recovery.bindings.length) {
-    if (snapshot.board) throw new Error("이미 선택한 쿠지 번호를 다시 선택할 수 없습니다.");
+    if (snapshot.board) throw new Error("이미 선택한 쿠지 번호를 다시 선택할 수 없어요.");
     const mapping = new Map(recovery.bindings.map((binding) => [binding.entitlementId, binding]));
     if (
       mapping.size !== ids.length || recovery.bindings.length !== ids.length
@@ -46,7 +46,7 @@ export function preparePaidKujiSelection(
         binding.state !== "RESERVED" || !Number.isSafeInteger(binding.slotNumber)
         || binding.slotNumber < 1 || binding.slotNumber > recovery.totalSlots
       ))
-    ) throw new Error("남은 추첨권과 선택한 쿠지 번호가 일치하지 않습니다.");
+    ) throw new Error("남은 추첨권과 선택한 쿠지 번호가 일치하지 않아요.");
     return {
       kind: "REVEAL",
       path: paidKujiRevealPath({
@@ -74,7 +74,7 @@ export function preparePaidKujiSelection(
       || tier.remainingQuantity > tier.initialQuantity
     ))
     || board.tiers.reduce((sum, tier) => sum + tier.initialQuantity, 0) !== board.totalSlots
-  ) throw new Error("구매한 쿠지 번호판의 버전과 남은 수량을 확인할 수 없습니다.");
+  ) throw new Error("구매한 쿠지 번호판의 버전과 남은 수량을 확인할 수 없어요.");
   return { kind: "SELECT", snapshot, board };
 }
 
@@ -87,7 +87,7 @@ export function paidKujiRevealPath(input: {
   mode?: DrawOpenMode;
 }): string {
   const firstBinding = input.bindings[0];
-  if (!firstBinding) throw new Error("열 수 있는 쿠지 추첨권을 찾을 수 없습니다.");
+  if (!firstBinding) throw new Error("열 수 있는 쿠지 추첨권을 찾을 수 없어요.");
   const query = new URLSearchParams({
     productId: input.productId,
     category: "kuji",

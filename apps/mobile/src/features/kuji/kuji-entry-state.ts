@@ -1,7 +1,7 @@
 export type KujiTurnCall = {
   productId: string;
   entryId: string;
-  title: "차례가 되었습니다";
+  title: "차례가 됐어요";
   body: "결제 대기 시간이 시작되었어요.";
   checkoutExpiresAt: string;
   serverNow: string;
@@ -38,7 +38,7 @@ export function buildKujiTurnCall(
   return {
     productId,
     entryId,
-    title: "차례가 되었습니다",
+    title: "차례가 됐어요",
     body: "결제 대기 시간이 시작되었어요.",
     checkoutExpiresAt,
     serverNow,

@@ -132,7 +132,7 @@ export function KujiDrawScreen() {
     setLoading(true);
     try {
       if (!paidDrawRoute) {
-        throw new Error("결제한 쿠지 주문과 추첨권 정보를 확인할 수 없습니다.");
+        throw new Error("결제한 쿠지 주문과 추첨권 정보를 확인할 수 없어요.");
       }
       const tokens = await readAuthTokens();
       if (!current()) return;
@@ -140,9 +140,9 @@ export function KujiDrawScreen() {
       const next = await fetchPaidKujiSelection(runtime.apiBaseUrl, tokens.accessToken, paidDrawRoute.orderId);
       const latestTokens = await readAuthTokens();
       if (!current()) return;
-      if (latestTokens?.accessToken !== tokens.accessToken) throw new Error("로그인 정보가 변경되었습니다. 다시 불러와 주세요.");
+      if (latestTokens?.accessToken !== tokens.accessToken) throw new Error("로그인 정보가 변경됐어요. 다시 불러와 주세요.");
       const prepared = preparePaidKujiSelection(next, { ...paidDrawRoute, productId });
-      if (prepared.kind === "DONE") throw new Error("이미 모두 연 쿠지 주문입니다. 구매 내역을 확인해 주세요.");
+      if (prepared.kind === "DONE") throw new Error("이미 모두 연 쿠지 주문이에요. 구매 내역을 확인해 주세요.");
       if (prepared.kind === "REVEAL") {
         presentDrawOpenModeChoice(next.recovery.entitlementIds.length, (mode) => {
           if (!current()) return;
@@ -159,7 +159,7 @@ export function KujiDrawScreen() {
         next.recovery.roomState,
         clientNowMs,
       );
-      if (!nextDrawLeaseClock.valid) throw new Error("쿠지 뽑기방의 남은 시간을 확인할 수 없습니다.");
+      if (!nextDrawLeaseClock.valid) throw new Error("쿠지 뽑기방의 남은 시간을 확인할 수 없어요.");
       setNowMs(clientNowMs);
       setDrawLeaseClock(nextDrawLeaseClock);
       setSnapshot(next);
@@ -174,7 +174,7 @@ export function KujiDrawScreen() {
       setSnapshot(null);
       setBoard(null);
       setDrawLeaseClock(null);
-      setMessage(error instanceof Error ? error.message : "쿠지 뽑기방을 불러오지 못했습니다.");
+      setMessage(error instanceof Error ? error.message : "쿠지 뽑기방을 불러오지 못했어요.");
     } finally {
       if (current()) setLoading(false);
     }
@@ -237,7 +237,7 @@ export function KujiDrawScreen() {
       });
       const latestTokens = await readAuthTokens();
       if (!current()) return;
-      if (latestTokens?.accessToken !== tokens.accessToken) throw new Error("로그인 정보가 변경되었습니다. 다시 불러와 주세요.");
+      if (latestTokens?.accessToken !== tokens.accessToken) throw new Error("로그인 정보가 변경됐어요. 다시 불러와 주세요.");
       const bindings = validateKujiSlotBinding(result, {
         productId,
         roomEntryId: paidDrawRoute.roomEntryId,
@@ -257,7 +257,7 @@ export function KujiDrawScreen() {
     } catch (error) {
       if (!current()) return;
       const status = (error as KujiSlotApiError | undefined)?.status;
-      setBindingMessage(error instanceof Error ? error.message : "선택한 쿠지 번호를 확정하지 못했습니다.");
+      setBindingMessage(error instanceof Error ? error.message : "선택한 쿠지 번호를 확정하지 못했어요.");
       if (status === 409) void load();
     } finally {
       // Only this operation can release its lock, even after a blur/re-entry.
@@ -276,14 +276,14 @@ export function KujiDrawScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea} edges={["top", "left", "right"]}>
-      <DetailPageHeader title="쿠지 뽑기" onBack={goBack} backLabel="상품 상세로 돌아가기" />
+      <DetailPageHeader title="쿠지 뽑기" titleMode="pixel" onBack={goBack} backLabel="상품 상세로 돌아가기" />
 
       {loading ? (
         <View style={styles.state}><ActivityIndicator color={colors.ink} /><Text style={styles.stateBody}>쿠지 뽑기방을 준비하는 중</Text></View>
       ) : message || !snapshot || !board ? (
         <View style={styles.state}>
           <DecorativeIonicon name="alert-circle-outline" size={34} color={colors.muted} />
-          <Text style={styles.stateTitle}>{message || "쿠지 뽑기방을 확인할 수 없습니다."}</Text>
+          <Text style={styles.stateTitle}>{message || "쿠지 뽑기방을 확인할 수 없어요."}</Text>
           <SeedActionButton label="다시 불러오기" variant="neutralSolid" onPress={() => void load()} />
         </View>
       ) : (
@@ -334,20 +334,22 @@ export function KujiDrawScreen() {
                       accessibilityState={{ checked: selected, disabled }}
                       disabled={disabled}
                       onPress={() => toggleTicket(ticket)}
-                      style={({ pressed }) => [styles.ticket, sold && styles.ticketSold, selected && styles.ticketSelected, pressed && styles.ticketPressed]}
+                      style={({ pressed }) => [styles.ticket, pressed && styles.ticketPressed]}
                     >
-                      <Image
-                        accessibilityIgnoresInvertColors
-                        resizeMode="stretch"
-                        source={require("../../../assets/draw/kuji/kuji-ticket-front.png")}
-                        style={[styles.ticketArtwork, sold && styles.ticketArtworkSold]}
-                      />
-                      {sold ? <View style={styles.ticketSoldOverlay} /> : null}
-                      <View style={[styles.ticketFace, sold && styles.ticketFaceSold, selected && styles.ticketFaceSelected]}>
-                        <Text style={[styles.ticketNumber, sold && styles.ticketNumberSold]}>{ticket}</Text>
-                        <View style={[styles.ticketState, selected && styles.ticketStateSelected]}>
-                          {selected ? <DecorativeIonicon name="checkmark" size={9} color={colors.ink} /> : null}
-                          <Text style={[styles.ticketLabel, sold && styles.ticketLabelSold, selected && styles.ticketLabelSelected]}>{sold ? "완료" : selected ? "선택" : "쿠지"}</Text>
+                      <View style={[styles.ticketCard, sold && styles.ticketSold, selected && styles.ticketSelected]}>
+                        <Image
+                          accessibilityIgnoresInvertColors
+                          resizeMode="contain"
+                          source={require("../../../assets/draw/kuji/kuji-ticket-front.png")}
+                          style={[styles.ticketArtwork, sold && styles.ticketArtworkSold]}
+                        />
+                        {sold ? <View style={styles.ticketSoldOverlay} /> : null}
+                        <View style={styles.ticketFace}>
+                          <Text variant="label" style={[styles.ticketNumber, sold && styles.ticketNumberSold]}>{ticket}</Text>
+                          <View style={[styles.ticketState, selected && styles.ticketStateSelected]}>
+                            {selected ? <DecorativeIonicon name="checkmark" size={9} color={colors.ink} /> : null}
+                            <Text variant="micro" style={[styles.ticketLabel, sold && styles.ticketLabelSold, selected && styles.ticketLabelSelected]}>{sold ? "완료" : selected ? "선택" : "쿠지"}</Text>
+                          </View>
                         </View>
                       </View>
                     </Pressable>
@@ -440,6 +442,9 @@ function firstParam(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
 }
 
+/** Intrinsic canvas of kuji-ticket-front.png; slots keep it so the artwork is never stretched. */
+const KUJI_TICKET_ASPECT_RATIO = 1517 / 1037;
+
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: seed.color.layer.basement },
   state: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: seed.spacing.globalGutter, gap: seed.spacing.componentDefault },
@@ -460,7 +465,7 @@ const styles = StyleSheet.create({
   timerCard: { minHeight: 76, paddingHorizontal: seed.spacing.x4, paddingVertical: seed.spacing.x3, borderRadius: seed.radius.r4, backgroundColor: colors.ink, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: seed.spacing.x3 },
   timerTitle: { color: colors.brand },
   timerValue: { color: colors.brand, fontSize: 34, lineHeight: 41, fontWeight: "900", fontVariant: ["tabular-nums"] },
-  timerDanger: { color: "#FF9B86" },
+  timerDanger: { color: seed.color.kuji.solid },
   drawBoard: { padding: seed.spacing.x3, borderRadius: seed.radius.r5, backgroundColor: colors.ink },
   boardHeader: { flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: seed.spacing.x3 },
   boardTitle: { color: colors.white },
@@ -468,22 +473,21 @@ const styles = StyleSheet.create({
   boardCount: { color: colors.brand, fontSize: 13, lineHeight: 18 },
   boardInventory: { width: 164, marginTop: seed.spacing.x0_5 },
   ticketGrid: { marginTop: seed.spacing.x3, flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between", rowGap: seed.spacing.x2 },
-  ticket: { width: "18.4%", minHeight: seed.size.touchTarget, aspectRatio: 1.36, overflow: "hidden", borderRadius: seed.radius.r1_5, borderWidth: 2, borderColor: colors.kujiOrangeDark, backgroundColor: colors.kujiOrange },
-  ticketSold: { borderColor: "#555D55", backgroundColor: "#303630" },
+  ticket: { width: "18.4%", minHeight: seed.size.touchTarget, justifyContent: "center" },
+  ticketCard: { width: "100%", aspectRatio: KUJI_TICKET_ASPECT_RATIO, overflow: "hidden", borderRadius: seed.radius.r1_5, borderWidth: 2, borderColor: seed.color.kuji.ink, backgroundColor: colors.kujiOrange },
+  ticketSold: { borderColor: seed.color.inverted.strokeStrong, backgroundColor: seed.color.inverted.surfaceSubtle },
   ticketSelected: { borderColor: colors.brand, backgroundColor: colors.kujiOrange },
   ticketPressed: { opacity: seed.state.pressedOpacity },
   ticketArtwork: { ...StyleSheet.absoluteFill, width: "100%", height: "100%" },
   ticketArtworkSold: { opacity: 0.22 },
-  ticketSoldOverlay: { ...StyleSheet.absoluteFill, backgroundColor: "rgba(35, 40, 35, 0.68)" },
-  ticketFace: { zIndex: 1, flex: 1, paddingLeft: 11, paddingRight: 2, paddingVertical: 3, alignItems: "center", justifyContent: "center", gap: 1 },
-  ticketFaceSold: { backgroundColor: "transparent" },
-  ticketFaceSelected: { backgroundColor: "transparent" },
-  ticketNumber: { color: colors.white, fontSize: 15, lineHeight: 18, fontWeight: "900", fontVariant: ["tabular-nums"] },
-  ticketNumberSold: { color: "#A7ADA6" },
+  ticketSoldOverlay: { ...StyleSheet.absoluteFill, backgroundColor: seed.color.inverted.surfaceRaised, opacity: 0.68 },
+  ticketFace: { zIndex: 1, flex: 1, paddingLeft: 11, paddingRight: 2, alignItems: "center", justifyContent: "center" },
+  ticketNumber: { color: seed.color.inverted.foreground, fontWeight: "900", fontVariant: ["tabular-nums"] },
+  ticketNumberSold: { color: seed.color.inverted.foregroundMuted },
   ticketState: { minHeight: 11, paddingHorizontal: 3, borderRadius: seed.radius.full, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 1 },
   ticketStateSelected: { backgroundColor: colors.brand },
-  ticketLabel: { color: "#FFF2E8", fontSize: 11, lineHeight: 15, fontWeight: "800" },
-  ticketLabelSold: { color: "#D0D5CF" },
+  ticketLabel: { color: seed.color.kuji.weakStrong, fontWeight: "800" },
+  ticketLabelSold: { color: seed.color.inverted.foregroundMuted },
   ticketLabelSelected: { color: colors.ink },
   prizeRemainingPanel: { minHeight: 60, paddingHorizontal: seed.spacing.x3, paddingVertical: seed.spacing.x2_5, borderRadius: seed.radius.r4, borderWidth: 1, borderColor: seed.color.stroke.neutral, backgroundColor: seed.color.layer.default, justifyContent: "center" },
   prizeRemainingRow: { flexDirection: "row", alignItems: "center", gap: seed.spacing.x2 },

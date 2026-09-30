@@ -27,7 +27,7 @@ export function KujiNotificationObserver() {
       const call: KujiTurnCall = {
         productId: data.productId,
         entryId: data.entryId,
-        title: "차례가 되었습니다",
+        title: "차례가 됐어요",
         body: "결제 대기 시간이 시작되었어요.",
         checkoutExpiresAt: data.checkoutExpiresAt,
         serverNow: data.serverNow,

@@ -148,7 +148,7 @@ export function KujiQueueScreen() {
       if (!continueToCheckout(nextRoom, usedFallback)) setRoom(nextRoom);
     } catch (error) {
       setRoom(null);
-      setMessage(error instanceof Error ? error.message : "쿠지 대기실을 불러오지 못했습니다.");
+      setMessage(error instanceof Error ? error.message : "쿠지 대기실을 불러오지 못했어요.");
     } finally {
       loadPendingRef.current = false;
       if (!redirectedRef.current) setLoading(false);
@@ -279,7 +279,7 @@ export function KujiQueueScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea} edges={["top", "bottom", "left", "right"]}>
-      <DetailPageHeader title="쿠지 대기실" onBack={goBack} backLabel="상품 상세로 돌아가기" />
+      <DetailPageHeader title="쿠지 대기실" titleMode="pixel" onBack={goBack} backLabel="상품 상세로 돌아가기" />
 
       {loading ? (
         <View style={styles.state}>
@@ -289,7 +289,7 @@ export function KujiQueueScreen() {
       ) : message || !room ? (
         <View style={styles.state}>
           <DecorativeIonicon name="alert-circle-outline" size={34} color={colors.muted} />
-          <Text style={styles.stateTitle}>{message || "대기실을 확인할 수 없습니다."}</Text>
+          <Text style={styles.stateTitle}>{message || "대기실을 확인할 수 없어요."}</Text>
           <SeedActionButton label="다시 불러오기" variant="neutralSolid" onPress={() => void load()} />
         </View>
       ) : (
@@ -373,7 +373,7 @@ function LiveDrawSection({ room }: { room: KujiRoomSnapshot }) {
         </View>
       ) : (
         <View style={styles.activityEmpty}>
-          <DecorativeIonicon name="sparkles-outline" size={20} color="#929A91" />
+          <DecorativeIonicon name="sparkles-outline" size={20} color={seed.color.inverted.foregroundSubtle} />
           <Text style={styles.activityEmptyText}>아직 공개된 결과가 없어요.</Text>
         </View>
       )}
@@ -398,7 +398,7 @@ function ActivityRow({
       {activity.prizeImageUrl ? (
         <Image source={{ uri: activity.prizeImageUrl }} style={styles.activityImage} />
       ) : (
-        <View style={styles.rarityTile}><Text style={styles.rarityText}>{activity.rarity}</Text></View>
+        <View style={styles.rarityTile}><Text variant="subtitle" numberOfLines={1} style={styles.rarityText}>{activity.rarity}</Text></View>
       )}
       <View style={styles.activityCopy}>
         <Text style={styles.activityName}>{activity.displayName}님</Text>
@@ -477,21 +477,21 @@ const styles = StyleSheet.create({
   liveBadgeText: { color: colors.ink, fontSize: 11, lineHeight: 16, fontWeight: "900" },
   activeLine: { minHeight: seed.size.touchTarget, marginTop: seed.spacing.x2, flexDirection: "row", alignItems: "center", gap: seed.spacing.x2 },
   activeDot: { width: 7, height: 7, borderRadius: seed.radius.full, backgroundColor: colors.brand },
-  activeText: { flex: 1, color: "#D9DDD7", ...seed.typography.caption },
-  recentHeader: { minHeight: 30, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "#3A403A", flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  recentLabel: { color: "#AEB6AD", ...seed.typography.caption, fontWeight: "700" },
-  recentCount: { color: "#929A91", ...seed.typography.caption },
-  activityList: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "#313631" },
-  activityRow: { minHeight: 66, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "#313631", flexDirection: "row", alignItems: "center", gap: seed.spacing.x2_5 },
-  activityImage: { width: 42, height: 42, borderRadius: seed.radius.r2_5, backgroundColor: "#2D322D" },
-  rarityTile: { width: 42, height: 42, borderRadius: seed.radius.r2_5, borderWidth: 1, borderColor: "#586158", alignItems: "center", justifyContent: "center", backgroundColor: "#202520" },
-  rarityText: { color: colors.brand, fontSize: 17, lineHeight: 22, fontWeight: "900" },
+  activeText: { flex: 1, color: seed.color.inverted.foregroundMuted, ...seed.typography.caption },
+  recentHeader: { minHeight: 30, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: seed.color.inverted.stroke, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  recentLabel: { color: seed.color.inverted.foregroundMuted, ...seed.typography.caption, fontWeight: "700" },
+  recentCount: { color: seed.color.inverted.foregroundSubtle, ...seed.typography.caption },
+  activityList: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: seed.color.inverted.stroke },
+  activityRow: { minHeight: 66, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: seed.color.inverted.stroke, flexDirection: "row", alignItems: "center", gap: seed.spacing.x2_5 },
+  activityImage: { width: 42, height: 42, borderRadius: seed.radius.r2_5, backgroundColor: seed.color.inverted.surfaceSubtle },
+  rarityTile: { width: 42, height: 42, borderRadius: seed.radius.r2_5, borderWidth: 1, borderColor: seed.color.inverted.strokeStrong, alignItems: "center", justifyContent: "center", backgroundColor: seed.color.inverted.surfaceRaised },
+  rarityText: { color: colors.brand, fontWeight: "900" },
   activityCopy: { flex: 1, minWidth: 0 },
-  activityName: { color: "#AEB6AD", ...seed.typography.caption },
+  activityName: { color: seed.color.inverted.foregroundMuted, ...seed.typography.caption },
   activityPrize: { marginTop: seed.spacing.x0_5, color: colors.white, ...seed.typography.bodyStrong },
-  activityAge: { color: "#929A91", ...seed.typography.caption },
-  activityEmpty: { minHeight: 78, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "#3A403A", flexDirection: "row", alignItems: "center", justifyContent: "center", gap: seed.spacing.x2 },
-  activityEmptyText: { color: "#AEB6AD", ...seed.typography.caption },
+  activityAge: { color: seed.color.inverted.foregroundSubtle, ...seed.typography.caption },
+  activityEmpty: { minHeight: 78, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: seed.color.inverted.stroke, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: seed.spacing.x2 },
+  activityEmptyText: { color: seed.color.inverted.foregroundMuted, ...seed.typography.caption },
   waitingCard: { borderRadius: seed.radius.r5, borderWidth: 1, borderColor: seed.color.stroke.neutral, backgroundColor: seed.color.layer.default, padding: seed.spacing.x4 },
   sectionHeader: { ...subtleSectionHeaderRule, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: seed.spacing.x3 },
   viewerSummary: { minHeight: 64, marginTop: seed.spacing.x3, paddingHorizontal: seed.spacing.x3, borderRadius: seed.radius.r3, backgroundColor: seed.color.background.brandWeak, flexDirection: "row", alignItems: "center", gap: seed.spacing.x2 },
