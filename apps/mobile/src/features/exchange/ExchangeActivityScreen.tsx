@@ -53,7 +53,7 @@ export function ExchangeActivityScreen() {
         return;
       }
       setSessionStatus("error");
-      setError(cause instanceof Error ? cause.message : "내 교환 현황을 불러오지 못했습니다.");
+      setError(cause instanceof Error ? cause.message : "내 교환 현황을 불러오지 못했어요.");
     } finally {
       setRefreshing(false);
     }
