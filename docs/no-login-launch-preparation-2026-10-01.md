@@ -20,7 +20,11 @@
 
 빌드 대상은 다뽀바 전용 `DABBOBA SDK57`이며 Release/PRELAUNCH·코드 서명 제외·동시 작업 2개로 **컴파일만** 실행했다. 기기/시뮬레이터 실행·설치·삭제는 하지 않았다. iOS 지침에 따라 꺼진 전용 시뮬레이터를 임의로 켜거나 실행 중인 FINDE 환경을 재사용하지 않았다.
 
-XcodeBuildMCP의 300초 응답 대기가 만료됐지만 실제 `xcodebuild` PID 91076이 계속 컴파일 중인 것을 확인했다. 따라서 실패/성공으로 판정하거나 같은 빌드를 재시작하지 않았다. 현재 종료 대기는 실행 session 70170으로 추적한다. **네이티브 컴파일 완료 증거는 아직 없다.** 종료 후 새 app.json 설정을 격리 복사본에 반영하고 최종 컴파일/결과를 확인해야 한다. 원래 생성본에는 Apple entitlement 수정이 포함되지 않았음을 명확히 남긴다.
+첫 빌드는 XcodeBuildMCP의 300초 응답 대기를 넘겨도 실제 프로세스가 계속 동작해 종료까지 기다렸다. 최종적으로 네이티브 컴파일·링크 이후 JS 번들 단계에서 실패했다. 임시 프로젝트의 node_modules 참조가 원본 작업 폴더 밖으로 이어져 Metro가 엔트리와 글꼴을 찾지 못한 검증 환경 문제였으며, 실패를 성공으로 기록하지 않았다. 원본 Metro 설정·의존성 보호 장치는 변경하지 않았다.
+
+Apple entitlement 수정 후 격리 iOS 프로젝트를 다시 생성하고 Pods 준비를 마쳤다. 임시 `.xcode.env.local`에만 JS 소스 루트를 원본 모바일 작업 폴더로 명시해 정상 의존성 그래프를 사용하고, 네이티브 생성물·빌드 결과는 계속 임시 폴더에 뒀다. 번들 생략 없이 원본 소스로 2,197개 모듈·73개 asset을 먼저 확인한 뒤 Release/PRELAUNCH arm64 최종 빌드를 실행했다. 두 번째 도구 응답 대기도 만료됐으나 실제 빌드를 재시작하지 않고 종료 결과를 확인했다.
+
+**최종 iOS 시뮬레이터 컴파일은 성공했다.** `final-build.xcresult`의 상태는 `succeeded`, 오류 0개, 경고 531개, 실행 시간 약 342초다. 경고에는 React Native/외부 라이브러리와 Hermes 번들 경고가 포함되며 경고 0개라고 주장하지 않는다. 생성 앱은 arm64, Bundle ID `com.dabboba.mobile`, build `3`이고 생성 entitlement에 Apple `Default`가 있다. 결과는 `/tmp/dabboba-native-launch-qa.AMIG6I/final-build.xcresult`, 앱은 같은 폴더의 `DerivedData/Build/Products/Release-iphonesimulator/DABBOBA.app`에 보관했다. 코드 서명 제외 빌드로, App Store IPA·친구 팀 서명·실행 화면·실기기 로그인/탈퇴/결제 검증을 대신하지 않는다. 시뮬레이터를 켜거나 앱을 설치·실행하지 않았다.
 
 Android 네이티브 프로젝트는 생성됐지만 이 Mac의 SDK 경로·환경 설정이 없어 APK/AAB 컴파일은 실행하지 않았다. 생성 manifest에 `allowBackup=false`, `dabboba` 복귀 scheme, 카메라·마이크·외부 저장소·오버레이 권한 제거 선언을 확인했다. 이것은 최종 merged manifest 검사나 서명 AAB가 아니다. SDK 설치/약관 또는 친구 소유 원격 빌드 환경과 실기기 확인을 통해 마쳐야 한다.
 

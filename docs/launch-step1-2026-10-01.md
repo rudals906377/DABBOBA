@@ -67,3 +67,4 @@
 - 공통 갤러리·사진 자르기 통합 후 Apple 로그인 네이티브 entitlement가 생성 설정에서 빠진 것을 수정했다. 관련 출시 설정 검사 70개, 최신 전체 단위 검사 1,025개·TypeScript 8개가 통과했다. 서명 프로파일·실기기 Apple 로그인/탈퇴 검증은 별도다.
 - 최신 암호화 백업·복원 도구를 전용 fixture로 검증했고, 운영 이력 조회용 읽기 전용 SQL 및 판매판 스토어 자료 초안을 준비했다. 상세 증거와 다음 직접 작업은 `no-login-launch-preparation-2026-10-01.md`에 정리했다.
 - 통합 결과는 로컬 `prep/launch-step1-20261001` 브랜치에 보관했다. 원격 main/PR 병합이나 운영 계정 변경으로 오해하지 않는다.
+- Apple 권한 수정을 포함한 iOS Release/PRELAUNCH arm64 시뮬레이터 컴파일도 성공했다. 최종 xcresult 오류 0개·경고 531개이며, 코드 서명 제외·미설치·미실행 결과다. Android는 Expo production export까지 확인했고 SDK가 없어 서명 APK/AAB 컴파일은 남아 있다.
