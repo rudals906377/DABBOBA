@@ -340,22 +340,40 @@ test("a committed Kuji batch waits for the peel handoff before replacing it with
   assert.match(screen, /const committedBatchReady = !preview && mode === "all" && batchResults\.length > 0/);
   assert.match(
     screen,
-    /const committedBatchSummaryVisible = committedBatchReady\s*&& \(sourceCategory !== "kuji" \|\| batchRevealSettled\)/,
+    /const committedBatchSummaryVisible = committedBatchReady\s*&& \(\(sourceCategory !== "kuji" && sourceCategory !== "gacha"\) \|\| batchRevealSettled\)/,
   );
   assert.match(
     settlement,
-    /sourceCategory === "kuji" && mode === "all" && batchResults\.length > 0[\s\S]*?setBatchRevealSettled\(true\)[\s\S]*?return/,
+    /\(sourceCategory === "kuji" \|\| sourceCategory === "gacha"\)\s*&& mode === "all"\s*&& batchResults\.length > 0[\s\S]*?setBatchRevealSettled\(true\)[\s\S]*?return/,
   );
   assert.match(screen, /resultReady=\{preview \? previewResultReady : Boolean\(result \|\| batchResults\.length\)\}/);
   assert.match(screen, /previewCompleted \|\| committedBatchSummaryVisible \? \(/);
 
-  const summaryVisible = (category, batchReady, peelSettled) => (
-    batchReady && (category !== "kuji" || peelSettled)
+  const summaryVisible = (category, batchReady, stageSettled) => (
+    batchReady && ((category !== "kuji" && category !== "gacha") || stageSettled)
   );
   assert.equal(summaryVisible("kuji", true, false), false);
   assert.equal(summaryVisible("kuji", true, true), true);
-  assert.equal(summaryVisible("gacha", true, false), true,
-    "the Kuji paper handoff must not delay existing gacha summaries");
+  assert.equal(summaryVisible("gacha", true, false), false,
+    "a committed gacha batch must finish the capsule reveal before the summary replaces it");
+  assert.equal(summaryVisible("gacha", true, true), true);
+});
+
+test("a committed gacha open-all batch drives the lever machine from the first committed result", () => {
+  const screen = readFileSync(
+    new URL("../apps/mobile/src/features/draw/DrawRevealScreen.tsx", import.meta.url),
+    "utf8",
+  );
+  const machineUse = screen.slice(screen.indexOf("<GachaLeverMachine"), screen.indexOf("/>", screen.indexOf("previewLabel:")));
+  assert.match(screen, /const gachaStagePrize = result \?\? batchResults\[0\] \?\? null;/);
+  assert.match(machineUse, /resultReady=\{preview \? previewResultReady : Boolean\(result \|\| batchResults\.length\)\}/);
+  assert.match(machineUse, /result: gachaStagePrize/);
+  assert.match(
+    screen,
+    /const gachaRevealInProgress = sourceCategory === "gacha"[\s\S]*?\|\| \(committedBatchReady && !batchRevealSettled\)/,
+  );
+  const skip = screen.slice(screen.indexOf("const handleGachaSkip ="), screen.indexOf("const sourceLabel ="));
+  assert.match(skip, /mode === "all" && batchResults\.length > 0[\s\S]*?setBatchRevealSettled\(true\)/);
 });
 
 test("the sequential kuji result footer distinguishes selecting from opening and stays visually flat", () => {
@@ -455,7 +473,7 @@ test("the native gacha machine offers one clockwise turn or six taps with matchi
     screen,
     /opacity: gachaMotionVisible && !gachaRevealInProgress \? 1 : 0[\s\S]*?<SeedInlineGuidance[\s\S]*?레버 6회 연속 터치 또는 시계 방향 1바퀴 드래그[\s\S]*?<\/SeedInlineGuidance>/,
   );
-  assert.match(screen, /resultReady=\{preview \? previewResultReady : Boolean\(result\)\}/);
+  assert.match(screen, /resultReady=\{preview \? previewResultReady : Boolean\(result \|\| batchResults\.length\)\}/);
   assert.match(screen, /onRequestOpen=\{\(\) => void openProduct\(\)\}/);
   assert.match(screen, /onRevealSettled=\{handleRevealSettled\}/);
   assert.match(screen, /sourceCategory === "kuji" && ticketNumber/);

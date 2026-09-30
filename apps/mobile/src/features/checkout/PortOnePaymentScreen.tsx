@@ -3,7 +3,7 @@ import Constants from "expo-constants";
 import * as SecureStore from "expo-secure-store";
 import { type Href, useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, AppState, KeyboardAvoidingView, Platform, StyleSheet, View } from "react-native";
+import { ActivityIndicator, Alert, AppState, KeyboardAvoidingView, Platform, StyleSheet, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { DetailPageHeader } from "@/components/DetailPageHeader";
 import { DecorativeIonicon } from "@/components/DecorativeIonicon";
@@ -11,6 +11,7 @@ import { AppText as Text, AppTextInput as TextInput } from "@/components/Typogra
 import { SeedActionButton, SeedInputShell } from "@/design-system/components";
 import { seed } from "@/design-system/seed";
 import {
+  abandonPortOnePayment,
   claimPortOnePaymentAttempt,
   confirmPortOnePayment,
   fetchCheckoutActorId,
@@ -29,6 +30,11 @@ import {
   paymentAttemptState,
   preparePaymentAttempt,
 } from "@/features/checkout/payment-attempt";
+import {
+  abandonedPaymentDestination,
+  isPortOneUserCancel,
+  isPortOneUserCancelError,
+} from "@/features/checkout/payment-abandon";
 import { normalizedPaymentCustomerName } from "@/features/checkout/payment-customer";
 import {
   assertKujiPaymentLease,
@@ -48,7 +54,7 @@ import {
 import { readAuthTokens } from "@/lib/session-store";
 import { colors } from "@/theme";
 
-type PaymentPhase = "loading" | "details" | "paying" | "confirming" | "pending" | "failed";
+type PaymentPhase = "loading" | "details" | "paying" | "confirming" | "abandoning" | "pending" | "failed";
 
 export function PortOnePaymentScreen() {
   const router = useRouter();
@@ -61,6 +67,7 @@ export function PortOnePaymentScreen() {
     paymentId?: string | string[];
   }>();
   const orderId = firstParam(params.orderId) ?? "";
+  const routeProductId = firstParam(params.productId);
   const redirectPaymentId = firstParam(params.paymentId);
   const runtime = useMemo(
     () => resolveMobileRuntimeConfig({
@@ -83,6 +90,7 @@ export function PortOnePaymentScreen() {
   const resumingRef = useRef(false);
   const continuingRef = useRef(false);
   const completedRef = useRef(false);
+  const abandoningRef = useRef(false);
 
   const continueToDraw = useCallback(async (paidOrder: CheckoutOrder) => {
     if (completedRef.current || continuingRef.current) return;
@@ -183,6 +191,39 @@ export function PortOnePaymentScreen() {
       confirmingRef.current = false;
     }
   }, [continueToDraw, runtime.apiBaseUrl]);
+
+  // The customer closed the PG window. Ask the server to cancel this owned
+  // pending order (stable idempotency key per paymentId). A 409 means the server
+  // already holds payment evidence, so fall back to the normal confirm path.
+  const abandonPayment = useCallback(async (paymentOrder: CheckoutOrder) => {
+    if (abandoningRef.current || confirmingRef.current || completedRef.current) return;
+    abandoningRef.current = true;
+    setPhase("abandoning");
+    setMessage("");
+    let confirmInstead = false;
+    try {
+      const accessToken = await verifiedCheckoutToken(runtime.apiBaseUrl, paymentOrder.userId);
+      const outcome = await abandonPortOnePayment(runtime.apiBaseUrl, accessToken, paymentOrder.paymentId);
+      if (outcome.kind === "PAYMENT_EVIDENCE") {
+        confirmInstead = true;
+      } else {
+        if (outcome.orderId !== null && outcome.orderId !== paymentOrder.id) {
+          throw new Error("결제 취소 정보와 주문이 일치하지 않아요.");
+        }
+        completedRef.current = true;
+        void clearPaymentAttempt(SecureStore, paymentOrder).catch(() => undefined);
+        router.replace(abandonedPaymentDestination(paymentOrder, routeProductId) as Href);
+        Alert.alert("결제를 취소했어요", "결제창을 닫아 주문을 취소했어요. 필요하면 다시 시도해 주세요.");
+        return;
+      }
+    } catch (error) {
+      setPhase("pending");
+      setMessage(`${error instanceof Error ? error.message : "결제 취소 상태를 확인하지 못했어요."} 추가 결제는 하지 말고 상태를 다시 확인해 주세요.`);
+    } finally {
+      abandoningRef.current = false;
+    }
+    if (confirmInstead) await confirmPayment(paymentOrder);
+  }, [confirmPayment, routeProductId, router, runtime.apiBaseUrl]);
 
   const assertPayableKujiOrder = useCallback(async (paymentOrder: CheckoutOrder, accessToken: string) => {
     const kujiLine = paymentOrder.lines.find((line) => line.category === "kuji");
@@ -426,13 +467,21 @@ export function PortOnePaymentScreen() {
       ) : paymentRequest ? (
         <Payment
           request={paymentRequest}
-          onComplete={() => { if (order) void confirmPayment(order); }}
-          onError={() => { if (order) void confirmPayment(order); }}
+          onComplete={(response) => {
+            if (!order) return;
+            if (isPortOneUserCancel(response)) void abandonPayment(order);
+            else void confirmPayment(order);
+          }}
+          onError={(error) => {
+            if (!order) return;
+            if (isPortOneUserCancelError(error)) void abandonPayment(order);
+            else void confirmPayment(order);
+          }}
           style={styles.payment}
         />
       ) : (
         <View style={styles.state}>
-          {phase === "loading" || phase === "confirming" ? (
+          {phase === "loading" || phase === "confirming" || phase === "abandoning" ? (
             <ActivityIndicator color={colors.ink} />
           ) : (
             <DecorativeIonicon
@@ -446,6 +495,8 @@ export function PortOnePaymentScreen() {
               ? "주문을 확인하고 있어요"
               : phase === "confirming"
                 ? "결제 승인을 확인하고 있어요"
+                : phase === "abandoning"
+                  ? "결제 취소를 확인하고 있어요"
                 : phase === "pending"
                   ? order?.status === "PAID" || order?.status === "FULFILLED"
                     ? "결제 후 뽑기 정보를 확인하고 있어요"
@@ -455,6 +506,13 @@ export function PortOnePaymentScreen() {
           {message ? <Text style={styles.stateBody}>{message}</Text> : null}
           {phase === "pending" ? (
             <SeedActionButton label="주문·뽑기 상태 다시 확인" onPress={() => { void load(); }} />
+          ) : null}
+          {phase === "pending" && order?.status === "PENDING_PAYMENT" ? (
+            <SeedActionButton
+              label="결제창을 닫았다면 다시 시도"
+              variant="neutralSolid"
+              onPress={() => { void abandonPayment(order); }}
+            />
           ) : null}
           {(phase === "pending" || phase === "failed")
             && (order?.status === "PAID" || order?.status === "FULFILLED") ? (

@@ -13,6 +13,12 @@ import {
   type GachaCheckoutOrderIntent,
   type GachaCheckoutOrderPayload,
 } from "@/features/checkout/gacha-checkout-intent";
+import {
+  interpretPaymentAbandonResponse,
+  paymentAbandonIdempotencyKey,
+  type PaymentAbandonOutcome,
+  type PaymentAbandonResponseBody,
+} from "@/features/checkout/payment-abandon";
 import { createMobileDabbobaClient as createDabbobaClient } from "@/lib/mobile-api-client";
 
 export type CheckoutOrder = components["schemas"]["Order"];
@@ -187,6 +193,33 @@ export async function confirmPortOnePayment(
     providerStatus: body.providerStatus,
     outcome: body.outcome,
   };
+}
+
+/**
+ * Abandons the owner's pending PortOne payment after the customer closed the
+ * PG window. 200 cancels the order; 409 means payment evidence exists and the
+ * caller must confirm instead. The idempotency key is stable per paymentId.
+ */
+export async function abandonPortOnePayment(
+  apiBaseUrl: string,
+  accessToken: string,
+  paymentId: string,
+): Promise<PaymentAbandonOutcome> {
+  const response = await fetch(
+    `${apiBaseUrl.replace(/\/$/, "")}/v1/payments/${encodeURIComponent(paymentId)}/abandon`,
+    {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${accessToken}`,
+        "content-type": "application/json",
+        "idempotency-key": paymentAbandonIdempotencyKey(paymentId),
+        "x-request-id": randomUUID(),
+      },
+      body: "{}",
+    },
+  );
+  const body = await response.json().catch(() => null) as PaymentAbandonResponseBody | null;
+  return interpretPaymentAbandonResponse(response.status, body, paymentId);
 }
 
 export async function claimPortOnePaymentAttempt(

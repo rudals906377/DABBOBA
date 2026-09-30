@@ -58,16 +58,46 @@ export function mostRestrictiveCommerceCapability(
   return buildCapability === "LIVE" && serverCapability === "LIVE" ? "LIVE" : "PRELAUNCH";
 }
 
+export type CommerceRouteAccess = "WAIT" | "ALLOW" | "DENY";
+
+/**
+ * Where the current server capability came from. `VERIFIED` is a real server
+ * answer (fresh or still inside the public-config grace window), including an
+ * explicit `PRELAUNCH`. `UNAVAILABLE` means the value is `null` only because
+ * refreshes failed (never succeeded, or the grace window expired).
+ */
+export type ServerCapabilitySource = "VERIFIED" | "UNAVAILABLE";
+
+export function resolveServerCapabilitySource(
+  serverCapability: CommerceCapability | null,
+): ServerCapabilitySource {
+  return serverCapability === null ? "UNAVAILABLE" : "VERIFIED";
+}
+
+/**
+ * Route gate decision.
+ *
+ * - A PRELAUNCH build never opens commerce routes.
+ * - Before the first config answer, wait.
+ * - A new entry requires an explicit server `LIVE` (ALLOW).
+ * - An explicit server `PRELAUNCH` always removes the route (DENY).
+ * - A failure-induced `null` denies new entries, but once this gate has
+ *   already rendered ALLOW (`previousAccess === "ALLOW"`) it keeps the mounted
+ *   screen: a dropped network request must not unmount a live payment/draw.
+ */
 export function resolveCommerceRouteAccess(
   buildCapability: CommerceCapability,
   serverCapability: CommerceCapability | null,
   configReady: boolean,
-): "WAIT" | "ALLOW" | "DENY" {
+  previousAccess: CommerceRouteAccess | null = null,
+): CommerceRouteAccess {
   if (buildCapability !== "LIVE") return "DENY";
+  if (serverCapability === "PRELAUNCH") return "DENY";
+  if (serverCapability === "LIVE") return configReady ? "ALLOW" : "WAIT";
+  // serverCapability === null: unknown because refreshes failed or none finished.
+  if (previousAccess === "ALLOW") return "ALLOW";
   if (!configReady) return "WAIT";
-  return mostRestrictiveCommerceCapability(buildCapability, serverCapability) === "LIVE"
-    ? "ALLOW"
-    : "DENY";
+  return "DENY";
 }
 
 export function resolveCatalogImageUrl(

@@ -408,7 +408,12 @@ export function CheckoutScreen() {
 
   const openLivePayment = useCallback((order: CheckoutOrder) => {
     const category = order.lines[0]?.category ?? product?.category;
-    router.push({
+    // The payment route owns this order (and any kuji lease) from here on.
+    // Replace checkout so a back gesture cannot return into a stale or expired
+    // lease, and mark the handoff so the kuji beforeRemove cancel guard does
+    // not release the lease the payment is using.
+    checkoutCompletedRef.current = true;
+    router.replace({
       pathname: `/checkout/payment/${encodeURIComponent(order.id)}`,
       params: {
         productId,
@@ -531,6 +536,7 @@ export function CheckoutScreen() {
     orderId: string,
     entitlementIds: string[],
   ) => {
+    checkoutCompletedRef.current = true;
     presentDrawOpenModeChoice(entitlementIds.length, (mode) => {
       if (!checkoutFocusedRef.current) return;
       const query = new URLSearchParams({
@@ -861,6 +867,9 @@ export function CheckoutScreen() {
       if (!continuedOrder) return;
       order = continuedOrder;
       const entitlementIds = paidKujiOrderEntitlementIds(order, quantity);
+      // A PAID order owns the room's DRAWING transition; never let the
+      // beforeRemove guard cancel it while the draw route replaces checkout.
+      if (entitlementIds) checkoutCompletedRef.current = true;
       if (!entitlementIds) {
         if (order.status === "PENDING_PAYMENT") {
           setDemoOrder(order);
