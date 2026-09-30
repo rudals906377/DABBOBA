@@ -1,6 +1,5 @@
 import { setAudioModeAsync, useAudioPlayer, type AudioPlayer } from "expo-audio";
 import { useCallback, useEffect, useRef } from "react";
-import { GACHA_REVEAL_SOUND_TIMING } from "@/features/draw/gacha-reveal-sound";
 
 const LEVER_SOUND = require("../../../assets/draw/gacha/sfx/gacha-lever-ratchet.wav");
 const DROP_SOUND = require("../../../assets/draw/gacha/sfx/gacha-capsule-drop.wav");
@@ -21,7 +20,10 @@ export function useGachaRevealAudio(enabled: boolean) {
   const dropPlayer = useAudioPlayer(DROP_SOUND, { downloadFirst: true, updateInterval: 1_000 });
   const openPlayer = useAudioPlayer(OPEN_SOUND, { downloadFirst: true, updateInterval: 1_000 });
   const enabledRef = useRef(enabled);
-  const timersRef = useRef<Array<ReturnType<typeof setTimeout>>>([]);
+  // The native reveal timeline fires each cue at its matching progress; this
+  // arming state lets cancel (reset, SKIP, settle, unmount) silence cues that
+  // are already on their way from the UI thread.
+  const cuesRef = useRef({ armed: false, dropPlayed: false, openPlayed: false });
 
   enabledRef.current = enabled;
 
@@ -45,8 +47,7 @@ export function useGachaRevealAudio(enabled: boolean) {
   }, [dropPlayer, enabled, leverPlayer, openPlayer]);
 
   const cancelScheduled = useCallback(() => {
-    for (const timer of timersRef.current) clearTimeout(timer);
-    timersRef.current = [];
+    cuesRef.current = { armed: false, dropPlayed: false, openPlayed: false };
   }, []);
 
   const playLever = useCallback(() => {
@@ -54,14 +55,24 @@ export function useGachaRevealAudio(enabled: boolean) {
   }, [leverPlayer]);
 
   const scheduleDispense = useCallback(() => {
-    cancelScheduled();
-    timersRef.current = [
-      setTimeout(() => void replay(dropPlayer, enabledRef), GACHA_REVEAL_SOUND_TIMING.dropImpactMs),
-      setTimeout(() => void replay(openPlayer, enabledRef), GACHA_REVEAL_SOUND_TIMING.seamOpenMs),
-    ];
-  }, [cancelScheduled, dropPlayer, openPlayer]);
+    cuesRef.current = { armed: true, dropPlayed: false, openPlayed: false };
+  }, []);
+
+  const playDropImpact = useCallback(() => {
+    const cues = cuesRef.current;
+    if (!cues.armed || cues.dropPlayed) return;
+    cues.dropPlayed = true;
+    void replay(dropPlayer, enabledRef);
+  }, [dropPlayer]);
+
+  const playSeamOpen = useCallback(() => {
+    const cues = cuesRef.current;
+    if (!cues.armed || cues.openPlayed) return;
+    cues.openPlayed = true;
+    void replay(openPlayer, enabledRef);
+  }, [openPlayer]);
 
   useEffect(() => cancelScheduled, [cancelScheduled]);
 
-  return { cancelScheduled, playLever, scheduleDispense };
+  return { cancelScheduled, playDropImpact, playLever, playSeamOpen, scheduleDispense };
 }

@@ -1,24 +1,17 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import {
+import * as revealState from "../apps/mobile/src/features/draw/draw-reveal-state.ts";
+
+const {
   DRAW_MOTION,
-  advancePreviewRevealState,
-  buildPreviewOpenActions,
-  completePreviewRevealState,
   createKujiOpenMotionState,
-  createPreviewResultItems,
-  createPreviewRevealState,
-  currentPreviewTicketIndex,
   resolveKujiDragProgress,
-  resolvePreviewNextTicketAction,
   resolveKujiPeelRelease,
   resolveKujiTravelDuration,
   resolveKujiTravelSegments,
-  selectHighestRankedResultId,
-  startPreviewOpenAll,
   transitionKujiOpenMotion,
-} from "../apps/mobile/src/features/draw/draw-reveal-state.ts";
+} = revealState;
 
 test("kuji drag progress stays clamped and travel completion follows the remaining distance", () => {
   assert.equal(resolveKujiDragProgress(-20, 200), 0);
@@ -249,111 +242,20 @@ test("cancelled travel and impact callbacks never advance the reveal", () => {
   );
 });
 
-test("one-by-one opening returns to a sealed ticket between results", () => {
-  let state = createPreviewRevealState("single", 3);
-  assert.deepEqual(state, { mode: "single", count: 3, openedCount: 0, phase: "sealed" });
-  assert.equal(currentPreviewTicketIndex(state), 0);
-
-  state = advancePreviewRevealState(state);
-  assert.deepEqual(state, { mode: "single", count: 3, openedCount: 1, phase: "revealed" });
-  assert.equal(currentPreviewTicketIndex(state), 0);
-
-  state = advancePreviewRevealState(state);
-  assert.deepEqual(state, { mode: "single", count: 3, openedCount: 1, phase: "sealed" });
-  assert.equal(currentPreviewTicketIndex(state), 1);
-
-  state = advancePreviewRevealState(state);
-  state = advancePreviewRevealState(state);
-  state = advancePreviewRevealState(state);
-  assert.deepEqual(state, { mode: "single", count: 3, openedCount: 3, phase: "revealed" });
-
-  state = advancePreviewRevealState(state);
-  assert.deepEqual(state, { mode: "single", count: 3, openedCount: 3, phase: "summary" });
-  assert.deepEqual(advancePreviewRevealState(state), state);
-});
-
-test("the next-ticket action prepares a sealed draggable ticket before it can auto-open", () => {
-  const initial = createPreviewRevealState("single", 3);
-  assert.equal(resolvePreviewNextTicketAction(initial), "open");
-  assert.equal(buildPreviewOpenActions(initial).nextLabel, "1번째 쿠지 열기");
-
-  const firstResult = advancePreviewRevealState(initial);
-  assert.equal(resolvePreviewNextTicketAction(firstResult), "prepare");
-  assert.equal(buildPreviewOpenActions(firstResult).nextLabel, "2번째 쿠지 선택");
-
-  const secondTicket = advancePreviewRevealState(firstResult);
-  assert.deepEqual(secondTicket, {
-    mode: "single",
-    count: 3,
-    openedCount: 1,
-    phase: "sealed",
-  });
-  assert.equal(resolvePreviewNextTicketAction(secondTicket), "open");
-  assert.equal(buildPreviewOpenActions(secondTicket).nextLabel, "2번째 쿠지 열기");
-
-  assert.equal(resolvePreviewNextTicketAction({ ...firstResult, openedCount: 3 }), "none");
-  assert.equal(resolvePreviewNextTicketAction({ ...firstResult, phase: "summary" }), "none");
-});
-
-test("open-all reveals the complete result set in one action", () => {
-  const initial = createPreviewRevealState("all", 50);
-  const summary = advancePreviewRevealState(initial);
-
-  assert.deepEqual(summary, { mode: "all", count: 50, openedCount: 50, phase: "summary" });
-  assert.equal(createPreviewResultItems([], 50).length, 50);
-  assert.deepEqual(completePreviewRevealState(initial), summary);
-});
-
-test("one-by-one reveal can switch the unopened kuji tickets to open-all", () => {
-  let state = createPreviewRevealState("single", 7);
-
-  assert.deepEqual(buildPreviewOpenActions(state), {
-    nextLabel: "1번째 쿠지 열기",
-    openAllLabel: "7개 한 번에 열기",
-  });
-
-  state = advancePreviewRevealState(state);
-  assert.deepEqual(buildPreviewOpenActions(state), {
-    nextLabel: "2번째 쿠지 선택",
-    openAllLabel: "6개 한 번에 열기",
-  });
-
-  const batch = startPreviewOpenAll(state);
-  assert.deepEqual(batch, {
-    mode: "all",
-    count: 7,
-    openedCount: 1,
-    phase: "sealed",
-  });
-  assert.deepEqual(advancePreviewRevealState(batch), {
-    mode: "all",
-    count: 7,
-    openedCount: 7,
-    phase: "summary",
-  });
-
-  assert.deepEqual(buildPreviewOpenActions(createPreviewRevealState("single", 1)), {
-    nextLabel: "1번째 쿠지 열기",
-    openAllLabel: null,
-  });
-});
-
-test("preview result items preserve selected ticket numbers", () => {
-  const items = createPreviewResultItems(["02", "17", "50"], 3);
-
-  assert.deepEqual(items.map(({ ticketNumber }) => ticketNumber), ["02", "17", "50"]);
-  assert.equal(new Set(items.map(({ id }) => id)).size, 3);
-});
-
-test("the featured committed result requires explicit server tier ranks", () => {
-  const results = [
-    { id: "b", rarity: "B" },
-    { id: "s-first", rarity: "S" },
-    { id: "a", rarity: "A" },
-    { id: "s-second", rarity: "S" },
-    { id: "unknown", rarity: "LAST" },
-  ];
-
-  assert.equal(selectHighestRankedResultId(results, { B: 3, S: 1, A: 2 }), "s-first");
-  assert.equal(selectHighestRankedResultId(results, {}), "b");
+test("the unreachable preview sequencing and best-result ranking helpers are removed", () => {
+  // No route mounts a preview reveal; committed results are shown in server
+  // entitlement order and never ranked from a free-form rarity label.
+  for (const name of [
+    "createPreviewRevealState",
+    "advancePreviewRevealState",
+    "completePreviewRevealState",
+    "buildPreviewOpenActions",
+    "resolvePreviewNextTicketAction",
+    "startPreviewOpenAll",
+    "currentPreviewTicketIndex",
+    "createPreviewResultItems",
+    "selectHighestRankedResultId",
+  ]) {
+    assert.equal(revealState[name], undefined, `${name} must stay removed`);
+  }
 });
