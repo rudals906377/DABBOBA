@@ -147,7 +147,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** @description Verifies a live Supabase social-provider session for an already linked DABBOBA customer and issues an ephemeral customer session used by the public account-deletion flow. This endpoint never creates a user or links an unknown provider subject. */
+        /** @description Verifies a live Supabase social-provider session for an already linked DABBOBA customer and issues an ephemeral ACCOUNT_DELETION-scoped customer session used by the public account-deletion flow. That session is accepted only by the account-deletion preview, request, and status routes and by logout; every other authenticated route answers 403 SESSION_SCOPE_FORBIDDEN. A provider that is not currently enabled is refused unless the verified identity is already linked to an existing account. This endpoint never creates a user or links an unknown provider subject. */
         post: operations["exchangeExistingCustomerForAccountDeletion"];
         delete?: never;
         options?: never;
@@ -294,6 +294,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /** @description Rotates an active administrator session after authenticated activity. The previous token is revoked; the replacement keeps the original login time and expires at the earlier of the idle window (ADMIN_SESSION_IDLE_MINUTES) and the absolute lifetime (ADMIN_SESSION_MAX_HOURS from login). A session past its absolute lifetime is revoked and answered with 401. */
         post: operations["keepAdminSessionAlive"];
         delete?: never;
         options?: never;
@@ -5026,7 +5027,7 @@ export interface components {
                 "application/json": components["schemas"]["LegalAcceptanceRequiredErrorEnvelope"];
             };
         };
-        /** @description The authenticated actor lacks the required role or ownership. */
+        /** @description The authenticated actor lacks the required role or ownership, or presents an ACCOUNT_DELETION-scoped session on a route that does not accept it (SESSION_SCOPE_FORBIDDEN). */
         Forbidden: {
             headers: {
                 [name: string]: unknown;
@@ -5333,7 +5334,7 @@ export interface operations {
             409: components["responses"]["Conflict"];
             428: components["responses"]["LegalAcceptanceRequired"];
             429: components["responses"]["RateLimited"];
-            /** @description Supabase customer token exchange or Apple revocation credential protection is unavailable. */
+            /** @description Supabase customer token exchange, the selected login provider for an unlinked identity (CUSTOMER_LOGIN_PROVIDER_UNAVAILABLE), or Apple revocation credential protection is unavailable. */
             503: {
                 headers: {
                     [name: string]: unknown;
@@ -5533,15 +5534,21 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Extends an active administrator session after authenticated activity. */
+            /** @description Administrator session rotated and renewed within its absolute lifetime. */
             200: {
                 headers: {
+                    "Cache-Control"?: "no-store";
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": {
+                        token: string;
                         /** Format: date-time */
                         expiresAt: string;
+                        /** Format: uuid */
+                        sessionId: string;
+                        /** Format: uuid */
+                        rotatedFromSessionId: string;
                     };
                 };
             };

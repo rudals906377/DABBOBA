@@ -177,7 +177,11 @@ test(
     assert.equal(issuedSession.rows[0]!.ip_address, "2001:db8::7");
     assert.equal(issuedSession.rows[0]!.user_agent, "Dabboba Signed Admin/1.0");
 
-    const adminToken = (successfulAfterExpiry.json() as { token: string }).token;
+    const adminLogin = successfulAfterExpiry.json() as { token: string; expiresAt: string };
+    const loginTtlMs = new Date(adminLogin.expiresAt).getTime() - Date.now();
+    assert.ok(loginTtlMs <= 60 * 60_000 && loginTtlMs > 55 * 60_000, `admin login uses the idle window: ${loginTtlMs}`);
+
+    const firstToken = adminLogin.token;
     await pool.query(
       "UPDATE sessions SET expires_at = now() + interval '10 minutes' WHERE user_id = $1 AND session_kind = 'ADMIN' AND revoked_at IS NULL",
       [userId],
@@ -185,11 +189,78 @@ test(
     const renewed = await app.inject({
       method: "POST",
       url: "/v1/admin/auth/keepalive",
-      headers: { authorization: `Bearer ${adminToken}` },
+      headers: { authorization: `Bearer ${firstToken}` },
     });
     assert.equal(renewed.statusCode, 200, renewed.body);
-    assert.ok(new Date((renewed.json() as { expiresAt: string }).expiresAt).getTime() > Date.now() + 23 * 60 * 60_000);
+    const renewal = renewed.json() as { token: string; expiresAt: string; sessionId: string; rotatedFromSessionId: string };
+    assert.notEqual(renewal.token, firstToken);
+    const renewedTtlMs = new Date(renewal.expiresAt).getTime() - Date.now();
+    assert.ok(renewedTtlMs <= 60 * 60_000 && renewedTtlMs > 55 * 60_000, `keepalive renews the idle window: ${renewedTtlMs}`);
+    const lineage = await pool.query<{ rotated_from_session_id: string; created_at: Date; old_created_at: Date; old_reason: string }>(
+      `SELECT s.rotated_from_session_id, s.created_at, old.created_at AS old_created_at, old.revoke_reason AS old_reason
+         FROM sessions s JOIN sessions old ON old.id = s.rotated_from_session_id
+        WHERE s.id = $1`,
+      [renewal.sessionId],
+    );
+    assert.equal(lineage.rows[0]!.rotated_from_session_id, renewal.rotatedFromSessionId);
+    assert.equal(lineage.rows[0]!.old_reason, "ROTATED");
+    assert.equal(lineage.rows[0]!.created_at.getTime(), lineage.rows[0]!.old_created_at.getTime(), "rotation keeps the login time");
 
+    const staleKeepalive = await app.inject({
+      method: "POST",
+      url: "/v1/admin/auth/keepalive",
+      headers: { authorization: `Bearer ${firstToken}` },
+    });
+    assert.equal(staleKeepalive.statusCode, 401, "the rotated-out admin token is revoked");
+
+    // Near the absolute cap, keepalive stops at created_at + 12h instead of
+    // granting another full idle window.
+    await pool.query(
+      "UPDATE sessions SET created_at = now() - interval '11 hours 50 minutes' WHERE id = $1",
+      [renewal.sessionId],
+    );
+    const capped = await app.inject({
+      method: "POST",
+      url: "/v1/admin/auth/keepalive",
+      headers: { authorization: `Bearer ${renewal.token}` },
+    });
+    assert.equal(capped.statusCode, 200, capped.body);
+    const cappedRenewal = capped.json() as { token: string; expiresAt: string };
+    const cappedTtlMs = new Date(cappedRenewal.expiresAt).getTime() - Date.now();
+    assert.ok(cappedTtlMs <= 10 * 60_000 && cappedTtlMs > 8 * 60_000, `keepalive is capped at the absolute lifetime: ${cappedTtlMs}`);
+
+    const adminMe = await app.inject({
+      method: "GET",
+      url: "/v1/admin/me",
+      headers: { authorization: `Bearer ${cappedRenewal.token}` },
+    });
+    assert.equal(adminMe.statusCode, 200, adminMe.body);
+    await pool.query(
+      `UPDATE sessions SET created_at = now() - interval '12 hours 1 minute'
+        WHERE user_id = $1 AND session_kind = 'ADMIN' AND revoked_at IS NULL`,
+      [userId],
+    );
+    const pastCap = await app.inject({
+      method: "GET",
+      url: "/v1/admin/me",
+      headers: { authorization: `Bearer ${cappedRenewal.token}` },
+    });
+    assert.equal(pastCap.statusCode, 401, "lookup rejects an administrator session past its absolute lifetime");
+    const pastCapKeepalive = await app.inject({
+      method: "POST",
+      url: "/v1/admin/auth/keepalive",
+      headers: { authorization: `Bearer ${cappedRenewal.token}` },
+    });
+    assert.equal(pastCapKeepalive.statusCode, 401, pastCapKeepalive.body);
+
+    const relogin = await app.inject({
+      method: "POST",
+      url: "/v1/admin/auth/login",
+      headers: signedClientHeaders,
+      payload: { email, password },
+    });
+    assert.equal(relogin.statusCode, 201, relogin.body);
+    const adminToken = (relogin.json() as { token: string }).token;
     const loggedOut = await app.inject({
       method: "POST",
       url: "/v1/admin/auth/logout",
@@ -466,6 +537,50 @@ test(
       headers: authorization(raceToken),
     });
     assert.equal(noRequestYet.statusCode, 404, noRequestYet.body);
+
+    // A deletion-scoped session only reaches the deletion and logout routes.
+    const deletionScopedToken = `customer-lifecycle-deletion-${randomUUID()}`;
+    await pool.query(
+      `INSERT INTO sessions(user_id,session_kind,scope,token_digest,expires_at)
+       VALUES($1,'USER','ACCOUNT_DELETION',$2,now()+interval '15 minutes')`,
+      [first.actor.userId, tokenDigest(deletionScopedToken, config.sessionTokenPepper)],
+    );
+    for (const [method, url] of [
+      ["GET", "/v1/auth/me"],
+      ["POST", "/v1/auth/refresh"],
+      ["POST", "/v1/auth/logout-others"],
+      ["GET", "/v1/account/profile"],
+    ] as const) {
+      const scoped = await app.inject({ method, url, headers: authorization(deletionScopedToken) });
+      assert.equal(scoped.statusCode, 403, `${method} ${url}: ${scoped.body}`);
+      assert.equal((scoped.json() as { error: { code: string } }).error.code, "SESSION_SCOPE_FORBIDDEN");
+    }
+    const scopedPreview = await app.inject({
+      method: "GET",
+      url: "/v1/account/deletion-preview",
+      headers: authorization(deletionScopedToken),
+    });
+    assert.equal(scopedPreview.statusCode, 200, scopedPreview.body);
+    const scopedStatus = await app.inject({
+      method: "GET",
+      url: "/v1/account/deletion-request",
+      headers: authorization(deletionScopedToken),
+    });
+    assert.equal(scopedStatus.statusCode, 404, scopedStatus.body);
+    const scopedLogout = await app.inject({
+      method: "POST",
+      url: "/v1/auth/logout",
+      headers: authorization(deletionScopedToken),
+    });
+    assert.equal(scopedLogout.statusCode, 204, scopedLogout.body);
+    await assert.rejects(
+      pool.query(
+        `INSERT INTO sessions(user_id,session_kind,scope,token_digest,expires_at)
+         VALUES($1,'ADMIN','ACCOUNT_DELETION',$2,now()+interval '15 minutes')`,
+        [admin.rows[0]!.id, tokenDigest(`scoped-admin-${randomUUID()}`, config.sessionTokenPepper)],
+      ),
+      (error: unknown) => (error as { code?: string }).code === "23514",
+    );
 
     const ipId = `lifecycle-ip-${suffix}`;
     const productId = `lifecycle-product-${suffix}`;

@@ -164,6 +164,7 @@ async function existingBrokeredCustomerForDeletion(
   client: DatabaseClient,
   claims: VerifiedSupabaseCustomer,
   loginProvider: (typeof CUSTOMER_LOGIN_METHODS)[number],
+  providerEnabled: boolean,
 ): Promise<CustomerUserRow> {
   await client.query(
     "SELECT pg_advisory_xact_lock(hashtextextended($1::text,0))",
@@ -177,6 +178,11 @@ async function existingBrokeredCustomerForDeletion(
     [loginProvider, claims.canonicalSubject],
   );
   const linkedUserIds = [...new Set(linked.rows.map((row) => row.user_id))];
+  if (!providerEnabled && linkedUserIds.length !== 1) {
+    // A disabled provider may only re-authenticate an identity that already
+    // exists (see the route comment); it never proves anything new.
+    throw new AppError(503, "CUSTOMER_LOGIN_PROVIDER_UNAVAILABLE", "현재 선택한 로그인 방식을 사용할 수 없습니다.");
+  }
   if (linkedUserIds.length !== 1) {
     throw unauthorized("기존 로그인 계정으로 본인 확인을 완료하지 못했습니다.");
   }
@@ -437,9 +443,17 @@ export async function registerCustomerAuthRoutes(
       if (loginProvider === "PHONE" && !claims.phone) {
         throw forbidden("인증된 휴대폰 번호를 확인하지 못했습니다.");
       }
+      // Apply the same enabled-provider gate as ordinary login, with one
+      // legacy exception: a verified identity that is already linked to a
+      // DABBOBA account may still re-authenticate here after its provider was
+      // disabled. Account deletion must stay reachable for every existing
+      // customer (App Store Guideline 5.1.1(v)); disabling a provider must not
+      // strand accounts that can only prove ownership through it. A disabled
+      // provider never creates or links an identity on this path.
+      const providerEnabled = context.config.customerLoginProviders?.includes(loginProvider) === true;
       const requestUserAgent = userAgent(request.headers["user-agent"]);
       const { user, session } = await withTransaction(context.pool, async (client) => {
-        const user = await existingBrokeredCustomerForDeletion(client, claims, loginProvider);
+        const user = await existingBrokeredCustomerForDeletion(client, claims, loginProvider, providerEnabled);
         if (loginProvider === "APPLE") {
           if (rawAppleRefreshToken) {
             await storeAppleRefreshCredential(client, context, user.id, rawAppleRefreshToken);
@@ -468,6 +482,7 @@ export async function registerCustomerAuthRoutes(
         const session = await issueSession(client, context.config, {
           userId: user.id,
           kind: "USER",
+          scope: "ACCOUNT_DELETION",
           ip: request.ip,
           expiresInMs: 15 * 60_000,
           ...(requestUserAgent ? { userAgent: requestUserAgent } : {}),

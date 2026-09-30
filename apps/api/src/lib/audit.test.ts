@@ -53,7 +53,7 @@ test("admin audit stores the decoded Korean reason without changing its text", a
   } as unknown as DatabaseClient;
   const actor: Actor = {
     userId: "admin-1", email: "admin@example.test", nickname: "관리자", role: "ADMIN",
-    status: "ACTIVE", sessionId: "session-1", sessionKind: "ADMIN",
+    status: "ACTIVE", sessionId: "session-1", sessionKind: "ADMIN", sessionScope: "FULL",
   };
 
   await writeAdminAudit(client, request({

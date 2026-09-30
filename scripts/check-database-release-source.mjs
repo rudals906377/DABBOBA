@@ -143,6 +143,11 @@ export const DATABASE_RELEASE_MIGRATIONS = Object.freeze([
     path: 'packages/db/migrations/0075_shipping_request_retry_after_cancellation.sql',
     sha256: 'b2cceb7a6b01e9e9f4a399420a560f2cd7c2d445fcf813760b451e04f95a4494',
   }),
+  Object.freeze({
+    file: '0077_session_scope.sql',
+    path: 'packages/db/migrations/0077_session_scope.sql',
+    sha256: 'dd09f7792b61a169d2a11af9741023f9ee7847e93e4cf67cb7624a574de16f48',
+  }),
 ]);
 
 export const MINIMUM_DATABASE_RELEASE_VERSION =

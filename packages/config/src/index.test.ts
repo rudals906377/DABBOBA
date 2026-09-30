@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   ADMIN_PROXY_IDENTITY_HEADERS,
+  assertAppleSignInParity,
   loadAdminConfig,
   loadApiConfig,
   loadMigrationConfig,
@@ -243,6 +244,94 @@ test("customer auth providers are explicit and fail closed", () => {
     ...base,
     CUSTOMER_AUTH_ENABLED_PROVIDERS: "APPLE",
   }), /APPLE login requires encrypted token storage/);
+});
+
+test("STAGING and PRODUCTION refuse third-party social login without Sign in with Apple", () => {
+  const production = {
+    NODE_ENV: "production",
+    API_SURFACE: "customer",
+    DATABASE_URL: "postgresql://dabboba_runtime:secret@db.example.test/postgres",
+    SESSION_TOKEN_PEPPER: "session-pepper-that-is-long-and-production-only",
+    SUPABASE_URL: "https://project.supabase.co",
+    SUPABASE_PUBLISHABLE_KEY: "sb_publishable_production_fixture_key",
+    WEB_ORIGINS: "https://www.example.test",
+  };
+  const appleStorage = {
+    APPLE_TOKEN_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString("base64url"),
+    APPLE_TOKEN_ENCRYPTION_KEY_VERSION: "1",
+  };
+
+  for (const providers of ["KAKAO", "NAVER,GOOGLE", "PHONE,KAKAO,NAVER,GOOGLE"]) {
+    assert.throws(
+      () => loadApiConfig({ ...production, CUSTOMER_AUTH_ENABLED_PROVIDERS: providers }),
+      /without APPLE; App Store Review Guideline 4\.8[^]*blocked in PRODUCTION/,
+    );
+    assert.throws(
+      () => loadApiConfig({
+        ...production,
+        DABBOBA_ENVIRONMENT_TIER: "STAGING",
+        CUSTOMER_AUTH_ENABLED_PROVIDERS: providers,
+      }),
+      /blocked in STAGING/,
+    );
+  }
+
+  assert.deepEqual(loadApiConfig({
+    ...production,
+    ...appleStorage,
+    CUSTOMER_AUTH_ENABLED_PROVIDERS: "PHONE,KAKAO,NAVER,GOOGLE,APPLE",
+  }).customerLoginProviders, ["PHONE", "KAKAO", "NAVER", "GOOGLE", "APPLE"]);
+  assert.deepEqual(loadApiConfig({
+    ...production,
+    CUSTOMER_AUTH_ENABLED_PROVIDERS: "PHONE",
+  }).customerLoginProviders, ["PHONE"]);
+  assert.deepEqual(loadApiConfig(production).customerLoginProviders, []);
+
+  const warnings: string[] = [];
+  assertAppleSignInParity(["KAKAO"], "TEST", (message) => warnings.push(message));
+  assertAppleSignInParity(["GOOGLE", "PHONE"], "LOCAL", (message) => warnings.push(message));
+  assertAppleSignInParity(["PHONE"], "TEST", (message) => warnings.push(message));
+  assertAppleSignInParity(["KAKAO", "APPLE"], "PRODUCTION", (message) => warnings.push(message));
+  assert.equal(warnings.length, 2);
+  assert.match(warnings[0]!, /allowed only in TEST/);
+  assert.match(warnings[1]!, /allowed only in LOCAL/);
+  assert.deepEqual(loadApiConfig({
+    NODE_ENV: "test",
+    DATABASE_URL: "postgresql://test/db",
+    SESSION_TOKEN_PEPPER: "test-pepper",
+    SUPABASE_URL: "https://project.supabase.co",
+    SUPABASE_PUBLISHABLE_KEY: "sb_publishable_local_fixture_key",
+    CUSTOMER_AUTH_ENABLED_PROVIDERS: "KAKAO",
+  }).customerLoginProviders, ["KAKAO"]);
+});
+
+test("administrator session limits default to a bounded cap and idle window", () => {
+  const base = {
+    NODE_ENV: "test",
+    DATABASE_URL: "postgresql://test/db",
+    SESSION_TOKEN_PEPPER: "test-pepper",
+  };
+  const defaults = loadApiConfig(base);
+  assert.equal(defaults.adminSessionMaxHours, 12);
+  assert.equal(defaults.adminSessionIdleMinutes, 60);
+
+  const custom = loadApiConfig({
+    ...base,
+    ADMIN_SESSION_MAX_HOURS: "8",
+    ADMIN_SESSION_IDLE_MINUTES: "30",
+  });
+  assert.equal(custom.adminSessionMaxHours, 8);
+  assert.equal(custom.adminSessionIdleMinutes, 30);
+
+  assert.throws(() => loadApiConfig({ ...base, ADMIN_SESSION_MAX_HOURS: "0" }), /ADMIN_SESSION_MAX_HOURS/);
+  assert.throws(() => loadApiConfig({ ...base, ADMIN_SESSION_MAX_HOURS: "169" }), /ADMIN_SESSION_MAX_HOURS/);
+  assert.throws(() => loadApiConfig({ ...base, ADMIN_SESSION_MAX_HOURS: "1.5" }), /ADMIN_SESSION_MAX_HOURS/);
+  assert.throws(() => loadApiConfig({ ...base, ADMIN_SESSION_IDLE_MINUTES: "4" }), /ADMIN_SESSION_IDLE_MINUTES/);
+  assert.throws(() => loadApiConfig({ ...base, ADMIN_SESSION_IDLE_MINUTES: "1441" }), /ADMIN_SESSION_IDLE_MINUTES/);
+  assert.throws(
+    () => loadApiConfig({ ...base, ADMIN_SESSION_MAX_HOURS: "1", ADMIN_SESSION_IDLE_MINUTES: "61" }),
+    /ADMIN_SESSION_IDLE_MINUTES must not exceed ADMIN_SESSION_MAX_HOURS/,
+  );
 });
 
 test("Dukroom customer API is disabled by default and requires an explicit boolean flag", () => {

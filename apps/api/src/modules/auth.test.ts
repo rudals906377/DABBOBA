@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { FastifyInstance, FastifyRequest } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { ApiContext } from "../types.js";
 import { AppError } from "../lib/errors.js";
 import { nextAdminLoginFailureState, registerAuthRoutes } from "./auth.js";
@@ -40,8 +40,9 @@ test("a fresh admin failure window locks only on its fifth failure", () => {
   );
 });
 
-test("admin keepalive extends only the authenticated, unrevoked session", async () => {
-  let handler: ((request: FastifyRequest) => Promise<{ expiresAt: string }>) | undefined;
+test("admin keepalive rotates the session and never renews past the absolute cap", async () => {
+  type KeepaliveResult = { token: string; expiresAt: string; sessionId: string; rotatedFromSessionId: string };
+  let handler: ((request: FastifyRequest, reply: FastifyReply) => Promise<KeepaliveResult>) | undefined;
   const app = {
     post(path: string, ...args: unknown[]) {
       if (path === "/v1/admin/auth/keepalive") handler = args.at(-1) as typeof handler;
@@ -49,26 +50,59 @@ test("admin keepalive extends only the authenticated, unrevoked session", async 
     get() {},
   } as unknown as FastifyInstance;
   const expiry = new Date("2026-09-27T12:00:00.000Z");
-  let found = true;
+  let state: "active" | "past-cap" | "missing" = "active";
   const statements: Array<{ sql: string; values: unknown[] }> = [];
-  const context = {
-    config: { sessionTtlDays: 30 },
-    auth: { requireAdmin() {} },
-    pool: {
-      async query(sql: string, values: unknown[]) {
-        statements.push({ sql, values });
-        return { rows: found ? [{ expires_at: expiry }] : [], rowCount: found ? 1 : 0 };
-      },
+  const client = {
+    async query(sql: string, values: unknown[] = []) {
+      statements.push({ sql, values });
+      if (sql.includes("FOR UPDATE")) {
+        if (state === "missing") return { rows: [], rowCount: 0 };
+        return { rows: [{ within_cap: state === "active" }], rowCount: 1 };
+      }
+      if (sql.includes("INSERT INTO sessions")) {
+        return { rows: [{ id: "rotated-session-id", expires_at: expiry }], rowCount: 1 };
+      }
+      return { rows: [], rowCount: 1 };
     },
+    release() {},
+  };
+  const context = {
+    config: { sessionTtlDays: 30, sessionTokenPepper: "pepper", adminSessionMaxHours: 8, adminSessionIdleMinutes: 30 },
+    auth: { requireAdmin() {} },
+    pool: { async connect() { return client; } },
   } as unknown as ApiContext;
   await registerAuthRoutes(app, context);
   assert.ok(handler);
   const request = { actor: { sessionId: "session-id", userId: "admin-id" } } as unknown as FastifyRequest;
-  assert.deepEqual(await handler(request), { expiresAt: expiry.toISOString() });
-  assert.deepEqual(statements[0]!.values, ["session-id", "admin-id", 30]);
-  assert.match(statements[0]!.sql, /session_kind = 'ADMIN'/);
-  assert.match(statements[0]!.sql, /revoked_at IS NULL AND expires_at > now\(\)/);
+  const reply = {
+    header() { return reply; },
+    send(body: unknown) { return body; },
+  } as unknown as FastifyReply;
 
-  found = false;
-  await assert.rejects(() => handler!(request), (error: unknown) => error instanceof AppError && error.statusCode === 401);
+  const result = await handler(request, reply);
+  assert.equal(result.expiresAt, expiry.toISOString());
+  assert.equal(result.sessionId, "rotated-session-id");
+  assert.equal(result.rotatedFromSessionId, "session-id");
+  assert.match(result.token, /^[A-Za-z0-9_-]{43}$/);
+  const lock = statements.find((entry) => entry.sql.includes("FOR UPDATE"))!;
+  assert.deepEqual(lock.values, ["session-id", "admin-id", 8]);
+  assert.match(lock.sql, /session_kind='ADMIN'/);
+  assert.match(lock.sql, /revoked_at IS NULL AND expires_at>now\(\)/);
+  assert.ok(statements.some((entry) => /revoke_reason='ROTATED'/.test(entry.sql)));
+  const insert = statements.find((entry) => entry.sql.includes("INSERT INTO sessions"))!;
+  assert.match(insert.sql, /LEAST\(created_at \+ \(\$3::integer \* interval '1 hour'\),\s+now\(\) \+ \(\$4::integer \* interval '1 minute'\)\)/);
+  assert.match(insert.sql, /created_at,now\(\)/);
+  assert.deepEqual([insert.values[0], insert.values[2], insert.values[3]], ["session-id", 8, 30]);
+  assert.notEqual(insert.values[1], result.token, "only the token digest is stored");
+  assert.ok(statements.some((entry) => entry.sql === "COMMIT"));
+
+  statements.length = 0;
+  state = "past-cap";
+  await assert.rejects(() => handler!(request, reply), (error: unknown) => error instanceof AppError && error.statusCode === 401);
+  assert.ok(statements.some((entry) => /revoke_reason='ADMIN_SESSION_MAX_AGE'/.test(entry.sql)));
+  assert.equal(statements.some((entry) => entry.sql.includes("INSERT INTO sessions")), false);
+  assert.ok(statements.some((entry) => entry.sql === "COMMIT"), "the cap revocation is committed before the 401");
+
+  state = "missing";
+  await assert.rejects(() => handler!(request, reply), (error: unknown) => error instanceof AppError && error.statusCode === 401);
 });
