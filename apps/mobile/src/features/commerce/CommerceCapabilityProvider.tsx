@@ -25,12 +25,14 @@ import {
   type CommerceCapability,
   type MobilePlatform,
 } from "@/lib/runtime-config";
+import { startForegroundInterval } from "@/lib/foreground-interval";
 
 /**
  * Public commerce/legal config refresh.
  *
- * The server answer is refreshed every 30 seconds, on foreground, and with an
- * 8-second timeout. A valid answer always wins, including an explicit
+ * The server answer is refreshed every 30 seconds while the app is active
+ * (the interval pauses in the background), immediately on every return to the
+ * foreground, and with an 8-second timeout. A valid answer always wins, including an explicit
  * `PRELAUNCH` mode. When a refresh fails, the last verified answer keeps
  * serving for at most `PUBLIC_CONFIG_GRACE_MS` (10 minutes) after its success
  * so one dropped request cannot disable login or eject a mounted commerce
@@ -115,14 +117,7 @@ export function CommerceCapabilityProvider({ children }: { children: ReactNode }
 
   useEffect(() => {
     void refresh();
-    const interval = setInterval(() => void refresh(), PUBLIC_CONFIG_REFRESH_INTERVAL_MS);
-    const subscription = AppState.addEventListener("change", (state) => {
-      if (state === "active") void refresh();
-    });
-    return () => {
-      clearInterval(interval);
-      subscription.remove();
-    };
+    return startForegroundInterval(AppState, () => void refresh(), PUBLIC_CONFIG_REFRESH_INTERVAL_MS);
   }, [refresh]);
 
   const { serverCapability, requiredPolicyVersions } = config;
