@@ -128,78 +128,97 @@ export function HomeScreen() {
     })));
   }, [categorySettingsRevision, commerceEnabled, snapshot?.homeSections]);
 
+  // The mount effect and the focus effect can both ask for a load (and both
+  // re-run when category settings change). A load with the same inputs joins
+  // the one already in flight; a newer request supersedes an older one, whose
+  // late results are then discarded instead of overwriting fresher state.
+  const loadGeneration = useRef(0);
+  const loadInFlight = useRef<{ key: string; generation: number; promise: Promise<void> } | null>(null);
+
   const load = useCallback(
-    async (manual = false) => {
+    (manual = false): Promise<void> => {
+      const key = `${categorySettingsRevision}|${runtime.apiBaseUrl}`;
+      if (!manual && loadInFlight.current?.key === key) return loadInFlight.current.promise;
+      const generation = ++loadGeneration.current;
+      const isCurrent = () => generation === loadGeneration.current;
       if (manual) {
         setRefreshing(true);
         setImageRequestKey((current) => current + 1);
       }
-      try {
-        const [catalogResult, recentResult] = await Promise.allSettled([
-          fetchHomeCatalog(runtime.apiBaseUrl),
-          fetchHomeRecentDrawActivity(runtime.apiBaseUrl),
-        ]);
-        const cached = await readHomeCatalogCache(db).catch(() => null);
-        const recoveredRecentDrawActivity = recentResult.status === "fulfilled"
-          ? recentResult.value
-          : null;
-        setRecentDrawActivity(recoveredRecentDrawActivity);
+      const promise = (async () => {
+        try {
+          const [catalogResult, recentResult] = await Promise.allSettled([
+            fetchHomeCatalog(runtime.apiBaseUrl),
+            fetchHomeRecentDrawActivity(runtime.apiBaseUrl),
+          ]);
+          const cached = await readHomeCatalogCache(db).catch(() => null);
+          if (!isCurrent()) return;
+          const recoveredRecentDrawActivity = recentResult.status === "fulfilled"
+            ? recentResult.value
+            : null;
+          setRecentDrawActivity(recoveredRecentDrawActivity);
 
-        if (catalogResult.status === "rejected") {
-          if (cached) {
-            const recovered = {
-              ...cached,
-              products: cached.products.filter((product) => (
-                isCustomerProductCategoryEnabledOn(product.category, "home")
-              )),
-              recentDrawActivity: recoveredRecentDrawActivity,
-            };
-            setSnapshot(recovered);
-            setSource("cache");
-            setHomeSectionsSource(cached.homeSections ? "cache" : "error");
-            setMessage("연결이 불안정해 마지막으로 저장한 목록을 보여드려요.");
-            if (recentResult.status === "fulfilled") {
-              await writeHomeCatalogCache(db, recovered).catch(() => undefined);
+          if (catalogResult.status === "rejected") {
+            if (cached) {
+              const recovered = {
+                ...cached,
+                products: cached.products.filter((product) => (
+                  isCustomerProductCategoryEnabledOn(product.category, "home")
+                )),
+                recentDrawActivity: recoveredRecentDrawActivity,
+              };
+              setSnapshot(recovered);
+              setSource("cache");
+              setHomeSectionsSource(cached.homeSections ? "cache" : "error");
+              setMessage("연결이 불안정해 마지막으로 저장한 목록을 보여드려요.");
+              if (recentResult.status === "fulfilled") {
+                await writeHomeCatalogCache(db, recovered).catch(() => undefined);
+              }
+            } else {
+              setSource("empty");
+              setHomeSectionsSource("error");
+              setMessage("홈을 불러오지 못했어요. 연결 상태를 확인해 주세요.");
             }
-          } else {
-            setSource("empty");
-            setHomeSectionsSource("error");
-            setMessage("홈을 불러오지 못했어요. 연결 상태를 확인해 주세요.");
+            return;
           }
-          return;
-        }
 
-        const fresh = {
-          ...catalogResult.value,
-          recentDrawActivity: recoveredRecentDrawActivity,
-        };
-        if (fresh.homeSections === null) {
-          if (cached?.homeSections) {
-            const recovered = mergeFreshHomeCatalogWithCachedSections(fresh, cached);
-            setSnapshot(recovered);
-            setSource("cache");
-            setHomeSectionsSource("cache");
-            setMessage("홈 진열 정보를 불러오지 못해 마지막으로 확인한 구성을 보여드려요.");
-            if (recentResult.status === "fulfilled") {
-              await writeHomeCatalogCache(db, recovered).catch(() => undefined);
+          const fresh = {
+            ...catalogResult.value,
+            recentDrawActivity: recoveredRecentDrawActivity,
+          };
+          if (fresh.homeSections === null) {
+            if (cached?.homeSections) {
+              const recovered = mergeFreshHomeCatalogWithCachedSections(fresh, cached);
+              setSnapshot(recovered);
+              setSource("cache");
+              setHomeSectionsSource("cache");
+              setMessage("홈 진열 정보를 불러오지 못해 마지막으로 확인한 구성을 보여드려요.");
+              if (recentResult.status === "fulfilled") {
+                await writeHomeCatalogCache(db, recovered).catch(() => undefined);
+              }
+            } else {
+              setSnapshot(fresh);
+              setSource("live");
+              setHomeSectionsSource("error");
+              setMessage("");
             }
-          } else {
-            setSnapshot(fresh);
-            setSource("live");
-            setHomeSectionsSource("error");
-            setMessage("");
+            return;
           }
-          return;
+          setSnapshot(fresh);
+          setSource("live");
+          setHomeSectionsSource("live");
+          setMessage("");
+          await writeHomeCatalogCache(db, fresh).catch(() => undefined);
+        } finally {
+          if (isCurrent()) {
+            initialLoadCompleted.current = true;
+            setRefreshing(false);
+          }
+          if (loadInFlight.current?.generation === generation) loadInFlight.current = null;
         }
-        setSnapshot(fresh);
-        setSource("live");
-        setHomeSectionsSource("live");
-        setMessage("");
-        await writeHomeCatalogCache(db, fresh).catch(() => undefined);
-      } finally {
-        initialLoadCompleted.current = true;
-        setRefreshing(false);
-      }
+      })();
+      loadInFlight.current = { key, generation, promise };
+      return promise;
     },
     [categorySettingsRevision, db, runtime.apiBaseUrl],
   );
