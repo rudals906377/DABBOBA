@@ -62,10 +62,23 @@ test('phone and both social callback paths clear previous-customer data before s
   const authApi = readFileSync(new URL('../apps/mobile/src/features/auth/auth-api.ts', import.meta.url), 'utf8');
   const login = readFileSync(new URL('../apps/mobile/src/features/auth/LoginScreen.tsx', import.meta.url), 'utf8');
   const callback = readFileSync(new URL('../apps/mobile/app/auth/callback.tsx', import.meta.url), 'utf8');
-  assert.match(authApi, /await commitAccountSessionAfterCleanup\(\{[\s\S]*?clearLocalData: clearPreviousCustomerData,[\s\S]*?writeAuthTokens: \(\) => writeAuthTokens\(/);
-  assert.match(login, /exchangeBrokerSession\([^;]*"PHONE", \(\) => clearUserScopedLocalData\(db\)\)/);
-  assert.match(login, /completeSocialCustomerLogin\([^;]*\(\) => clearUserScopedLocalData\(db\)\)/);
-  assert.match(callback, /completeSocialCustomerLogin\([^;]*\(\) => clearUserScopedLocalData\(db\)\)/);
+  const database = readFileSync(new URL('../apps/mobile/src/lib/local-database.ts', import.meta.url), 'utf8');
+  // The stored-session check happens before the exchange, and cleanup still precedes token storage.
+  assert.ok(authApi.indexOf('const previousCustomerStored = Boolean((await readAuthTokens())?.accessToken);')
+    < authApi.indexOf('client.POST("/v1/auth/exchange"'));
+  assert.match(authApi, /await commitAccountSessionAfterCleanup\(\{[\s\S]*?clearLocalData: \(\) => clearLocalDataBeforeLogin\(previousCustomerStored\),[\s\S]*?writeAuthTokens: \(\) => writeAuthTokens\(/);
+  // A session the device failed to store is revoked instead of being left valid.
+  assert.match(authApi, /\} catch \(error\) \{\s*\/\/[^\n]*\n[^\n]*\n\s*await revokeIssuedSession\(apiBaseUrl, session\.token\);\s*throw error;/);
+  for (const source of [login, login.slice(login.indexOf('completeSocialCustomerLogin(')), callback]) {
+    assert.match(source, /\(previousCustomerStored\) => clearLocalDataBeforeCustomerLogin\(db, previousCustomerStored\)/);
+  }
+  // Another account's stored session wipes everything; a guest keeps recently viewed products.
+  const guestAware = database.slice(
+    database.indexOf('export async function clearLocalDataBeforeCustomerLogin'),
+    database.indexOf('export async function readRecentlyViewedProductIds'),
+  );
+  assert.match(guestAware, /if \(previousCustomerStored\) \{\s*await clearUserScopedLocalData\(db\);/);
+  assert.doesNotMatch(guestAware.slice(guestAware.indexOf('return;')), /recently_viewed_products/);
 });
 
 test('an accepted deletion never reports that the server request failed when local cleanup fails', () => {

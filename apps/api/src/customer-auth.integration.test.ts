@@ -129,7 +129,7 @@ test("customer broker reuses one Supabase subject without merging email peers an
   };
   const webDeletionExchange = (
     accessToken: string,
-    loginProvider: Exclude<CustomerAuthProvider, "EMAIL">,
+    loginProvider: CustomerAuthProvider,
     appleRefreshToken?: string,
   ) => app.inject({
     method: "POST",
@@ -238,6 +238,32 @@ test("customer broker reuses one Supabase subject without merging email peers an
   }));
   assert.equal(duplicatePhone.statusCode, 409, duplicatePhone.body);
 
+  // A pre-broker PHONE identity stores the E.164 number as its subject. A new
+  // phone OTP for that number is never auto-linked by the phone string: the
+  // exchange rolls back entirely and points the customer to support recovery.
+  const e164LegacyPhone = `+8210${suffix.replace(/\D/g, "").padEnd(24, "0").slice(16, 24)}`;
+  const e164Legacy = await ownerPool.query<{ id: string }>(
+    "INSERT INTO users(email,nickname,role,status,phone_e164) VALUES(NULL,$1,'USER','ACTIVE',$2) RETURNING id",
+    ["legacy e164 phone fixture", e164LegacyPhone],
+  );
+  createdUserIds.add(e164Legacy.rows[0]!.id);
+  await ownerPool.query(
+    "INSERT INTO auth_identities(user_id,provider,provider_subject,verified_at) VALUES($1,'PHONE',$2,now())",
+    [e164Legacy.rows[0]!.id, e164LegacyPhone],
+  );
+  const recoverySubject = `phone-recovery-${suffix}`;
+  const legacyPhoneLogin = await exchange(token("phone-recovery", {
+    ...claims(recoverySubject, ["PHONE"], null),
+    phone: e164LegacyPhone,
+  }));
+  assert.equal(legacyPhoneLogin.statusCode, 409, legacyPhoneLogin.body);
+  assert.equal((legacyPhoneLogin.json() as { code: string }).code, "LEGACY_PHONE_RECOVERY_REQUIRED");
+  const orphanedRecovery = await ownerPool.query(
+    "SELECT 1 FROM auth_identities WHERE provider_subject=$1",
+    [`${issuer}#${recoverySubject}`],
+  );
+  assert.equal(orphanedRecovery.rowCount, 0, "the rejected phone exchange leaves no temporary identity");
+
   const socialOnlySubject = `web-deletion-social-${suffix}`;
   const socialOnlyClaims = claims(socialOnlySubject, ["KAKAO"], null);
   const socialOnlyLogin = await exchange(token("web-deletion-social-login", socialOnlyClaims));
@@ -305,6 +331,42 @@ test("customer broker reuses one Supabase subject without merging email peers an
   } finally {
     config.customerLoginProviders = enabledProviders;
   }
+
+  // A customer whose only identity is a legacy verified EMAIL link can still
+  // prove ownership to delete the account, but EMAIL never becomes a login.
+  const emailOnlySubject = `legacy-email-${suffix}`;
+  const emailOnlyUser = await ownerPool.query<{ id: string }>(
+    "INSERT INTO users(email,nickname,role,status) VALUES($1,$2,'USER','ACTIVE') RETURNING id",
+    [`legacy-email-${suffix}@example.test`, "legacy email fixture"],
+  );
+  const emailOnlyUserId = emailOnlyUser.rows[0]!.id;
+  createdUserIds.add(emailOnlyUserId);
+  await ownerPool.query(
+    "INSERT INTO auth_identities(user_id,provider,provider_subject,verified_at) VALUES($1,'EMAIL',$2,now())",
+    [emailOnlyUserId, `${issuer}#${emailOnlySubject}`],
+  );
+  const emailOnlyClaims = claims(emailOnlySubject, ["EMAIL"], `legacy-email-${suffix}@example.test`);
+  const emailLogin = await exchange(token("legacy-email-login", emailOnlyClaims));
+  assert.equal(emailLogin.statusCode, 400, emailLogin.body);
+  const emailDeletion = await webDeletionExchange(token("legacy-email-deletion", emailOnlyClaims), "EMAIL");
+  assert.equal(emailDeletion.statusCode, 201, emailDeletion.body);
+  const emailDeletionBody = emailDeletion.json() as { actor: { userId: string; sessionId: string } };
+  assert.equal(emailDeletionBody.actor.userId, emailOnlyUserId);
+  const emailDeletionSession = await ownerPool.query<{ scope: string }>(
+    "SELECT scope FROM sessions WHERE id=$1",
+    [emailDeletionBody.actor.sessionId],
+  );
+  assert.equal(emailDeletionSession.rows[0]!.scope, "ACCOUNT_DELETION");
+  const unknownEmailDeletion = await webDeletionExchange(
+    token("unknown-email-deletion", claims(`unknown-email-${suffix}`, ["EMAIL"], `unknown-email-${suffix}@example.test`)),
+    "EMAIL",
+  );
+  assert.equal(unknownEmailDeletion.statusCode, 503, unknownEmailDeletion.body);
+  const unknownEmailLocal = await ownerPool.query(
+    "SELECT 1 FROM auth_identities WHERE provider_subject=$1",
+    [`${issuer}#unknown-email-${suffix}`],
+  );
+  assert.equal(unknownEmailLocal.rowCount, 0);
 
   const appleDeletion = await webDeletionExchange(
     token("web-deletion-apple", claims(legacySubject, ["APPLE"], null)),

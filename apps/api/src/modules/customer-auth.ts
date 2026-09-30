@@ -20,6 +20,9 @@ import { issueSession } from "../plugins/auth.js";
 import type { ApiContext } from "../types.js";
 
 const CUSTOMER_LOGIN_METHODS = ["PHONE", "KAKAO", "NAVER", "GOOGLE", "APPLE"] as const;
+// EMAIL is not a new login method, but customers whose only identity is a legacy
+// verified EMAIL link must still be able to prove ownership to delete their account.
+const CUSTOMER_DELETION_METHODS = [...CUSTOMER_LOGIN_METHODS, "EMAIL"] as const;
 export const REQUIRED_CUSTOMER_POLICY_VERSIONS = FALLBACK_REQUIRED_POLICY_VERSIONS;
 
 type CustomerUserRow = {
@@ -54,10 +57,13 @@ export function customerLoginProviderDiscovery(
 ) {
   const brokerExchangeConfigured = Boolean(supabaseUrl && publishableKey);
   const enabled = new Set(enabledProviders || []);
+  const methods = brokerExchangeConfigured
+    ? CUSTOMER_LOGIN_METHODS.filter((provider) => enabled.has(provider))
+    : [];
   return {
-    methods: brokerExchangeConfigured
-      ? CUSTOMER_LOGIN_METHODS.filter((provider) => enabled.has(provider))
-      : [],
+    methods,
+    // Account deletion also accepts legacy EMAIL links; it never creates or links an identity.
+    deletionMethods: brokerExchangeConfigured ? [...methods, "EMAIL" as const] : [],
     brokerExchangeConfigured,
     requiredPolicyVersions,
   };
@@ -126,6 +132,21 @@ async function applyVerifiedContactClaims(
       [claims.phone, user.id],
     );
     if (usedPhone.rowCount) {
+      // Legacy PHONE identities stored the E.164 number instead of the broker
+      // subject. Never auto-link by a phone string (AGENTS.md); the whole
+      // exchange rolls back so no temporary account survives, and support
+      // recovers the original account through a separately approved step.
+      const legacyPhone = await client.query(
+        "SELECT 1 FROM auth_identities WHERE provider='PHONE' AND provider_subject=$1 AND user_id<>$2 LIMIT 1",
+        [claims.phone, user.id],
+      );
+      if (legacyPhone.rowCount) {
+        throw new AppError(
+          409,
+          "LEGACY_PHONE_RECOVERY_REQUIRED",
+          "예전에 휴대폰 번호로 가입한 계정이 있어요. 고객센터로 문의해 주시면 기존 계정을 찾아 드릴게요.",
+        );
+      }
       throw conflict("인증된 휴대폰 번호가 다른 계정에 연결되어 있습니다. 고객센터에 문의해 주세요.");
     }
     await client.query("UPDATE users SET phone_e164=$2 WHERE id=$1", [user.id, claims.phone]);
@@ -163,7 +184,7 @@ async function storeAppleRefreshCredential(
 async function existingBrokeredCustomerForDeletion(
   client: DatabaseClient,
   claims: VerifiedSupabaseCustomer,
-  loginProvider: (typeof CUSTOMER_LOGIN_METHODS)[number],
+  loginProvider: (typeof CUSTOMER_DELETION_METHODS)[number],
   providerEnabled: boolean,
 ): Promise<CustomerUserRow> {
   await client.query(
@@ -428,7 +449,7 @@ export async function registerCustomerAuthRoutes(
       const policy = await loadRequiredPolicyDocuments(context.pool);
       requiredPolicyAcceptance(input, policy.versions);
       const accessToken = stringInput(input, "accessToken", { min: 64, max: 16_384, trim: false })!;
-      const loginProvider = enumInput(input, "loginProvider", CUSTOMER_LOGIN_METHODS)!;
+      const loginProvider = enumInput(input, "loginProvider", CUSTOMER_DELETION_METHODS)!;
       const rawAppleRefreshToken = input.appleRefreshToken === undefined
         ? null
         : validateAppleRefreshToken(stringInput(input, "appleRefreshToken", { min: 32, max: 16_384, trim: false }));
@@ -450,7 +471,9 @@ export async function registerCustomerAuthRoutes(
       // customer (App Store Guideline 5.1.1(v)); disabling a provider must not
       // strand accounts that can only prove ownership through it. A disabled
       // provider never creates or links an identity on this path.
-      const providerEnabled = context.config.customerLoginProviders?.includes(loginProvider) === true;
+      // EMAIL is never an enabled login method, so it only re-authenticates an existing link.
+      const providerEnabled = loginProvider !== "EMAIL"
+        && context.config.customerLoginProviders?.includes(loginProvider) === true;
       const requestUserAgent = userAgent(request.headers["user-agent"]);
       const { user, session } = await withTransaction(context.pool, async (client) => {
         const user = await existingBrokeredCustomerForDeletion(client, claims, loginProvider, providerEnabled);

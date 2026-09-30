@@ -43,7 +43,7 @@ import {
   resolveMobileRuntimeConfig,
   type MobilePlatform,
 } from "@/lib/runtime-config";
-import { clearUserScopedLocalData } from "@/lib/local-database";
+import { clearLocalDataBeforeCustomerLogin, clearUserScopedLocalData } from "@/lib/local-database";
 import { resolvePublicAppLink } from "@/lib/public-app-links";
 import { colors } from "@/theme";
 
@@ -189,7 +189,13 @@ export function LoginScreen() {
     }
     let exchanged = false;
     try {
-      await exchangeBrokerSession(runtime.apiBaseUrl, supabaseAccessToken, requiredPolicyVersions, "PHONE", () => clearUserScopedLocalData(db));
+      await exchangeBrokerSession(
+        runtime.apiBaseUrl,
+        supabaseAccessToken,
+        requiredPolicyVersions,
+        "PHONE",
+        (previousCustomerStored) => clearLocalDataBeforeCustomerLogin(db, previousCustomerStored),
+      );
       exchanged = true;
     } finally {
       await clearBrokerSession();
@@ -206,7 +212,11 @@ export function LoginScreen() {
     setMessage("");
     try {
       const callbackUrl = await beginSocialLogin(provider, String(returnPath), requiredPolicyVersions);
-      const completedReturnTo = await completeSocialCustomerLogin(runtime.apiBaseUrl, callbackUrl, () => clearUserScopedLocalData(db));
+      const completedReturnTo = await completeSocialCustomerLogin(
+        runtime.apiBaseUrl,
+        callbackUrl,
+        (previousCustomerStored) => clearLocalDataBeforeCustomerLogin(db, previousCustomerStored),
+      );
       router.replace(completedReturnTo as Href);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "로그인을 완료하지 못했어요.");

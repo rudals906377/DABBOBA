@@ -359,7 +359,7 @@ test("customer sessions restore with expiry-aware single-flight rotation", () =>
   assert.match(store, /expiresAt\?: string/);
   assert.match(store, /replaceAuthTokensIfCurrent/);
   assert.match(store, /clearAuthTokensIfCurrent/);
-  assert.match(authApi, /expiresAt:\s*result\.data\.expiresAt/);
+  assert.match(authApi, /expiresAt:\s*session\.expiresAt/);
   assert.match(demoApi, /expiresAt:\s*session\.expiresAt/);
   assert.match(lifecycle, /customerSessionFlights/);
   assert.match(lifecycle, /\/v1\/auth\/me/);

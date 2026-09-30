@@ -6,11 +6,13 @@ import { customerLoginProviderDiscovery, requiredPolicyAcceptance } from "./cust
 test("customer auth discovery exposes the five approved methods only when live broker verification is configured", () => {
   assert.deepEqual(customerLoginProviderDiscovery(null, null), {
     methods: [],
+    deletionMethods: [],
     brokerExchangeConfigured: false,
     requiredPolicyVersions: { terms: "2026-09-30", privacy: "2026-09-30" },
   });
   assert.deepEqual(customerLoginProviderDiscovery("https://project.supabase.co", null, ["KAKAO"]), {
     methods: [],
+    deletionMethods: [],
     brokerExchangeConfigured: false,
     requiredPolicyVersions: { terms: "2026-09-30", privacy: "2026-09-30" },
   });
@@ -20,6 +22,8 @@ test("customer auth discovery exposes the five approved methods only when live b
     ["PHONE", "KAKAO"],
   ), {
     methods: ["PHONE", "KAKAO"],
+    // Legacy EMAIL links can still prove ownership for deletion, never for a new login.
+    deletionMethods: ["PHONE", "KAKAO", "EMAIL"],
     brokerExchangeConfigured: true,
     requiredPolicyVersions: { terms: "2026-09-30", privacy: "2026-09-30" },
   });
