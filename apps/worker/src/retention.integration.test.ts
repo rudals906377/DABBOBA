@@ -99,10 +99,10 @@ test("worker retention deletes only expired, unreferenced rows and rolls Home cl
   await fixturePool.query(
     `INSERT INTO sessions(id,user_id,session_kind,token_digest,expires_at,revoked_at,created_at)
      VALUES
-       ($1,$5,'USER',$6 || '-revoked',now()+interval '1 day',now()-interval '40 days',now()-interval '41 days'),
-       ($2,$5,'USER',$6 || '-parent',now()-interval '40 days',NULL,now()-interval '60 days'),
-       ($4,$5,'USER',$6 || '-active',now()+interval '1 day',NULL,now())`,
-    [sessionIds.revoked, sessionIds.expiredParent, sessionIds.child, sessionIds.active, userId, suffix],
+       ($1,$4,'USER',$5 || '-revoked',now()+interval '1 day',now()-interval '40 days',now()-interval '41 days'),
+       ($2,$4,'USER',$5 || '-parent',now()-interval '40 days',NULL,now()-interval '60 days'),
+       ($3,$4,'USER',$5 || '-active',now()+interval '1 day',NULL,now())`,
+    [sessionIds.revoked, sessionIds.expiredParent, sessionIds.active, userId, suffix],
   );
   await fixturePool.query(
     `INSERT INTO sessions(id,user_id,session_kind,token_digest,expires_at,rotated_from_session_id)

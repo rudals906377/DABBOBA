@@ -48,9 +48,14 @@ test("prototype catalog retirement retires versions before deactivation and pres
 test("migrator commits the assertion and retirement SQL as one transaction", async () => {
   const source = await migrator;
 
+  // Each ordinary migration and its schema_migrations record run inside one
+  // runTransactionalMigration unit (BEGIN ... COMMIT, ROLLBACK on error).
   assert.match(
     source,
-    /await client\.query\("BEGIN"\);[\s\S]*await client\.query\(migration\.sql\);[\s\S]*INSERT INTO schema_migrations[\s\S]*await client\.query\("COMMIT"\)/,
+    /await runTransactionalMigration\(client, async \(\) => \{\s*await client\.query\(migration\.sql\);\s*await client\.query\(\s*"INSERT INTO schema_migrations/,
   );
-  assert.match(source, /catch \(error\) \{[\s\S]*await client\.query\("ROLLBACK"\)/);
+  assert.match(
+    source,
+    /export async function runTransactionalMigration[\s\S]*?await client\.query\("BEGIN"\);[\s\S]*?await work\(\);\s*await client\.query\("COMMIT"\);[\s\S]*?catch \(error\) \{\s*await client\.query\("ROLLBACK"\)/,
+  );
 });
