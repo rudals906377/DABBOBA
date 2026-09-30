@@ -714,7 +714,9 @@ function homeProductAccessibilityLabel(
   commerceEnabled: boolean,
 ): string {
   const badgeLabel = badge === "BEST" ? "인기 상품, " : badge === "NEW" ? "신상품, " : "";
-  const tierAccessibilityLabel = product.category === "kuji"
+  const showInventory = shouldShowCatalogInventory(product, commerceEnabled);
+  // The accessibility tree must hide tier quantities whenever the visible tier summary is hidden.
+  const tierAccessibilityLabel = showInventory && product.category === "kuji"
     ? remainingKujiTierAccessibilityLabel(product.remainingKujiTiers)
     : null;
   return [
@@ -722,7 +724,7 @@ function homeProductAccessibilityLabel(
     ipName,
     product.name,
     productPriceLabel(product, commerceEnabled),
-    shouldShowCatalogInventory(product, commerceEnabled)
+    showInventory
       ? `${remainingInventoryLabel(product.category)} ${catalogQuantityLabel(product)}`
       : null,
     tierAccessibilityLabel,

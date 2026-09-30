@@ -4,11 +4,12 @@ import test from "node:test";
 
 import {
   KUJI_CHECKOUT_LIMIT_SECONDS,
-  KUJI_CLOCK_SKEW_WARNING_MS,
+  KUJI_MAX_SERVER_CLOCK_OFFSET_MS,
   createKujiCheckoutClock,
   formatKujiCheckoutRemainingTime,
-  isKujiServerClockSkewed,
   kujiCheckoutRemainingSeconds,
+  measureKujiServerClockOffset,
+  normalizeKujiServerClockOffset,
   resolveKujiCheckoutPhase,
 } from "../apps/mobile/src/features/kuji/kuji-checkout-state.ts";
 
@@ -62,20 +63,65 @@ test("a stale serverNow snapshot never extends the absolute checkout deadline", 
   assert.equal(kujiCheckoutRemainingSeconds(clock, clientNow), 120);
 });
 
-test("kuji queue explains a large clock mismatch before entering checkout", async () => {
-  const now = Date.parse("2026-09-24T02:00:00.000Z");
-  assert.equal(KUJI_CLOCK_SKEW_WARNING_MS, 300_000);
-  assert.equal(isKujiServerClockSkewed(new Date(now - 60_000).toISOString(), now), false);
-  assert.equal(isKujiServerClockSkewed(new Date(now - 301_000).toISOString(), now), true);
-  assert.equal(isKujiServerClockSkewed(new Date(now + 301_000).toISOString(), now), true);
-  assert.equal(isKujiServerClockSkewed("not-a-date", now), false);
+test("a measured server offset keeps the full lease on a skewed device clock", () => {
+  const serverNow = Date.parse("2026-09-24T02:00:00.000Z");
+  const expiresAt = new Date(serverNow + 180_000).toISOString();
 
+  for (const deviceSkewMs of [10 * 60_000, -10 * 60_000, 3 * 60 * 60_000]) {
+    const receivedAt = serverNow + deviceSkewMs;
+    const offset = measureKujiServerClockOffset(new Date(serverNow).toISOString(), receivedAt);
+    assert.equal(offset, -deviceSkewMs);
+    const clock = createKujiCheckoutClock(expiresAt, new Date(serverNow).toISOString(), receivedAt, offset);
+    assert.equal(clock.valid, true);
+    assert.equal(kujiCheckoutRemainingSeconds(clock, receivedAt), 180);
+    assert.equal(kujiCheckoutRemainingSeconds(clock, receivedAt + 60_000), 120);
+    assert.equal(resolveKujiCheckoutPhase(clock, receivedAt + 180_000), "EXPIRED");
+  }
+
+  // Re-entering later with the same route keeps the absolute server deadline.
+  const receivedAt = serverNow + 10 * 60_000;
+  const offset = measureKujiServerClockOffset(new Date(serverNow).toISOString(), receivedAt);
+  const reopened = createKujiCheckoutClock(
+    expiresAt,
+    new Date(serverNow).toISOString(),
+    receivedAt + 150_000,
+    offset,
+  );
+  assert.equal(kujiCheckoutRemainingSeconds(reopened, receivedAt + 150_000), 30);
+});
+
+test("unmeasured or corrupt clock offsets fall back to the non-extending snapshot rule", () => {
+  assert.equal(normalizeKujiServerClockOffset("-600000"), -600_000);
+  assert.equal(normalizeKujiServerClockOffset(12.5), null);
+  assert.equal(normalizeKujiServerClockOffset("12ms"), null);
+  assert.equal(normalizeKujiServerClockOffset(KUJI_MAX_SERVER_CLOCK_OFFSET_MS + 1), null);
+  assert.equal(measureKujiServerClockOffset("not-a-date", Date.now()), null);
+
+  const clientNow = Date.parse("2026-09-01T10:00:00.000Z");
+  const clock = createKujiCheckoutClock(
+    new Date(clientNow + 120_000).toISOString(),
+    new Date(clientNow - 60_000).toISOString(),
+    clientNow,
+    normalizeKujiServerClockOffset("not-a-number"),
+  );
+  assert.equal(clock.measuredOffset, false);
+  assert.equal(kujiCheckoutRemainingSeconds(clock, clientNow), 120);
+});
+
+test("kuji queue forwards the measured clock offset instead of blocking checkout", async () => {
   const screen = await readFile(
     new URL("../apps/mobile/src/features/kuji/KujiQueueScreen.tsx", import.meta.url),
     "utf8",
   );
-  assert.match(screen, /if \(isKujiServerClockSkewed\(next\.serverNow, Date\.now\(\)\)\) \{[\s\S]*?setMessage\(/);
-  assert.ok(screen.indexOf("isKujiServerClockSkewed(next.serverNow") < screen.indexOf("redirectedRef.current = true"));
+  assert.doesNotMatch(screen, /isKujiServerClockSkewed|시간이 맞지 않아 결제를 시작할 수 없어요/);
+  assert.match(screen, /measureKujiServerClockOffset\(next\.serverNow, Date\.now\(\)\)/);
+
+  const checkout = await readFile(
+    new URL("../apps/mobile/src/features/checkout/CheckoutScreen.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.match(checkout, /normalizeKujiServerClockOffset\(firstParam\(params\.serverClockOffsetMs\)\)/);
+  assert.match(checkout, /serverClockOffsetMs: measureKujiServerClockOffset\(room\.serverNow, Date\.now\(\)\)/);
 });
 
 test("invalid or past kuji checkout leases fail closed while paid takes precedence", () => {

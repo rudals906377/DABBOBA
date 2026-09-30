@@ -78,6 +78,8 @@ import {
   createKujiCheckoutClock,
   formatKujiCheckoutRemainingTime,
   kujiCheckoutRemainingSeconds,
+  measureKujiServerClockOffset,
+  normalizeKujiServerClockOffset,
   resolveKujiCheckoutPhase,
 } from "@/features/kuji/kuji-checkout-state";
 import { fetchKujiRoom, leaveKujiRoom } from "@/features/kuji/kuji-room-api";
@@ -123,6 +125,7 @@ export function CheckoutScreen() {
     kujiCheckoutExpiresAt?: string | string[];
     checkoutExpiresAt?: string | string[];
     serverNow?: string | string[];
+    serverClockOffsetMs?: string | string[];
     kujiRoomFixture?: string | string[];
     internalCommerce?: string | string[];
   }>();
@@ -132,23 +135,35 @@ export function CheckoutScreen() {
   const kujiCheckoutExpiresAt = firstParam(params.kujiCheckoutExpiresAt)
     ?? firstParam(params.checkoutExpiresAt);
   const kujiServerNow = firstParam(params.serverNow);
+  const routeServerClockOffsetMs = normalizeKujiServerClockOffset(firstParam(params.serverClockOffsetMs));
   const kujiRoomFixture = firstParam(params.kujiRoomFixture);
   const showInternalCommerceControls = __DEV__
     && firstParam(params.internalCommerce) === "enabled";
   const [verifiedKujiLease, setVerifiedKujiLease] = useState<{
     checkoutExpiresAt: string;
     serverNow: string;
+    serverClockOffsetMs: number | null;
   } | null>(null);
   const effectiveKujiCheckoutExpiresAt = verifiedKujiLease?.checkoutExpiresAt
     ?? kujiCheckoutExpiresAt;
   const effectiveKujiServerNow = verifiedKujiLease?.serverNow ?? kujiServerNow;
+  const effectiveServerClockOffsetMs = verifiedKujiLease
+    ? verifiedKujiLease.serverClockOffsetMs
+    : routeServerClockOffsetMs;
   const kujiCheckoutClock = useMemo(
     () => createKujiCheckoutClock(
       effectiveKujiCheckoutExpiresAt,
       effectiveKujiServerNow,
       Date.now(),
+      effectiveServerClockOffsetMs,
     ),
-    [effectiveKujiCheckoutExpiresAt, effectiveKujiServerNow, kujiEntryId, productId],
+    [
+      effectiveKujiCheckoutExpiresAt,
+      effectiveKujiServerNow,
+      effectiveServerClockOffsetMs,
+      kujiEntryId,
+      productId,
+    ],
   );
   const runtime = useMemo(
     () => resolveMobileRuntimeConfig({
@@ -238,6 +253,7 @@ export function CheckoutScreen() {
           setVerifiedKujiLease({
             checkoutExpiresAt: kujiCheckoutExpiresAt,
             serverNow: kujiServerNow ?? new Date().toISOString(),
+            serverClockOffsetMs: routeServerClockOffsetMs,
           });
         } else {
           const room = await fetchKujiRoom(
@@ -265,6 +281,7 @@ export function CheckoutScreen() {
             setVerifiedKujiLease({
               checkoutExpiresAt: room.viewer.checkoutExpiresAt,
               serverNow: room.serverNow,
+              serverClockOffsetMs: measureKujiServerClockOffset(room.serverNow, Date.now()),
             });
           }
         }
@@ -288,6 +305,7 @@ export function CheckoutScreen() {
     kujiRoomFixture,
     kujiServerNow,
     productId,
+    routeServerClockOffsetMs,
     runtime.apiBaseUrl,
   ]);
 

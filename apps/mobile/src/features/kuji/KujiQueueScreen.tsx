@@ -25,7 +25,7 @@ import { seed } from "@/design-system/seed";
 import {
   buildKujiCheckoutPath,
 } from "@/features/kuji/kuji-entry-state";
-import { isKujiServerClockSkewed } from "@/features/kuji/kuji-checkout-state";
+import { measureKujiServerClockOffset } from "@/features/kuji/kuji-checkout-state";
 import {
   KUJI_LOCAL_CHECKOUT_SECONDS,
   createKujiRoomFallback,
@@ -98,10 +98,6 @@ export function KujiQueueScreen() {
       || !viewer.checkoutExpiresAt
       || redirectedRef.current
     ) return false;
-    if (isKujiServerClockSkewed(next.serverNow, Date.now())) {
-      setMessage("기기와 서버의 시간이 맞지 않아 결제를 시작할 수 없어요. 기기의 자동 시간 설정을 확인한 뒤 다시 불러와 주세요.");
-      return false;
-    }
     redirectedRef.current = true;
     router.replace(
       buildKujiCheckoutPath(
@@ -110,6 +106,9 @@ export function KujiQueueScreen() {
         viewer.checkoutExpiresAt,
         next.serverNow,
         developmentFixture,
+        // Carry the measured clock difference so a skewed device clock still
+        // counts down the same server-owned lease instead of blocking checkout.
+        measureKujiServerClockOffset(next.serverNow, Date.now()),
       ) as Href,
     );
     return true;
