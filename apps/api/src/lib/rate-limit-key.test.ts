@@ -60,6 +60,31 @@ test("IPv6 callers share one /64 bucket", () => {
   assert.notEqual(first, other);
 });
 
+test("IPv4-mapped IPv6 callers share the ordinary IPv4 rate-limit bucket", () => {
+  const config = { trustedClientIpHeader: null };
+  assert.equal(clientIpForRateLimit(request({ ip: "::ffff:192.0.2.10" }), config), "192.0.2.10");
+  assert.equal(clientIpForRateLimit(request({ ip: "::ffff:c000:20a" }), config), "192.0.2.10");
+});
+
+test("expanded and compressed IPv6 forms cannot create different rate-limit buckets", () => {
+  const config = { trustedClientIpHeader: null };
+  assert.equal(
+    clientIpForRateLimit(request({ ip: "2001:0db8:0001:0002:0000:0000:0000:0001" }), config),
+    "2001:db8:1:2::",
+  );
+  assert.equal(clientIpForRateLimit(request({ ip: "2001:db8:1:2::abcd" }), config), "2001:db8:1:2::");
+});
+
+test("oversized or invalid trusted client-IP values fall back to the socket address", () => {
+  const config = { trustedClientIpHeader: "cf-connecting-ip" };
+  for (const candidate of ["!".repeat(512), "2001:db8::invalid", "203.0.113.1:443"]) {
+    assert.equal(
+      clientIpForRateLimit(request({ headers: { "cf-connecting-ip": candidate } }), config),
+      "192.0.2.10",
+    );
+  }
+});
+
 test("opaque client keys are pepper-bound and never contain the raw key", () => {
   const key = opaqueClientKey("ip:192.0.2.10", pepper);
   assert.match(key, /^[0-9a-f]{64}$/);

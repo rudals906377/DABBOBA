@@ -12,7 +12,7 @@
 6. **최종 로컬 회귀.** 훈련 도구 수정 후 루트 검사 1,023개와 TypeScript 검사 8개가 모두 통과했다. 준비한 읽기 전용 이력 SQL도 전용 로컬 DB에서 `transaction_read_only=on`으로 실행해 성공했다. 운영 SQL 실행 증거는 아니다.
 7. **네이티브 설정 누락 수정.** 격리 복사본에서 SDK 57 iOS·Android prebuild를 실제 실행했다. `usesAppleSignIn: true`만으로 Apple 네이티브 entitlement가 생성되지 않는 것을 확인해, 기존 브라우저 OAuth 구현은 바꾸지 않고 `com.apple.developer.applesignin=[Default]`를 app.json에 명시했다. 누락·빈 배열·문자열·다른 값·추가 값은 출시 구조 검사에서 거부한다. 수정 후 Expo introspection에 실제 entitlement가 표시됐고, 관련 70개 및 전체 단위 1,025개·TypeScript 8개가 통과했다. 친구 팀·앱 식별자·iPhone 전용·사진 권한 설명·딥링크도 생성 설정에서 확인했다. 최종 서명 프로파일과 실기기 재검증은 별도다.
 8. **판매판 심사 자료.** `gacha-sales-store-preparation-2026-10-01.md`에 가챠-only 판매 설명, 정확한 유료 무작위 실물 제공 방식, 심사 안내, 일반 리뷰 계정 준비 서식, 실제 설치 후 캡처 목록과 데이터 선언 대조표를 작성했다. 사전오픈판 초안은 따로 보존하고 최신 iOS build 3과 실제 Google Play 제출 방식 결정을 반영했다. 콘솔 입력·제출·승인이나 법률 검토 완료를 의미하지 않는다.
-9. **의존성 재조회.** production 의존성 audit의 high/critical은 0개, moderate는 `@fastify/rate-limit` 경유 `ip-address@10.5.0`의 기존 4건이다. 원본 audit는 `/tmp/dabboba-native-launch-qa.AMIG6I/dependency-audit.json`에 있다. 잔여 경고를 0건으로 표시하지 않았다. 이번 slice에서 잠금 파일이나 이 의존성을 수정하지 않았다.
+9. **의존성 재조회 및 후속 수정.** 최초 조회에서 production 의존성 audit의 high/critical은 0개, moderate는 `@fastify/rate-limit` 경유 `ip-address@10.5.0`의 4건이었다. 이 최초 증거는 `/tmp/dabboba-native-launch-qa.AMIG6I/dependency-audit.json`에 보존했다. 이후 기존 허용 범위 안의 `10.7.2`로 해당 전이 의존성만 갱신했고, 회귀 재현·수정 검사, API 356개 및 루트 1,028개·TypeScript 8개가 최종 통과했다. 새로운 production audit는 모든 심각도 0개다. 자세한 범위와 첫 시험 DB 로그인 실패를 포함한 증거는 `dependency-patch-2026-10-01.md`에 있다. 이는 로컬 준비 결과이며 운영 배포·전체 보안 무결함을 뜻하지 않는다.
 
 ### 네이티브 컴파일의 현재 증거 경계
 
