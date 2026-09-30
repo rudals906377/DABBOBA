@@ -48,15 +48,17 @@ test("native Product Detail keeps its commerce action in a floating content over
 
 test("native Product Detail bounds category artwork and leads with prize information", () => {
   assert.match(source, /import \{ CatalogProductImage \} from "@\/components\/CatalogProductImage"/);
-  assert.match(source, /product\.category === "kuji" \? styles\.heroKuji : styles\.heroGacha/);
-  assert.match(source, /heroGacha:\s*\{[^}]*aspectRatio:\s*4\s*\/\s*3/);
-  assert.match(source, /heroKuji:\s*\{[^}]*aspectRatio:\s*16\s*\/\s*9/);
+  assert.match(source, /onDimensions=\{\(width, height\) => setMeasured\(/);
+  assert.match(source, /\[styles\.hero, \{ aspectRatio: heroAspectRatio \}\]/);
+  assert.match(source, /hero:\s*\{ width: "100%", overflow: "hidden" \}/);
+  assert.doesNotMatch(source, /heroGacha|heroKuji|aspectRatio:\s*4\s*\/\s*3/);
   assert.match(source, /<CatalogProductImage[\s\S]*?resizeMode="contain"/);
   assert.doesNotMatch(source, /Image\.getSize|setImageAspectRatio/);
 
   const detailIndex = source.indexOf("<View style={styles.detailCopy}>");
   const oddsIndex = source.indexOf("<OddsSection snapshot={snapshot} />");
-  const guidanceIndex = source.indexOf("<CommerceGuidance");
-  assert.ok(detailIndex >= 0 && oddsIndex > detailIndex && guidanceIndex > oddsIndex);
-  assert.match(source, /accessibilityState=\{\{ expanded \}\}/);
+  assert.ok(detailIndex >= 0 && oddsIndex > detailIndex);
+  assert.doesNotMatch(source, /CommerceGuidance|구매·보관 안내|사전오픈 안내/);
+  assert.match(source, /<SeedInlineGuidance[\s\S]*?확률표 버전 \$\{odds\.version\}[\s\S]*?확률은 남은 수량에 따라 실시간으로 바뀌어요/);
+  assert.doesNotMatch(source, /서버 가중치를 기준으로 계산됩니다/);
 });
