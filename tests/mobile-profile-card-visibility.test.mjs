@@ -33,7 +33,7 @@ const exchangeRoomSource = readFileSync(
 test("profile discovery hides card products without deleting owned or historical records", () => {
   assert.match(
     profileApiSource,
-    /wishlist:\s*\(wishlistResult\.data\?\.items \?\? \[\]\)\.filter\(\(item\) => \([\s\S]*?isCustomerBrowsableCatalogCategory\(item\.product\.category\)/,
+    /wishlist:\s*wishlistResult\.data\s*\?\s*wishlistResult\.data\.items\.filter\(\(item\) => isCustomerBrowsableCatalogCategory\(item\.product\.category\)\)\s*:\s*null/,
   );
   assert.match(
     profileApiSource,
@@ -42,8 +42,8 @@ test("profile discovery hides card products without deleting owned or historical
 
   assert.match(profileApiSource, /catalogProducts: products/);
   assert.match(profileApiSource, /const inventoryItems = \[\.\.\.\(inventoryResult\.data\?\.items \?\? \[\]\)\]/);
-  assert.match(profileApiSource, /inventory: inventoryItems/);
-  assert.match(profileApiSource, /orders: ordersResult\.data\?\.items \?\? \[\]/);
+  assert.match(profileApiSource, /inventory: inventoryResult\.data \? inventoryItems : null/);
+  assert.match(profileApiSource, /orders: ordersResult\.data\?\.items \?\? null/);
   assert.match(profileApiSource, /return "카드"/);
 });
 

@@ -34,17 +34,27 @@ export type ProfileSnapshot = {
   actor: Actor | null;
   profile: AccountProfile;
   basicInfo: AccountBasicInfo;
+  /**
+   * A missing address (404) is a valid `null`; a failed address request keeps
+   * `null` and records `sectionErrors.address`.
+   */
   defaultAddress: DefaultAddress | null;
-  wishlist: WishlistItem[];
-  inventory: InventoryUnit[];
-  orders: AccountOrder[];
-  pointBalance: number;
-  pointHistory: PointLedgerEntry[];
-  shippingRequests: ShippingRequest[];
+  /**
+   * Personal sections are `null` when their request failed (see
+   * `sectionErrors`) or when the requested scope did not load them. A failed
+   * personal-data request is never returned as an empty successful list or a
+   * zero balance.
+   */
+  wishlist: WishlistItem[] | null;
+  inventory: InventoryUnit[] | null;
+  orders: AccountOrder[] | null;
+  pointBalance: number | null;
+  pointHistory: PointLedgerEntry[] | null;
+  shippingRequests: ShippingRequest[] | null;
   wantedRequests: ProfileWantedRequest[];
   notices: Notice[];
-  inquiries: Inquiry[];
-  notificationPreferences: NotificationPreferences;
+  inquiries: Inquiry[] | null;
+  notificationPreferences: NotificationPreferences | null;
   sectionErrors: Partial<Record<ProfileSnapshotSection, string>>;
   fetchedAt: string;
 };
@@ -53,6 +63,7 @@ export type ProfileSnapshotSection =
   | "catalog"
   | "wanted"
   | "notices"
+  | "profile"
   | "address"
   | "wishlist"
   | "inventory"
@@ -179,13 +190,13 @@ export async function fetchProfileSnapshot(
   if (!addressResult.data && addressResult.response.status !== 404) {
     sectionErrors.address = errorMessage(addressResult.error, "기본 배송지를 불러오지 못했습니다.");
   }
-  if (!wishlistResult.data) sectionErrors.wishlist = errorMessage(wishlistResult.error, "찜 목록을 불러오지 못했습니다.");
-  if (!inventoryResult.data) sectionErrors.inventory = errorMessage(inventoryResult.error, "보관함을 불러오지 못했습니다.");
-  if (!ordersResult.data) sectionErrors.orders = errorMessage(ordersResult.error, "구매 내역을 불러오지 못했습니다.");
-  if (!pointsResult.data) sectionErrors.points = errorMessage(pointsResult.error, "포인트 내역을 불러오지 못했습니다.");
-  if (!shippingResult.data) sectionErrors.shipping = errorMessage(shippingResult.error, "배송 내역을 불러오지 못했습니다.");
-  if (!inquiriesResult.data) sectionErrors.inquiries = errorMessage(inquiriesResult.error, "문의 내역을 불러오지 못했습니다.");
-  if (!preferencesResult.data) sectionErrors.preferences = errorMessage(preferencesResult.error, "알림 설정을 불러오지 못했습니다.");
+  if (!wishlistResult.data) sectionErrors.wishlist = errorMessage(wishlistResult.error, "찜 목록을 불러오지 못했어요.");
+  if (!inventoryResult.data) sectionErrors.inventory = errorMessage(inventoryResult.error, "보관함을 불러오지 못했어요.");
+  if (!ordersResult.data) sectionErrors.orders = errorMessage(ordersResult.error, "구매 내역을 불러오지 못했어요.");
+  if (!pointsResult.data) sectionErrors.points = errorMessage(pointsResult.error, "포인트 정보를 불러오지 못했어요.");
+  if (!shippingResult.data) sectionErrors.shipping = errorMessage(shippingResult.error, "배송 신청 내역을 불러오지 못했어요.");
+  if (!inquiriesResult.data) sectionErrors.inquiries = errorMessage(inquiriesResult.error, "문의 내역을 불러오지 못했어요.");
+  if (!preferencesResult.data) sectionErrors.preferences = errorMessage(preferencesResult.error, "알림 설정을 불러오지 못했어요.");
 
   const inventoryItems = [...(inventoryResult.data?.items ?? [])];
   const seenInventoryCursors = new Set<string>();
@@ -199,14 +210,15 @@ export async function fetchProfileSnapshot(
       params: { query: { limit: 100, cursor: inventoryCursor } },
     });
     if (!pageResult.data) {
-      sectionErrors.inventory = errorMessage(pageResult.error, "보관함을 모두 불러오지 못했습니다.");
+      // Verified pages stay visible for reading, but the recorded section error
+      // keeps every inventory action closed until a full reload succeeds.
+      sectionErrors.inventory = errorMessage(pageResult.error, "보관함을 모두 불러오지 못했어요.");
       break;
     }
     const page = pageResult.data;
     inventoryItems.push(...page.items);
     inventoryCursor = page.nextCursor ?? undefined;
   }
-  const guestDefaults = createGuestSnapshot([], {}, [], []);
 
   return {
     isExample: false,
@@ -216,18 +228,18 @@ export async function fetchProfileSnapshot(
     profile: profileResult.data,
     basicInfo: basicInfoResult.data,
     defaultAddress,
-    wishlist: (wishlistResult.data?.items ?? []).filter((item) => (
-      isCustomerBrowsableCatalogCategory(item.product.category)
-    )),
-    inventory: inventoryItems,
-    orders: ordersResult.data?.items ?? [],
-    pointBalance: pointsResult.data?.balance ?? 0,
-    pointHistory: pointsResult.data?.items ?? [],
-    shippingRequests: shippingResult.data?.items ?? [],
+    wishlist: wishlistResult.data
+      ? wishlistResult.data.items.filter((item) => isCustomerBrowsableCatalogCategory(item.product.category))
+      : null,
+    inventory: inventoryResult.data ? inventoryItems : null,
+    orders: ordersResult.data?.items ?? null,
+    pointBalance: pointsResult.data?.balance ?? null,
+    pointHistory: pointsResult.data?.items ?? null,
+    shippingRequests: shippingResult.data?.items ?? null,
     wantedRequests,
     notices,
-    inquiries: inquiriesResult.data?.items ?? [],
-    notificationPreferences: preferencesResult.data ?? guestDefaults.notificationPreferences,
+    inquiries: inquiriesResult.data?.items ?? null,
+    notificationPreferences: preferencesResult.data ?? null,
     sectionErrors,
     fetchedAt: new Date().toISOString(),
   };
@@ -267,7 +279,7 @@ async function fetchStorageProfileSnapshot(
     sectionErrors.catalog = "일부 작품 정보를 불러오지 못했습니다. 보관 상품은 계속 확인할 수 있어요.";
   }
   if (!profileResult.data || !basicInfoResult.data) {
-    sectionErrors.inventory = "계정 표시 정보 일부를 불러오지 못했습니다.";
+    sectionErrors.profile = "계정 표시 정보 일부를 불러오지 못했어요.";
   }
   const defaultAddress = addressResult.data ?? null;
   if (!addressResult.data && addressResult.response.status !== 404) {
@@ -324,6 +336,15 @@ async function fetchStorageProfileSnapshot(
     },
     defaultAddress,
     inventory: inventoryItems,
+    // The storage scope loads only inventory; the other personal sections were
+    // not requested and must not read as empty successful results.
+    wishlist: null,
+    orders: null,
+    pointBalance: null,
+    pointHistory: null,
+    shippingRequests: null,
+    inquiries: null,
+    notificationPreferences: null,
     sectionErrors,
     fetchedAt,
   };

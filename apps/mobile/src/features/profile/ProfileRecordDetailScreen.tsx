@@ -23,6 +23,7 @@ import {
   type AccountShippingRequestDetail,
 } from "@/features/profile/profile-detail-api";
 import { categoryLabel, formatDate, ProfileApiError } from "@/features/profile/profile-api";
+import { profileSectionFailure } from "@/features/profile/profile-section-state";
 import { useProfileSnapshot } from "@/features/profile/use-profile-snapshot";
 import { ProfileSessionGate, isProfileSessionBlocked } from "@/features/profile/ProfileSessionGate";
 import { productSubjectTitle } from "@/features/shop/product-title";
@@ -59,7 +60,8 @@ export function ProfileOrderDetailScreen() {
   const orderId = singleParam(rawOrderId);
   const profileState = useProfileSnapshot();
   const snapshot = profileState.snapshot;
-  const order = snapshot?.orders.find((item) => item.id === orderId) ?? null;
+  const order = snapshot?.orders?.find((item) => item.id === orderId) ?? null;
+  const ordersFailure = snapshot ? profileSectionFailure(snapshot, "orders") : null;
   const blockedStatus = isProfileSessionBlocked(profileState.status) ? profileState.status : null;
 
   return (
@@ -71,10 +73,10 @@ export function ProfileOrderDetailScreen() {
     >
       {blockedStatus ? <ProfileSessionGate status={blockedStatus} returnTo={`/profile/orders/${encodeURIComponent(orderId)}`} guestBody="로그인하면 내 주문 상세를 확인할 수 있어요." /> : <>
       {!snapshot && !profileState.message ? <LoadingState label="주문을 불러오는 중" /> : null}
-      {!order && profileState.message ? (
-        <ErrorState message={profileState.message} onRetry={profileState.reload} />
+      {!order && (profileState.message || ordersFailure) ? (
+        <ErrorState message={profileState.message || ordersFailure || ""} onRetry={profileState.reload} />
       ) : null}
-      {snapshot && !order ? (
+      {snapshot && !order && !ordersFailure ? (
         <MissingState icon="receipt-outline" title="주문을 찾을 수 없어요" />
       ) : null}
       {order ? (
@@ -106,7 +108,7 @@ export function ProfileShippingDetailScreen() {
   const detailGeneration = useRef(0);
   const hasFocusedOnce = useRef(false);
   const snapshotFallback = profileState.status === "authenticated"
-    ? profileState.snapshot?.shippingRequests.find((item) => item.id === shippingRequestId) ?? null
+    ? profileState.snapshot?.shippingRequests?.find((item) => item.id === shippingRequestId) ?? null
     : null;
   const shippingRequest = profileState.status === "authenticated"
     ? (detail?.id === shippingRequestId ? detail : snapshotFallback)

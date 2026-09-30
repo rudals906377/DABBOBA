@@ -19,6 +19,8 @@ import {
 import { AppText as Text } from "@/components/Typography";
 import { seed } from "@/design-system/seed";
 import { useCommerceCapability } from "@/features/commerce/CommerceCapabilityProvider";
+import { ProfileSectionErrorState } from "@/features/profile/ProfileSectionErrorState";
+import { profileSectionFailure, profileSectionsFailure } from "@/features/profile/profile-section-state";
 import { useProfileSnapshot } from "@/features/profile/use-profile-snapshot";
 import { ProfileSessionGate, isProfileSessionBlocked } from "@/features/profile/ProfileSessionGate";
 import { colors } from "@/theme";
@@ -70,6 +72,7 @@ export function ProfileHomeScreen() {
   const profileState = useProfileSnapshot();
   const { status, snapshot, message, refreshing, reload } = profileState;
   const hasFocusedOnce = useRef(false);
+  const summary = status === "authenticated" && snapshot ? authenticatedSummary(snapshot) : null;
   const push = (section: ProfileSection) => {
     if (section === "product-history") {
       router.push("/product-history");
@@ -149,19 +152,23 @@ export function ProfileHomeScreen() {
                 </Pressable>
 
                 <View style={styles.summaryDivider} />
-                <View accessible accessibilityRole="summary" style={styles.walletCard} accessibilityLabel={`내 포인트 ${snapshot.pointBalance.toLocaleString("ko-KR")}P`}>
-                  <ProfileMetric label="내 포인트" value={`${snapshot.pointBalance.toLocaleString("ko-KR")}P`} accent />
+                <View accessible accessibilityRole="summary" style={styles.walletCard} accessibilityLabel={summary?.pointBalanceLabel ? `내 포인트 ${summary.pointBalanceLabel}` : "내 포인트, 불러오지 못했어요"}>
+                  <ProfileMetric label="내 포인트" value={summary?.pointBalanceLabel ?? "불러오지 못했어요"} accent={Boolean(summary?.pointBalanceLabel)} muted={!summary?.pointBalanceLabel} />
                 </View>
 
                 <View style={styles.summaryDivider} />
-                <View accessible accessibilityRole="summary" style={styles.statsCard} accessibilityLabel={`나의 활동, 찜 ${snapshot.wishlist.length}개, 보관함 ${snapshot.inventory.length}개, 구매 ${snapshot.orders.length}건`}>
-                  <Stat value={snapshot.wishlist.length} label="찜" />
+                <View accessible accessibilityRole="summary" style={styles.statsCard} accessibilityLabel={`나의 활동, 찜 ${statLabel(summary?.wishlistCount, "개")}, 보관함 ${statLabel(summary?.inventoryCount, "개")}, 구매 ${statLabel(summary?.orderCount, "건")}`}>
+                  <Stat value={summary?.wishlistCount ?? "—"} label="찜" />
                   <View style={styles.statDivider} />
-                  <Stat value={snapshot.inventory.length} label="보관함" />
+                  <Stat value={summary?.inventoryCount ?? "—"} label="보관함" />
                   <View style={styles.statDivider} />
-                  <Stat value={snapshot.orders.length} label="구매" />
+                  <Stat value={summary?.orderCount ?? "—"} label="구매" />
                 </View>
               </View>
+            ) : null}
+
+            {summary?.failure ? (
+              <ProfileSectionErrorState message={summary.failure} onRetry={reload} style={styles.summaryFailure} />
             ) : null}
 
             {commerceEnabled ? <Pressable
@@ -195,6 +202,37 @@ export function ProfileHomeScreen() {
       </ScrollView>
     </SafeAreaView>
   );
+}
+
+type AuthenticatedSummary = {
+  pointBalanceLabel: string | null;
+  wishlistCount: number | null;
+  inventoryCount: number | null;
+  orderCount: number | null;
+  failure: string | null;
+};
+
+/**
+ * Overview values for the authenticated summary card. A failed personal
+ * section yields `null` (rendered as an unavailable marker plus one retryable
+ * failure) instead of a 0P balance or a zero count.
+ */
+function authenticatedSummary(snapshot: NonNullable<ReturnType<typeof useProfileSnapshot>["snapshot"]>): AuthenticatedSummary {
+  const pointsFailed = profileSectionFailure(snapshot, "points") !== null || snapshot.pointBalance === null;
+  const count = (section: "wishlist" | "inventory" | "orders", list: ReadonlyArray<unknown> | null) => (
+    profileSectionFailure(snapshot, section) || !list ? null : list.length
+  );
+  return {
+    pointBalanceLabel: pointsFailed || snapshot.pointBalance === null ? null : `${snapshot.pointBalance.toLocaleString("ko-KR")}P`,
+    wishlistCount: count("wishlist", snapshot.wishlist),
+    inventoryCount: count("inventory", snapshot.inventory),
+    orderCount: count("orders", snapshot.orders),
+    failure: profileSectionsFailure(snapshot, ["points", "wishlist", "inventory", "orders"]),
+  };
+}
+
+function statLabel(value: number | null | undefined, unit: string): string {
+  return typeof value === "number" ? `${value}${unit}` : "불러오지 못했어요";
 }
 
 function Stat({ value, label }: { value: number | string; label: string }) {
@@ -293,6 +331,7 @@ const styles = StyleSheet.create({
   statValue: { color: colors.ink, ...seed.typography.subtitle, textAlign: "center" },
   statLabel: { color: colors.muted, ...seed.typography.caption, fontWeight: "700", textAlign: "center" },
   statDivider: { width: StyleSheet.hairlineWidth, height: 34, backgroundColor: seed.color.stroke.muted },
+  summaryFailure: { marginTop: seed.spacing.x3 },
   requestCard: { minHeight: 84, flexDirection: "row", alignItems: "center", gap: seed.spacing.x3, marginTop: seed.spacing.x4, borderRadius: seed.radius.r4, borderWidth: 1, borderColor: seed.color.stroke.neutral, paddingHorizontal: seed.spacing.x4, paddingVertical: seed.spacing.x3, backgroundColor: seed.color.layer.default },
   requestIcon: { width: 48, height: 48, borderRadius: seed.radius.r3, alignItems: "center", justifyContent: "center", backgroundColor: seed.color.background.brandWeak },
   requestText: { flex: 1, minWidth: 0 },

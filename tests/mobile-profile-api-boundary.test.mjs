@@ -146,7 +146,7 @@ test("inventory pagination reports a later page failure while preserving the ver
   const harness = setup(undefined, 503, pages);
   const result = await harness.fetch("http://test.invalid", "test-only-token");
   assert.equal(result.inventory.map((item) => item.id).join(","), "page-1");
-  assert.match(result.sectionErrors.inventory, /보관함을 모두 불러오지 못했습니다/);
+  assert.match(result.sectionErrors.inventory, /보관함을 모두 불러오지 못했어요/);
 });
 
 test("inventory pagination rejects a repeated cursor instead of returning partial data", async () => {
@@ -179,6 +179,31 @@ for (const privatePath of ["auth/me", "account/profile", "account/basic-info"]) 
     }
   });
 }
+
+test("a failed /v1/account/orders 500 becomes a null section while other sections load", async () => {
+  const harness = setup("/v1/account/orders", 500);
+  const result = await harness.fetch("http://test.invalid", "test-only-token");
+  assert.equal(result.orders, null);
+  assert.equal(typeof result.sectionErrors.orders, "string");
+  assert.ok(result.sectionErrors.orders.length > 0);
+  assert.equal(result.pointBalance, 32400);
+  assert.equal(result.pointHistory.length, 1);
+  assert.equal(result.inventory.map((item) => item.id).join(","), "server-owned");
+  assert.equal(result.wishlist.length, 1);
+  assert.deepEqual(result.shippingRequests, []);
+  for (const section of ["points", "inventory", "wishlist", "shipping", "inquiries", "preferences"]) {
+    assert.equal(result.sectionErrors[section], undefined);
+  }
+});
+
+test("a failed points request never reads as a zero balance", async () => {
+  const harness = setup("/v1/account/points", 500);
+  const result = await harness.fetch("http://test.invalid", "test-only-token");
+  assert.equal(result.pointBalance, null);
+  assert.equal(result.pointHistory, null);
+  assert.equal(typeof result.sectionErrors.points, "string");
+  assert.deepEqual(result.orders, []);
+});
 
 const optionalPrivateSections = new Map([
   ["account/default-address", "address"],

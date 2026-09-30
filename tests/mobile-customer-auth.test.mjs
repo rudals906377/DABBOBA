@@ -78,11 +78,17 @@ test("login explains missing legal configuration before sign-in choices", () => 
   assert.equal(render.match(/약관 정보를 확인할 수 없어 로그인을 잠시 이용할 수 없어요\./g)?.length, 1);
 });
 
-test("failed public config refresh invalidates previously verified legal versions as well as commerce", () => {
+test("failed public config refresh keeps legal and commerce authority only inside the bounded grace window", () => {
   const provider = read("apps/mobile/src/features/commerce/CommerceCapabilityProvider.tsx");
   const failedRefresh = provider.slice(provider.indexOf("} catch (error) {"), provider.indexOf("} finally {"));
-  assert.match(failedRefresh, /setServerCapability\(null\)/);
-  assert.match(failedRefresh, /setRequiredPolicyVersions\(null\)/);
+  assert.match(failedRefresh, /failure = error/);
+  assert.doesNotMatch(failedRefresh, /setServerCapability|setRequiredPolicyVersions/);
+  const settle = provider.slice(provider.indexOf("} finally {"));
+  assert.match(settle, /setConfig\(\(previous\) => resolvePublicConfigState\(/);
+  assert.match(provider, /PUBLIC_CONFIG_TIMEOUT_MS = 8_000/);
+  assert.match(provider, /PUBLIC_CONFIG_REFRESH_INTERVAL_MS = 30_000/);
+  const grace = read("apps/mobile/src/features/commerce/public-config-grace.ts");
+  assert.match(grace, /PUBLIC_CONFIG_GRACE_MS = 10 \* 60_000/);
 });
 
 test("login can retry both legal policy and provider availability after a temporary API failure", () => {

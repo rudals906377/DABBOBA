@@ -45,6 +45,8 @@ import {
 } from "@/features/profile/profile-api";
 import { isPointReturnEligibleInventory } from "@/features/profile/point-return-eligibility";
 import { PaidDrawRecovery } from "@/features/profile/PaidDrawRecovery";
+import { ProfileSectionErrorState } from "@/features/profile/ProfileSectionErrorState";
+import { profileSectionFailure } from "@/features/profile/profile-section-state";
 import {
   GACHA_ONLY_FREE_SHIPPING_THRESHOLD,
   KUJI_INCLUDED_FREE_SHIPPING_THRESHOLD,
@@ -237,20 +239,28 @@ function Wishlist({
   profileState: ReturnType<typeof useProfileSnapshot>;
   assetBaseUrl: string | null;
 }) {
-  const items = profileState.snapshot!.wishlist;
+  const snapshot = profileState.snapshot!;
+  const failure = profileSectionFailure(snapshot, "wishlist");
+  const items = snapshot.wishlist ?? [];
+  const removeLocally = (current: NonNullable<typeof profileState.snapshot>, item: WishlistItem) => (
+    current.wishlist
+      ? { ...current, wishlist: current.wishlist.filter((candidate) => candidate.id !== item.id) }
+      : current
+  );
   const remove = async (item: WishlistItem) => {
     if (!profileState.snapshot) return;
     if (profileState.snapshot.isExample || !profileState.accessToken) {
-      profileState.setSnapshot((current) => current ? { ...current, wishlist: current.wishlist.filter((candidate) => candidate.id !== item.id) } : current);
+      profileState.setSnapshot((current) => current ? removeLocally(current, item) : current);
       return;
     }
     try {
       await removeWishlistItem(profileState.runtime.apiBaseUrl, profileState.accessToken, item.product.id);
-      profileState.setSnapshot((current) => current ? { ...current, wishlist: current.wishlist.filter((candidate) => candidate.id !== item.id) } : current);
+      profileState.setSnapshot((current) => current ? removeLocally(current, item) : current);
     } catch (error) {
       Alert.alert("찜을 해제하지 못했어요", error instanceof Error ? error.message : "잠시 후 다시 시도해 주세요.");
     }
   };
+  if (failure) return <ProfileSectionErrorState message={failure} onRetry={profileState.reload} />;
   return (
     <>
       <SectionLead title={`관심 상품 ${items.length}개`} />
@@ -287,32 +297,43 @@ export function StorageHubContent({
   const { fontScale } = useWindowDimensions();
   const largeText = Number.isFinite(fontScale) && fontScale > 1.3;
   const [mode, setMode] = useState<StorageMode>(initialMode);
+  // A failed or partially failed inventory load closes every storage action:
+  // selection, shipping, and point return all need the complete verified list.
+  const inventoryFailure = profileSectionFailure(snapshot, "inventory");
+  const inventory = inventoryFailure ? null : snapshot.inventory;
   const storedDrawItems = useMemo(
-    () => snapshot.inventory.filter(isStoredDrawInventory),
-    [snapshot.inventory],
+    () => inventory?.filter(isStoredDrawInventory) ?? null,
+    [inventory],
   );
   const pointReturnItems = useMemo(
-    () => snapshot.inventory.filter(isPointReturnEligibleInventory),
-    [snapshot.inventory],
+    () => inventory?.filter(isPointReturnEligibleInventory) ?? null,
+    [inventory],
   );
   const exchangeOrShippingItems = useMemo(
-    () => snapshot.inventory.filter(isExchangeOrShippingInventory),
-    [snapshot.inventory],
+    () => inventory?.filter(isExchangeOrShippingInventory) ?? null,
+    [inventory],
   );
 
   return (
     <View style={rootLayout ? styles.storageRootHub : undefined}>
       <View accessibilityRole="tablist" style={styles.storageTabs}>
-        <StorageModeTab label="보관 중" count={storedDrawItems.length} selected={mode === "shipping"} largeText={largeText} onPress={() => setMode("shipping")} />
-        <StorageModeTab label="교환 또는 배송 중인 상품" count={exchangeOrShippingItems.length} wide selected={mode === "exchange-or-shipping"} largeText={largeText} onPress={() => setMode("exchange-or-shipping")} />
-        <StorageModeTab label="포인트 환급" count={pointReturnItems.length} selected={mode === "point-return"} largeText={largeText} onPress={() => setMode("point-return")} />
+        <StorageModeTab label="보관 중" count={storedDrawItems?.length ?? null} selected={mode === "shipping"} largeText={largeText} onPress={() => setMode("shipping")} />
+        <StorageModeTab label="교환 또는 배송 중인 상품" count={exchangeOrShippingItems?.length ?? null} wide selected={mode === "exchange-or-shipping"} largeText={largeText} onPress={() => setMode("exchange-or-shipping")} />
+        <StorageModeTab label="포인트 환급" count={pointReturnItems?.length ?? null} selected={mode === "point-return"} largeText={largeText} onPress={() => setMode("point-return")} />
       </View>
       {!commerceEnabled ? (
         <SeedInlineGuidance style={styles.prelaunchStorageGuidance}>
           사전오픈 기간에는 보관 상품과 기존 진행 내역만 확인할 수 있어요. 배송·포인트 환급 신청은 정식 오픈 후 제공됩니다.
         </SeedInlineGuidance>
       ) : null}
-      {mode === "shipping" ? (
+      {inventoryFailure || !storedDrawItems || !exchangeOrShippingItems || !pointReturnItems ? (
+        <StorageLoadFailure
+          message={inventoryFailure ?? "보관함을 불러오지 못했어요."}
+          profileState={profileState}
+          rootLayout={rootLayout}
+          rootScrollProps={rootScrollProps}
+        />
+      ) : mode === "shipping" ? (
         <Shipping profileState={profileState} items={storedDrawItems} assetBaseUrl={assetBaseUrl} commerceEnabled={commerceEnabled} rootLayout={rootLayout} rootScrollProps={rootScrollProps} />
       ) : mode === "exchange-or-shipping" ? (
         <ExchangeOrShipping profileState={profileState} items={exchangeOrShippingItems} assetBaseUrl={assetBaseUrl} rootLayout={rootLayout} rootScrollProps={rootScrollProps} />
@@ -323,11 +344,36 @@ export function StorageHubContent({
   );
 }
 
-function StorageModeTab({ label, count, selected, largeText, wide = false, onPress }: { label: string; count: number; selected: boolean; largeText: boolean; wide?: boolean; onPress: () => void }) {
+function StorageLoadFailure({
+  message,
+  profileState,
+  rootLayout = false,
+  rootScrollProps,
+}: {
+  message: string;
+  profileState: ReturnType<typeof useProfileSnapshot>;
+  rootLayout?: boolean;
+  rootScrollProps?: Pick<ScrollViewProps, "onScroll" | "scrollEventThrottle">;
+}) {
+  const content = <ProfileSectionErrorState message={message} onRetry={profileState.reload} style={styles.storageLoadFailure} />;
+  if (!rootLayout) return content;
+  return (
+    <ScrollView
+      {...rootScrollProps}
+      style={styles.storageModeBody}
+      contentContainerStyle={styles.storageScrollContent}
+      refreshControl={<RefreshControl refreshing={profileState.refreshing} onRefresh={profileState.reload} tintColor={colors.ink} />}
+    >
+      {content}
+    </ScrollView>
+  );
+}
+
+function StorageModeTab({ label, count, selected, largeText, wide = false, onPress }: { label: string; count: number | null; selected: boolean; largeText: boolean; wide?: boolean; onPress: () => void }) {
   return (
     <Pressable
       accessibilityRole="tab"
-      accessibilityLabel={`${label}, ${count}개`}
+      accessibilityLabel={count === null ? `${label}, 불러오지 못했어요` : `${label}, ${count}개`}
       accessibilityState={{ selected }}
       onPress={onPress}
       style={({ pressed }) => [styles.storageTab, wide && styles.storageTabWide, largeText && styles.storageTabLargeText, pressed && styles.pressed]}
@@ -411,6 +457,10 @@ function Shipping({
   const submit = async () => {
     if (!selected.length) {
       Alert.alert("배송할 상품을 선택해 주세요");
+      return;
+    }
+    if (snapshot.sectionErrors.address) {
+      Alert.alert("기본 배송지를 확인하지 못했어요", `${snapshot.sectionErrors.address} 다시 불러온 뒤 신청해 주세요.`);
       return;
     }
     if (!snapshot.defaultAddress) {
@@ -674,9 +724,12 @@ function ShippingHistory({
   profileState: ReturnType<typeof useProfileSnapshot>;
 }) {
   const snapshot = profileState.snapshot!;
+  const failure = profileSectionFailure(snapshot, "shipping");
+  const shippingRequests = snapshot.shippingRequests ?? [];
+  if (failure) return <ProfileSectionErrorState message={failure} onRetry={profileState.reload} />;
   return (
     <>
-      {snapshot.shippingRequests.length ? snapshot.shippingRequests.map((request) => {
+      {shippingRequests.length ? shippingRequests.map((request) => {
         const compactDestination = compactShippingDestination(request.destination.addressLine1);
         return (
           <Pressable key={request.id} accessibilityRole="button" accessibilityLabel={`${formatDate(request.requestedAt)} 배송 신청 상세`} onPress={() => router.push(`/profile/shipping/${encodeURIComponent(request.id)}` as Href)} style={({ pressed }) => [styles.historyCard, pressed && styles.pressed]}>
@@ -839,7 +892,8 @@ function PointReturn({
 
 function Orders({ profileState }: { profileState: ReturnType<typeof useProfileSnapshot> }) {
   const snapshot = profileState.snapshot!;
-  const orders = snapshot.orders;
+  const failure = profileSectionFailure(snapshot, "orders");
+  const orders = snapshot.orders ?? [];
   return (
     <>
       {!snapshot.isExample && profileState.accessToken ? (
@@ -851,6 +905,7 @@ function Orders({ profileState }: { profileState: ReturnType<typeof useProfileSn
           ipNames={snapshot.ipNames}
         />
       ) : null}
+      {failure ? <ProfileSectionErrorState message={failure} onRetry={profileState.reload} /> : <>
       <SectionLead title={`주문 ${orders.length}건`} description="서버에서 확정한 결제 금액과 주문 상태를 그대로 표시합니다." />
       {orders.length ? orders.map((order) => (
         <Pressable key={order.id} accessibilityRole="button" accessibilityLabel={`${formatDate(order.createdAt)} 주문 상세`} onPress={() => router.push(`/profile/orders/${encodeURIComponent(order.id)}` as Href)} style={({ pressed }) => [styles.historyCard, pressed && styles.pressed]}>
@@ -872,17 +927,25 @@ function Orders({ profileState }: { profileState: ReturnType<typeof useProfileSn
           <View style={styles.totalRow}><Text style={styles.totalLabel}>결제 금액</Text><Text style={styles.totalValue}>{order.total.toLocaleString("ko-KR")}원</Text></View>
         </Pressable>
       )) : <EmptyState icon="receipt-outline" title="구매 내역이 없어요" body="결제가 완료된 주문이 이곳에 표시돼요." />}
+      </>}
     </>
   );
 }
 
 function Points({ profileState }: { profileState: ReturnType<typeof useProfileSnapshot> }) {
   const snapshot = profileState.snapshot!;
+  const failure = profileSectionFailure(snapshot, "points");
+  const pointBalance = snapshot.pointBalance;
+  const pointHistory = snapshot.pointHistory;
+  // A failed points request never renders as a 0P balance or an empty ledger.
+  if (failure || pointBalance === null || pointHistory === null) {
+    return <ProfileSectionErrorState message={failure ?? "포인트 정보를 불러오지 못했어요."} onRetry={profileState.reload} />;
+  }
   return (
     <>
-      <View style={styles.pointHero}><Text style={styles.pointCaption}>사용 가능한 포인트</Text><Text style={styles.pointBalance}>{snapshot.pointBalance.toLocaleString("ko-KR")}P</Text></View>
+      <View style={styles.pointHero}><Text style={styles.pointCaption}>사용 가능한 포인트</Text><Text style={styles.pointBalance}>{pointBalance.toLocaleString("ko-KR")}P</Text></View>
       <Text style={styles.listHeading}>적립·사용 내역</Text>
-      {snapshot.pointHistory.length ? snapshot.pointHistory.map((entry) => (
+      {pointHistory.length ? pointHistory.map((entry) => (
         <View key={entry.id} style={styles.pointRow}>
           <View><Text style={styles.pointReason}>{entry.reason}</Text><Text style={styles.historyMeta}>{formatDate(entry.createdAt)}</Text></View>
           <Text style={[styles.pointAmount, entry.amount > 0 ? styles.pointPlus : styles.pointMinus]}>{entry.amount > 0 ? "+" : ""}{entry.amount.toLocaleString("ko-KR")}P</Text>
@@ -913,7 +976,7 @@ function RequestRoom({ profileState }: { profileState: ReturnType<typeof useProf
     <>
       <View style={styles.requestLead}><Text style={styles.requestLeadTitle}>찾는 상품이 아직 없나요?</Text><Text style={styles.requestLeadBody}>작품·카테고리·원하는 상품을 등록하고 다른 수집가의 관심을 모아보세요.</Text><PrimaryButton label="새 신청 작성" onPress={() => router.push("/profile/requests/new" as Href)} /></View>
       <Text style={styles.listHeading}>함께 기다리는 신청</Text>
-      {snapshot.sectionErrors.wanted ? <SeedInlineGuidance style={styles.sectionErrorGuidance}>{snapshot.sectionErrors.wanted} 아래로 당겨 다시 시도해 주세요.</SeedInlineGuidance> : null}
+      {snapshot.sectionErrors.wanted ? <ProfileSectionErrorState message={snapshot.sectionErrors.wanted} onRetry={profileState.reload} style={styles.sectionErrorState} /> : null}
       {snapshot.wantedRequests.map((request) => (
         <View key={request.id} style={styles.requestItem}>
           <Pressable accessibilityRole="button" accessibilityLabel={`${request.desiredItem} 신청 상세`} onPress={() => router.push(`/profile/requests/${encodeURIComponent(request.id)}` as Href)} style={({ pressed }) => [pressed && styles.pressed]}>
@@ -934,6 +997,8 @@ function Support({ profileState }: { profileState: ReturnType<typeof useProfileS
   const { commerceEnabled } = useCommerceCapability();
   const snapshot = profileState.snapshot!;
   const blockedStatus = isProfileSessionBlocked(profileState.status) ? profileState.status : null;
+  const inquiriesFailure = profileSectionFailure(snapshot, "inquiries");
+  const inquiries = snapshot.inquiries;
   return (
     <>
       <SectionLead title="무엇을 도와드릴까요?" description="신청방은 상품 요청 공간이고, 고객센터는 공지·이용 안내·문의 처리를 담당해요." />
@@ -942,17 +1007,18 @@ function Support({ profileState }: { profileState: ReturnType<typeof useProfileS
       <Faq title="보관 상품은 언제 배송할 수 있나요?" body={commerceEnabled ? "보관함에 보관 중인 상품을 선택해 배송 신청할 수 있어요." : "사전오픈 기간에는 배송 신청을 이용할 수 없어요."} />
       {commerceEnabled ? <Faq title="교환 중인 상품도 배송할 수 있나요?" body="교환 등록이나 제안에 사용 중인 상품은 교환을 취소하거나 종료한 뒤 배송할 수 있어요." /> : null}
       <Text style={styles.listHeading}>공지사항</Text>
-      {snapshot.sectionErrors.notices ? <SeedInlineGuidance style={styles.sectionErrorGuidance}>{snapshot.sectionErrors.notices} 아래로 당겨 다시 시도해 주세요.</SeedInlineGuidance> : null}
+      {snapshot.sectionErrors.notices ? <ProfileSectionErrorState message={snapshot.sectionErrors.notices} onRetry={profileState.reload} style={styles.sectionErrorState} /> : null}
       {snapshot.notices.map((notice) => <Pressable key={notice.id} accessibilityRole="button" accessibilityLabel={`${notice.title} 공지 상세`} onPress={() => router.push(`/profile/notices/${encodeURIComponent(notice.id)}` as Href)} style={({ pressed }) => [styles.noticeCard, pressed && styles.pressed]}><Text style={styles.noticeTitle}>{notice.isPinned ? "[중요] " : ""}{notice.title}</Text><Text numberOfLines={3} style={styles.noticeBody}>{notice.content}</Text><Text style={styles.historyMeta}>{formatDate(notice.publishedAt ?? notice.createdAt)}</Text></Pressable>)}
       <Text style={styles.listHeading}>내 문의</Text>
-      {snapshot.sectionErrors.inquiries ? <SeedInlineGuidance style={styles.sectionErrorGuidance}>{snapshot.sectionErrors.inquiries} 아래로 당겨 다시 시도해 주세요.</SeedInlineGuidance> : null}
       {blockedStatus ? (
         <ProfileSessionGate
           status={blockedStatus}
           returnTo="/profile/support"
           guestBody="로그인하면 내 문의 내역을 확인하고 새 문의를 남길 수 있어요."
         />
-      ) : snapshot.inquiries.length ? snapshot.inquiries.map((inquiry) => <Pressable key={inquiry.id} accessibilityRole="button" accessibilityLabel={`${inquiry.title} 문의 상세`} onPress={() => router.push(`/profile/inquiries/${encodeURIComponent(inquiry.id)}` as Href)} style={({ pressed }) => [styles.historyCard, pressed && styles.pressed]}><View style={styles.historyTop}><Text style={styles.historyTitle}>{inquiry.title}</Text><Text style={styles.statusBadge}>{inquiryStatus(inquiry.status)}</Text></View><Text style={styles.historyMeta}>{formatDate(inquiry.updatedAt)} 업데이트</Text></Pressable>) : <EmptyState icon="chatbubble-ellipses-outline" title="문의 내역이 없어요" body="도움이 필요하면 1:1 문의를 남길 수 있어요." />}
+      ) : inquiriesFailure || !inquiries ? (
+        <ProfileSectionErrorState message={inquiriesFailure ?? "문의 내역을 불러오지 못했어요."} onRetry={profileState.reload} />
+      ) : inquiries.length ? inquiries.map((inquiry) => <Pressable key={inquiry.id} accessibilityRole="button" accessibilityLabel={`${inquiry.title} 문의 상세`} onPress={() => router.push(`/profile/inquiries/${encodeURIComponent(inquiry.id)}` as Href)} style={({ pressed }) => [styles.historyCard, pressed && styles.pressed]}><View style={styles.historyTop}><Text style={styles.historyTitle}>{inquiry.title}</Text><Text style={styles.statusBadge}>{inquiryStatus(inquiry.status)}</Text></View><Text style={styles.historyMeta}>{formatDate(inquiry.updatedAt)} 업데이트</Text></Pressable>) : <EmptyState icon="chatbubble-ellipses-outline" title="문의 내역이 없어요" body="도움이 필요하면 1:1 문의를 남길 수 있어요." />}
       {!blockedStatus ? <PrimaryButton label="1:1 문의하기" onPress={() => router.push("/profile/inquiries/new" as Href)} /> : null}
       <View style={styles.publicInfoMenu}><MemberLink href="/profile/business" label="사업자 정보" caption="상호 · 대표자 · 사업자등록정보" icon="business-outline" last /></View>
     </>
@@ -1191,7 +1257,8 @@ const styles = StyleSheet.create({
   errorBox: { marginTop: seed.spacing.x5, borderRadius: seed.radius.r4, padding: seed.spacing.x5, backgroundColor: seed.color.background.criticalWeak },
   errorText: { color: colors.ink, fontSize: 13, lineHeight: 20, textAlign: "center" },
   exampleGuidance: { marginBottom: seed.spacing.x4 },
-  sectionErrorGuidance: { marginBottom: seed.spacing.x3 },
+  sectionErrorState: { marginBottom: seed.spacing.x3 },
+  storageLoadFailure: { marginTop: seed.spacing.x4 },
   sectionLead: { marginBottom: 18 },
   sectionLeadTitle: { color: seed.color.foreground.neutral, ...seed.typography.sectionTitle },
   sectionLeadBody: { color: colors.muted, ...seed.typography.bodyCompact, marginTop: seed.spacing.x2 },
