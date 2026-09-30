@@ -8,17 +8,20 @@ const ROUTES = Object.freeze([
   ['/v1/public/config', 'Public config'],
   ['/v1/catalog/recent-draws', 'Recent draws'],
   ['/v1/catalog/home-sections', 'Home sections'],
+  ['/v1/auth/providers', 'Auth providers'],
 ]);
 const MOBILE_CATALOG_ROUTES = Object.freeze([
   ['/v1/catalog/products?category=gacha&limit=1', 'Products'],
   ['/v1/catalog/ips', 'IPs'],
 ]);
 const LIVE_MOBILE_ROUTES = Object.freeze([
-  ['/v1/auth/providers', 'Auth providers'],
   ['/v1/catalog/products?category=gacha&saleStatus=ON_SALE&excludeSoldOut=true&limit=1', 'Gacha products'],
   ['/v1/catalog/products?category=kuji&saleStatus=ON_SALE&excludeSoldOut=true&limit=1', 'Kuji products'],
 ]);
 const REQUIRED_LIVE_LOGIN_METHODS = Object.freeze(['PHONE', 'KAKAO', 'NAVER', 'GOOGLE', 'APPLE']);
+// App Store Review Guideline 4.8: offering a third-party social login requires
+// Sign in with Apple as an equivalent option, in every commerce mode.
+const THIRD_PARTY_LOGIN_METHODS = Object.freeze(['KAKAO', 'NAVER', 'GOOGLE']);
 const POLICY_VERSION = /^\d{4}-\d{2}-\d{2}$/;
 const SECTION_LAYOUTS = new Set(['gacha', 'kuji']);
 const SECTION_SOURCES = new Set(['MANUAL', 'IP', 'NEW', 'POPULAR']);
@@ -82,8 +85,15 @@ function assertBody(route, body, expectedCommerceMode) {
       throw new Error(`LIVE ${category} catalog has no purchasable product.`);
     }
   } else if (route === 'Auth providers') {
-    if (!Array.isArray(body.methods) || body.brokerExchangeConfigured !== true
-      || REQUIRED_LIVE_LOGIN_METHODS.some((method) => !body.methods.includes(method))) {
+    if (!Array.isArray(body.methods) || typeof body.brokerExchangeConfigured !== 'boolean') {
+      throw new Error('Auth providers contract is incomplete.');
+    }
+    if (THIRD_PARTY_LOGIN_METHODS.some((method) => body.methods.includes(method))
+      && !body.methods.includes('APPLE')) {
+      throw new Error('Auth providers list a third-party login without Sign in with Apple.');
+    }
+    if (expectedCommerceMode === 'LIVE' && (body.brokerExchangeConfigured !== true
+      || REQUIRED_LIVE_LOGIN_METHODS.some((method) => !body.methods.includes(method)))) {
       throw new Error('LIVE customer login providers are incomplete.');
     }
   }

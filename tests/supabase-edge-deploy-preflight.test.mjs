@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { SUPABASE_INTEGRATION_PROJECT_REF } from '../scripts/supabase-integration-profile.mjs';
 import { defaultReleaseCheck, runSupabaseEdgeReleasePreflight } from '../scripts/supabase-edge-release-preflight.mjs';
 import {
   deploySupabaseEdge,
@@ -280,21 +281,21 @@ test('LIVE Edge preflight refuses incomplete payment configuration before source
   assert.equal(databaseCalled, false);
 });
 
-test('LIVE Edge preflight requires complete isolated roles and migration 0075 before database access', async () => {
+test('LIVE Edge preflight requires complete isolated roles and migration 0076 before database access', async () => {
   let databaseCalled = false;
   await assert.rejects(runSupabaseEdgeReleasePreflight({
     edgeProfile: { ...fullLiveEdgeProfile, DABBOBA_ENABLE_PRODUCTION_WORKER: '' },
     expectedCommerceMode: 'LIVE',
-    checkSource: () => ({ status: 'pass', head: 'a'.repeat(40), latestMigration: '0075_shipping_request_retry_after_cancellation.sql', worktreeClean: true }),
+    checkSource: () => ({ status: 'pass', head: 'a'.repeat(40), latestMigration: '0076_legal_policy_business_phone.sql', worktreeClean: true }),
     runReleaseCheck() { databaseCalled = true; },
   }), /DABBOBA_ENABLE_PRODUCTION_WORKER/);
   assert.equal(databaseCalled, false);
   await assert.rejects(runSupabaseEdgeReleasePreflight({
     edgeProfile: fullLiveEdgeProfile,
     expectedCommerceMode: 'LIVE',
-    checkSource: () => ({ status: 'pass', head: 'a'.repeat(40), latestMigration: '0074_claimed_cancelled_payment_reconciliation_index.sql', worktreeClean: true }),
+    checkSource: () => ({ status: 'pass', head: 'a'.repeat(40), latestMigration: '0075_shipping_request_retry_after_cancellation.sql', worktreeClean: true }),
     runReleaseCheck() { databaseCalled = true; },
-  }), /migration 0075/);
+  }), /migration 0076/);
   assert.equal(databaseCalled, false);
 });
 
@@ -305,14 +306,14 @@ test('complete LIVE Edge candidate reaches the read-only target database release
     sourceEnvironment: { DATABASE_MIGRATION_URL: 'postgresql://migration:fixture@migration.example.test/postgres' },
     checkSource: () => ({
       status: 'pass', head: 'a'.repeat(40),
-      latestMigration: '0075_shipping_request_retry_after_cancellation.sql', worktreeClean: true,
+      latestMigration: '0076_legal_policy_business_phone.sql', worktreeClean: true,
     }),
     runReleaseCheck: () => ({ status: 0, stdout: JSON.stringify({
       scope: 'database-release-check/v1', status: 'pass',
       environmentTier: 'PRODUCTION', targetHash: 'b'.repeat(64),
     }) }),
   });
-  assert.equal(result.latestMigration, '0075_shipping_request_retry_after_cancellation.sql');
+  assert.equal(result.latestMigration, '0076_legal_policy_business_phone.sql');
   assert.equal(result.targetHash, 'b'.repeat(64));
   assert.deepEqual(result.releaseConfiguration.customerAuthProviders, ['PHONE', 'KAKAO', 'NAVER', 'GOOGLE', 'APPLE']);
 });
@@ -345,7 +346,7 @@ test('Supabase Edge release preflight requires a committed source and a passing 
     },
     checkSource() {
       calls.push('source');
-      return { status: 'pass', head: 'a'.repeat(40), latestMigration: '0075_shipping_request_retry_after_cancellation.sql', worktreeClean: true, blockers: [] };
+      return { status: 'pass', head: 'a'.repeat(40), latestMigration: '0076_legal_policy_business_phone.sql', worktreeClean: true, blockers: [] };
     },
     runReleaseCheck({ environment }) {
       calls.push('database');
@@ -438,6 +439,12 @@ test('Supabase Edge deployment performs both preflights before build, secret, or
   assert.equal(calls.some((call) => call.includes('build:supabase')), true);
   assert.equal(calls.some((call) => call.includes('functions deploy dabboba-api')), true);
   assert.ok(calls.indexOf('public-smoke') > calls.findIndex((call) => call.includes('functions deploy dabboba-worker')));
+  const adminBuild = calls.indexOf('corepack:pnpm --filter @dabboba/api build:supabase:admin');
+  const adminDeploy = calls.indexOf(`supabase:functions deploy dabboba-admin-api --no-verify-jwt --project-ref ${SUPABASE_INTEGRATION_PROJECT_REF}`);
+  assert.ok(adminBuild > calls.indexOf('project-access'), 'admin bundle is built only after both preflights');
+  assert.ok(adminDeploy > adminBuild, 'admin function is deployed from the freshly built admin bundle');
+  assert.ok(adminDeploy > calls.findIndex((call) => call.startsWith('supabase:secrets set')));
+  assert.ok(calls.indexOf('public-smoke') > adminDeploy);
 });
 
 test('a failed database preflight leaves build, secrets, and functions untouched', async () => {
@@ -484,4 +491,17 @@ test('deployment cannot report success when the mobile public API smoke fails', 
   }), /Public config returned HTTP 404/);
   assert.ok(calls.some((call) => call.includes('functions deploy dabboba-api')));
   assert.ok(calls.some((call) => call.includes('functions deploy dabboba-worker')));
+});
+
+test('admin Edge function injects the customer WASM image sanitizer for catalog media', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const admin = await readFile(new URL('../supabase/functions/dabboba-admin-api/index.ts', import.meta.url), 'utf8');
+  const adminConfig = JSON.parse(await readFile(new URL('../supabase/functions/dabboba-admin-api/deno.json', import.meta.url), 'utf8'));
+  const customerConfig = JSON.parse(await readFile(new URL('../supabase/functions/dabboba-api/deno.json', import.meta.url), 'utf8'));
+  assert.match(admin, /surface: "admin"/);
+  assert.match(admin, /import\("\.\.\/dabboba-api\/image-sanitizer\.ts"\)/);
+  assert.match(admin, /sanitizeImage: sanitizeEdgeImage/);
+  for (const specifier of ['@imagemagick/magick-wasm', '@imagemagick/magick-wasm/magick.wasm']) {
+    assert.equal(adminConfig.imports[specifier], customerConfig.imports[specifier]);
+  }
 });

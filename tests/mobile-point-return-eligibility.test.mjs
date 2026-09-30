@@ -61,11 +61,11 @@ test("point return admits only owned inventory whose source is a gacha draw", ()
 test("storage keeps kuji for shipping while point return receives only the gacha subset", () => {
   assert.match(
     profileSectionSource,
-    /storedDrawItems = useMemo\([\s\S]*?snapshot\.inventory\.filter\(isStoredDrawInventory\)/,
+    /storedDrawItems = useMemo\([\s\S]*?inventory\?\.filter\(isStoredDrawInventory\)/,
   );
   assert.match(
     profileSectionSource,
-    /pointReturnItems = useMemo\([\s\S]*?snapshot\.inventory\.filter\(isPointReturnEligibleInventory\)/,
+    /pointReturnItems = useMemo\([\s\S]*?inventory\?\.filter\(isPointReturnEligibleInventory\)/,
   );
   assert.match(
     profileSectionSource,
@@ -75,9 +75,9 @@ test("storage keeps kuji for shipping while point return receives only the gacha
     profileSectionSource,
     /<PointReturn[^>]*items=\{pointReturnItems\}/,
   );
-  assert.match(profileSectionSource, /<StorageModeTab label="포인트 환급" count=\{pointReturnItems\.length\}/);
+  assert.match(profileSectionSource, /<StorageModeTab label="포인트 환급" count=\{pointReturnItems\?\.length \?\? null\}/);
   assert.match(profileSectionSource, /<ExchangeOrShipping[^>]*items=\{exchangeOrShippingItems\}/);
-  assert.match(profileSectionSource, /<StorageModeTab label="교환 또는 배송 중인 상품" count=\{exchangeOrShippingItems\.length\}/);
+  assert.match(profileSectionSource, /<StorageModeTab label="교환 또는 배송 중인 상품" count=\{exchangeOrShippingItems\?\.length \?\? null\}/);
   assert.doesNotMatch(profileSectionSource, /AvailabilityPill|storageAvailabilityRow/);
   assert.match(profileSectionSource, /<PointReturn[^>]*items=\{pointReturnItems\}/);
   assert.match(

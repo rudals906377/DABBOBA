@@ -123,7 +123,7 @@ test("customer broker reuses one Supabase subject without merging email peers an
       accessToken,
       loginProvider,
       ...(loginProvider === "APPLE" ? { appleRefreshToken: `apple-refresh-${"x".repeat(64)}` } : {}),
-      acceptedPolicies: { terms: "2026-09-22", privacy: "2026-09-22" },
+      acceptedPolicies: { terms: "2026-09-30", privacy: "2026-09-30" },
     },
     });
   };
@@ -138,7 +138,7 @@ test("customer broker reuses one Supabase subject without merging email peers an
       accessToken,
       loginProvider,
       ...(appleRefreshToken ? { appleRefreshToken } : {}),
-      acceptedPolicies: { terms: "2026-09-22", privacy: "2026-09-22" },
+      acceptedPolicies: { terms: "2026-09-30", privacy: "2026-09-30" },
     },
   });
 

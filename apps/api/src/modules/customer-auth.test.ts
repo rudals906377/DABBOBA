@@ -7,12 +7,12 @@ test("customer auth discovery exposes the five approved methods only when live b
   assert.deepEqual(customerLoginProviderDiscovery(null, null), {
     methods: [],
     brokerExchangeConfigured: false,
-    requiredPolicyVersions: { terms: "2026-09-22", privacy: "2026-09-22" },
+    requiredPolicyVersions: { terms: "2026-09-30", privacy: "2026-09-30" },
   });
   assert.deepEqual(customerLoginProviderDiscovery("https://project.supabase.co", null, ["KAKAO"]), {
     methods: [],
     brokerExchangeConfigured: false,
-    requiredPolicyVersions: { terms: "2026-09-22", privacy: "2026-09-22" },
+    requiredPolicyVersions: { terms: "2026-09-30", privacy: "2026-09-30" },
   });
   assert.deepEqual(customerLoginProviderDiscovery(
     "https://project.supabase.co",
@@ -21,7 +21,7 @@ test("customer auth discovery exposes the five approved methods only when live b
   ), {
     methods: ["PHONE", "KAKAO"],
     brokerExchangeConfigured: true,
-    requiredPolicyVersions: { terms: "2026-09-22", privacy: "2026-09-22" },
+    requiredPolicyVersions: { terms: "2026-09-30", privacy: "2026-09-30" },
   });
 });
 

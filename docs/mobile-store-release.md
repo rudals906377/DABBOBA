@@ -126,9 +126,15 @@ requires the five requested login methods, a LIVE PortOne channel, distinct API
 payment/webhook secrets, the same dedicated API/worker requery secret, a worker
 configured for `PORTONE_API` against this project's API route, production
 storage and database roles, and a clean reviewed commit containing migration
-`0075` or later. It then runs the target database's read-only release check.
+`0076` or later. Migration `0076` publishes the 2026-09-30 TERMS/PRIVACY
+revision whose only change is the business phone `031-947-9996`; the
+release-config gate fails when either public policy phone differs from the
+in-app business information. It then runs the target database's read-only release check.
 It does not create the profile, apply migrations, upload secrets, deploy a
 function, enable Cron, charge a card, or establish provider/store approval.
+After the same preflight and project check, `supabase:edge:deploy` builds and
+deploys `dabboba-api`, `dabboba-admin-api` (with the shared WASM image
+sanitizer, so admin catalog-media completion works), and `dabboba-worker`.
 The existing `supabase:edge:deploy` command remains PRELAUNCH-only; do not
 point it at a LIVE profile or treat this preflight as authorization to switch
 shared production secrets before a reviewed cutover and rollback sequence is

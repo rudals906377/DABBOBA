@@ -72,9 +72,11 @@ export async function deploySupabaseEdge({
   const release = await preflight({ edgeProfile: profile });
   verifyProjectAccess();
   runCommand('corepack', ['pnpm', '--filter', '@dabboba/api', 'build:supabase']);
+  runCommand('corepack', ['pnpm', '--filter', '@dabboba/api', 'build:supabase:admin']);
   runCommand('corepack', ['pnpm', '--filter', '@dabboba/worker', 'build:edge']);
   runSupabase('secrets', 'set', '--env-file', SUPABASE_EDGE_PROFILE_FILE, '--project-ref', SUPABASE_INTEGRATION_PROJECT_REF);
   runSupabase('functions', 'deploy', 'dabboba-api', '--no-verify-jwt', '--project-ref', SUPABASE_INTEGRATION_PROJECT_REF);
+  runSupabase('functions', 'deploy', 'dabboba-admin-api', '--no-verify-jwt', '--project-ref', SUPABASE_INTEGRATION_PROJECT_REF);
   runSupabase('functions', 'deploy', 'dabboba-worker', '--no-verify-jwt', '--project-ref', SUPABASE_INTEGRATION_PROJECT_REF);
   await verifyPublicSurface();
   process.stdout.write(`Database release ${release.targetHash.slice(0, 12)} and source ${release.sourceHead.slice(0, 12)} passed preflight.\n`);

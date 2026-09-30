@@ -305,6 +305,7 @@ When any text-entry control loses focus, dismiss the simulated keyboard. If the 
 
 - Keep the domain category IDs and their commerce meaning fixed as `gacha`, `kuji`, `figure`, and `tcg`. Let authorized operators manage only customer-facing labels, order, `active` / `coming-soon` / `hidden` availability, surface visibility, 안내 문구, representative image URL, and icon key through the audited admin API.
 - The customer app must use the public category-settings API with safe built-in defaults, refresh the settings while the app remains open, and apply one shared policy across Home, 뽀바, 교환방, 신청방, Product Detail, and checkout. An operator save must not require a store release; a temporary settings fetch failure must retain the last verified settings rather than blanking the storefront.
+- The public commerce/legal config (`/v1/public/config`) follows a bounded variant of that rule: a valid response always replaces the state, including an explicit `PRELAUNCH` that applies immediately, while a failed refresh keeps the last verified commerce mode and required policy versions only for `PUBLIC_CONFIG_GRACE_MS` (10 minutes) after that success; past the window, or before any success, both become unknown and login and commerce stay fail-closed.
 
 ## Native Exchange Room And Lifecycle — 2026-09-11
 

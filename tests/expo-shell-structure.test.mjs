@@ -1281,7 +1281,9 @@ test("native my-info hub opens every account utility and nested member detail ou
       && accountMenuIndex > commerceMenuIndex
       && supportMenuIndex > accountMenuIndex,
   );
-  assert.match(profileHomeSource, /<ProfileMetric label="내 포인트" value=\{`\$\{snapshot\.pointBalance\.toLocaleString\("ko-KR"\)\}P`\} accent \/>/);
+  assert.match(profileHomeSource, /<ProfileMetric label="내 포인트" value=\{summary\?\.pointBalanceLabel \?\? "불러오지 못했어요"\}/);
+  assert.match(profileHomeSource, /pointBalanceLabel: pointsFailed \|\| snapshot\.pointBalance === null \? null : `\$\{snapshot\.pointBalance\.toLocaleString\("ko-KR"\)\}P`/);
+  assert.doesNotMatch(profileHomeSource, /pointBalance \?\? 0/);
   assert.doesNotMatch(profileHomeSource, /내 쿠폰|준비 중/);
   assert.match(profileHomeSource, /const COMMERCE_MENU: ReadonlyArray<ProfileMenuItem> = \[/);
   assert.match(profileHomeSource, /const ACCOUNT_MENU: ReadonlyArray<ProfileMenuItem> = \[/);
@@ -1321,7 +1323,7 @@ test("native my-info hub opens every account utility and nested member detail ou
   assert.match(profileSectionSource, /<StorageModeTab label="보관 중"/);
   assert.match(profileSectionSource, /<StorageModeTab label="교환 또는 배송 중인 상품"[\s\S]*?wide/);
   assert.match(profileSectionSource, /<StorageModeTab label="포인트 환급"/);
-  assert.match(profileSectionSource, /snapshot\.inventory\.filter\(isExchangeOrShippingInventory\)/);
+  assert.match(profileSectionSource, /inventory\?\.filter\(isExchangeOrShippingInventory\)/);
   assert.match(profileSectionSource, /item\.status === "EXCHANGE_LISTED"[\s\S]*?item\.status === "EXCHANGE_OFFERED"[\s\S]*?item\.status === "SHIPPING"/);
   assert.doesNotMatch(profileHomeSource, /주문·포인트·배송 상태는 내 계정의 최신 내역/);
   for (const detail of ["개인정보", "기본 배송지", "로그인 및 보안", "알림 수신설정", "개인정보·수신 동의", "약관·운영정책", "로그아웃·회원탈퇴"]) {

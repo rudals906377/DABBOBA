@@ -18,7 +18,7 @@ export const PROFILE_POLICIES: readonly ProfilePolicy[] = [
     id: "terms",
     title: "서비스 이용약관",
     summary: "회원, 상품 구매, 뽑기, 포인트와 교환·신청 이용 기준",
-    updatedAt: "2026.09.22",
+    updatedAt: "2026.09.30",
     sections: [
       {
         heading: "사전오픈 안내",
@@ -54,7 +54,7 @@ export const PROFILE_POLICIES: readonly ProfilePolicy[] = [
     id: "privacy",
     title: "개인정보처리방침",
     summary: "개인정보의 수집·이용, 보관과 회원 권리 안내",
-    updatedAt: "2026.09.22",
+    updatedAt: "2026.09.30",
     sections: [
       {
         heading: "처리하는 정보",

@@ -28,7 +28,7 @@ test('LIVE candidate check reports only reviewed non-secret evidence and never d
       assert.equal(expectedCommerceMode, 'LIVE');
       return {
         sourceHead: 'a'.repeat(40),
-        latestMigration: '0075_shipping_request_retry_after_cancellation.sql',
+        latestMigration: '0076_legal_policy_business_phone.sql',
         targetHash: 'b'.repeat(64),
         releaseConfiguration: { customerAuthProviders: ['PHONE', 'KAKAO', 'NAVER', 'GOOGLE', 'APPLE'] },
       };
