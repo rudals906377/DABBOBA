@@ -55,7 +55,7 @@ test("native catalog, storage, and profile roots share the approved readable sca
   assert.match(catalogRowSource, /ipName:\s*\{[^}]*seed\.typography\.catalogMetadata/);
   assert.match(catalogRowSource, /price:\s*\{[^}]*seed\.typography\.catalogPrice/);
   assert.match(catalogRowSource, /caption:\s*\{[^}]*seed\.typography\.finePrint/);
-  assert.match(catalogRowSource, /categoryLabel:\s*\{[^}]*seed\.typography\.finePrint/);
+  assert.match(catalogRowSource, /variant="catalogMetadata" numberOfLines=\{1\} style=\{styles\.categoryLabel\}/);
   assert.doesNotMatch(catalogRowSource, /row:\s*\{[^}]*borderWidth:/);
   assert.match(storageSource, /productPrice:\s*\{[^}]*color:\s*colors\.ink[^}]*seed\.typography\.catalogPrice/);
   assert.match(storageSource, /orderIp:\s*\{[^}]*seed\.typography\.catalogMetadata/);

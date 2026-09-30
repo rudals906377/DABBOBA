@@ -2,6 +2,7 @@ import Constants from "expo-constants";
 import { type Href, useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  AccessibilityInfo,
   ActivityIndicator,
   FlatList,
   Keyboard,
@@ -242,7 +243,7 @@ export function ShopScreen({ category }: { category: ShopRootCategory }) {
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="상품 필터 및 정렬 열기"
-          accessibilityHint={commerceEnabled ? "품절 제외와 상품 정렬 방식을 선택합니다" : "상품 정렬 방식을 선택합니다"}
+          accessibilityHint={commerceEnabled ? "품절 제외와 상품 정렬 방식을 선택해요" : "상품 정렬 방식을 선택해요"}
           accessibilityValue={{ text: excludeSoldOut || sortOption !== "latest" ? "필터 적용됨" : "기본 필터" }}
           hitSlop={4}
           onPress={() => { Keyboard.dismiss(); setFilterDrawerOpen(true); }}
@@ -277,8 +278,8 @@ export function ShopScreen({ category }: { category: ShopRootCategory }) {
         <View style={styles.refreshFailure} accessibilityLiveRegion="polite">
           <Text variant="caption" style={styles.refreshFailureText}>
             {commerceEnabled
-              ? "목록을 갱신하지 못했어요. 표시된 가격·재고가 최신이 아닐 수 있습니다."
-              : "목록을 갱신하지 못했어요. 표시된 예정가가 최신이 아닐 수 있습니다."}
+              ? "목록을 갱신하지 못했어요. 표시된 가격·재고가 최신이 아닐 수 있어요."
+              : "목록을 갱신하지 못했어요. 표시된 예정가가 최신이 아닐 수 있어요."}
           </Text>
           <Pressable
             accessibilityRole="button"
@@ -419,6 +420,19 @@ function ShopFilterDrawer({
 }) {
   const [draftExcludeSoldOut, setDraftExcludeSoldOut] = useState(excludeSoldOut);
   const [draftSortOption, setDraftSortOption] = useState(sortOption);
+  const [reduceMotion, setReduceMotion] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    void AccessibilityInfo.isReduceMotionEnabled().then((enabled) => {
+      if (active) setReduceMotion(enabled);
+    });
+    const subscription = AccessibilityInfo.addEventListener("reduceMotionChanged", setReduceMotion);
+    return () => {
+      active = false;
+      subscription.remove();
+    };
+  }, []);
 
   useEffect(() => {
     if (!visible) return;
@@ -430,7 +444,7 @@ function ShopFilterDrawer({
     <Modal
       visible={visible}
       transparent
-      animationType="slide"
+      animationType={reduceMotion ? "none" : "slide"}
       statusBarTranslucent
       onRequestClose={onClose}
     >
@@ -569,9 +583,9 @@ function ProductCard({
         </Text>
         <View style={[styles.productMeta, wide && styles.kujiProductMeta]}>
           {price.qualifier ? (
-            <Text variant="catalogMetadata" maxFontSizeMultiplier={CATALOG_CARD_TEXT_MAX_FONT_SIZE_MULTIPLIER} numberOfLines={1} style={styles.productPriceQualifier}>예정가</Text>
+            <Text variant="catalogMetadata" maxFontSizeMultiplier={CATALOG_CARD_TEXT_MAX_FONT_SIZE_MULTIPLIER} style={styles.productPriceQualifier}>{price.qualifier}</Text>
           ) : null}
-          <Text variant="catalogPrice" maxFontSizeMultiplier={CATALOG_CARD_TEXT_MAX_FONT_SIZE_MULTIPLIER} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.72} style={styles.productPrice}>{price.amount}</Text>
+          <Text variant="catalogPrice" maxFontSizeMultiplier={CATALOG_CARD_TEXT_MAX_FONT_SIZE_MULTIPLIER} style={styles.productPrice}>{price.amount}</Text>
         </View>
         {product.category === "kuji" && shouldShowCatalogInventory(product, commerceEnabled) ? (
           <KujiPrizeTierRow tiers={product.remainingKujiTiers} style={styles.kujiPrizeTiers} />
@@ -687,10 +701,10 @@ const styles = StyleSheet.create({
   productName: { minHeight: 40, color: colors.ink, ...seed.typography.catalogTitle, marginTop: seed.spacing.x1 },
   gachaProductName: { marginTop: 0 },
   kujiProductName: { minHeight: 0, marginTop: seed.spacing.x1, ...seed.typography.catalogTitleWide },
-  productMeta: { marginTop: seed.spacing.x2, flexDirection: "row", alignItems: "baseline", gap: 4 },
+  productMeta: { marginTop: seed.spacing.x2, gap: seed.spacing.x0_5 },
   kujiProductMeta: { marginTop: seed.spacing.x2 },
-  productPriceQualifier: { flexShrink: 0, color: colors.muted, ...seed.typography.catalogMetadata },
-  productPrice: { flexShrink: 1, minWidth: 0, color: colors.ink, ...seed.typography.catalogPrice },
+  productPriceQualifier: { color: colors.muted, ...seed.typography.catalogMetadata },
+  productPrice: { color: colors.ink, ...seed.typography.catalogPrice },
   kujiPrizeTiers: { marginTop: seed.spacing.x1_5 },
   productInventory: { marginTop: seed.spacing.x1_5 },
   kujiProductInventory: { marginTop: seed.spacing.x1_5 },
@@ -699,7 +713,7 @@ const styles = StyleSheet.create({
   retryButton: { minHeight: seed.size.touchTarget, justifyContent: "center", paddingHorizontal: 16, marginTop: 15, borderRadius: seed.radius.r2_5, backgroundColor: colors.ink },
   retryLabel: { color: colors.white, fontWeight: "700" },
   drawerOverlay: { flex: 1, justifyContent: "flex-end" },
-  drawerBackdrop: { ...StyleSheet.absoluteFill, backgroundColor: "rgba(7, 16, 11, 0.42)" },
+  drawerBackdrop: { ...StyleSheet.absoluteFill, backgroundColor: seed.color.inverted.surface, opacity: 0.42 },
   drawerSheet: { paddingHorizontal: seed.spacing.globalGutter, paddingTop: seed.spacing.x2, borderTopLeftRadius: seed.radius.r6, borderTopRightRadius: seed.radius.r6, backgroundColor: seed.color.layer.elevated },
   drawerHandle: { alignSelf: "center", width: 38, height: 4, marginBottom: seed.spacing.x2, borderRadius: seed.radius.r0_5, backgroundColor: seed.color.stroke.contrast },
   drawerHeader: { minHeight: seed.size.topNavigation, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },

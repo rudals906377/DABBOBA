@@ -68,11 +68,10 @@ export function CatalogProductRow({
           </View>
         </KujiProductFrame>
       </GachaMachineFrame>
-      <ProductInfoDivider orientation="vertical" style={styles.mediaDivider} />
       <View style={styles.copy}>
         <View style={styles.metaRow}>
           <Text numberOfLines={1} style={styles.ipName}>{ipName}</Text>
-          <View style={[styles.categoryBadge, product.category === "kuji" && styles.categoryBadgeKuji]}><Text style={styles.categoryLabel}>{categoryLabel(product.category)}</Text></View>
+          <Text variant="catalogMetadata" numberOfLines={1} style={styles.categoryLabel}>{categoryLabel(product.category)}</Text>
         </View>
         <Text numberOfLines={2} style={styles.name}>{productSubjectTitle(product.name, ipName)}</Text>
         <ProductInfoDivider style={styles.fieldDivider} />
@@ -97,13 +96,10 @@ const styles = StyleSheet.create({
   pressed: { opacity: seed.state.pressedOpacity },
   imageFrame: { width: 92, height: 92, ...catalogProductImageSurface },
   image: { width: "100%", height: "100%" },
-  mediaDivider: { marginVertical: seed.spacing.x0_5 },
   copy: { flex: 1, minWidth: 0, justifyContent: "center" },
   metaRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 },
   ipName: { flex: 1, color: colors.muted, ...seed.typography.catalogMetadata },
-  categoryBadge: { paddingHorizontal: 7, paddingVertical: 4, borderRadius: seed.radius.r1_5, backgroundColor: colors.brand },
-  categoryBadgeKuji: { backgroundColor: colors.kujiOrange },
-  categoryLabel: { color: colors.ink, ...seed.typography.finePrint, fontWeight: "900" },
+  categoryLabel: { flexShrink: 0, color: colors.muted },
   name: { color: seed.color.foreground.neutral, ...seed.typography.catalogTitle, marginTop: 7 },
   fieldDivider: { marginTop: seed.spacing.x1_5 },
   price: { color: seed.color.foreground.neutral, ...seed.typography.catalogPrice, marginTop: seed.spacing.x1_5 },

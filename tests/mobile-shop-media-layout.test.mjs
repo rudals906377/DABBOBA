@@ -34,15 +34,17 @@ test("prelaunch shop cards keep the amount on one line without losing its full a
   assert.equal(productPriceLabel(product, false), "오픈 예정가 9,900원");
   assert.deepEqual(productPriceParts({ price: 0 }, false), { qualifier: null, amount: "가격 공개 예정" });
   assert.deepEqual(productPriceParts({ price: 9_900, saleStatus: "ON_SALE" }, true), { qualifier: null, amount: "9,900원" });
-  assert.match(shopSource, /price\.qualifier[\s\S]*?>예정가<\/Text>/);
-  assert.match(shopSource, /numberOfLines=\{1\} adjustsFontSizeToFit minimumFontScale=\{0\.72\}[\s\S]*?\{price\.amount\}/);
+  assert.match(shopSource, /price\.qualifier \? \([\s\S]*?style=\{styles\.productPriceQualifier\}>\{price\.qualifier\}<\/Text>/);
+  assert.match(shopSource, /variant="catalogPrice" maxFontSizeMultiplier=\{CATALOG_CARD_TEXT_MAX_FONT_SIZE_MULTIPLIER\} style=\{styles\.productPrice\}>\{price\.amount\}<\/Text>/);
+  assert.doesNotMatch(shopSource, /adjustsFontSizeToFit|minimumFontScale/);
+  assert.doesNotMatch(shopSource, />예정가<\/Text>/);
 });
 
 test("a failed refresh warns when previously loaded cards remain visible", () => {
   assert.match(shopSource, /if \(manual\) \{\s*setRefreshing\(true\)/);
   assert.match(shopSource, /else setMessage\("연결 상태를 확인한 뒤 다시 시도해 주세요\."\)/);
   assert.match(shopSource, /message && products\.length > 0 && !loading && !refreshing/);
-  assert.match(shopSource, /표시된 가격·재고가 최신이 아닐 수 있습니다\./);
+  assert.match(shopSource, /표시된 가격·재고가 최신이 아닐 수 있어요\./);
   assert.match(shopSource, /accessibilityLabel="상품 목록 다시 불러오기"[\s\S]*?onPress=\{\(\) => void loadProducts\(\{ manual: true \}\)\}/);
 });
 
@@ -57,8 +59,10 @@ test("compact catalog rows share image states and use gacha storefront artwork w
   assert.match(catalogRowSource, /<CatalogProductImage/);
   assert.match(catalogRowSource, /product\.category === "kuji" \|\| \(product\.category === "gacha" && !storefrontUri\)/);
   assert.match(catalogRowSource, /fallbackSources=\{product\.category === "gacha" && storefrontUri \? \[\{ uri: primaryUri, resizeMode: "contain" \}\] : \[\]\}/);
-  assert.match(catalogRowSource, /product\.category === "kuji" && styles\.categoryBadgeKuji/);
-  assert.match(catalogRowSource, /categoryBadgeKuji:[^\n]*backgroundColor:\s*colors\.kujiOrange/);
+  assert.doesNotMatch(catalogRowSource, /categoryBadge|orientation="vertical"/);
+  assert.match(catalogRowSource, /<Text variant="catalogMetadata" numberOfLines=\{1\} style=\{styles\.categoryLabel\}>\{categoryLabel\(product\.category\)\}<\/Text>/);
+  assert.match(catalogRowSource, /categoryLabel: \{ flexShrink: 0, color: colors\.muted \}/);
+  assert.match(catalogRowSource, /<ProductInfoDivider style=\{styles\.fieldDivider\} \/>/);
   assert.doesNotMatch(catalogRowSource, />이미지 없음<\/Text>/);
 });
 
