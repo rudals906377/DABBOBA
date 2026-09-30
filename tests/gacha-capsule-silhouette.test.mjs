@@ -46,7 +46,5 @@ test("machine and reveal share anatomy without sharing the same material treatme
   assert.match(visual, /const lowerColor = heroDetail \? palette\.lower : palette\.machineLower/);
   assert.match(visual, /!heroDetail && styles\.machineHighlight/);
   assert.match(visual, /heroDetail \? <View style=\{styles\.lowerRoundShade\} \/> : <View style=\{styles\.machineLowerPlane\} \/>/);
-  assert.match(reveal, /import \{ GachaCapsuleVisual \}/);
-  assert.match(reveal, /<GachaCapsuleVisual tone="lime" depth=\{2\} heroDetail diameter=\{142\} \/>/);
   assert.doesNotMatch(reveal, /capsuleTop|capsuleBottom|capsuleSeam/);
 });

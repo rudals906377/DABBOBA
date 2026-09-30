@@ -29,7 +29,7 @@ const numericConstant = (name) => {
   return Number(match[1]);
 };
 
-function releaseHarness(startRadians = 0, { reduceMotion = false, animationFinishes = true } = {}) {
+function releaseHarness(startRadians = 0, { reduceMotion = false, animationFinishes = true, impulseProgress = 1 } = {}) {
   const shared = (value) => ({ value });
   const requests = [];
   const scope = {
@@ -45,6 +45,9 @@ function releaseHarness(startRadians = 0, { reduceMotion = false, animationFinis
     clockwiseCueOpacity: shared(1),
     leverSoundPlayed: shared(0),
     animationRun: shared(7),
+    agitationProgress: shared(impulseProgress),
+    GACHA_AGITATION_DURATION_MS: 1_000,
+    delays: [],
     GESTURE_TAP_SLOP: numericConstant("GESTURE_TAP_SLOP"),
     GESTURE_CENTER: numericConstant("GESTURE_SIZE") / 2,
     GESTURE_MIN_RADIUS: numericConstant("GESTURE_MIN_RADIUS"),
@@ -61,6 +64,10 @@ function releaseHarness(startRadians = 0, { reduceMotion = false, animationFinis
     withTiming: (target, _options, callback) => {
       callback?.(animationFinishes);
       return target;
+    },
+    withDelay: (delayMs, animation) => {
+      scope.delays.push(delayMs);
+      return animation;
     },
     scheduleOnRN: (callback, run) => callback(run),
     playLeverSound: () => {},
@@ -183,4 +190,35 @@ test("a completed circular gesture is not reset or requested twice on release", 
   assert.equal(scope.interactionRadians.value, GACHA_LEVER_TARGET_RADIANS);
   assert.equal(scope.leverRadians.value, GACHA_LEVER_TARGET_RADIANS);
   assert.deepEqual(requests, []);
+});
+
+test("an unfinished drag unwinds only after an already-fired chamber impulse settles", () => {
+  const inFlight = releaseHarness(Math.PI, { impulseProgress: 0.25 });
+  inFlight.scope.gestureTravel.value = 30;
+  inFlight.scope.interactionRadians.value = Math.PI + 0.4;
+  inFlight.scope.leverRadians.value = Math.PI + 0.4;
+  inFlight.finalize({}, true);
+  assert.equal(inFlight.scope.interactionRadians.value, Math.PI);
+  assert.equal(inFlight.scope.leverRadians.value, Math.PI);
+  assert.deepEqual(inFlight.scope.delays, [750], "wait for the remaining 75 percent of the impulse");
+
+  const idle = releaseHarness(Math.PI);
+  idle.scope.gestureTravel.value = 30;
+  idle.scope.interactionRadians.value = Math.PI + 0.4;
+  idle.finalize({}, true);
+  assert.deepEqual(idle.scope.delays, [], "no impulse in flight unwinds immediately");
+
+  const reduced = releaseHarness(Math.PI, { impulseProgress: 0.25, reduceMotion: true });
+  reduced.scope.gestureTravel.value = 30;
+  reduced.scope.interactionRadians.value = Math.PI + 0.4;
+  reduced.finalize({}, true);
+  assert.equal(reduced.scope.leverRadians.value, Math.PI);
+  assert.deepEqual(reduced.scope.delays, []);
+});
+
+test("unwinding the handle never clears a consumed chamber cam threshold", () => {
+  const reaction = machine.match(/useAnimatedReaction\(\s*\(\) => \(\{\s*radians: leverRadians\.value,[\s\S]*?\[reduceMotion\],\s*\);/)?.[0];
+  assert.ok(reaction, "the lever-driven chamber reaction must exist");
+  assert.doesNotMatch(reaction, /triggeredPulseCount\.value = 0/);
+  assert.match(reaction, /if \(drive\.pulseCount <= triggeredPulseCount\.value\) return;/);
 });

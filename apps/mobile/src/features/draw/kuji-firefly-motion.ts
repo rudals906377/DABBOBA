@@ -1,5 +1,3 @@
-export const KUJI_FIREFLY_COUNT = 12;
-export const KUJI_FIREFLY_MIN_STAGE_WIDTH = 320;
 export const GACHA_FIREFLY_COUNT = 36;
 export const GACHA_FIREFLY_DURATION_MS = 12_000;
 
@@ -28,20 +26,6 @@ export type KujiFireflyMotionFrame = {
 };
 
 const TWO_PI = Math.PI * 2;
-const FIREFLY_LANES = [
-  7,
-  14.82,
-  22.64,
-  30.45,
-  38.27,
-  46.09,
-  53.91,
-  61.73,
-  69.55,
-  77.36,
-  85.18,
-  93,
-] as const;
 
 function seedFromText(value: string): number {
   let seed = 2_166_136_261;
@@ -61,39 +45,6 @@ function createSeededUnitInterval(initialSeed: number): () => number {
     value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
     return ((value ^ (value >>> 14)) >>> 0) / 4_294_967_296;
   };
-}
-
-const roundToHundredth = (value: number) => Math.round(value * 100) / 100;
-const roundToHundredThousandth = (value: number) => Math.round(value * 100_000) / 100_000;
-
-export function createKujiFireflyConfigs(seedText: string): KujiFireflyConfig[] {
-  const random = createSeededUnitInterval(seedFromText(seedText));
-  const phaseRanks = FIREFLY_LANES.map((_, index) => index);
-
-  for (let index = phaseRanks.length - 1; index > 0; index -= 1) {
-    const swapIndex = Math.floor(random() * (index + 1));
-    [phaseRanks[index], phaseRanks[swapIndex]] = [phaseRanks[swapIndex]!, phaseRanks[index]!];
-  }
-
-  return FIREFLY_LANES.map((leftPercent, index) => {
-    const verticalUnit = random();
-    const phaseRank = phaseRanks[index]!;
-    return {
-      id: `kuji-firefly-${index}`,
-      laneIndex: index,
-      leftPercent: roundToHundredth(leftPercent + (random() - 0.5) * 0.8),
-      startTopPercent: roundToHundredth(93 + verticalUnit * 5),
-      size: 3 + Math.floor(random() * 3),
-      curveAmplitude: roundToHundredth(4 + random() * 3),
-      curveDirection: random() < 0.5 ? -1 : 1,
-      curveSkew: roundToHundredth((random() - 0.5) * 0.36),
-      curvePhase: roundToHundredth(random() * TWO_PI),
-      riseDistance: roundToHundredth(438 + verticalUnit * 30),
-      startOffset: roundToHundredThousandth((phaseRank + 0.1 + random() * 0.25) / KUJI_FIREFLY_COUNT),
-      durationMs: 6_600 + phaseRank * 135 + Math.round(random() * 100),
-      twinkleCycles: random() < 0.5 ? 2 : 3,
-    };
-  });
 }
 
 /** A full-width staggered field that stays dispersed across every loop. */

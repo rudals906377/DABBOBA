@@ -1,6 +1,6 @@
 import Constants from "expo-constants";
 import { type Href, useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Image,
@@ -100,12 +100,7 @@ export function KujiDrawScreen() {
   requestScope.setOwner(JSON.stringify([productId, paidDrawRoute]));
   const mountedRef = useRef(true);
   const [selectedTickets, setSelectedTickets] = useState<string[]>([]);
-  const [nowMs, setNowMs] = useState(() => Date.now());
   const [drawLeaseClock, setDrawLeaseClock] = useState<KujiDrawLeaseClock | null>(null);
-  const remainingSeconds = drawLeaseClock
-    ? kujiDrawLeaseRemainingSeconds(drawLeaseClock, nowMs)
-    : 0;
-  const remainingTime = formatKujiDrawLeaseRemainingTime(remainingSeconds);
   const ticketSlots = useMemo(() => board?.slots.map((slot) => ({
     ...slot,
     label: formatKujiSlotNumber(slot.slotNumber, board.totalSlots),
@@ -160,7 +155,6 @@ export function KujiDrawScreen() {
         clientNowMs,
       );
       if (!nextDrawLeaseClock.valid) throw new Error("쿠지 뽑기방의 남은 시간을 확인할 수 없어요.");
-      setNowMs(clientNowMs);
       setDrawLeaseClock(nextDrawLeaseClock);
       setSnapshot(next);
       setBoard(nextBoard);
@@ -190,11 +184,6 @@ export function KujiDrawScreen() {
     void load();
     return () => requestScope.invalidate();
   }, [load, requestScope]));
-
-  useEffect(() => {
-    const timer = setInterval(() => setNowMs(Date.now()), 1_000);
-    return () => clearInterval(timer);
-  }, []);
 
   const goBack = () => {
     requestScope.invalidate();
@@ -271,11 +260,15 @@ export function KujiDrawScreen() {
     }
   };
 
-  const toggleTicket = (ticket: string) => {
+  // Stable across selection changes so memoized ticket cells only re-render
+  // when their own number/selected/sold/disabled inputs change.
+  const toggleTicket = useCallback((ticket: string) => {
     if (!availableTicketLabels.has(ticket) || binding) return;
     setBindingMessage("");
     setSelectedTickets((current) => toggleKujiTicketSelection(current, ticket, purchasedCount));
-  };
+  }, [availableTicketLabels, binding, purchasedCount]);
+  const selectedTicketSet = useMemo(() => new Set(selectedTickets), [selectedTickets]);
+  const selectionFull = selectedTickets.length >= purchasedCount;
 
   return (
     <SafeAreaView style={styles.safeArea} edges={["top", "left", "right"]}>
@@ -294,10 +287,7 @@ export function KujiDrawScreen() {
           <ScrollView contentContainerStyle={[styles.content, { paddingBottom: floatingBottomInset }]}>
             <ProductStrip snapshot={snapshot} assetBaseUrl={runtime.assetBaseUrl} />
 
-            <View style={styles.timerCard}>
-              <KoreanPixelTitle variant="compact" style={styles.timerTitle}>남은 시간</KoreanPixelTitle>
-              <Text style={[styles.timerValue, remainingSeconds <= 30 && styles.timerDanger]}>{remainingTime}</Text>
-            </View>
+            {drawLeaseClock ? <KujiDrawLeaseCountdown clock={drawLeaseClock} /> : null}
 
             <View style={styles.drawBoard}>
               <View style={styles.boardHeader}>
@@ -317,45 +307,19 @@ export function KujiDrawScreen() {
               <View style={styles.ticketGrid}>
                 {ticketSlots.map((slot) => {
                   const ticket = slot.label;
-                  const selected = selectedTickets.includes(ticket);
+                  const selected = selectedTicketSet.has(ticket);
                   const sold = !slot.available;
-                  const selectionFull = selectedTickets.length >= purchasedCount;
                   const disabled = binding || sold || (!selected && selectionFull);
                   return (
-                    <Pressable
+                    <KujiTicketCell
                       key={ticket}
-                      accessibilityRole="checkbox"
-                      accessibilityLabel={`${ticket}번 쿠지${
-                        sold
-                          ? ", 판매 완료"
-                          : selected
-                            ? ", 선택됨"
-                            : selectionFull
-                              ? ", 구매 수량 선택 완료"
-                              : ", 선택 가능"
-                      }`}
-                      accessibilityState={{ checked: selected, disabled }}
+                      ticket={ticket}
+                      selected={selected}
+                      sold={sold}
+                      selectionFull={selectionFull}
                       disabled={disabled}
-                      onPress={() => toggleTicket(ticket)}
-                      style={({ pressed }) => [styles.ticket, pressed && styles.ticketPressed]}
-                    >
-                      <View style={[styles.ticketCard, sold && styles.ticketSold, selected && styles.ticketSelected]}>
-                        <Image
-                          accessibilityIgnoresInvertColors
-                          resizeMode="contain"
-                          source={require("../../../assets/draw/kuji/kuji-ticket-front.png")}
-                          style={[styles.ticketArtwork, sold && styles.ticketArtworkSold]}
-                        />
-                        {sold ? <View style={styles.ticketSoldOverlay} /> : null}
-                        <View style={styles.ticketFace}>
-                          <Text variant="label" style={[styles.ticketNumber, sold && styles.ticketNumberSold]}>{ticket}</Text>
-                          <View style={[styles.ticketState, selected && styles.ticketStateSelected]}>
-                            {selected ? <DecorativeIonicon name="checkmark" size={9} color={colors.ink} /> : null}
-                            <Text variant="micro" style={[styles.ticketLabel, sold && styles.ticketLabelSold, selected && styles.ticketLabelSelected]}>{sold ? "완료" : selected ? "선택" : "쿠지"}</Text>
-                          </View>
-                        </View>
-                      </View>
-                    </Pressable>
+                      onToggle={toggleTicket}
+                    />
                   );
                 })}
               </View>
@@ -391,6 +355,82 @@ export function KujiDrawScreen() {
     </SafeAreaView>
   );
 }
+
+/**
+ * The one-second lease countdown owns its own tick so the 50-ticket board
+ * above does not re-render every second. Remaining time is always derived
+ * from the server-anchored lease clock and the current wall time.
+ */
+function KujiDrawLeaseCountdown({ clock }: { clock: KujiDrawLeaseClock }) {
+  const [, tick] = useReducer((value: number) => value + 1, 0);
+  useEffect(() => {
+    const timer = setInterval(tick, 1_000);
+    return () => clearInterval(timer);
+  }, []);
+  const remainingSeconds = kujiDrawLeaseRemainingSeconds(clock, Date.now());
+  const remainingTime = formatKujiDrawLeaseRemainingTime(remainingSeconds);
+  return (
+    <View style={styles.timerCard}>
+      <KoreanPixelTitle variant="compact" style={styles.timerTitle}>남은 시간</KoreanPixelTitle>
+      <Text style={[styles.timerValue, remainingSeconds <= 30 && styles.timerDanger]}>{remainingTime}</Text>
+    </View>
+  );
+}
+
+type KujiTicketCellProps = {
+  ticket: string;
+  selected: boolean;
+  sold: boolean;
+  selectionFull: boolean;
+  disabled: boolean;
+  onToggle: (ticket: string) => void;
+};
+
+const KujiTicketCell = memo(function KujiTicketCell({
+  ticket,
+  selected,
+  sold,
+  selectionFull,
+  disabled,
+  onToggle,
+}: KujiTicketCellProps) {
+  const handlePress = useCallback(() => onToggle(ticket), [onToggle, ticket]);
+  return (
+    <Pressable
+      accessibilityRole="checkbox"
+      accessibilityLabel={`${ticket}번 쿠지${
+        sold
+          ? ", 판매 완료"
+          : selected
+            ? ", 선택됨"
+            : selectionFull
+              ? ", 구매 수량 선택 완료"
+              : ", 선택 가능"
+      }`}
+      accessibilityState={{ checked: selected, disabled }}
+      disabled={disabled}
+      onPress={handlePress}
+      style={({ pressed }) => [styles.ticket, pressed && styles.ticketPressed]}
+    >
+      <View style={[styles.ticketCard, sold && styles.ticketSold, selected && styles.ticketSelected]}>
+        <Image
+          accessibilityIgnoresInvertColors
+          resizeMode="contain"
+          source={KUJI_TICKET_BOARD_ARTWORK}
+          style={[styles.ticketArtwork, sold && styles.ticketArtworkSold]}
+        />
+        {sold ? <View style={styles.ticketSoldOverlay} /> : null}
+        <View style={styles.ticketFace}>
+          <Text variant="label" style={[styles.ticketNumber, sold && styles.ticketNumberSold]}>{ticket}</Text>
+          <View style={[styles.ticketState, selected && styles.ticketStateSelected]}>
+            {selected ? <DecorativeIonicon name="checkmark" size={9} color={colors.ink} /> : null}
+            <Text variant="micro" style={[styles.ticketLabel, sold && styles.ticketLabelSold, selected && styles.ticketLabelSelected]}>{sold ? "완료" : selected ? "선택" : "쿠지"}</Text>
+          </View>
+        </View>
+      </View>
+    </Pressable>
+  );
+});
 
 function ProductStrip({ snapshot, assetBaseUrl }: { snapshot: PaidKujiSelectionSnapshot; assetBaseUrl: string | null }) {
   const imageUri = resolveCatalogImageUrl(snapshot.product.currentImageUrl, assetBaseUrl);
@@ -447,6 +487,11 @@ function firstParam(value: string | string[] | undefined): string | undefined {
 
 /** Intrinsic canvas of kuji-ticket-front.png; slots keep it so the artwork is never stretched. */
 const KUJI_TICKET_ASPECT_RATIO = 1517 / 1037;
+/**
+ * Board-only 400 px downsample of kuji-ticket-front.png (same 1517:1037 canvas).
+ * The full-resolution original stays reserved for the reveal layers.
+ */
+const KUJI_TICKET_BOARD_ARTWORK = require("../../../assets/draw/kuji/kuji-ticket-front-board.png");
 
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: seed.color.layer.basement },

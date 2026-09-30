@@ -63,7 +63,7 @@ function harness() {
     returningRef: { current: false }, routeKey: "current-route",
     completionFocusRef: { current: true }, completionGenerationRef: { current: 0 },
     requestMountedRef: { current: true }, activeRouteKeyRef: { current: "current-route" },
-    preview: false, sourceCategory: "gacha", routeOrderId: orderId,
+    sourceCategory: "gacha", routeOrderId: orderId,
     result: committedResult, settledCommittedResult: committedResult,
     committedBatchComplete: false, revealSettled: true,
     committedSequence: { nextEntitlementId: null, entitlementIds: ids }, completionScope: "order-product-sequence",
@@ -206,9 +206,9 @@ test("a deferred whole-order proof stays stale after an in-place A to B to A rou
   assert.equal(h.scope.completionGenerationRef.current, generation, "an ordinary same-owner render does not invalidate a fresh request");
 });
 
-test("preview, kuji, unfinished animation, intermediate result and different sequence keep recovery", async () => {
+test("kuji, unfinished animation, intermediate result and different sequence keep recovery", async () => {
   const cases = [
-    { preview: true }, { sourceCategory: "kuji" },
+    { sourceCategory: "kuji" },
     { result: null, settledCommittedResult: null }, { revealSettled: false },
     { routeOrderId: "" }, { committedSequence: { nextEntitlementId: ids[1] } },
     { consumedSequenceRef: { current: { scope: "other-sequence", ids: new Set(ids) } } },
