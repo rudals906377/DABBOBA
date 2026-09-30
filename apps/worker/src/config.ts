@@ -28,6 +28,29 @@ export const MIN_QUEUE_VISIBILITY_SECONDS =
 // timeout remains a fail-safe for one already-started bounded operation.
 export const MAX_WORKER_RUN_SECONDS = 45;
 
+// The API ranks Home popularity over a rolling 30-day click window, so raw
+// click evidence must outlive that window before it is rolled up and deleted.
+export const HOME_CLICK_POPULARITY_WINDOW_DAYS = 30;
+export const MIN_HOME_CLICK_ROLLUP_DAYS = HOME_CLICK_POPULARITY_WINDOW_DAYS + 1;
+
+export type WorkerRetentionConfig = {
+  /** Published outbox events older than this many days are deleted. */
+  outboxPublishedDays: number;
+  /** Revoked or expired sessions older than this many days are deleted. */
+  sessionDays: number;
+  /** Raw Home click events older than this many days are rolled up daily. */
+  homeClickRollupDays: number;
+  /** Upper bound on rows each retention step touches per worker run. */
+  batchSize: number;
+};
+
+export const DEFAULT_WORKER_RETENTION: WorkerRetentionConfig = Object.freeze({
+  outboxPublishedDays: 30,
+  sessionDays: 30,
+  homeClickRollupDays: 35,
+  batchSize: 500,
+});
+
 export type WorkerConfig = {
   environment: RuntimeEnvironment;
   environmentTier?: BackendEnvironmentTier;
@@ -65,6 +88,8 @@ export type WorkerConfig = {
     | { provider: "MANUAL_REVIEW" }
     | ({ provider: "KG_INICIS" } & InicisInquiryConfig)
     | ({ provider: "PORTONE_API" } & PortOneApiRequeryConfig);
+  /** Optional only for backwards-compatible programmatic fixtures; loaded configs always set it. */
+  retention?: WorkerRetentionConfig;
   logLevel: "debug" | "info" | "warn" | "error";
 };
 
@@ -335,6 +360,36 @@ export function loadWorkerConfig(env: Environment = process.env): WorkerConfig {
     notificationDeliveryToken: optional(env, "NOTIFICATION_DELIVERY_TOKEN"),
     expoPushAccessToken,
     paymentReconciliation,
+    retention: {
+      outboxPublishedDays: integer(
+        env,
+        "WORKER_RETENTION_OUTBOX_DAYS",
+        DEFAULT_WORKER_RETENTION.outboxPublishedDays,
+        30,
+        3_650,
+      ),
+      sessionDays: integer(
+        env,
+        "WORKER_RETENTION_SESSION_DAYS",
+        DEFAULT_WORKER_RETENTION.sessionDays,
+        30,
+        3_650,
+      ),
+      homeClickRollupDays: integer(
+        env,
+        "WORKER_RETENTION_HOME_CLICK_DAYS",
+        DEFAULT_WORKER_RETENTION.homeClickRollupDays,
+        MIN_HOME_CLICK_ROLLUP_DAYS,
+        3_650,
+      ),
+      batchSize: integer(
+        env,
+        "WORKER_RETENTION_BATCH_SIZE",
+        DEFAULT_WORKER_RETENTION.batchSize,
+        1,
+        5_000,
+      ),
+    },
     logLevel: logLevel(env),
   };
 }

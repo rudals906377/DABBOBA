@@ -59,7 +59,7 @@ test("configured KG INICIS reconciliation is wired into actual worker job depend
 
   await runWorkerOnce(config, logger, () => false, () => pool, operations);
 
-  assert.equal(observedProviders.length, 5);
+  assert.equal(observedProviders.length, 6);
   assert.equal(observedProviders.every((provider) => provider instanceof InicisInquiryPaymentProvider), true);
   assert.ok(createPaymentReconciliationProvider(config) instanceof InicisInquiryPaymentProvider);
   assert.throws(
@@ -184,15 +184,16 @@ test("a productive run prioritizes lease-sensitive periodic work before queue co
 
   const summary = await runWorkerOnce(config, logger, () => false, () => pool, operations);
 
-  assert.equal(summary.periodicCompleted, 5);
+  assert.equal(summary.periodicCompleted, 6);
   assert.equal(summary.periodicFailed, 0);
-  assert.deepEqual(trace.slice(0, 8), [
+  assert.deepEqual(trace.slice(0, 9), [
     "acl",
-    "periodic:reservation.sweep",
     "periodic:payment.reconcile",
+    "periodic:reservation.sweep",
     "periodic:inventory.storage-expiry",
     "periodic:account-auth.cleanup",
     "periodic:media.cleanup",
+    "periodic:retention.sweep",
     "dispatch",
     "queue",
   ]);
@@ -250,12 +251,13 @@ test("a failed periodic class does not starve later maintenance or one bounded q
     /reservation\.sweep/,
   );
 
-  assert.deepEqual(trace.slice(1, 9), [
-    "periodic:reservation.sweep",
+  assert.deepEqual(trace.slice(1, 10), [
     "periodic:payment.reconcile",
+    "periodic:reservation.sweep",
     "periodic:inventory.storage-expiry",
     "periodic:account-auth.cleanup",
     "periodic:media.cleanup",
+    "periodic:retention.sweep",
     "dispatch",
     "queue",
     "dispatch",

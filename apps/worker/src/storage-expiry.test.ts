@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { DatabasePool } from "@dabboba/db";
 import type { Logger } from "./logger.js";
-import { processInventoryStorageExpiryBatch } from "./storage-expiry.js";
+import {
+  processInventoryStorageExpiryBatch,
+  STORAGE_REMINDER_MILESTONE_DAYS,
+  STORAGE_REMINDER_WINDOW_DAYS,
+} from "./storage-expiry.js";
 import { parseWorkerJob } from "./types.js";
 
 function loggerWith(debugEntries: Array<Record<string, unknown>>): Logger {
@@ -75,8 +79,16 @@ test("storage expiry sweep unwinds only stale open exchange work, then holds own
   assert.match(hold?.sql ?? "", /event_kind,outbox_event_id[\s\S]*?'EXPIRED_HOLD'/);
   assert.match(hold?.sql ?? "", /ON CONFLICT \(inventory_unit_id,storage_expires_at,event_kind\) DO NOTHING/);
 
-  assert.deepEqual(reminders?.params, [25, now]);
-  assert.match(reminders?.sql ?? "", /VALUES \(1\),\(3\),\(7\),\(14\)/);
+  assert.deepEqual(reminders?.params, [25, now, [1, 3, 7, 14], 14]);
+  assert.deepEqual([...STORAGE_REMINDER_MILESTONE_DAYS], [1, 3, 7, 14]);
+  assert.equal(STORAGE_REMINDER_WINDOW_DAYS, 14);
+  assert.match(reminders?.sql ?? "", /unnest\(\$3::integer\[\]\) AS milestone\(days\)/);
+  // The outer scan is bounded by the widest reminder window so it can use the
+  // storage-expiry index range instead of visiting every stored unit.
+  assert.match(
+    reminders?.sql ?? "",
+    /inventory\.storage_expires_at\s+<= \$2::timestamptz \+ make_interval\(days => \$4::integer\)/,
+  );
   assert.match(reminders?.sql ?? "", /listing\.status='MATCHED'/);
   assert.match(reminders?.sql ?? "", /offer\.status='ACCEPTED'/);
   assert.match(reminders?.sql ?? "", /inventory\.storage_expires_at>\$2::timestamptz/);
