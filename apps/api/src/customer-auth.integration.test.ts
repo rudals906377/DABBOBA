@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { randomInt, randomUUID } from "node:crypto";
 import test from "node:test";
 import Fastify from "fastify";
 import { assertDatabaseUrlForTier, type ApiConfig } from "@dabboba/config";
@@ -20,6 +20,10 @@ test("customer broker reuses one Supabase subject without merging email peers an
   const ownerPool = createMigrationDatabasePool(migrationDatabaseUrl!, "customer-auth-fixtures");
   const runtimePool = createDatabasePool(runtimeDatabaseUrl!, "customer-auth-runtime", { runtimeEnvironment: "test" });
   const suffix = randomUUID();
+  // Four distinct phone numbers per run: a shared random base plus a fixed slot,
+  // so no two fixtures can collapse onto the same zero-padded number.
+  const phoneBase = randomInt(0, 25_000_000);
+  const testPhone = (slot: 0 | 1 | 2 | 3) => `+8210${String(phoneBase * 4 + slot).padStart(8, "0")}`;
   const createdUserIds = new Set<string>();
   const config: ApiConfig = {
     environment: "test",
@@ -194,7 +198,7 @@ test("customer broker reuses one Supabase subject without merging email peers an
   assert.notEqual(firstSeparateId, secondSeparateId);
 
   const legacySubject = `legacy-phone-${suffix}`;
-  const legacyPhone = `+8210${suffix.replace(/\D/g, "").padEnd(8, "0").slice(0, 8)}`;
+  const legacyPhone = testPhone(0);
   const legacy = await ownerPool.query<{ id: string }>(
     "INSERT INTO users(email,nickname,role,status,phone_e164) VALUES(NULL,$1,'USER','ACTIVE',$2) RETURNING id",
     ["legacy phone fixture", legacyPhone],
@@ -215,7 +219,7 @@ test("customer broker reuses one Supabase subject without merging email peers an
   assert.deepEqual(legacyProviders.rows.map((row) => row.provider), ["APPLE", "PHONE"]);
 
   const phoneSubject = `phone-otp-${suffix}`;
-  const phoneNumber = `+8210${suffix.replace(/\D/g, "").padEnd(16, "0").slice(8, 16)}`;
+  const phoneNumber = testPhone(1);
   const phoneClaims = { ...claims(phoneSubject, ["PHONE"], null), phone: phoneNumber };
   const phoneLogin = await exchange(token("phone-otp", phoneClaims));
   assert.equal(phoneLogin.statusCode, 201, phoneLogin.body);
@@ -258,7 +262,7 @@ test("customer broker reuses one Supabase subject without merging email peers an
   // A pre-broker PHONE identity stored the E.164 number as its subject. A new
   // verified phone OTP for that number signs in to the same account, links the
   // broker subject and keeps the legacy identity; account deletion finds it too.
-  const e164LegacyPhone = `+8210${suffix.replace(/\D/g, "").padEnd(24, "0").slice(16, 24)}`;
+  const e164LegacyPhone = testPhone(2);
   const e164Legacy = await ownerPool.query<{ id: string }>(
     "INSERT INTO users(email,nickname,role,status,phone_e164) VALUES(NULL,$1,'USER','ACTIVE',NULL) RETURNING id",
     ["legacy e164 phone fixture"],
@@ -293,7 +297,7 @@ test("customer broker reuses one Supabase subject without merging email peers an
   assert.equal((legacyPhoneDeletion.json() as { actor: { userId: string } }).actor.userId, e164LegacyId);
 
   // Two different existing owners of one number are refused, never merged.
-  const splitPhone = `+8210${suffix.replace(/\D/g, "").padEnd(32, "0").slice(24, 32)}`;
+  const splitPhone = testPhone(3);
   const splitOwners = await ownerPool.query<{ id: string }>(
     "INSERT INTO users(email,nickname,role,status,phone_e164) VALUES(NULL,'split phone a','USER','ACTIVE',$1),(NULL,'split phone b','USER','ACTIVE',NULL) RETURNING id",
     [splitPhone],
