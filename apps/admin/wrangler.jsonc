@@ -15,7 +15,7 @@
     "DABBOBA_ENVIRONMENT_TIER": "PRODUCTION",
     "DABBOBA_API_URL": "https://rconfxsykttfvznakile.supabase.co/functions/v1/dabboba-admin-api",
     "ADMIN_EDGE_CLIENT_IP_HEADER": "cf-connecting-ip",
-    "ADMIN_SESSION_COOKIE_NAME": "dabboba_admin_session"
+    "ADMIN_SESSION_COOKIE_NAME": "__Host-dabboba_admin_session"
   },
   "observability": { "enabled": true }
 }

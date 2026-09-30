@@ -1,10 +1,9 @@
 import type { NextConfig } from "next";
 
-const developmentEval = process.env.NODE_ENV === "production" ? "" : " 'unsafe-eval'";
-
+// The Content-Security-Policy header is issued per request by proxy.ts so its
+// script-src can allow scripts by nonce rather than allowing all inline code.
 const securityHeaders = [
-  { key: "Content-Security-Policy", value: `default-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; object-src 'none'; script-src 'self' 'unsafe-inline'${developmentEval}; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self'; font-src 'self' data:` },
-  { key: "Cache-Control", value: "private, no-store, max-age=0" },
+  { key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains" },
   { key: "Cross-Origin-Opener-Policy", value: "same-origin" },
   { key: "Cross-Origin-Resource-Policy", value: "same-origin" },
   { key: "Referrer-Policy", value: "same-origin" },
@@ -14,6 +13,8 @@ const securityHeaders = [
   { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=(), payment=()" },
 ] as const;
 
+const noStore = { key: "Cache-Control", value: "private, no-store, max-age=0" } as const;
+
 const nextConfig: NextConfig = {
   allowedDevOrigins: ["127.0.0.1"],
   output: "standalone",
@@ -21,7 +22,12 @@ const nextConfig: NextConfig = {
   transpilePackages: ["@dabboba/api-client", "@dabboba/config", "@dabboba/contracts", "@dabboba/ui"],
   experimental: { serverActions: { bodySizeLimit: "11mb" } },
   async headers() {
-    return [{ source: "/(.*)", headers: [...securityHeaders] }];
+    return [
+      { source: "/(.*)", headers: [...securityHeaders] },
+      // Content-hashed build assets keep Next.js's immutable caching; every
+      // other console response is private and never stored.
+      { source: "/((?!_next/static/).*)", headers: [noStore] },
+    ];
   },
 };
 
