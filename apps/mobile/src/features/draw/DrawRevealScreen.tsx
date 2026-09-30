@@ -100,10 +100,44 @@ import {
   type MobilePlatform,
 } from "@/lib/runtime-config";
 import { readDrawSoundEnabled, writeDrawSoundEnabled } from "@/lib/local-database";
-import { readAuthTokens } from "@/lib/session-store";
+import { openCustomerLogin } from "@/features/auth/login-navigation";
+import { readAuthTokens, subscribeAuthTokens, type StoredAuthTokens } from "@/lib/session-store";
 import { colors } from "@/theme";
 
 type RevealMode = DrawOpenMode;
+
+class DrawLoginRequiredError extends Error {
+  constructor() {
+    super("로그인이 필요해요");
+    this.name = "DrawLoginRequiredError";
+  }
+}
+
+function hasUsableAccessToken(tokens: StoredAuthTokens | null): tokens is StoredAuthTokens {
+  if (!tokens?.accessToken) return false;
+  if (!tokens.expiresAt) return true;
+  const expiresAtMs = Date.parse(tokens.expiresAt);
+  return !Number.isFinite(expiresAtMs) || expiresAtMs > Date.now();
+}
+
+const MAX_LOGIN_RETURN_PATH_LENGTH = 300;
+
+function drawRevealReturnPath(
+  entitlementId: string,
+  params: Record<string, string | string[] | undefined>,
+  productId: string,
+): string {
+  const query = new URLSearchParams();
+  for (const key of ["productId", "entitlementIds", "orderId", "category", "mode", "count", "tickets"] as const) {
+    const value = params[key];
+    const first = Array.isArray(value) ? value[0] : value;
+    if (first) query.set(key, first);
+  }
+  const queryString = query.toString();
+  const path = `/draw/reveal/${encodeURIComponent(entitlementId)}${queryString ? `?${queryString}` : ""}`;
+  if (path.length <= MAX_LOGIN_RETURN_PATH_LENGTH) return path;
+  return productId ? `/product/${encodeURIComponent(productId)}` : "/(tabs)/storage";
+}
 const smoothRevealEasing = Easing.bezier(0.16, 0.82, 0.28, 1);
 
 export function DrawRevealScreen({ preview = false }: { preview?: boolean }) {
@@ -172,6 +206,7 @@ export function DrawRevealScreen({ preview = false }: { preview?: boolean }) {
   const [revealResetSignal, setRevealResetSignal] = useState(0);
   const [queuedPreviewOpen, setQueuedPreviewOpen] = useState<"all" | null>(null);
   const [message, setMessage] = useState("");
+  const [loginRequired, setLoginRequired] = useState(false);
   const [reduceMotion, setReduceMotion] = useState(true);
   const [soundEnabled, setSoundEnabled] = useState(false);
   const [soundPreferenceReady, setSoundPreferenceReady] = useState(false);
@@ -216,6 +251,22 @@ export function DrawRevealScreen({ preview = false }: { preview?: boolean }) {
       completionGenerationRef.current += 1;
     };
   }, []));
+
+  useEffect(() => {
+    if (!loginRequired) return;
+    let active = true;
+    const recheck = () => {
+      void readAuthTokens().then((tokens) => {
+        if (active && hasUsableAccessToken(tokens)) setLoginRequired(false);
+      }).catch(() => undefined);
+    };
+    const unsubscribe = subscribeAuthTokens(recheck);
+    recheck();
+    return () => {
+      active = false;
+      unsubscribe();
+    };
+  }, [loginRequired]);
 
   useEffect(() => {
     void AccessibilityInfo.isReduceMotionEnabled().then(setReduceMotion);
@@ -273,7 +324,7 @@ export function DrawRevealScreen({ preview = false }: { preview?: boolean }) {
       return;
     }
     if (!productId) {
-      setMessage("오픈할 상품을 찾을 수 없습니다.");
+      setMessage("오픈할 상품을 찾을 수 없어요.");
       setPreviewLoading(false);
       return;
     }
@@ -293,7 +344,7 @@ export function DrawRevealScreen({ preview = false }: { preview?: boolean }) {
     } catch (error) {
       if (!isCurrentRequest(generation, owner)) return;
       setSnapshot(null);
-      setMessage(error instanceof Error ? error.message : "오픈 화면을 준비하지 못했습니다.");
+      setMessage(error instanceof Error ? error.message : "오픈 화면을 준비하지 못했어요.");
     } finally {
       if (isCurrentRequest(generation, owner)) setPreviewLoading(false);
     }
@@ -402,7 +453,7 @@ export function DrawRevealScreen({ preview = false }: { preview?: boolean }) {
       ) {
         const tokens = await readAuthTokens();
         if (!isCurrentReturn()) return;
-        if (!tokens?.accessToken) throw new Error("로그인 계정을 확인하지 못했습니다.");
+        if (!tokens?.accessToken) throw new Error("로그인 계정을 확인하지 못했어요.");
         const actorId = await fetchCheckoutActorId(runtime.apiBaseUrl, tokens.accessToken);
         if (!isCurrentReturn()) return;
         const intent = await readPendingGachaCheckoutOrderIntent(db, { actorId, productId });
@@ -429,7 +480,7 @@ export function DrawRevealScreen({ preview = false }: { preview?: boolean }) {
           if (complete) {
             const latestTokens = await readAuthTokens();
             if (!isCurrentReturn()) return;
-            if (latestTokens?.accessToken !== tokens.accessToken) throw new Error("로그인 정보가 변경되었습니다.");
+            if (latestTokens?.accessToken !== tokens.accessToken) throw new Error("로그인 정보가 변경됐어요.");
             await clearPendingGachaCheckoutOrderIntent(db, intent, isCurrentReturn);
           }
         }
@@ -453,7 +504,7 @@ export function DrawRevealScreen({ preview = false }: { preview?: boolean }) {
   const openAllProducts = async () => {
     if (preview || mode !== "all" || requestInFlightRef.current || committedBatchComplete) return;
     if (!routeOrderId || !productId || committedSequence.total < 2) {
-      setMessage("한 번에 열 결제 주문과 추첨권을 확인할 수 없습니다.");
+      setMessage("한 번에 열 결제 주문과 추첨권을 확인할 수 없어요.");
       return;
     }
     if (committedSequence.activeIndex !== 0) {
@@ -471,7 +522,7 @@ export function DrawRevealScreen({ preview = false }: { preview?: boolean }) {
     try {
       const tokens = await readAuthTokens();
       if (!isCurrentRequest(generation, owner)) return;
-      if (!tokens?.accessToken) throw new Error("로그인 후 상품을 열어 주세요.");
+      if (!hasUsableAccessToken(tokens)) throw new DrawLoginRequiredError();
       const order = await fetchCheckoutOrder(runtime.apiBaseUrl, tokens.accessToken, routeOrderId);
       if (!isCurrentRequest(generation, owner)) return;
       const verified = verifyCommittedDrawBatch(order, {
@@ -492,7 +543,7 @@ export function DrawRevealScreen({ preview = false }: { preview?: boolean }) {
             tokens.accessToken,
             currentEntitlementId,
           );
-          if (!isCurrentRequest(generation, owner)) throw new Error("상품 확인 요청이 취소되었습니다.");
+          if (!isCurrentRequest(generation, owner)) throw new Error("상품 확인 요청이 취소됐어요.");
           const expectedKujiSlot = verified.category === "kuji"
             ? Number(routeTickets[index])
             : undefined;
@@ -543,11 +594,16 @@ export function DrawRevealScreen({ preview = false }: { preview?: boolean }) {
       }
     } catch (error) {
       if (!isCurrentRequest(generation, owner)) return;
+      if (error instanceof DrawLoginRequiredError && !batchResults.length) {
+        setBatchResults([]);
+        setLoginRequired(true);
+        return;
+      }
       if (batchResults.length) {
         setBatchError("이미 확정된 결과는 보관함에 안전하게 유지돼요. 남은 결과는 다시 시도하거나 남은 뽑기에서 이어서 확인해 주세요.");
       } else {
         setBatchResults([]);
-        setMessage(error instanceof Error ? error.message : "상품 결과를 확인하지 못했습니다.");
+        setMessage(error instanceof Error ? error.message : "상품 결과를 확인하지 못했어요.");
       }
     } finally {
       if (isCurrentRequest(generation, owner)) {
@@ -581,7 +637,7 @@ export function DrawRevealScreen({ preview = false }: { preview?: boolean }) {
     }
     if (requestInFlightRef.current || result) return;
     if (!entitlementId) {
-      setMessage("사용할 수 있는 추첨권을 찾을 수 없습니다.");
+      setMessage("사용할 수 있는 추첨권을 찾을 수 없어요.");
       return;
     }
 
@@ -594,7 +650,7 @@ export function DrawRevealScreen({ preview = false }: { preview?: boolean }) {
     try {
       const tokens = await readAuthTokens();
       if (!isCurrentRequest(generation, owner)) return;
-      if (!tokens?.accessToken) throw new Error("로그인 후 상품을 열어 주세요.");
+      if (!hasUsableAccessToken(tokens)) throw new DrawLoginRequiredError();
       const committed = await consumeDrawEntitlement(
         runtime.apiBaseUrl,
         tokens.accessToken,
@@ -655,7 +711,11 @@ export function DrawRevealScreen({ preview = false }: { preview?: boolean }) {
       setResult(null);
       setRevealSettled(false);
       setRevealResetSignal((current) => current + 1);
-      setMessage(error instanceof Error ? error.message : "상품 결과를 확인하지 못했습니다.");
+      if (error instanceof DrawLoginRequiredError) {
+        setLoginRequired(true);
+        return;
+      }
+      setMessage(error instanceof Error ? error.message : "상품 결과를 확인하지 못했어요.");
     } finally {
       if (isCurrentRequest(generation, owner)) setOpening(false);
     }
@@ -890,7 +950,7 @@ export function DrawRevealScreen({ preview = false }: { preview?: boolean }) {
     void writeDrawSoundEnabled(db, next).catch(() => {
       if (!requestMountedRef.current) return;
       setSoundEnabled((current) => current === next ? previous : current);
-      Alert.alert("효과음 설정", "효과음 설정을 저장하지 못했습니다. 다시 시도해 주세요.");
+      Alert.alert("효과음 설정", "효과음 설정을 저장하지 못했어요. 다시 시도해 주세요.");
     });
   }, [db, soundEnabled, soundPreferenceReady]);
 
@@ -941,6 +1001,20 @@ export function DrawRevealScreen({ preview = false }: { preview?: boolean }) {
         <View style={styles.state}>
           <ActivityIndicator color={colors.brand} />
           <Text style={styles.stateText}>오픈 화면을 준비하는 중</Text>
+        </View>
+      ) : loginRequired && !result ? (
+        <View style={styles.state}>
+          <DecorativeIonicon name="lock-closed-outline" size={38} color={colors.brand} />
+          <KoreanPixelTitle variant="section" style={styles.loginRequiredTitle}>로그인이 필요해요</KoreanPixelTitle>
+          <BalancedAppText style={styles.stateText}>로그인하면 결제한 상품을 이어서 열 수 있어요.</BalancedAppText>
+          <SeedActionButton
+            label="로그인"
+            onPress={() => openCustomerLogin(
+              "로그인하면 결제한 상품을 이어서 열 수 있어요.",
+              drawRevealReturnPath(routeEntitlementId, params, productId),
+            )}
+            style={styles.stateAction}
+          />
         </View>
       ) : message && !result ? (
         <View style={styles.state}>
@@ -1042,7 +1116,7 @@ export function DrawRevealScreen({ preview = false }: { preview?: boolean }) {
                     <DecorativeIonicon
                       name={soundPreferenceReady && soundEnabled ? "volume-medium-outline" : "volume-mute-outline"}
                       size={21}
-                      color={soundPreferenceReady && soundEnabled ? colors.brand : "#CBD2C9"}
+                      color={soundPreferenceReady && soundEnabled ? colors.brand : seed.color.inverted.foregroundMuted}
                     />
                   </Pressable>
                 ) : null}
@@ -1224,7 +1298,7 @@ function CommittedResult({
   return (
     <SmoothResultReveal reduceMotion={reduceMotion} style={styles.committedResult}>
       <ResultAura reduceMotion={reduceMotion}>
-        <View style={styles.rarityBadge}><Text style={styles.rarityText}>{result.rarity}</Text></View>
+        <View style={styles.rarityBadge}><Text variant="subtitle" numberOfLines={1} style={styles.rarityText}>{result.rarity}</Text></View>
       </ResultAura>
       {imageUri ? (
         <SmoothResultImage uri={imageUri} reduceMotion={reduceMotion} />
@@ -1574,7 +1648,7 @@ function SealedCapsule({ reduceMotion }: { reduceMotion: boolean }) {
       <View style={styles.capsule}>
         <GachaCapsuleVisual tone="lime" depth={2} heroDetail diameter={142} />
       </View>
-      <Text style={styles.sealedCode}>GACHA</Text>
+      <KoreanPixelTitle variant="header" style={styles.sealedCode}>GACHA</KoreanPixelTitle>
       <Text style={styles.sealedLabel}>캡슐을 열어 주세요</Text>
     </Animated.View>
   );
@@ -1586,7 +1660,7 @@ function SealedDraw() {
       <View style={styles.unknownDraw}>
         <DecorativeIonicon name="gift-outline" size={68} color={colors.brand} />
       </View>
-      <Text style={styles.sealedCode}>DRAW</Text>
+      <KoreanPixelTitle variant="header" style={styles.sealedCode}>DRAW</KoreanPixelTitle>
       <Text style={styles.sealedLabel}>상품을 열어 주세요</Text>
     </View>
   );
@@ -1770,28 +1844,29 @@ function drawCategoryFromParam(
 
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: colors.ink },
-  header: { minHeight: seed.size.topNavigation, paddingHorizontal: seed.spacing.x3, flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "#303730", backgroundColor: colors.ink },
+  header: { minHeight: seed.size.topNavigation, paddingHorizontal: seed.spacing.x3, flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: seed.color.inverted.stroke, backgroundColor: colors.ink },
   headerAction: { width: 78, minHeight: seed.size.touchTarget, alignItems: "center", justifyContent: "center" },
   headerTitle: { color: colors.white },
   skipText: { color: colors.brand, ...seed.typography.label, fontWeight: "800" },
-  soundToggle: { position: "absolute", zIndex: 30, top: seed.spacing.x2, right: seed.spacing.x2, width: seed.size.touchTarget, height: seed.size.touchTarget, borderRadius: seed.radius.full, borderWidth: StyleSheet.hairlineWidth, borderColor: "#465046", backgroundColor: "rgba(23, 28, 23, 0.82)", alignItems: "center", justifyContent: "center" },
+  soundToggle: { position: "absolute", zIndex: 30, top: seed.spacing.x2, right: seed.spacing.x2, width: seed.size.touchTarget, height: seed.size.touchTarget, borderRadius: seed.radius.full, borderWidth: StyleSheet.hairlineWidth, borderColor: seed.color.inverted.strokeStrong, backgroundColor: seed.color.inverted.surfaceRaised, alignItems: "center", justifyContent: "center" },
   soundToggleDisabled: { opacity: 0.48 },
   pressed: { opacity: seed.state.pressedOpacity },
   state: { flex: 1, paddingHorizontal: seed.spacing.globalGutter, alignItems: "center", justifyContent: "center", gap: seed.spacing.componentDefault },
-  stateText: { maxWidth: 330, color: "#D8DED6", ...seed.typography.body, textAlign: "center" },
+  stateText: { maxWidth: 330, color: seed.color.inverted.foregroundMuted, ...seed.typography.body, textAlign: "center" },
   stateAction: { width: "100%", marginTop: seed.spacing.x2 },
+  loginRequiredTitle: { color: seed.color.inverted.foreground, textAlign: "center" },
   content: { paddingHorizontal: seed.spacing.globalGutter, paddingTop: seed.spacing.x4, paddingBottom: seed.spacing.x7, gap: seed.spacing.componentDefault },
   drawScroll: { flex: 1 },
   gachaContent: { flexGrow: 1 },
-  gachaInteractionHint: { alignSelf: "center", color: "#CBD2C9", textAlign: "center" },
+  gachaInteractionHint: { alignSelf: "center", color: seed.color.inverted.foregroundMuted, textAlign: "center" },
   summaryContent: { flex: 1, paddingHorizontal: seed.spacing.globalGutter, paddingTop: seed.spacing.x4, gap: seed.spacing.componentDefault },
   stageHeader: { minHeight: 54, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: seed.spacing.x3 },
   stageEyebrow: { marginBottom: seed.spacing.x1, color: colors.brand, fontSize: 11, lineHeight: 16, fontWeight: "900", letterSpacing: 0.8 },
   stageTitle: { color: colors.white },
-  stage: { minHeight: 430, padding: seed.spacing.x4, borderRadius: seed.radius.r5, borderWidth: 1, borderColor: "#3A4339", backgroundColor: "#151A15", alignItems: "center", justifyContent: "center", overflow: "hidden" },
+  stage: { minHeight: 430, padding: seed.spacing.x4, borderRadius: seed.radius.r5, borderWidth: 1, borderColor: seed.color.inverted.stroke, backgroundColor: seed.color.inverted.surface, alignItems: "center", justifyContent: "center", overflow: "hidden" },
   expandedDrawStage: { minHeight: 496 },
   fullGachaStage: { flexGrow: 1 },
-  lightGachaStage: { backgroundColor: "#FCFCF8", borderColor: "#FCFCF8" },
+  lightGachaStage: { backgroundColor: seed.color.layer.default, borderColor: seed.color.layer.default },
   summaryStage: { flex: 1, minHeight: 0, padding: seed.spacing.x2_5 },
   staticSparkField: { ...StyleSheet.absoluteFill },
   spark: { position: "absolute", width: 7, height: 7, backgroundColor: colors.brand },
@@ -1803,63 +1878,63 @@ const styles = StyleSheet.create({
   dispersedGachaEmber: { shadowOpacity: 0.36, shadowRadius: 3.5 },
   sealedBlock: { alignItems: "center" },
   capsule: { width: 142, height: 142, transform: [{ rotate: "-8deg" }] },
-  unknownDraw: { width: 156, height: 156, borderRadius: seed.radius.full, borderWidth: 2, borderColor: "#697469", alignItems: "center", justifyContent: "center", backgroundColor: "#202620" },
-  sealedCode: { marginTop: seed.spacing.x5, color: colors.brand, fontFamily: "Galmuri11", fontSize: 17, lineHeight: 23, fontWeight: "400", letterSpacing: 0.6 },
-  sealedLabel: { marginTop: seed.spacing.x1_5, color: "#CBD2C9", ...seed.typography.bodyStrong },
+  unknownDraw: { width: 156, height: 156, borderRadius: seed.radius.full, borderWidth: 2, borderColor: seed.color.inverted.strokeStrong, alignItems: "center", justifyContent: "center", backgroundColor: seed.color.inverted.surfaceRaised },
+  sealedCode: { marginTop: seed.spacing.x5, color: colors.brand },
+  sealedLabel: { marginTop: seed.spacing.x1_5, color: seed.color.inverted.foregroundMuted, ...seed.typography.bodyStrong },
   previewOpened: { alignItems: "center" },
   resultAuraWrap: { alignItems: "center", justifyContent: "center" },
-  resultAuraFlash: { position: "absolute", width: 164, height: 164, borderRadius: seed.radius.full, backgroundColor: "#FFF6D8" },
-  resultAura: { position: "absolute", width: 174, height: 174, borderRadius: seed.radius.full, borderWidth: 2, borderColor: "#F7A34A", backgroundColor: "rgba(243, 107, 44, 0.1)", shadowColor: "#F38B35", shadowOpacity: 0.45, shadowRadius: 18, shadowOffset: { width: 0, height: 0 } },
+  resultAuraFlash: { position: "absolute", width: 164, height: 164, borderRadius: seed.radius.full, backgroundColor: seed.color.kuji.weakStrong },
+  resultAura: { position: "absolute", width: 174, height: 174, borderRadius: seed.radius.full, borderWidth: 2, borderColor: seed.color.kuji.stroke, backgroundColor: seed.color.background.transparent, shadowColor: seed.color.kuji.solid, shadowOpacity: 0.45, shadowRadius: 18, shadowOffset: { width: 0, height: 0 } },
   resultAuraOuter: { position: "absolute", width: 194, height: 194, borderRadius: seed.radius.full, borderWidth: 1, borderColor: colors.brand },
   resultAuraParticle: { position: "absolute", left: "50%", top: "50%", marginLeft: -3, marginTop: -3, borderRadius: 2, backgroundColor: colors.brand },
-  previewResultIcon: { width: 158, height: 158, borderRadius: seed.radius.full, borderWidth: 1, borderColor: "#4A5549", backgroundColor: "#202620", alignItems: "center", justifyContent: "center" },
+  previewResultIcon: { width: 158, height: 158, borderRadius: seed.radius.full, borderWidth: 1, borderColor: seed.color.inverted.strokeStrong, backgroundColor: seed.color.inverted.surfaceRaised, alignItems: "center", justifyContent: "center" },
   previewResultCode: { marginTop: seed.spacing.x4, color: colors.brand, fontFamily: "Galmuri11", fontSize: 20, lineHeight: 28, fontWeight: "400" },
-  previewTicketNumber: { marginTop: seed.spacing.x4, color: "#CBD2C9", ...seed.typography.caption, fontWeight: "800", letterSpacing: 0.7 },
-  previewProgress: { marginTop: seed.spacing.x1, color: "#CBD2C9", ...seed.typography.bodyStrong, fontVariant: ["tabular-nums"] },
+  previewTicketNumber: { marginTop: seed.spacing.x4, color: seed.color.inverted.foregroundMuted, ...seed.typography.caption, fontWeight: "800", letterSpacing: 0.7 },
+  previewProgress: { marginTop: seed.spacing.x1, color: seed.color.inverted.foregroundMuted, ...seed.typography.bodyStrong, fontVariant: ["tabular-nums"] },
   summaryLayout: { flex: 1, width: "100%", minHeight: 0, flexDirection: "row", gap: seed.spacing.x2 },
-  summaryFeatured: { flex: 1.35, minWidth: 0, padding: seed.spacing.x3, borderRadius: seed.radius.r4, borderWidth: 1, borderColor: "#4A5549", backgroundColor: "#202620", alignItems: "center", justifyContent: "center" },
+  summaryFeatured: { flex: 1.35, minWidth: 0, padding: seed.spacing.x3, borderRadius: seed.radius.r4, borderWidth: 1, borderColor: seed.color.inverted.strokeStrong, backgroundColor: seed.color.inverted.surfaceRaised, alignItems: "center", justifyContent: "center" },
   bestResultBadge: { minHeight: 30, paddingHorizontal: seed.spacing.x2_5, borderRadius: seed.radius.r2, backgroundColor: colors.brand, alignItems: "center", justifyContent: "center" },
   bestResultBadgeText: { color: colors.ink, fontFamily: "Galmuri11", fontSize: 11, lineHeight: 16, fontWeight: "400" },
-  featuredResultIcon: { width: 108, height: 108, marginTop: seed.spacing.x4, borderRadius: seed.radius.full, borderWidth: 1, borderColor: "#4A5549", backgroundColor: "#171C17", alignItems: "center", justifyContent: "center" },
+  featuredResultIcon: { width: 108, height: 108, marginTop: seed.spacing.x4, borderRadius: seed.radius.full, borderWidth: 1, borderColor: seed.color.inverted.strokeStrong, backgroundColor: seed.color.inverted.surface, alignItems: "center", justifyContent: "center" },
   featuredResultCode: { marginTop: seed.spacing.x4, color: colors.brand, fontFamily: "Galmuri11", fontSize: 15, lineHeight: 21, fontWeight: "400", textAlign: "center" },
-  featuredTicket: { marginTop: seed.spacing.x1_5, color: "#CBD2C9", fontSize: 11, lineHeight: 16, fontWeight: "800", letterSpacing: 0.4 },
-  summaryRail: { flex: 1, minWidth: 0, borderRadius: seed.radius.r4, borderWidth: 1, borderColor: "#353D35", backgroundColor: "#1B201B", overflow: "hidden" },
-  summaryRailHeader: { minHeight: 42, paddingHorizontal: seed.spacing.x2, flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "#353D35" },
-  summaryRailTitle: { flex: 1, color: "#D8DED6", fontSize: 11, lineHeight: 16 },
+  featuredTicket: { marginTop: seed.spacing.x1_5, color: seed.color.inverted.foregroundMuted, fontSize: 11, lineHeight: 16, fontWeight: "800", letterSpacing: 0.4 },
+  summaryRail: { flex: 1, minWidth: 0, borderRadius: seed.radius.r4, borderWidth: 1, borderColor: seed.color.inverted.stroke, backgroundColor: seed.color.inverted.surfaceRaised, overflow: "hidden" },
+  summaryRailHeader: { minHeight: 42, paddingHorizontal: seed.spacing.x2, flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: seed.color.inverted.stroke },
+  summaryRailTitle: { flex: 1, color: seed.color.inverted.foregroundMuted, fontSize: 11, lineHeight: 16 },
   summaryRailCount: { color: colors.brand, fontSize: 11, lineHeight: 16, fontVariant: ["tabular-nums"] },
   summaryRailList: { flex: 1 },
   summaryRailListContent: { paddingHorizontal: seed.spacing.x2, paddingBottom: seed.spacing.x2 },
-  summaryRailItem: { minHeight: 64, flexDirection: "row", alignItems: "center", gap: seed.spacing.x1_5, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "#313831" },
-  summaryRailIcon: { width: 34, height: 34, borderRadius: seed.radius.r2, backgroundColor: "#252B25", alignItems: "center", justifyContent: "center" },
+  summaryRailItem: { minHeight: 64, flexDirection: "row", alignItems: "center", gap: seed.spacing.x1_5, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: seed.color.inverted.stroke },
+  summaryRailIcon: { width: 34, height: 34, borderRadius: seed.radius.r2, backgroundColor: seed.color.inverted.surfaceSubtle, alignItems: "center", justifyContent: "center" },
   summaryRailCopy: { flex: 1, minWidth: 0 },
-  summaryRailCode: { color: "#D8DED6", fontSize: 11, lineHeight: 16, fontWeight: "900" },
-  summaryRailTicket: { marginTop: 2, color: "#8F988E", fontSize: 11, lineHeight: 16, fontWeight: "800", letterSpacing: 0.2 },
+  summaryRailCode: { color: seed.color.inverted.foregroundMuted, fontSize: 11, lineHeight: 16, fontWeight: "900" },
+  summaryRailTicket: { marginTop: 2, color: seed.color.inverted.foregroundSubtle, fontSize: 11, lineHeight: 16, fontWeight: "800", letterSpacing: 0.2 },
   committedBatchSummary: { flex: 1, width: "100%", minHeight: 0, gap: seed.spacing.x2 },
   committedBatchHeader: { minHeight: 38, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: seed.spacing.x2 },
   committedBatchTitle: { color: colors.white },
   committedBatchCount: { color: colors.brand, fontVariant: ["tabular-nums"] },
-  committedBatchError: { color: "#E2E7E0" },
+  committedBatchError: { color: seed.color.inverted.foregroundMuted },
   committedBatchList: { flex: 1 },
   committedBatchListContent: { gap: seed.spacing.x2, paddingBottom: seed.spacing.x1 },
-  committedBatchItem: { minHeight: 92, padding: seed.spacing.x2, borderRadius: seed.radius.r3, borderWidth: 1, borderColor: "#394139", backgroundColor: "#202620", flexDirection: "row", alignItems: "center", gap: seed.spacing.x2 },
-  committedBatchImage: { width: 72, height: 72, borderRadius: seed.radius.r2, backgroundColor: "#F6F6F1" },
-  committedBatchPlaceholder: { alignItems: "center", justifyContent: "center", backgroundColor: "#252B25" },
+  committedBatchItem: { minHeight: 92, padding: seed.spacing.x2, borderRadius: seed.radius.r3, borderWidth: 1, borderColor: seed.color.inverted.stroke, backgroundColor: seed.color.inverted.surfaceRaised, flexDirection: "row", alignItems: "center", gap: seed.spacing.x2 },
+  committedBatchImage: { width: 72, height: 72, borderRadius: seed.radius.r2, backgroundColor: seed.color.layer.basement },
+  committedBatchPlaceholder: { alignItems: "center", justifyContent: "center", backgroundColor: seed.color.inverted.surfaceSubtle },
   committedBatchCopy: { flex: 1, minWidth: 0 },
   committedBatchMetaRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: seed.spacing.x2 },
   committedBatchRarity: { color: colors.brand, ...seed.typography.caption, fontWeight: "900" },
-  committedBatchTicket: { color: "#CBD2C9", ...seed.typography.caption, fontWeight: "800", fontVariant: ["tabular-nums"] },
+  committedBatchTicket: { color: seed.color.inverted.foregroundMuted, ...seed.typography.caption, fontWeight: "800", fontVariant: ["tabular-nums"] },
   committedBatchName: { marginTop: seed.spacing.x0_5, color: colors.white, ...seed.typography.bodyStrong },
-  committedBatchMeta: { marginTop: seed.spacing.x0_5, color: "#9EA69D", ...seed.typography.caption },
+  committedBatchMeta: { marginTop: seed.spacing.x0_5, color: seed.color.inverted.foregroundSubtle, ...seed.typography.caption },
   committedBatchAction: { width: "100%", marginTop: seed.spacing.x1 },
   committedResult: { width: "100%", alignItems: "center" },
   rarityBadge: { minWidth: 64, height: 38, paddingHorizontal: seed.spacing.x3, borderRadius: seed.radius.r2_5, backgroundColor: colors.brand, alignItems: "center", justifyContent: "center" },
-  rarityText: { color: colors.ink, fontFamily: "Galmuri11", fontSize: 17, lineHeight: 23, fontWeight: "400" },
+  rarityText: { color: colors.ink },
   resultImage: { width: "100%", height: 232, marginTop: seed.spacing.x4 },
-  resultPlaceholder: { alignItems: "center", justifyContent: "center", borderRadius: seed.radius.r4, backgroundColor: "#202620" },
-  resultIp: { marginTop: seed.spacing.x3, color: "#9EA69D", ...seed.typography.caption },
+  resultPlaceholder: { alignItems: "center", justifyContent: "center", borderRadius: seed.radius.r4, backgroundColor: seed.color.inverted.surfaceRaised },
+  resultIp: { marginTop: seed.spacing.x3, color: seed.color.inverted.foregroundSubtle, ...seed.typography.caption },
   resultName: { marginTop: seed.spacing.x1, color: colors.white, ...seed.typography.sectionTitle, textAlign: "center" },
   resultMeta: { marginTop: seed.spacing.x2, color: colors.brand, ...seed.typography.label, fontWeight: "800" },
-  targetRow: { minHeight: 92, padding: seed.spacing.x3, borderRadius: seed.radius.r4, backgroundColor: "#F6F6F1", flexDirection: "row", alignItems: "center", gap: seed.spacing.componentDefault },
+  targetRow: { minHeight: 92, padding: seed.spacing.x3, borderRadius: seed.radius.r4, backgroundColor: seed.color.layer.basement, flexDirection: "row", alignItems: "center", gap: seed.spacing.componentDefault },
   targetImage: { width: 68, height: 68, borderRadius: seed.radius.r3, backgroundColor: seed.color.background.neutralWeak },
   targetPlaceholder: { alignItems: "center", justifyContent: "center" },
   targetCopy: { flex: 1, minWidth: 0 },
