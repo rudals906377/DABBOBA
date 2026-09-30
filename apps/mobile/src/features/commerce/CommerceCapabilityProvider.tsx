@@ -20,6 +20,8 @@ import {
 import {
   mostRestrictiveCommerceCapability,
   resolveMobileRuntimeConfig,
+  resolveServerCapabilitySource,
+  type ServerCapabilitySource,
   type CommerceCapability,
   type MobilePlatform,
 } from "@/lib/runtime-config";
@@ -43,6 +45,12 @@ export type { RequiredPolicyVersions } from "@/features/commerce/public-config-g
 type CommerceCapabilityContextValue = {
   buildCapability: CommerceCapability;
   serverCapability: CommerceCapability | null;
+  /**
+   * `VERIFIED` when `serverCapability` is a real server answer (including an
+   * explicit PRELAUNCH); `UNAVAILABLE` when it is `null` only because refreshes
+   * failed. Gates use this to keep an already-mounted route on network failure.
+   */
+  serverCapabilitySource: ServerCapabilitySource;
   effectiveCapability: CommerceCapability;
   commerceEnabled: boolean;
   requiredPolicyVersions: RequiredPolicyVersions | null;
@@ -125,6 +133,7 @@ export function CommerceCapabilityProvider({ children }: { children: ReactNode }
   const value = useMemo<CommerceCapabilityContextValue>(() => ({
     buildCapability: runtime.commerceCapability,
     serverCapability,
+    serverCapabilitySource: resolveServerCapabilitySource(serverCapability),
     effectiveCapability,
     commerceEnabled: effectiveCapability === "LIVE",
     requiredPolicyVersions,
