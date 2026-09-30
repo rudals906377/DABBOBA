@@ -16,7 +16,7 @@ type KujiRoomPaymentSnapshot = Readonly<{
 
 export class KujiPaymentLeaseMismatchError extends Error {
   constructor() {
-    super("쿠지 주문과 대기실 참여 정보가 일치하지 않습니다. 추가 결제를 진행하지 않았어요.");
+    super("쿠지 주문과 대기실 참여 정보가 일치하지 않아요. 추가 결제를 진행하지 않았어요.");
     this.name = "KujiPaymentLeaseMismatchError";
   }
 }
@@ -25,7 +25,7 @@ export class KujiPaymentLeaseExpiredError extends Error {
   readonly productId: string;
 
   constructor(productId: string) {
-    super("쿠지 결제 대기 시간이 끝났습니다. 결제창을 열지 않고 상품으로 돌아갑니다.");
+    super("쿠지 결제 대기 시간이 끝났어요. 결제창을 열지 않고 상품으로 돌아가요.");
     this.name = "KujiPaymentLeaseExpiredError";
     this.productId = productId;
   }

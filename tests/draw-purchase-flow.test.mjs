@@ -52,9 +52,10 @@ test("gacha opens checkout while kuji claims its one-person room before checkout
   assert.match(productDetail, /buildKujiRoomGatePath/);
   assert.doesNotMatch(productDetail, /buildGachaPreviewParams|resolveKujiEntryPath|결제 금액 확인/);
 
-  for (const copy of ["구매 상품", "구매 수량", "결제 수단 준비 중", "포인트로 구매하기"]) {
+  for (const copy of ["구매 상품", "구매 수량", "결제 수단 준비 중", "구매하기"]) {
     assert.match(checkout, new RegExp(copy));
   }
+  assert.doesNotMatch(checkout, /포인트로 구매하기|원 테스트 결제`|원 결제하기`/);
   assert.doesNotMatch(checkout, /buildGachaPreviewParams|openGachaPreview|\/draw\/preview|체험하기/);
   assert.match(checkout, /createGachaCheckoutOrder/);
   assert.match(checkout, /fetchCheckoutActorId/);

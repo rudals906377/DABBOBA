@@ -1027,9 +1027,9 @@ test("native gacha and kuji shops coexist with the shared drawn-product storage 
   assert.match(shopSource, /\.\.\.catalogProductCardSurface/);
   assert.doesNotMatch(productDetailSource, /Image\.getSize\(|setImageAspectRatio/);
   assert.match(productDetailSource, /<CatalogProductImage/);
-  assert.match(productDetailSource, /product\.category === "kuji" \? styles\.heroKuji : styles\.heroGacha/);
-  assert.match(productDetailSource, /heroGacha:\s*\{[^}]*aspectRatio:\s*4\s*\/\s*3/);
-  assert.match(productDetailSource, /heroKuji:\s*\{[^}]*aspectRatio:\s*16\s*\/\s*9/);
+  assert.match(productDetailSource, /onDimensions=\{\(width, height\) => setMeasured\(/);
+  assert.match(productDetailSource, /\[styles\.hero, \{ aspectRatio: heroAspectRatio \}\]/);
+  assert.doesNotMatch(productDetailSource, /heroGacha|heroKuji/);
   assert.match(productDetailSource, /resizeMode="contain"/);
   assert.match(productDetailSource, /heroContainer:\s*\{[^}]*marginHorizontal:\s*seed\.spacing\.x2/);
   assert.match(productDetailSource, /hero:\s*\{[^}]*width:\s*"100%"/);
@@ -1168,7 +1168,8 @@ test("native customer category surfaces share operator-managed availability and 
   for (const option of ["최신순", "인기순", "가격 높은순", "가격 낮은순"]) {
     assert.match(shopFilterSource, new RegExp(option));
   }
-  assert.match(shopSource, /animationType="slide"/);
+  assert.match(shopSource, /animationType=\{reduceMotion \? "none" : "slide"\}/);
+  assert.match(shopSource, /AccessibilityInfo\.addEventListener\("reduceMotionChanged", setReduceMotion\)/);
   assert.match(shopSource, /accessibilityRole="switch"/);
   assert.match(shopSource, /accessibilityRole="radio"/);
 });
@@ -1179,11 +1180,11 @@ test("native kuji claims its room before the shared quantity and purchase checko
   assert.match(productDetailSource, /buildKujiRoomGatePath/);
   assert.doesNotMatch(productDetailSource, /buildGachaPreviewParams|resolveKujiEntryPath|결제 금액 확인/);
 
-  assert.match(checkoutScreenSource, /<Text style=\{styles\.sectionTitle\}>구매 상품<\/Text>[\s\S]*?styles\.quantityRow/);
+  assert.match(checkoutScreenSource, /<KoreanPixelTitle variant="section" style=\{styles\.sectionTitle\}>구매 상품<\/KoreanPixelTitle>[\s\S]*?styles\.quantityRow/);
   assert.match(checkoutScreenSource, /구매 수량/);
   assert.match(checkoutScreenSource, /checkoutNeedsAgreement/);
   assert.match(checkoutScreenSource, /결제 수단 준비 중/);
-  assert.match(checkoutScreenSource, /포인트로 구매하기/);
+  assert.match(checkoutScreenSource, /label=\{!recoveringGachaOrder && paymentAvailability === "unavailable"\s*\? "결제 수단 준비 중"\s*: "구매하기"\}/);
   assert.doesNotMatch(checkoutScreenSource, /buildGachaPreviewParams|openGachaPreview|\/draw\/preview|체험하기/);
   assert.match(checkoutScreenSource, /kujiCheckoutExpiresAt/);
   assert.match(checkoutScreenSource, /결제 남은 시간/);
@@ -1220,7 +1221,7 @@ test("native purchase Product Detail continues into a server-verified PortOne ch
   assert.match(checkoutScreenSource, /주문내용 확인 및 결제 동의/);
   assert.match(checkoutScreenSource, /EXPO_PUBLIC_PORTONE_STORE_ID/);
   assert.match(checkoutScreenSource, /결제 수단 준비 중/);
-  assert.match(checkoutScreenSource, /포인트로 구매하기/);
+  assert.match(checkoutScreenSource, /label=\{!recoveringGachaOrder && paymentAvailability === "unavailable"\s*\? "결제 수단 준비 중"\s*: "구매하기"\}/);
   assert.doesNotMatch(checkoutScreenSource, /openConnectionGuide|\/checkout\/connect\//);
   assert.match(checkoutScreenSource, /resizeMode="contain"/);
   assert.match(checkoutScreenSource, /accessibilityRole="radio"/);

@@ -54,7 +54,8 @@ test("checkout keeps unconfigured providers fail-closed while live, points, and 
   assert.equal(checkoutPaymentAvailability(6_500, true), "demo");
   assert.equal(checkoutPaymentAvailability(6_500, false, true), "live");
   assert.match(checkoutSource, /결제 수단 준비 중/);
-  assert.match(checkoutSource, /포인트로 구매하기/);
+  assert.match(checkoutSource, /label=\{!recoveringGachaOrder && paymentAvailability === "unavailable"\s*\? "결제 수단 준비 중"\s*: "구매하기"\}/);
+  assert.match(checkoutSource, /loading=\{submitting\}/);
   assert.match(checkoutSource, /paymentAvailability === "unavailable"/);
   assert.match(checkoutSource, /const testPaymentsEnabled = __DEV__ && demoEnabled/);
   assert.match(checkoutSource, /accessibilityRole="radio"/);
@@ -135,7 +136,9 @@ test("checkout follows the compact reference hierarchy and exposes only the conf
   assert.doesNotMatch(checkoutSource, /<KoreanPixelTitle[^>]*>수량 선택<\/KoreanPixelTitle>/);
   assert.doesNotMatch(checkoutSource, /24,900|54,900|60일|15%/);
   assert.match(checkoutSource, /width: "100%"/);
-  assert.doesNotMatch(checkoutSource, /<KoreanPixelTitle/);
+  for (const title of ["구매 상품", "쿠폰 사용", "포인트 사용", "결제 수단", "결제 금액"]) {
+    assert.match(checkoutSource, new RegExp(`<KoreanPixelTitle variant="section" style=\\{styles\\.sectionTitle\\}>${title}</KoreanPixelTitle>`));
+  }
   assert.doesNotMatch(checkoutSource, /couponRow[\s\S]*?chevron-down/);
 });
 

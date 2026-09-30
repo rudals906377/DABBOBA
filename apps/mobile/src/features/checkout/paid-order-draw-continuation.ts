@@ -28,7 +28,7 @@ export function paidProductDrawFromOrder(order: Order, requestedOrderId: string)
     || entitlementIds.some((id) => !UUID_PATTERN.test(id))
     || new Set(entitlementIds.map((id) => id.toLowerCase())).size !== entitlementIds.length
   ) {
-    throw new Error("결제한 상품과 추첨권 정보가 일치하지 않습니다. 내정보의 결제·뽑기 복구에서 다시 확인해 주세요.");
+    throw new Error("결제한 상품과 추첨권 정보가 일치하지 않아요. 내정보의 결제·뽑기 복구에서 다시 확인해 주세요.");
   }
   return {
     category: line.category,
@@ -57,7 +57,7 @@ export function paidKujiRoomEntryFromRecovery(
     || actualIds.some((id, index) => id !== expectedIds[index])
     || recovery.bindings.length > 0
   ) {
-    throw new Error("결제한 쿠지 방 정보를 확인하지 못했습니다. 내정보의 결제·뽑기 복구에서 다시 확인해 주세요.");
+    throw new Error("결제한 쿠지 방 정보를 확인하지 못했어요. 내정보의 결제·뽑기 복구에서 다시 확인해 주세요.");
   }
   return recovery.roomEntryId;
 }

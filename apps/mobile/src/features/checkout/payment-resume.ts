@@ -7,7 +7,7 @@ type OwnedPaymentOrder = {
 
 export class PaymentResumeIdentityMismatchError extends Error {
   constructor() {
-    super("결제 주문 정보가 변경되었습니다.");
+    super("결제 주문 정보가 변경됐어요.");
     this.name = "PaymentResumeIdentityMismatchError";
   }
 }

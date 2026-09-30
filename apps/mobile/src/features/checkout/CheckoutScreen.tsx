@@ -22,6 +22,7 @@ import {
 import { CatalogProductImage } from "@/components/CatalogProductImage";
 import { DetailPageHeader } from "@/components/DetailPageHeader";
 import { ProductInfoDivider } from "@/components/ProductInfoDivider";
+import { KoreanPixelTitle } from "@/components/RootCategoryTitle";
 import { AppText as Text, AppTextInput as TextInput } from "@/components/Typography";
 import { SeedActionButton, SeedInlineGuidance, SeedInputShell } from "@/design-system/components";
 import { catalogProductCardSurface } from "@/design-system/catalog";
@@ -258,7 +259,7 @@ export function CheckoutScreen() {
               && !room.viewer.checkoutExpiresAt
             )
           ) {
-            throw new Error("현재 결제 가능한 쿠지 순서가 아닙니다. 대기실에서 다시 확인해 주세요.");
+            throw new Error("현재 결제 가능한 쿠지 순서가 아니에요. 대기실에서 다시 확인해 주세요.");
           }
           if (room.viewer.state === "CHECKOUT_PENDING" && room.viewer.checkoutExpiresAt) {
             setVerifiedKujiLease({
@@ -276,7 +277,7 @@ export function CheckoutScreen() {
     } catch (error) {
       setSnapshot(null);
       setVerifiedKujiLease(null);
-      setMessage(error instanceof Error ? error.message : "결제 정보를 불러오지 못했습니다.");
+      setMessage(error instanceof Error ? error.message : "결제 정보를 불러오지 못했어요.");
     } finally {
       setLoading(false);
     }
@@ -441,7 +442,7 @@ export function CheckoutScreen() {
     checkoutExpiredHandledRef.current = true;
     void releaseKujiEntryBestEffort();
     AccessibilityInfo.announceForAccessibility(
-      "결제 대기 시간이 끝나 자동으로 취소됐어요. 상품 페이지로 이동합니다.",
+      "결제 대기 시간이 끝나 자동으로 취소됐어요. 상품 페이지로 이동해요.",
     );
     replaceWithProduct();
     Alert.alert(
@@ -454,7 +455,7 @@ export function CheckoutScreen() {
     if (!checkoutFocusedRef.current) return;
     checkoutExpiredHandledRef.current = true;
     void releaseKujiEntryBestEffort();
-    AccessibilityInfo.announceForAccessibility("결제를 취소하고 상품 페이지로 이동합니다.");
+    AccessibilityInfo.announceForAccessibility("결제를 취소하고 상품 페이지로 이동해요.");
     replaceWithProduct();
   }, [releaseKujiEntryBestEffort, replaceWithProduct]);
 
@@ -769,7 +770,7 @@ export function CheckoutScreen() {
         || quantity <= 0
         || !drawAvailable
       ) {
-        throw new Error("현재 새로 구매할 수 있는 가챠 상품이 아닙니다.");
+        throw new Error("현재 새로 구매할 수 있는 가챠 상품이 아니에요.");
       }
       const expectedDrawVersion = snapshot?.drawOdds?.version;
       if (!expectedDrawVersion) {
@@ -1059,7 +1060,7 @@ export function CheckoutScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea} edges={["top", "left", "right"]}>
-      <DetailPageHeader title="결제" onBack={goBack} backLabel="상품 상세로 돌아가기" />
+      <DetailPageHeader title="결제" titleMode="pixel" onBack={goBack} backLabel="상품 상세로 돌아가기" />
 
       {loading ? (
         <View style={styles.state}>
@@ -1069,7 +1070,7 @@ export function CheckoutScreen() {
       ) : message || !snapshot || !product ? (
         <View style={styles.state}>
           <DecorativeIonicon name="alert-circle-outline" size={34} color={colors.muted} />
-          <Text style={styles.stateTitle}>{message || "상품을 찾을 수 없습니다."}</Text>
+          <Text style={styles.stateTitle}>{message || "상품을 찾을 수 없어요."}</Text>
           {pendingGachaIntent ? (
             <SeedActionButton
               label="이전 주문 확인"
@@ -1104,7 +1105,7 @@ export function CheckoutScreen() {
               <View
                 accessible
                 accessibilityLabel={`결제 남은 시간 ${kujiCheckoutRemainingTime}`}
-                accessibilityHint="시간이 끝나면 결제가 자동으로 취소되고 상품 페이지로 이동합니다."
+                accessibilityHint="시간이 끝나면 결제가 자동으로 취소되고 상품 페이지로 이동해요."
                 style={[
                   styles.checkoutTimer,
                   kujiCheckoutExpired && styles.checkoutTimerExpired,
@@ -1121,7 +1122,7 @@ export function CheckoutScreen() {
             ) : null}
 
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>구매 상품</Text>
+              <KoreanPixelTitle variant="section" style={styles.sectionTitle}>구매 상품</KoreanPixelTitle>
               <View style={styles.productRow}>
                 <View style={styles.productImage}>
                   <CatalogProductImage
@@ -1185,7 +1186,7 @@ export function CheckoutScreen() {
             </View>
 
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>쿠폰 사용</Text>
+              <KoreanPixelTitle variant="section" style={styles.sectionTitle}>쿠폰 사용</KoreanPixelTitle>
               <View
                 accessible
                 accessibilityLabel="쿠폰 사용, 미적용, 사용 가능 0장"
@@ -1197,7 +1198,7 @@ export function CheckoutScreen() {
             </View>
 
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>포인트 사용</Text>
+              <KoreanPixelTitle variant="section" style={styles.sectionTitle}>포인트 사용</KoreanPixelTitle>
               <View style={styles.pointRow}>
                 <SeedInputShell focused={pointInputFocused} style={styles.pointInputShell}>
                   <TextInput
@@ -1233,7 +1234,7 @@ export function CheckoutScreen() {
             </View>
 
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>결제 수단</Text>
+              <KoreanPixelTitle variant="section" style={styles.sectionTitle}>결제 수단</KoreanPixelTitle>
               {testPaymentsEnabled ? (
                 <SeedInlineGuidance
                   paragraphs={developmentPaymentCopy.guidance}
@@ -1301,7 +1302,7 @@ export function CheckoutScreen() {
             </View>
 
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>결제 금액</Text>
+              <KoreanPixelTitle variant="section" style={styles.sectionTitle}>결제 금액</KoreanPixelTitle>
               <PriceRow label="상품 금액" value={`${subtotal.toLocaleString("ko-KR")}원`} />
               <PriceRow label="쿠폰 할인 금액" value="0원" />
               <PriceRow label="포인트 사용" value={pointUsed ? `-${pointUsed.toLocaleString("ko-KR")}원` : "0원"} />
@@ -1332,17 +1333,10 @@ export function CheckoutScreen() {
 
           <FloatingBottomActionPanel panelStyle={styles.footer}>
             <SeedActionButton
-              label={submitting
-                ? "주문 확인 중"
-                : product.category === "gacha" && pendingGachaIntent
-                  ? "이전 주문 확인"
-                  : paymentAvailability === "demo"
-                    ? `${paymentTotal.toLocaleString("ko-KR")}원 테스트 결제`
-                    : paymentAvailability === "live"
-                      ? `${paymentTotal.toLocaleString("ko-KR")}원 결제하기`
-                    : paymentAvailability === "points"
-                      ? "포인트로 구매하기"
-                      : "결제 수단 준비 중"}
+              label={!recoveringGachaOrder && paymentAvailability === "unavailable"
+                ? "결제 수단 준비 중"
+                : "구매하기"}
+              loading={submitting}
               disabled={submitting || (
                 checkoutNeedsAgreement(product.category === "gacha" && Boolean(pendingGachaIntent))
                 && !agreementAccepted
@@ -1390,7 +1384,7 @@ const styles = StyleSheet.create({
   checkoutTimerCaption: { color: colors.muted, ...seed.typography.caption },
   checkoutTimerValue: { minWidth: 84, color: colors.greenInk, fontSize: 24, lineHeight: 31, fontWeight: "900", fontVariant: ["tabular-nums"], textAlign: "right" },
   section: { paddingVertical: seed.spacing.x3_5, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: seed.color.stroke.neutral },
-  sectionTitle: { marginBottom: seed.spacing.x3, color: colors.ink, ...seed.typography.subtitle },
+  sectionTitle: { marginBottom: seed.spacing.x3 },
   sectionCaption: { marginTop: -seed.spacing.x1_5, marginBottom: seed.spacing.x3, color: colors.muted, ...seed.typography.caption },
   productRow: { padding: seed.spacing.x3, ...catalogProductCardSurface, flexDirection: "row", alignItems: "center", gap: seed.spacing.componentDefault },
   productImage: { width: 64, height: 64, overflow: "hidden", borderRadius: seed.radius.r2, backgroundColor: seed.color.background.neutralWeak },
