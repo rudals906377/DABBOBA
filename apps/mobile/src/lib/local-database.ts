@@ -220,6 +220,28 @@ export async function clearUserScopedLocalData(db: SQLiteDatabase): Promise<void
   `);
 }
 
+/**
+ * Clears local data before a customer login is committed. A stored customer
+ * session may belong to another account, so all user-scoped data goes. With no
+ * stored session the remaining rows are guest device data (logout already
+ * cleared the previous customer's), so guest-safe recently viewed history stays
+ * and only drafts, uploads and sync cursors are reset.
+ */
+export async function clearLocalDataBeforeCustomerLogin(
+  db: SQLiteDatabase,
+  previousCustomerStored: boolean,
+): Promise<void> {
+  if (previousCustomerStored) {
+    await clearUserScopedLocalData(db);
+    return;
+  }
+  await db.execAsync(`
+    DELETE FROM post_drafts;
+    DELETE FROM upload_queue;
+    DELETE FROM sync_state;
+  `);
+}
+
 export async function readRecentlyViewedProductIds(
   db: SQLiteDatabase,
 ): Promise<string[]> {

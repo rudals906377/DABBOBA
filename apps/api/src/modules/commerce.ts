@@ -31,7 +31,7 @@ import { iso, nullableIso, numberValue } from "../lib/rows.js";
 import { DEMO_SELLER_PRODUCT_IDS, demoProfileRequested } from "../lib/demo-testing.js";
 import { releasePendingOrder } from "../lib/pending-order-release.js";
 import type { ApiContext } from "../types.js";
-import { rebaseLegacyCatalogMediaUrl } from "./catalog-media-url.js";
+import { rebaseLegacyCatalogMediaReplayBody, rebaseLegacyCatalogMediaUrl } from "./catalog-media-url.js";
 import { KUJI_SLOT_SELECTION_ALGORITHM, loadSealedKujiSlotForConsume } from "./kuji-slots.js";
 import { registerPortOnePaymentRoutes } from "./portone-payments.js";
 
@@ -638,7 +638,29 @@ export async function applyCanonicalPaymentEvent(context:ApiContext,event:Canoni
 }
 
 export async function registerCommerceRoutes(app:FastifyInstance,context:ApiContext){
-  app.get("/v1/catalog/products/:productId/draw-odds",async(request,reply)=>{
+  // Outside LIVE the product page still shows what can be won: each prize and its
+  // composition quantity in the published set, never probabilities, weights or
+  // remaining (live) quantities (user decision 2026-09-30).
+  app.get("/v1/catalog/products/:productId/prize-lineup",async(request,reply)=>{
+    reply.header("cache-control","no-store");
+    const productId=slugIdInput((request.params as Record<string,unknown>).productId,"productId");
+    if(demoProfileRequested()&&!DEMO_SELLER_PRODUCT_IDS.includes(productId as typeof DEMO_SELLER_PRODUCT_IDS[number]))throw notFound("공개 중인 가챠·쿠지 경품 구성을 찾을 수 없습니다.");
+    const version=await context.pool.query<{id:string;product_id:string;version:number;published_at:Date}>(`SELECT v.id,v.product_id,v.version,v.published_at
+      FROM draw_probability_versions v
+      JOIN catalog_products p ON p.id=v.product_id
+      WHERE v.product_id=$1 AND v.status='ACTIVE' AND p.is_active=true AND p.is_prize_only=false
+        AND p.sale_status IN ('COMING_SOON','ON_SALE') AND p.category IN ('gacha','kuji')`,[productId]);
+    if(!version.rowCount)throw notFound("공개 중인 가챠·쿠지 경품 구성을 찾을 수 없습니다.");
+    const active=version.rows[0]!;
+    const entries=await context.pool.query<{id:string;prize_product_id:string;rarity:string;initial_quantity:number|null} & DrawPrizeSnapshotRow>(`SELECT e.id,e.prize_product_id,e.prize_name_snapshot,e.prize_image_url_snapshot,e.prize_sku_snapshot,e.prize_ip_id_snapshot,e.prize_category_snapshot,e.rarity,e.initial_quantity
+      FROM draw_pool_entries e
+      WHERE e.probability_version_id=$1
+      ORDER BY e.rarity,e.id`,[active.id]);
+    return{productId:active.product_id,version:numberValue(active.version),publishedAt:iso(active.published_at),entries:entries.rows.map((entry)=>({id:entry.id,prizeProductId:entry.prize_product_id,...drawPrizeSnapshotFields(entry,context.config.catalogMediaBaseUrl),rarity:entry.rarity,quantity:entry.initial_quantity===null?null:numberValue(entry.initial_quantity)}))};
+  });
+
+  // Remaining-quantity odds disclose live stock, so they are served only while commerce is LIVE.
+  app.get("/v1/catalog/products/:productId/draw-odds",{preHandler:requireLiveCommerce(context)},async(request,reply)=>{
     reply.header("cache-control","no-store");
     const productId=slugIdInput((request.params as Record<string,unknown>).productId,"productId");
     if(demoProfileRequested()&&!DEMO_SELLER_PRODUCT_IDS.includes(productId as typeof DEMO_SELLER_PRODUCT_IDS[number]))throw notFound("공개 중인 가챠·쿠지 확률표를 찾을 수 없습니다.");
@@ -717,7 +739,7 @@ export async function registerCommerceRoutes(app:FastifyInstance,context:ApiCont
     const hash=requestHash({entitlementId});
     const result=await withTransaction(context.pool,async(client)=>{
       const idem=await beginIdempotency(client,{actorId:request.actor!.userId,scope:"CONSUME_DRAW",key,hash});
-      if(!idem.fresh)return {replay:true,statusCode:idem.statusCode,body:idem.body};
+      if(!idem.fresh)return {replay:true,statusCode:idem.statusCode,body:rebaseLegacyCatalogMediaReplayBody(context.config.catalogMediaBaseUrl,idem.body)};
       const lookup=await client.query<{product_id:string;probability_version_id:string;order_id:string}>("SELECT e.product_id,e.probability_version_id,l.order_id FROM draw_entitlements e JOIN order_lines l ON l.id=e.order_line_id WHERE e.id=$1 AND e.user_id=$2",[entitlementId,request.actor!.userId]);if(!lookup.rowCount)throw notFound("추첨권을 찾을 수 없습니다.");const lockTarget=lookup.rows[0]!;const linkedKujiRoom=await lockLinkedKujiRoomForOrder(client,lockTarget.order_id);const linkedOrder=await client.query<{status:string}>("SELECT status FROM orders WHERE id=$1 FOR UPDATE",[lockTarget.order_id]);if(!linkedOrder.rowCount||!["PAID","FULFILLED"].includes(linkedOrder.rows[0]!.status))throw conflict("결제 완료된 추첨권만 사용할 수 있습니다.");if(linkedKujiRoom){const roomTime=await client.query<{server_now:Date}>("SELECT clock_timestamp() AS server_now");const serverNow=roomTime.rows[0]!.server_now;if(linkedKujiRoom.state==="DRAWING"){if(linkedKujiRoom.drawing_expires_at===null)throw conflict("쿠지 뽑기 시간을 확인할 수 없습니다.");if(serverNow.getTime()>=linkedKujiRoom.drawing_expires_at.getTime()){const expiredRoom=await expireLockedKujiOrderDrawing(client,{orderId:lockTarget.order_id,serverNow});if(expiredRoom)await writeOutbox(client,request.id,{aggregateType:"ORDER",aggregateId:lockTarget.order_id,eventType:"kuji.drawing_lease_expired",payload:{orderId:lockTarget.order_id,roomEntryId:linkedKujiRoom.id,entitlementsRemainConsumable:true}});}}else if(!["EXPIRED","COMPLETED"].includes(linkedKujiRoom.state)){throw conflict("현재 쿠지 추첨권을 사용할 수 없습니다.");}}await client.query("SELECT p.id FROM catalog_products p JOIN product_stock s ON s.product_id=p.id WHERE p.id=$1 FOR UPDATE OF p,s",[lockTarget.product_id]);await client.query("SELECT id FROM draw_probability_versions WHERE id=$1 FOR UPDATE",[lockTarget.probability_version_id]);await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1::text,0))",[`draw-capacity:${lockTarget.probability_version_id}`]);
       const entitlement=await client.query<{id:string;user_id:string;product_id:string;probability_version_id:string;status:string;version:number}>(`SELECT e.*,v.version FROM draw_entitlements e JOIN draw_probability_versions v ON v.id=e.probability_version_id WHERE e.id=$1 FOR UPDATE OF e`,[entitlementId]);
       if(!entitlement.rowCount)throw notFound("추첨권을 찾을 수 없습니다.");
@@ -804,7 +826,7 @@ export async function registerCommerceRoutes(app:FastifyInstance,context:ApiCont
     LEFT JOIN draw_pool_entries e ON e.probability_version_id=v.id
     LEFT JOIN kuji_deck_tiers tier ON tier.pool_entry_id=e.id
     LEFT JOIN kuji_decks deck ON deck.probability_version_id=v.id
-    WHERE v.product_id=$1 GROUP BY v.id,deck.total_slots,deck.assignment_algorithm ORDER BY v.version DESC`,[productId]);return{items:result.rows.map((row)=>{const entries=row.entries.map((entry)=>({...entry,weight:numberValue(entry.weight),initialQuantity:entry.initialQuantity===null?null:numberValue(entry.initialQuantity),remainingQuantity:entry.remainingQuantity===null?null:numberValue(entry.remainingQuantity),tierCode:entry.tierCode??null,tierRank:entry.tierRank==null?null:numberValue(entry.tierRank)}));const totalEffectiveWeight=entries.reduce((sum,entry)=>sum+entry.weight*(entry.remainingQuantity===null?1:entry.remainingQuantity),0);return{id:row.id,productId:row.product_id,version:row.version,status:row.status,publishedBy:row.published_by,publishedAt:nullableIso(row.published_at),createdAt:iso(row.created_at),totalSlots:row.total_slots==null?null:numberValue(row.total_slots),assignmentAlgorithm:row.assignment_algorithm,totalEffectiveWeight,entries};})};});
+    WHERE v.product_id=$1 GROUP BY v.id,deck.total_slots,deck.assignment_algorithm ORDER BY v.version DESC`,[productId]);return{items:result.rows.map((row)=>{const entries=row.entries.map((entry)=>({...entry,prizeImageUrl:rebaseLegacyCatalogMediaUrl(context.config.catalogMediaBaseUrl,entry.prizeImageUrl??null),weight:numberValue(entry.weight),initialQuantity:entry.initialQuantity===null?null:numberValue(entry.initialQuantity),remainingQuantity:entry.remainingQuantity===null?null:numberValue(entry.remainingQuantity),tierCode:entry.tierCode??null,tierRank:entry.tierRank==null?null:numberValue(entry.tierRank)}));const totalEffectiveWeight=entries.reduce((sum,entry)=>sum+entry.weight*(entry.remainingQuantity===null?1:entry.remainingQuantity),0);return{id:row.id,productId:row.product_id,version:row.version,status:row.status,publishedBy:row.published_by,publishedAt:nullableIso(row.published_at),createdAt:iso(row.created_at),totalSlots:row.total_slots==null?null:numberValue(row.total_slots),assignmentAlgorithm:row.assignment_algorithm,totalEffectiveWeight,entries};})};});
 
   app.post("/v1/admin/products/:productId/draw-versions",{preHandler:context.auth.requirePermission("catalog.write")},async(request,reply)=>{
     const productId=slugIdInput((request.params as Record<string,unknown>).productId,"productId");

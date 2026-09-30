@@ -22,7 +22,7 @@ async function releaseRepository({ omit = [], mutate = null } = {}) {
   await mkdir(join(directory, 'apps/worker/src'), { recursive: true });
   const migrationDirectory = new URL('packages/db/migrations/', repositoryRoot);
   const migrations = (await readdir(migrationDirectory))
-    .filter((file) => /^\d{4}_[a-z0-9_]+\.sql$/.test(file) && Number(file.slice(0, 4)) <= 80)
+    .filter((file) => /^\d{4}_[a-z0-9_]+\.sql$/.test(file) && Number(file.slice(0, 4)) <= 81)
     .sort();
   for (const file of migrations) {
     if (omit.includes(file)) continue;
@@ -40,12 +40,12 @@ async function releaseRepository({ omit = [], mutate = null } = {}) {
   return directory;
 }
 
-test('release source accepts a clean Git commit containing every reviewed release migration through 0080', async () => {
+test('release source accepts a clean Git commit containing every reviewed release migration through 0081', async () => {
   const directory = await releaseRepository();
   try {
     const report = checkDatabaseReleaseSource({ repositoryRoot: directory });
     assert.equal(report.status, 'pass', JSON.stringify(report));
-    assert.equal(report.latestMigration, '0080_retention_indexes.sql');
+    assert.equal(report.latestMigration, '0081_draft_draw_snapshot_media_rebase.sql');
     assert.deepEqual(report.blockers, []);
     assert.match(report.head, /^[0-9a-f]{40,64}$/);
     assert.equal(report.worktreeClean, true);
@@ -138,14 +138,14 @@ test('release source rejects a release missing the session-scope migration', asy
   }
 });
 
-test('release source rejects a release missing the retention index migration', async () => {
-  const directory = await releaseRepository({ omit: ['0080_retention_indexes.sql'] });
+test('release source rejects a release missing the draft snapshot media rebase migration', async () => {
+  const directory = await releaseRepository({ omit: ['0081_draft_draw_snapshot_media_rebase.sql'] });
   try {
     const report = checkDatabaseReleaseSource({ repositoryRoot: directory });
     assert.equal(report.status, 'blocked');
-    assert.equal(report.latestMigration, '0079_worker_retention.sql');
-    assert.ok(report.blockers.includes('required_migration_not_committed:0080_retention_indexes.sql'));
-    assert.ok(report.blockers.includes('latest_committed_migration_below_0080'));
+    assert.equal(report.latestMigration, '0080_retention_indexes.sql');
+    assert.ok(report.blockers.includes('required_migration_not_committed:0081_draft_draw_snapshot_media_rebase.sql'));
+    assert.ok(report.blockers.includes('latest_committed_migration_below_0081'));
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
@@ -153,10 +153,11 @@ test('release source rejects a release missing the retention index migration', a
 
 test('release source registers every migration from 0078 without a gap', () => {
   const files = DATABASE_RELEASE_MIGRATIONS.map((migration) => migration.file);
-  assert.deepEqual(files.slice(-3), [
+  assert.deepEqual(files.slice(-4), [
     '0078_commerce_indexes.sql',
     '0079_worker_retention.sql',
     '0080_retention_indexes.sql',
+    '0081_draft_draw_snapshot_media_rebase.sql',
   ]);
   const versions = files.map((file) => Number(file.slice(0, 4)));
   for (let index = 1; index < versions.length; index += 1) {

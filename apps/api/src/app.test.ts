@@ -223,7 +223,7 @@ test("untrusted error status codes are bounded and client errors stay generic", 
   }
 });
 
-test("PRELAUNCH rejects every customer commerce mutation before its handler can write", async () => {
+test("PRELAUNCH rejects every customer commerce mutation and live-stock read before its handler runs", async () => {
   const observed: string[] = [];
   const pool = {
     async query(sql: string) {
@@ -252,6 +252,8 @@ test("PRELAUNCH rejects every customer commerce mutation before its handler can 
   const { app } = await buildApp({ config, pool, redis: null });
   const authorization = { authorization: `Bearer ${"x".repeat(40)}` };
   const guardedRequests = [
+    { method: "GET", url: "/v1/catalog/products/coming-soon-gacha/draw-odds" },
+    { method: "GET", url: "/v1/catalog/products/coming-soon-kuji/kuji-slots" },
     { method: "POST", url: "/v1/orders" },
     { method: "POST", url: "/v1/payments/30000000-0000-4000-8000-000000000001/confirm" },
     { method: "POST", url: "/v1/payments/30000000-0000-4000-8000-000000000001/abandon" },

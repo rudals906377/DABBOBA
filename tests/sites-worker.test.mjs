@@ -477,7 +477,8 @@ test("email OTP verification exchanges a transient Supabase token for a DABBOBA 
     async (url, init) => {
       calls.push({ url, init });
       if (url.endsWith("/auth/v1/verify")) return json({ access_token: supabaseToken });
-      if (url.endsWith("/v1/auth/exchange")) {
+      assert.doesNotMatch(url, /\/v1\/auth\/exchange$/, "email never opens an ordinary login session");
+      if (url.endsWith("/v1/auth/account-deletion-exchange")) {
         const body = JSON.parse(init.body);
         assert.equal(body.accessToken, supabaseToken);
         assert.deepEqual(body.acceptedPolicies, policyVersions);
@@ -498,6 +499,44 @@ test("email OTP verification exchanges a transient Supabase token for a DABBOBA 
   });
   assert.equal(calls.length, 3);
   assert.equal(calls[2].init.headers.authorization, `Bearer ${supabaseToken}`);
+});
+
+test("legacy email-only customers get the deletion email form from deletionMethods, not the login menu", async () => {
+  const provider = {
+    methods: ["PHONE", "KAKAO", "APPLE"],
+    deletionMethods: ["PHONE", "KAKAO", "APPLE", "EMAIL"],
+    brokerExchangeConfigured: true,
+    requiredPolicyVersions: policyVersions,
+  };
+  const runtime = await handleAccountDeletionService(
+    new Request("https://dabboba.net/account-deletion/runtime-config.json"),
+    accountDeletionRuntime,
+    async (url) => (url.endsWith("/v1/auth/providers")
+      ? json(provider)
+      : json({ commerceMode: "PRELAUNCH", requiredPolicyVersions: policyVersions })),
+  );
+  assert.equal(runtime?.status, 200);
+  const config = await runtime?.json();
+  assert.equal(config.emailOtpEnabled, true);
+  assert.equal(config.phoneOtpEnabled, true);
+  assert.deepEqual(config.socialMethods, ["KAKAO", "APPLE"]);
+
+  const calls = [];
+  const otp = await handleAccountDeletionService(
+    new Request("https://dabboba.net/account-deletion/auth/email-otp", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ email: "legacy@example.com" }),
+    }),
+    accountDeletionRuntime,
+    async (url, init) => {
+      calls.push({ url, init });
+      return url.endsWith("/v1/auth/providers") ? json(provider) : json({});
+    },
+  );
+  assert.equal(otp?.status, 202);
+  assert.equal(calls.length, 2, "the email code is requested because deletionMethods includes EMAIL");
+  assert.deepEqual(JSON.parse(calls[1].init.body), { email: "legacy@example.com", create_user: false });
 });
 
 test("web phone OTP never creates a new user or reveals account existence", async () => {

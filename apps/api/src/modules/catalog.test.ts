@@ -319,6 +319,25 @@ test("public product discovery filters only public sale statuses for LIVE readin
   await assert.rejects(handler({ query: { saleStatus: "DRAFT" } }, readReply), /saleStatus/);
 });
 
+test("PRELAUNCH discovery ignores the sold-out filter so hidden stock cannot shape results", async () => {
+  const { app, routes } = routeHarness();
+  const capturedSql: string[] = [];
+  await registerCatalogRoutes(app, {
+    ...contextWithPool({
+      async query(sql: string) {
+        capturedSql.push(sql);
+        return { rowCount: 0, rows: [] };
+      },
+    }),
+    config: { environment: "production", commerceMode: "PRELAUNCH" },
+  } as unknown as ApiContext);
+  const handler = routes.get("GET /v1/catalog/products");
+  assert.ok(handler);
+  await handler({ query: { category: "kuji", excludeSoldOut: "true", limit: 1 } }, readReply);
+  assert.equal(capturedSql.length, 1);
+  assert.doesNotMatch(capturedSql[0]!, /on_hand-s\.reserved,0\) > 0/);
+});
+
 test("public product detail resolves one active sellable product by canonical id", async () => {
   const { app, routes } = routeHarness();
   let capturedSql = "";

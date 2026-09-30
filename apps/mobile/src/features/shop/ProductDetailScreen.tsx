@@ -49,6 +49,7 @@ import {
   setProductWishlist,
   type ProductDetailSnapshot,
 } from "@/features/shop/shop-api";
+import { includedPrizes } from "@/features/shop/included-prizes";
 import { productSubjectTitle } from "@/features/shop/product-title";
 import { shopTabPathForCategory } from "@/features/shop/shop-navigation";
 import { readAuthTokens } from "@/lib/session-store";
@@ -370,38 +371,46 @@ function ProductHero({ snapshot, assetBaseUrl }: { snapshot: ProductDetailSnapsh
 
 function OddsSection({ snapshot }: { snapshot: ProductDetailSnapshot }) {
   const odds = snapshot.drawOdds;
+  const prizes = includedPrizes(snapshot);
   return (
     <View style={styles.section}>
       <View style={styles.includedHeader}>
         <KoreanPixelTitle variant="section">포함 상품</KoreanPixelTitle>
-        {odds?.entries.length ? <Text style={styles.includedCount}>총 {odds.entries.length}종</Text> : null}
+        {prizes.length ? <Text style={styles.includedCount}>총 {prizes.length}종</Text> : null}
       </View>
-      {odds?.entries.length ? (
+      {prizes.length ? (
         <>
           <View style={styles.includedGrid}>
-            {odds.entries.map((entry) => (
-              <View key={entry.id} style={styles.includedCard}>
+            {prizes.map((prize) => (
+              <View
+                key={prize.id}
+                style={styles.includedCard}
+                accessible
+                accessibilityLabel={[prize.prizeName, prize.accessibilityDetail].filter(Boolean).join(", ")}
+              >
                 <View style={styles.includedImageFrame}>
                   <CatalogProductImage
-                    uri={entry.prizeImageUrl ?? null}
-                    requestKey={entry.id}
+                    uri={prize.prizeImageUrl}
+                    requestKey={prize.id}
                     resizeMode="contain"
                     style={styles.includedImage}
                   />
                 </View>
                 <View style={styles.includedCopy}>
-                  <Text numberOfLines={2} style={styles.includedName}>{entry.prizeName}</Text>
-                  <Text style={styles.includedOdds}>{entry.probabilityPercent.toFixed(2)}%</Text>
+                  <Text numberOfLines={2} style={styles.includedName}>{prize.prizeName}</Text>
+                  {prize.detail ? <Text style={styles.includedOdds}>{prize.detail}</Text> : null}
                 </View>
               </View>
             ))}
           </View>
-          <SeedInlineGuidance
-            accessibilityLabel={`확률표 버전 ${odds.version}. 확률은 남은 수량에 따라 실시간으로 바뀌어요`}
-            style={styles.disclosure}
-          >
-            확률은 남은 수량에 따라 실시간으로 바뀌어요
-          </SeedInlineGuidance>
+          {odds?.entries.length ? (
+            <SeedInlineGuidance
+              accessibilityLabel={`확률표 버전 ${odds.version}. 확률은 남은 수량에 따라 실시간으로 바뀌어요`}
+              style={styles.disclosure}
+            >
+              확률은 남은 수량에 따라 실시간으로 바뀌어요
+            </SeedInlineGuidance>
+          ) : null}
         </>
       ) : (
         <View style={styles.oddsEmpty}>

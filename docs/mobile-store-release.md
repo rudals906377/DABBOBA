@@ -384,20 +384,14 @@ contact before public submission.
    collaborator. Do not record personal recovery data or secrets in Git.
 2. Use the verified friend-owned paid Apple Developer Team `MCZ4884P7F`. Do not
    use Team `52HC8BV2BL` for DABBOBA release.
-3. Resolve the Bundle ID before creating an App Store Connect record. The current
-   team already registered `com.dabboba.mobile`. Apple allows an App ID to be
-   removed only when it has not been uploaded to App Store Connect, and an App
-   transfer requires at least one released version. Because DABBOBA has no
-   released App Store version, do not attempt the normal app-transfer flow.
-   After confirming the current identifier's upload and Sign in with Apple
-   status in Apple's portal, use one of these reviewed paths:
-   - remove the unused App ID and its obsolete profile from the current team,
-     then register the same Bundle ID and fresh credentials in the friend team;
-   - if Apple does not permit safe reuse, select a new friend-owned Bundle ID and
-     update Expo, deep links, Sign in with Apple, push, auth redirects, and later
-     PG/store configuration before building.
-   See Apple's [App ID removal rules](https://developer.apple.com/help/account/identifiers/delete-an-app-id)
-   and [app-transfer criteria](https://developer.apple.com/help/app-store-connect/transfer-an-app/app-transfer-criteria).
+3. [Done 2026-09-23] The Bundle ID moved to the friend team: the developer
+   team's unused App ID and obsolete profile were removed, `com.dabboba.mobile`
+   was registered to Team `MCZ4884P7F` with fresh distribution credentials, and
+   App Store Connect app ID `6815146511` was created there. Keep this App ID,
+   record, and the `ascAppId` pin in `apps/mobile/eas.json`; do not remove,
+   re-register, transfer, or duplicate them. Before each iOS upload, run
+   `node scripts/verify-ios-artifact-team.mjs <path-to.ipa>` because the source
+   `appleTeamId` pin alone cannot prove which EAS credentials signed the binary.
 4. Create the friend-owned Google Play app record and confirm package ownership,
    agreements, seller identity, tax/banking state where relevant, and
    least-privilege submit access. Add submit IDs only after those exact records
@@ -423,7 +417,16 @@ physical-device QA, Google Play testing, or public App Store approval.
 ## Signed artifact and device QA
 
 Record the exact Git commit, EAS build IDs, version/build numbers, tester,
-device/OS, date, and result. At minimum verify both platforms for:
+device/OS, date, and result.
+
+Before uploading any iOS release artifact, run
+`node scripts/verify-ios-artifact-team.mjs <path-to.ipa>`. The source
+`appleTeamId` pin cannot prove which EAS credentials signed the binary; this
+check reads the embedded provisioning profile and requires Team `MCZ4884P7F`,
+application identifier `MCZ4884P7F.com.dabboba.mobile`, `get-task-allow` false,
+and an App Store (device-free) profile. It rejects Team `52HC8BV2BL`.
+
+At minimum verify both platforms for:
 
 - installed display name, launcher icon/adaptive masks, splash, orientation,
   status/navigation safe areas, and cold/warm start;

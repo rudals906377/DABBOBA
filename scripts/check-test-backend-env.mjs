@@ -13,6 +13,23 @@ function assertLoopbackUrl(value, key, protocols) {
   }
 }
 
+// Integration suites insert and delete rows, so they may only target a database
+// whose name marks it as disposable (dabboba_ci, dabboba_edge_test,
+// dabboba_flow_test_20260924, ...). Preserved databases such as
+// dabboba_development or dabboba are refused even on loopback.
+const DISPOSABLE_TEST_DATABASE = /^dabboba(?:_[a-z0-9]+)*_(?:ci|test)(?:_[a-z0-9]+)*$/;
+
+export function isDisposableTestDatabaseName(name) {
+  return DISPOSABLE_TEST_DATABASE.test(name);
+}
+
+function assertDisposableTestDatabase(value, key) {
+  const name = decodeURIComponent(new URL(value).pathname.slice(1));
+  if (!isDisposableTestDatabaseName(name)) {
+    throw new Error(`${key} must name a disposable test database (dabboba_…_ci or dabboba_…_test).`);
+  }
+}
+
 function databaseIdentity(value) {
   const parsed = new URL(value);
   const hostname = parsed.hostname.toLowerCase().replace(/\.$/, '');
@@ -30,6 +47,12 @@ export function assertTestBackendEnvironment(env, { requireIntegrationDatabase =
     'DATABASE_URL', 'WORKER_DATABASE_URL',
   ]) {
     if (env[key]?.trim()) assertLoopbackUrl(env[key], key, ['postgres:', 'postgresql:']);
+  }
+  for (const key of [
+    'DABBOBA_TEST_DATABASE_URL', 'DABBOBA_RUNTIME_TEST_DATABASE_URL',
+    'DABBOBA_WORKER_TEST_DATABASE_URL', 'DATABASE_MIGRATION_URL',
+  ]) {
+    if (env[key]?.trim()) assertDisposableTestDatabase(env[key], key);
   }
   const roleTestUrls = [
     env.DABBOBA_TEST_DATABASE_URL,

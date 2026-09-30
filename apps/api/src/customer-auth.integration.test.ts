@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { randomInt, randomUUID } from "node:crypto";
 import test from "node:test";
 import Fastify from "fastify";
 import { assertDatabaseUrlForTier, type ApiConfig } from "@dabboba/config";
@@ -20,6 +20,10 @@ test("customer broker reuses one Supabase subject without merging email peers an
   const ownerPool = createMigrationDatabasePool(migrationDatabaseUrl!, "customer-auth-fixtures");
   const runtimePool = createDatabasePool(runtimeDatabaseUrl!, "customer-auth-runtime", { runtimeEnvironment: "test" });
   const suffix = randomUUID();
+  // Four distinct phone numbers per run: a shared random base plus a fixed slot,
+  // so no two fixtures can collapse onto the same zero-padded number.
+  const phoneBase = randomInt(0, 25_000_000);
+  const testPhone = (slot: 0 | 1 | 2 | 3) => `+8210${String(phoneBase * 4 + slot).padStart(8, "0")}`;
   const createdUserIds = new Set<string>();
   const config: ApiConfig = {
     environment: "test",
@@ -129,7 +133,7 @@ test("customer broker reuses one Supabase subject without merging email peers an
   };
   const webDeletionExchange = (
     accessToken: string,
-    loginProvider: Exclude<CustomerAuthProvider, "EMAIL">,
+    loginProvider: CustomerAuthProvider,
     appleRefreshToken?: string,
   ) => app.inject({
     method: "POST",
@@ -194,7 +198,7 @@ test("customer broker reuses one Supabase subject without merging email peers an
   assert.notEqual(firstSeparateId, secondSeparateId);
 
   const legacySubject = `legacy-phone-${suffix}`;
-  const legacyPhone = `+8210${suffix.replace(/\D/g, "").padEnd(8, "0").slice(0, 8)}`;
+  const legacyPhone = testPhone(0);
   const legacy = await ownerPool.query<{ id: string }>(
     "INSERT INTO users(email,nickname,role,status,phone_e164) VALUES(NULL,$1,'USER','ACTIVE',$2) RETURNING id",
     ["legacy phone fixture", legacyPhone],
@@ -215,7 +219,7 @@ test("customer broker reuses one Supabase subject without merging email peers an
   assert.deepEqual(legacyProviders.rows.map((row) => row.provider), ["APPLE", "PHONE"]);
 
   const phoneSubject = `phone-otp-${suffix}`;
-  const phoneNumber = `+8210${suffix.replace(/\D/g, "").padEnd(16, "0").slice(8, 16)}`;
+  const phoneNumber = testPhone(1);
   const phoneClaims = { ...claims(phoneSubject, ["PHONE"], null), phone: phoneNumber };
   const phoneLogin = await exchange(token("phone-otp", phoneClaims));
   assert.equal(phoneLogin.statusCode, 201, phoneLogin.body);
@@ -232,11 +236,86 @@ test("customer broker reuses one Supabase subject without merging email peers an
   assert.equal(phoneReauth.statusCode, 201, phoneReauth.body);
   assert.equal((phoneReauth.json() as { actor: { userId: string } }).actor.userId, phoneUserId);
 
-  const duplicatePhone = await exchange(token("phone-conflict", {
-    ...claims(`phone-conflict-${suffix}`, ["PHONE"], null),
+  // User decision 2026-09-30: a verified phone OTP for a number that already
+  // belongs to one account signs in to and links that account.
+  const samePhoneSubject = `phone-same-${suffix}`;
+  const samePhone = await exchange(token("phone-same", {
+    ...claims(samePhoneSubject, ["PHONE"], null),
     phone: legacyPhone,
   }));
-  assert.equal(duplicatePhone.statusCode, 409, duplicatePhone.body);
+  assert.equal(samePhone.statusCode, 201, samePhone.body);
+  assert.equal((samePhone.json() as { actor: { userId: string } }).actor.userId, legacyId);
+  const samePhoneIdentity = await ownerPool.query<{ user_id: string }>(
+    "SELECT user_id FROM auth_identities WHERE provider='PHONE' AND provider_subject=$1",
+    [`${issuer}#${samePhoneSubject}`],
+  );
+  assert.deepEqual(samePhoneIdentity.rows, [{ user_id: legacyId }]);
+
+  // A login already linked to another account is never merged with the phone's owner.
+  const linkedElsewhere = await exchange(token("phone-linked-elsewhere", {
+    ...claims(phoneSubject, ["PHONE"], null),
+    phone: legacyPhone,
+  }));
+  assert.equal(linkedElsewhere.statusCode, 409, linkedElsewhere.body);
+  assert.equal((linkedElsewhere.json() as { code: string }).code, "PHONE_ACCOUNT_CONFLICT");
+
+  // A pre-broker PHONE identity stored the E.164 number as its subject. A new
+  // verified phone OTP for that number signs in to the same account, links the
+  // broker subject and keeps the legacy identity; account deletion finds it too.
+  const e164LegacyPhone = testPhone(2);
+  const e164Legacy = await ownerPool.query<{ id: string }>(
+    "INSERT INTO users(email,nickname,role,status,phone_e164) VALUES(NULL,$1,'USER','ACTIVE',NULL) RETURNING id",
+    ["legacy e164 phone fixture"],
+  );
+  const e164LegacyId = e164Legacy.rows[0]!.id;
+  createdUserIds.add(e164LegacyId);
+  await ownerPool.query(
+    "INSERT INTO auth_identities(user_id,provider,provider_subject,verified_at) VALUES($1,'PHONE',$2,now())",
+    [e164LegacyId, e164LegacyPhone],
+  );
+  const recoverySubject = `phone-recovery-${suffix}`;
+  const recoveryClaims = { ...claims(recoverySubject, ["PHONE"], null), phone: e164LegacyPhone };
+  const legacyPhoneLogin = await exchange(token("phone-recovery", recoveryClaims));
+  assert.equal(legacyPhoneLogin.statusCode, 201, legacyPhoneLogin.body);
+  assert.equal((legacyPhoneLogin.json() as { actor: { userId: string } }).actor.userId, e164LegacyId);
+  const recoveredIdentities = await ownerPool.query<{ provider_subject: string }>(
+    "SELECT provider_subject FROM auth_identities WHERE user_id=$1 AND provider='PHONE' ORDER BY provider_subject",
+    [e164LegacyId],
+  );
+  assert.deepEqual(
+    recoveredIdentities.rows.map((row) => row.provider_subject).sort(),
+    [e164LegacyPhone, `${issuer}#${recoverySubject}`].sort(),
+  );
+  const recoveredPhone = await ownerPool.query<{ phone_e164: string }>("SELECT phone_e164 FROM users WHERE id=$1", [e164LegacyId]);
+  assert.equal(recoveredPhone.rows[0]!.phone_e164, e164LegacyPhone);
+  const legacyDeletionSubject = `phone-recovery-deletion-${suffix}`;
+  const legacyPhoneDeletion = await webDeletionExchange(
+    token("phone-recovery-deletion", { ...claims(legacyDeletionSubject, ["PHONE"], null), phone: e164LegacyPhone }),
+    "PHONE",
+  );
+  assert.equal(legacyPhoneDeletion.statusCode, 201, legacyPhoneDeletion.body);
+  assert.equal((legacyPhoneDeletion.json() as { actor: { userId: string } }).actor.userId, e164LegacyId);
+
+  // Two different existing owners of one number are refused, never merged.
+  const splitPhone = testPhone(3);
+  const splitOwners = await ownerPool.query<{ id: string }>(
+    "INSERT INTO users(email,nickname,role,status,phone_e164) VALUES(NULL,'split phone a','USER','ACTIVE',$1),(NULL,'split phone b','USER','ACTIVE',NULL) RETURNING id",
+    [splitPhone],
+  );
+  for (const row of splitOwners.rows) createdUserIds.add(row.id);
+  await ownerPool.query(
+    "INSERT INTO auth_identities(user_id,provider,provider_subject,verified_at) VALUES($1,'PHONE',$2,now())",
+    [splitOwners.rows[1]!.id, splitPhone],
+  );
+  const splitSubject = `phone-split-${suffix}`;
+  const splitLogin = await exchange(token("phone-split", { ...claims(splitSubject, ["PHONE"], null), phone: splitPhone }));
+  assert.equal(splitLogin.statusCode, 409, splitLogin.body);
+  assert.equal((splitLogin.json() as { code: string }).code, "PHONE_ACCOUNT_CONFLICT");
+  const splitIdentity = await ownerPool.query(
+    "SELECT 1 FROM auth_identities WHERE provider_subject=$1",
+    [`${issuer}#${splitSubject}`],
+  );
+  assert.equal(splitIdentity.rowCount, 0, "the refused phone exchange leaves no temporary identity");
 
   const socialOnlySubject = `web-deletion-social-${suffix}`;
   const socialOnlyClaims = claims(socialOnlySubject, ["KAKAO"], null);
@@ -305,6 +384,42 @@ test("customer broker reuses one Supabase subject without merging email peers an
   } finally {
     config.customerLoginProviders = enabledProviders;
   }
+
+  // A customer whose only identity is a legacy verified EMAIL link can still
+  // prove ownership to delete the account, but EMAIL never becomes a login.
+  const emailOnlySubject = `legacy-email-${suffix}`;
+  const emailOnlyUser = await ownerPool.query<{ id: string }>(
+    "INSERT INTO users(email,nickname,role,status) VALUES($1,$2,'USER','ACTIVE') RETURNING id",
+    [`legacy-email-${suffix}@example.test`, "legacy email fixture"],
+  );
+  const emailOnlyUserId = emailOnlyUser.rows[0]!.id;
+  createdUserIds.add(emailOnlyUserId);
+  await ownerPool.query(
+    "INSERT INTO auth_identities(user_id,provider,provider_subject,verified_at) VALUES($1,'EMAIL',$2,now())",
+    [emailOnlyUserId, `${issuer}#${emailOnlySubject}`],
+  );
+  const emailOnlyClaims = claims(emailOnlySubject, ["EMAIL"], `legacy-email-${suffix}@example.test`);
+  const emailLogin = await exchange(token("legacy-email-login", emailOnlyClaims));
+  assert.equal(emailLogin.statusCode, 400, emailLogin.body);
+  const emailDeletion = await webDeletionExchange(token("legacy-email-deletion", emailOnlyClaims), "EMAIL");
+  assert.equal(emailDeletion.statusCode, 201, emailDeletion.body);
+  const emailDeletionBody = emailDeletion.json() as { actor: { userId: string; sessionId: string } };
+  assert.equal(emailDeletionBody.actor.userId, emailOnlyUserId);
+  const emailDeletionSession = await ownerPool.query<{ scope: string }>(
+    "SELECT scope FROM sessions WHERE id=$1",
+    [emailDeletionBody.actor.sessionId],
+  );
+  assert.equal(emailDeletionSession.rows[0]!.scope, "ACCOUNT_DELETION");
+  const unknownEmailDeletion = await webDeletionExchange(
+    token("unknown-email-deletion", claims(`unknown-email-${suffix}`, ["EMAIL"], `unknown-email-${suffix}@example.test`)),
+    "EMAIL",
+  );
+  assert.equal(unknownEmailDeletion.statusCode, 503, unknownEmailDeletion.body);
+  const unknownEmailLocal = await ownerPool.query(
+    "SELECT 1 FROM auth_identities WHERE provider_subject=$1",
+    [`${issuer}#unknown-email-${suffix}`],
+  );
+  assert.equal(unknownEmailLocal.rowCount, 0);
 
   const appleDeletion = await webDeletionExchange(
     token("web-deletion-apple", claims(legacySubject, ["APPLE"], null)),

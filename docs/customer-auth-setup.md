@@ -86,7 +86,8 @@ Supabase 변경 기록에서 신규 Free 프로젝트의 기본 SMTP 이메일 �
 - 카카오·네이버는 native PKCE callback `dabboba://auth/callback`, 휴대폰은 한국 `010` 번호의 SMS OTP를 사용한다.
 - 앱은 Supabase의 public project URL과 publishable key만 사용한다. secret/service-role key는 앱에 들어가지 않는다.
 - Fastify API가 Supabase access token의 서명·issuer·audience·만료·인증 상태와 허용 provider를 확인한 뒤 별도의 DABBOBA session을 발급한다.
-- 계정은 broker의 `issuer + sub`로 연결한다. 이메일이나 휴대폰 번호가 같다는 이유만으로 카카오·네이버·휴대폰 계정을 자동 병합하지 않는다.
+- 계정은 broker의 `issuer + sub`로 연결한다. 이메일이나 휴대폰 번호가 같다는 이유만으로 카카오·네이버 계정을 자동 병합하지 않는다.
+- 2026-09-30 사용자 결정: Supabase가 인증한 **휴대폰 문자 로그인**의 번호가 기존 계정 하나의 인증된 번호(옛 방식 E.164 PHONE identity 포함)와 같으면, 새 계정을 만들지 않고 그 계정으로 로그인하며 새 broker 주체를 연결한다. 웹 탈퇴의 휴대폰 확인도 같은 계정을 찾는다. 이미 서로 다른 두 계정이 있거나, 이 로그인이 다른 계정에 연결돼 있으면 주문·포인트·보관함을 옮기지 않고 `PHONE_ACCOUNT_CONFLICT`로 멈춘 뒤 고객센터에서 처리한다.
 - PostgreSQL migration `0023_customer_broker_auth.sql`에 이메일 없는 계정과 검증된 E.164 휴대폰 번호 저장 구조가 포함돼 있다.
 
 ## 사용자가 직접 해야 하는 설정

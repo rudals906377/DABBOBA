@@ -338,12 +338,24 @@ async function prepareTarget(options, sdkVersion) {
   throw new Error(`No connected Android emulator has Expo Go for SDK ${sdkVersion.split('.')[0]}. Start a compatible emulator first; this launcher never installs or replaces Expo Go.`);
 }
 
+// The app is configured with 127.0.0.1 API (8788) and asset/web (4174) origins,
+// which on an emulator point at the emulator itself; reverse them with Metro.
+export const ANDROID_REVERSE_PORTS = Object.freeze([METRO_PORT, 8788, 4174]);
+
 export async function ensureAndroidReverse(target, executeAdb = run) {
   const { stdout } = await executeAdb(target.adb, ['-s', target.serial, 'reverse', '--list']);
-  const source = `tcp:${METRO_PORT}`;
-  const existing = stdout.split('\n').map(line => line.trim().split(/\s+/)).filter(fields => fields[1] === source);
-  if (existing.some(fields => fields[2] !== source)) throw new Error(`Android emulator port ${METRO_PORT} already forwards to another service. Its mapping was preserved.`);
-  if (!existing.length) await executeAdb(target.adb, ['-s', target.serial, 'reverse', '--no-rebind', source, source]);
+  const mappings = stdout.split('\n').map(line => line.trim().split(/\s+/));
+  const missing = [];
+  // Check every port before adding any, so a foreign mapping leaves the emulator untouched.
+  for (const port of ANDROID_REVERSE_PORTS) {
+    const source = `tcp:${port}`;
+    const existing = mappings.filter(fields => fields[1] === source);
+    if (existing.some(fields => fields[2] !== source)) throw new Error(`Android emulator port ${port} already forwards to another service. Its mapping was preserved.`);
+    if (!existing.length) missing.push(source);
+  }
+  for (const source of missing) {
+    await executeAdb(target.adb, ['-s', target.serial, 'reverse', '--no-rebind', source, source]);
+  }
 }
 
 async function openTarget(target, url) {

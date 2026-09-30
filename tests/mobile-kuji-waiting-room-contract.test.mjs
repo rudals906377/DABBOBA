@@ -27,6 +27,14 @@ test("kuji enters the room gate before checkout and carries the authoritative le
     buildKujiCheckoutPath("eva kuji", "entry/1", checkoutExpiresAt, serverNow, true),
     /&kujiRoomFixture=development$/,
   );
+  assert.match(
+    buildKujiCheckoutPath("eva kuji", "entry/1", checkoutExpiresAt, serverNow, false, -600_000),
+    /&serverClockOffsetMs=-600000$/,
+  );
+  assert.doesNotMatch(
+    buildKujiCheckoutPath("eva kuji", "entry/1", checkoutExpiresAt, serverNow, false, null),
+    /serverClockOffsetMs/,
+  );
 });
 
 test("kuji turn notifications always return through the authoritative room gate", () => {

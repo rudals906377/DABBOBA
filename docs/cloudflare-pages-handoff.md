@@ -46,6 +46,7 @@ PNPM_VERSION=11.22.0
 - Cloudflare의 `Email Address Obfuscation`은 꺼 둔다. 활성화하면 검토·기록한 정책 HTML의 SHA-256과 실제 공개 본문이 달라진다.
 - 처음에는 Preview 배포 주소에서 검수하고, `main` 배포가 통과한 뒤에만 커스텀 도메인을 연결한다.
 - 현재 `dabboba.pages.dev` 프로젝트가 존재하므로 이전이 필요할 때 친구 계정의 새 프로젝트는 다른 임시 프로젝트명을 사용할 수 있다. 최종 사용자는 `dabboba.net`으로 접속하므로 임시 `*.pages.dev` 이름을 맞추기 위해 기존 프로젝트를 먼저 삭제하지 않는다.
+- 새 Pages 프로젝트만으로는 소유권 이전이 끝나지 않는다. `dabboba.net` zone, 네임서버, 커스텀 도메인 연결, Email Routing이 기존 계정에 남아 있으면 아래 `4. dabboba.net 도메인과 DNS`의 `계정 간 zone·Email Routing 이전`을 먼저 끝낸 뒤에만 운영 도메인을 새 프로젝트에 붙인다.
 
 [Cloudflare 빌드 설정](https://developers.cloudflare.com/pages/configuration/build-configuration/) · [빌드 런타임 버전 설정](https://developers.cloudflare.com/pages/configuration/build-image/)
 
@@ -128,6 +129,39 @@ SUPABASE_PUBLISHABLE_KEY=<운영 publishable key>
 - [x] 수동 CNAME만 먼저 만들지 않는다. Pages의 Custom domains 절차를 통해 연결한다.
 
 루트 도메인을 Pages에 연결하려면 해당 zone의 네임서버가 Cloudflare를 향해야 한다. 다른 DNS 사업자를 계속 쓰면서 서브도메인만 연결할 때는 CNAME 방식이 가능하다. 자세한 절차는 [Cloudflare Pages 커스텀 도메인 문서](https://developers.cloudflare.com/pages/configuration/custom-domains/)를 따른다.
+
+### 계정 간 zone·Email Routing 이전
+
+현재 zone이 있는 계정이 지정 친구의 계정으로 확인되면 이 절차는 건너뛴다. 다른 사람 소유로 확인되면 공개 사이트와 `support@dabboba.net` 메일이 끊기지 않도록 아래 순서를 지킨다. Cloudflare는 zone을 두 계정에서 동시에 활성화하지 않는다. 새 계정의 zone이 `Pending`인 동안에는 트래픽을 프록시하지 않고, 활성화되면 기존 계정의 zone은 `Moved Away`가 됐다가 7일 뒤 삭제된다. [Cloudflare 계정 간 도메인 이동](https://developers.cloudflare.com/fundamentals/manage-domains/move-domain/)
+
+**이전 전 백업과 준비 — 기존 계정에서**
+
+- [ ] DNS → Records → Export로 BIND 파일을 내려받아 운영 기록 보관소에 둔다. 이 파일 없이 진행하면 Cloudflare가 프록시 레코드를 다시 가져오면서 1000 오류가 날 수 있다.
+- [ ] Email Routing의 주소별 규칙, catch-all 설정, 전달 대상 주소 목록과 MX/SPF/DKIM TXT 값을 스크린샷이나 표로 기록한다. Email Routing 설정은 zone 이동으로 옮겨지지 않는다고 보고 새 계정에서 다시 만든다.
+- [ ] Pages 커스텀 도메인(`dabboba.net`, `www.dabboba.net`), 리디렉션 규칙, WAF·rate limiting·Turnstile 규칙, SSL/TLS 모드, `Email Address Obfuscation` 꺼짐 상태를 기록한다. 인증서는 이전되지 않으며 새 계정에서 다시 발급된다.
+- [ ] DNSSEC가 켜져 있으면 등록기관의 DS 레코드를 먼저 지우고 DS TTL이 지날 때까지 기다린 뒤 기존 zone에서 DNSSEC를 끈다. 유료 add-on이나 구독이 있으면 해지한다.
+- [ ] 네임서버 전환 전에 NS·MX·A/AAAA/CNAME TTL을 짧게(예: 300초) 낮추고 기존 TTL만큼 기다린다.
+
+**새 계정 준비 — 친구 계정에서, 네임서버를 바꾸기 전에**
+
+- [ ] 친구 계정에 `dabboba.net`을 추가하고, 자동 탐지 대신 백업한 BIND 파일을 가져와 레코드를 대조한다. 이 단계에서는 zone이 `Pending`이어도 된다.
+- [ ] 친구 계정의 Pages 프로젝트가 Preview와 `*.pages.dev` 주소에서 위 스모크 테스트를 통과했는지 확인한다.
+- [ ] 새 계정이 안내한 네임서버 두 개를 기록한다. 기존 계정과 다를 수 있다.
+
+**전환과 확인**
+
+- [ ] 등록기관에서 네임서버를 새 계정 값으로 바꾸고 `Re-check now`로 zone이 `Active`가 될 때까지 확인한다.
+- [ ] `Active` 직후 친구 계정에서 Email Routing을 켜고 전달 대상 주소를 다시 인증한 뒤 백업한 규칙을 다시 만든다. 외부 메일 → `support@dabboba.net` 전달이 실제로 도착하는지 확인한다.
+- [ ] 친구 계정 Pages 프로젝트의 Custom domains에 `dabboba.net`, `www.dabboba.net`을 추가하고 인증서가 Active가 된 뒤 HTTPS와 `www` 리디렉션을 확인한다.
+- [ ] WAF·rate limiting·Turnstile 규칙과 `Email Address Obfuscation` 꺼짐 상태를 새 계정에 다시 적용한다.
+- [ ] 위 `5. 공개 전 스모크 테스트`를 `https://dabboba.net`에서 다시 통과한다.
+- [ ] DNS와 메일이 안정된 뒤 TTL을 원래 값으로 되돌리고, 아래 `DNSSEC` 절차로 새 계정에서 DNSSEC를 다시 켠다.
+
+**롤백**
+
+- 새 계정 zone이 `Active`가 되기 전에 문제가 생기면 등록기관의 네임서버를 기존 값으로 되돌린다. 기존 zone은 아직 활성 상태다.
+- `Active` 이후에는 기존 zone이 `Moved Away` 상태로 7일 동안만 남는다. 이 상태의 zone을 그대로 되살릴 수 있다고 가정하지 않는다. 되돌려야 하면 백업한 BIND 파일과 Email Routing 기록으로 되돌릴 계정에 zone을 다시 구성하고, 그 계정이 안내한 네임서버로 등록기관 값을 바꾼다. 이 7일 동안 기존 계정의 Pages 프로젝트, 레코드 백업, Email Routing 기록을 지우지 않는다.
+- 롤백과 전환 시각, 실제 네임서버 값, 확인한 URL·메일 결과를 운영 기록에 남긴다. 비밀번호, API 토큰, 복구 코드는 남기지 않는다.
 
 ### 이메일 DNS
 

@@ -1,5 +1,6 @@
 import type { components } from "@dabboba/contracts";
 import {
+  clearAuthTokensIfCurrent,
   readAuthTokens,
   type StoredAuthTokens,
   writeAuthTokens,
@@ -86,32 +87,52 @@ export async function ensureInternalCustomerSession(
     if (storedSessionState === "current") return stored;
   }
 
-  if (!isCurrent()) throw new Error("로그인 화면이 변경되었습니다.");
-  const session = await withDemoRequestTimeout(async (signal) => {
-    const response = await fetch(apiUrl(apiBaseUrl, "/v1/demo/session"), {
-      method: "POST",
-      headers: { Accept: "application/json" },
-      signal,
+  try {
+    if (!isCurrent()) throw new Error("로그인 화면이 변경되었습니다.");
+    const session = await withDemoRequestTimeout(async (signal) => {
+      const response = await fetch(apiUrl(apiBaseUrl, "/v1/demo/session"), {
+        method: "POST",
+        headers: { Accept: "application/json" },
+        signal,
+      });
+      if (!response.ok) {
+        throw new Error(await responseMessage(response, "로그인 정보를 불러오지 못했습니다."));
+      }
+      return parseInternalCustomerSession(await response.json());
     });
-    if (!response.ok) {
-      throw new Error(await responseMessage(response, "로그인 정보를 불러오지 못했습니다."));
+    if (!isCurrent()) throw new Error("로그인 화면이 변경되었습니다.");
+    const tokens = {
+      accessToken: session.token,
+      refreshToken: session.token,
+      expiresAt: session.expiresAt,
+    };
+    try {
+      await clearPreviousCustomerData();
+    } catch {
+      throw new InternalCustomerDataCleanupError();
     }
-    return parseInternalCustomerSession(await response.json());
-  });
-  if (!isCurrent()) throw new Error("로그인 화면이 변경되었습니다.");
-  const tokens = {
-    accessToken: session.token,
-    refreshToken: session.token,
-    expiresAt: session.expiresAt,
-  };
+    if (!isCurrent()) throw new Error("로그인 화면이 변경되었습니다.");
+    await writeAuthTokens(tokens);
+    return tokens;
+  } catch (error) {
+    // A stored session judged noncanonical or expired must never survive a
+    // failed replacement, or the generic session restore would reuse it and
+    // internal tests would continue under the wrong account instead of as a guest.
+    if (stored) await forgetRejectedInternalSession(stored, clearPreviousCustomerData);
+    throw error;
+  }
+}
+
+async function forgetRejectedInternalSession(
+  rejected: StoredAuthTokens,
+  clearPreviousCustomerData: () => Promise<void>,
+): Promise<void> {
   try {
     await clearPreviousCustomerData();
   } catch {
-    throw new InternalCustomerDataCleanupError();
+    // The rejected session is still removed below; the next login clears again.
   }
-  if (!isCurrent()) throw new Error("로그인 화면이 변경되었습니다.");
-  await writeAuthTokens(tokens);
-  return tokens;
+  await clearAuthTokensIfCurrent(rejected).catch(() => false);
 }
 
 export async function transitionDemoPayment(

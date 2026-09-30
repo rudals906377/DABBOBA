@@ -252,10 +252,12 @@ test(
     const storedDraws = (inventoryBeforeReturn.json() as {
       items: Array<{ id: string; pointReturnEligible: boolean; pointReturnAmount?: number; product: { price: number } }>;
     }).items;
-    for (const inventoryId of [oddInventoryId, evenInventoryId]) {
+    // The amount is 50% of the drawn prize's reference price, rounded down per
+    // item; the 1,000 KRW gacha ticket price does not matter (2026-09-30 decision).
+    for (const [inventoryId, expectedPoints] of [[oddInventoryId, 4_999], [evenInventoryId, 1_000]] as const) {
       const storedDraw = storedDraws.find((item) => item.id === inventoryId);
       assert.equal(storedDraw?.pointReturnEligible, true);
-      assert.equal(storedDraw.pointReturnAmount, 500);
+      assert.equal(storedDraw.pointReturnAmount, expectedPoints);
     }
     assert.equal(storedDraws.find((item) => item.id === oddInventoryId)?.product.price, 9_999);
     const inventoryUnitIds = [oddInventoryId, evenInventoryId].sort((left, right) => left.localeCompare(right, "en-US"));
@@ -270,8 +272,8 @@ test(
       returnedAt: string;
     };
     assert.deepEqual(result.inventoryUnitIds, inventoryUnitIds);
-    assert.equal(result.totalPointAmount, 1_000);
-    assert.equal(result.balance, 1_000);
+    assert.equal(result.totalPointAmount, 5_999);
+    assert.equal(result.balance, 5_999);
     assert.equal(Number.isNaN(Date.parse(result.returnedAt)), false);
 
     const inventory = await pool.query<{ id: string; status: string }>(
@@ -283,7 +285,7 @@ test(
       "SELECT user_id,total_point_amount FROM inventory_point_returns WHERE id=$1",
       [result.id],
     );
-    assert.deepEqual(header.rows, [{ user_id: owner.actor.userId, total_point_amount: 1_000 }]);
+    assert.deepEqual(header.rows, [{ user_id: owner.actor.userId, total_point_amount: 5_999 }]);
     const items = await pool.query<{
       inventory_unit_id: string;
       reference_amount: number;
@@ -295,7 +297,7 @@ test(
     );
     assert.deepEqual(
       items.rows.map((item) => [item.inventory_unit_id, item.reference_amount, item.point_amount]),
-      inventoryUnitIds.map((id) => [id, 1_000, 500]),
+      inventoryUnitIds.map((id) => (id === oddInventoryId ? [id, 9_999, 4_999] : [id, 2_000, 1_000])),
     );
     const ledger = await pool.query<{ entry_type: string; amount: number; reference_type: string; reference_id: string }>(
       `SELECT entry_type,amount,reference_type,reference_id FROM point_ledger_entries
@@ -304,7 +306,7 @@ test(
     );
     assert.deepEqual(ledger.rows, [{
       entry_type: "EARN",
-      amount: 1_000,
+      amount: 5_999,
       reference_type: "INVENTORY_POINT_RETURN",
       reference_id: result.id,
     }]);
@@ -312,7 +314,7 @@ test(
       "SELECT balance FROM point_accounts WHERE user_id=$1",
       [owner.actor.userId],
     );
-    assert.deepEqual(account.rows, [{ balance: 1_000 }]);
+    assert.deepEqual(account.rows, [{ balance: 5_999 }]);
     const outbox = await pool.query<{ count: number }>(
       `SELECT count(*)::integer AS count FROM outbox_events
        WHERE aggregate_type='INVENTORY_POINT_RETURN' AND aggregate_id=$1 AND event_type='inventory.point_returned'`,
@@ -427,12 +429,13 @@ test(
     const zeroPricedPrizeItem = (zeroPricedPrizeInventory.json() as {
       items: Array<{ id: string; pointReturnEligible: boolean; pointReturnAmount?: number; product: { price: number } }>;
     }).items.find((item) => item.id === zeroPricedPrizeInventoryId);
+    // A prize registered without a reference price earns no points, whatever the ticket cost.
     assert.equal(zeroPricedPrizeItem?.product.price, 0);
-    assert.equal(zeroPricedPrizeItem?.pointReturnEligible, true);
-    assert.equal(zeroPricedPrizeItem?.pointReturnAmount, 500);
+    assert.equal(zeroPricedPrizeItem?.pointReturnEligible, false);
+    assert.equal(zeroPricedPrizeItem?.pointReturnAmount, undefined);
     const zeroPricedPrizeReturn = await returnPoints(owner.token, [zeroPricedPrizeInventoryId]);
-    assert.equal(zeroPricedPrizeReturn.statusCode, 201, zeroPricedPrizeReturn.body);
-    assert.equal((zeroPricedPrizeReturn.json() as { totalPointAmount: number }).totalPointAmount, 500);
+    assert.equal(zeroPricedPrizeReturn.statusCode, 409, zeroPricedPrizeReturn.body);
+    assert.match(zeroPricedPrizeReturn.body, /0P/);
 
     const overflowInventoryId = await addDrawInventory({
       drawUserId: overflowOwner.actor.userId,

@@ -75,6 +75,73 @@ test("a stalled internal login request releases the app instead of loading forev
   }
 });
 
+test("a rejected noncanonical session is forgotten when its replacement fails", async () => {
+  const source = await read("apps/mobile/src/features/demo/demo-api.ts");
+  const output = ts.transpileModule(source, {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+    fileName: "demo-api.ts",
+  }).outputText;
+  const stored = { accessToken: "other-customer-token", refreshToken: "other-customer-token" };
+  const cleared = [];
+  let localCleanups = 0;
+  const module = { exports: {} };
+  vm.runInNewContext(output, {
+    module,
+    exports: module.exports,
+    __DEV__: true,
+    AbortController,
+    Date,
+    setTimeout: () => ({}),
+    clearTimeout() {},
+    async fetch(url) {
+      const path = new URL(url).pathname;
+      if (path === "/v1/demo/capabilities") return {
+        status: 200,
+        ok: true,
+        json: async () => ({
+          enabled: true,
+          profile: "supabase-demo",
+          paymentProvider: "TEST_PG",
+          actions: ["approve", "fail", "cancel", "refund"],
+        }),
+      };
+      if (path === "/v1/auth/me") return {
+        status: 200,
+        ok: true,
+        json: async () => ({ actor: {
+          userId: "da000000-0000-4000-8000-00000000000b",
+          email: "member02@dabboba.local",
+          nickname: "다른 회원",
+          role: "USER",
+          status: "ACTIVE",
+        } }),
+      };
+      if (path === "/v1/demo/session") return {
+        status: 503,
+        ok: false,
+        json: async () => ({ error: { message: "잠시 후 다시 시도해 주세요." } }),
+        text: async () => "",
+      };
+      throw new Error(`Unexpected request: ${path}`);
+    },
+    require(specifier) {
+      if (specifier === "@/lib/session-store") return {
+        readAuthTokens: async () => stored,
+        writeAuthTokens: async () => { throw new Error("a failed replacement must not store tokens"); },
+        clearAuthTokensIfCurrent: async (expected) => { cleared.push(expected); return true; },
+      };
+      throw new Error(`Unexpected dependency: ${specifier}`);
+    },
+  });
+
+  await assert.rejects(module.exports.ensureInternalCustomerSession(
+    "https://api.dabboba.net",
+    async () => { localCleanups += 1; },
+  ));
+  assert.deepEqual(cleared, [stored], "the rejected session is removed only if it is still the stored one");
+  assert.equal(localCleanups, 1, "its local data is cleared before the session is forgotten");
+});
+
 test("a stalled TEST_PG approval stops waiting without implying the payment failed", async () => {
   const source = await read("apps/mobile/src/features/demo/demo-api.ts");
   const output = ts.transpileModule(source, {

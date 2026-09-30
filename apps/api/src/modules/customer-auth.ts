@@ -20,6 +20,9 @@ import { issueSession } from "../plugins/auth.js";
 import type { ApiContext } from "../types.js";
 
 const CUSTOMER_LOGIN_METHODS = ["PHONE", "KAKAO", "NAVER", "GOOGLE", "APPLE"] as const;
+// EMAIL is not a new login method, but customers whose only identity is a legacy
+// verified EMAIL link must still be able to prove ownership to delete their account.
+const CUSTOMER_DELETION_METHODS = [...CUSTOMER_LOGIN_METHODS, "EMAIL"] as const;
 export const REQUIRED_CUSTOMER_POLICY_VERSIONS = FALLBACK_REQUIRED_POLICY_VERSIONS;
 
 type CustomerUserRow = {
@@ -54,10 +57,13 @@ export function customerLoginProviderDiscovery(
 ) {
   const brokerExchangeConfigured = Boolean(supabaseUrl && publishableKey);
   const enabled = new Set(enabledProviders || []);
+  const methods = brokerExchangeConfigured
+    ? CUSTOMER_LOGIN_METHODS.filter((provider) => enabled.has(provider))
+    : [];
   return {
-    methods: brokerExchangeConfigured
-      ? CUSTOMER_LOGIN_METHODS.filter((provider) => enabled.has(provider))
-      : [],
+    methods,
+    // Account deletion also accepts legacy EMAIL links; it never creates or links an identity.
+    deletionMethods: brokerExchangeConfigured ? [...methods, "EMAIL" as const] : [],
     brokerExchangeConfigured,
     requiredPolicyVersions,
   };
@@ -126,7 +132,15 @@ async function applyVerifiedContactClaims(
       [claims.phone, user.id],
     );
     if (usedPhone.rowCount) {
-      throw conflict("인증된 휴대폰 번호가 다른 계정에 연결되어 있습니다. 고객센터에 문의해 주세요.");
+      // A verified phone login for an unlinked subject already signed in to the
+      // phone's owner (verifiedPhoneOwnerId). Reaching here means this login is
+      // linked to a different existing account: two accounts are never merged
+      // automatically, because that would move orders, points and inventory.
+      throw new AppError(
+        409,
+        "PHONE_ACCOUNT_CONFLICT",
+        "이 휴대폰 번호는 다른 계정에 연결되어 있어요. 두 계정을 합치려면 고객센터로 문의해 주세요.",
+      );
     }
     await client.query("UPDATE users SET phone_e164=$2 WHERE id=$1", [user.id, claims.phone]);
   }
@@ -160,10 +174,40 @@ async function storeAppleRefreshCredential(
   );
 }
 
+/**
+ * User decision 2026-09-30: a phone OTP whose Supabase-verified number already
+ * belongs to one existing customer signs in to that account instead of creating
+ * a second one. This covers pre-broker PHONE identities that stored the E.164
+ * number as their subject. Only a verified PHONE login reaches this lookup, and
+ * two distinct existing owners are never merged or have records moved.
+ */
+async function verifiedPhoneOwnerId(client: DatabaseClient, phone: string): Promise<string | null> {
+  await client.query(
+    "SELECT pg_advisory_xact_lock(hashtextextended($1::text,0))",
+    [`customer-auth-phone:${phone}`],
+  );
+  const owners = await client.query<{ id: string }>(
+    `SELECT id FROM users WHERE phone_e164=$1
+     UNION
+     SELECT user_id AS id FROM auth_identities WHERE provider='PHONE' AND provider_subject=$1
+     ORDER BY id`,
+    [phone],
+  );
+  if (!owners.rowCount) return null;
+  if (owners.rowCount > 1) {
+    throw new AppError(
+      409,
+      "PHONE_ACCOUNT_CONFLICT",
+      "이 휴대폰 번호가 여러 계정에 연결되어 있어요. 고객센터로 문의해 주세요.",
+    );
+  }
+  return owners.rows[0]!.id;
+}
+
 async function existingBrokeredCustomerForDeletion(
   client: DatabaseClient,
   claims: VerifiedSupabaseCustomer,
-  loginProvider: (typeof CUSTOMER_LOGIN_METHODS)[number],
+  loginProvider: (typeof CUSTOMER_DELETION_METHODS)[number],
   providerEnabled: boolean,
 ): Promise<CustomerUserRow> {
   await client.query(
@@ -178,6 +222,10 @@ async function existingBrokeredCustomerForDeletion(
     [loginProvider, claims.canonicalSubject],
   );
   const linkedUserIds = [...new Set(linked.rows.map((row) => row.user_id))];
+  if (!linkedUserIds.length && loginProvider === "PHONE" && claims.phone) {
+    const phoneOwnerId = await verifiedPhoneOwnerId(client, claims.phone);
+    if (phoneOwnerId) linkedUserIds.push(phoneOwnerId);
+  }
   if (!providerEnabled && linkedUserIds.length !== 1) {
     // A disabled provider may only re-authenticate an identity that already
     // exists (see the route comment); it never proves anything new.
@@ -222,6 +270,7 @@ async function existingBrokeredCustomerForDeletion(
 async function upsertBrokeredCustomer(
   client: DatabaseClient,
   claims: VerifiedSupabaseCustomer,
+  loginProvider: (typeof CUSTOMER_LOGIN_METHODS)[number],
 ): Promise<CustomerUserRow> {
   await client.query(
     "SELECT pg_advisory_xact_lock(hashtextextended($1::text,0))",
@@ -239,9 +288,11 @@ async function upsertBrokeredCustomer(
     throw conflict("로그인 연결 정보가 여러 계정에 연결되어 있습니다.");
   }
 
+  const existingUserId = linkedUserIds[0]
+    ?? (loginProvider === "PHONE" && claims.phone ? await verifiedPhoneOwnerId(client, claims.phone) : null);
   let user: CustomerUserRow;
-  if (linkedUserIds.length === 1) {
-    const userId = linkedUserIds[0]!;
+  if (existingUserId) {
+    const userId = existingUserId;
     await lockAccountMutation(client, userId);
     const existing = await client.query<CustomerUserRow>(
       `SELECT id,email::text,nickname,role,status,phone_e164
@@ -362,7 +413,7 @@ export async function registerCustomerAuthRoutes(
       }
       const requestUserAgent = userAgent(request.headers["user-agent"]);
       const { user, session } = await withTransaction(context.pool, async (client) => {
-        const user = await upsertBrokeredCustomer(client, claims);
+        const user = await upsertBrokeredCustomer(client, claims, loginProvider);
         if (loginProvider === "APPLE") {
           await storeAppleRefreshCredential(client, context, user.id, appleRefreshToken!);
         }
@@ -428,7 +479,7 @@ export async function registerCustomerAuthRoutes(
       const policy = await loadRequiredPolicyDocuments(context.pool);
       requiredPolicyAcceptance(input, policy.versions);
       const accessToken = stringInput(input, "accessToken", { min: 64, max: 16_384, trim: false })!;
-      const loginProvider = enumInput(input, "loginProvider", CUSTOMER_LOGIN_METHODS)!;
+      const loginProvider = enumInput(input, "loginProvider", CUSTOMER_DELETION_METHODS)!;
       const rawAppleRefreshToken = input.appleRefreshToken === undefined
         ? null
         : validateAppleRefreshToken(stringInput(input, "appleRefreshToken", { min: 32, max: 16_384, trim: false }));
@@ -450,7 +501,9 @@ export async function registerCustomerAuthRoutes(
       // customer (App Store Guideline 5.1.1(v)); disabling a provider must not
       // strand accounts that can only prove ownership through it. A disabled
       // provider never creates or links an identity on this path.
-      const providerEnabled = context.config.customerLoginProviders?.includes(loginProvider) === true;
+      // EMAIL is never an enabled login method, so it only re-authenticates an existing link.
+      const providerEnabled = loginProvider !== "EMAIL"
+        && context.config.customerLoginProviders?.includes(loginProvider) === true;
       const requestUserAgent = userAgent(request.headers["user-agent"]);
       const { user, session } = await withTransaction(context.pool, async (client) => {
         const user = await existingBrokeredCustomerForDeletion(client, claims, loginProvider, providerEnabled);

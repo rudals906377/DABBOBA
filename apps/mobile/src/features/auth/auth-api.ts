@@ -7,7 +7,7 @@ import {
 } from "@/features/auth/supabase-broker";
 import { socialLoginCallbackFingerprint } from "@/features/auth/social-login-state";
 import { commitAccountSessionAfterCleanup } from "@/features/profile/account-device-cleanup";
-import { writeAuthTokens } from "@/lib/session-store";
+import { readAuthTokens, writeAuthTokens } from "@/lib/session-store";
 
 export type AuthProviderAvailability = components["schemas"]["CustomerLoginProviders"];
 
@@ -35,14 +35,23 @@ export async function fetchAuthProviderAvailability(apiBaseUrl: string): Promise
   }
 }
 
+/**
+ * Removes local data before a new customer session is stored. `previousCustomerStored`
+ * is true when a customer session (possibly another account's) is on the device;
+ * otherwise only guest device data remains, because logout already cleared the
+ * previous customer's, and guest-safe history such as recently viewed products stays.
+ */
+export type ClearLocalDataBeforeLogin = (previousCustomerStored: boolean) => Promise<void>;
+
 export async function exchangeBrokerSession(
   apiBaseUrl: string,
   accessToken: string,
   acceptedPolicies: AcceptedPolicyVersions,
   loginProvider: "PHONE" | "KAKAO" | "NAVER" | "GOOGLE" | "APPLE",
-  clearPreviousCustomerData: () => Promise<void>,
+  clearLocalDataBeforeLogin: ClearLocalDataBeforeLogin,
   appleRefreshToken?: string,
 ): Promise<void> {
+  const previousCustomerStored = Boolean((await readAuthTokens())?.accessToken);
   const client = createDabbobaClient({ baseUrl: apiBaseUrl, requestId: randomUUID });
   const result = await client.POST("/v1/auth/exchange", {
     body: {
@@ -53,20 +62,37 @@ export async function exchangeBrokerSession(
     },
   });
   if (!result.data) throw new Error(errorMessage(result.error, "로그인 정보를 저장하지 못했습니다."));
-  await commitAccountSessionAfterCleanup({
-    clearLocalData: clearPreviousCustomerData,
-    writeAuthTokens: () => writeAuthTokens({
-      accessToken: result.data.token,
-      refreshToken: result.data.token,
-      expiresAt: result.data.expiresAt,
-    }),
-  });
+  const session = result.data;
+  try {
+    await commitAccountSessionAfterCleanup({
+      clearLocalData: () => clearLocalDataBeforeLogin(previousCustomerStored),
+      writeAuthTokens: () => writeAuthTokens({
+        accessToken: session.token,
+        refreshToken: session.token,
+        expiresAt: session.expiresAt,
+      }),
+    });
+  } catch (error) {
+    // The server already issued a session this device could not store. Revoke it
+    // so a failed local cleanup never leaves an unreachable but valid session.
+    await revokeIssuedSession(apiBaseUrl, session.token);
+    throw error;
+  }
+}
+
+async function revokeIssuedSession(apiBaseUrl: string, token: string): Promise<void> {
+  try {
+    const client = createDabbobaClient({ baseUrl: apiBaseUrl, token: () => token, requestId: randomUUID });
+    await client.POST("/v1/auth/logout", {});
+  } catch {
+    // Best effort: the session still expires at its server-side TTL.
+  }
 }
 
 export async function completeSocialCustomerLogin(
   apiBaseUrl: string,
   resultUrl: string,
-  clearPreviousCustomerData: () => Promise<void>,
+  clearLocalDataBeforeLogin: ClearLocalDataBeforeLogin,
 ): Promise<string> {
   const fingerprint = socialLoginCallbackFingerprint(resultUrl);
   const existing = socialLoginCompletionFlights.get(fingerprint);
@@ -80,7 +106,7 @@ export async function completeSocialCustomerLogin(
         completed.accessToken,
         completed.acceptedPolicies,
         completed.provider,
-        clearPreviousCustomerData,
+        clearLocalDataBeforeLogin,
         completed.appleRefreshToken,
       );
       return completed.returnTo;

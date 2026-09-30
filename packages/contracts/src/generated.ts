@@ -147,7 +147,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** @description Verifies a live Supabase social-provider session for an already linked DABBOBA customer and issues an ephemeral ACCOUNT_DELETION-scoped customer session used by the public account-deletion flow. That session is accepted only by the account-deletion preview, request, and status routes and by logout; every other authenticated route answers 403 SESSION_SCOPE_FORBIDDEN. A provider that is not currently enabled is refused unless the verified identity is already linked to an existing account. This endpoint never creates a user or links an unknown provider subject. */
+        /** @description Verifies a live Supabase social-provider session for an already linked DABBOBA customer and issues an ephemeral ACCOUNT_DELETION-scoped customer session used by the public account-deletion flow. That session is accepted only by the account-deletion preview, request, and status routes and by logout; every other authenticated route answers 403 SESSION_SCOPE_FORBIDDEN. A provider that is not currently enabled is refused unless the verified identity is already linked to an existing account; EMAIL is accepted only in that already-linked form so legacy email-only customers can delete their account. This endpoint never creates a user or links an unknown provider subject. */
         post: operations["exchangeExistingCustomerForAccountDeletion"];
         delete?: never;
         options?: never;
@@ -1083,6 +1083,23 @@ export interface paths {
             cookie?: never;
         };
         get: operations["getProductDrawOdds"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/catalog/products/{productId}/prize-lineup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description The published prize lineup of an active gacha or kuji product with each prize's composition quantity in the set. It never returns probabilities, weights or remaining quantities, so it stays available before LIVE commerce. */
+        get: operations["getProductPrizeLineup"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2727,6 +2744,8 @@ export interface components {
         CustomerAuthProvider: "PHONE" | "KAKAO" | "NAVER" | "GOOGLE" | "APPLE";
         CustomerLoginProviders: {
             methods: components["schemas"]["CustomerAuthProvider"][];
+            /** @description Methods accepted by the account-deletion exchange. It adds EMAIL so a customer whose only identity is a legacy verified EMAIL link can still delete the account; EMAIL is never a new login method. */
+            deletionMethods: ("PHONE" | "KAKAO" | "NAVER" | "GOOGLE" | "APPLE" | "EMAIL")[];
             brokerExchangeConfigured: boolean;
             requiredPolicyVersions: {
                 terms: string;
@@ -2746,7 +2765,7 @@ export interface components {
         AccountDeletionAccessTokenExchangeInput: {
             accessToken: string;
             /** @enum {string} */
-            loginProvider: "PHONE" | "KAKAO" | "NAVER" | "GOOGLE" | "APPLE";
+            loginProvider: "PHONE" | "KAKAO" | "NAVER" | "GOOGLE" | "APPLE" | "EMAIL";
             /** @description Optional fresh Apple provider refresh token. When absent, an existing encrypted revocation credential is required. */
             appleRefreshToken?: string;
             acceptedPolicies: components["schemas"]["RequiredPolicyVersions"];
@@ -4444,6 +4463,27 @@ export interface components {
             probabilityNumerator: number;
             probabilityDenominator: number;
             probabilityPercent: number;
+        };
+        PublicPrizeLineupEntry: {
+            /** Format: uuid */
+            id: string;
+            prizeProductId: string;
+            prizeName: string;
+            /** Format: uri */
+            prizeImageUrl: string | null;
+            prizeSku: string;
+            prizeIpId: string;
+            prizeCategory: components["schemas"]["ProductCategory"];
+            rarity: string;
+            /** @description Composition quantity of this prize in the published set; null when the prize is not finite. */
+            quantity: number | null;
+        };
+        PublicPrizeLineup: {
+            productId: string;
+            version: number;
+            /** Format: date-time */
+            publishedAt: string;
+            entries: components["schemas"]["PublicPrizeLineupEntry"][];
         };
         PublicDrawOdds: {
             /** Format: uuid */
@@ -7318,6 +7358,31 @@ export interface operations {
             };
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            503: components["responses"]["CommerceUnavailable"];
+        };
+    };
+    getProductPrizeLineup: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                productId: components["parameters"]["ProductId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Prize lineup of the active draw version. */
+            200: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicPrizeLineup"];
+                };
+            };
+            404: components["responses"]["NotFound"];
         };
     };
     getProductKujiSlots: {
@@ -7342,6 +7407,7 @@ export interface operations {
                 };
             };
             404: components["responses"]["NotFound"];
+            503: components["responses"]["CommerceUnavailable"];
         };
     };
     joinKujiRoom: {

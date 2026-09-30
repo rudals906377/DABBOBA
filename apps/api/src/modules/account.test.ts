@@ -644,7 +644,7 @@ test("account inventory returns the owner's stored, exchanging, or shipping GACH
   assert.match(capturedSql, /iu\.status IN \('OWNED','EXCHANGE_LISTED','EXCHANGE_OFFERED','SHIPPING','EXPIRED_HOLD'\)/);
   assert.match(capturedSql, /\(iu\.status IN \('SHIPPING','EXPIRED_HOLD'\) OR iu\.storage_expires_at>now\(\)\)/);
   assert.match(capturedSql, /point_purchase\.reference_amount >= 2/);
-  assert.match(capturedSql, /purchase_line\.unit_price AS reference_amount/);
+  assert.match(capturedSql, /SELECT p\.price AS reference_amount/);
   assert.match(capturedSql, /iu\.source_type IN \('GACHA','KUJI'\)/);
   assert.match(capturedSql, /draw_result\.prize_inventory_unit_id=iu\.id/);
   assert.match(capturedSql, /draw_result\.user_id=iu\.owner_id/);
@@ -1584,7 +1584,7 @@ test("point return atomically locks original draw inventory, records immutable a
   const pointBalanceUpdate = queries.find(({ sql }) => sql.includes("UPDATE point_accounts SET balance=balance+"));
   assert.match(pointBalanceUpdate?.sql || "", /balance<=\$3::integer-\$2::integer/);
   assert.deepEqual(pointBalanceUpdate?.params, [actorId, 1_000, MAX_POINT_BALANCE]);
-  assert.match(inventoryLock?.sql || "", /purchase_line\.unit_price AS reference_amount/);
+  assert.match(inventoryLock?.sql || "", /p\.price AS reference_amount/);
   assert.match(
     queries.find(({ sql }) => sql.includes("UPDATE inventory_units SET status='POINT_RETURNED'"))?.sql || "",
     /storage_expires_at>now\(\)/,

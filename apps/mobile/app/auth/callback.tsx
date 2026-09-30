@@ -8,7 +8,7 @@ import { AppText as Text } from "@/components/Typography";
 import { SeedActionButton } from "@/design-system/components";
 import { seed } from "@/design-system/seed";
 import { completeSocialCustomerLogin } from "@/features/auth/auth-api";
-import { clearUserScopedLocalData } from "@/lib/local-database";
+import { clearLocalDataBeforeCustomerLogin } from "@/lib/local-database";
 import { buildSocialLoginCallbackUrl } from "@/features/auth/social-login-state";
 import {
   resolveMobileRuntimeConfig,
@@ -37,7 +37,11 @@ export default function CustomerAuthCallbackRoute() {
 
   useEffect(() => {
     let active = true;
-    void completeSocialCustomerLogin(runtime.apiBaseUrl, callbackUrl, () => clearUserScopedLocalData(db))
+    void completeSocialCustomerLogin(
+      runtime.apiBaseUrl,
+      callbackUrl,
+      (previousCustomerStored) => clearLocalDataBeforeCustomerLogin(db, previousCustomerStored),
+    )
       .then((returnTo) => {
         if (active) router.replace(returnTo as Href);
       })

@@ -18,11 +18,15 @@ export function buildKujiCheckoutPath(
   checkoutExpiresAt: string,
   serverNow?: string,
   developmentFixture = false,
+  serverClockOffsetMs?: number | null,
 ): string {
   const query = [
     `kujiEntryId=${encodeURIComponent(entryId)}`,
     `kujiCheckoutExpiresAt=${encodeURIComponent(checkoutExpiresAt)}`,
     ...(serverNow ? [`serverNow=${encodeURIComponent(serverNow)}`] : []),
+    ...(typeof serverClockOffsetMs === "number" && Number.isSafeInteger(serverClockOffsetMs)
+      ? [`serverClockOffsetMs=${serverClockOffsetMs}`]
+      : []),
     ...(developmentFixture ? ["kujiRoomFixture=development"] : []),
   ].join("&");
   return `/checkout/${encodeURIComponent(productId)}?${query}`;

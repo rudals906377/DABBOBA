@@ -157,7 +157,10 @@ function bindingResponse(input: {
 }
 
 export async function registerKujiSlotRoutes(app: FastifyInstance, context: ApiContext) {
-  app.get("/v1/catalog/products/:productId/kuji-slots", async (request, reply) => {
+  // Slot availability and tier quantities are live stock; outside LIVE they stay private.
+  app.get("/v1/catalog/products/:productId/kuji-slots", {
+    preHandler: requireLiveCommerce(context),
+  }, async (request, reply) => {
     noStore(reply);
     const productId = slugIdInput((request.params as Record<string, unknown>).productId, "productId");
     const deck = await context.pool.query<{
