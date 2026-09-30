@@ -342,6 +342,7 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "409": { $ref: "#/components/responses/Conflict" }
+        "413": { description: Declared byteSize exceeds the active storage provider's object limit (Supabase Storage 5 MiB). }
         "429": { description: Per-user active, daily, or retained media count/byte quota exceeded. }
         "503": { description: Media storage is not configured. }
         "428": { $ref: "#/components/responses/LegalAcceptanceRequired" }
@@ -437,7 +438,7 @@ paths:
         - $ref: "#/components/parameters/MediaId"
       responses:
         "200":
-          description: Short-lived URL for privileged review of an attachment.
+          description: Short-lived URL for privileged review of an attachment. Requires inquiries.read for INQUIRY media, catalog.read for CATALOG/CATALOG_REQUEST media, and moderation.read otherwise; every issuance writes an admin audit row.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/MediaReadUrl" }
@@ -465,6 +466,7 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "409": { $ref: "#/components/responses/Conflict" }
+        "413": { description: Declared byteSize exceeds the active storage provider's object limit (Supabase Storage 5 MiB). }
         "429": { description: Per-administrator active, daily, or retained media quota exceeded. }
         "503": { description: Image processing, private storage, or stable catalog delivery is unavailable. }
   /v1/admin/catalog-media/{mediaId}/complete:
@@ -4588,7 +4590,10 @@ components:
         kind: { type: string, maxLength: 100 }
         title: { type: string, maxLength: 160 }
         body: { type: string }
-        data: { type: object, additionalProperties: true }
+        data:
+          type: object
+          description: Validated destination identifiers only (for example orderId or productId); other stored notification fields are never exposed.
+          additionalProperties: { type: string }
         destination: { $ref: "#/components/schemas/NotificationDestination" }
         readAt: { type: [string, "null"], format: date-time }
         createdAt: { type: string, format: date-time }

@@ -3101,8 +3101,9 @@ export interface components {
             kind: string;
             title: string;
             body: string;
+            /** @description Validated destination identifiers only (for example orderId or productId); other stored notification fields are never exposed. */
             data: {
-                [key: string]: unknown;
+                [key: string]: string;
             };
             destination: components["schemas"]["NotificationDestination"];
             /** Format: date-time */
@@ -5606,6 +5607,13 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             409: components["responses"]["Conflict"];
+            /** @description Declared byteSize exceeds the active storage provider's object limit (Supabase Storage 5 MiB). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             428: components["responses"]["LegalAcceptanceRequired"];
             /** @description Per-user active */
             429: {
@@ -5785,7 +5793,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Short-lived URL for privileged review of an attachment. */
+            /** @description Short-lived URL for privileged review of an attachment. Requires inquiries.read for INQUIRY media, catalog.read for CATALOG/CATALOG_REQUEST media, and moderation.read otherwise; every issuance writes an admin audit row. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -5827,6 +5835,13 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
+            /** @description Declared byteSize exceeds the active storage provider's object limit (Supabase Storage 5 MiB). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             /** @description Per-administrator active */
             429: {
                 headers: {

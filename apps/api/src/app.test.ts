@@ -290,3 +290,119 @@ test("PRELAUNCH rejects every customer commerce mutation before its handler can 
     await app.close();
   }
 });
+
+test("request ids are always server-generated and echoed on the response", async () => {
+  const { app } = await buildApp({ config: testConfig("all"), pool: unusedPool });
+  app.get("/test-only/request-id", async (request) => ({ id: request.id }));
+  app.get("/test-only/request-id-error", async () => {
+    throw Object.assign(new Error("boom"), { statusCode: 422 });
+  });
+  try {
+    const response = await app.inject({
+      method: "GET",
+      url: "/test-only/request-id",
+      headers: { "x-request-id": "client-chosen-request-id" },
+    });
+    assert.equal(response.statusCode, 200);
+    const serverId = response.json().id as string;
+    assert.match(serverId, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    assert.notEqual(serverId, "client-chosen-request-id");
+    assert.equal(response.headers["x-request-id"], serverId);
+
+    const failed = await app.inject({
+      method: "GET",
+      url: "/test-only/request-id-error",
+      headers: { "x-request-id": "client-chosen-request-id" },
+    });
+    assert.equal(failed.json().error.requestId, failed.headers["x-request-id"]);
+    assert.notEqual(failed.json().error.requestId, "client-chosen-request-id");
+  } finally {
+    await app.close();
+  }
+});
+
+test("the global limiter keys authenticated callers by session and anonymous callers by IP", async () => {
+  const { app } = await buildApp({ config: testConfig("all"), pool: unusedPool });
+  app.get("/test-only/limited", async () => ({ ok: true }));
+  const tokenA = { authorization: `Bearer ${"a".repeat(43)}` };
+  const tokenB = { authorization: `Bearer ${"b".repeat(43)}` };
+  try {
+    for (let index = 0; index < 240; index += 1) {
+      const response = await app.inject({ method: "GET", url: "/test-only/limited", headers: tokenA });
+      assert.equal(response.statusCode, 200);
+    }
+    assert.equal((await app.inject({ method: "GET", url: "/test-only/limited", headers: tokenA })).statusCode, 429);
+    // Another session behind the same address keeps its own bucket.
+    assert.equal((await app.inject({ method: "GET", url: "/test-only/limited", headers: tokenB })).statusCode, 200);
+    // Anonymous traffic from that address is also independent of either session.
+    assert.equal((await app.inject({ method: "GET", url: "/test-only/limited" })).statusCode, 200);
+  } finally {
+    await app.close();
+  }
+});
+
+test("login exchange limits follow the client IP even when random bearer tokens are sent", async () => {
+  const { app } = await buildApp({ config: testConfig("customer"), pool: unusedPool });
+  try {
+    const statuses: number[] = [];
+    for (let index = 0; index < 13; index += 1) {
+      const response = await app.inject({
+        method: "POST",
+        url: "/v1/auth/exchange",
+        headers: { authorization: `Bearer ${String(index).padStart(43, "r")}`, "content-type": "application/json" },
+        payload: "{}",
+      });
+      statuses.push(response.statusCode);
+    }
+    assert.equal(statuses.slice(0, 12).includes(429), false, statuses.join(","));
+    assert.equal(statuses[12], 429);
+  } finally {
+    await app.close();
+  }
+});
+
+test("with a trusted client-IP header, fabricated session tokens cannot escape a per-IP ceiling", async () => {
+  const config = { ...testConfig("all"), trustedClientIpHeader: "cf-connecting-ip" };
+  const { app } = await buildApp({ config, pool: unusedPool });
+  app.get("/test-only/guarded", async () => ({ ok: true }));
+  try {
+    let limited = 0;
+    for (let index = 0; index < 1_201; index += 1) {
+      const response = await app.inject({
+        method: "GET",
+        url: "/test-only/guarded",
+        headers: {
+          authorization: `Bearer ${String(index).padStart(43, "g")}`,
+          "cf-connecting-ip": "198.51.100.20",
+        },
+      });
+      if (response.statusCode === 429) limited += 1;
+    }
+    assert.equal(limited, 1);
+    const otherAddress = await app.inject({
+      method: "GET",
+      url: "/test-only/guarded",
+      headers: { authorization: `Bearer ${"h".repeat(43)}`, "cf-connecting-ip": "198.51.100.21" },
+    });
+    assert.equal(otherAddress.statusCode, 200);
+  } finally {
+    await app.close();
+  }
+});
+
+test("PRELAUNCH also gates admin shipping-status and exchange-resolution mutations", async () => {
+  const config = { ...testConfig("admin"), commerceMode: "PRELAUNCH" as const };
+  const { app } = await buildApp({ config, pool: unusedPool });
+  try {
+    for (const url of [
+      "/v1/admin/commerce/shipping/30000000-0000-4000-8000-000000000001/status",
+      "/v1/admin/exchange/listings/60000000-0000-4000-8000-000000000001/resolution",
+    ]) {
+      const response = await app.inject({ method: "POST", url, headers: { authorization: `Bearer ${"x".repeat(43)}` } });
+      assert.equal(response.statusCode, 503, `${url}: ${response.body}`);
+      assert.equal(response.json().error.code, "COMMERCE_NOT_AVAILABLE");
+    }
+  } finally {
+    await app.close();
+  }
+});

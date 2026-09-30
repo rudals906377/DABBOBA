@@ -11,7 +11,7 @@ import {
   idempotencyKey,
   requestHash,
 } from "../lib/idempotency.js";
-import { enumInput, objectInput, queryString, stringInput, uuidInput } from "../lib/input.js";
+import { enumInput, objectInput, queryString, stringInput, uuidInput, likeContainsPattern } from "../lib/input.js";
 import { cursorPage, pagination } from "../lib/pagination.js";
 import { iso, nullableIso, numberValue } from "../lib/rows.js";
 import { assertUgcOperationsPolicyAccepted } from "../lib/ugc-policy.js";
@@ -845,14 +845,48 @@ async function cancelMatchedExchange(
   if (!cancelled.rowCount) throw conflict("이미 완료되었거나 취소된 교환입니다.");
 }
 
+export const EXCHANGE_READ_EXPIRY_SWEEP_INTERVAL_MS = 30_000;
+
+/**
+ * Public/customer exchange reads share one bounded expiry sweep per process so
+ * anonymous browsing cannot turn every GET into a write transaction. Mutations
+ * still call expireStaleExchangeListings directly, and the browse query itself
+ * excludes OPEN listings whose own period has elapsed.
+ */
+export function createThrottledExchangeExpirySweep(
+  queryable: Queryable,
+  intervalMs = EXCHANGE_READ_EXPIRY_SWEEP_INTERVAL_MS,
+  now: () => number = Date.now,
+): () => Promise<void> {
+  let lastStartedAt = Number.NEGATIVE_INFINITY;
+  let inFlight: Promise<void> | null = null;
+  return async () => {
+    if (inFlight) return inFlight;
+    if (now() - lastStartedAt < intervalMs) return;
+    lastStartedAt = now();
+    inFlight = expireStaleExchangeListings(queryable)
+      .then(() => undefined)
+      .catch((error: unknown) => {
+        // A failed sweep must not suppress the next attempt for the full window.
+        lastStartedAt = Number.NEGATIVE_INFINITY;
+        throw error;
+      })
+      .finally(() => {
+        inFlight = null;
+      });
+    return inFlight;
+  };
+}
+
 export async function registerExchangeRoutes(app: FastifyInstance, context: ApiContext) {
+  const sweepExpiredListingsForRead = createThrottledExchangeExpirySweep(context.pool);
   app.get(
     "/v1/exchange/inventory",
     { preHandler: [requireLiveCommerce(context), context.auth.requireUser] },
     async (request) => {
-      await expireStaleExchangeListings(context.pool);
+      await sweepExpiredListingsForRead();
       const query = queryOf(request);
-      const { limit, cursor } = pagination(query);
+      const { limit, cursor } = pagination(query, "uuid");
       const search = queryString(query.q);
       const values: unknown[] = [request.actor!.userId, limit + 1];
       const filters = [
@@ -870,8 +904,8 @@ export async function registerExchangeRoutes(app: FastifyInstance, context: ApiC
         "p.is_active=true",
       ];
       if (search) {
-        values.push(`%${search}%`);
-        filters.push(`(p.name ILIKE $${values.length} OR p.sku ILIKE $${values.length})`);
+        values.push(likeContainsPattern(search));
+        filters.push(`(p.name ILIKE $${values.length} ESCAPE '\\' OR p.sku ILIKE $${values.length} ESCAPE '\\')`);
       }
       if (cursor) {
         values.push(cursor.createdAt, cursor.id);
@@ -890,10 +924,10 @@ export async function registerExchangeRoutes(app: FastifyInstance, context: ApiC
   );
 
   app.get("/v1/exchange/listings", { preHandler: requireLiveCommerce(context) }, async (request) => {
-    await expireStaleExchangeListings(context.pool);
+    await sweepExpiredListingsForRead();
     const viewerId = (await optionalUserActor(context, request))?.userId ?? null;
     const query = queryOf(request);
-    const { limit, cursor } = pagination(query);
+    const { limit, cursor } = pagination(query, "uuid");
     const search = queryString(query.q);
     const category = query.category === undefined
       ? undefined
@@ -901,13 +935,14 @@ export async function registerExchangeRoutes(app: FastifyInstance, context: ApiC
     const values: unknown[] = [viewerId, limit + 1];
     const filters = [
       "l.status='OPEN'",
+      "l.expires_at>now()",
       listingBundleIsPubliclyEligible,
       exchangeBlockVisibility("$1", "l.author_id"),
     ];
     if (search) {
-      values.push(`%${search}%`);
+      values.push(likeContainsPattern(search));
       filters.push(
-        `(l.title ILIKE $${values.length} OR l.details ILIKE $${values.length}
+        `(l.title ILIKE $${values.length} ESCAPE '\\' OR l.details ILIKE $${values.length} ESCAPE '\\'
           OR EXISTS (
             SELECT 1
             FROM exchange_listing_items search_listing_item
@@ -915,11 +950,11 @@ export async function registerExchangeRoutes(app: FastifyInstance, context: ApiC
             JOIN catalog_products search_product ON search_product.id=search_inventory.product_id
             JOIN catalog_ips search_ip ON search_ip.id=search_product.ip_id
             WHERE search_listing_item.listing_id=l.id
-              AND (search_product.name ILIKE $${values.length}
-                OR search_ip.name_ko ILIKE $${values.length}
-                OR search_ip.name_en ILIKE $${values.length}
-                OR search_ip.name_ja ILIKE $${values.length}
-                OR array_to_string(search_ip.aliases, ' ') ILIKE $${values.length})
+              AND (search_product.name ILIKE $${values.length} ESCAPE '\\'
+                OR search_ip.name_ko ILIKE $${values.length} ESCAPE '\\'
+                OR search_ip.name_en ILIKE $${values.length} ESCAPE '\\'
+                OR search_ip.name_ja ILIKE $${values.length} ESCAPE '\\'
+                OR array_to_string(search_ip.aliases, ' ') ILIKE $${values.length} ESCAPE '\\')
           ))`,
       );
     }
@@ -948,7 +983,7 @@ export async function registerExchangeRoutes(app: FastifyInstance, context: ApiC
     "/v1/exchange/activity",
     { preHandler: [requireLiveCommerce(context), context.auth.requireUser] },
     async (request) => {
-      await expireStaleExchangeListings(context.pool);
+      await sweepExpiredListingsForRead();
       const actorId = request.actor!.userId;
       const [authored, applied] = await Promise.all([
         context.pool.query<ListingRow>(
@@ -976,7 +1011,7 @@ export async function registerExchangeRoutes(app: FastifyInstance, context: ApiC
   );
 
   app.get("/v1/exchange/listings/:listingId", { preHandler: requireLiveCommerce(context) }, async (request) => {
-    await expireStaleExchangeListings(context.pool);
+    await sweepExpiredListingsForRead();
     const listingId = uuidInput((request.params as Record<string, unknown>).listingId, "listingId");
     const actor = await optionalUserActor(context, request);
     const result = await context.pool.query<ListingRow>(
@@ -1504,7 +1539,7 @@ export async function registerExchangeRoutes(app: FastifyInstance, context: ApiC
     { preHandler: context.auth.requirePermission("exchange.resolve") },
     async (request) => {
       const query = queryOf(request);
-      const { limit, cursor } = pagination(query);
+      const { limit, cursor } = pagination(query, "uuid");
       const search = queryString(query.q);
       const status = query.status === undefined
         ? undefined
@@ -1512,10 +1547,10 @@ export async function registerExchangeRoutes(app: FastifyInstance, context: ApiC
       const values: unknown[] = [limit + 1];
       const filters: string[] = [];
       if (search) {
-        values.push(`%${search}%`);
+        values.push(likeContainsPattern(search));
         filters.push(
-          `(l.title ILIKE $${values.length} OR l.details ILIKE $${values.length}
-            OR u.nickname ILIKE $${values.length} OR l.id::text ILIKE $${values.length}
+          `(l.title ILIKE $${values.length} ESCAPE '\\' OR l.details ILIKE $${values.length} ESCAPE '\\'
+            OR u.nickname ILIKE $${values.length} ESCAPE '\\' OR l.id::text ILIKE $${values.length} ESCAPE '\\'
             OR EXISTS (
               SELECT 1
               FROM exchange_listing_items admin_search_item
@@ -1524,8 +1559,8 @@ export async function registerExchangeRoutes(app: FastifyInstance, context: ApiC
               JOIN catalog_products admin_search_product
                 ON admin_search_product.id=admin_search_inventory.product_id
               WHERE admin_search_item.listing_id=l.id
-                AND (admin_search_product.name ILIKE $${values.length}
-                  OR admin_search_product.sku ILIKE $${values.length})
+                AND (admin_search_product.name ILIKE $${values.length} ESCAPE '\\'
+                  OR admin_search_product.sku ILIKE $${values.length} ESCAPE '\\')
             ))`,
         );
       }
@@ -1548,7 +1583,7 @@ export async function registerExchangeRoutes(app: FastifyInstance, context: ApiC
 
   app.post(
     "/v1/admin/exchange/listings/:listingId/resolution",
-    { preHandler: context.auth.requirePermission("exchange.resolve") },
+    { preHandler: [requireLiveCommerce(context), context.auth.requirePermission("exchange.resolve")] },
     async (request, reply) => {
       const listingId = uuidInput((request.params as Record<string, unknown>).listingId, "listingId");
       const body = objectInput(request.body);

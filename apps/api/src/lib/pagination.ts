@@ -1,11 +1,29 @@
 import { boundedLimit, decodeCursor, encodeCursor } from "@dabboba/db";
 import { badRequest } from "./errors.js";
 
-export function pagination(query: Record<string, unknown>) {
+/**
+ * Primary-key shape of the table a cursor pages through. UUID tables must
+ * reject non-UUID cursor ids before PostgreSQL casts them (22P02), and text
+ * slug tables must reject values their CHECK constraint could never contain.
+ */
+export type CursorIdFormat = "uuid" | "slug";
+
+const UUID_CURSOR_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const SLUG_CURSOR_ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
+export function cursorIdMatches(id: string, format: CursorIdFormat): boolean {
+  return format === "uuid"
+    ? UUID_CURSOR_ID.test(id)
+    : id.length <= 120 && SLUG_CURSOR_ID.test(id);
+}
+
+export function pagination(query: Record<string, unknown>, idFormat: CursorIdFormat) {
   const limit = boundedLimit(query.limit);
   const rawCursor = typeof query.cursor === "string" ? query.cursor : undefined;
   const cursor = decodeCursor(rawCursor);
-  if (rawCursor && !cursor) throw badRequest("페이지 커서가 올바르지 않습니다.");
+  if ((rawCursor && !cursor) || (cursor && !cursorIdMatches(cursor.id, idFormat))) {
+    throw badRequest("페이지 커서가 올바르지 않습니다.");
+  }
   return { limit, cursor };
 }
 

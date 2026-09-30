@@ -584,6 +584,7 @@ test("production requires a distinct admin proxy secret and explicit edge-overwr
     NODE_ENV: "production",
     DABBOBA_API_URL: "https://api.example.test",
     ADMIN_PROXY_IDENTITY_SECRET: "admin-proxy-secret-that-is-long-and-production-only",
+    ADMIN_SESSION_COOKIE_NAME: "__Host-dabboba_admin_session",
   };
   assert.throws(() => loadAdminConfig(productionAdmin), /ADMIN_EDGE_CLIENT_IP_HEADER/);
   assert.throws(() => loadAdminConfig({
@@ -600,6 +601,42 @@ test("production requires a distinct admin proxy secret and explicit edge-overwr
     ADMIN_EDGE_CLIENT_IP_HEADER: "CF-Connecting-IP",
   });
   assert.equal(config.adminEdgeClientIpHeader, "cf-connecting-ip");
+});
+
+test("production admin session cookies must use the __Host- prefix", () => {
+  const productionAdmin = {
+    NODE_ENV: "production",
+    DABBOBA_API_URL: "https://api.example.test",
+    ADMIN_PROXY_IDENTITY_SECRET: "admin-proxy-secret-that-is-long-and-production-only",
+    ADMIN_EDGE_CLIENT_IP_HEADER: "CF-Connecting-IP",
+  };
+  assert.throws(() => loadAdminConfig(productionAdmin), /__Host-/);
+  for (const name of ["dabboba_admin_session", "__Secure-dabboba_admin_session", "__host-dabboba_admin_session", "__Host-"]) {
+    assert.throws(() => loadAdminConfig({ ...productionAdmin, ADMIN_SESSION_COOKIE_NAME: name }), /__Host-/, name);
+  }
+  assert.throws(
+    () => loadAdminConfig({ ...productionAdmin, ADMIN_SESSION_COOKIE_NAME: "__Host-bad name;" }),
+    /valid cookie name/,
+  );
+  assert.equal(
+    loadAdminConfig({ ...productionAdmin, ADMIN_SESSION_COOKIE_NAME: "__Host-dabboba_admin_session" }).sessionCookieName,
+    "__Host-dabboba_admin_session",
+  );
+  // Local development keeps the plain name so http://127.0.0.1 continues to work.
+  assert.equal(loadAdminConfig({ NODE_ENV: "development", DABBOBA_API_URL: "http://127.0.0.1:8788" }).sessionCookieName, "dabboba_admin_session");
+});
+
+test("the trusted client-IP header is explicit, normalized, and cannot reuse identity headers", () => {
+  const base = {
+    NODE_ENV: "test",
+    DATABASE_URL: "postgresql://test/db",
+    SESSION_TOKEN_PEPPER: "local-development-session-pepper",
+  };
+  assert.equal(loadApiConfig(base).trustedClientIpHeader, null);
+  assert.equal(loadApiConfig({ ...base, TRUSTED_CLIENT_IP_HEADER: "CF-Connecting-IP" }).trustedClientIpHeader, "cf-connecting-ip");
+  for (const value of ["authorization", "Cookie", "x-request-id", "x-dabboba-admin-client-ip", "x-dabboba-anything", "bad header"]) {
+    assert.throws(() => loadApiConfig({ ...base, TRUSTED_CLIENT_IP_HEADER: value }), /TRUSTED_CLIENT_IP_HEADER/, value);
+  }
 });
 
 test("production requires a strong dedicated payment webhook secret when a provider is configured", () => {

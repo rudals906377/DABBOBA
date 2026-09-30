@@ -17,6 +17,10 @@ const MEDIA_PURPOSES = [...USER_MEDIA_PURPOSES, "CATALOG"] as const;
 const SUPPORTED_MIME_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"] as const;
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 const MAX_ACTIVE_UPLOAD_COUNT = 10;
+
+export function mediaUploadTooLarge(maxBytes: number): AppError {
+  return new AppError(413, "MEDIA_TOO_LARGE", "사진 파일이 너무 큽니다.", { maxBytes });
+}
 const MAX_ACTIVE_UPLOAD_BYTES = 30 * 1024 * 1024;
 const MAX_DAILY_UPLOAD_COUNT = 50;
 const MAX_DAILY_UPLOAD_BYTES = 200 * 1024 * 1024;
@@ -733,13 +737,26 @@ export async function signMediaAsset(context: ApiContext, asset: MediaRow) {
   }
 }
 
-async function signedReadUrl(context: ApiContext, request: FastifyRequest, adminAccess: boolean) {
+async function signedReadUrl(context: ApiContext, request: FastifyRequest) {
   const id = mediaId(request);
   const row = await context.pool.query<MediaRow>("SELECT * FROM media_assets WHERE id=$1 AND status='READY'", [id]);
   if (!row.rowCount) throw notFound("사용 가능한 첨부 파일을 찾을 수 없습니다.");
   const asset = row.rows[0]!;
-  if (!adminAccess && asset.owner_id !== request.actor!.userId) throw forbidden();
+  if (asset.owner_id !== request.actor!.userId) throw forbidden();
   return signMediaAsset(context, asset);
+}
+
+const ADMIN_MEDIA_READ_AUDIT_REASON = "관리자 첨부 파일 열람";
+
+/**
+ * Administrator media access follows the console surface that owns the
+ * attachment: inquiry evidence needs inquiries.read, catalog media needs
+ * catalog.read, and every other customer upload is moderated content.
+ */
+export function adminMediaReadPermission(purpose: string): "inquiries.read" | "catalog.read" | "moderation.read" {
+  if (purpose === "INQUIRY") return "inquiries.read";
+  if (purpose === "CATALOG" || purpose === "CATALOG_REQUEST") return "catalog.read";
+  return "moderation.read";
 }
 
 export async function registerMediaRoutes(app: FastifyInstance, context: ApiContext) {
@@ -761,7 +778,8 @@ export async function registerMediaRoutes(app: FastifyInstance, context: ApiCont
     const purpose = catalogUpload ? "CATALOG" : enumInput(body, "purpose", USER_MEDIA_PURPOSES)!;
     const filename = normalizeFilename(stringInput(body, "filename", { max: 255 })!);
     const mimeType = enumInput(body, "mimeType", SUPPORTED_MIME_TYPES)!;
-    const byteSize = integerInput(body, "byteSize", { min: 1, max: MAX_UPLOAD_BYTES })!;
+    const byteSize = integerInput(body, "byteSize", { min: 1 })!;
+    if (byteSize > MAX_UPLOAD_BYTES) throw mediaUploadTooLarge(MAX_UPLOAD_BYTES);
     const checksumSha256 = stringInput(body, "checksumSha256", { min: 64, max: 64 })!.toLocaleLowerCase("en-US");
     if (!/^[0-9a-f]{64}$/.test(checksumSha256)) throw badRequest("checksumSha256 형식을 확인해 주세요.");
     const methods = body.acceptedUploadMethods ?? ["POST"];
@@ -791,6 +809,9 @@ export async function registerMediaRoutes(app: FastifyInstance, context: ApiCont
     }
     const storage = context.mediaRuntime.configuredMediaStorage(needsLegacyPost ? { ...context.config, mediaStorageProvider: "gcs" } : context.config);
     if (storage.provider === "gcs" && !acceptedUploadMethods.includes("POST")) throw badRequest("지원하지 않는 업로드 방식입니다.");
+    // The active adapter owns the real object-size ceiling (Supabase: 5 MiB).
+    // Reject before signing so an oversized intent is a 413, not an adapter 500.
+    if (byteSize > storage.maxUploadBytes) throw mediaUploadTooLarge(storage.maxUploadBytes);
     const id = randomUUID();
     const objectKey = `uploads/${actorId}/${id}/${filename}`;
     const expiresAt = new Date(Date.now() + UPLOAD_POLICY_TTL_MS);
@@ -1405,7 +1426,7 @@ export async function registerMediaRoutes(app: FastifyInstance, context: ApiCont
     config: { rateLimit: { max: 20, timeWindow: "1 minute" } },
   }, deleteMedia);
 
-  app.get("/v1/media/:mediaId/url", { preHandler: context.auth.requireUser }, async (request) => signedReadUrl(context, request, false));
+  app.get("/v1/media/:mediaId/url", { preHandler: context.auth.requireUser }, async (request) => signedReadUrl(context, request));
   app.get("/v1/media/:mediaId/public-url", async (request) => {
     const id = mediaId(request);
     const row = await context.pool.query<MediaRow>(
@@ -1428,8 +1449,49 @@ export async function registerMediaRoutes(app: FastifyInstance, context: ApiCont
     if (!row.rowCount) throw notFound("공개된 첨부 파일을 찾을 수 없습니다.");
     return signMediaAsset(context, row.rows[0]!);
   });
-  app.get("/v1/admin/media/:mediaId/url", { preHandler: context.auth.requireAdmin }, async (request) => {
-    if (!isAdminRole(request.actor!.role)) throw forbidden();
-    return signedReadUrl(context, request, true);
+  app.get("/v1/admin/media/:mediaId/url", {
+    preHandler: context.auth.requireAdmin,
+    config: { rateLimit: { max: 60, timeWindow: "1 minute" } },
+  }, async (request, reply) => {
+    const actor = request.actor!;
+    if (!isAdminRole(actor.role)) throw forbidden();
+    const id = mediaId(request);
+    const row = await context.pool.query<MediaRow>("SELECT * FROM media_assets WHERE id=$1 AND status='READY'", [id]);
+    if (!row.rowCount) throw notFound("사용 가능한 첨부 파일을 찾을 수 없습니다.");
+    const asset = row.rows[0]!;
+    const permission = adminMediaReadPermission(asset.purpose);
+    const allowed = await context.pool.query(
+      "SELECT 1 FROM admin_role_permissions WHERE role=$1 AND permission_code=$2",
+      [actor.role, permission],
+    );
+    if (!allowed.rowCount) throw forbidden();
+    // Private customer media leaves the service boundary through this URL, so
+    // every issuance is recorded before the signature is created.
+    await withTransaction(context.pool, async (client) => {
+      const identity = await client.query<{ ip_address: string | null; user_agent: string | null }>(
+        `SELECT host(ip_address) AS ip_address,user_agent FROM sessions
+         WHERE id=$1 AND user_id=$2 AND session_kind='ADMIN'
+         FOR SHARE`,
+        [actor.sessionId, actor.userId],
+      );
+      if (!identity.rowCount) throw forbidden("유효한 관리자 세션의 감사 식별 정보를 확인할 수 없습니다.");
+      await client.query(
+        `INSERT INTO admin_audit_logs
+          (admin_id,action,target_type,target_id,reason,request_id,idempotency_key,metadata,ip_address,user_agent)
+         VALUES ($1,'MEDIA_SIGNED_URL_ISSUED','MEDIA',$2,$3,$4,$5,$6,$7,$8)`,
+        [
+          actor.userId,
+          id,
+          ADMIN_MEDIA_READ_AUDIT_REASON,
+          request.id,
+          `read:${request.id}`,
+          JSON.stringify({ purpose: asset.purpose, ownerId: asset.owner_id, permission }),
+          identity.rows[0]!.ip_address,
+          identity.rows[0]!.user_agent,
+        ],
+      );
+    });
+    reply.header("cache-control", "no-store");
+    return signMediaAsset(context, asset);
   });
 }

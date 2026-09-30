@@ -9,6 +9,7 @@ import {
   KUJI_INCLUDED_FREE_SHIPPING_THRESHOLD,
   STANDARD_SHIPPING_FEE,
   accountNotificationDestination,
+  publicNotificationData,
   accountDeletionStatus,
   calculateAccountShippingPolicy,
   canonicalPointReturnInventoryIds,
@@ -143,6 +144,22 @@ test("notification destinations are finite, kind-owned, and never accept stored 
   });
 });
 
+test("notification data returned to clients is limited to validated destination identifiers", () => {
+  const orderId = "11111111-1111-4111-8111-111111111111";
+  assert.deepEqual(publicNotificationData({
+    orderId,
+    productId: "safe-kuji-product",
+    category: "KUJI",
+    userId: "22222222-2222-4222-8222-222222222222",
+    amount: 12_000,
+    reason: "internal operator note",
+    providerPaymentId: "pay_secret",
+    href: "https://attacker.example/steal",
+    listingId: "../../admin",
+  }), { orderId, productId: "safe-kuji-product", category: "KUJI" });
+  assert.deepEqual(publicNotificationData({}), {});
+});
+
 test("Expo push tokens accept only bounded canonical Expo token forms", () => {
   assert.equal(isExpoPushToken("ExpoPushToken[abcdefgh_ABCDEFGH-12345678]"), true);
   assert.equal(isExpoPushToken("ExponentPushToken[abcdefgh_ABCDEFGH-12345678]"), true);
@@ -266,8 +283,9 @@ test("notification APIs are owner-scoped, paged, and expose an authoritative unr
   const list = await routes.get("/v1/account/notifications")!({
     actor: { userId: actorId },
     query: { limit: 1 },
-  }, {}) as { items: Array<{ id: string; destination: { route: string } }>; nextCursor: string | null };
+  }, {}) as { items: Array<{ id: string; data: unknown; destination: { route: string } }>; nextCursor: string | null };
   assert.equal(list.items.length, 1);
+  assert.deepEqual(list.items[0]!.data, {});
   assert.equal(list.items[0]!.id, firstId);
   assert.equal(list.items[0]!.destination.route, "storage");
   assert.ok(list.nextCursor);

@@ -3,7 +3,7 @@ import { USER_STATUSES, type UserRole, type UserStatus } from "@dabboba/domain";
 import { adminIdempotentMutation, sendAdminMutation } from "../lib/admin-idempotency.js";
 import { writeAdminAudit } from "../lib/audit.js";
 import { badRequest, conflict, forbidden, notFound } from "../lib/errors.js";
-import { enumInput, nullableStringInput, objectInput, queryString, stringInput, uuidInput } from "../lib/input.js";
+import { enumInput, nullableStringInput, objectInput, queryString, stringInput, uuidInput, likeContainsPattern } from "../lib/input.js";
 import { cursorPage, pagination } from "../lib/pagination.js";
 import { hashPassword } from "../lib/password.js";
 import { browserLabel, iso, maskEmail, maskIp, nullableIso, numberValue } from "../lib/rows.js";
@@ -75,9 +75,9 @@ export async function registerAdminRoutes(app: FastifyInstance, context: ApiCont
   });
 
   app.get("/v1/admin/users", { preHandler: context.auth.requirePermission("users.read") }, async (request) => {
-    const query=queryOf(request);const {limit,cursor}=pagination(query);const search=queryString(query.q);const status=query.status===undefined?undefined:enumInput(query,"status",USER_STATUSES);
+    const query=queryOf(request);const {limit,cursor}=pagination(query, "uuid");const search=queryString(query.q);const status=query.status===undefined?undefined:enumInput(query,"status",USER_STATUSES);
     const values:unknown[]=[limit+1];const filters=["u.role='USER'"];
-    if(search){values.push(`%${search}%`);filters.push(`(u.nickname ILIKE $${values.length} OR u.email::text ILIKE $${values.length} OR u.id::text ILIKE $${values.length})`);}
+    if(search){values.push(likeContainsPattern(search));filters.push(`(u.nickname ILIKE $${values.length} ESCAPE '\\' OR u.email::text ILIKE $${values.length} ESCAPE '\\' OR u.id::text ILIKE $${values.length} ESCAPE '\\')`);}
     if(status){values.push(status);filters.push(`u.status=$${values.length}`);}if(cursor){values.push(cursor.createdAt,cursor.id);filters.push(`(u.created_at,u.id)<($${values.length-1},$${values.length})`);}
     const result=await context.pool.query<UserRow>(`${userSelect} WHERE ${filters.join(" AND ")} ORDER BY u.created_at DESC,u.id DESC LIMIT $1`,values);return cursorPage(result.rows,limit,mapUser);
   });
@@ -107,7 +107,7 @@ export async function registerAdminRoutes(app: FastifyInstance, context: ApiCont
   });
 
   app.get("/v1/admin/administrators", { preHandler: context.auth.requireSuperAdmin }, async (request) => {
-    const query=queryOf(request);const {limit,cursor}=pagination(query);const values:unknown[]=[limit+1];const filters=["u.role IN ('ADMIN','SUPER_ADMIN')"];
+    const query=queryOf(request);const {limit,cursor}=pagination(query, "uuid");const values:unknown[]=[limit+1];const filters=["u.role IN ('ADMIN','SUPER_ADMIN')"];
     if(cursor){values.push(cursor.createdAt,cursor.id);filters.push(`(u.created_at,u.id)<($${values.length-1},$${values.length})`);}const result=await context.pool.query<UserRow>(`${userSelect} WHERE ${filters.join(" AND ")} ORDER BY u.created_at DESC,u.id DESC LIMIT $1`,values);return cursorPage(result.rows,limit,mapUser);
   });
 
@@ -125,8 +125,8 @@ export async function registerAdminRoutes(app: FastifyInstance, context: ApiCont
   });
 
   app.get("/v1/admin/audit-logs", { preHandler: context.auth.requirePermission("audit.read") }, async (request) => {
-    const query=queryOf(request);const {limit,cursor}=pagination(query);const search=queryString(query.q);const action=queryString(query.action,100);const values:unknown[]=[limit+1];const filters:string[]=[];
-    if(search){values.push(`%${search}%`);filters.push(`(a.action ILIKE $${values.length} OR a.target_type ILIKE $${values.length} OR a.target_id ILIKE $${values.length} OR u.email::text ILIKE $${values.length})`);}if(action){values.push(action);filters.push(`a.action=$${values.length}`);}if(cursor){values.push(cursor.createdAt,cursor.id);filters.push(`(a.created_at,a.id)<($${values.length-1},$${values.length})`);}
+    const query=queryOf(request);const {limit,cursor}=pagination(query, "uuid");const search=queryString(query.q);const action=queryString(query.action,100);const values:unknown[]=[limit+1];const filters:string[]=[];
+    if(search){values.push(likeContainsPattern(search));filters.push(`(a.action ILIKE $${values.length} ESCAPE '\\' OR a.target_type ILIKE $${values.length} ESCAPE '\\' OR a.target_id ILIKE $${values.length} ESCAPE '\\' OR u.email::text ILIKE $${values.length} ESCAPE '\\')`);}if(action){values.push(action);filters.push(`a.action=$${values.length}`);}if(cursor){values.push(cursor.createdAt,cursor.id);filters.push(`(a.created_at,a.id)<($${values.length-1},$${values.length})`);}
     const result=await context.pool.query<AuditRow>(`SELECT a.*,u.email::text AS admin_email FROM admin_audit_logs a JOIN users u ON u.id=a.admin_id ${filters.length?`WHERE ${filters.join(" AND ")}`:""} ORDER BY a.created_at DESC,a.id DESC LIMIT $1`,values);
     return cursorPage(result.rows,limit,(row)=>({id:row.id,adminId:row.admin_id,adminEmailMasked:maskEmail(row.admin_email),action:row.action,targetType:row.target_type,targetId:row.target_id,reason:row.reason,requestId:row.request_id,metadata:row.metadata,ipAddressMasked:maskIp(row.ip_address),clientLabel:browserLabel(row.user_agent),createdAt:iso(row.created_at)}));
   });

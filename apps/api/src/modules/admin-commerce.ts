@@ -2,11 +2,11 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { withTransaction } from "@dabboba/db";
 import { adminMutationHeaders, writeAdminAudit, writeOutbox } from "../lib/audit.js";
 import { assertDrawCapacity } from "../lib/draw-capacity.js";
-import { effectiveCommerceMode } from "../lib/commerce-mode.js";
+import { effectiveCommerceMode, requireLiveCommerce } from "../lib/commerce-mode.js";
 import { lateRefundBlocker, normalDrawRefundBlocker, REFUND_CANDIDATE_LOOKUP_SQL, type NormalDrawRefundCandidate } from "./portone-payments.js";
 import { badRequest, conflict, notFound } from "../lib/errors.js";
 import { beginIdempotency, completeIdempotency, requestHash } from "../lib/idempotency.js";
-import { enumInput, integerInput, nullableStringInput, objectInput, queryString, slugIdInput, stringInput, uuidInput } from "../lib/input.js";
+import { enumInput, integerInput, nullableStringInput, objectInput, queryString, slugIdInput, stringInput, uuidInput, likeContainsPattern } from "../lib/input.js";
 import { cursorPage, pagination } from "../lib/pagination.js";
 import { iso, maskEmail, nullableIso, numberValue } from "../lib/rows.js";
 import type { ApiContext } from "../types.js";
@@ -222,7 +222,7 @@ async function sendMutation(reply: FastifyReply, result: { replay: boolean; stat
 export async function registerAdminCommerceRoutes(app: FastifyInstance, context: ApiContext) {
   app.get("/v1/admin/commerce/orders", { preHandler: context.auth.requirePermission("orders.read") }, async (request) => {
     const query = queryOf(request);
-    const { limit, cursor } = pagination(query);
+    const { limit, cursor } = pagination(query, "uuid");
     const status = query.status === undefined ? undefined : enumInput(query, "status", ORDER_STATUSES);
     const search = queryString(query.q);
     const userId = query.userId === undefined || query.userId === "" ? undefined : uuidInput(query.userId, "userId");
@@ -231,9 +231,9 @@ export async function registerAdminCommerceRoutes(app: FastifyInstance, context:
     if (status) { values.push(status); filters.push(`o.status=$${values.length}`); }
     if (userId) { values.push(userId); filters.push(`o.user_id=$${values.length}`); }
     if (search) {
-      values.push(`%${search}%`);
-      filters.push(`(o.id::text ILIKE $${values.length} OR u.email::text ILIKE $${values.length} OR u.nickname ILIKE $${values.length} OR EXISTS (
-        SELECT 1 FROM order_lines search_line WHERE search_line.order_id=o.id AND search_line.product_name_snapshot ILIKE $${values.length}
+      values.push(likeContainsPattern(search));
+      filters.push(`(o.id::text ILIKE $${values.length} ESCAPE '\\' OR u.email::text ILIKE $${values.length} ESCAPE '\\' OR u.nickname ILIKE $${values.length} ESCAPE '\\' OR EXISTS (
+        SELECT 1 FROM order_lines search_line WHERE search_line.order_id=o.id AND search_line.product_name_snapshot ILIKE $${values.length} ESCAPE '\\'
       ))`);
     }
     if (cursor) { values.push(cursor.createdAt, cursor.id); filters.push(`(o.created_at,o.id)<($${values.length - 1},$${values.length})`); }
@@ -283,7 +283,7 @@ export async function registerAdminCommerceRoutes(app: FastifyInstance, context:
 
   app.get("/v1/admin/commerce/payments", { preHandler: context.auth.requirePermission("payments.read") }, async (request) => {
     const query = queryOf(request);
-    const { limit, cursor } = pagination(query);
+    const { limit, cursor } = pagination(query, "uuid");
     const status = query.status === undefined ? undefined : enumInput(query, "status", PAYMENT_STATUSES);
     const provider = queryString(query.provider, 40);
     const search = queryString(query.q, 200);
@@ -292,8 +292,8 @@ export async function registerAdminCommerceRoutes(app: FastifyInstance, context:
     if (status) { values.push(status); filters.push(`p.status=$${values.length}`); }
     if (provider) { values.push(provider); filters.push(`p.provider=$${values.length}`); }
     if (search) {
-      values.push(`%${search}%`);
-      filters.push(`(p.id::text ILIKE $${values.length} OR p.order_id::text ILIKE $${values.length} OR COALESCE(p.provider_payment_id,'') ILIKE $${values.length} OR u.email::text ILIKE $${values.length})`);
+      values.push(likeContainsPattern(search));
+      filters.push(`(p.id::text ILIKE $${values.length} ESCAPE '\\' OR p.order_id::text ILIKE $${values.length} ESCAPE '\\' OR COALESCE(p.provider_payment_id,'') ILIKE $${values.length} ESCAPE '\\' OR u.email::text ILIKE $${values.length} ESCAPE '\\')`);
     }
     if (cursor) { values.push(cursor.createdAt, cursor.id); filters.push(`(p.created_at,p.id)<($${values.length - 1},$${values.length})`); }
     const result = await context.pool.query<PaymentSummaryRow>(`
@@ -348,7 +348,7 @@ export async function registerAdminCommerceRoutes(app: FastifyInstance, context:
 
   app.get("/v1/admin/commerce/refund-reviews", { preHandler: context.auth.requirePermission("refunds.read") }, async (request) => {
     const query = queryOf(request);
-    const { limit, cursor } = pagination(query);
+    const { limit, cursor } = pagination(query, "uuid");
     const operationStatus = query.operationStatus === undefined ? undefined : enumInput(query, "operationStatus", REVIEW_FILTER_STATUSES);
     const search = queryString(query.q, 200);
     const values: unknown[] = [limit + 1];
@@ -356,8 +356,8 @@ export async function registerAdminCommerceRoutes(app: FastifyInstance, context:
     if (operationStatus === "UNTRACKED") filters.push("r.id IS NULL AND a.payment_id IS NULL");
     else if (operationStatus) { values.push(operationStatus); filters.push(`r.status=$${values.length}`); }
     if (search) {
-      values.push(`%${search}%`);
-      filters.push(`(p.id::text ILIKE $${values.length} OR o.id::text ILIKE $${values.length} OR COALESCE(p.provider_payment_id,'') ILIKE $${values.length} OR u.email::text ILIKE $${values.length})`);
+      values.push(likeContainsPattern(search));
+      filters.push(`(p.id::text ILIKE $${values.length} ESCAPE '\\' OR o.id::text ILIKE $${values.length} ESCAPE '\\' OR COALESCE(p.provider_payment_id,'') ILIKE $${values.length} ESCAPE '\\' OR u.email::text ILIKE $${values.length} ESCAPE '\\')`);
     }
     if (cursor) { values.push(cursor.createdAt, cursor.id); filters.push(`(p.created_at,p.id)<($${values.length - 1},$${values.length})`); }
     const result = await context.pool.query<RefundReviewRow>(`
@@ -501,12 +501,12 @@ export async function registerAdminCommerceRoutes(app: FastifyInstance, context:
 
   app.get("/v1/admin/commerce/inventory", { preHandler: context.auth.requirePermission("inventory.read") }, async (request) => {
     const query = queryOf(request);
-    const { limit, cursor } = pagination(query);
+    const { limit, cursor } = pagination(query, "uuid");
     const search = queryString(query.q);
     const category = query.category === undefined || query.category === "" ? undefined : enumInput(query, "category", ["gacha", "figure", "kuji", "tcg"] as const);
     const values: unknown[] = [limit + 1];
     const filters: string[] = [];
-    if (search) { values.push(`%${search}%`); filters.push(`(p.name ILIKE $${values.length} OR p.sku ILIKE $${values.length} OR p.id ILIKE $${values.length})`); }
+    if (search) { values.push(likeContainsPattern(search)); filters.push(`(p.name ILIKE $${values.length} ESCAPE '\\' OR p.sku ILIKE $${values.length} ESCAPE '\\' OR p.id ILIKE $${values.length} ESCAPE '\\')`); }
     if (category) { values.push(category); filters.push(`p.category=$${values.length}`); }
     if (cursor) { values.push(cursor.createdAt, cursor.id); filters.push(`(p.created_at,p.id)<($${values.length - 1},$${values.length})`); }
     const result = await context.pool.query<InventoryRow>(`
@@ -623,15 +623,15 @@ export async function registerAdminCommerceRoutes(app: FastifyInstance, context:
 
   app.get("/v1/admin/commerce/shipping", { preHandler: context.auth.requirePermission("shipping.read") }, async (request) => {
     const query = queryOf(request);
-    const { limit, cursor } = pagination(query);
+    const { limit, cursor } = pagination(query, "uuid");
     const status = query.status === undefined ? undefined : enumInput(query, "status", SHIPPING_STATUSES);
     const search = queryString(query.q, 200);
     const values: unknown[] = [limit + 1];
     const filters: string[] = [];
     if (status) { values.push(status); filters.push(`s.status=$${values.length}`); }
     if (search) {
-      values.push(`%${search}%`);
-      filters.push(`(s.id::text ILIKE $${values.length} OR u.email::text ILIKE $${values.length} OR u.nickname ILIKE $${values.length} OR COALESCE(s.tracking_number,'') ILIKE $${values.length})`);
+      values.push(likeContainsPattern(search));
+      filters.push(`(s.id::text ILIKE $${values.length} ESCAPE '\\' OR u.email::text ILIKE $${values.length} ESCAPE '\\' OR u.nickname ILIKE $${values.length} ESCAPE '\\' OR COALESCE(s.tracking_number,'') ILIKE $${values.length} ESCAPE '\\')`);
     }
     if (cursor) { values.push(cursor.createdAt, cursor.id); filters.push(`(s.requested_at,s.id)<($${values.length - 1},$${values.length})`); }
     const result = await context.pool.query<ShippingSummaryRow>(`
@@ -683,7 +683,7 @@ export async function registerAdminCommerceRoutes(app: FastifyInstance, context:
     };
   });
 
-  app.post("/v1/admin/commerce/shipping/:shippingRequestId/status", { preHandler: context.auth.requirePermission("shipping.manage") }, async (request, reply) => {
+  app.post("/v1/admin/commerce/shipping/:shippingRequestId/status", { preHandler: [requireLiveCommerce(context), context.auth.requirePermission("shipping.manage")] }, async (request, reply) => {
     const shippingRequestId = uuidInput((request.params as Record<string, unknown>).shippingRequestId, "shippingRequestId");
     const body = objectInput(request.body);
     const status = enumInput(body, "status", SHIPPING_TARGET_STATUSES)!;
