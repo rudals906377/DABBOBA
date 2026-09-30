@@ -4366,10 +4366,10 @@ components:
         mediaId: { type: string, format: uuid }
         expectedVersion: { type: integer, minimum: 1 }
         role:
-          description: primary는 기존 상세·기본 대표 사진이고 storefront는 상품 목록 전용 사진입니다.
+          description: primary는 기본 대표 사진, storefront는 목록 전용 사진, gallery는 상품 상세에서 넘겨 보는 사진을 순서대로 추가합니다(최대 8장). gallery에 등록된 사진이 있으면 상세 화면은 그 사진들만 슬라이드로 보여줍니다.
           allOf:
             - type: string
-              enum: [primary, storefront]
+              enum: [primary, storefront, gallery]
               default: primary
     ProductImageAttachment:
       type: object
@@ -4383,14 +4383,18 @@ components:
         imageUrl: { type: string, format: uri }
         version: { type: integer, minimum: 2 }
         mediaId: { type: string, format: uuid }
-        role: { type: string, enum: [primary, storefront] }
+        role: { type: string, enum: [primary, storefront, gallery] }
     ProductImageClearInput:
       type: object
       additionalProperties: false
       required: [expectedVersion, role]
       properties:
         expectedVersion: { type: integer, minimum: 1 }
-        role: { type: string, enum: [storefront] }
+        role: { type: string, enum: [storefront, gallery] }
+        imageUrl:
+          type: string
+          format: uri
+          description: gallery 사진 한 장을 연결 해제할 때 필요한 현재 이미지 URL입니다.
     ProductImageClearResult:
       type: object
       additionalProperties: false
@@ -4400,9 +4404,9 @@ components:
           type: string
           maxLength: 120
           pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$"
-        imageUrl: { type: "null" }
+        imageUrl: { type: [string, "null"], format: uri }
         version: { type: integer, minimum: 2 }
-        role: { type: string, enum: [storefront] }
+        role: { type: string, enum: [storefront, gallery] }
     Actor:
       type: object
       additionalProperties: false
@@ -5189,7 +5193,10 @@ components:
           maxItems: 200
           description: ACTIVE 쿠지 덱에서 아직 결과 확정으로 소진되지 않은 상만 순서대로 제공합니다. 가챠이거나 공개 덱이 없으면 빈 배열이며, 봉인된 번호별 결과는 포함하지 않습니다.
           items: { $ref: "#/components/schemas/PublicKujiTierRemaining" }
-        metadata: { type: object, additionalProperties: true }
+        metadata:
+          type: object
+          additionalProperties: true
+          description: detailGalleryImageUrls는 등록 순서대로 보여줄 상세 슬라이드 이미지 URL 최대 8개입니다. 비어 있으면 imageUrl 한 장을 사용합니다.
         imageUrl: { type: [string, "null"], format: uri }
         storefrontImageUrl:
           type: [string, "null"]
@@ -5221,7 +5228,10 @@ components:
         releaseDate: { type: [string, "null"], format: date }
         price: { type: integer, minimum: 0, maximum: 2147483647 }
         availableQuantity: { type: integer, minimum: 0, maximum: 2147483647 }
-        metadata: { type: object, additionalProperties: true }
+        metadata:
+          type: object
+          additionalProperties: true
+          description: detailGalleryImageUrls는 등록 순서대로 보여줄 상세 슬라이드 이미지 URL 최대 8개입니다.
         imageUrl: { type: [string, "null"], format: uri }
         isActive: { type: boolean }
         isPrizeOnly:

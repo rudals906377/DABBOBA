@@ -146,6 +146,35 @@ test("product image action forwards the storefront role to the atomic attach", a
   });
 });
 
+test("product image action forwards gallery role without replacing the primary image", async () => {
+  const file = new File([new Uint8Array([1, 2, 3, 4])], "상세 사진.png", { type: "image/png" });
+  const run = await loadActions();
+  await assert.rejects(() => run.actions.uploadProductImage(form(file, { role: "gallery" })), /REDIRECT/);
+  assert.deepEqual(JSON.parse(JSON.stringify(run.apiCalls[2][1].body)), {
+    mediaId: "123e4567-e89b-42d3-a456-426614174001", expectedVersion: 7, role: "gallery",
+  });
+});
+
+test("gallery image clear action removes one selected slide with confirmation", async () => {
+  const run = await loadActions();
+  await assert.rejects(() => run.actions.clearGalleryProductImage(form(null, {
+    imageUrl: "https://cdn.example.test/gallery-2.webp",
+    reason: "잘못 등록한 상세 사진 제거",
+    confirmGalleryImageClear: "on",
+  })), /REDIRECT/);
+  assert.equal(run.apiCalls.length, 1);
+  assert.deepEqual(JSON.parse(JSON.stringify(run.apiCalls[0][1].body)), {
+    expectedVersion: 7, role: "gallery", imageUrl: "https://cdn.example.test/gallery-2.webp",
+  });
+
+  const denied = await loadActions();
+  await assert.rejects(() => denied.actions.clearGalleryProductImage(form(null, {
+    imageUrl: "https://cdn.example.test/gallery-2.webp",
+    reason: "잘못 등록한 상세 사진 제거",
+  })), /REDIRECT/);
+  assert.equal(denied.apiCalls.length, 0);
+});
+
 test("storefront image clear action is confirmed and sends only the protected storefront role", async () => {
   const run = await loadActions();
   await assert.rejects(() => run.actions.clearStorefrontProductImage(form(null, {
@@ -239,7 +268,7 @@ test("product image action cannot fake success on capability, storage, or stale 
 test("product image form renders a same-origin server action without editable image URL", async () => {
   const module = await loadModule(join(adminRoot, "components/catalog-forms.tsx"), {
     "../lib/actions": {
-      clearStorefrontProductImage() {}, createCharacter() {}, createIp() {}, createProduct() {}, updateCharacter() {}, updateIp() {}, updateProduct() {}, uploadProductImage() {},
+      clearGalleryProductImage() {}, clearStorefrontProductImage() {}, createCharacter() {}, createIp() {}, createProduct() {}, updateCharacter() {}, updateIp() {}, updateProduct() {}, uploadProductImage() {},
     },
     "./operations": {
       ReturnTo: ({ value }) => React.createElement(React.Fragment, null,
@@ -259,11 +288,12 @@ test("product image form renders a same-origin server action without editable im
     },
     returnTo: "/catalog/products",
   }));
-  assert.equal((html.match(/type="file"/g) || []).length, 2);
+  assert.equal((html.match(/type="file"/g) || []).length, 3);
   assert.match(html, /accept="image\/jpeg,image\/png,image\/webp,image\/gif"/);
   assert.match(html, /name="expectedVersion" value="7"/);
   assert.match(html, /name="role" value="primary"/);
   assert.match(html, /name="role" value="storefront"/);
+  assert.match(html, /name="role" value="gallery"/);
   assert.match(html, /정확한 1:1 비율/);
   assert.match(html, /최소 1080×1080px/);
   assert.match(html, /현재 대표 사진/);
@@ -281,7 +311,7 @@ test("product image form renders a same-origin server action without editable im
 test("product image form hides the clear action when no storefront image exists and never links unsafe URLs", async () => {
   const module = await loadModule(join(adminRoot, "components/catalog-forms.tsx"), {
     "../lib/actions": {
-      clearStorefrontProductImage() {}, createCharacter() {}, createIp() {}, createProduct() {}, updateCharacter() {}, updateIp() {}, updateProduct() {}, uploadProductImage() {},
+      clearGalleryProductImage() {}, clearStorefrontProductImage() {}, createCharacter() {}, createIp() {}, createProduct() {}, updateCharacter() {}, updateIp() {}, updateProduct() {}, uploadProductImage() {},
     },
     "./operations": {
       ReturnTo: () => null,
@@ -308,10 +338,40 @@ test("product image form hides the clear action when no storefront image exists 
   assert.doesNotMatch(html, /class="danger"/);
 });
 
+test("admin form shows an ordered three-photo gallery and per-photo removal", async () => {
+  const module = await loadModule(join(adminRoot, "components/catalog-forms.tsx"), {
+    "../lib/actions": {
+      clearGalleryProductImage() {}, clearStorefrontProductImage() {}, createCharacter() {}, createIp() {}, createProduct() {}, updateCharacter() {}, updateIp() {}, updateProduct() {}, uploadProductImage() {},
+    },
+    "./operations": {
+      ReturnTo: () => null,
+      ReasonField: () => null,
+      safeExternalUrl: (value) => /^https?:\/\//.test(String(value || "")) ? String(value) : null,
+    },
+  });
+  const html = renderToStaticMarkup(React.createElement(module.ProductImageForm, {
+    item: {
+      id: "gacha-sylvanian-adventure",
+      version: 7,
+      category: "gacha",
+      imageUrl: "https://cdn.example.test/primary.webp",
+      storefrontImageUrl: null,
+      metadata: { detailGalleryImageUrls: ["https://cdn.example.test/1.webp", "https://cdn.example.test/2.webp", "https://cdn.example.test/3.webp"] },
+    },
+    returnTo: "/catalog/products",
+  }));
+  assert.match(html, /상세 슬라이드 1/);
+  assert.match(html, /상세 슬라이드 2/);
+  assert.match(html, /상세 슬라이드 3/);
+  assert.equal((html.match(/name="confirmGalleryImageClear"/g) || []).length, 3);
+  assert.match(html, /name="role" value="gallery"/);
+  assert.equal((html.match(/type="file"/g) || []).length, 3);
+});
+
 test("IP form identifies its image as the Home popular-work square artwork", async () => {
   const module = await loadModule(join(adminRoot, "components/catalog-forms.tsx"), {
     "../lib/actions": {
-      clearStorefrontProductImage() {}, createCharacter() {}, createIp() {}, createProduct() {}, updateCharacter() {}, updateIp() {}, updateProduct() {}, uploadProductImage() {},
+      clearGalleryProductImage() {}, clearStorefrontProductImage() {}, createCharacter() {}, createIp() {}, createProduct() {}, updateCharacter() {}, updateIp() {}, updateProduct() {}, uploadProductImage() {},
     },
     "./operations": {
       ReturnTo: () => null,

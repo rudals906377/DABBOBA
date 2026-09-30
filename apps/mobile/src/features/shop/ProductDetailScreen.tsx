@@ -51,6 +51,7 @@ import {
 } from "@/features/shop/shop-api";
 import { includedPrizes } from "@/features/shop/included-prizes";
 import { productSubjectTitle } from "@/features/shop/product-title";
+import { productDetailGalleryImages } from "@/features/shop/product-gallery";
 import { shopTabPathForCategory } from "@/features/shop/shop-navigation";
 import { readAuthTokens } from "@/lib/session-store";
 import { recordRecentlyViewedProduct } from "@/lib/local-database";
@@ -337,30 +338,55 @@ export function ProductDetailScreen() {
 const HERO_ASPECT_RATIO_BOUNDS = { min: 0.6, max: 2.4 } as const;
 
 function ProductHero({ snapshot, assetBaseUrl }: { snapshot: ProductDetailSnapshot; assetBaseUrl: string | null }) {
-  const uri = resolveCatalogImageUrl(snapshot.product.imageUrl, assetBaseUrl, snapshot.product.version);
+  const imageUrls = productDetailGalleryImages(snapshot.product.metadata, snapshot.product.imageUrl);
+  const [slideWidth, setSlideWidth] = useState(0);
+  const [activeIndex, setActiveIndex] = useState(0);
+  const uri = resolveCatalogImageUrl(imageUrls[activeIndex] ?? imageUrls[0] ?? null, assetBaseUrl, snapshot.product.version);
   const editionLabel = productMetadataText(snapshot.product, "edition")?.trim();
-  const [measured, setMeasured] = useState<{ uri: string | null; aspectRatio: number } | null>(null);
+  const [measured, setMeasured] = useState<Record<string, number>>({});
   // Until the source is measured, reserve a neutral loading footprint; the hero then
   // takes the image's own aspect ratio so the complete photo shows without a frame.
   const loadingAspectRatio = snapshot.product.category === "kuji" ? 16 / 9 : 1;
-  const heroAspectRatio = measured?.uri === uri ? measured.aspectRatio : loadingAspectRatio;
+  const heroAspectRatio = (uri && measured[uri]) || loadingAspectRatio;
+
+  useEffect(() => setActiveIndex(0), [snapshot.product.id, snapshot.product.version, slideWidth]);
+
+  const renderImage = (imageUrl: string | null, index: number) => {
+    const imageUri = resolveCatalogImageUrl(imageUrl, assetBaseUrl, snapshot.product.version);
+    return <CatalogProductImage
+      uri={imageUri}
+      requestKey={`${snapshot.product.version}-${index}`}
+      resizeMode="contain"
+      style={styles.heroImage}
+      onDimensions={(width, height) => {
+        if (!imageUri) return;
+        const aspectRatio = Math.min(HERO_ASPECT_RATIO_BOUNDS.max, Math.max(HERO_ASPECT_RATIO_BOUNDS.min, width / height));
+        setMeasured((current) => current[imageUri] === aspectRatio ? current : { ...current, [imageUri]: aspectRatio });
+      }}
+    />;
+  };
 
   return (
     <View style={styles.heroContainer}>
-      <View style={[styles.hero, { aspectRatio: heroAspectRatio }]}>
-        <CatalogProductImage
-          uri={uri}
-          requestKey={snapshot.product.version}
-          resizeMode="contain"
-          style={styles.heroImage}
-          onDimensions={(width, height) => setMeasured({
-            uri,
-            aspectRatio: Math.min(
-              HERO_ASPECT_RATIO_BOUNDS.max,
-              Math.max(HERO_ASPECT_RATIO_BOUNDS.min, width / height),
-            ),
-          })}
-        />
+      <View style={[styles.hero, { aspectRatio: heroAspectRatio }]} onLayout={({ nativeEvent }) => setSlideWidth(nativeEvent.layout.width)}>
+        {imageUrls.length > 1 && slideWidth > 0 ? (
+          <ScrollView
+            key={`${snapshot.product.id}-${snapshot.product.version}-${slideWidth}`}
+            horizontal
+            pagingEnabled
+            showsHorizontalScrollIndicator={false}
+            accessibilityLabel={`${snapshot.product.name} 상품 상세 사진 ${imageUrls.length}장`}
+            onMomentumScrollEnd={({ nativeEvent }) => setActiveIndex(Math.min(imageUrls.length - 1, Math.max(0, Math.round(nativeEvent.contentOffset.x / slideWidth))))}
+            style={styles.heroImage}
+          >
+            {imageUrls.map((url, index) => (
+              <View key={`${index}-${url}`} accessibilityLabel={`상품 상세 사진 ${index + 1}/${imageUrls.length}`} style={{ width: slideWidth, height: "100%" }}>
+                {renderImage(url, index)}
+              </View>
+            ))}
+          </ScrollView>
+        ) : renderImage(imageUrls[0] ?? null, 0)}
+        {imageUrls.length > 1 ? <View pointerEvents="none" style={styles.heroCount}><Text style={styles.heroCountText}>{activeIndex + 1} / {imageUrls.length}</Text></View> : null}
         {editionLabel ? (
           <View style={styles.editionBadge}><Text style={styles.editionLabel}>{editionLabel}</Text></View>
         ) : null}
@@ -442,6 +468,8 @@ const styles = StyleSheet.create({
   heroContainer: { marginHorizontal: seed.spacing.x2, marginVertical: seed.spacing.x4 },
   hero: { width: "100%", overflow: "hidden" },
   heroImage: { width: "100%", height: "100%" },
+  heroCount: { position: "absolute", right: seed.spacing.x3, top: seed.spacing.x3, paddingHorizontal: seed.spacing.x2_5, paddingVertical: seed.spacing.x1_5, borderRadius: seed.radius.full, backgroundColor: "rgba(7,16,11,0.88)" },
+  heroCountText: { ...seed.typography.catalogMetadata, color: colors.white },
   editionBadge: { position: "absolute", left: 12, bottom: 12, maxWidth: "82%", paddingHorizontal: 10, paddingVertical: 7, borderRadius: seed.radius.r2, backgroundColor: seed.color.inverted.surface },
   editionLabel: { color: colors.white, fontSize: 11, lineHeight: 16, fontWeight: "800" },
   detailCopy: { paddingHorizontal: seed.spacing.globalGutter },

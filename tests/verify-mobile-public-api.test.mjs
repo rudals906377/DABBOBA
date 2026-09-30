@@ -33,7 +33,7 @@ function fixtureFetch({ commerceMode, paymentProvider } = {}) {
     let body = bodies[parsed.pathname];
     if (parsed.pathname === '/v1/catalog/products') {
       body = mode === 'LIVE'
-        ? { items: [product(parsed.searchParams.get('category'))], nextCursor: null }
+        ? { items: parsed.searchParams.get('category') === 'gacha' ? [product('gacha')] : [], nextCursor: null }
         : { items: [{ id: 'p', category: parsed.searchParams.get('category'), availableQuantity: 0, totalQuantity: null, imageUrl: 'https://cdn.dabboba.net/p.jpg' }], nextCursor: null };
     }
     return new Response(JSON.stringify(body), { status: 200 });

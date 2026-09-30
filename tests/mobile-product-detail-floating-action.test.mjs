@@ -48,7 +48,9 @@ test("native Product Detail keeps its commerce action in a floating content over
 
 test("native Product Detail bounds category artwork and leads with prize information", () => {
   assert.match(source, /import \{ CatalogProductImage \} from "@\/components\/CatalogProductImage"/);
-  assert.match(source, /onDimensions=\{\(width, height\) => setMeasured\(/);
+  assert.match(source, /onDimensions=\{\(width, height\) =>/);
+  assert.match(source, /setMeasured\(\(current\) => current\[imageUri\] === aspectRatio/);
+  assert.match(source, /measured\[uri\]/);
   assert.match(source, /\[styles\.hero, \{ aspectRatio: heroAspectRatio \}\]/);
   assert.match(source, /hero:\s*\{ width: "100%", overflow: "hidden" \}/);
   assert.doesNotMatch(source, /heroGacha|heroKuji|aspectRatio:\s*4\s*\/\s*3/);

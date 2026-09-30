@@ -38,6 +38,7 @@
     "supabase:worker:provision": "node scripts/provision-supabase-worker-role.mjs",
     "supabase:worker:schedule": "node scripts/configure-supabase-worker-schedule.mjs",
     "catalog:photos:check": "node scripts/sync-product-photo-catalog.mjs --check",
+    "catalog:media:inspect": "node scripts/inspect-local-product-media.mjs",
     "catalog:photos:apply": "node scripts/sync-product-photo-catalog.mjs --apply",
     "workspace:assert": "node scripts/check-workspace-structure.mjs",
     "workspace:packages": "corepack pnpm --filter './packages/*' build",

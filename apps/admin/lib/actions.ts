@@ -29,7 +29,7 @@ const EXCHANGE_ACTIONS = ["COMPLETE", "CANCEL"] as const;
 const REFUND_REVIEW_STATUSES = ["PENDING", "IN_REVIEW", "WAITING_PROVIDER", "ESCALATED", "CLOSED"] as const;
 const SHIPPING_TARGET_STATUSES = ["PROCESSING", "SHIPPED", "DELIVERED", "CANCELLED"] as const;
 const ACCOUNT_DELETION_DECISIONS = ["APPROVED", "REJECTED"] as const;
-const PRODUCT_IMAGE_ROLES = ["primary", "storefront"] as const;
+const PRODUCT_IMAGE_ROLES = ["primary", "storefront", "gallery"] as const;
 
 type CreateCatalogMediaUploadInput = components["schemas"]["CreateCatalogMediaUploadInput"];
 type MediaReady = components["schemas"]["MediaReady"];
@@ -555,6 +555,26 @@ export async function clearStorefrontProductImage(form: FormData) {
       body: input,
     });
   }, "상품 목록 사진 연결을 해제했습니다.");
+}
+
+export async function clearGalleryProductImage(form: FormData) {
+  await mutate("catalog.manage", form, async (session, operationReason) => {
+    if (form.get("confirmGalleryImageClear") !== "on") {
+      throw new Error("상세 슬라이드 사진 연결 해제를 확인해 주세요.");
+    }
+    const input: ProductImageClearInput = {
+      expectedVersion: version(form),
+      role: "gallery",
+      imageUrl: text(form, "imageUrl", 2_000),
+    };
+    await adminApi<ProductImageClearResult>(`/v1/admin/products/${id(form, "productId")}/image`, {
+      method: "DELETE",
+      token: session.token,
+      reason: operationReason,
+      headers: mutationHeaders(form),
+      body: input,
+    });
+  }, "상세 슬라이드 사진 연결을 해제했습니다.");
 }
 
 function drawVersionBody(form: FormData, category: DrawDraftCategory) {

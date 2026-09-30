@@ -1,5 +1,5 @@
 import type { CatalogIp, CatalogProduct, Character } from "../lib/admin-types";
-import { clearStorefrontProductImage, createCharacter, createIp, createProduct, updateCharacter, updateIp, updateProduct, uploadProductImage } from "../lib/actions";
+import { clearGalleryProductImage, clearStorefrontProductImage, createCharacter, createIp, createProduct, updateCharacter, updateIp, updateProduct, uploadProductImage } from "../lib/actions";
 import { ReasonField, ReturnTo, safeExternalUrl } from "./operations";
 
 export function IpForm({ item, returnTo, initialName }: { item?: CatalogIp; returnTo: string; initialName?: string }) {
@@ -99,7 +99,7 @@ function ProductImageUploadForm({
 }: {
   item: CatalogProduct;
   returnTo: string;
-  role: "primary" | "storefront";
+  role: "primary" | "storefront" | "gallery";
   label: string;
   guidance: string;
   buttonLabel: string;
@@ -165,7 +165,24 @@ function StorefrontImageClearForm({ item, returnTo }: { item: CatalogProduct; re
   </form>;
 }
 
+function GalleryImageClearForm({ item, imageUrl, index, returnTo }: { item: CatalogProduct; imageUrl: string; index: number; returnTo: string }) {
+  return <form className="stack-form catalog-image-form" action={clearGalleryProductImage}>
+    <input type="hidden" name="productId" value={item.id} />
+    <input type="hidden" name="expectedVersion" value={item.version} />
+    <input type="hidden" name="imageUrl" value={imageUrl} />
+    <ReturnTo value={returnTo} />
+    <p><strong>상세 슬라이드 {index + 1} 연결 해제</strong></p>
+    <p className="muted">이 사진만 상품 상세 슬라이드에서 제거합니다. 기본 대표·목록·경품 사진은 유지됩니다.</p>
+    <label className="check-field"><input type="checkbox" name="confirmGalleryImageClear" required />이 사진 연결 해제를 확인했습니다.</label>
+    <ReasonField label="상세 슬라이드 사진 연결 해제 사유" />
+    <div className="form-actions"><button className="danger">슬라이드 사진 제거</button></div>
+  </form>;
+}
+
 export function ProductImageForm({ item, returnTo }: { item: CatalogProduct; returnTo: string }) {
+  const gallery = Array.isArray(item.metadata?.detailGalleryImageUrls)
+    ? item.metadata.detailGalleryImageUrls.filter((url): url is string => typeof url === "string")
+    : [];
   const storefront = item.category === "gacha"
     ? {
         label: "새 가챠 목록 사진",
@@ -182,6 +199,7 @@ export function ProductImageForm({ item, returnTo }: { item: CatalogProduct; ret
     <div className="catalog-image-current-grid">
       <CurrentProductImage label="현재 대표 사진" url={item.imageUrl} />
       <CurrentProductImage label="현재 목록 사진" url={item.storefrontImageUrl} />
+      {gallery.map((url, index) => <CurrentProductImage key={`${index}-${url}`} label={`상세 슬라이드 ${index + 1}`} url={url} />)}
     </div>
     <ProductImageUploadForm
       item={item}
@@ -199,6 +217,16 @@ export function ProductImageForm({ item, returnTo }: { item: CatalogProduct; ret
       guidance={storefront.guidance}
       buttonLabel="목록 사진 업로드 및 연결"
     /> : <p className="muted">목록 사진은 가챠·쿠지 상품에만 등록할 수 있습니다.</p>}
+    {gallery.length < 8 ? <ProductImageUploadForm
+      item={item}
+      returnTo={returnTo}
+      role="gallery"
+      label="새 상세 슬라이드 사진"
+      guidance="상품 상세에서 등록 순서대로 넘겨 볼 사진 · 최대 8장 · JPG, PNG, WEBP, GIF · 각 10MB 이하. 첫 사진부터 차례로 한 장씩 등록하세요."
+      buttonLabel="상세 슬라이드 사진 추가"
+    /> : <p className="muted">상세 슬라이드 사진은 최대 8장입니다.</p>}
+    {gallery.length ? <p className="muted">상세 슬라이드 사진이 있으면 고객 상세 화면에는 이 사진들만 표시됩니다. 기본 대표 사진은 슬라이드에 자동 추가되지 않습니다.</p> : null}
     {item.storefrontImageUrl ? <StorefrontImageClearForm item={item} returnTo={returnTo} /> : null}
+    {gallery.map((url, index) => <GalleryImageClearForm key={`${index}-${url}`} item={item} imageUrl={url} index={index} returnTo={returnTo} />)}
   </>;
 }

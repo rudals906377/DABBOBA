@@ -1034,7 +1034,9 @@ test("native gacha and kuji shops coexist with the shared drawn-product storage 
   assert.match(shopSource, /\.\.\.catalogProductCardSurface/);
   assert.doesNotMatch(productDetailSource, /Image\.getSize\(|setImageAspectRatio/);
   assert.match(productDetailSource, /<CatalogProductImage/);
-  assert.match(productDetailSource, /onDimensions=\{\(width, height\) => setMeasured\(/);
+  assert.match(productDetailSource, /onDimensions=\{\(width, height\) =>/);
+  assert.match(productDetailSource, /setMeasured\(\(current\) => current\[imageUri\] === aspectRatio/);
+  assert.match(productDetailSource, /measured\[uri\]/);
   assert.match(productDetailSource, /\[styles\.hero, \{ aspectRatio: heroAspectRatio \}\]/);
   assert.doesNotMatch(productDetailSource, /heroGacha|heroKuji/);
   assert.match(productDetailSource, /resizeMode="contain"/);

@@ -195,7 +195,7 @@ test('mobile release smoke rejects a prelaunch catalog that exposes invented sto
   }), /Products exposes inventory during PRELAUNCH/);
 });
 
-test('LIVE mobile release requires configured login and purchasable gacha and kuji catalogs', async () => {
+test('first LIVE mobile release requires gacha and keeps kuji deferred', async () => {
   const liveResponses = {
     ...responses,
     '/v1/public/config': { ...responses['/v1/public/config'], commerceMode: 'LIVE' },
@@ -218,7 +218,7 @@ test('LIVE mobile release requires configured login and purchasable gacha and ku
       const body = overrides[`${parsed.pathname}${parsed.search}`]
         ?? overrides[parsed.pathname]
         ?? (parsed.pathname === '/v1/catalog/products'
-          ? { items: [product(parsed.searchParams.get('category'))], nextCursor: null }
+          ? { items: parsed.searchParams.get('category') === 'gacha' ? [product('gacha')] : [], nextCursor: null }
           : parsed.pathname === '/v1/catalog/ips'
             ? { items: [], nextCursor: null }
             : liveResponses[parsed.pathname]);
@@ -233,13 +233,12 @@ test('LIVE mobile release requires configured login and purchasable gacha and ku
   });
   assert.equal(result.commerceMode, 'LIVE');
   const apiCalls = valid.calls.filter((call) => call.host === 'api.dabboba.net');
-  assert.equal(apiCalls.length, 9);
+  assert.equal(apiCalls.length, 8);
   assert.deepEqual(valid.calls.filter((call) => call.host === 'cdn.dabboba.net').map((call) => call.path), ['/gacha.jpg']);
   assert.equal(valid.calls.every((call) => call.method === 'GET'), true);
   assert.equal(apiCalls[3].path, '/v1/auth/providers');
-  assert.deepEqual(apiCalls.slice(-2).map(({ path, search }) => `${path}${search}`), [
+  assert.deepEqual(apiCalls.slice(-1).map(({ path, search }) => `${path}${search}`), [
     '/v1/catalog/products?category=gacha&saleStatus=ON_SALE&excludeSoldOut=true&limit=1',
-    '/v1/catalog/products?category=kuji&saleStatus=ON_SALE&excludeSoldOut=true&limit=1',
   ]);
 
   const missingLogin = fetchLive({
@@ -273,12 +272,18 @@ test('LIVE mobile release requires configured login and purchasable gacha and ku
     apiBaseUrl: 'https://api.dabboba.net', expectedCommerceMode: 'LIVE', fetchImpl: unsellableGacha.fetchImpl,
   }), /LIVE gacha catalog has no purchasable product/);
 
-  const missingKuji = fetchLive({
-    '/v1/catalog/products?category=kuji&saleStatus=ON_SALE&excludeSoldOut=true&limit=1': { items: [], nextCursor: null },
+  const prematureKuji = fetchLive({
+    '/v1/catalog/products?category=kuji&limit=1': { items: [product('kuji')], nextCursor: null },
   });
   await assert.rejects(publicApiSmoke.verifyMobilePublicApiSurface({
-    apiBaseUrl: 'https://api.dabboba.net', expectedCommerceMode: 'LIVE', fetchImpl: missingKuji.fetchImpl,
-  }), /LIVE kuji catalog has no purchasable product/);
+    apiBaseUrl: 'https://api.dabboba.net', expectedCommerceMode: 'LIVE', fetchImpl: prematureKuji.fetchImpl,
+  }), /Kuji is deferred/);
+  const comingSoonKuji = fetchLive({
+    '/v1/catalog/products?category=kuji&limit=1': { items: [{ ...product('kuji'), saleStatus: 'COMING_SOON', purchasable: false }], nextCursor: null },
+  });
+  await publicApiSmoke.verifyMobilePublicApiSurface({
+    apiBaseUrl: 'https://api.dabboba.net', expectedCommerceMode: 'LIVE', fetchImpl: comingSoonKuji.fetchImpl,
+  });
 });
 
 test('every profile rejects a third-party login listed without Sign in with Apple', async () => {

@@ -39,6 +39,7 @@ import {
 } from "../lib/demo-testing.js";
 import type { ApiContext } from "../types.js";
 import { assertReadyOwnedMedia } from "./media.js";
+import { preserveProductGalleryMetadata } from "./catalog-gallery-metadata.js";
 
 type IpRow = {
   id: string;
@@ -690,13 +691,14 @@ export async function registerCatalogRoutes(app: FastifyInstance, context: ApiCo
 
   app.post("/v1/admin/products", { preHandler: context.auth.requirePermission("catalog.write") }, async (request, reply) => {
     const input = productInput(request.body); const id = input.id || input.sku.toLocaleLowerCase("en-US").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+    const metadata = preserveProductGalleryMetadata(input.metadata);
     if (!id) throw badRequest("상품 id를 생성할 수 없습니다.");
     const mutation = await adminIdempotentMutation(context, request, { target: { type: "PRODUCT", id }, work: async (client) => {
       await assertCharactersBelongToIp(client, input.ipId, input.characterIds || []);
       const created = await client.query<ProductRow>(
         `INSERT INTO catalog_products (id,sku,ip_id,category,name,manufacturer,release_date,price,image_url,metadata,is_active,is_prize_only,sale_status)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'DRAFT') RETURNING *, $13::integer AS available_quantity, $14::text[] AS character_ids`,
-        [id,input.sku,input.ipId,input.category,input.name,input.manufacturer || null,input.releaseDate || null,input.price,input.imageUrl || null,JSON.stringify(input.metadata),input.isActive,input.isPrizeOnly ?? false,input.availableQuantity,input.characterIds || []],
+        [id,input.sku,input.ipId,input.category,input.name,input.manufacturer || null,input.releaseDate || null,input.price,input.imageUrl || null,JSON.stringify(metadata),input.isActive,input.isPrizeOnly ?? false,input.availableQuantity,input.characterIds || []],
       );
       await client.query("INSERT INTO product_stock (product_id,on_hand,reserved) VALUES ($1,$2,0)", [id,input.availableQuantity]);
       for (const characterId of input.characterIds || []) await client.query("INSERT INTO product_characters (product_id,character_id) VALUES ($1,$2)", [id,uuidInput(characterId,"characterId")]);
@@ -741,6 +743,7 @@ export async function registerCatalogRoutes(app: FastifyInstance, context: ApiCo
          FROM catalog_products p JOIN product_stock s ON s.product_id=p.id WHERE p.id=$1 FOR UPDATE OF p,s`, [id],
       );
       if (!before.rowCount) throw notFound();
+      const metadata = preserveProductGalleryMetadata(input.metadata, before.rows[0]!.metadata);
       if (input.category !== before.rows[0]!.category) {
         throw conflict("판매·추첨 자산의 의미를 보존하기 위해 상품 카테고리는 생성 후 변경할 수 없습니다. 새 SKU를 등록해 주세요.");
       }
@@ -776,7 +779,7 @@ export async function registerCatalogRoutes(app: FastifyInstance, context: ApiCo
       const updated = await client.query<ProductRow>(
         `UPDATE catalog_products SET sku=$2,ip_id=$3,category=$4,name=$5,manufacturer=$6,release_date=$7,price=$8,image_url=$9,metadata=$10,is_active=$11,sale_status=$12,version=version+1
          WHERE id=$1 AND version=$13 RETURNING *, $14::integer AS available_quantity, COALESCE($15::text[], $16::text[]) AS character_ids`,
-        [id,input.sku,input.ipId,input.category,input.name,input.manufacturer || null,input.releaseDate || null,input.price,input.imageUrl || null,JSON.stringify(input.metadata),input.isActive,requestedSaleStatus,input.expectedVersion,input.availableQuantity,input.characterIds || null,before.rows[0]!.character_ids],
+        [id,input.sku,input.ipId,input.category,input.name,input.manufacturer || null,input.releaseDate || null,input.price,input.imageUrl || null,JSON.stringify(metadata),input.isActive,requestedSaleStatus,input.expectedVersion,input.availableQuantity,input.characterIds || null,before.rows[0]!.character_ids],
       );
       if (!updated.rowCount) throw conflict("다른 운영자가 먼저 수정했습니다.");
       if (input.characterIds !== undefined) {

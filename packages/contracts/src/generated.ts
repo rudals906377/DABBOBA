@@ -2910,8 +2910,8 @@ export interface components {
             /** Format: uuid */
             mediaId: string;
             expectedVersion: number;
-            /** @description primary는 기존 상세·기본 대표 사진이고 storefront는 상품 목록 전용 사진입니다. */
-            role?: "primary" | "storefront";
+            /** @description primary는 기본 대표 사진, storefront는 목록 전용 사진, gallery는 상품 상세에서 넘겨 보는 사진을 순서대로 추가합니다(최대 8장). gallery에 등록된 사진이 있으면 상세 화면은 그 사진들만 슬라이드로 보여줍니다. */
+            role?: "primary" | "storefront" | "gallery";
         };
         ProductImageAttachment: {
             productId: string;
@@ -2921,19 +2921,25 @@ export interface components {
             /** Format: uuid */
             mediaId: string;
             /** @enum {string} */
-            role: "primary" | "storefront";
+            role: "primary" | "storefront" | "gallery";
         };
         ProductImageClearInput: {
             expectedVersion: number;
             /** @enum {string} */
-            role: "storefront";
+            role: "storefront" | "gallery";
+            /**
+             * Format: uri
+             * @description gallery 사진 한 장을 연결 해제할 때 필요한 현재 이미지 URL입니다.
+             */
+            imageUrl?: string;
         };
         ProductImageClearResult: {
             productId: string;
-            imageUrl: null;
+            /** Format: uri */
+            imageUrl: string | null;
             version: number;
             /** @enum {string} */
-            role: "storefront";
+            role: "storefront" | "gallery";
         };
         Actor: {
             /** Format: uuid */
@@ -3555,6 +3561,7 @@ export interface components {
             totalQuantity: number | null;
             /** @description ACTIVE 쿠지 덱에서 아직 결과 확정으로 소진되지 않은 상만 순서대로 제공합니다. 가챠이거나 공개 덱이 없으면 빈 배열이며, 봉인된 번호별 결과는 포함하지 않습니다. */
             remainingKujiTiers?: components["schemas"]["PublicKujiTierRemaining"][];
+            /** @description detailGalleryImageUrls는 등록 순서대로 보여줄 상세 슬라이드 이미지 URL 최대 8개입니다. 비어 있으면 imageUrl 한 장을 사용합니다. */
             metadata: {
                 [key: string]: unknown;
             };
@@ -3589,6 +3596,7 @@ export interface components {
             releaseDate?: string | null;
             price: number;
             availableQuantity: number;
+            /** @description detailGalleryImageUrls는 등록 순서대로 보여줄 상세 슬라이드 이미지 URL 최대 8개입니다. */
             metadata: {
                 [key: string]: unknown;
             };
