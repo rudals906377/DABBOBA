@@ -22,7 +22,7 @@ async function releaseRepository({ omit = [], mutate = null } = {}) {
   await mkdir(join(directory, 'apps/worker/src'), { recursive: true });
   const migrationDirectory = new URL('packages/db/migrations/', repositoryRoot);
   const migrations = (await readdir(migrationDirectory))
-    .filter((file) => /^\d{4}_[a-z0-9_]+\.sql$/.test(file) && Number(file.slice(0, 4)) <= 80)
+    .filter((file) => /^\d{4}_[a-z0-9_]+\.sql$/.test(file) && Number(file.slice(0, 4)) <= 81)
     .sort();
   for (const file of migrations) {
     if (omit.includes(file)) continue;
