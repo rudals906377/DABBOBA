@@ -1,5 +1,21 @@
 # DABBOBA mobile store release gate
 
+## 2026-10-01 current preparation boundary
+
+The owner's newer launch scope is eight gacha products only; Kuji is deferred.
+The current LIVE public API gate requires genuinely purchasable gacha and rejects
+sellable Kuji in this first-launch scope. Empty or coming-soon Kuji is allowed.
+The four social methods remain required; PHONE is an additional requirement only
+when its readiness flag is approved and device-tested. Older dated sections
+below that require both categories or always require five methods are historical.
+The owner chose to prepare an actual Google Play submission rather than wait for
+a written policy reply; this is not a claim of store approval or legal clearance.
+
+The latest local source integrates PR #9 while preserving current security,
+authentication and PRELAUNCH guards. Fresh disposable-DB tests and both-platform
+production bundle marker scans passed; they do not constitute signed device or
+real payment evidence. See [no-login preparation](no-login-launch-preparation-2026-10-01.md).
+
 This document separates repository readiness from evidence that can exist only
 after using external developer accounts, signed artifacts, store consoles, and
 physical devices. A green local check is not App Store or Google Play approval.

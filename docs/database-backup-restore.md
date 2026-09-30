@@ -87,11 +87,17 @@ node ops/database/test-backup.integration.mjs
 
 위 원격 archive들을 실제로 복원하지는 않았다. 2026-09-08의 84-table 및 2026-09-14의 86-table 복원 증거는 모두 고객 데이터가 없는 별도 로컬 fixture 훈련 결과다. Supabase 관리 schema/extension/Auth 설정을 포함한 전체 플랫폼 복구는 공식 운영 절차로 별도 검증해야 한다. ACL/소유권·글로벌 역할 비밀번호·Storage의 실제 이미지 객체는 이 훈련의 복원 보장 범위가 아니다. 기존 미디어 provider 변경, 자동/예약/오프사이트 백업, PITR, 복구 담당자, RPO/RTO/보존 기간, 정기 훈련과 알림도 완료하지 않았다.
 
+## 2026-10-01 최신 소스의 로컬 복원 훈련
+
+별도 빈 로컬 DB에 `0081`까지 migration 82개를 적용한 뒤 전용 fixture로 훈련했다. `local-restore-drill-passed`: 전체 98개 테이블·578개 제약조건·262개 CHECK 재해석, 큐/보관 메시지·sequence·RLS/policy·trigger/index 비교 및 동시 snapshot·오류 rollback 검증 통과. 운영 Supabase나 고객 데이터는 사용하지 않았고 역할 GRANT·플랫폼 전체 복구는 포함하지 않는다. 자세한 증거와 사용자 작업은 `docs/no-login-launch-preparation-2026-10-01.md`에 있다.
+
+`ops/database/test-backup.integration.mjs`는 더 이상 migration 51개를 가정하지 않고 현재 소스 전체의 version/checksum을 요구한다. 신규 훈련 컨테이너는 `dabboba-launch-ci-YYYYMMDD-<7자리 SHA>` 이름, CI와 같은 pinned 이미지, `dabboba.purpose=disposable-launch-qa` label과 루프백 단일 포트가 필요하다. `DABBOBA_BACKUP_TEST_APPROVE_DISPOSABLE=YES`, clone용 source DB 및 **테스트 전용** user/password도 명시해야 한다. 운영·공유 DB는 source로 사용하지 않는다. 과거 훈련 기록은 당시 증거로 남기되 그 DB를 최신 소스 훈련으로 재해석하지 않는다.
+
 ## 0068~0081 적용 전후 운영 절차 (2026-09-30, 원격 미실행)
 
-이 절은 **아직 실행하지 않은 필수 절차**다. 운영 DB는 `0067`까지 적용돼 있으므로 한 번의 `db:migrate`로 `0068`~`0081` 14개가 순서대로 적용된다. `0076`은 사업자 유선번호를 반영한 새 약관·개인정보처리방침 버전(2026-09-30)을 필수 버전으로 만들므로, 적용 후 다음 로그인에서 고객에게 재동의를 받고 공개 정책 페이지도 같은 버전이 배포돼 있어야 한다. `0081`은 미게시(DRAFT) 뽑기 초안에 남은 옛 이미지 주소만 새 프로젝트 주소로 고치며 공개·종료된 확률표는 바꾸지 않는다. 클라우드 작업 환경은 운영 DB(5432)에 접속할 수 없으므로 아래 절차는 운영 DB 접속 정보가 있는 운영자 컴퓨터에서 실행한다. 이 저장소 변경은 원격 DB·백업·PITR 설정을 전혀 바꾸지 않았다. 아래 단계는 승인된 운영자가 승인된 friend 소유 프로젝트(`rconfxsykttfvznakile`)에서만 수행한다.
+이 절은 **아직 실행하지 않은 필수 절차**다. 당시 기록의 운영 DB는 `0067`까지 적용돼 있었으며, 실제 이력도 그 상태라면 `0068`~`0081` 14개가 순서대로 적용 대상이 된다. 현재 운영 상태는 적용 직전에 다시 조회한다. `0076`은 사업자 유선번호를 반영한 새 약관·개인정보처리방침 버전(2026-09-30)을 필수 버전으로 만들므로, 적용 후 다음 로그인에서 고객에게 재동의를 받고 공개 정책 페이지도 같은 버전이 배포돼 있어야 한다. `0081`은 미게시(DRAFT) 뽑기 초안에 남은 옛 이미지 주소만 새 프로젝트 주소로 고치며 공개·종료된 확률표는 바꾸지 않는다. 클라우드 작업 환경은 운영 DB(5432)에 접속할 수 없으므로 아래 절차는 운영 DB 접속 정보가 있는 운영자 컴퓨터에서 실행한다. 이 저장소 변경은 원격 DB·백업·PITR 설정을 전혀 바꾸지 않았다. 아래 단계는 승인된 운영자가 승인된 friend 소유 프로젝트(`rconfxsykttfvznakile`)에서만 수행한다.
 
-1. **대상 확인.** `DATABASE_MIGRATION_URL`이 승인 프로젝트의 Session pooler(5432) 또는 direct 주소인지 확인한다. 폐기된 QA 프로젝트 `yxkmvgfruphgghowzvmo`에는 `0067` 이상 migration이 적용될 수 없다. `packages/db/src/migrate.ts`는 대기 중인 `0067`+ migration이 있으면 아무것도 적용하기 전에 실패하고, `scripts/supabase-integration-profile.mjs`의 `assertMigrationTargetAllowed`도 같은 대상·하한을 거부한다.
+1. **대상·실제 이력 확인.** 위 `0067` 상태와 14개 적용 목록은 당시 관측에 기반한 계획이지 현재 운영 상태의 증거가 아니다. 친구 소유 프로젝트 ID를 대시보드에서 확인하고 `ops/database/launch-history-readonly.sql`로 실제 version/checksum을 조회해 현재 소스와 대조한다. `DATABASE_MIGRATION_URL`이 승인 프로젝트의 Session pooler(5432) 또는 direct 주소인지도 확인한다. 폐기된 QA 프로젝트 `yxkmvgfruphgghowzvmo`에는 `0067` 이상 migration이 적용될 수 없다. `packages/db/src/migrate.ts`는 대기 중인 `0067`+ migration이 있으면 아무것도 적용하기 전에 실패하고, `scripts/supabase-integration-profile.mjs`의 `assertMigrationTargetAllowed`도 같은 대상·하한을 거부한다.
 2. **PITR·플랫폼 백업 확인.** Supabase 대시보드에서 해당 프로젝트의 플랜, 일일 백업 보존 기간, PITR 활성 여부와 보존 창을 확인하고 기록한다. PITR은 유료 add-on이므로 활성화·비용 결정은 소유자 승인 사항이며 이 작업에서 켜지 않았다. PITR이 없으면 일일 백업 시점과 아래 논리 백업만이 복구 지점이다.
 3. **적용 직전 암호화 논리 백업.** 위 `backup` → `verify` 명령으로 새 archive를 만들고, SHA-256·크기·migration 개수를 위 표에 추가한다. 키는 archive와 다른 장애 도메인에 둔다(현재 같은 컴퓨터 보관은 오프사이트 백업이 아니다).
 4. **적용.** `0078`과 `0080`은 첫 줄 `-- dabboba:no-transaction` 헤더로 트랜잭션 밖에서 `CREATE INDEX CONCURRENTLY IF NOT EXISTS`를 한 문장씩 실행한다. 중단된 빌드가 남긴 INVALID 인덱스는 다음 실행에서 `DROP INDEX CONCURRENTLY` 후 재생성하며, 모든 인덱스가 valid일 때만 checksum을 기록한다. 트랜잭션 migration은 `lock_timeout=5s`로 대기하고 `55P03`이면 최대 3회 재시도한다. `0079`는 retention 권한·일일 집계 테이블·service_role 권한 회수를 한 트랜잭션으로 적용하고 자체 검증한다. 적용 후 `db:migrate`를 한 번 더 실행해 "Database schema is current."를 확인한다.
