@@ -1,5 +1,43 @@
 # DABBOBA mobile store release gate
 
+## 2026-10-02 native candidate boundary
+
+The latest local Android compilation used reviewed main commit
+`b497cad3e336ede7c74c30e89d2b522d4b0b6084` (merged PR #16), the approved
+mint horizontal icon, and the pinned production customer API. It remained
+PRELAUNCH; no payment channel, provider secret, account, or WAF rule changed.
+
+- Both Release APK and Android App Bundle compilation completed. These are
+  **unsigned arm64-v8a verification artifacts**, not installable customer APKs
+  or upload-ready Play releases. The temporary generated project explicitly
+  disabled its default debug signing; no release key was created or used.
+- Android SDK 36, build tools 36.0.0, NDK 27.1.12297006 and JDK 17 are now
+  available on this Mac. The first attempt with the default JDK 26 failed in
+  native-library configuration; the same bounded build passed with the existing
+  JDK 17. The older statement that no Android SDK exists is historical.
+- The packaged APK reports `com.dabboba.mobile`, version `1.0.0`/code `1`,
+  minimum SDK 24 and target SDK 36. The merged manifest disables app backup and
+  debuggability and includes the `dabboba` return scheme. Camera, microphone,
+  overlay, external-storage and broad image/video-reading permissions are absent.
+- The APK and AAB contain the same Hermes bundle. The production-marker scan
+  found no test-payment, demo-session, fixture or customer-API loopback marker.
+  Inspection of individual Hermes strings found no concrete Supabase secret
+  key, privileged JWT or private-key block. Prefix-rejection literals in the
+  string table are not credentials; raw concatenated bytecode is not a reliable
+  secret-value detector.
+- Artifacts are retained outside Git at
+  `../.dabboba-launch/artifacts/android-prelaunch-20261002/` as
+  `app-release-unsigned.apk` and `app-release-unsigned.aab`.
+  APK SHA-256: `e542593c5b22af422f9eee4a2836a9e7f57aec39ac3558cbd85f50166e37768f`.
+  AAB SHA-256: `c429bf695562cfbed50f45ad298912dbaa0e688c4374f3df7764cc333489010b`.
+
+No Android device was connected and the local keychain exposed no valid iOS
+signing identity during this check. Neither artifact was installed, uploaded or
+submitted. Friend-controlled signing, a final reviewed candidate with the
+intended supported ABIs, both-platform physical-device regression and actual
+Apple deletion/revocation remain separate requirements. Do not reuse these
+PRELAUNCH artifacts as evidence of the requested LIVE sales release.
+
 ## 2026-10-01 current preparation boundary
 
 The owner's newer launch scope is eight gacha products only; Kuji is deferred.
@@ -219,7 +257,7 @@ dated verification evidence.
   `production-prelaunch`, and a payment-enabled `production-live` build.
   Its iOS submit profiles contain only the public App Store Connect app ID;
   submit credentials and secrets stay outside Git.
-- App version `1.0.0`, the next iOS build number `2`, Android version code `1`,
+- App version `1.0.0`, the current source iOS build number `3`, Android version code `1`,
   bundle and package IDs, and the approved app icon are explicit in
   `apps/mobile/app.json`. iOS build `1` is the older TestFlight upload from
   commit `933186d`; a new candidate cannot reuse that build string. Bump each
