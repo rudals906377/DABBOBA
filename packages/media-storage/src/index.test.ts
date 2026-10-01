@@ -4,7 +4,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { once } from "node:events";
 import test from "node:test";
 import {
-  MAX_MEDIA_BYTES, MediaStorageError, SupabaseMediaStorage, type SupabaseMediaStorageConfig,
+  MAX_MEDIA_BYTES, STORAGE_REQUEST_TIMEOUT_MS, MediaStorageError, SupabaseMediaStorage, type SupabaseMediaStorageConfig,
 } from "./index.js";
 
 const mediaId = "8a8753bd-f8c4-48ea-935a-747ed464cd77";
@@ -59,6 +59,28 @@ async function collect(storage: SupabaseMediaStorage): Promise<Buffer> {
   for await (const chunk of storage.read(key, version)) chunks.push(chunk);
   return Buffer.concat(chunks);
 }
+
+test("Storage reads support numeric Web/Edge timer handles and still clear the deadline", async (t) => {
+  const numericHandle = 987654321;
+  let cleared = false;
+  t.mock.method(globalThis, "setTimeout", (_callback: unknown, delay: number) => {
+    assert.equal(delay, STORAGE_REQUEST_TIMEOUT_MS);
+    return numericHandle as unknown as ReturnType<typeof setTimeout>;
+  });
+  t.mock.method(globalThis, "clearTimeout", (handle: Parameters<typeof clearTimeout>[0]) => {
+    assert.equal(handle, numericHandle);
+    cleared = true;
+  });
+  // Keep the numeric timer shim out of Node's fetch transport internals.
+  t.mock.method(globalThis, "fetch", async () => new Response(JSON.stringify(info()), {
+    headers: { "content-type": "application/json" },
+  }));
+  try {
+    const storage = new SupabaseMediaStorage(config("http://127.0.0.1:12345"));
+    assert.equal((await storage.stat(key)).version, version);
+    assert.equal(cleared, true);
+  } finally { t.mock.restoreAll(); }
+});
 
 test("configuration is restricted to matching HTTPS Supabase endpoints or explicit same-origin loopback", () => {
   const hosted = { ...config("https://abcdefghijklmnopqrst.supabase.co"), allowLocalHttp: false };
