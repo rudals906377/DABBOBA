@@ -32,7 +32,7 @@ async function loadModule(path, mocks) {
       if (id === "react") return React;
       if (id === "node:crypto") return require("node:crypto");
       if (id === "./draw-version-draft") return { buildDrawVersionDraftPayload() { throw new Error("unused draw draft helper"); } };
-      if (id === "./catalog-media-upload") return { catalogImageFile() { throw new Error("unused catalog image helper"); }, uploadCatalogImage() {} };
+      if (id === "./product-image-upload") return { saveProductImage() { throw new Error("unused catalog image helper"); } };
       if (id in mocks) return mocks[id];
       throw new Error(`Unexpected import: ${id}`);
     }, module, module.exports,
