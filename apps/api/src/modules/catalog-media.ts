@@ -306,6 +306,11 @@ export async function registerCatalogMediaRoutes(app: FastifyInstance, context: 
     if (!media.rowCount) throw notFound("공개된 상품 이미지를 찾을 수 없습니다.");
     const signed = await signMediaAsset(context, media.rows[0]!);
     return reply
+      // This redirect is an intentionally public, published catalog image.
+      // Helmet's default same-origin CORP blocks even the redirect in an <img>
+      // on our separate admin/customer origins. Keep private/error routes at
+      // the default; set this only after READY and publication checks succeed.
+      .header("cross-origin-resource-policy", "cross-origin")
       .header("cache-control", "private, no-store")
       .header("location", signed.url)
       .code(302)

@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { FastifyInstance } from "fastify";
+import Fastify from "fastify";
+import helmet from "@fastify/helmet";
 import { AppError } from "../lib/errors.js";
 import type { ApiContext } from "../types.js";
 import { legacyCatalogMediaDeliveryUrl } from "./catalog-media-url.js";
@@ -87,6 +89,52 @@ test("public catalog media lookup accepts only this asset's current and legacy d
     `${baseUrl}/v1/catalog/media/${mediaId}/image`,
     legacyCatalogMediaDeliveryUrl(mediaId),
   ]]);
+});
+
+test("only published READY catalog image redirects allow cross-origin embedding", async (t) => {
+  const app = Fastify();
+  t.after(() => app.close());
+  await app.register(helmet, { contentSecurityPolicy: false });
+  app.get("/private-control", async () => ({ protected: true }));
+  const mediaId = "11111111-1111-4111-8111-111111111111";
+  let published = true;
+  let readCalls = 0;
+  await registerCatalogMediaRoutes(app, {
+    config: { catalogMediaBaseUrl: "https://public.example.test" },
+    pool: {
+      async query(sql: string) {
+        assert.match(sql, /media\.status='READY'/);
+        assert.match(sql, /media\.purpose='CATALOG'/);
+        assert.match(sql, /product\.is_active AND ip\.is_active/);
+        return published ? { rowCount: 1, rows: [{
+          id: mediaId, object_key: "catalog/photo.webp", object_generation: "1",
+          detected_mime_type: "image/webp", metadata: {},
+        }] } : { rowCount: 0, rows: [] };
+      },
+    },
+    auth: { requirePermission: () => async () => undefined },
+    mediaRuntime: {
+      configuredMediaStorage() {
+        return { provider: "gcs", async signedRead() {
+          readCalls += 1;
+          return "https://storage.example.test/public-photo?signature=test-only";
+        } };
+      },
+    },
+  } as unknown as ApiContext);
+  const publicImage = await app.inject(`/v1/catalog/media/${mediaId}/image`);
+  assert.equal(publicImage.statusCode, 302);
+  assert.equal(publicImage.headers["cross-origin-resource-policy"], "cross-origin");
+  assert.equal(publicImage.headers["cache-control"], "private, no-store");
+  assert.equal(publicImage.headers["x-content-type-options"], "nosniff");
+  assert.equal(publicImage.headers.location, "https://storage.example.test/public-photo?signature=test-only");
+  assert.equal((await app.inject("/private-control")).headers["cross-origin-resource-policy"], "same-origin");
+  published = false;
+  const hiddenImage = await app.inject(`/v1/catalog/media/${mediaId}/image`);
+  assert.equal(hiddenImage.statusCode, 404);
+  assert.equal(hiddenImage.headers["cross-origin-resource-policy"], "same-origin");
+  assert.equal(hiddenImage.headers.location, undefined);
+  assert.equal(readCalls, 1);
 });
 
 function clearRequest(input: { expectedVersion: number; role: string; key: string; imageUrl?: string }) {
