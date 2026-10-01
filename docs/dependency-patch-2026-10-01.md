@@ -1,5 +1,13 @@
 # 출시 준비 의존성 수정 — 2026-10-01
 
+## 후속 운영 점검: Fastify 보안 수정
+
+이전 0건 audit 기록 이후 새 production audit에서 Fastify 5.12.1 관련 high 4건과 moderate 1건이 확인됐다. 직접 의존성 허용 하한을 `^5.12.2`로 올리고 같은 5.12 patch 계열의 `5.12.5`로 잠금했다. 관련 Fastify package/integrity/snapshot 외 다른 package resolution은 변경되지 않았다.
+
+공식 [5.12.2 보안 수정](https://github.com/fastify/fastify/releases/tag/v5.12.2)과 [5.12.5 보안 수정](https://github.com/fastify/fastify/releases/tag/v5.12.5)을 확인했다. 앱에 모든 취약 경로가 실제 도달한다고 주장하지 않는다. 비동기 validator의 `value` 필드가 요청 body 전체로 치환되지 않는 in-process 회귀 검사를 추가했고 통과했다.
+
+frozen 설치·API 빌드·타입 검사 및 API 318개 단위/transport 검사는 통과했다. 이 실행은 DB 설정 없이 했으므로 DB 통합 38개는 건너뛰었다. patch 뒤 audit은 알려진 취약점 0개다. 실제 운영 코드 재배포와 공개 경로 재확인 결과는 `production-release-progress-2026-10-01.md`에 별도로 기록한다.
+
 작업 위치: `/Users/kyoungmin/Desktop/DBB/.dabboba-launch-step1`.
 운영 배포·원격 푸시·외부 계정 변경은 하지 않았다.
 
