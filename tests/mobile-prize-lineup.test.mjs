@@ -39,3 +39,18 @@ test("product detail falls back to the lineup only when the odds are withheld", 
   // The probability disclosure caption appears only with real odds.
   assert.match(screen, /\{odds\?\.entries\.length \? \(\s*<SeedInlineGuidance/);
 });
+
+test("an unpublished draw set still displays registered included products without invented quantities", () => {
+  const items = includedPrizes({
+    drawOdds: null,
+    prizeLineup: null,
+    includedProducts: [
+      { id: "secret", name: "시크릿", imageUrl: "https://media.example/secret.webp" },
+      { id: "cat", name: "아기 고양이", imageUrl: null },
+    ],
+  });
+  assert.deepEqual(items, [
+    { id: "secret", prizeName: "시크릿", prizeImageUrl: "https://media.example/secret.webp", detail: null, accessibilityDetail: null },
+    { id: "cat", prizeName: "아기 고양이", prizeImageUrl: null, detail: null, accessibilityDetail: null },
+  ]);
+});
