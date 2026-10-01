@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { EmptyState, FilterBar, NextCursor, PageHeader, StatusBadge, first, formatDate, shortId } from "../../../../components/operations";
+import { statusLabel, EmptyState, FilterBar, NextCursor, PageHeader, StatusBadge, first, formatDate, shortId } from "../../../../components/operations";
 import { adminApi, queryString } from "../../../../lib/api";
 import { requireCapability } from "../../../../lib/auth";
 import type { AdminOrder, CursorPage, SearchParams } from "../../../../lib/admin-types";
@@ -17,7 +17,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
     <FilterBar>
       <label>검색<input name="q" defaultValue={q} placeholder="주문 ID · 회원 · 상품" /></label>
       <label>회원 ID<input name="userId" defaultValue={userId} placeholder="UUID" /></label>
-      <label>상태<select name="status" defaultValue={status}><option value="">전체</option>{["PENDING_PAYMENT", "PAID", "FULFILLED", "CANCELLED", "REFUND_REVIEW", "REFUNDED"].map((value) => <option key={value}>{value}</option>)}</select></label>
+      <label>상태<select name="status" defaultValue={status}><option value="">전체</option>{["PENDING_PAYMENT", "PAID", "FULFILLED", "CANCELLED", "REFUND_REVIEW", "REFUNDED"].map((value) => <option key={value} value={value}>{statusLabel(value)}</option>)}</select></label>
     </FilterBar>
     <section className="data-panel">{page.items.length === 0 ? <EmptyState title="주문이 없습니다." /> : <table className="data-table"><thead><tr><th>주문</th><th>회원</th><th>금액</th><th>상품</th><th>주문 상태</th><th>결제</th><th>접수</th></tr></thead><tbody>{page.items.map((order) => <tr key={order.id}>
       <td><Link href={`/commerce/orders/${order.id}`}><strong>{shortId(order.id)}</strong></Link></td>

@@ -525,8 +525,8 @@ test("IP form identifies its image as the Home popular-work square artwork", asy
   assert.match(html, /홈 인기 작품용 1:1 대표 이미지 URL/);
   assert.match(html, /정사각형 IP 이미지/);
   const productHtml = renderToStaticMarkup(React.createElement(module.ProductForm, { returnTo: "/catalog/products" }));
-  assert.match(productHtml, /상품 등록 후 목록의 ‘사진 자르기·업로드’/);
-  assert.match(productHtml, /외부 URL은 자르기를 거치지 않습니다/);
+  assert.match(productHtml, /상품 등록 후 ‘사진 관리’에서 직접 잘라/);
+  assert.doesNotMatch(productHtml, /name="imageUrl"/);
   const characterHtml = renderToStaticMarkup(React.createElement(module.CharacterForm, { returnTo: "/catalog/characters" }));
   assert.match(characterHtml, /캐릭터 이미지는 외부 URL만 연결할 수 있습니다/);
   assert.doesNotMatch(characterHtml, /상품을 등록한 뒤/);

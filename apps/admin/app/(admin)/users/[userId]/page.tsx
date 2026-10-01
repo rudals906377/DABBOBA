@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Feedback, PageHeader, ReasonField, ReturnTo, StatusBadge, formatDate, formatKoreaDateTimeInput, shortId } from "../../../../components/operations";
+import { statusLabel, Feedback, PageHeader, ReasonField, ReturnTo, StatusBadge, formatDate, formatKoreaDateTimeInput, shortId } from "../../../../components/operations";
 import { changeUserStatus } from "../../../../lib/actions";
 import { adminApi } from "../../../../lib/api";
 import { requireCapability } from "../../../../lib/auth";
@@ -35,7 +35,7 @@ export default async function UserDetailPage({ params, searchParams }: { params:
       <div className="panel-heading"><div><h2>회원 상태 변경</h2><p>서버가 전이 가능 여부와 권한을 다시 검사합니다.</p></div></div>
       {isDeleted ? <p className="muted">탈퇴 처리된 계정은 일반 상태 변경으로 복구할 수 없습니다. <Link href={`/account-deletions?q=${encodeURIComponent(user.id)}`}>전용 탈퇴 검토 기록</Link>에서 처리 이력을 확인하세요.</p> : <form className="stack-form" action={changeUserStatus}>
         <input type="hidden" name="userId" value={user.id} /><ReturnTo value={returnTo} />
-        <div className="field-grid"><label>새 상태<select name="status" defaultValue={allowedStatuses.includes(user.status) ? user.status : "ACTIVE"}>{allowedStatuses.map((value) => <option key={value}>{value}</option>)}</select></label>
+        <div className="field-grid"><label>새 상태<select name="status" defaultValue={allowedStatuses.includes(user.status) ? user.status : "ACTIVE"}>{allowedStatuses.map((value) => <option key={value} value={value}>{statusLabel(value)}</option>)}</select></label>
         <label>정지 종료 시각 (한국 시간)<input type="datetime-local" name="suspendedUntil" defaultValue={formatKoreaDateTimeInput(user.suspendedUntil)} /></label></div>
         <ReasonField />
         <div className="form-actions"><button className="danger" type="submit">상태 변경</button></div>

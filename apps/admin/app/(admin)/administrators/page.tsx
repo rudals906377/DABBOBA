@@ -1,4 +1,4 @@
-import { EmptyState, Feedback, NextCursor, PageHeader, ReasonField, ReturnTo, StatusBadge, first, formatDate, shortId } from "../../../components/operations";
+import { statusLabel, EmptyState, Feedback, NextCursor, PageHeader, ReasonField, ReturnTo, StatusBadge, first, formatDate, shortId } from "../../../components/operations";
 import { changeAdministrator, createAdministrator } from "../../../lib/actions";
 import { adminApi, queryString } from "../../../lib/api";
 import { requireCapability } from "../../../lib/auth";
@@ -20,13 +20,13 @@ export default async function AdministratorsPage({ searchParams }: { searchParam
         <div className="field-grid">
           <label>이메일<input type="email" name="email" maxLength={254} required /></label><label>닉네임<input name="nickname" minLength={2} maxLength={40} required /></label>
           <label>임시 비밀번호<input type="password" name="password" minLength={12} maxLength={256} autoComplete="new-password" required /></label>
-          <label>역할<select name="role"><option>ADMIN</option><option>SUPER_ADMIN</option></select></label>
+          <label>역할<select name="role"><option value="ADMIN">{statusLabel("ADMIN")}</option><option value="SUPER_ADMIN">{statusLabel("SUPER_ADMIN")}</option></select></label>
         </div><ReasonField label="발급 사유" /><div className="form-actions"><button className="primary" type="submit">관리자 발급</button></div>
       </form>
     </section>
     <section className="data-panel">
       {page.items.length === 0 ? <EmptyState title="등록된 관리자 계정이 없습니다." /> : <table className="data-table"><thead><tr><th>관리자</th><th>역할</th><th>상태</th><th>생성일</th><th>권한/상태 변경</th></tr></thead><tbody>{page.items.map((admin) => <tr key={admin.id}>
-        <td><strong>{admin.nickname}</strong><br /><span className="muted">{admin.emailMasked} · {shortId(admin.id)}</span></td><td>{admin.role}</td><td><StatusBadge value={admin.status} /></td><td>{formatDate(admin.createdAt)}</td><td>{admin.id === session.actor.userId ? <span className="muted">현재 계정</span> : <details className="inline-details"><summary>변경</summary><form action={changeAdministrator}><input type="hidden" name="userId" value={admin.id} /><ReturnTo value={returnTo} /><label>역할<select name="role" defaultValue={admin.role}><option>ADMIN</option><option>SUPER_ADMIN</option></select></label><label>상태<select name="status" defaultValue={admin.status}>{["ACTIVE", "SUSPENDED", "BANNED"].map((value) => <option key={value}>{value}</option>)}</select></label><ReasonField label="변경 사유" /><div className="form-actions"><button className="danger">변경 적용</button></div></form></details>}</td>
+        <td><strong>{admin.nickname}</strong><br /><span className="muted">{admin.emailMasked} · {shortId(admin.id)}</span></td><td>{admin.role}</td><td><StatusBadge value={admin.status} /></td><td>{formatDate(admin.createdAt)}</td><td>{admin.id === session.actor.userId ? <span className="muted">현재 계정</span> : <details className="inline-details"><summary>변경</summary><form action={changeAdministrator}><input type="hidden" name="userId" value={admin.id} /><ReturnTo value={returnTo} /><label>역할<select name="role" defaultValue={admin.role}><option value="ADMIN">{statusLabel("ADMIN")}</option><option value="SUPER_ADMIN">{statusLabel("SUPER_ADMIN")}</option></select></label><label>상태<select name="status" defaultValue={admin.status}>{["ACTIVE", "SUSPENDED", "BANNED"].map((value) => <option key={value} value={value}>{statusLabel(value)}</option>)}</select></label><ReasonField label="변경 사유" /><div className="form-actions"><button className="danger">변경 적용</button></div></form></details>}</td>
       </tr>)}</tbody></table>}
     </section><NextCursor pathname="/administrators" nextCursor={page.nextCursor} searchParams={query} />
   </>;

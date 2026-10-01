@@ -19,6 +19,7 @@ function form(values) {
 const adminRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 async function loadModule(path, mocks) {
+  const picker = path.endsWith("home-section-form.tsx") ? await loadModule(join(adminRoot, "components/home-product-picker.tsx"), {}) : null;
   const source = await readFile(path, "utf8");
   const output = transformSync(source, {
     filename: path,
@@ -30,6 +31,7 @@ async function loadModule(path, mocks) {
     (id) => {
       if (id === "react/jsx-runtime") return require("react/jsx-runtime");
       if (id === "react") return React;
+      if (id === "./home-product-picker") return picker;
       if (id === "node:crypto") return require("node:crypto");
       if (id === "./draw-version-draft") return { buildDrawVersionDraftPayload() { throw new Error("unused draw draft helper"); } };
       if (id === "./product-image-upload") return { saveProductImage() { throw new Error("unused catalog image helper"); } };
@@ -160,7 +162,7 @@ test("home section actions preserve authorization and stale-version failures", a
   assert.equal(revalidations.length, 0);
 });
 
-test("home section page keeps paged IP search and renders empty and missing-IP states", async () => {
+test("home section page loads complete choices and renders empty and missing-IP states", async () => {
   const calls = [];
   const pageModule = await loadModule(join(adminRoot, "app/(admin)/catalog/home-sections/page.tsx"), {
     "next/link": { __esModule: true, default: ({ children, href }) => React.createElement("a", { href }, children) },
@@ -179,14 +181,15 @@ test("home section page keeps paged IP search and renders empty and missing-IP s
       adminApi: async (path) => { calls.push(path); return path.includes("home-sections") ? { configured: true, items: [section] } : { items: [], nextCursor: "page-3" }; },
     },
     "../../../../lib/auth": { requireCapability: async () => ({ token: "token" }) },
+    "../../../../lib/catalog-choices": { catalogIpChoices: async () => { calls.push("all-ip-choices"); return []; }, catalogProductChoices: async () => [] },
   });
   const tree = await pageModule.default({ searchParams: Promise.resolve({ q: "스파이", cursor: "page-2" }) });
   const html = renderToStaticMarkup(tree);
-  assert.ok(calls.includes("/v1/admin/ips?q=%EC%8A%A4%ED%8C%8C%EC%9D%B4&cursor=page-2&limit=30"));
-  assert.match(html, /현재 검색 결과에서 확인 불가 · spy-family/);
+  assert.ok(calls.includes("all-ip-choices"));
+  assert.match(html, /현재 연결된 작품/);
   assert.match(html, /가챠/);
   assert.match(html, /수동·IP·신상품·인기 기준과 가챠·쿠지 카드 레이아웃/);
-  assert.match(html, /next:page-3/);
+  assert.doesNotMatch(html, /next:page-3/);
 
   calls.length = 0;
   const emptyModule = await loadModule(join(adminRoot, "app/(admin)/catalog/home-sections/page.tsx"), {
@@ -195,6 +198,7 @@ test("home section page keeps paged IP search and renders empty and missing-IP s
     "../../../../components/operations": { PageHeader: () => null, Feedback: () => null, FilterBar: ({ children }) => React.createElement("form", null, children), NextCursor: () => null, EmptyState: ({ title, description }) => React.createElement("div", null, title, description), StatusBadge: () => null, first: (v) => v, formatDate: (v) => v },
     "../../../../lib/api": { queryString: () => "", adminApi: async (path) => path.includes("home-sections") ? { configured: false, items: [] } : { items: [ip], nextCursor: null } },
     "../../../../lib/auth": { requireCapability: async () => ({ token: "token" }) },
+    "../../../../lib/catalog-choices": { catalogIpChoices: async () => { calls.push("all-ip-choices"); return []; }, catalogProductChoices: async () => [] },
   });
   const emptyHtml = renderToStaticMarkup(await emptyModule.default({ searchParams: Promise.resolve({}) }));
   assert.match(emptyHtml, /등록된 홈 섹션이 없습니다/);

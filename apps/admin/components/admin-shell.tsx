@@ -18,7 +18,7 @@ export function AdminShell({ actor, children }: { actor: Actor; children: React.
         </div>
         <SidebarNav items={navigation} />
         <div className="admin-identity">
-          <span>{actor.role}</span>
+          <span>{actor.role === "SUPER_ADMIN" ? "최고 관리자" : "관리자"}</span>
           <strong>{actor.nickname}</strong>
           <form action="/api/auth/logout" method="post">
             <button type="submit">로그아웃</button>
