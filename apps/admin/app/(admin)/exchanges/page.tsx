@@ -1,4 +1,4 @@
-import {
+import { statusLabel,
   EmptyState,
   Feedback,
   FilterBar,
@@ -69,7 +69,7 @@ export default async function ExchangesPage({ searchParams }: { searchParams: Pr
     <Feedback searchParams={query} />
     <FilterBar>
       <label>검색<input name="q" defaultValue={q} placeholder="글 · 상품 · 작성자 · SKU · 교환 ID" maxLength={120} /></label>
-      <label>상태<select name="status" defaultValue={status}><option value="">전체</option>{LISTING_STATUSES.map((value) => <option key={value}>{value}</option>)}</select></label>
+      <label>상태<select name="status" defaultValue={status}><option value="">전체</option>{LISTING_STATUSES.map((value) => <option key={value} value={value}>{statusLabel(value)}</option>)}</select></label>
     </FilterBar>
     <section className="data-panel">
       {page.items.length === 0

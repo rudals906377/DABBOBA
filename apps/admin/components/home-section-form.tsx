@@ -1,6 +1,7 @@
 import type { AdminHomeSection, CatalogIp } from "../lib/admin-types";
 import { createHomeSection, updateHomeSection } from "../lib/actions";
 import { ReasonField, ReturnTo } from "./operations";
+import { HomeProductPicker, type HomeProductChoice } from "./home-product-picker";
 
 const HOME_SECTION_LAYOUT_LABELS = {
   gacha: "가챠",
@@ -14,17 +15,17 @@ const HOME_SECTION_SOURCE_LABELS = {
   POPULAR: "최근 30일 인기순",
 } as const;
 
-export function HomeSectionForm({ item, ips, returnTo, configured }: {
+export function HomeSectionForm({ item, ips, returnTo, configured, products = [] }: {
   item?: AdminHomeSection;
   ips: CatalogIp[];
   returnTo: string;
   configured: boolean;
+  products?: HomeProductChoice[];
 }) {
   const selectedIpAvailable = !item?.ipId || ips.some((ip) => ip.id === item.ipId);
   return <form className="stack-form" action={item ? updateHomeSection : createHomeSection}>
     <ReturnTo value={returnTo} />
-    {item ? <><input type="hidden" name="sectionId" value={item.id} /><input type="hidden" name="expectedVersion" value={item.version} /></>
-      : <label>섹션 ID<input name="sectionId" pattern="[a-z0-9]+(?:-[a-z0-9]+)*" maxLength={120} required placeholder="예: spy-family" /></label>}
+    {item ? <><input type="hidden" name="sectionId" value={item.id} /><input type="hidden" name="expectedVersion" value={item.version} /></> : null}
     <div className="field-grid">
       <label>제목<input name="title" defaultValue={item?.title} maxLength={120} required /></label>
       <label>부제<textarea name="subtitle" defaultValue={item?.subtitle ?? ""} maxLength={240} rows={2} placeholder="선택 입력 · 섹션 설명" /></label>
@@ -33,10 +34,10 @@ export function HomeSectionForm({ item, ips, returnTo, configured }: {
           {Object.entries(HOME_SECTION_SOURCE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
         </select>
       </label>
-      <label>연결 IP (선택)
+      <label>연결 작품 (선택)
         <select name="ipId" defaultValue={item?.ipId ?? ""}>
           <option value="">전체 IP</option>
-          {!selectedIpAvailable && item?.ipId ? <option value={item.ipId}>연결 IP를 현재 검색 결과에서 찾을 수 없음 ({item.ipId})</option> : null}
+          {!selectedIpAvailable && item?.ipId ? <option value={item.ipId}>현재 연결된 작품</option> : null}
           {ips.map((ip) => <option key={ip.id} value={ip.id}>{ip.nameKo} / {ip.nameEn}{ip.isActive ? "" : " (IP 비활성)"}</option>)}
         </select>
       </label>
@@ -51,15 +52,7 @@ export function HomeSectionForm({ item, ips, returnTo, configured }: {
       {item ? <label className="check-field"><input type="checkbox" name="isActive" defaultChecked={item.isActive} /> 홈 노출</label>
         : <input type="hidden" name="isActive" value="off" />}
     </div>
-    <label>수동 상품 순서
-      <textarea
-        name="manualProductIds"
-        defaultValue={item?.manualProductIds.join("\n") ?? ""}
-        rows={5}
-        placeholder={"상품 ID를 위에서부터 노출 순서대로 입력하세요.\n예: demon-slayer-gacha"}
-      />
-      <span className="muted">수동 선택일 때만 사용합니다. 쉼표 또는 줄바꿈으로 최대 20개까지 입력할 수 있습니다.</span>
-    </label>
+    <details className="catalog-optional" open={item?.sourceKind === "MANUAL"}><summary>수동으로 상품 선택·순서 변경</summary><HomeProductPicker products={products} initialIds={item?.manualProductIds ?? []} /></details>
     {(item?.sourceKind ?? "IP") === "IP" && !item?.ipId ? <aside className="draw-lot-warning">
       <strong>연결 IP 선택 필요</strong>
       <p>IP 최신순 구성은 연결 IP를 선택해야 저장할 수 있습니다.</p>

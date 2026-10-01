@@ -9,15 +9,29 @@ export function PageHeader({ eyebrow, title, description, actions }: {
 }) {
   return (
     <header className="page-header">
-      <div><span>{eyebrow}</span><h1>{title}</h1><p>{description}</p></div>
+      <div>{/[가-힣]/.test(eyebrow) ? <span>{eyebrow}</span> : null}<h1>{title}</h1><p>{description}</p></div>
       {actions ? <div className="page-actions">{actions}</div> : null}
     </header>
   );
 }
 
 export function StatusBadge({ value }: { value: string | boolean }) {
-  const label = typeof value === "boolean" ? (value ? "활성" : "비활성") : value;
+  const label = typeof value === "boolean" ? (value ? "활성" : "비활성") : statusLabel(value);
   return <span className="status-badge" data-status={String(value).toLowerCase()}>{label}</span>;
+}
+
+export function statusLabel(value: string) {
+  const labels: Record<string, string> = {
+    ACTIVE: "정상", SUSPENDED: "이용 정지", BANNED: "이용 제한", DELETED: "삭제됨", HIDDEN: "숨김", PUBLISHED: "공개", DRAFT: "작성 중",
+    PENDING: "대기", IN_PROGRESS: "처리 중", ANSWERED: "답변 완료", CLOSED: "처리 종료", REVIEWING: "검토 중", RESOLVED: "처리 완료", REJECTED: "반려", APPROVED: "승인", ON_HOLD: "보류", MERGED: "기존 항목에 연결",
+    PENDING_PAYMENT: "결제 대기", PAYMENT_PENDING: "결제 대기", AUTHORIZED: "결제 승인", PAID: "결제 완료", FAILED: "실패", FULFILLED: "주문 완료", CANCELLED: "취소", REFUND_REVIEW: "환불 검토", REFUNDED: "환불 완료",
+    REQUESTED: "신청됨", PROCESSING: "처리 중", SHIPPED: "배송 중", DELIVERED: "배송 완료", IN_REVIEW: "검토 중", WAITING_PROVIDER: "결제사 확인 중", ESCALATED: "추가 확인", UNTRACKED: "검토 미접수",
+    ADMIN: "관리자", SUPER_ADMIN: "최고 관리자", USER: "회원", PRODUCT: "상품", IP: "작품", POST: "게시물", COMMENT: "댓글", SNAP: "스냅", EXCHANGE_LISTING: "교환글", WANTED_REQUEST: "상품 요청",
+    DUKROOM: "덕질방", GENERAL: "일반", NO_ACTION: "조치 없음", HIDE_POST: "게시물 숨김", HIDE_COMMENT: "댓글 숨김", HIDE_EXCHANGE_LISTING: "교환글 숨김", HIDE_WANTED_REQUEST: "상품 요청 숨김", WARN_USER: "회원 경고", SUSPEND_USER: "회원 이용 정지",
+    OPEN: "진행 중", MATCHED: "매칭됨", COMPLETED: "완료", REVOKING_TOKENS: "로그인 연결 해제 중", DELETING: "삭제 중", RETRY_PENDING: "재시도 대기", RETENTION_HOLD: "보존 검토", WAITING: "대기",
+    gacha: "가챠", kuji: "쿠지", figure: "피규어", tcg: "카드", COMING_SOON: "오픈 예정", ON_SALE: "판매 중", PAUSED: "판매 중지",
+  };
+  return labels[value] ?? value;
 }
 
 export function EmptyState({ title = "표시할 항목이 없습니다.", description = "검색어나 필터를 바꿔 다시 확인해 주세요." }) {
@@ -52,7 +66,7 @@ export function NextCursor({ pathname, nextCursor, searchParams }: {
 }
 
 export function ReasonField({ label = "처리 사유" }: { label?: string }) {
-  return <label className="reason-field"><span>{label}<b>필수</b></span><textarea name="reason" minLength={2} maxLength={1000} required placeholder="감사 로그에 남길 구체적인 사유를 입력하세요." /></label>;
+  return <label className="reason-field"><span>{label}<b>필수</b></span><textarea name="reason" minLength={2} maxLength={1000} required placeholder="왜 변경하는지 간단히 적어주세요." /></label>;
 }
 
 export function ReturnTo({ value }: { value: string }) {

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { EmptyState, Feedback, FilterBar, NextCursor, PageHeader, StatusBadge, first, formatDate, shortId } from "../../../components/operations";
+import { statusLabel, EmptyState, Feedback, FilterBar, NextCursor, PageHeader, StatusBadge, first, formatDate, shortId } from "../../../components/operations";
 import { adminApi, queryString } from "../../../lib/api";
 import { requireCapability } from "../../../lib/auth";
 import type { CursorPage, SearchParams, UserSummary } from "../../../lib/admin-types";
@@ -18,7 +18,7 @@ export default async function UsersPage({ searchParams }: { searchParams: Promis
     <Feedback searchParams={query} />
     <FilterBar>
       <label>검색<input name="q" defaultValue={q} placeholder="닉네임 · 마스킹 이메일 · ID" maxLength={120} /></label>
-      <label>상태<select name="status" defaultValue={status}><option value="">전체</option>{["ACTIVE", "SUSPENDED", "BANNED", "DELETED"].map((value) => <option key={value}>{value}</option>)}</select></label>
+      <label>상태<select name="status" defaultValue={status}><option value="">전체</option>{["ACTIVE", "SUSPENDED", "BANNED", "DELETED"].map((value) => <option key={value} value={value}>{statusLabel(value)}</option>)}</select></label>
     </FilterBar>
     <section className="data-panel">
       {page.items.length === 0 ? <EmptyState /> : <table className="data-table"><thead><tr><th>회원</th><th>역할</th><th>상태</th><th>활동</th><th>가입</th><th>작업</th></tr></thead><tbody>

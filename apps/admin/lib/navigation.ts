@@ -31,3 +31,9 @@ export const ADMIN_NAVIGATION: readonly AdminNavigationItem[] = [
   { href: "/users", label: "회원", eyebrow: "USERS", capability: "users.manage" },
   { href: "/catalog/ips", label: "IP", eyebrow: "CATALOG", capability: "catalog.manage" },
 ] as const;
+
+const DAILY_ROUTES = new Set(["/", "/catalog/products", "/commerce/inventory", "/commerce/orders", "/commerce/shipping", "/commerce/payments", "/commerce/refunds", "/inquiries", "/notices", "/users", "/account-deletions", "/catalog/home-sections"]);
+
+export function isDailyMenu(item: AdminNavigationItem) {
+  return DAILY_ROUTES.has(item.href);
+}

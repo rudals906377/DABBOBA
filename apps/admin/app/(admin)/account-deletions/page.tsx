@@ -1,5 +1,5 @@
 import Link from "next/link";
-import {
+import { statusLabel,
   EmptyState,
   Feedback,
   FilterBar,
@@ -53,7 +53,7 @@ export default async function AccountDeletionsPage({ searchParams }: { searchPar
           "REJECTED",
           "COMPLETED",
           "CANCELLED",
-        ].map((value) => <option key={value}>{value}</option>)}
+        ].map((value) => <option key={value} value={value}>{statusLabel(value)}</option>)}
       </select></label>
     </FilterBar>
     <section className="data-panel">

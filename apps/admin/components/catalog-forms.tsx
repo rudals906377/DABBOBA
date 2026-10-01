@@ -8,9 +8,9 @@ export function IpForm({ item, returnTo, initialName }: { item?: CatalogIp; retu
   return <form className="stack-form" action={action}>
     {item ? <><input type="hidden" name="ipId" value={item.id} /><input type="hidden" name="expectedVersion" value={item.version} /></> : null}<ReturnTo value={returnTo} />
     <div className="field-grid">
-      <label>슬러그<input name="slug" defaultValue={item?.slug} pattern="[a-z0-9]+(?:-[a-z0-9]+)*" maxLength={100} required /></label>
+      {item ? <input type="hidden" name="slug" value={item.slug} /> : null}
       <label>한국어 이름<input name="nameKo" defaultValue={item?.nameKo || initialName} maxLength={160} required /></label>
-      <label>영문 이름<input name="nameEn" defaultValue={item?.nameEn} maxLength={160} required /></label>
+      <label>영문 이름 (선택)<input name="nameEn" defaultValue={item?.nameEn} maxLength={160} /></label>
       <label>일문 이름<input name="nameJa" defaultValue={item?.nameJa || ""} maxLength={160} /></label>
       <label className="span-2">별칭 (쉼표 또는 줄바꿈)<textarea name="aliases" defaultValue={item?.aliases.join(", ")} maxLength={5000} /></label>
       <label className="span-2">설명<textarea name="description" defaultValue={item?.description} maxLength={5000} /></label>
@@ -24,12 +24,12 @@ export function IpForm({ item, returnTo, initialName }: { item?: CatalogIp; retu
   </form>;
 }
 
-export function CharacterForm({ item, returnTo }: { item?: Character; returnTo: string }) {
+export function CharacterForm({ item, returnTo, ips = [] }: { item?: Character; returnTo: string; ips?: CatalogIp[] }) {
   const action = item ? updateCharacter : createCharacter;
   return <form className="stack-form" action={action}>
     {item ? <><input type="hidden" name="characterId" value={item.id} /><input type="hidden" name="expectedVersion" value={item.version} /></> : null}<ReturnTo value={returnTo} />
     <div className="field-grid">
-      <label>IP ID<input name="ipId" defaultValue={item?.ipId} maxLength={120} required /></label><label>캐릭터 이름<input name="name" defaultValue={item?.name} maxLength={160} required /></label>
+      <WorkSelect ips={ips} value={item?.ipId} /><label>캐릭터 이름<input name="name" defaultValue={item?.name} maxLength={160} required /></label>
       <label className="span-2">별칭 (쉼표 또는 줄바꿈)<textarea name="aliases" defaultValue={item?.aliases.join(", ")} maxLength={4000} /></label>
       <label className="span-2">외부 이미지 URL (선택)<input type="url" name="imageUrl" defaultValue={item?.imageUrl || ""} maxLength={2000} />
         <small>캐릭터 이미지는 외부 URL만 연결할 수 있습니다. 이 화면에서는 파일 업로드와 자르기를 지원하지 않습니다.</small>
@@ -40,32 +40,36 @@ export function CharacterForm({ item, returnTo }: { item?: Character; returnTo: 
   </form>;
 }
 
-export function ProductForm({ item, returnTo, initialName, initialIpId, initialPrizeOnly = false }: {
+function WorkSelect({ ips, value }: { ips: CatalogIp[]; value?: string }) {
+  return <label>작품<select name="ipId" defaultValue={value || ""} required>
+    <option value="" disabled>작품을 선택하세요</option>
+    {value && !ips.some((ip) => ip.id === value) ? <option value={value}>현재 연결된 작품</option> : null}
+    {ips.map((ip) => <option key={ip.id} value={ip.id}>{ip.nameKo}{ip.isActive === false ? " (비노출)" : ""}</option>)}
+  </select></label>;
+}
+
+export function ProductForm({ item, returnTo, initialName, initialIpId, initialPrizeOnly = false, ips = [] }: {
   item?: CatalogProduct;
   returnTo: string;
   initialName?: string;
   initialIpId?: string;
   initialPrizeOnly?: boolean;
+  ips?: CatalogIp[];
 }) {
   const action = item ? updateProduct : createProduct;
   return <form className="stack-form" action={action}>
+    <input type="hidden" name="simpleCatalog" value="on" />
     {item ? <><input type="hidden" name="productId" value={item.id} /><input type="hidden" name="expectedVersion" value={item.version} /></> : null}<ReturnTo value={returnTo} />
     <div className="field-grid">
-      <label>관리 코드 (SKU)<input name="sku" defaultValue={item?.sku} maxLength={80} placeholder="예: gacha-kimetsu-001" required /><small>상품마다 다른 영문·숫자 코드입니다.</small></label><label>작품 ID<input name="ipId" defaultValue={item?.ipId || initialIpId} maxLength={120} placeholder="작품 메뉴에서 확인" required /></label>
+      <WorkSelect ips={ips} value={item?.ipId || initialIpId} />
       {item ? <>
         <label>상품 종류<input value={item.category === "gacha" ? "가챠" : item.category === "kuji" ? "쿠지" : item.category} readOnly aria-readonly="true" title="종류 변경은 새 SKU 등록으로 처리합니다." /></label>
         <input type="hidden" name="category" value={item.category} />
       </> : <label>상품 종류<select name="category" defaultValue="gacha"><option value="gacha">가챠</option><option value="kuji">쿠지</option><option value="figure">피규어 (내부 전용)</option><option value="tcg">카드 (내부 전용)</option></select></label>}
       <label>상품명<input name="name" defaultValue={item?.name || initialName} maxLength={240} placeholder="고객에게 보일 상품 이름" required /></label>
-      <label>제조사<input name="manufacturer" defaultValue={item?.manufacturer || ""} maxLength={160} /></label><label>출시일<input type="date" name="releaseDate" defaultValue={item?.releaseDate || ""} /></label>
       <label>가격 (원)<input type="number" name="price" min={0} max={2147483647} defaultValue={item?.price ?? 0} required /></label>
-      {item ? <label>가용 수량 (재고 운영에서 조정)<input type="number" name="availableQuantity" value={item.availableQuantity} readOnly aria-readonly="true" /></label>
+      {item ? <div className="immutable-field"><span>재고</span><strong>{item.availableQuantity.toLocaleString("ko-KR")}개</strong><small>수량 변경은 재고 메뉴에서 처리하세요.</small></div>
         : <label>처음 등록할 재고 수<input type="number" name="availableQuantity" min={0} max={2147483647} defaultValue={0} required /></label>}
-      <label className="span-2">캐릭터 UUID (쉼표 또는 줄바꿈)<textarea name="characterIds" defaultValue={item?.characterIds.join(", ")} placeholder="비워 저장하면 연결을 모두 해제합니다." /></label>
-      <label className="span-2">메타데이터 JSON<textarea name="metadata" defaultValue={JSON.stringify(item?.metadata || {}, null, 2)} required /></label>
-      <label className="span-2">외부 이미지 URL (선택)<input type="url" name="imageUrl" defaultValue={item?.imageUrl || ""} maxLength={2000} />
-        <small>컴퓨터에 있는 사진은 상품 등록 후 목록의 ‘사진 자르기·업로드’에서 직접 잘라 올려주세요. 외부 URL은 자르기를 거치지 않습니다.</small>
-      </label>
       <label className="check-field"><input type="checkbox" name="isActive" defaultChecked={item?.isActive ?? true} /> 활성</label>
       {item?.isPrizeOnly || (!item && initialPrizeOnly) ? <>
         <input type="hidden" name="saleStatus" value="DRAFT" />
@@ -82,13 +86,17 @@ export function ProductForm({ item, returnTo, initialName, initialIpId, initialP
       {item ? <div className="span-2 immutable-field">
         <input type="hidden" name="isPrizeOnly" value={item.isPrizeOnly ? "on" : "off"} />
         <span>상품 용도</span>
-        <strong>{item.isPrizeOnly ? "경품 전용 SKU" : "판매 상품 SKU"}</strong>
-        <small>상품 용도는 생성 후 바꿀 수 없습니다. 용도가 달라지면 새 SKU를 등록하세요.</small>
+        <strong>{item.isPrizeOnly ? "구성 상품" : "판매 상품"}</strong>
+        <small>상품 용도는 생성 후 바꿀 수 없습니다. 다른 용도는 새 상품으로 등록하세요.</small>
       </div> : <label className="span-2 check-field product-kind-field">
         <input type="checkbox" name="isPrizeOnly" defaultChecked={initialPrizeOnly} />
-        <span><strong>경품 전용 SKU</strong><small>체크하면 공개 상품 목록과 일반 주문에서 제외되고, 같은 IP의 가챠·쿠지 경품 후보로만 사용됩니다. 생성 후 변경할 수 없습니다.</small></span>
+        <span><strong>구성 상품으로 등록</strong><small>개별 판매하지 않고 가챠·쿠지 구성에만 사용합니다. 생성 후 용도는 변경할 수 없습니다.</small></span>
       </label>}
     </div>
+    <details className="catalog-optional"><summary>추가 정보 (선택)</summary><div className="field-grid">
+      <label>제조사<input name="manufacturer" defaultValue={item?.manufacturer || ""} maxLength={160} /></label><label>출시일<input type="date" name="releaseDate" defaultValue={item?.releaseDate || ""} /></label>
+    </div></details>
+    {!item ? <p className="muted">사진은 상품 등록 후 ‘사진 관리’에서 직접 잘라 올려주세요.</p> : null}
     {!item ? <p className="muted">쿠지 판매 상품은 등록 후 이어지는 <strong>쿠지 상 구성</strong>에서 상 이름·노출 순서·수량을 설정하고 공개합니다.</p> : null}
     <ReasonField label={item ? "수정 사유" : "등록 사유"} /><div className="form-actions"><button className="primary">{item ? "상품 수정" : "상품 등록"}</button></div>
   </form>;
@@ -149,7 +157,6 @@ function CurrentProductImage({ label, url }: { label: string; url: string | null
         />
         <a className="button-link" href={safeUrl} target="_blank" rel="noreferrer noopener">현재 사진 열기</a>
       </> : <p className="muted">현재 URL은 안전하게 미리 볼 수 없습니다.</p>}
-      <small style={{ overflowWrap: "anywhere" }}>{url}</small>
     </> : null}
   </section>;
 }
@@ -207,32 +214,34 @@ export function ProductImageForm({ item, returnTo }: { item: CatalogProduct; ret
       <CurrentProductImage label="현재 목록 사진" url={item.storefrontImageUrl} />
       {gallery.map((url, index) => <CurrentProductImage key={`${index}-${url}`} label={`상세 슬라이드 ${index + 1}`} url={url} />)}
     </div>
-    <ProductImageUploadForm
+    <details className="catalog-optional"><summary>대표 사진 변경</summary><ProductImageUploadForm
       item={item}
       returnTo={returnTo}
       role="primary"
       label="새 대표 사진"
       guidance="상품 상세와 기존 화면에 사용하는 기본 사진 · 원본 비율로 전체 사진을 유지하거나 6:5·4:3·1:1로 자르기 · JPG, PNG, WEBP, GIF · 최대 10MB"
       buttonLabel="대표 사진 업로드 및 연결"
-    />
-    {storefront ? <ProductImageUploadForm
+    /></details>
+    {storefront ? <details className="catalog-optional"><summary>목록 카드 사진 변경</summary><ProductImageUploadForm
       item={item}
       returnTo={returnTo}
       role="storefront"
       label={storefront.label}
       guidance={storefront.guidance}
       buttonLabel="목록 사진 업로드 및 연결"
-    /> : <p className="muted">목록 사진은 가챠·쿠지 상품에만 등록할 수 있습니다.</p>}
-    {gallery.length < 8 ? <ProductImageUploadForm
+    /></details> : <p className="muted">목록 사진은 가챠·쿠지 상품에만 등록할 수 있습니다.</p>}
+    {gallery.length < 8 ? <details className="catalog-optional"><summary>상세 슬라이드 사진 추가 ({gallery.length}/8장)</summary><ProductImageUploadForm
       item={item}
       returnTo={returnTo}
       role="gallery"
       label="새 상세 슬라이드 사진"
       guidance="상품 상세에서 등록 순서대로 넘겨 볼 사진 · 최대 8장 · JPG, PNG, WEBP, GIF · 각 10MB 이하. 첫 사진부터 차례로 한 장씩 등록하세요."
       buttonLabel="상세 슬라이드 사진 추가"
-    /> : <p className="muted">상세 슬라이드 사진은 최대 8장입니다.</p>}
+    /></details> : <p className="muted">상세 슬라이드 사진은 최대 8장입니다.</p>}
     {gallery.length ? <p className="muted">상세 슬라이드 사진이 있으면 고객 상세 화면에는 이 사진들만 표시됩니다. 기본 대표 사진은 슬라이드에 자동 추가되지 않습니다.</p> : null}
-    {item.storefrontImageUrl ? <StorefrontImageClearForm item={item} returnTo={returnTo} /> : null}
-    {gallery.map((url, index) => <GalleryImageClearForm key={`${index}-${url}`} item={item} imageUrl={url} index={index} returnTo={returnTo} />)}
+    {item.storefrontImageUrl || gallery.length ? <details className="catalog-optional"><summary>사진 연결 해제</summary>
+      {item.storefrontImageUrl ? <StorefrontImageClearForm item={item} returnTo={returnTo} /> : null}
+      {gallery.map((url, index) => <GalleryImageClearForm key={`${index}-${url}`} item={item} imageUrl={url} index={index} returnTo={returnTo} />)}
+    </details> : null}
   </>;
 }

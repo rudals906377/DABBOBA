@@ -338,7 +338,7 @@ export async function resolveExchange(form: FormData) {
 
 function ipBody(form: FormData) {
   return {
-    slug: text(form, "slug", 100), nameKo: text(form, "nameKo", 160), nameEn: text(form, "nameEn", 160),
+    slug: optionalText(form, "slug", 100) ?? `work-${mutationHeaders(form)["idempotency-key"]}`, nameKo: text(form, "nameKo", 160), nameEn: optionalText(form, "nameEn", 160) ?? text(form, "nameKo", 160),
     nameJa: optionalText(form, "nameJa", 160), aliases: aliases(form), description: textAllowEmpty(form, "description", 5_000),
     imageUrl: optionalText(form, "imageUrl", 2_000), isActive: form.get("isActive") === "on",
   };
@@ -380,7 +380,7 @@ export async function createHomeSection(form: FormData) {
     }
     await adminApi("/v1/admin/home-sections", {
       method: "POST", token: session.token, reason: operationReason, headers: mutationHeaders(form),
-      body: { id: text(form, "sectionId", 120), ...homeSectionBody(form), isActive: false },
+      body: { id: optionalText(form, "sectionId", 120) ?? `home-${mutationHeaders(form)["idempotency-key"]}`, ...homeSectionBody(form), isActive: false },
     });
   }, "홈 섹션을 비노출 상태로 생성했습니다.");
 }
@@ -436,7 +436,21 @@ export async function updateCharacter(form: FormData) {
   }, "캐릭터를 수정했습니다.");
 }
 
-function productBody(form: FormData) {
+function productBody(form: FormData, current?: CatalogProduct) {
+  if (form.get("simpleCatalog") === "on") {
+    const category = current?.category ?? enumValue(form, "category", CATEGORIES);
+    return {
+      sku: current?.sku ?? `${category}-${mutationHeaders(form)["idempotency-key"]}`,
+      ipId: text(form, "ipId", 120),
+      characterIds: current?.characterIds ?? [],
+      category, name: text(form, "name", 240),
+      manufacturer: optionalText(form, "manufacturer", 160), releaseDate: optionalText(form, "releaseDate", 10),
+      price: integer(form, "price"), availableQuantity: current?.availableQuantity ?? integer(form, "availableQuantity"),
+      metadata: current?.metadata ?? {}, imageUrl: current?.imageUrl ?? null,
+      isActive: form.get("isActive") === "on", isPrizeOnly: current?.isPrizeOnly ?? form.get("isPrizeOnly") === "on",
+      saleStatus: current?.isPrizeOnly ? "DRAFT" : enumValue(form, "saleStatus", PRODUCT_SALE_STATUSES),
+    };
+  }
   const characterIds = aliases(form, "characterIds");
   return {
     sku: text(form, "sku", 80), ipId: text(form, "ipId", 120), characterIds,
@@ -468,6 +482,8 @@ export async function createProduct(form: FormData) {
   const needsKujiConfiguration = created.category === "kuji" && !created.isPrizeOnly;
   const successDestination = needsKujiConfiguration
     ? `/catalog/products/${encodeURIComponent(created.id)}/draws`
+    : form.get("simpleCatalog") === "on" && destination.split("?")[0] === "/catalog/products"
+      ? `/catalog/products/${encodeURIComponent(created.id)}`
     : destination;
   redirect(feedback(
     successDestination,
@@ -477,7 +493,11 @@ export async function createProduct(form: FormData) {
 }
 export async function updateProduct(form: FormData) {
   await mutate("catalog.manage", form, async (session, operationReason) => {
-    await adminApi(`/v1/admin/products/${id(form, "productId")}`, { method: "PATCH", token: session.token, reason: operationReason, headers: mutationHeaders(form), body: { ...productBody(form), expectedVersion: version(form) } });
+    const path = `/v1/admin/products/${id(form, "productId")}`;
+    const expectedVersion = version(form);
+    const current = form.get("simpleCatalog") === "on" ? await adminApi<CatalogProduct>(path, { token: session.token }) : undefined;
+    if (current && current.version !== expectedVersion) throw new Error("다른 운영자가 먼저 수정했습니다. 새로고침 후 다시 저장해 주세요.");
+    await adminApi(path, { method: "PATCH", token: session.token, reason: operationReason, headers: mutationHeaders(form), body: { ...productBody(form, current), expectedVersion } });
   }, "상품을 수정했습니다.");
 }
 

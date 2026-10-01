@@ -91,7 +91,7 @@ test("catalog product forms distinguish immutable prize-only SKUs", async () => 
   assert.match(forms, /name="isPrizeOnly"/);
   assert.match(forms, /상품 용도는 생성 후 바꿀 수 없습니다/);
   assert.match(page, /name="prizeOnly"/);
-  assert.match(page, /경품 전용/);
+  assert.match(page, /구성 상품/);
   assert.match(page, /쿠지 상 구성/);
   assert.match(forms, /등록 후 이어지는 <strong>쿠지 상 구성<\/strong>/);
   assert.match(drawForm, /afterCreate=/);
