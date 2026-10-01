@@ -333,7 +333,7 @@ test("admin Home layout contract keeps legacy rows visible but requires a catego
   assert.equal(update.layoutKind, "kuji");
 });
 
-test("generated catalog image contract distinguishes primary and storefront attachments", () => {
+test("generated catalog image contract distinguishes primary, storefront and gallery attachments", () => {
   const primary = {
     mediaId: "10000000-0000-4000-8000-000000000001",
     expectedVersion: 1,
@@ -342,6 +342,15 @@ test("generated catalog image contract distinguishes primary and storefront atta
     ...primary,
     role: "storefront",
   } satisfies components["schemas"]["ProductImageAttachInput"];
+  const gallery = {
+    ...primary,
+    role: "gallery",
+  } satisfies components["schemas"]["ProductImageAttachInput"];
+  const clearGallery = {
+    expectedVersion: 2,
+    role: "gallery",
+    imageUrl: "https://cdn.example.test/gallery.webp",
+  } satisfies components["schemas"]["ProductImageClearInput"];
   const attachment = {
     productId: "demon-slayer-kuji",
     imageUrl: "https://cdn.example.test/storefront.webp",
@@ -362,6 +371,8 @@ test("generated catalog image contract distinguishes primary and storefront atta
 
   assert.equal("role" in primary, false);
   assert.equal(attachment.role, "storefront");
+  assert.equal(gallery.role, "gallery");
+  assert.equal(clearGallery.role, "gallery");
   assert.equal(cleared.imageUrl, null);
 
   const document = readFileSync(fileURLToPath(new URL("../openapi/dabboba.openapi.yaml", import.meta.url)), "utf8");
@@ -369,14 +380,15 @@ test("generated catalog image contract distinguishes primary and storefront atta
     document.indexOf("    ProductImageAttachInput:\n"),
     document.indexOf("    ProductImageAttachment:\n"),
   );
-  assert.match(attachInput, /enum: \[primary, storefront\]/);
+  assert.match(attachInput, /enum: \[primary, storefront, gallery\]/);
   assert.match(attachInput, /default: primary/);
   const clearSchema = document.slice(
     document.indexOf("    ProductImageClearInput:\n"),
     document.indexOf("    ProductImageClearResult:\n"),
   );
   assert.match(clearSchema, /required: \[expectedVersion, role\]/);
-  assert.match(clearSchema, /enum: \[storefront\]/);
+  assert.match(clearSchema, /enum: \[storefront, gallery\]/);
+  assert.match(clearSchema, /imageUrl:[\s\S]*format: uri/);
   const imagePath = document.slice(
     document.indexOf("  \/v1\/admin\/products\/{productId}\/image:\n"),
     document.indexOf("  \/v1\/admin\/catalog-requests:\n"),
@@ -389,6 +401,7 @@ test("generated catalog image contract distinguishes primary and storefront atta
   );
   assert.match(product, /required: \[[^\n]*storefrontImageUrl/);
   assert.match(product, /storefrontImageUrl:[\s\S]*type: \[string, "null"\]/);
+  assert.match(product, /description: detailGalleryImageUrls[^\n]*최대 8개/);
   assert.match(product, /remainingKujiTiers:[\s\S]*PublicKujiTierRemaining/);
   assert.doesNotMatch(product.match(/required: \[[^\n]*\]/)?.[0] ?? "", /remainingKujiTiers/);
   const upsertProduct = document.slice(
