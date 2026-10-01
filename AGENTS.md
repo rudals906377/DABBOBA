@@ -394,3 +394,8 @@ When any text-entry control loses focus, dismiss the simulated keyboard. If the 
 
 - First launch contains the eight operator-confirmed gacha products only. Kuji is deferred: preserve its code, history and empty/coming-soon shop, but do not require a sellable Kuji product in launch verification or activate Kuji sales. Do not infer an exemption from any gacha payment, legal, authentication or inventory gate.
 - Keep gallery photos separate from detailed prize SKUs and storefront thumbnails. Sylvanian `1.jpg`, `2.jpg`, `3.jpg` are ordered hero slides, not prize kinds. All products support an audited ordered detail gallery of up to eight photos through admin media upload/attach and per-photo clear. Preserve source-aspect-ratio hero rendering, independent primary/storefront images, authenticated media ownership, optimistic version checks and mutation audit/idempotency.
+# Launcher identity — 2026-10-01
+
+- The owner selected the horizontal DABBOBA wordmark with capsule O and bright mint background. Use `design-assets/app-icons/dabboba-wordmark-capsule-horizontal-final-source.png`; white/ivory previews are not approved replacements.
+- iOS/default uses the opaque 1024px asset; Android uses the complete horizontal foreground inside its safe circle over `#78EF95`. Preserve Apple Sign In entitlements and existing team/project IDs.
+- Developer-console uploads use the opaque `dabboba-developer-icon-256.png`, including the mint background. Uploading the transparent adaptive foreground is incorrect.

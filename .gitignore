@@ -37,6 +37,9 @@ coverage/
 /design-assets/app-icons/*
 !/design-assets/app-icons/README-launcher-icon.md
 !/design-assets/app-icons/dabboba-wordmark-capsule-slant-final-source.png
+!/design-assets/app-icons/dabboba-wordmark-capsule-horizontal-final-source.png
+!/design-assets/app-icons/dabboba-horizontal-adaptive-source.png
+!/design-assets/app-icons/dabboba-developer-icon-256.png
 work/qa/
 work/audits/
 apps/mobile/assets/DABBOBA-logo-selected-*.zip

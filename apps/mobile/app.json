@@ -31,7 +31,7 @@
       ],
       "adaptiveIcon": {
         "foregroundImage": "./assets/icons/adaptive-icon-foreground.png",
-        "backgroundColor": "#91E98E"
+        "backgroundColor": "#78EF95"
       }
     },
     "plugins": [
