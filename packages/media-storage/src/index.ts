@@ -367,7 +367,8 @@ export class SupabaseMediaStorage {
   async #open(path: string, init: RequestInit, ignoreMissing = false): Promise<{ response: Response; close(): void }> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), STORAGE_REQUEST_TIMEOUT_MS);
-    timer.unref();
+    // Node timers have unref(); Web/Edge runtimes return a numeric handle.
+    timer.unref?.();
     const close = () => { clearTimeout(timer); controller.abort(); };
     try {
       const response = await fetch(new URL(path, this.#base), {
