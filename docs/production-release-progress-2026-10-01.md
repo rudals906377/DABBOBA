@@ -22,6 +22,7 @@
 - Kakao 앱 1591356과 Naver DABBOBA 앱에 확정 민트색 가로 아이콘을 등록했고 새로고침 후 화면에서 확인했다. 사업자 등록, 개인정보 동의항목, callback, key는 변경하지 않았다.
 - 로컬 단위 검사 1,036개 + TypeScript 8개, 관리자 56개 통과. iOS/Android PRELAUNCH production export 및 금지 fixture/결제 표시 검사 통과. 서명된 최종 native 바이너리나 실제 기기 결과가 아니다.
 - 추가 audit에서 Fastify 5.12.1 high 4건/moderate 1건을 발견해 `^5.12.2` 하한과 잠금 5.12.5로 수정했다. audit 0건, 빌드·타입·API 319개 통과(38개 DB 통합은 이 실행에서 미설정/건너뜀), 비동기 body 치환 거부 회귀 및 Deno 고객/관리자 entry 검사·고객 bundle smoke 통과. 첫 Deno 검사는 root에서 config를 선택하지 않아 import 해석에 실패했고 올바른 함수 config로 재실행했다. 검사 기준이나 보안 경계를 완화하지 않았다.
+- 보안 수정 commit `1af8df2`를 clean release source 검사 후 운영 고객/관리자 API에 코드만 재배포했다. worker/Secret/결제 모드를 변경하지 않았다. EAS production의 공개 설정을 값 노출 없이 메모리로 읽어 전체 PRELAUNCH 출시 설정과 해당 공개 API 검사 7개 경로·대표 이미지가 통과했다. paymentProvider는 공개 config에 없으므로 원격 provider 설정까지 증명하지 않는다.
 
 ## 진행·미완료
 
