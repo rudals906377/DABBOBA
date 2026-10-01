@@ -1,6 +1,5 @@
 "use server";
 
-import { createHash } from "node:crypto";
 import type { components } from "@dabboba/contracts";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
@@ -8,7 +7,7 @@ import { AdminApiError, adminApi } from "./api";
 import { requireCapability, type AdminSession } from "./auth";
 import type { Capability } from "./capabilities";
 import type { CatalogProduct } from "./admin-types";
-import { catalogImageFile, uploadCatalogImage } from "./catalog-media-upload";
+import { saveProductImage } from "./product-image-upload";
 import { buildDrawVersionDraftPayload, type DrawDraftCategory } from "./draw-version-draft";
 import { safeInternalPath } from "./request-security";
 
@@ -29,13 +28,7 @@ const EXCHANGE_ACTIONS = ["COMPLETE", "CANCEL"] as const;
 const REFUND_REVIEW_STATUSES = ["PENDING", "IN_REVIEW", "WAITING_PROVIDER", "ESCALATED", "CLOSED"] as const;
 const SHIPPING_TARGET_STATUSES = ["PROCESSING", "SHIPPED", "DELIVERED", "CANCELLED"] as const;
 const ACCOUNT_DELETION_DECISIONS = ["APPROVED", "REJECTED"] as const;
-const PRODUCT_IMAGE_ROLES = ["primary", "storefront", "gallery"] as const;
 
-type CreateCatalogMediaUploadInput = components["schemas"]["CreateCatalogMediaUploadInput"];
-type MediaReady = components["schemas"]["MediaReady"];
-type MediaUploadIntent = components["schemas"]["MediaUploadIntent"];
-type ProductImageAttachInput = components["schemas"]["ProductImageAttachInput"];
-type ProductImageAttachment = components["schemas"]["ProductImageAttachment"];
 type ProductImageClearInput = components["schemas"]["ProductImageClearInput"];
 type ProductImageClearResult = components["schemas"]["ProductImageClearResult"];
 
@@ -490,56 +483,7 @@ export async function updateProduct(form: FormData) {
 
 export async function uploadProductImage(form: FormData) {
   await mutate("catalog.manage", form, async (session, operationReason) => {
-    const productId = id(form, "productId");
-    const expectedVersion = version(form);
-    const role = enumValue(form, "role", PRODUCT_IMAGE_ROLES);
-    const file = catalogImageFile(form.get("image"));
-    const checksumSha256 = createHash("sha256").update(Buffer.from(await file.arrayBuffer())).digest("hex");
-    let intent: MediaUploadIntent;
-    let uploadStage = "intent";
-    try {
-      const uploadInput: CreateCatalogMediaUploadInput = {
-        filename: file.name,
-        mimeType: file.type,
-        byteSize: file.size,
-        checksumSha256,
-        acceptedUploadMethods: ["POST", "PUT"],
-      };
-      intent = await adminApi<MediaUploadIntent>("/v1/admin/catalog-media/uploads", {
-        method: "POST",
-        token: session.token,
-        reason: operationReason,
-        headers: mutationHeaders(form),
-        body: uploadInput,
-      });
-      uploadStage = "storage";
-      await uploadCatalogImage(intent, file);
-      uploadStage = "complete";
-      await adminApi<MediaReady>(`/v1/admin/catalog-media/${encodeURIComponent(intent.mediaId)}/complete`, {
-        method: "POST",
-        token: session.token,
-        reason: operationReason,
-        headers: idempotencyHeaders(form, "completeIdempotencyKey"),
-      });
-      uploadStage = "attach";
-      const attachInput: ProductImageAttachInput = { mediaId: intent.mediaId, expectedVersion, role };
-      await adminApi<ProductImageAttachment>(`/v1/admin/products/${productId}/image`, {
-        method: "PATCH",
-        token: session.token,
-        reason: operationReason,
-        headers: idempotencyHeaders(form, "attachIdempotencyKey"),
-        body: attachInput,
-      });
-    } catch (error) {
-      console.error("catalog-media-admin-flow", uploadStage, error instanceof AdminApiError ? error.status : "local");
-      if (error instanceof AdminApiError && error.status === 503) {
-        throw new Error("현재 상품 이미지 저장을 사용할 수 없습니다. 운영 환경의 미디어 구성을 확인한 뒤 다시 시도해 주세요.");
-      }
-      if (error instanceof AdminApiError && error.status === 410) {
-        throw new Error("상품 사진 업로드 시간이 만료되었습니다. 사진을 다시 선택해 시도해 주세요.");
-      }
-      throw error;
-    }
+    await saveProductImage(form, session.token, operationReason);
   }, "상품 사진을 저장했습니다.");
 }
 

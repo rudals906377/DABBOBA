@@ -460,8 +460,10 @@ test(
 
     const unassignedPublic = await app.inject({ method: "GET", url: `/v1/catalog/media/${unassignedMediaId}/image` });
     assert.equal(unassignedPublic.statusCode, 404, unassignedPublic.body);
+    assert.equal(unassignedPublic.headers["cross-origin-resource-policy"], "same-origin");
     const activePublic = await app.inject({ method: "GET", url: `/v1/catalog/media/${readyMediaId}/image` });
     assert.equal(activePublic.statusCode, 302, activePublic.body);
+    assert.equal(activePublic.headers["cross-origin-resource-policy"], "cross-origin");
     assert.equal(activePublic.headers["cache-control"], "private, no-store");
     assert.match(String(activePublic.headers.location), /^https:\/\/storage\.example\.test\/private\//);
     assert.equal(signedReadCalls, 1);

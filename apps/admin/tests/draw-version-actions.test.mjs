@@ -76,7 +76,7 @@ async function loadActions({ productCategory = "kuji", deny = false } = {}) {
       },
     },
     "./request-security": { safeInternalPath: (value) => String(value || "/") },
-    "./catalog-media-upload": { catalogImageFile() { throw new Error("unused catalog image helper"); }, uploadCatalogImage() {} },
+    "./product-image-upload": { saveProductImage() { throw new Error("unused catalog image helper"); } },
     "./draw-version-draft": drawDraftModule,
   });
   return { actions, apiCalls, redirects, revalidations };

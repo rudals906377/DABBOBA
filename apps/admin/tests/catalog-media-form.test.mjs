@@ -22,7 +22,7 @@ async function loadModule(path, mocks = {}, context = {}) {
   }).code;
   const module = { exports: {} };
   vm.runInNewContext(`(function(require,module,exports){${output}\n})`, {
-    AbortSignal, Buffer, File, FormData, Headers, Response, URL, URLSearchParams, crypto, process, ...context,
+    AbortSignal, Blob, Buffer, Error, File, FormData, Headers, Request, Response, URL, URLSearchParams, crypto, process, ...context,
   })((id) => {
     if (id === "server-only") return {};
     if (id === "node:crypto") return require("node:crypto");
@@ -73,7 +73,7 @@ async function loadActions({ apiFailure, deny = false } = {}) {
   class ApiError extends Error {
     constructor(status) { super("api failure"); this.status = status; this.requestId = null; }
   }
-  const actions = await loadModule(join(adminRoot, "lib/actions.ts"), {
+  const mocks = {
     "server-only": {},
     "next/cache": { revalidatePath(path) { revalidations.push(path); } },
     "next/navigation": { redirect(path) { redirects.push(path); throw new Error(`REDIRECT:${path}`); } },
@@ -104,9 +104,12 @@ async function loadActions({ apiFailure, deny = false } = {}) {
     "./auth": { requireCapability: async () => { if (deny) throw new Error("DENIED"); return { token: "admin-token" }; } },
     "./request-security": { safeInternalPath: (value) => String(value || "/") },
     "./draw-version-draft": { buildDrawVersionDraftPayload() { throw new Error("unused draw helper"); } },
-    "./catalog-media-upload": helper,
+  };
+  mocks["./product-image-upload"] = await loadModule(join(adminRoot, "lib/product-image-upload.ts"), {
+    "./api": mocks["./api"], "./catalog-media-upload": helper,
   });
-  return { actions, apiCalls, uploads, redirects, revalidations };
+  const actions = await loadModule(join(adminRoot, "lib/actions.ts"), mocks);
+  return { actions, apiCalls, uploads, redirects, revalidations, productImages: mocks["./product-image-upload"] };
 }
 
 test("product image action uploads, completes, and attaches only the image with fresh idempotency keys", async () => {
@@ -162,6 +165,113 @@ test("product image action forwards gallery role without replacing the primary i
   assert.deepEqual(JSON.parse(JSON.stringify(run.apiCalls[2][1].body)), {
     mediaId: "123e4567-e89b-42d3-a456-426614174001", expectedVersion: 7, role: "gallery",
   });
+});
+
+async function loadUploadRoute({ noSession = false, deny = false, apiFailure } = {}) {
+  const run = await loadActions({ apiFailure });
+  const originHelper = await loadModule(join(adminRoot, "lib/request-origin.ts"));
+  const security = await loadModule(join(adminRoot, "lib/request-security.ts"), {
+    "@dabboba/config": {}, "next/server": { NextResponse: Response }, "./request-origin": originHelper,
+  });
+  const bodyHelper = await loadModule(join(adminRoot, "lib/catalog-upload-body.ts"));
+  let sessionReads = 0;
+  const route = await loadModule(join(adminRoot, "app/api/catalog/images/route.ts"), {
+    "next/cache": { revalidatePath(path) { run.revalidations.push(path); } },
+    "../../../../lib/auth": { getAdminSession: async () => {
+      sessionReads += 1;
+      return noSession ? null : { token: "admin-token", actor: { status: "ACTIVE", role: "SUPER_ADMIN", permissions: deny ? [] : ["catalog.read", "catalog.write"] } };
+    } },
+    "../../../../lib/capabilities": await loadModule(join(adminRoot, "lib/capabilities.ts")),
+    "../../../../lib/catalog-upload-body": bodyHelper,
+    "../../../../lib/product-image-upload": run.productImages,
+    "../../../../lib/request-security": security,
+    "../../../../lib/request-origin": originHelper,
+  });
+  return { ...run, route, bodyHelper, sessionReads: () => sessionReads };
+}
+
+function uploadRequest(data, headers = {}) {
+  return new Request("https://admin.dabboba.net/api/catalog/images", {
+    method: "POST", body: data,
+    headers: { host: "admin.dabboba.net", origin: "https://admin.dabboba.net", "sec-fetch-site": "same-origin", ...headers },
+  });
+}
+
+test("native upload route preserves gallery completion, version, audit reason and 303 redirect", async () => {
+  const run = await loadUploadRoute();
+  const response = await run.route.POST(uploadRequest(form(new File([new Uint8Array([1, 2, 3, 4])], "3.jpg", { type: "image/jpeg" }), { role: "gallery" })));
+  assert.equal(response.status, 303);
+  assert.match(response.headers.get("location"), /^\/catalog\/products\?q=test&success=/);
+  assert.equal(response.headers.get("cache-control"), "no-store");
+  assert.equal(run.apiCalls.length, 3);
+  assert.equal(run.apiCalls[2][1].body.role, "gallery");
+  assert.equal(run.apiCalls[2][1].body.expectedVersion, 7);
+  assert.equal(run.apiCalls[2][1].reason, "상품 대표 사진 교체");
+  assert.deepEqual(run.revalidations, ["/catalog/products"]);
+});
+
+test("upload route fails closed for cross-origin, absent Origin, missing session and missing capability", async () => {
+  for (const headers of [{ origin: "https://attacker.example" }, { origin: "" }, { origin: "null" }, { "sec-fetch-site": "same-site" }, { origin: "http://admin.dabboba.net" }]) {
+    const run = await loadUploadRoute();
+    const response = await run.route.POST(uploadRequest(form(null), headers));
+    assert.equal(response.status, 403);
+    assert.equal(run.sessionReads(), 0);
+    assert.equal(run.apiCalls.length, 0);
+  }
+  const anonymous = await loadUploadRoute({ noSession: true });
+  const login = await anonymous.route.POST(uploadRequest(form(null)));
+  assert.equal(login.status, 303);
+  assert.match(login.headers.get("location"), /^\/login\?/);
+  assert.equal(anonymous.apiCalls.length, 0);
+  const denied = await loadUploadRoute({ deny: true });
+  assert.equal((await denied.route.POST(uploadRequest(form(null)))).status, 403);
+  assert.equal(denied.apiCalls.length, 0);
+});
+
+test("upload rejects invalid file, missing reason, malformed keys and repeated fields before intent", async () => {
+  for (const overrides of [{ reason: "x" }, { attachIdempotencyKey: "invalid" }, { expectedVersion: "0" }, { role: "unknown" }]) {
+    const run = await loadUploadRoute();
+    const response = await run.route.POST(uploadRequest(form(new File(["abcd"], "3.jpg", { type: "image/jpeg" }), overrides)));
+    assert.match(response.headers.get("location"), /error=/);
+    assert.equal(run.apiCalls.length, 0);
+  }
+  for (const data of [form(new File(["abcd"], "script.svg", { type: "image/svg+xml" })), form(new File([], "empty.jpg", { type: "image/jpeg" }))]) {
+    const run = await loadUploadRoute();
+    const response = await run.route.POST(uploadRequest(data));
+    assert.match(response.headers.get("location"), /error=/);
+    assert.equal(run.apiCalls.length, 0);
+  }
+  const run = await loadUploadRoute();
+  const duplicate = form(new File(["abcd"], "3.jpg", { type: "image/jpeg" }));
+  duplicate.append("productId", "other-product");
+  assert.match((await run.route.POST(uploadRequest(duplicate))).headers.get("location"), /error=/);
+  assert.equal(run.apiCalls.length, 0);
+});
+
+test("upload route has no open redirect or false success on stale attachment", async () => {
+  const run = await loadUploadRoute({ apiFailure: { path: "/v1/admin/products/product-1/image", status: 409 } });
+  const response = await run.route.POST(uploadRequest(form(new File(["abcd"], "3.jpg", { type: "image/jpeg" }), { returnTo: "https://attacker.example" })));
+  assert.equal(response.status, 303);
+  assert.match(response.headers.get("location"), /^\/catalog\/products\?error=/);
+  assert.doesNotMatch(response.headers.get("location"), /success=|attacker/);
+  assert.equal(run.revalidations.length, 0);
+  assert.equal(run.productImages.productImageError(new Error("secret-storage-url")), "상품 사진을 저장하지 못했습니다.");
+});
+
+test("multipart body limit rejects declared and streamed oversize and unsupported bodies", async () => {
+  const { bodyHelper } = await loadUploadRoute();
+  const size = bodyHelper.MAX_CATALOG_UPLOAD_BODY_BYTES;
+  const request = uploadRequest(form(null), { "content-length": String(size + 1) });
+  await assert.rejects(() => bodyHelper.catalogUploadForm(request), (error) => error.status === 413);
+  let cancelled = false;
+  const stream = new ReadableStream({ start(controller) { controller.enqueue(new Uint8Array(size + 1)); }, cancel() { cancelled = true; } });
+  await assert.rejects(() => bodyHelper.catalogUploadForm(new Request("https://admin.dabboba.net/api/catalog/images", {
+    method: "POST", body: stream, duplex: "half", headers: { "content-type": "multipart/form-data; boundary=test", "content-length": "1" },
+  })), (error) => error.status === 413);
+  assert.equal(cancelled, true);
+  await assert.rejects(() => bodyHelper.catalogUploadForm(new Request("https://admin.dabboba.net/api/catalog/images", {
+    method: "POST", body: "{}", headers: { "content-type": "application/json" },
+  })), (error) => error.status === 415);
 });
 
 test("gallery image clear action removes one selected slide with confirmation", async () => {
@@ -284,7 +394,7 @@ test("product image action cannot fake success on capability, storage, or stale 
   assert.doesNotMatch(stale.redirects.at(-1), /success=/);
 });
 
-test("product image form renders a same-origin server action without editable image URL", async () => {
+test("product image form uses a dedicated native multipart upload, not React action serialization", async () => {
   const module = await loadModule(join(adminRoot, "components/catalog-forms.tsx"), {
     "./image-crop-picker": await loadCropPicker(),
     "../lib/actions": {
@@ -309,6 +419,12 @@ test("product image form renders a same-origin server action without editable im
     returnTo: "/catalog/products",
   }));
   assert.equal((html.match(/type="file"/g) || []).length, 3);
+  assert.equal((html.match(/action="\/api\/catalog\/images"/g) || []).length, 3);
+  assert.equal((html.match(/method="post"/g) || []).length, 3);
+  assert.equal((html.match(/encType="multipart\/form-data"/g) || []).length, 3);
+  const uploadForms = html.match(/<form class="stack-form catalog-image-form catalog-crop-picker"[\s\S]*?<\/form>/g);
+  assert.equal(uploadForms.length, 3);
+  for (const uploadForm of uploadForms) assert.doesNotMatch(uploadForm, /\$ACTION_|javascript:throw/);
   assert.match(html, /accept="image\/jpeg,image\/png,image\/webp,image\/gif"/);
   assert.match(html, /name="expectedVersion" value="7"/);
   assert.match(html, /name="role" value="primary"/);
