@@ -133,16 +133,19 @@ test("new sellable kuji continues directly to its tier configuration", async () 
   assert.match(redirects.at(-1), /success=/);
 });
 
-test("draw draft helper separates gacha weights from kuji tiers and enforces finite-deck totals", async () => {
+test("draw draft helper fixes gacha weights to one and enforces finite-deck totals", async () => {
   const helper = await loadModule(join(adminRoot, "lib/draw-version-draft.ts"));
   const gacha = helper.buildDrawVersionDraftPayload("gacha", [
-    { prizeProductId: "prize-a", rarity: "A", weight: 2, quantity: 3 },
+    { prizeProductId: "prize-a", rarity: "A", quantity: 3 },
   ]);
   assert.deepEqual(JSON.parse(JSON.stringify(gacha)), {
-    entries: [{ prizeProductId: "prize-a", rarity: "A", weight: 2, quantity: 3 }],
+    entries: [{ prizeProductId: "prize-a", rarity: "A", weight: 1, quantity: 3 }],
   });
   assert.throws(() => helper.buildDrawVersionDraftPayload("gacha", [
-    { prizeProductId: "prize-a", rarity: "A", weight: 2, quantity: 3, tierCode: "A", tierRank: 0 },
+    { prizeProductId: "prize-a", rarity: "A", weight: 2, quantity: 3 },
+  ]), /가중치는 1이어야/);
+  assert.throws(() => helper.buildDrawVersionDraftPayload("gacha", [
+    { prizeProductId: "prize-a", rarity: "A", quantity: 3, tierCode: "A", tierRank: 0 },
   ]), /tierCode/);
 
   const kujiEntries = [
@@ -161,13 +164,13 @@ test("draw draft helper separates gacha weights from kuji tiers and enforces fin
   assert.throws(() => helper.buildDrawVersionDraftPayload("kuji", [{ ...kujiEntries[0], tierRank: null }], 1), /tierRank/);
   assert.throws(() => helper.buildDrawVersionDraftPayload("kuji", [{ ...kujiEntries[0], tierRank: false }], 1), /tierRank/);
   assert.throws(() => helper.buildDrawVersionDraftPayload("kuji", [{ ...kujiEntries[0], weight: 99 }], 1), /가중치를 사용하지 않습니다/);
-  assert.throws(() => helper.buildDrawVersionDraftPayload("gacha", [{ prizeProductId: "prize-a", rarity: "A", weight: 2, quantity: 3, tierRank: 1 }]), /tierRank/);
-  assert.throws(() => helper.buildDrawVersionDraftPayload("gacha", [{ prizeProductId: "prize-a", rarity: "A", weight: 2, quantity: 3 }], 10), /전체 장수/);
+  assert.throws(() => helper.buildDrawVersionDraftPayload("gacha", [{ prizeProductId: "prize-a", rarity: "A", quantity: 3, tierRank: 1 }]), /tierRank/);
+  assert.throws(() => helper.buildDrawVersionDraftPayload("gacha", [{ prizeProductId: "prize-a", rarity: "A", quantity: 3 }], 10), /전체 장수/);
 });
 
-test("gacha action ignores browser category and preserves weighted finite entries", async () => {
+test("gacha action ignores browser category and preserves finite quantity entries", async () => {
   const { actions, apiCalls } = await loadActions({ productCategory: "gacha" });
-  const entries = [{ prizeProductId: "prize-a", rarity: "A", weight: 7, quantity: 2 }];
+  const entries = [{ prizeProductId: "prize-a", rarity: "A", weight: 1, quantity: 2 }];
   await assert.rejects(() => actions.createDrawVersion(form({
     ...base,
     category: "kuji",
@@ -233,5 +236,6 @@ test("draw form renderer exposes only the fields for the authoritative product c
   assert.doesNotMatch(gacha, /name="totalSlots"/);
   assert.doesNotMatch(gacha, /등급 코드 \(tierCode\)/);
   assert.doesNotMatch(gacha, /등급 순서 \(tierRank, 0부터\)/);
-  assert.match(gacha, /기본 가중치/);
+  assert.doesNotMatch(gacha, /기본 가중치/);
+  assert.match(gacha, /확률 계산용 전체 수량/);
 });

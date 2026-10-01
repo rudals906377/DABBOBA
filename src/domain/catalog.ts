@@ -44,6 +44,8 @@ export type ProductRecord = {
   description: string;
   price: number;
   stock: number;
+  totalQuantity?: number | null;
+  openedQuantity?: number | null;
   asset: string;
   edition: string;
   reward: string;

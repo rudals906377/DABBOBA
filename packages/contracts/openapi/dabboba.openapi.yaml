@@ -929,6 +929,22 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/HomeRecentDrawActivityList" }
+  /v1/catalog/products/{productId}/recent-draws:
+    get:
+      tags: [Catalog]
+      operationId: getProductRecentDraws
+      description: Returns at most eight newest immutable prize snapshots for this public Gacha or Kuji product. Customer identity is omitted and unpublished products produce no activity.
+      parameters:
+        - $ref: "#/components/parameters/ProductId"
+      responses:
+        "200":
+          description: Recent committed results for the requested product, newest first.
+          headers:
+            Cache-Control:
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/HomeRecentDrawActivityList" }
   /v1/catalog/home-product-clicks/{productId}:
     post:
       tags: [Catalog]
@@ -1033,6 +1049,23 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/CatalogProduct" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/catalog/products/{productId}/included-products:
+    get:
+      tags: [Catalog]
+      operationId: getCatalogIncludedProducts
+      description: Public included prize list for a browsable gacha or kuji product. ON_SALE uses immutable snapshots from the ACTIVE draw version; COMING_SOON uses active planned prize SKUs. Does not expose per-prize inventory or probabilities.
+      parameters:
+        - name: productId
+          in: path
+          required: true
+          schema: { type: string, maxLength: 120 }
+      responses:
+        "200":
+          description: Included prizes in catalog order.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CatalogIncludedProductPage" }
         "404": { $ref: "#/components/responses/NotFound" }
   /v1/catalog/requests:
     post:
@@ -4366,10 +4399,10 @@ components:
         mediaId: { type: string, format: uuid }
         expectedVersion: { type: integer, minimum: 1 }
         role:
-          description: primary는 기존 상세·기본 대표 사진이고 storefront는 상품 목록 전용 사진입니다.
+          description: primary는 기본 대표 사진, storefront는 목록 전용 사진, gallery는 상품 상세에서 넘겨 보는 사진을 순서대로 추가합니다(최대 8장). gallery에 등록된 사진이 있으면 상세 화면은 그 사진들만 슬라이드로 보여줍니다.
           allOf:
             - type: string
-              enum: [primary, storefront]
+              enum: [primary, storefront, gallery]
               default: primary
     ProductImageAttachment:
       type: object
@@ -4383,14 +4416,18 @@ components:
         imageUrl: { type: string, format: uri }
         version: { type: integer, minimum: 2 }
         mediaId: { type: string, format: uuid }
-        role: { type: string, enum: [primary, storefront] }
+        role: { type: string, enum: [primary, storefront, gallery] }
     ProductImageClearInput:
       type: object
       additionalProperties: false
       required: [expectedVersion, role]
       properties:
         expectedVersion: { type: integer, minimum: 1 }
-        role: { type: string, enum: [storefront] }
+        role: { type: string, enum: [storefront, gallery] }
+        imageUrl:
+          type: string
+          format: uri
+          description: gallery 사진 한 장을 연결 해제할 때 필요한 현재 이미지 URL입니다.
     ProductImageClearResult:
       type: object
       additionalProperties: false
@@ -4400,9 +4437,9 @@ components:
           type: string
           maxLength: 120
           pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$"
-        imageUrl: { type: "null" }
+        imageUrl: { type: [string, "null"], format: uri }
         version: { type: integer, minimum: 2 }
-        role: { type: string, enum: [storefront] }
+        role: { type: string, enum: [storefront, gallery] }
     Actor:
       type: object
       additionalProperties: false
@@ -5184,12 +5221,19 @@ components:
           type: [integer, "null"]
           minimum: 0
           description: LIVE 판매 중에만 공개하는 총수량입니다. PRELAUNCH·COMING_SOON에는 null이며, 그 밖에는 ACTIVE 쿠지 덱의 전체 슬롯 수 또는 모든 항목에 초기 수량이 있는 ACTIVE 유한 가챠 풀의 초기 수량 합계입니다.
+        openedQuantity:
+          type: [integer, "null"]
+          minimum: 0
+          description: 현재 ACTIVE 뽑기 버전에서 서버가 확정한 결과 수입니다. LIVE 판매 중이며 총수량을 확인할 수 있을 때만 공개하고, 구버전 API나 PRELAUNCH·COMING_SOON에서는 없거나 null일 수 있습니다. 예약·결제 대기·미사용 추첨권은 오픈 수에 포함하지 않습니다.
         remainingKujiTiers:
           type: array
           maxItems: 200
           description: ACTIVE 쿠지 덱에서 아직 결과 확정으로 소진되지 않은 상만 순서대로 제공합니다. 가챠이거나 공개 덱이 없으면 빈 배열이며, 봉인된 번호별 결과는 포함하지 않습니다.
           items: { $ref: "#/components/schemas/PublicKujiTierRemaining" }
-        metadata: { type: object, additionalProperties: true }
+        metadata:
+          type: object
+          additionalProperties: true
+          description: detailGalleryImageUrls는 등록 순서대로 보여줄 상세 슬라이드 이미지 URL 최대 8개입니다. 비어 있으면 imageUrl 한 장을 사용합니다.
         imageUrl: { type: [string, "null"], format: uri }
         storefrontImageUrl:
           type: [string, "null"]
@@ -5205,6 +5249,20 @@ components:
         version: { type: integer, minimum: 1 }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
+    CatalogIncludedProduct:
+      type: object
+      additionalProperties: false
+      required: [id, name, imageUrl]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        imageUrl: { type: [string, "null"], format: uri }
+    CatalogIncludedProductPage:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/CatalogIncludedProduct" } }
     UpsertProductInput:
       type: object
       additionalProperties: false
@@ -5221,7 +5279,10 @@ components:
         releaseDate: { type: [string, "null"], format: date }
         price: { type: integer, minimum: 0, maximum: 2147483647 }
         availableQuantity: { type: integer, minimum: 0, maximum: 2147483647 }
-        metadata: { type: object, additionalProperties: true }
+        metadata:
+          type: object
+          additionalProperties: true
+          description: detailGalleryImageUrls는 등록 순서대로 보여줄 상세 슬라이드 이미지 URL 최대 8개입니다.
         imageUrl: { type: [string, "null"], format: uri }
         isActive: { type: boolean }
         isPrizeOnly:
@@ -5892,7 +5953,7 @@ components:
         tierCode:
           type: [string, "null"]
           maxLength: 40
-          description: Required only for kuji; null for weighted gacha.
+          description: Required only for kuji; null for quantity-ratio gacha.
         tierRank:
           type: [integer, "null"]
           minimum: 0
@@ -5913,11 +5974,11 @@ components:
           type: [integer, "null"]
           minimum: 1
           maximum: 10000
-          description: Required for finite kuji and null for weighted gacha.
+          description: Required for finite kuji and null for quantity-ratio gacha.
         assignmentAlgorithm:
           type: [string, "null"]
           enum: [CSPRNG_FISHER_YATES_V1, LEGACY_SINGLE_TIER_V1, null]
-          description: Stored sealed-kuji slot assignment algorithm; null for weighted gacha.
+          description: Stored sealed-kuji slot assignment algorithm; null for quantity-ratio gacha.
         totalEffectiveWeight: { type: integer, minimum: 0, maximum: 9007199254740991 }
         entries: { type: array, minItems: 1, maxItems: 200, items: { $ref: "#/components/schemas/DrawPoolEntry" } }
     DrawProbabilityVersionList:
@@ -5951,7 +6012,7 @@ components:
                 type: integer
                 minimum: 1
                 maximum: 1000000
-                description: Required for gacha and rejected for sealed kuji.
+                description: Optional legacy field. Gacha accepts only 1; sealed kuji rejects it.
               quantity: { type: [integer, "null"], minimum: 1, maximum: 10000 }
               tierCode:
                 type: string
@@ -6459,7 +6520,7 @@ components:
         version: { type: integer, minimum: 1 }
         publishedAt: { type: string, format: date-time }
         calculatedAt: { type: string, format: date-time }
-        calculation: { type: string, const: WEIGHT_X_REMAINING_QUANTITY }
+        calculation: { type: string, enum: [REMAINING_QUANTITY_RATIO, WEIGHT_X_REMAINING_QUANTITY] }
         totalEffectiveWeight: { type: integer, minimum: 1 }
         entries: { type: array, items: { $ref: "#/components/schemas/PublicDrawOddsEntry" } }
     AccountDeletionStatus:

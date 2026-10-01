@@ -752,6 +752,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/catalog/products/{productId}/recent-draws": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Returns at most eight newest immutable prize snapshots for this public Gacha or Kuji product. Customer identity is omitted and unpublished products produce no activity. */
+        get: operations["getProductRecentDraws"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/catalog/home-product-clicks/{productId}": {
         parameters: {
             query?: never;
@@ -826,6 +843,23 @@ export interface paths {
             cookie?: never;
         };
         get: operations["getCatalogProduct"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/catalog/products/{productId}/included-products": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Public included prize list for a browsable gacha or kuji product. ON_SALE uses immutable snapshots from the ACTIVE draw version; COMING_SOON uses active planned prize SKUs. Does not expose per-prize inventory or probabilities. */
+        get: operations["getCatalogIncludedProducts"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2910,8 +2944,8 @@ export interface components {
             /** Format: uuid */
             mediaId: string;
             expectedVersion: number;
-            /** @description primary는 기존 상세·기본 대표 사진이고 storefront는 상품 목록 전용 사진입니다. */
-            role?: "primary" | "storefront";
+            /** @description primary는 기본 대표 사진, storefront는 목록 전용 사진, gallery는 상품 상세에서 넘겨 보는 사진을 순서대로 추가합니다(최대 8장). gallery에 등록된 사진이 있으면 상세 화면은 그 사진들만 슬라이드로 보여줍니다. */
+            role?: "primary" | "storefront" | "gallery";
         };
         ProductImageAttachment: {
             productId: string;
@@ -2921,19 +2955,25 @@ export interface components {
             /** Format: uuid */
             mediaId: string;
             /** @enum {string} */
-            role: "primary" | "storefront";
+            role: "primary" | "storefront" | "gallery";
         };
         ProductImageClearInput: {
             expectedVersion: number;
             /** @enum {string} */
-            role: "storefront";
+            role: "storefront" | "gallery";
+            /**
+             * Format: uri
+             * @description gallery 사진 한 장을 연결 해제할 때 필요한 현재 이미지 URL입니다.
+             */
+            imageUrl?: string;
         };
         ProductImageClearResult: {
             productId: string;
-            imageUrl: null;
+            /** Format: uri */
+            imageUrl: string | null;
             version: number;
             /** @enum {string} */
-            role: "storefront";
+            role: "storefront" | "gallery";
         };
         Actor: {
             /** Format: uuid */
@@ -3553,8 +3593,11 @@ export interface components {
             availableQuantity: number;
             /** @description LIVE 판매 중에만 공개하는 총수량입니다. PRELAUNCH·COMING_SOON에는 null이며, 그 밖에는 ACTIVE 쿠지 덱의 전체 슬롯 수 또는 모든 항목에 초기 수량이 있는 ACTIVE 유한 가챠 풀의 초기 수량 합계입니다. */
             totalQuantity: number | null;
+            /** @description 현재 ACTIVE 뽑기 버전에서 서버가 확정한 결과 수입니다. LIVE 판매 중이며 총수량을 확인할 수 있을 때만 공개하고, 구버전 API나 PRELAUNCH·COMING_SOON에서는 없거나 null일 수 있습니다. 예약·결제 대기·미사용 추첨권은 오픈 수에 포함하지 않습니다. */
+            openedQuantity?: number | null;
             /** @description ACTIVE 쿠지 덱에서 아직 결과 확정으로 소진되지 않은 상만 순서대로 제공합니다. 가챠이거나 공개 덱이 없으면 빈 배열이며, 봉인된 번호별 결과는 포함하지 않습니다. */
             remainingKujiTiers?: components["schemas"]["PublicKujiTierRemaining"][];
+            /** @description detailGalleryImageUrls는 등록 순서대로 보여줄 상세 슬라이드 이미지 URL 최대 8개입니다. 비어 있으면 imageUrl 한 장을 사용합니다. */
             metadata: {
                 [key: string]: unknown;
             };
@@ -3577,6 +3620,15 @@ export interface components {
             /** Format: date-time */
             updatedAt: string;
         };
+        CatalogIncludedProduct: {
+            id: string;
+            name: string;
+            /** Format: uri */
+            imageUrl: string | null;
+        };
+        CatalogIncludedProductPage: {
+            items: components["schemas"]["CatalogIncludedProduct"][];
+        };
         UpsertProductInput: {
             sku: string;
             ipId: string;
@@ -3589,6 +3641,7 @@ export interface components {
             releaseDate?: string | null;
             price: number;
             availableQuantity: number;
+            /** @description detailGalleryImageUrls는 등록 순서대로 보여줄 상세 슬라이드 이미지 URL 최대 8개입니다. */
             metadata: {
                 [key: string]: unknown;
             };
@@ -4083,7 +4136,7 @@ export interface components {
             weight: number;
             initialQuantity: number | null;
             remainingQuantity: number | null;
-            /** @description Required only for kuji; null for weighted gacha. */
+            /** @description Required only for kuji; null for quantity-ratio gacha. */
             tierCode: string | null;
             /** @description Required only for kuji; lower values are higher tiers. */
             tierRank: number | null;
@@ -4101,10 +4154,10 @@ export interface components {
             publishedAt: string | null;
             /** Format: date-time */
             createdAt: string;
-            /** @description Required for finite kuji and null for weighted gacha. */
+            /** @description Required for finite kuji and null for quantity-ratio gacha. */
             totalSlots: number | null;
             /**
-             * @description Stored sealed-kuji slot assignment algorithm; null for weighted gacha.
+             * @description Stored sealed-kuji slot assignment algorithm; null for quantity-ratio gacha.
              * @enum {string|null}
              */
             assignmentAlgorithm: "CSPRNG_FISHER_YATES_V1" | "LEGACY_SINGLE_TIER_V1" | null;
@@ -4120,7 +4173,7 @@ export interface components {
             entries: {
                 prizeProductId: string;
                 rarity: string;
-                /** @description Required for gacha and rejected for sealed kuji. */
+                /** @description Optional legacy field. Gacha accepts only 1; sealed kuji rejects it. */
                 weight?: number;
                 quantity?: number | null;
                 /** @description Required for kuji and rejected for gacha. */
@@ -4494,8 +4547,8 @@ export interface components {
             publishedAt: string;
             /** Format: date-time */
             calculatedAt: string;
-            /** @constant */
-            calculation: "WEIGHT_X_REMAINING_QUANTITY";
+            /** @enum {string} */
+            calculation: "REMAINING_QUANTITY_RATIO" | "WEIGHT_X_REMAINING_QUANTITY";
             totalEffectiveWeight: number;
             entries: components["schemas"]["PublicDrawOddsEntry"][];
         };
@@ -6680,6 +6733,29 @@ export interface operations {
             };
         };
     };
+    getProductRecentDraws: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                productId: components["parameters"]["ProductId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Recent committed results for the requested product, newest first. */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HomeRecentDrawActivityList"];
+                };
+            };
+        };
+    };
     recordHomeProductClick: {
         parameters: {
             query?: never;
@@ -6804,6 +6880,29 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CatalogProduct"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+        };
+    };
+    getCatalogIncludedProducts: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                productId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Included prizes in catalog order. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CatalogIncludedProductPage"];
                 };
             };
             404: components["responses"]["NotFound"];

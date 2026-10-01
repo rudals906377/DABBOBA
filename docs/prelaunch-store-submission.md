@@ -1,12 +1,17 @@
 # DABBOBA 1.0.0 PRELAUNCH store submission source
 
-This file is the reviewed source for App Store Connect and Google Play Console.
+Scope note (2026-10-01): this is the payment-disabled catalog submission draft,
+not the planned first gacha-sales launch. The sales preparation is tracked in
+`docs/gacha-sales-store-preparation-2026-10-01.md`. Do not submit a LIVE binary
+using this PRELAUNCH description or treat this draft as a submitted/approved record.
+
+This file is a draft source for App Store Connect and Google Play Console.
 It is not proof that the values were entered or approved in either console.
 
 ## Product scope
 
 - Version: `1.0.0`
-- iOS build: `2`
+- iOS build: `3` in current source; verify the actual signed upload before submission
 - Android versionCode: `1`
 - Locale: Korean first
 - Capability: product discovery, search, wishlist, notices, account settings,
@@ -155,5 +160,7 @@ approved first-release diagnostics boundary.
 - [ ] App Store phone screenshots and Google Play screenshots/feature graphic
   were captured from the signed PRELAUNCH build.
 - [ ] App Store privacy and Google Data Safety answers match the working matrix.
-- [ ] Google policy support supplied written classification before any later
-  paid chance-based physical-prize Android release.
+- [ ] Prepare an accurate paid-random-physical-product disclosure and submit for
+  Google Play review under the owner's approved launch plan. The user chose
+  actual app submission rather than waiting for a separate written response;
+  this does not establish approval or waive legal/policy review.

@@ -23,6 +23,16 @@ test("admin source has no browser token storage or database imports", async () =
   assert.doesNotMatch(combined, /localStorage|sessionStorage|@dabboba\/db|from ["'][^"']*(?:prisma|postgres)/i);
 });
 
+test("admin image policy permits only local blob previews without broadening form or script origins", async () => {
+  const config = await readFile(join(adminRoot, "lib/content-security-policy.ts"), "utf8");
+  assert.match(config, /img-src 'self' data: blob: https:/);
+  assert.match(config, /form-action 'self'/);
+  assert.match(config, /script-src 'self'/);
+  assert.match(config, /nonce-\$\{nonce\}/);
+  assert.doesNotMatch(config, /script-src[^;\n]*unsafe-inline/);
+  assert.doesNotMatch(config, /connect-src[^;]*blob:/);
+});
+
 test("admin session cookie is hardened and opaque token is not returned", async () => {
   const login = await readFile(join(adminRoot, "app/api/auth/login/route.ts"), "utf8");
   assert.match(login, /httpOnly:\s*true/);

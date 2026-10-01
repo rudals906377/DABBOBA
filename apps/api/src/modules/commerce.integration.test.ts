@@ -174,8 +174,9 @@ test(
     await pool.query(
       `INSERT INTO draw_pool_entries(
          probability_version_id,prize_product_id,prize_name_snapshot,prize_image_url_snapshot,
-         prize_sku_snapshot,prize_ip_id_snapshot,prize_category_snapshot,rarity,weight
-       ) VALUES($1,$2,$3,$4,$5,$6,$7,'A',1)`,
+         prize_sku_snapshot,prize_ip_id_snapshot,prize_category_snapshot,rarity,weight,
+         initial_quantity,remaining_quantity
+       ) VALUES($1,$2,$3,$4,$5,$6,$7,'A',1,40,40)`,
       [
         paymentVersion.rows[0]!.id,
         paymentPrizeProduct,

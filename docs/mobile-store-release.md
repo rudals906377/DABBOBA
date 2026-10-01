@@ -1,5 +1,21 @@
 # DABBOBA mobile store release gate
 
+## 2026-10-01 current preparation boundary
+
+The owner's newer launch scope is eight gacha products only; Kuji is deferred.
+The current LIVE public API gate requires genuinely purchasable gacha and rejects
+sellable Kuji in this first-launch scope. Empty or coming-soon Kuji is allowed.
+The four social methods remain required; PHONE is an additional requirement only
+when its readiness flag is approved and device-tested. Older dated sections
+below that require both categories or always require five methods are historical.
+The owner chose to prepare an actual Google Play submission rather than wait for
+a written policy reply; this is not a claim of store approval or legal clearance.
+
+The latest local source integrates PR #9 while preserving current security,
+authentication and PRELAUNCH guards. Fresh disposable-DB tests and both-platform
+production bundle marker scans passed; they do not constitute signed device or
+real payment evidence. See [no-login preparation](no-login-launch-preparation-2026-10-01.md).
+
 This document separates repository readiness from evidence that can exist only
 after using external developer accounts, signed artifacts, store consoles, and
 physical devices. A green local check is not App Store or Google Play approval.
@@ -481,6 +497,17 @@ Android intent filters, permissions, exported components, target SDK, network
 security configuration, and the final AAB/IPA signing identity. Keep the
 inspection output with the release evidence; do not commit provisioning
 profiles, certificates, or private keys.
+
+The browser-based Apple OAuth implementation does not depend on the
+`expo-apple-authentication` config plugin. A local SDK 57 prebuild demonstrated
+that `ios.usesAppleSignIn: true` alone left the native Apple entitlement absent.
+The app now explicitly declares
+`ios.entitlements["com.apple.developer.applesignin"] = ["Default"]`, and the
+release structure gate rejects a missing or malformed declaration. Expo
+introspection confirmed the generated entitlement. This is not proof of the
+final signed provisioning profile or a new device login/deletion test.
+Reference: [Expo iOS capabilities](https://docs.expo.dev/build-reference/ios-capabilities/)
+and [Apple Sign in capability](https://developer.apple.com/documentation/xcode/configuring-sign-in-with-apple).
 
 `ios.supportsTablet` is disabled. The first release is iPhone-only; iPad support
 must be reopened as a separate layout and store-metadata decision rather than

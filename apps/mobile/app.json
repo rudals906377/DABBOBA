@@ -12,6 +12,9 @@
       "bundleIdentifier": "com.dabboba.mobile",
       "appleTeamId": "MCZ4884P7F",
       "usesAppleSignIn": true,
+      "entitlements": {
+        "com.apple.developer.applesignin": ["Default"]
+      },
       "buildNumber": "3",
       "config": {
         "usesNonExemptEncryption": false
@@ -28,7 +31,7 @@
       ],
       "adaptiveIcon": {
         "foregroundImage": "./assets/icons/adaptive-icon-foreground.png",
-        "backgroundColor": "#91E98E"
+        "backgroundColor": "#78EF95"
       }
     },
     "plugins": [

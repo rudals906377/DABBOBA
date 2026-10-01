@@ -3,26 +3,23 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
-import { chmod, mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { backupMain, openArchive, sealArchive } from './backup.mjs';
 import { packBackupBundle, unpackBackupBundle } from './backup-pgmq.mjs';
+import { assertLocalDrillContainerName, localDrillConfig } from './local-drill-config.mjs';
 
 const { Pool } = createRequire(new URL('../../packages/db/package.json', import.meta.url))('pg');
 const run = promisify(execFile);
 const container = process.env.DABBOBA_BACKUP_TEST_CONTAINER;
-const source = process.env.DABBOBA_BACKUP_TEST_SOURCE_DATABASE;
-if (container !== 'dabboba-backend-integration-20260905') throw new Error('Explicit dedicated test container required.');
-if (!/^dabboba_restore_drill_[a-z0-9_]+$/.test(source ?? '')) throw new Error('An explicit disposable restore-clone source is required.');
+assertLocalDrillContainerName(container);
+const inspection = JSON.parse((await run('docker', ['inspect', container])).stdout)[0];
+const { source, user, password, port } = localDrillConfig(process.env, inspection);
 const target = `dabboba_restore_drill_${Date.now()}`;
-const ports = JSON.parse((await run('docker', ['inspect', container, '--format', '{{json .NetworkSettings.Ports}}'])).stdout);
-const mapping = ports['5432/tcp']?.find((entry) => entry.HostIp === '127.0.0.1');
-assert.ok(mapping && /^[0-9]+$/.test(mapping.HostPort), 'fixture PostgreSQL needs a known loopback port');
 const pools = new Map();
-const password = 'dabboba-disposable-local-only-20260905';
 const latestMigrations = [
   '0038_shipping_request_item_snapshots.sql',
   '0039_retire_prototype_catalog.sql',
@@ -55,7 +52,7 @@ const retiredPrototypeIpIds = [
 const ident = (name) => `"${name.replaceAll('"','""')}"`;
 function pool(database) {
   if (!pools.has(database)) pools.set(database, new Pool({
-    host: '127.0.0.1', port: Number(mapping.HostPort), user: 'postgres', password, database,
+    host: '127.0.0.1', port, user, password, database,
     ssl: false, max: 3, connectionTimeoutMillis: 5000, query_timeout: 120000,
     options: '-c statement_timeout=120000 -c search_path=pg_catalog -c timezone=UTC',
   }));
@@ -322,7 +319,13 @@ async function verifyLatestMigrationResults(database, fixture) {
 
 const started = Date.now();
 try {
-  assert.equal(await scalar(source, 'SELECT count(*) FROM public.schema_migrations'), '51');
+  const migrationDirectory = new URL('../../packages/db/migrations/', import.meta.url);
+  const migrationFiles = (await readdir(migrationDirectory)).filter(file => /^\d{4}_.+\.sql$/.test(file)).sort();
+  const expectedHistory = await Promise.all(migrationFiles.map(async version => ({
+    version, checksum:createHash('sha256').update(await readFile(new URL(version,migrationDirectory))).digest('hex'),
+  })));
+  assert.deepEqual(await rows(source,'SELECT version,checksum FROM public.schema_migrations ORDER BY version'),expectedHistory,
+    'source clone must contain every current migration with its reviewed checksum');
   const latestMigrationFixture = await createLatestMigrationFixture(source);
   // Fixtures mutate ONLY the explicitly named disposable clone.
   await rows(source, "SELECT pgmq.create('dabboba_worker')");
@@ -347,8 +350,8 @@ try {
   await writeFile(key, randomBytes(32), { mode: 0o600 });
   const env = {
     DABBOBA_DB_TOOL_CONTAINER: container,
-    DABBOBA_BACKUP_SOURCE_URL: `postgresql://postgres:${password}@127.0.0.1:5432/${source}`,
-    DABBOBA_RESTORE_DRILL_URL: `postgresql://postgres:${password}@127.0.0.1:5432/${target}`,
+    DABBOBA_BACKUP_SOURCE_URL: `postgresql://${user}:${encodeURIComponent(password)}@127.0.0.1:5432/${source}`,
+    DABBOBA_RESTORE_DRILL_URL: `postgresql://${user}:${encodeURIComponent(password)}@127.0.0.1:5432/${target}`,
     DABBOBA_APPROVE_LOCAL_RESTORE: 'YES',
   };
   assert.equal((await backupMain(['backup', archive, key], env)).queueSnapshotIncluded, true);
@@ -427,7 +430,7 @@ try {
   assert.equal(await scalar(source, 'SELECT count(*) FROM public.backup_snapshot_probe WHERE id=$1', [concurrentProbeId]), '1');
   assert.equal(await scalar(source, "SELECT count(*) FROM pgmq.q_dabboba_worker WHERE message->>'fixture'=$1", [concurrentMarker]), '1');
   process.stdout.write(`${JSON.stringify({
-    status: 'local-restore-drill-passed', tablesCompared: Object.keys(before).length, migrations: 51, ...constraints,
+    status: 'local-restore-drill-passed', tablesCompared: Object.keys(before).length, migrations: migrationFiles.length, ...constraints,
     queueRowsAndArchiveAndSequenceRestored: true, payloadSqlInjectionPrevented: true,
     sharedSnapshotConcurrentCommitExcluded: true, lateRestoreErrorRolledBack: true,
     constraintTriggerPolicyIndexSequenceChecksPassed: true, metadataOnlyTargetRejected: true,

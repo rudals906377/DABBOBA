@@ -68,3 +68,49 @@ Deno.test("bundled Edge API runs the real customer Fastify surface against the r
     await harness.close();
   }
 });
+
+Deno.test("bundled Edge API serves real loopback HTTP without losing request bytes or surface boundaries", async () => {
+  const databaseUrl = Deno.env.get("DABBOBA_EDGE_SMOKE_DATABASE_URL");
+  if (!databaseUrl) throw new Error("Missing DABBOBA_EDGE_SMOKE_DATABASE_URL");
+  const harness = await createLocalEdgeApiIntegrationHarness({ databaseUrl, hmacKey: HMAC_KEY });
+  let server: Deno.HttpServer<Deno.NetAddr> | undefined;
+  try {
+    server = Deno.serve({ hostname: "127.0.0.1", port: 0, onListen: () => {} }, async (request, info) =>
+      response(await harness.handler(request, { remoteAddr: { hostname: info.remoteAddr.hostname } })));
+    const base = `http://127.0.0.1:${server.addr.port}/dabboba-api`;
+    const request = async (path: string, init?: RequestInit) => {
+      const result = await fetch(`${base}${path}`, { ...init, signal: AbortSignal.timeout(5_000) });
+      // Consume every response so the test's leak checks remain meaningful.
+      return { status: result.status, headers: result.headers, bytes: new Uint8Array(await result.arrayBuffer()) };
+    };
+    for (const [path, expected] of [
+      ["/healthz", 200], ["/readyz", 200], ["/v1/catalog/products?limit=1", 200],
+      ["/v1/account/profile", 401], ["/v1/admin/dashboard", 404],
+    ] as const) {
+      const result = await request(path);
+      if (result.status !== expected) throw new Error(`HTTP ${path}: expected ${expected}, received ${result.status}`);
+    }
+    const cors = await request("/v1/catalog/products", {
+      method: "OPTIONS",
+      headers: { origin: "https://app.example.test", "access-control-request-method": "GET" },
+    });
+    if (cors.status !== 204 || cors.headers.get("access-control-allow-origin") !== "https://app.example.test") {
+      throw new Error("HTTP CORS boundary failed");
+    }
+    const head = await request("/healthz", { method: "HEAD" });
+    if (head.status !== 200 || head.bytes.length !== 0) throw new Error("HTTP HEAD must have no response body");
+    const bytes = new TextEncoder().encode('{ "amount" : 1000, "memo" : "한글" }\n');
+    const raw = await request("/v1/test-only/raw-hmac", {
+      method: "POST", headers: { "content-type": "application/json" }, body: bytes,
+    });
+    const digest = (JSON.parse(new TextDecoder().decode(raw.bytes)) as { digest?: unknown }).digest;
+    if (raw.status !== 200 || digest !== await sha256HmacHex(HMAC_KEY, bytes)) {
+      throw new Error("HTTP ingress changed the signed JSON bytes");
+    }
+    const concurrent = await Promise.all(Array.from({ length: 8 }, () => request("/healthz")));
+    if (concurrent.some((item) => item.status !== 200)) throw new Error("HTTP concurrent requests failed");
+  } finally {
+    try { await server?.shutdown(); }
+    finally { await harness.close(); }
+  }
+});

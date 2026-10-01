@@ -1,6 +1,7 @@
 import type { CatalogIp, CatalogProduct, Character } from "../lib/admin-types";
-import { clearStorefrontProductImage, createCharacter, createIp, createProduct, updateCharacter, updateIp, updateProduct, uploadProductImage } from "../lib/actions";
+import { clearGalleryProductImage, clearStorefrontProductImage, createCharacter, createIp, createProduct, updateCharacter, updateIp, updateProduct } from "../lib/actions";
 import { ReasonField, ReturnTo, safeExternalUrl } from "./operations";
+import { ImageCropPicker } from "./image-crop-picker";
 
 export function IpForm({ item, returnTo, initialName }: { item?: CatalogIp; returnTo: string; initialName?: string }) {
   const action = item ? updateIp : createIp;
@@ -30,7 +31,9 @@ export function CharacterForm({ item, returnTo }: { item?: Character; returnTo: 
     <div className="field-grid">
       <label>IP ID<input name="ipId" defaultValue={item?.ipId} maxLength={120} required /></label><label>캐릭터 이름<input name="name" defaultValue={item?.name} maxLength={160} required /></label>
       <label className="span-2">별칭 (쉼표 또는 줄바꿈)<textarea name="aliases" defaultValue={item?.aliases.join(", ")} maxLength={4000} /></label>
-      <label className="span-2">이미지 URL<input type="url" name="imageUrl" defaultValue={item?.imageUrl || ""} maxLength={2000} /></label>
+      <label className="span-2">외부 이미지 URL (선택)<input type="url" name="imageUrl" defaultValue={item?.imageUrl || ""} maxLength={2000} />
+        <small>캐릭터 이미지는 외부 URL만 연결할 수 있습니다. 이 화면에서는 파일 업로드와 자르기를 지원하지 않습니다.</small>
+      </label>
       <label className="check-field"><input type="checkbox" name="isActive" defaultChecked={item?.isActive ?? true} /> 활성</label>
     </div>
     <ReasonField label={item ? "수정 사유" : "등록 사유"} /><div className="form-actions"><button className="primary">{item ? "캐릭터 수정" : "캐릭터 등록"}</button></div>
@@ -60,7 +63,9 @@ export function ProductForm({ item, returnTo, initialName, initialIpId, initialP
         : <label>처음 등록할 재고 수<input type="number" name="availableQuantity" min={0} max={2147483647} defaultValue={0} required /></label>}
       <label className="span-2">캐릭터 UUID (쉼표 또는 줄바꿈)<textarea name="characterIds" defaultValue={item?.characterIds.join(", ")} placeholder="비워 저장하면 연결을 모두 해제합니다." /></label>
       <label className="span-2">메타데이터 JSON<textarea name="metadata" defaultValue={JSON.stringify(item?.metadata || {}, null, 2)} required /></label>
-      <label className="span-2">이미지 URL<input type="url" name="imageUrl" defaultValue={item?.imageUrl || ""} maxLength={2000} /></label>
+      <label className="span-2">외부 이미지 URL (선택)<input type="url" name="imageUrl" defaultValue={item?.imageUrl || ""} maxLength={2000} />
+        <small>컴퓨터에 있는 사진은 상품 등록 후 목록의 ‘사진 자르기·업로드’에서 직접 잘라 올려주세요. 외부 URL은 자르기를 거치지 않습니다.</small>
+      </label>
       <label className="check-field"><input type="checkbox" name="isActive" defaultChecked={item?.isActive ?? true} /> 활성</label>
       {item?.isPrizeOnly || (!item && initialPrizeOnly) ? <>
         <input type="hidden" name="saleStatus" value="DRAFT" />
@@ -99,25 +104,26 @@ function ProductImageUploadForm({
 }: {
   item: CatalogProduct;
   returnTo: string;
-  role: "primary" | "storefront";
+  role: "primary" | "storefront" | "gallery";
   label: string;
   guidance: string;
   buttonLabel: string;
 }) {
-  return <form className="stack-form catalog-image-form" action={uploadProductImage}>
-    <input type="hidden" name="productId" value={item.id} />
-    <input type="hidden" name="expectedVersion" value={item.version} />
-    <input type="hidden" name="role" value={role} />
-    <ReturnTo value={returnTo} />
-    <input type="hidden" name="completeIdempotencyKey" value={crypto.randomUUID()} />
-    <input type="hidden" name="attachIdempotencyKey" value={crypto.randomUUID()} />
-    <label>{label}
-      <input type="file" name="image" accept="image/jpeg,image/png,image/webp,image/gif" required />
-      <small>{guidance}</small>
-    </label>
-    <ReasonField label={`${label} 변경 사유`} />
-    <div className="form-actions"><button className="primary">{buttonLabel}</button></div>
-  </form>;
+  return <ImageCropPicker
+    productId={item.id}
+    expectedVersion={item.version}
+    returnTo={returnTo}
+    role={role}
+    idempotencyKeys={{ intent: crypto.randomUUID(), complete: crypto.randomUUID(), attach: crypto.randomUUID() }}
+    label={label}
+    guidance={guidance}
+    buttonLabel={buttonLabel}
+    ratios={role === "storefront"
+      ? [{ label: item.category === "kuji" ? "16:9" : "1:1", value: item.category === "kuji" ? 16 / 9 : 1 }]
+      : [{ label: "원본 비율 · 전체 사진", value: 0 }, { label: "6:5", value: 6 / 5 }, { label: "4:3", value: 4 / 3 }, { label: "1:1", value: 1 }]}
+    minimumWidth={role === "storefront" ? item.category === "kuji" ? 1200 : 1080 : 0}
+    minimumHeight={role === "storefront" ? item.category === "kuji" ? 675 : 1080 : 0}
+  />;
 }
 
 function safeProductImageUrl(value: string | null) {
@@ -165,7 +171,24 @@ function StorefrontImageClearForm({ item, returnTo }: { item: CatalogProduct; re
   </form>;
 }
 
+function GalleryImageClearForm({ item, imageUrl, index, returnTo }: { item: CatalogProduct; imageUrl: string; index: number; returnTo: string }) {
+  return <form className="stack-form catalog-image-form" action={clearGalleryProductImage}>
+    <input type="hidden" name="productId" value={item.id} />
+    <input type="hidden" name="expectedVersion" value={item.version} />
+    <input type="hidden" name="imageUrl" value={imageUrl} />
+    <ReturnTo value={returnTo} />
+    <p><strong>상세 슬라이드 {index + 1} 연결 해제</strong></p>
+    <p className="muted">이 사진만 상품 상세 슬라이드에서 제거합니다. 기본 대표·목록·경품 사진은 유지됩니다.</p>
+    <label className="check-field"><input type="checkbox" name="confirmGalleryImageClear" required />이 사진 연결 해제를 확인했습니다.</label>
+    <ReasonField label="상세 슬라이드 사진 연결 해제 사유" />
+    <div className="form-actions"><button className="danger">슬라이드 사진 제거</button></div>
+  </form>;
+}
+
 export function ProductImageForm({ item, returnTo }: { item: CatalogProduct; returnTo: string }) {
+  const gallery = Array.isArray(item.metadata?.detailGalleryImageUrls)
+    ? item.metadata.detailGalleryImageUrls.filter((url): url is string => typeof url === "string")
+    : [];
   const storefront = item.category === "gacha"
     ? {
         label: "새 가챠 목록 사진",
@@ -182,13 +205,14 @@ export function ProductImageForm({ item, returnTo }: { item: CatalogProduct; ret
     <div className="catalog-image-current-grid">
       <CurrentProductImage label="현재 대표 사진" url={item.imageUrl} />
       <CurrentProductImage label="현재 목록 사진" url={item.storefrontImageUrl} />
+      {gallery.map((url, index) => <CurrentProductImage key={`${index}-${url}`} label={`상세 슬라이드 ${index + 1}`} url={url} />)}
     </div>
     <ProductImageUploadForm
       item={item}
       returnTo={returnTo}
       role="primary"
       label="새 대표 사진"
-      guidance="상품 상세와 기존 화면에 사용하는 기본 사진 · JPG, PNG, WEBP, GIF · 최대 10MB"
+      guidance="상품 상세와 기존 화면에 사용하는 기본 사진 · 원본 비율로 전체 사진을 유지하거나 6:5·4:3·1:1로 자르기 · JPG, PNG, WEBP, GIF · 최대 10MB"
       buttonLabel="대표 사진 업로드 및 연결"
     />
     {storefront ? <ProductImageUploadForm
@@ -199,6 +223,16 @@ export function ProductImageForm({ item, returnTo }: { item: CatalogProduct; ret
       guidance={storefront.guidance}
       buttonLabel="목록 사진 업로드 및 연결"
     /> : <p className="muted">목록 사진은 가챠·쿠지 상품에만 등록할 수 있습니다.</p>}
+    {gallery.length < 8 ? <ProductImageUploadForm
+      item={item}
+      returnTo={returnTo}
+      role="gallery"
+      label="새 상세 슬라이드 사진"
+      guidance="상품 상세에서 등록 순서대로 넘겨 볼 사진 · 최대 8장 · JPG, PNG, WEBP, GIF · 각 10MB 이하. 첫 사진부터 차례로 한 장씩 등록하세요."
+      buttonLabel="상세 슬라이드 사진 추가"
+    /> : <p className="muted">상세 슬라이드 사진은 최대 8장입니다.</p>}
+    {gallery.length ? <p className="muted">상세 슬라이드 사진이 있으면 고객 상세 화면에는 이 사진들만 표시됩니다. 기본 대표 사진은 슬라이드에 자동 추가되지 않습니다.</p> : null}
     {item.storefrontImageUrl ? <StorefrontImageClearForm item={item} returnTo={returnTo} /> : null}
+    {gallery.map((url, index) => <GalleryImageClearForm key={`${index}-${url}`} item={item} imageUrl={url} index={index} returnTo={returnTo} />)}
   </>;
 }

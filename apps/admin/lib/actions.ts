@@ -29,7 +29,7 @@ const EXCHANGE_ACTIONS = ["COMPLETE", "CANCEL"] as const;
 const REFUND_REVIEW_STATUSES = ["PENDING", "IN_REVIEW", "WAITING_PROVIDER", "ESCALATED", "CLOSED"] as const;
 const SHIPPING_TARGET_STATUSES = ["PROCESSING", "SHIPPED", "DELIVERED", "CANCELLED"] as const;
 const ACCOUNT_DELETION_DECISIONS = ["APPROVED", "REJECTED"] as const;
-const PRODUCT_IMAGE_ROLES = ["primary", "storefront"] as const;
+const PRODUCT_IMAGE_ROLES = ["primary", "storefront", "gallery"] as const;
 
 type CreateCatalogMediaUploadInput = components["schemas"]["CreateCatalogMediaUploadInput"];
 type MediaReady = components["schemas"]["MediaReady"];
@@ -496,6 +496,7 @@ export async function uploadProductImage(form: FormData) {
     const file = catalogImageFile(form.get("image"));
     const checksumSha256 = createHash("sha256").update(Buffer.from(await file.arrayBuffer())).digest("hex");
     let intent: MediaUploadIntent;
+    let uploadStage = "intent";
     try {
       const uploadInput: CreateCatalogMediaUploadInput = {
         filename: file.name,
@@ -511,13 +512,16 @@ export async function uploadProductImage(form: FormData) {
         headers: mutationHeaders(form),
         body: uploadInput,
       });
+      uploadStage = "storage";
       await uploadCatalogImage(intent, file);
+      uploadStage = "complete";
       await adminApi<MediaReady>(`/v1/admin/catalog-media/${encodeURIComponent(intent.mediaId)}/complete`, {
         method: "POST",
         token: session.token,
         reason: operationReason,
         headers: idempotencyHeaders(form, "completeIdempotencyKey"),
       });
+      uploadStage = "attach";
       const attachInput: ProductImageAttachInput = { mediaId: intent.mediaId, expectedVersion, role };
       await adminApi<ProductImageAttachment>(`/v1/admin/products/${productId}/image`, {
         method: "PATCH",
@@ -527,6 +531,7 @@ export async function uploadProductImage(form: FormData) {
         body: attachInput,
       });
     } catch (error) {
+      console.error("catalog-media-admin-flow", uploadStage, error instanceof AdminApiError ? error.status : "local");
       if (error instanceof AdminApiError && error.status === 503) {
         throw new Error("현재 상품 이미지 저장을 사용할 수 없습니다. 운영 환경의 미디어 구성을 확인한 뒤 다시 시도해 주세요.");
       }
@@ -555,6 +560,26 @@ export async function clearStorefrontProductImage(form: FormData) {
       body: input,
     });
   }, "상품 목록 사진 연결을 해제했습니다.");
+}
+
+export async function clearGalleryProductImage(form: FormData) {
+  await mutate("catalog.manage", form, async (session, operationReason) => {
+    if (form.get("confirmGalleryImageClear") !== "on") {
+      throw new Error("상세 슬라이드 사진 연결 해제를 확인해 주세요.");
+    }
+    const input: ProductImageClearInput = {
+      expectedVersion: version(form),
+      role: "gallery",
+      imageUrl: text(form, "imageUrl", 2_000),
+    };
+    await adminApi<ProductImageClearResult>(`/v1/admin/products/${id(form, "productId")}/image`, {
+      method: "DELETE",
+      token: session.token,
+      reason: operationReason,
+      headers: mutationHeaders(form),
+      body: input,
+    });
+  }, "상세 슬라이드 사진 연결을 해제했습니다.");
 }
 
 function drawVersionBody(form: FormData, category: DrawDraftCategory) {

@@ -36,6 +36,7 @@ import { effectiveCommerceMode } from "../lib/commerce-mode.js";
 
 const HOME_SECTION_PRODUCT_LIMIT = 20;
 const HOME_RECENT_DRAW_LIMIT = 2;
+const PRODUCT_RECENT_DRAW_LIMIT = 8;
 const HOME_SECTION_SOURCE_KINDS = ["MANUAL", "IP", "NEW", "POPULAR"] as const;
 
 type HomeCatalogSectionSourceKind = typeof HOME_SECTION_SOURCE_KINDS[number];
@@ -220,6 +221,38 @@ async function homeRecentDrawActivity(client: Pick<DatabaseClient, "query">, dem
   return result.rows.map((row) => mapHomeRecentDraw(row, catalogMediaBaseUrl));
 }
 
+async function productRecentDrawActivity(
+  client: Pick<DatabaseClient, "query">,
+  productId: string,
+  demo: boolean,
+  catalogMediaBaseUrl: string | null | undefined,
+) {
+  const result = await client.query<HomeRecentDrawRow>(
+    `SELECT result.id,result.product_id,draw_product.category,
+            pool_entry.prize_name_snapshot,pool_entry.prize_image_url_snapshot,
+            pool_entry.rarity,result.committed_at
+       FROM draw_results result
+       JOIN draw_pool_entries pool_entry ON pool_entry.id=result.pool_entry_id
+       JOIN catalog_products draw_product ON draw_product.id=result.product_id
+       JOIN catalog_ips ip ON ip.id=draw_product.ip_id
+       JOIN storefront_category_settings category_setting ON category_setting.category=draw_product.category
+      WHERE result.product_id=$1
+        AND draw_product.is_active=true
+        AND draw_product.is_prize_only=false
+        AND draw_product.sale_status IN ('ON_SALE','PAUSED')
+        AND draw_product.category IN ('gacha','kuji')
+        AND ip.is_active=true
+        AND category_setting.availability='active'
+        AND ($2::text IS NULL OR (
+          draw_product.metadata->>'catalogGeneration'=$2 AND draw_product.id=ANY($3::text[])
+        ))
+      ORDER BY result.committed_at DESC,result.id DESC
+      LIMIT $4`,
+    [productId, demo ? CUSTOMER_CATALOG_GENERATION : null, [...DEMO_SELLER_PRODUCT_IDS], PRODUCT_RECENT_DRAW_LIMIT],
+  );
+  return result.rows.map((row) => mapHomeRecentDraw(row, catalogMediaBaseUrl));
+}
+
 async function homeProductBadgeState(client: DatabaseClient, demo: boolean) {
   const result = await client.query<{ product_id: string }>(
     `SELECT click_event.product_id
@@ -370,6 +403,18 @@ export function homeProductClickDedupeId(input: {
 }
 
 export async function registerHomeCatalogRoutes(app: FastifyInstance, context: ApiContext) {
+  app.get("/v1/catalog/products/:productId/recent-draws", async (request, reply) => {
+    reply.header("cache-control", "no-store");
+    const productId = slugIdInput((request.params as Record<string, unknown>).productId, "productId");
+    return withTransaction(context.pool, async (client) => {
+      await client.query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY");
+      return {
+        serverNow: new Date().toISOString(),
+        items: await productRecentDrawActivity(client, productId, demoProfileRequested(), context.config.catalogMediaBaseUrl),
+      };
+    });
+  });
+
   app.get("/v1/catalog/recent-draws", async (_request, reply) => {
     reply.header("cache-control", "no-store");
     const demo = demoProfileRequested();

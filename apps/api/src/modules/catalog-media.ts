@@ -2,18 +2,19 @@ import type { FastifyInstance } from "fastify";
 import { adminIdempotentMutation, sendAdminMutation } from "../lib/admin-idempotency.js";
 import { writeAdminAudit, writeOutbox } from "../lib/audit.js";
 import { AppError, badRequest, conflict, notFound } from "../lib/errors.js";
-import { enumInput, integerInput, objectInput, slugIdInput, uuidInput } from "../lib/input.js";
+import { enumInput, integerInput, objectInput, slugIdInput, stringInput, uuidInput } from "../lib/input.js";
 import type { ApiContext } from "../types.js";
 import { legacyCatalogMediaDeliveryUrl } from "./catalog-media-url.js";
 import { signMediaAsset, type MediaRow } from "./media.js";
 
 type CatalogMediaMetadata = Record<string, unknown> & { catalogDeliveryUrl?: unknown };
-type ProductImageRole = "primary" | "storefront";
+type ProductImageRole = "primary" | "storefront" | "gallery";
 type ProductImageRow = {
   id: string;
   category: string;
   image_url: string | null;
   storefront_image_url: string | null;
+  metadata: Record<string, unknown>;
   version: number;
 };
 type DimensionedMediaRow = MediaRow & {
@@ -21,13 +22,24 @@ type DimensionedMediaRow = MediaRow & {
   height: number | string | null;
 };
 
-const PRODUCT_IMAGE_ROLES = ["primary", "storefront"] as const;
-const STOREFRONT_IMAGE_CLEAR_ROLES = ["storefront"] as const;
+const PRODUCT_IMAGE_ROLES = ["primary", "storefront", "gallery"] as const;
+const PRODUCT_IMAGE_CLEAR_ROLES = ["storefront", "gallery"] as const;
 
 function metadataRecord(metadata: unknown): CatalogMediaMetadata {
   return metadata && typeof metadata === "object" && !Array.isArray(metadata)
     ? metadata as CatalogMediaMetadata
     : {};
+}
+
+export function appendDetailGalleryImageUrl(metadata: unknown, imageUrl: string): string[] {
+  const existing = metadataRecord(metadata).detailGalleryImageUrls;
+  if (existing !== undefined && (!Array.isArray(existing) || existing.some((item) => typeof item !== "string"))) {
+    throw conflict("상품 상세 사진 목록이 올바르지 않습니다.");
+  }
+  const urls = (existing ?? []) as string[];
+  if (urls.length >= 8) throw conflict("상품 상세 사진은 최대 8장까지 연결할 수 있습니다.");
+  if (urls.includes(imageUrl)) throw conflict("이미 연결된 상품 상세 사진입니다.");
+  return [...urls, imageUrl];
 }
 
 export function catalogMediaDeliveryUrl(context: Pick<ApiContext, "config">, mediaId: string, metadata?: unknown): string {
@@ -104,7 +116,7 @@ export async function registerCatalogMediaRoutes(app: FastifyInstance, context: 
       target: { type: "PRODUCT_CATALOG_IMAGE", id: productId, mediaId, role },
       work: async (client) => {
         const product = await client.query<ProductImageRow>(
-          "SELECT id,category,image_url,storefront_image_url,version FROM catalog_products WHERE id=$1 FOR UPDATE",
+          "SELECT id,category,image_url,storefront_image_url,metadata,version FROM catalog_products WHERE id=$1 FOR UPDATE",
           [productId],
         );
         if (!product.rowCount) throw notFound("상품을 찾을 수 없습니다.");
@@ -129,13 +141,19 @@ export async function registerCatalogMediaRoutes(app: FastifyInstance, context: 
            WHERE id=$1 AND metadata->>'catalogDeliveryUrl' IS NULL`,
           [mediaId, imageUrl],
         );
+        const gallery = role === "gallery" ? appendDetailGalleryImageUrl(before.metadata, imageUrl) : null;
         const imageColumn = role === "storefront" ? "storefront_image_url" : "image_url";
         const updated = await client.query<{ id: string; attached_image_url: string; version: number }>(
-          `UPDATE catalog_products
-           SET ${imageColumn}=$2,version=version+1
-           WHERE id=$1 AND version=$3
-           RETURNING id,${imageColumn} AS attached_image_url,version`,
-          [productId, imageUrl, expectedVersion],
+          role === "gallery"
+            ? `UPDATE catalog_products
+               SET metadata=jsonb_set(metadata,'{detailGalleryImageUrls}',to_jsonb($2::text[]),true),version=version+1
+               WHERE id=$1 AND version=$3
+               RETURNING id,$4::text AS attached_image_url,version`
+            : `UPDATE catalog_products
+               SET ${imageColumn}=$2,version=version+1
+               WHERE id=$1 AND version=$3
+               RETURNING id,${imageColumn} AS attached_image_url,version`,
+          role === "gallery" ? [productId, gallery, expectedVersion, imageUrl] : [productId, imageUrl, expectedVersion],
         );
         if (!updated.rowCount) throw conflict("다른 운영자가 먼저 수정했습니다.");
         const after = updated.rows[0]!;
@@ -151,7 +169,8 @@ export async function registerCatalogMediaRoutes(app: FastifyInstance, context: 
           targetType: "PRODUCT",
           targetId: productId,
           before: {
-            imageUrl: role === "storefront" ? before.storefront_image_url : before.image_url,
+            imageUrl: role === "gallery" ? before.metadata.detailGalleryImageUrls ?? []
+              : role === "storefront" ? before.storefront_image_url : before.image_url,
             version: before.version,
             role,
           },
@@ -181,40 +200,50 @@ export async function registerCatalogMediaRoutes(app: FastifyInstance, context: 
     const productId = slugIdInput((request.params as Record<string, unknown>).productId, "productId");
     const body = objectInput(request.body);
     const expectedVersion = integerInput(body, "expectedVersion", { min: 1 })!;
-    const role = enumInput(body, "role", STOREFRONT_IMAGE_CLEAR_ROLES)!;
+    const role = enumInput(body, "role", PRODUCT_IMAGE_CLEAR_ROLES)!;
+    const selectedImageUrl = role === "gallery" ? stringInput(body, "imageUrl", { max: 2_000 })! : null;
 
     const mutation = await adminIdempotentMutation(context, request, {
-      target: { type: "PRODUCT_STOREFRONT_IMAGE", id: productId, role },
+      target: { type: "PRODUCT_CATALOG_IMAGE", id: productId, role, imageUrl: selectedImageUrl },
       work: async (client) => {
         const product = await client.query<ProductImageRow>(
-          "SELECT id,category,image_url,storefront_image_url,version FROM catalog_products WHERE id=$1 FOR UPDATE",
+          "SELECT id,category,image_url,storefront_image_url,metadata,version FROM catalog_products WHERE id=$1 FOR UPDATE",
           [productId],
         );
         if (!product.rowCount) throw notFound("상품을 찾을 수 없습니다.");
         const before = product.rows[0]!;
         if (before.version !== expectedVersion) throw conflict("다른 운영자가 먼저 수정했습니다.");
-        if (before.storefront_image_url === null) throw conflict("연결된 목록 사진이 없습니다.");
+        if (role === "storefront" && before.storefront_image_url === null) throw conflict("연결된 목록 사진이 없습니다.");
+        const gallery = role === "gallery" ? metadataRecord(before.metadata).detailGalleryImageUrls : null;
+        if (role === "gallery" && (!Array.isArray(gallery) || !gallery.includes(selectedImageUrl))) {
+          throw conflict("연결된 상세 슬라이드 사진이 없습니다.");
+        }
 
         const updated = await client.query<{ id: string; version: number }>(
-          `UPDATE catalog_products
-           SET storefront_image_url=NULL,version=version+1
-           WHERE id=$1 AND version=$2
-           RETURNING id,version`,
-          [productId, expectedVersion],
+          role === "gallery"
+            ? `UPDATE catalog_products
+               SET metadata=jsonb_set(metadata,'{detailGalleryImageUrls}',to_jsonb($3::text[]),true),version=version+1
+               WHERE id=$1 AND version=$2
+               RETURNING id,version`
+            : `UPDATE catalog_products
+               SET storefront_image_url=NULL,version=version+1
+               WHERE id=$1 AND version=$2
+               RETURNING id,version`,
+          role === "gallery" ? [productId, expectedVersion, (gallery as string[]).filter((url) => url !== selectedImageUrl)] : [productId, expectedVersion],
         );
         if (!updated.rowCount) throw conflict("다른 운영자가 먼저 수정했습니다.");
         const responseBody = {
           productId: updated.rows[0]!.id,
-          imageUrl: null,
+          imageUrl: selectedImageUrl,
           version: updated.rows[0]!.version,
           role,
         };
         await writeAdminAudit(client, request, request.actor!, {
-          action: "PRODUCT_STOREFRONT_IMAGE_CLEARED",
+          action: role === "gallery" ? "PRODUCT_GALLERY_IMAGE_CLEARED" : "PRODUCT_STOREFRONT_IMAGE_CLEARED",
           targetType: "PRODUCT",
           targetId: productId,
           before: {
-            imageUrl: before.storefront_image_url,
+            imageUrl: role === "gallery" ? selectedImageUrl : before.storefront_image_url,
             version: before.version,
             role,
           },
@@ -224,7 +253,7 @@ export async function registerCatalogMediaRoutes(app: FastifyInstance, context: 
         await writeOutbox(client, request.id, {
           aggregateType: "PRODUCT",
           aggregateId: productId,
-          eventType: "catalog.product.storefront_image_cleared",
+          eventType: role === "gallery" ? "catalog.product.gallery_image_cleared" : "catalog.product.storefront_image_cleared",
           payload: responseBody,
         });
         return {
@@ -254,7 +283,10 @@ export async function registerCatalogMediaRoutes(app: FastifyInstance, context: 
              SELECT 1
              FROM catalog_products AS product
              JOIN catalog_ips AS ip ON ip.id=product.ip_id
-             WHERE (product.image_url=ANY($2::text[]) OR product.storefront_image_url=ANY($2::text[]))
+             WHERE (product.image_url=ANY($2::text[])
+               OR product.storefront_image_url=ANY($2::text[])
+               OR (jsonb_typeof(product.metadata->'detailGalleryImageUrls')='array'
+                 AND (product.metadata->'detailGalleryImageUrls') ?| $2::text[]))
                AND product.is_active AND ip.is_active
            )
            OR EXISTS (

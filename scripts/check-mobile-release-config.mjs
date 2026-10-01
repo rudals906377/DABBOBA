@@ -195,6 +195,12 @@ function validateAppConfiguration(rootDir, environment, errors, warnings, struct
   if (expo.ios?.usesAppleSignIn !== true) {
     addIssue(errors, "IOS_APPLE_SIGN_IN_CAPABILITY_MISSING", "Apple 로그인을 제공하는 iOS 빌드는 usesAppleSignIn capability를 선언해야 합니다.");
   }
+  // usesAppleSignIn alone does not generate an entitlement when the app uses
+  // browser OAuth rather than the expo-apple-authentication config plugin.
+  const appleSignInEntitlement = expo.ios?.entitlements?.["com.apple.developer.applesignin"];
+  if (!Array.isArray(appleSignInEntitlement) || appleSignInEntitlement.length !== 1 || appleSignInEntitlement[0] !== "Default") {
+    addIssue(errors, "IOS_APPLE_SIGN_IN_ENTITLEMENT_MISSING", "Apple 로그인 권한을 네이티브 빌드에 반영하도록 ios.entitlements에 com.apple.developer.applesignin=[Default]를 선언해야 합니다.");
+  }
   if (!/^\d+$/.test(expo.ios?.buildNumber ?? "") || Number(expo.ios?.buildNumber) < 1) {
     addIssue(errors, "IOS_BUILD_NUMBER_INVALID", "ios.buildNumber는 1 이상의 정수 문자열이어야 합니다.");
   }

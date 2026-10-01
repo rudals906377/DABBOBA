@@ -21,7 +21,6 @@ const MOBILE_CATALOG_ROUTES = Object.freeze([
 const DELETION_METHODS = new Set(['PHONE', 'KAKAO', 'NAVER', 'GOOGLE', 'APPLE', 'EMAIL']);
 const LIVE_MOBILE_ROUTES = Object.freeze([
   ['/v1/catalog/products?category=gacha&saleStatus=ON_SALE&excludeSoldOut=true&limit=1', 'Gacha products'],
-  ['/v1/catalog/products?category=kuji&saleStatus=ON_SALE&excludeSoldOut=true&limit=1', 'Kuji products'],
 ]);
 // PHONE (SMS OTP) is required in LIVE only when the build attests verified SMS
 // delivery with DABBOBA_PHONE_LOGIN_READY=true; otherwise it must stay off.
@@ -78,6 +77,12 @@ function assertBody(route, body, expectedCommerceMode, { requirePhoneLogin = fal
     const category = route === 'Products' ? 'gacha' : route === 'Kuji catalog' ? 'kuji' : null;
     if (category && body.items.some((product) => !isRecord(product) || product.category !== category)) {
       throw new Error(`${route} returned a product outside the ${category} category.`);
+    }
+    // First launch sells gacha only. Keep the Kuji shop contract checked, but
+    // never require or accept a premature sellable Kuji to satisfy release.
+    if (route === 'Kuji catalog' && expectedCommerceMode === 'LIVE'
+      && body.items.some((product) => product.purchasable === true || product.saleStatus === 'ON_SALE')) {
+      throw new Error('Kuji is deferred; its catalog must not expose an on-sale or purchasable product.');
     }
     if (category && expectedCommerceMode === 'PRELAUNCH'
       && body.items.some(exposesPrelaunchInventory)) {

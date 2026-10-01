@@ -13,6 +13,10 @@ const floatingPanelSource = readFileSync(
   path.join(root, "apps/mobile/src/components/FloatingBottomActionPanel.tsx"),
   "utf8",
 );
+const shopApiSource = readFileSync(
+  path.join(root, "apps/mobile/src/features/shop/shop-api.ts"),
+  "utf8",
+);
 
 test("native Product Detail keeps its commerce action in a floating content overlay", () => {
   assert.match(floatingPanelSource, /useSafeAreaInsets/);
@@ -34,31 +38,51 @@ test("native Product Detail keeps its commerce action in a floating content over
   );
   assert.doesNotMatch(source, /footerLayer|footer:\s*\{[^}]*borderTopWidth/);
   assert.match(source, /quantityButton:\s*\{ width: seed\.size\.touchTarget/);
-  assert.match(
-    source,
-    /!isDrawCategory\(product\.category\) \? \([\s\S]*?styles\.quantityBox[\s\S]*?\) : null/,
-  );
-  assert.match(source, /isDrawCategory\(product\.category\) \? null : <Text style=\{styles\.primaryButtonMeta\}>/);
+  assert.match(source, /commerceEnabled && !isDrawCategory\(product\.category\) \? \(/);
+  assert.match(source, /isDrawCategory\(product\.category\) \? \([\s\S]*?styles\.wishlistButton/);
+  assert.match(source, /disabled=\{!commerceEnabled \|\| drawUnavailable\}/);
+  assert.match(source, /!commerceEnabled\s*\? "뽑기 오픈 준비 중"/);
   assert.match(source, /isDrawCategory\(product\.category\) \? "뽑으러 가기" : "구매 준비"/);
   assert.match(source, /primaryButtonCentered:\s*\{ justifyContent: "center" \}/);
-  assert.match(source, /style=\{\(\{ pressed \}\) => \[styles\.quantityButton, pressed && styles\.pressed\]\}/);
+  assert.match(source, /styles\.quantityButton, pressed && styles\.pressed/);
   assert.match(source, /pressedTranslateY/);
   assert.match(source, /pressedScale/);
 });
 
 test("native Product Detail bounds category artwork and leads with prize information", () => {
   assert.match(source, /import \{ CatalogProductImage \} from "@\/components\/CatalogProductImage"/);
-  assert.match(source, /onDimensions=\{\(width, height\) => setMeasured\(/);
+  assert.match(source, /onDimensions=\{\(width, height\) =>/);
+  assert.match(source, /setMeasured\(\(current\) => current\[imageUri\] === aspectRatio/);
+  assert.match(source, /measured\[uri\]/);
   assert.match(source, /\[styles\.hero, \{ aspectRatio: heroAspectRatio \}\]/);
   assert.match(source, /hero:\s*\{ width: "100%", overflow: "hidden" \}/);
   assert.doesNotMatch(source, /heroGacha|heroKuji|aspectRatio:\s*4\s*\/\s*3/);
   assert.match(source, /<CatalogProductImage[\s\S]*?resizeMode="contain"/);
-  assert.doesNotMatch(source, /Image\.getSize|setImageAspectRatio/);
 
   const detailIndex = source.indexOf("<View style={styles.detailCopy}>");
-  const oddsIndex = source.indexOf("<OddsSection snapshot={snapshot} />");
-  assert.ok(detailIndex >= 0 && oddsIndex > detailIndex);
-  assert.doesNotMatch(source, /CommerceGuidance|구매·보관 안내|사전오픈 안내/);
-  assert.match(source, /<SeedInlineGuidance[\s\S]*?확률표 버전 \$\{odds\.version\}[\s\S]*?확률은 남은 수량에 따라 실시간으로 바뀌어요/);
-  assert.doesNotMatch(source, /서버 가중치를 기준으로 계산됩니다/);
+  const oddsIndex = source.indexOf("<OddsSection snapshot={snapshot} onRetry=");
+  const recentIndex = source.indexOf("<RecentDrawSection items={recentDraws}");
+  const informationIndex = source.indexOf("<DrawProductInformation snapshot={snapshot} />");
+  const noticesIndex = source.indexOf("<DrawProductNotices");
+  assert.ok(detailIndex >= 0 && oddsIndex > detailIndex && recentIndex > oddsIndex && informationIndex > recentIndex && noticesIndex > informationIndex);
+  assert.doesNotMatch(source, /CommerceGuidance/);
+  assert.match(source, /확률표 버전 \$\{odds\.version\}/);
+});
+
+test("product detail wishlist reads all pages and never treats a failed lookup as not wished", () => {
+  assert.match(source, /useFocusEffect\(useCallback\(\(\) => \{\s*void load\(\)/);
+  assert.match(shopApiSource, /fetchShopWishlistProductIds\(apiBaseUrl, accessToken, context\.signal\)\.catch\(\(\) => null\)/);
+  assert.match(shopApiSource, /wishlistLoaded: !accessToken \|\| wishlistIds !== null/);
+  assert.match(shopApiSource, /wishedByViewer:[\s\S]*?wishlistIds\?\.has\(productId\)/);
+  assert.match(source, /if \(!snapshot\.wishlistLoaded\) \{[\s\S]*?fetchShopWishlistProductIds\(runtime\.apiBaseUrl, accessToken\)/);
+  assert.match(source, /accessibilityLabel=\{!snapshot\.wishlistLoaded \? "찜 상태 다시 불러오기"/);
+});
+
+test("included products center their artwork and names in compact reference-proportioned cards", () => {
+  assert.match(source, /<View style=\{styles\.includedImageFrame\}>\s*<View style=\{styles\.includedImageTile\}>\s*<CatalogProductImage/);
+  assert.match(source, /includedCard: \{[^}]*\.\.\.catalogProductCardSurface \}/);
+  assert.match(source, /includedImageFrame: \{[^}]*height: 92[^}]*alignItems: "center"[^}]*justifyContent: "center"/);
+  assert.match(source, /includedImageFrame: \{[^}]*backgroundColor: seed\.color\.layer\.default/);
+  assert.match(source, /includedImageTile: \{ width: 56, height: 56 \}/);
+  assert.match(source, /includedName: \{[^}]*width: "100%"[^}]*fontSize: 13, lineHeight: 18, fontWeight: "700"[^}]*textAlign: "center"/);
 });

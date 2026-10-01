@@ -26,7 +26,8 @@ import {
   uuidInput, likeContainsPattern } from "../lib/input.js";
 import { cursorPage, pagination } from "../lib/pagination.js";
 import { iso, nullableIso, numberValue } from "../lib/rows.js";
-import { CATALOG_TOTAL_QUANTITY_SQL } from "../lib/catalog-total-quantity.js";
+import { CATALOG_OPENED_QUANTITY_SQL, CATALOG_TOTAL_QUANTITY_SQL } from "../lib/catalog-total-quantity.js";
+import { rebaseLegacyCatalogMediaUrl } from "./catalog-media-url.js";
 import { effectiveCommerceMode } from "../lib/commerce-mode.js";
 import {
   CATALOG_REMAINING_KUJI_TIERS_SQL,
@@ -39,6 +40,7 @@ import {
 } from "../lib/demo-testing.js";
 import type { ApiContext } from "../types.js";
 import { assertReadyOwnedMedia } from "./media.js";
+import { preserveProductGalleryMetadata } from "./catalog-gallery-metadata.js";
 
 type IpRow = {
   id: string;
@@ -66,6 +68,7 @@ type ProductRow = {
   price: number;
   available_quantity: number | string;
   total_quantity?: number | string | null;
+  opened_quantity?: number | string | null;
   metadata: Record<string, unknown>;
   image_url: string | null;
   storefront_image_url: string | null;
@@ -153,6 +156,10 @@ const mapProduct = (
     availableQuantity: discloseInventory ? numberValue(row.available_quantity) : 0,
     totalQuantity: discloseInventory && row.total_quantity !== null && row.total_quantity !== undefined
       ? numberValue(row.total_quantity)
+      : null,
+    openedQuantity: discloseInventory && row.total_quantity !== null && row.total_quantity !== undefined
+      && row.opened_quantity !== null && row.opened_quantity !== undefined
+      ? numberValue(row.opened_quantity)
       : null,
     metadata: row.metadata,
     imageUrl: row.image_url,
@@ -492,6 +499,7 @@ export async function registerCatalogRoutes(app: FastifyInstance, context: ApiCo
        `WITH product_catalog AS (
          SELECT p.*, COALESCE(s.on_hand - s.reserved, 0) AS available_quantity,
            ${CATALOG_TOTAL_QUANTITY_SQL} AS total_quantity,
+           ${CATALOG_OPENED_QUANTITY_SQL} AS opened_quantity,
            ${CATALOG_REMAINING_KUJI_TIERS_SQL} AS remaining_kuji_tiers,
            COALESCE((SELECT array_agg(pc.character_id::text ORDER BY pc.character_id) FROM product_characters pc WHERE pc.product_id=p.id),'{}'::text[]) AS character_ids,
            ${sortScore} AS sort_score
@@ -523,6 +531,7 @@ export async function registerCatalogRoutes(app: FastifyInstance, context: ApiCo
     const result = await context.pool.query<ProductRow>(
       `SELECT p.*,COALESCE(s.on_hand-s.reserved,0) AS available_quantity,
         ${CATALOG_TOTAL_QUANTITY_SQL} AS total_quantity,
+        ${CATALOG_OPENED_QUANTITY_SQL} AS opened_quantity,
         ${CATALOG_REMAINING_KUJI_TIERS_SQL} AS remaining_kuji_tiers,
         COALESCE((SELECT array_agg(pc.character_id::text ORDER BY pc.character_id)
           FROM product_characters pc WHERE pc.product_id=p.id),'{}'::text[]) AS character_ids
@@ -541,6 +550,49 @@ export async function registerCatalogRoutes(app: FastifyInstance, context: ApiCo
     );
     if (!result.rowCount) throw notFound("상품을 찾을 수 없습니다.");
     return mapProduct(result.rows[0]!, commerceMode);
+  });
+
+  app.get("/v1/catalog/products/:productId/included-products", async (request, reply) => {
+    reply.header("cache-control", "no-store");
+    const productId = slugIdInput((request.params as Record<string, unknown>).productId, "productId");
+    if (demoProfileRequested() && !DEMO_SELLER_PRODUCT_IDS.includes(productId as typeof DEMO_SELLER_PRODUCT_IDS[number])) {
+      throw notFound("상품을 찾을 수 없습니다.");
+    }
+    const parent = await context.pool.query<{ id: string; sale_status: ProductSaleStatus }>(
+      `SELECT p.id,p.sale_status FROM catalog_products p JOIN catalog_ips i ON i.id=p.ip_id
+       WHERE p.id=$1 AND p.is_active=true AND p.is_prize_only=false
+         AND p.category IN ('gacha','kuji') AND p.sale_status IN ('COMING_SOON','ON_SALE')
+         AND i.is_active=true
+         AND (p.sale_status <> 'ON_SALE' OR EXISTS (
+           SELECT 1 FROM draw_probability_versions active_version
+            WHERE active_version.product_id=p.id AND active_version.status='ACTIVE'
+         ))`,
+      [productId],
+    );
+    if (!parent.rowCount) throw notFound("상품을 찾을 수 없습니다.");
+    const children = parent.rows[0]!.sale_status === "ON_SALE"
+      ? await context.pool.query<{ id: string; name: string; image_url: string | null }>(
+        `SELECT entry.prize_product_id AS id,entry.prize_name_snapshot AS name,
+                entry.prize_image_url_snapshot AS image_url
+           FROM draw_probability_versions version
+           JOIN draw_pool_entries entry ON entry.probability_version_id=version.id
+          WHERE version.product_id=$1 AND version.status='ACTIVE'
+          ORDER BY entry.created_at,entry.id`,
+        [productId],
+      )
+      : await context.pool.query<{ id: string; name: string; image_url: string | null }>(
+        `SELECT id,name,image_url FROM catalog_products
+         WHERE is_active=true AND is_prize_only=true
+           AND metadata->>'parentProductId'=$1
+           AND ip_id=(SELECT ip_id FROM catalog_products WHERE id=$1)
+         ORDER BY sku,id`,
+        [productId],
+      );
+    return { items: children.rows.map((child) => ({
+      id: child.id,
+      name: child.name,
+      imageUrl: rebaseLegacyCatalogMediaUrl(context.config.catalogMediaBaseUrl, child.image_url),
+    })) };
   });
 
   app.post("/v1/catalog/requests", { preHandler: context.auth.requireUser }, async (request, reply) => {
@@ -668,6 +720,7 @@ export async function registerCatalogRoutes(app: FastifyInstance, context: ApiCo
     const result = await context.pool.query<ProductRow>(
       `SELECT p.*,COALESCE(s.on_hand-s.reserved,0) AS available_quantity,
          ${CATALOG_TOTAL_QUANTITY_SQL} AS total_quantity,
+         ${CATALOG_OPENED_QUANTITY_SQL} AS opened_quantity,
          COALESCE((SELECT array_agg(pc.character_id::text ORDER BY pc.character_id) FROM product_characters pc WHERE pc.product_id=p.id),'{}'::text[]) AS character_ids
        FROM catalog_products p LEFT JOIN product_stock s ON s.product_id=p.id
        ${filters.length ? `WHERE ${filters.join(" AND ")}` : ""} ORDER BY p.created_at DESC,p.id DESC LIMIT $1`, values,
@@ -680,6 +733,7 @@ export async function registerCatalogRoutes(app: FastifyInstance, context: ApiCo
     const result = await context.pool.query<ProductRow>(
       `SELECT p.*,COALESCE(s.on_hand-s.reserved,0) AS available_quantity,
          ${CATALOG_TOTAL_QUANTITY_SQL} AS total_quantity,
+         ${CATALOG_OPENED_QUANTITY_SQL} AS opened_quantity,
          COALESCE((SELECT array_agg(pc.character_id::text ORDER BY pc.character_id) FROM product_characters pc WHERE pc.product_id=p.id),'{}'::text[]) AS character_ids
        FROM catalog_products p LEFT JOIN product_stock s ON s.product_id=p.id WHERE p.id=$1`,
       [id],
@@ -690,13 +744,14 @@ export async function registerCatalogRoutes(app: FastifyInstance, context: ApiCo
 
   app.post("/v1/admin/products", { preHandler: context.auth.requirePermission("catalog.write") }, async (request, reply) => {
     const input = productInput(request.body); const id = input.id || input.sku.toLocaleLowerCase("en-US").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+    const metadata = preserveProductGalleryMetadata(input.metadata);
     if (!id) throw badRequest("상품 id를 생성할 수 없습니다.");
     const mutation = await adminIdempotentMutation(context, request, { target: { type: "PRODUCT", id }, work: async (client) => {
       await assertCharactersBelongToIp(client, input.ipId, input.characterIds || []);
       const created = await client.query<ProductRow>(
         `INSERT INTO catalog_products (id,sku,ip_id,category,name,manufacturer,release_date,price,image_url,metadata,is_active,is_prize_only,sale_status)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'DRAFT') RETURNING *, $13::integer AS available_quantity, $14::text[] AS character_ids`,
-        [id,input.sku,input.ipId,input.category,input.name,input.manufacturer || null,input.releaseDate || null,input.price,input.imageUrl || null,JSON.stringify(input.metadata),input.isActive,input.isPrizeOnly ?? false,input.availableQuantity,input.characterIds || []],
+        [id,input.sku,input.ipId,input.category,input.name,input.manufacturer || null,input.releaseDate || null,input.price,input.imageUrl || null,JSON.stringify(metadata),input.isActive,input.isPrizeOnly ?? false,input.availableQuantity,input.characterIds || []],
       );
       await client.query("INSERT INTO product_stock (product_id,on_hand,reserved) VALUES ($1,$2,0)", [id,input.availableQuantity]);
       for (const characterId of input.characterIds || []) await client.query("INSERT INTO product_characters (product_id,character_id) VALUES ($1,$2)", [id,uuidInput(characterId,"characterId")]);
@@ -741,6 +796,7 @@ export async function registerCatalogRoutes(app: FastifyInstance, context: ApiCo
          FROM catalog_products p JOIN product_stock s ON s.product_id=p.id WHERE p.id=$1 FOR UPDATE OF p,s`, [id],
       );
       if (!before.rowCount) throw notFound();
+      const metadata = preserveProductGalleryMetadata(input.metadata, before.rows[0]!.metadata);
       if (input.category !== before.rows[0]!.category) {
         throw conflict("판매·추첨 자산의 의미를 보존하기 위해 상품 카테고리는 생성 후 변경할 수 없습니다. 새 SKU를 등록해 주세요.");
       }
@@ -753,15 +809,16 @@ export async function registerCatalogRoutes(app: FastifyInstance, context: ApiCo
       if (input.availableQuantity !== currentAvailableQuantity) {
         throw conflict("상품 수정에서는 재고를 변경할 수 없습니다. 재고 운영의 불변 조정 원장을 사용해 주세요.");
       }
+      const requestedSaleStatus = input.saleStatus ?? before.rows[0]!.sale_status;
       if (["gacha","kuji"].includes(input.category)) {
         const activeVersion = await client.query<{ id: string }>("SELECT id FROM draw_probability_versions WHERE product_id=$1 AND status='ACTIVE' FOR UPDATE", [id]);
         if (activeVersion.rowCount) await assertDrawCapacity(client, {
           probabilityVersionId: activeVersion.rows[0]!.id,
           productId: id,
           onHand: numberValue(stock.rows[0]!.on_hand),
+          requireQuantityRatio: input.category === "gacha" && requestedSaleStatus === "ON_SALE",
         });
       }
-      const requestedSaleStatus = input.saleStatus ?? before.rows[0]!.sale_status;
       await assertProductSaleStatusReady(client, {
         id,
         category: input.category,
@@ -776,7 +833,7 @@ export async function registerCatalogRoutes(app: FastifyInstance, context: ApiCo
       const updated = await client.query<ProductRow>(
         `UPDATE catalog_products SET sku=$2,ip_id=$3,category=$4,name=$5,manufacturer=$6,release_date=$7,price=$8,image_url=$9,metadata=$10,is_active=$11,sale_status=$12,version=version+1
          WHERE id=$1 AND version=$13 RETURNING *, $14::integer AS available_quantity, COALESCE($15::text[], $16::text[]) AS character_ids`,
-        [id,input.sku,input.ipId,input.category,input.name,input.manufacturer || null,input.releaseDate || null,input.price,input.imageUrl || null,JSON.stringify(input.metadata),input.isActive,requestedSaleStatus,input.expectedVersion,input.availableQuantity,input.characterIds || null,before.rows[0]!.character_ids],
+        [id,input.sku,input.ipId,input.category,input.name,input.manufacturer || null,input.releaseDate || null,input.price,input.imageUrl || null,JSON.stringify(metadata),input.isActive,requestedSaleStatus,input.expectedVersion,input.availableQuantity,input.characterIds || null,before.rows[0]!.character_ids],
       );
       if (!updated.rowCount) throw conflict("다른 운영자가 먼저 수정했습니다.");
       if (input.characterIds !== undefined) {

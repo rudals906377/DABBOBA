@@ -9,7 +9,7 @@ import {
   normalizedCheckoutPointInput,
   toggleCheckoutNoticeState,
 } from "../apps/mobile/src/features/checkout/checkout-payment-ui.ts";
-import { CHECKOUT_NOTICE_SECTIONS } from "../apps/mobile/src/features/checkout/checkout-reference-notices.ts";
+import { checkoutNoticeSections } from "../apps/mobile/src/features/checkout/checkout-reference-notices.ts";
 
 const checkoutSource = await readFile(
     new URL("../apps/mobile/src/features/checkout/CheckoutScreen.tsx", import.meta.url),
@@ -83,15 +83,18 @@ test("the legacy connection route cannot bypass payment into a draw preview", ()
   assert.doesNotMatch(connectionSource, /fontSize:\s*(?:7|8|9|10)(?:\D|$)/);
 });
 
-test("three reference notices open independently and retain the supplied Korean copy", () => {
+test("checkout notices open independently and distinguish gacha from sealed kuji", () => {
+  const gachaSections = checkoutNoticeSections("gacha");
+  const kujiSections = checkoutNoticeSections("kuji");
   assert.deepEqual(
-    CHECKOUT_NOTICE_SECTIONS.map(({ id, title }) => ({ id, title })),
+    gachaSections.map(({ id, title }) => ({ id, title })),
     [
-      { id: "payment-refund", title: "결제 및 환불 안내" },
-      { id: "shipping-exchange", title: "배송 및 교환 안내" },
-      { id: "post-shipping", title: "배송 후 교환 및 환불 안내" },
+      { id: "payment-refund", title: "결제 및 결과 안내" },
+      { id: "shipping-exchange", title: "보관·배송·포인트 안내" },
+      { id: "post-shipping", title: "배송 후 문의 안내" },
     ],
   );
+  assert.deepEqual(kujiSections.map(({ id }) => id), gachaSections.map(({ id }) => id));
   const firstOpen = toggleCheckoutNoticeState({}, "payment-refund");
   const secondOpen = toggleCheckoutNoticeState(firstOpen, "shipping-exchange");
   assert.deepEqual(secondOpen, { "payment-refund": true, "shipping-exchange": true });
@@ -100,18 +103,30 @@ test("three reference notices open independently and retain the supplied Korean 
     "shipping-exchange": true,
   });
 
-  const copy = JSON.stringify(CHECKOUT_NOTICE_SECTIONS);
-  assert.match(copy, /다뽀바/);
-  assert.match(copy, /배송받은 상품에 하자, 파손, 오배송이 있는 경우 배송 완료 후 7일 이내 1:1 문의를 통해 접수해주세요\./);
-  assert.match(copy, /뽑기함/);
+  const gachaCopy = JSON.stringify(gachaSections);
+  const kujiCopy = JSON.stringify(kujiSections);
+  const copy = gachaCopy + kujiCopy;
+  assert.match(gachaCopy, /결제 전에 포함 상품 목록과 전체·오픈 수량을 확인할 수 있습니다/);
+  assert.match(gachaCopy, /각 캡슐을 직접 열 때 서버가 남은 구성에 따라 획득 상품을 확정/);
+  assert.match(kujiCopy, /결제 전에 쿠지의 포함 상품과 등급별 남은 수량/);
+  assert.match(kujiCopy, /선택한 티켓을 직접 열 때 서버가 획득 상품을 확정/);
+  assert.match(copy, /받을 정확한 상품은 결제 전에 알 수 없습니다|봉인된 번호별 정확한 상품은 열기 전까지 알 수 없습니다/);
+  assert.match(copy, /결과 화면과 보관함/);
+  assert.doesNotMatch(gachaCopy, /봉인된 번호별/);
+  assert.doesNotMatch(kujiCopy, /각 캡슐/);
+  assert.match(copy, /보관함/);
+  assert.match(copy, /다시 결제하지 마세요/);
   assert.match(copy, /24,900원/);
   assert.match(copy, /54,900원/);
   assert.match(copy, /3,000원/);
   assert.match(copy, /60일/);
-  assert.doesNotMatch(copy, /쿠지의 경우 15%|소유 권리는 자동 종료|D-14|알림톡/);
+  assert.match(copy, /50%/);
+  assert.doesNotMatch(copy, /결제 시 해당 상품군 내 여러 아이템 중 1종이 무작위로 지급|단순 변심.*환불은 불가능|영상 제출이 필수|쿠폰은 반환·재발급되지 않습니다/);
   assert.doesNotMatch(copy, /픽앤팝|팝페이/);
   assert.match(noticeSource, /accessibilityState=\{\{ expanded: open \}\}/);
+  assert.match(noticeSource, /useState<Record<string, boolean>>\(\{ "payment-refund": true \}\)/);
   assert.match(noticeSource, /toggleCheckoutNoticeState\(current, section\.id\)/);
+  assert.match(checkoutSource, /<CheckoutNoticeSections category=\{product\.category\} \/>/);
 });
 
 test("checkout follows the compact reference hierarchy and exposes only the configured KG INICIS card method", () => {

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
@@ -19,6 +19,29 @@ test("iOS release configuration targets the verified friend-owned Apple team", (
   const appConfig = JSON.parse(readFileSync(path.join(rootDir, "apps/mobile/app.json"), "utf8"));
 
   assert.equal(appConfig.expo.ios.appleTeamId, "MCZ4884P7F");
+});
+
+test("Apple sign-in declares the native entitlement without relying on an absent config plugin", () => {
+  const appConfig = JSON.parse(readFileSync(path.join(rootDir, "apps/mobile/app.json"), "utf8"));
+
+  assert.deepEqual(appConfig.expo.ios.entitlements?.["com.apple.developer.applesignin"], ["Default"]);
+});
+
+test("release gate rejects a missing or malformed native Apple sign-in entitlement", () => {
+  const fixtureRoot = mkdtempSync(path.join(os.tmpdir(), "dabboba-apple-entitlement-"));
+  try {
+    mkdirSync(path.join(fixtureRoot, "apps/mobile"), { recursive: true });
+    symlinkSync(path.join(rootDir, "apps/mobile/src"), path.join(fixtureRoot, "apps/mobile/src"), "dir");
+    const appConfig = JSON.parse(readFileSync(path.join(rootDir, "apps/mobile/app.json"), "utf8"));
+    for (const entitlement of [undefined, [], "Default", ["Unexpected"], ["Default", "Unexpected"]]) {
+      appConfig.expo.ios.entitlements = { "com.apple.developer.applesignin": entitlement };
+      writeFileSync(path.join(fixtureRoot, "apps/mobile/app.json"), JSON.stringify(appConfig));
+      const report = inspectMobileReleaseConfig({ rootDir: fixtureRoot, environment: {}, structureOnly: true });
+      assert.ok(report.errors.some((issue) => issue.code === "IOS_APPLE_SIGN_IN_ENTITLEMENT_MISSING"));
+    }
+  } finally {
+    rmSync(fixtureRoot, { recursive: true, force: true });
+  }
 });
 
 const productionPublicEnvironment = {
