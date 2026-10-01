@@ -235,6 +235,7 @@ export async function fetchProductDetail(
 
   let drawOdds: PublicDrawOdds | null = null;
   let prizeLineup: PublicPrizeLineup | null = null;
+  let registeredIncludedProducts: components["schemas"]["CatalogIncludedProduct"][] | null = null;
   if (!ownedCollectible && !exchangeReference && isDrawCategory(product.category)) {
     const oddsResult = await client.GET("/v1/catalog/products/{productId}/draw-odds", {
       params: { path: { productId } },
@@ -248,6 +249,15 @@ export async function fetchProductDetail(
         signal: context.signal,
       });
       prizeLineup = lineupResult.data ?? null;
+      if (!prizeLineup && product.saleStatus === "COMING_SOON") {
+        // A coming-soon catalog may have confirmed photos before its draw set
+        // is published. Read that existing public list, without inventing odds.
+        const includedResult = await client.GET("/v1/catalog/products/{productId}/included-products", {
+          params: { path: { productId } },
+          signal: context.signal,
+        });
+        registeredIncludedProducts = includedResult.data?.items ?? null;
+      }
     }
   }
 
@@ -261,8 +271,8 @@ export async function fetchProductDetail(
     drawOdds,
     prizeLineup,
     includedProducts: drawOdds?.entries.map((entry) => ({ id: entry.prizeProductId, name: entry.prizeName, imageUrl: entry.prizeImageUrl }))
-      ?? prizeLineup?.entries.map((entry) => ({ id: entry.prizeProductId, name: entry.prizeName, imageUrl: entry.prizeImageUrl })) ?? [],
-    includedProductsLoaded: Boolean(drawOdds || prizeLineup),
+      ?? prizeLineup?.entries.map((entry) => ({ id: entry.prizeProductId, name: entry.prizeName, imageUrl: entry.prizeImageUrl })) ?? registeredIncludedProducts ?? [],
+    includedProductsLoaded: Boolean(drawOdds || prizeLineup || registeredIncludedProducts),
     ownedCollectible,
     exchangeReference,
   };

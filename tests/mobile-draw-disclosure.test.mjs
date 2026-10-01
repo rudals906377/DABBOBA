@@ -35,7 +35,7 @@ test("product detail shows included products without presenting illustrative odd
   assert.match(detailSource, /snapshot\?\.includedProductsLoaded !== true/);
   assert.match(detailSource, /snapshot\.includedProducts\.length === 0/);
   assert.match(detailSource, /상품 목록을 불러오지 못했어요/);
-  assert.match(shopApiSource, /includedProductsLoaded: Boolean\(drawOdds \|\| prizeLineup\)/);
+  assert.match(shopApiSource, /includedProductsLoaded: Boolean\(drawOdds \|\| prizeLineup \|\| registeredIncludedProducts\)/);
   assert.doesNotMatch(detailSource, /snapshot\?\.drawOdds/);
   assert.match(shopApiSource, /if \(!drawOdds\) \{/);
   assert.match(shopApiSource, /\/prize-lineup/);

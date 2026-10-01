@@ -2,7 +2,7 @@
 
 ## 2026-10-02 native candidate boundary
 
-The latest local Android compilation used reviewed main commit
+The initial local Android compilation used reviewed main commit
 `b497cad3e336ede7c74c30e89d2b522d4b0b6084` (merged PR #16), the approved
 mint horizontal icon, and the pinned production customer API. It remained
 PRELAUNCH; no payment channel, provider secret, account, or WAF rule changed.
@@ -37,6 +37,39 @@ submitted. Friend-controlled signing, a final reviewed candidate with the
 intended supported ABIs, both-platform physical-device regression and actual
 Apple deletion/revocation remain separate requirements. Do not reuse these
 PRELAUNCH artifacts as evidence of the requested LIVE sales release.
+
+### Guest emulator follow-up and coming-soon composition fix
+
+An isolated Pixel 8/API 35 arm64 emulator was subsequently created outside the
+repository. A derivative of the Release APK was signed **only with the generated
+template debug key** for this disposable emulator. This is not friend-controlled
+release signing and does not replace physical Android or iPhone testing.
+
+- Cold launch and all eight gacha discovery cards rendered against the pinned
+  production API without a login. Sylvanian's hero advanced through `1 / 3`,
+  `2 / 3`, and `3 / 3`, with the actual three uploaded photographs visible.
+- The first native run reproduced a composition-list error: the coming-soon
+  product had eight registered included products, but no ACTIVE published draw
+  set, so `prize-lineup` returned 404 while `included-products` returned 200.
+- The app now reads the existing public `included-products` list only when a
+  COMING_SOON draw product has no published lineup. It displays registered names
+  and photographs without inventing quantities or probabilities. ON_SALE never
+  substitutes editable draft artwork for missing authoritative draw information.
+  Failed reads remain unavailable; a successful empty list remains genuinely empty.
+- The rebuilt APK displayed Sylvanian's eight actual composition cards, retained
+  `뽑기 오픈 준비 중`, and had no crash-buffer entry. No login, payment, draw,
+  account deletion, remote catalog mutation, provider or WAF change was executed.
+- Mobile regression checks: 461 passed, zero failed/skipped; mobile TypeScript,
+  protected-runtime integrity, web/policy build and rebuilt APK/AAB compilation
+  passed. The new APK bundle marker scan returned no forbidden marker.
+- Updated unsigned artifacts are retained separately under the above artifact
+  directory's `lineup-fix/` subdirectory; the original baseline was not overwritten.
+  APK SHA-256: `af4e9b1c6e0729a04837ff8b479599959a3209ad1f2f4b55652ded6645a76009`.
+  AAB SHA-256: `c162389bacdec24a65fb010e3790c727ba6aed687083bc57cf081608d2d18742`.
+
+The guest emulator proof covers this catalog/gallery slice only. Home currently
+has no configured displayed products; the app shows that state rather than fake
+merchandise. Store signing/submission and the LIVE release gates remain open.
 
 ## 2026-10-01 current preparation boundary
 

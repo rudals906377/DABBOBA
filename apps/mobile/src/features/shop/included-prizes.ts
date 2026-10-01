@@ -1,3 +1,4 @@
+import type { components } from "@dabboba/contracts";
 import type { PublicDrawOdds, PublicPrizeLineup } from "./shop-api";
 
 export type IncludedPrize = {
@@ -16,6 +17,7 @@ export type IncludedPrize = {
 export function includedPrizes(snapshot: {
   drawOdds: PublicDrawOdds | null;
   prizeLineup: PublicPrizeLineup | null;
+  includedProducts?: components["schemas"]["CatalogIncludedProduct"][];
 }): IncludedPrize[] {
   if (snapshot.drawOdds?.entries.length) {
     return snapshot.drawOdds.entries.map((entry) => ({
@@ -26,7 +28,18 @@ export function includedPrizes(snapshot: {
       accessibilityDetail: `확률 ${entry.probabilityPercent.toFixed(2)}퍼센트`,
     }));
   }
-  return (snapshot.prizeLineup?.entries ?? []).map((entry) => ({
+  if (!snapshot.prizeLineup) {
+    // Registered prelaunch artwork is useful before a draw set is published,
+    // but cannot establish composition quantities or probabilities.
+    return (snapshot.includedProducts ?? []).map((entry) => ({
+      id: entry.id,
+      prizeName: entry.name,
+      prizeImageUrl: entry.imageUrl ?? null,
+      detail: null,
+      accessibilityDetail: null,
+    }));
+  }
+  return snapshot.prizeLineup.entries.map((entry) => ({
     id: entry.id,
     prizeName: entry.prizeName,
     prizeImageUrl: entry.prizeImageUrl ?? null,
