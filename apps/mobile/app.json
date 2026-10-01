@@ -15,7 +15,7 @@
       "entitlements": {
         "com.apple.developer.applesignin": ["Default"]
       },
-      "buildNumber": "3",
+      "buildNumber": "5",
       "config": {
         "usesNonExemptEncryption": false
       }

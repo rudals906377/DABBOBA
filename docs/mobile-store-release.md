@@ -290,7 +290,7 @@ dated verification evidence.
   `production-prelaunch`, and a payment-enabled `production-live` build.
   Its iOS submit profiles contain only the public App Store Connect app ID;
   submit credentials and secrets stay outside Git.
-- App version `1.0.0`, the current source iOS build number `3`, Android version code `1`,
+- App version `1.0.0`, the current source iOS build number `5`, Android version code `1`,
   bundle and package IDs, and the approved app icon are explicit in
   `apps/mobile/app.json`. iOS build `1` is the older TestFlight upload from
   commit `933186d`; a new candidate cannot reuse that build string. Bump each
