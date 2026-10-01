@@ -214,32 +214,34 @@ export function ProductImageForm({ item, returnTo }: { item: CatalogProduct; ret
       <CurrentProductImage label="현재 목록 사진" url={item.storefrontImageUrl} />
       {gallery.map((url, index) => <CurrentProductImage key={`${index}-${url}`} label={`상세 슬라이드 ${index + 1}`} url={url} />)}
     </div>
-    <ProductImageUploadForm
+    <details className="catalog-optional"><summary>대표 사진 변경</summary><ProductImageUploadForm
       item={item}
       returnTo={returnTo}
       role="primary"
       label="새 대표 사진"
       guidance="상품 상세와 기존 화면에 사용하는 기본 사진 · 원본 비율로 전체 사진을 유지하거나 6:5·4:3·1:1로 자르기 · JPG, PNG, WEBP, GIF · 최대 10MB"
       buttonLabel="대표 사진 업로드 및 연결"
-    />
-    {storefront ? <ProductImageUploadForm
+    /></details>
+    {storefront ? <details className="catalog-optional"><summary>목록 카드 사진 변경</summary><ProductImageUploadForm
       item={item}
       returnTo={returnTo}
       role="storefront"
       label={storefront.label}
       guidance={storefront.guidance}
       buttonLabel="목록 사진 업로드 및 연결"
-    /> : <p className="muted">목록 사진은 가챠·쿠지 상품에만 등록할 수 있습니다.</p>}
-    {gallery.length < 8 ? <ProductImageUploadForm
+    /></details> : <p className="muted">목록 사진은 가챠·쿠지 상품에만 등록할 수 있습니다.</p>}
+    {gallery.length < 8 ? <details className="catalog-optional"><summary>상세 슬라이드 사진 추가 ({gallery.length}/8장)</summary><ProductImageUploadForm
       item={item}
       returnTo={returnTo}
       role="gallery"
       label="새 상세 슬라이드 사진"
       guidance="상품 상세에서 등록 순서대로 넘겨 볼 사진 · 최대 8장 · JPG, PNG, WEBP, GIF · 각 10MB 이하. 첫 사진부터 차례로 한 장씩 등록하세요."
       buttonLabel="상세 슬라이드 사진 추가"
-    /> : <p className="muted">상세 슬라이드 사진은 최대 8장입니다.</p>}
+    /></details> : <p className="muted">상세 슬라이드 사진은 최대 8장입니다.</p>}
     {gallery.length ? <p className="muted">상세 슬라이드 사진이 있으면 고객 상세 화면에는 이 사진들만 표시됩니다. 기본 대표 사진은 슬라이드에 자동 추가되지 않습니다.</p> : null}
-    {item.storefrontImageUrl ? <StorefrontImageClearForm item={item} returnTo={returnTo} /> : null}
-    {gallery.map((url, index) => <GalleryImageClearForm key={`${index}-${url}`} item={item} imageUrl={url} index={index} returnTo={returnTo} />)}
+    {item.storefrontImageUrl || gallery.length ? <details className="catalog-optional"><summary>사진 연결 해제</summary>
+      {item.storefrontImageUrl ? <StorefrontImageClearForm item={item} returnTo={returnTo} /> : null}
+      {gallery.map((url, index) => <GalleryImageClearForm key={`${index}-${url}`} item={item} imageUrl={url} index={index} returnTo={returnTo} />)}
+    </details> : null}
   </>;
 }
