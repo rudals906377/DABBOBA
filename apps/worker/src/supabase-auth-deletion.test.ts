@@ -144,6 +144,7 @@ test("Apple revocation is confirmed before Supabase deletion and is not stored i
   const completionEvent = transactionQueries.find((sql) => sql.includes("INSERT INTO account_deletion_request_events"));
   assert.ok(completionEvent);
   assert.match(completionEvent, /'appleTokenRevokedAt',\s*\(SELECT apple_revoked_at FROM account_auth_deletion_jobs WHERE id=\$3::uuid\)/);
+  assert.match(completionEvent, /'COMPLETED','\{\}'::jsonb,0,\$3::text,\$4/);
   assert.ok(transactionQueries.indexOf(completionEvent) < transactionQueries.findIndex((sql) => sql.includes("DELETE FROM account_auth_deletion_jobs")));
   assert.ok(!completionEvent.includes(refreshToken));
 });
