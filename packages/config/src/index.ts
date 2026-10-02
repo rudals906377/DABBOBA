@@ -87,6 +87,8 @@ export type ApiConfig = {
     channelKey: string;
     channelEnvironment: "LIVE" | "TEST";
     webhookSecret: string;
+    /** Optional additional KCP V2 channel in the same merchant/store/environment. */
+    kcpChannelKey?: string;
   } | null;
   gcsBucket: string | null;
   gcsProjectId: string | null;
@@ -328,6 +330,11 @@ function paymentConfig(
   };
   const portOneConfigured = Object.values(portOneValues).some(Boolean);
   const portOneComplete = Object.values(portOneValues).every(Boolean);
+  const kcpChannelKey = optional(env, "PORTONE_KCP_CHANNEL_KEY");
+  if (kcpChannelKey && (!portOneComplete || paymentProvider !== "PORTONE_V2_INICIS"
+    || kcpChannelKey === portOneValues.channelKey || !/^channel-key-[A-Za-z0-9-]{1,160}$/.test(kcpChannelKey))) {
+    throw new Error("PORTONE_KCP_CHANNEL_KEY requires a complete PortOne rail and a distinct valid channel key");
+  }
   const explicitSupabaseDemoTestRail = (
     env.DABBOBA_BACKEND_PROFILE?.trim() === "supabase-demo"
     && env.DABBOBA_ENVIRONMENT_TIER?.trim() === "STAGING"
@@ -408,6 +415,7 @@ function paymentConfig(
           channelKey: portOneValues.channelKey!,
           channelEnvironment: portOneValues.channelEnvironment as "LIVE" | "TEST",
           webhookSecret: portOneValues.webhookSecret!,
+          ...(kcpChannelKey ? { kcpChannelKey } : {}),
         }
       : null,
   };

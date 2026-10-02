@@ -21,6 +21,7 @@ import { releasePendingOrder } from "../lib/pending-order-release.js";
 import { numberValue } from "../lib/rows.js";
 import type { ApiContext } from "../types.js";
 import { applyCanonicalPaymentEvent, parseCanonicalPaymentEvent } from "./commerce.js";
+import { boundPaymentAdapterOptions, isPortOneCardProvider, PORTONE_CARD_PROVIDERS } from "../lib/portone-channel-binding.js";
 
 const PORTONE_PROVIDER = "PORTONE_V2_INICIS";
 
@@ -74,7 +75,7 @@ type RefundAttempt = {
 };
 
 export function lateRefundBlocker(row: LateRefundCandidate): string | null {
-  if (row.provider !== PORTONE_PROVIDER || row.status !== "REFUND_REVIEW" || row.order_status !== "REFUND_REVIEW") return "결제와 주문이 모두 환불 검토 상태여야 합니다.";
+  if (!isPortOneCardProvider(row.provider) || row.status !== "REFUND_REVIEW" || row.order_status !== "REFUND_REVIEW") return "결제와 주문이 모두 환불 검토 상태여야 합니다.";
   if (!row.cancelled_at) return "결제 지연으로 취소된 주문만 처리할 수 있습니다.";
   if (row.order_kind === "PRODUCT") {
     if (numberValue(row.line_count) < 1 || row.shipping_request_id) return "미발급 상품 주문만 처리할 수 있습니다.";
@@ -98,7 +99,7 @@ export function normalDrawRefundBlocker(
   row: NormalDrawRefundCandidate,
   expectedStatus: "PAID" | "REFUND_REVIEW",
 ): string | null {
-  if (row.provider !== PORTONE_PROVIDER || row.status !== expectedStatus || row.order_status !== expectedStatus) {
+  if (!isPortOneCardProvider(row.provider) || row.status !== expectedStatus || row.order_status !== expectedStatus) {
     return "결제와 주문 상태가 전액 환불 요청 조건에 맞지 않습니다.";
   }
   if (row.order_kind !== "PRODUCT" || row.cancelled_at) return "취소되지 않은 상품 주문만 환불할 수 있습니다.";
@@ -386,10 +387,11 @@ async function dispatchCanonicalEvent(
   // applied in-process. No shared-secret HTTP hop exists in PortOne mode.
   const rawBody = JSON.stringify(event);
   const payload = JSON.parse(rawBody) as Record<string, unknown>;
-  const digest = createHash("sha256").update(`internal:${PORTONE_PROVIDER}:${rawBody}`).digest("hex");
+  const { provider } = await boundPaymentAdapterOptions(context.pool, context.config, event.paymentId);
+  const digest = createHash("sha256").update(`internal:${provider}:${rawBody}`).digest("hex");
   return applyCanonicalPaymentEvent(
     context,
-    parseCanonicalPaymentEvent(PORTONE_PROVIDER, payload, digest),
+    parseCanonicalPaymentEvent(provider, payload, digest),
     correlationId,
   );
 }
@@ -404,7 +406,8 @@ async function reconcilePayment(
   }: { retryReviewedRefund?: boolean; reportMissingProviderPayment?: boolean } = {},
 ) {
   const config = configuredContext(context);
-  const adapter = createPortOneV2Adapter(config);
+  const bound = await boundPaymentAdapterOptions(context.pool, context.config, localPayment.id);
+  const adapter = createPortOneV2Adapter(bound.options);
   let payment: PortOneCardPayment;
   try {
     payment = await adapter.getPayment({
@@ -466,8 +469,8 @@ export async function registerPortOnePaymentRoutes(
       assertWorkerReconciliationSignature(request, context.config.paymentReconciliationWorkerSecret, paymentId);
       configuredContext(context);
       const payment = await context.pool.query<LocalPayment & { status: string; pg_attempt_started_at: Date | null }>(
-        "SELECT id,order_id,amount,status,pg_attempt_started_at FROM payments WHERE id=$1 AND provider=$2",
-        [paymentId, PORTONE_PROVIDER],
+        "SELECT id,order_id,amount,status,pg_attempt_started_at FROM payments WHERE id=$1 AND provider=ANY($2::text[])",
+        [paymentId, [...PORTONE_CARD_PROVIDERS]],
       );
       if (!payment.rowCount) throw notFound("포트원 결제 정보를 찾을 수 없습니다.");
       const current = payment.rows[0]!;
@@ -499,8 +502,8 @@ export async function registerPortOnePaymentRoutes(
       const payment = await context.pool.query<LocalPayment & { status: string; order_status: string }>(
         `SELECT p.id,p.order_id,p.amount,p.status,o.status AS order_status
            FROM payments p JOIN orders o ON o.id=p.order_id
-          WHERE p.id=$1 AND p.provider=$2`,
-        [paymentId, PORTONE_PROVIDER],
+          WHERE p.id=$1 AND p.provider=ANY($2::text[])`,
+        [paymentId, [...PORTONE_CARD_PROVIDERS]],
       );
       if (!payment.rowCount) throw notFound("포트원 결제 정보를 찾을 수 없습니다.");
       const current = payment.rows[0]!;
@@ -628,7 +631,7 @@ export async function registerPortOnePaymentRoutes(
       // A provider read is safe before the order freeze: the locked transaction
       // below rechecks every asset before any cancellation can be sent. A failed
       // read must not strand a paid customer in REFUND_REVIEW with no retry path.
-      const adapter = createPortOneV2Adapter(config);
+      const adapter = createPortOneV2Adapter((await boundPaymentAdapterOptions(context.pool, context.config, paymentId)).options);
       let providerPayment: PortOneCardPayment;
       try {
         providerPayment = await adapter.getPayment({
@@ -819,7 +822,7 @@ export async function registerPortOnePaymentRoutes(
       // confirms the full payment is intact and no cancellation exists.
       let providerPayment: PortOneCardPayment;
       try {
-        providerPayment = await createPortOneV2Adapter(config).getPayment({ paymentId, expectedTotalAmount: expectedAmount });
+        providerPayment = await createPortOneV2Adapter((await boundPaymentAdapterOptions(context.pool, context.config, paymentId)).options).getPayment({ paymentId, expectedTotalAmount: expectedAmount });
       } catch (error) {
         throw providerError(error);
       }
@@ -927,7 +930,7 @@ export async function registerPortOnePaymentRoutes(
         );
         if (!rows.rowCount) throw notFound("결제 정보를 찾을 수 없습니다.");
         const row = rows.rows[0]!;
-        if (row.provider !== PORTONE_PROVIDER || row.status !== "PENDING"
+        if (!isPortOneCardProvider(row.provider) || row.status !== "PENDING"
           || row.order_status !== "PENDING_PAYMENT" || numberValue(row.amount) <= 0
           || numberValue(row.amount) !== numberValue(row.total)) {
           throw conflict("이 주문은 카드 결제를 시작할 수 없습니다.");
@@ -935,6 +938,7 @@ export async function registerPortOnePaymentRoutes(
         if (row.pg_attempt_started_at) {
           throw new AppError(409, "PAYMENT_ATTEMPT_ALREADY_STARTED", "이미 결제창을 연 주문입니다. 결제사 상태를 다시 확인해 주세요.");
         }
+        await boundPaymentAdapterOptions(client, context.config, paymentId);
         const now = (await client.query<{ server_now: Date }>("SELECT clock_timestamp() AS server_now")).rows[0]!.server_now;
         if (row.order_kind === "PRODUCT") {
           const reservations = await client.query<{ line_count: string; active_count: string; kuji_count: string }>(
@@ -1067,7 +1071,7 @@ export async function registerPortOnePaymentRoutes(
       );
       if (!owned.rowCount) throw notFound("결제 정보를 찾을 수 없습니다.");
       const local = owned.rows[0]!;
-      if (local.provider !== PORTONE_PROVIDER) throw conflict("카드 결제 주문이 아닙니다.");
+      if (!isPortOneCardProvider(local.provider)) throw conflict("카드 결제 주문이 아닙니다.");
 
       // Fresh authoritative read. Only "PortOne has no payment for this
       // window" may release the order; any money movement or in-flight
@@ -1075,7 +1079,7 @@ export async function registerPortOnePaymentRoutes(
       let providerStatus: "READY" | "PAYMENT_NOT_FOUND" | "FAILED" | "CANCELLED";
       let providerPayment: PortOneCardPayment | null = null;
       try {
-        providerPayment = await createPortOneV2Adapter(config).getPayment({
+        providerPayment = await createPortOneV2Adapter((await boundPaymentAdapterOptions(context.pool, context.config, paymentId)).options).getPayment({
           paymentId,
           expectedTotalAmount: numberValue(local.amount),
         });
@@ -1125,7 +1129,7 @@ export async function registerPortOnePaymentRoutes(
         );
         if (!rows.rowCount) throw notFound("결제 정보를 찾을 수 없습니다.");
         const row = rows.rows[0]!;
-        if (row.order_id !== local.order_id || row.provider !== PORTONE_PROVIDER) {
+        if (row.order_id !== local.order_id || row.provider !== local.provider || !isPortOneCardProvider(row.provider)) {
           throw conflict("결제 정보가 변경되었습니다.");
         }
         let outcome: "cancelled" | "already_closed";
@@ -1203,8 +1207,8 @@ export async function registerPortOnePaymentRoutes(
       throw providerError(error);
     }
     const payment = await context.pool.query<LocalPayment>(
-      "SELECT id,order_id,amount FROM payments WHERE id=$1 AND provider=$2",
-      [trigger.paymentId, PORTONE_PROVIDER],
+      "SELECT id,order_id,amount FROM payments WHERE id=$1 AND provider=ANY($2::text[])",
+      [trigger.paymentId, [...PORTONE_CARD_PROVIDERS]],
     );
     if (!payment.rowCount) throw notFound("결제 정보를 찾을 수 없습니다.");
     const result = await reconcilePayment(context, request.id, payment.rows[0]!);

@@ -113,6 +113,35 @@ test("payment lookup uses the fixed PortOne endpoint and returns only ledger-saf
   assert.equal(new Headers(requests[0]!.init?.headers).get("authorization"), "PortOne synthetic-portone-secret");
 });
 
+test("an explicitly bound KCP V2 adapter preserves KCP identity and rejects other PG channels", async () => {
+  const kcpContract = { ...contract, pgProvider: "KCP_V2" as const, channelKey: "channel-kcp-test" };
+  const kcpPayment = payment({ channel: {
+    key: kcpContract.channelKey, type: "TEST", pgProvider: "KCP_V2",
+  } });
+  const adapter = createPortOneV2Adapter({ ...kcpContract, fetchImpl: async () => jsonResponse(kcpPayment) });
+  const result = await adapter.getPayment({ paymentId: "payment-test", expectedTotalAmount: 12_000 });
+  assert.deepEqual(result.channel, { key: "channel-kcp-test", environment: "TEST", pgProvider: "KCP_V2" });
+  assert.equal(JSON.stringify(result).includes("must-not-escape"), false);
+
+  for (const channel of [
+    { ...kcpPayment.channel, pgProvider: "INICIS_V2" },
+    { ...kcpPayment.channel, pgProvider: "KCP" },
+    { ...kcpPayment.channel, key: contract.channelKey },
+    { ...kcpPayment.channel, type: "LIVE" },
+  ]) {
+    const wrongChannel = createPortOneV2Adapter({ ...kcpContract, fetchImpl: async () => jsonResponse(payment({ channel })) });
+    await assert.rejects(wrongChannel.getPayment({ paymentId: "payment-test", expectedTotalAmount: 12_000 }), errorCode("PAYMENT_CONTRACT_MISMATCH"));
+  }
+  const inicis = createPortOneV2Adapter({ ...contract, fetchImpl: async () => jsonResponse(kcpPayment) });
+  await assert.rejects(inicis.getPayment({ paymentId: "payment-test", expectedTotalAmount: 12_000 }), errorCode("PAYMENT_CONTRACT_MISMATCH"));
+});
+
+test("unknown or malformed explicit PG binding is rejected before any network request", () => {
+  for (const pgProvider of ["KCP", "UNCONFIGURED", "", null]) {
+    assert.throws(() => createPortOneV2Adapter({ ...contract, pgProvider } as never), errorCode("INVALID_CONFIGURATION"));
+  }
+});
+
 test("an uncharged READY payment can omit the channel and method while awaiting the PG", async () => {
   const { channel: _channel, method: _method, paidAt: _paidAt, ...ready } = payment({
     status: "READY",

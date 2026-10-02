@@ -79,7 +79,7 @@ export class PortOneApiReconciliationProvider implements PaymentReconciliationPr
 
   async observe(payment: PaymentRecord): Promise<PaymentObservation> {
     const now = this.#now();
-    if (payment.provider !== "PORTONE_V2_INICIS") return { state: "UNKNOWN", observedAt: now.toISOString() };
+    if (!["PORTONE_V2_INICIS", "PORTONE_V2_KCP"].includes(payment.provider)) return { state: "UNKNOWN", observedAt: now.toISOString() };
     if (!UUID.test(payment.id) || !UUID.test(payment.orderId)) fail("PortOne requery payment identity is invalid");
     const path = `/v1/internal/payments/${payment.id}/reconcile`;
     const timestamp = String(Math.floor(now.getTime() / 1_000));

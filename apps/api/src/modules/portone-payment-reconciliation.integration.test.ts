@@ -6,10 +6,12 @@ import { createDatabasePool } from "@dabboba/db";
 import { buildApp } from "../app.js";
 import { acceptRequiredPoliciesForIntegrationTest } from "../integration-test-fixtures.js";
 import { issueSession } from "../plugins/auth.js";
+import { selectCardChannel } from "../lib/portone-channel-binding.js";
 
 const databaseUrl = process.env.DABBOBA_TEST_DATABASE_URL;
 
-test("verified PortOne requery recovers one paid order and its draw survives through storage without a second charge", {
+for (const cardPg of ["INICIS", "KCP"] as const) {
+test(`${cardPg}: verified PortOne requery recovers one paid order and its draw survives through storage without a second charge`, {
   skip: !databaseUrl,
   timeout: 60_000,
 }, async (t) => {
@@ -23,11 +25,12 @@ test("verified PortOne requery recovers one paid order and its draw survives thr
     paymentReconciliationWorkerSecret: "payment-requery-worker-secret-for-tests",
     portOne: {
       apiSecret: "synthetic-secret", merchantId: "synthetic-merchant", storeId: "synthetic-store",
-      channelKey: "synthetic-channel", channelEnvironment: "TEST",
+      channelKey: "synthetic-channel", kcpChannelKey: "channel-key-synthetic-kcp", channelEnvironment: "TEST",
       webhookSecret: "payment-requery-integration-webhook-secret",
     },
     gcsBucket: null, gcsProjectId: null, logLevel: "silent",
   };
+  const selectedChannel = selectCardChannel(config, cardPg);
   const { app } = await buildApp({ config, pool, redis: null });
   t.after(async () => { await app.close(); await pool.end(); });
   const suffix = randomUUID().replaceAll("-", "").slice(0, 12);
@@ -87,7 +90,7 @@ test("verified PortOne requery recovers one paid order and its draw survives thr
     [orderId, line.rows[0]!.id, productId],
   );
   const payment = await pool.query<{ id: string }>(
-    "INSERT INTO payments(order_id,provider,status,amount) VALUES($1,'PORTONE_V2_INICIS','PENDING',10000) RETURNING id", [orderId],
+    "INSERT INTO payments(order_id,provider,status,amount,portone_channel_binding) VALUES($1,$2,'PENDING',10000,$3) RETURNING id", [orderId, selectedChannel.provider, JSON.stringify(selectedChannel)],
   );
   const paymentId = payment.rows[0]!.id;
   let providerLookups = 0;
@@ -103,7 +106,7 @@ test("verified PortOne requery recovers one paid order and its draw survives thr
     return new Response(JSON.stringify({
       id: paymentId, transactionId: `portone-${suffix}`, pgTxId: `kg-${suffix}`,
       merchantId: "synthetic-merchant", storeId: "synthetic-store", version: "V2",
-      channel: { key: "synthetic-channel", type: "TEST", pgProvider: "INICIS_V2" },
+      channel: { key: selectedChannel.channelKey, type: "TEST", pgProvider: selectedChannel.pgProvider },
       method: { type: "PaymentMethodCard" }, status: "PAID",
       amount: { total: 10_000, paid: 10_000, cancelled: 0 }, currency: "KRW",
       requestedAt: "2026-09-20T00:00:00.000Z", statusChangedAt: "2026-09-20T00:00:02.000Z",
@@ -262,6 +265,8 @@ test("verified PortOne requery recovers one paid order and its draw survives thr
   assert.equal(workerGated.statusCode, 503, workerGated.body);
   assert.equal(providerLookups, 4);
 });
+
+}
 
 test("a claimed payment cancelled on reservation expiry is still requeried and a late charge enters refund review", {
   skip: !databaseUrl,

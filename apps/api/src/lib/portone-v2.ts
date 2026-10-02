@@ -22,6 +22,7 @@ const PAYMENT_STATUSES = [
 
 export type PortOnePaymentStatus = (typeof PAYMENT_STATUSES)[number];
 export type PortOneChannelEnvironment = "LIVE" | "TEST";
+export type PortOneCardPgProvider = "INICIS_V2" | "KCP_V2";
 export type PortOneCancelRequester = "CUSTOMER" | "ADMIN";
 export type PortOneCancellationOutcome = "SUCCEEDED" | "PENDING" | "FAILED";
 
@@ -96,7 +97,7 @@ export type PortOneCardPayment = {
   channel: {
     key: string;
     environment: PortOneChannelEnvironment;
-    pgProvider: "INICIS_V2";
+    pgProvider: PortOneCardPgProvider;
   } | null;
   method: "CARD" | null;
   amount: {
@@ -119,6 +120,8 @@ export type PortOneV2AdapterOptions = {
   storeId: string;
   channelKey: string;
   channelEnvironment: PortOneChannelEnvironment;
+  /** Trusted persisted channel binding; legacy callers remain INICIS-only. */
+  pgProvider?: PortOneCardPgProvider;
   timeoutMs?: number;
   maxResponseBytes?: number;
   fetchImpl?: PortOneFetch;
@@ -322,6 +325,7 @@ function normalizePayment(
     storeId: string;
     channelKey: string;
     channelEnvironment: PortOneChannelEnvironment;
+    pgProvider: PortOneCardPgProvider;
   },
 ): PortOneCardPayment {
   const raw = record(value) as (Payment & Record<string, unknown>) | null;
@@ -351,7 +355,7 @@ function normalizePayment(
     || raw.storeId !== expected.storeId
     || (channel && (channel.key !== expected.channelKey
       || channel.type !== expected.channelEnvironment
-      || channel.pgProvider !== "INICIS_V2"))
+      || channel.pgProvider !== expected.pgProvider))
     || (method && method.type !== "PaymentMethodCard")
     || raw.currency !== "KRW"
     || amount.total !== expected.totalAmount
@@ -359,7 +363,7 @@ function normalizePayment(
   if (mismatched) {
     throw new PortOneV2Error(
       "PAYMENT_CONTRACT_MISMATCH",
-      "The PortOne payment does not match the expected V2 KG Inicis card contract.",
+      "The PortOne payment does not match the expected V2 card channel contract.",
     );
   }
 
@@ -375,7 +379,7 @@ function normalizePayment(
     channel: channel ? {
       key: requiredString(channel.key, "payment.channel.key"),
       environment: channel.type as PortOneChannelEnvironment,
-      pgProvider: "INICIS_V2",
+      pgProvider: expected.pgProvider,
     } : null,
     method: method ? "CARD" : null,
     amount: {
@@ -423,6 +427,10 @@ function validateOptions(options: PortOneV2AdapterOptions) {
   if (options.channelEnvironment !== "LIVE" && options.channelEnvironment !== "TEST") {
     throw new PortOneV2Error("INVALID_CONFIGURATION", "channelEnvironment is invalid.");
   }
+  const pgProvider = options.pgProvider === undefined ? "INICIS_V2" : options.pgProvider;
+  if (pgProvider !== "INICIS_V2" && pgProvider !== "KCP_V2") {
+    throw new PortOneV2Error("INVALID_CONFIGURATION", "pgProvider is invalid.");
+  }
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 30_000) {
     throw new PortOneV2Error("INVALID_CONFIGURATION", "timeoutMs is invalid.");
@@ -437,6 +445,7 @@ function validateOptions(options: PortOneV2AdapterOptions) {
     storeId,
     channelKey,
     channelEnvironment: options.channelEnvironment,
+    pgProvider,
     timeoutMs,
     maxResponseBytes,
     fetchImpl: options.fetchImpl ?? globalThis.fetch,
@@ -535,6 +544,7 @@ export function createPortOneV2Adapter(options: PortOneV2AdapterOptions): PortOn
         storeId: config.storeId,
         channelKey: config.channelKey,
         channelEnvironment: config.channelEnvironment,
+        pgProvider: config.pgProvider,
       });
     },
 

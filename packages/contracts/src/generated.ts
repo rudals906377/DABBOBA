@@ -2773,6 +2773,18 @@ export interface components {
         PublicConfig: {
             commerceMode: components["schemas"]["CommerceLaunchMode"];
             requiredPolicyVersions: components["schemas"]["RequiredPolicyVersions"];
+            cardPaymentOptions?: components["schemas"]["PortOneCardChannelBinding"][];
+        };
+        PortOneCardChannelBinding: {
+            /** @enum {string} */
+            provider: "PORTONE_V2_INICIS" | "PORTONE_V2_KCP";
+            /** @enum {string} */
+            pgProvider: "INICIS_V2" | "KCP_V2";
+            merchantId: string;
+            storeId: string;
+            channelKey: string;
+            /** @enum {string} */
+            channelEnvironment: "TEST" | "LIVE";
         };
         /** @enum {string} */
         CustomerAuthProvider: "PHONE" | "KAKAO" | "NAVER" | "GOOGLE" | "APPLE";
@@ -4012,6 +4024,8 @@ export interface components {
              * @description First server-claimed PortOne window time, or null before any attempt. A non-null value requires provider reconciliation, not another window.
              */
             paymentAttemptStartedAt?: string | null;
+            /** @description Immutable server-selected channel snapshot; never choose a different PG for an existing payment. */
+            cardPayment?: components["schemas"]["PortOneCardChannelBinding"] | null;
             /** @enum {string} */
             status: "PENDING_PAYMENT" | "PAID" | "FULFILLED" | "CANCELLED" | "REFUND_REVIEW" | "REFUNDED";
             /** Format: uuid */
@@ -4037,6 +4051,11 @@ export interface components {
             updatedAt: string;
         };
         CreateOrderInput: {
+            /**
+             * @description Optional explicit configured card rail. Omission retains the existing default.
+             * @enum {string}
+             */
+            cardPg?: "INICIS" | "KCP";
             items: {
                 productId: string;
                 quantity: number;
