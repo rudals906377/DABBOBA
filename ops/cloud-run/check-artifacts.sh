@@ -161,6 +161,7 @@ actual_context="$context_check_dir/actual.txt"
       pnpm-lock.yaml \
       pnpm-workspace.yaml \
       tsconfig.base.json \
+      patches/node-forge@1.4.0.patch \
       apps/api/package.json \
       apps/api/tsconfig.json \
       apps/worker/package.json \

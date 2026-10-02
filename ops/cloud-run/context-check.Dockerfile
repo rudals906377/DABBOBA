@@ -6,6 +6,7 @@ COPY . .
 
 RUN test -f package.json \
   && test -f pnpm-lock.yaml \
+  && test -f patches/node-forge@1.4.0.patch \
   && test -f apps/api/src/index.ts \
   && test -f apps/worker/src/index.ts \
   && test -f packages/db/src/migrate.ts \

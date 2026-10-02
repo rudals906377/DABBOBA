@@ -11,6 +11,9 @@
 !pnpm-workspace.yaml
 !tsconfig.base.json
 
+!patches/
+!patches/node-forge@1.4.0.patch
+
 !apps/
 !apps/api/
 !apps/api/package.json

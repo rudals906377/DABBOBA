@@ -13,6 +13,7 @@ RUN corepack enable \
   && pnpm --version
 
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
+COPY patches/node-forge@1.4.0.patch ./patches/node-forge@1.4.0.patch
 COPY apps/api/package.json apps/api/tsconfig.json ./apps/api/
 COPY apps/worker/package.json apps/worker/tsconfig.json ./apps/worker/
 COPY packages/config/package.json packages/config/tsconfig.json ./packages/config/
