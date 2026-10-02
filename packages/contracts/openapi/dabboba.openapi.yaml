@@ -111,6 +111,66 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/CustomerLoginProviders" }
+  /v1/auth/payment-review:
+    get:
+      tags: [Auth]
+      operationId: getPaymentReviewLogin
+      description: Dedicated internal payment-review login discovery. Disabled outside the pinned STAGING project and TEST channel; normal customer providers are unchanged.
+      responses:
+        "200":
+          description: Review access availability; never exposes account credentials.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [enabled, expiresAt]
+                properties:
+                  enabled: { type: boolean }
+                  expiresAt: { type: [string, "null"], format: date-time }
+    post:
+      tags: [Auth]
+      operationId: loginPaymentReviewer
+      description: Auth server verifies the designated review customer's password. Pinned Auth subject, test project, TEST channel and expiry are independently enforced on the server. Never authenticates administrators.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [email, password, acceptedPolicies]
+              properties:
+                email: { type: string, maxLength: 254 }
+                password: { type: string, minLength: 1, maxLength: 256, writeOnly: true }
+                acceptedPolicies:
+                  type: object
+                  required: [terms, privacy]
+                  additionalProperties: false
+                  properties:
+                    terms: { type: string }
+                    privacy: { type: string }
+      responses:
+        "201":
+          description: Password-verified customer session; lifetime is capped by review expiry.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SessionCreated" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "428":
+          description: Explicit current policy acceptance required.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LegalAcceptanceRequiredErrorEnvelope" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "503":
+          description: Auth server temporarily unavailable.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
   /v1/auth/exchange:
     post:
       tags: [Auth]
@@ -1808,7 +1868,7 @@ paths:
     post:
       tags: [Commerce]
       operationId: abandonOwnPortOnePaymentWindow
-      description: Owner-only release of an unpaid PortOne payment window. The server performs a fresh PortOne lookup and cancels the still-pending order (releasing stock reservations, the kuji room entry, coupons, and points) only when PortOne authoritatively reports no payment (READY with no money, or PAYMENT_NOT_FOUND). A terminal no-charge FAILED/CANCELLED provider state is applied through the canonical provider path. Any payment evidence (PAY_PENDING, virtual account, paid or cancelled amounts, cancellation records) returns 409 PAYMENT_EVIDENCE_PRESENT with no change. Replays with the same Idempotency-Key return the original response without another provider call.
+      description: Owner-only release of an unpaid PortOne payment window. A fresh authenticated PortOne lookup must establish no submitted payment before reservations, room entry, coupons, and points can be released. READY with zero money or PAYMENT_NOT_FOUND qualify. The adapter also recognizes the narrowly validated KG unsubmitted-window shape whose paid field projects the requested total, with a verified channel and no card method, PG transaction, approval, or cancellation. For FAILED this additionally requires PG user-close code 01 and a failure timestamp. Terminal no-charge FAILED/CANCELLED states use the canonical provider path. Other payment evidence or uncertain reads never release the order. Same-key replays return the original result without another provider call.
       security: [{ bearerAuth: [] }]
       parameters:
         - $ref: "#/components/parameters/PaymentId"

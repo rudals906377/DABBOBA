@@ -89,7 +89,7 @@ export function mapSupabaseCustomerClaims(payload: JWTPayload): SupabaseCustomer
   };
 }
 
-async function readBoundedJson(response: Response): Promise<unknown> {
+export async function readBoundedAuthJson(response: Response): Promise<unknown> {
   const limit = 65_536;
   const declared = Number(response.headers.get("content-length"));
   if (Number.isFinite(declared) && declared > limit) throw unauthorized("로그인 인증 정보를 확인해 주세요.");
@@ -151,7 +151,7 @@ async function fetchLiveCustomer(
       signal: controller.signal,
     });
     if (!response.ok) throw unauthorized("로그인 인증 정보가 만료되었거나 유효하지 않습니다.");
-    const user = objectValue(await readBoundedJson(response));
+    const user = objectValue(await readBoundedAuthJson(response));
     if (
       user.id !== claims.subject
       || user.role !== "authenticated"

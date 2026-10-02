@@ -9,7 +9,7 @@ import { issueSession } from "../plugins/auth.js";
 
 const databaseUrl = process.env.DABBOBA_TEST_DATABASE_URL;
 
-type ProviderState = "READY" | "PAY_PENDING" | "PAID" | "NOT_FOUND" | "UNAVAILABLE";
+type ProviderState = "READY" | "READY_REQUEST_AMOUNT" | "FAILED_WINDOW_CLOSE" | "PAY_PENDING" | "PAID" | "NOT_FOUND" | "UNAVAILABLE";
 
 test("an abandoned PortOne window releases only an authoritatively unpaid order, idempotently", {
   skip: !databaseUrl,
@@ -74,13 +74,14 @@ test("an abandoned PortOne window releases only an authoritatively unpaid order,
     }
     const amount = await pool.query<{ amount: number }>("SELECT amount FROM payments WHERE id=$1", [paymentId]);
     const total = Number(amount.rows[0]!.amount);
-    const paid = state === "PAID" ? total : 0;
+    const paid = state === "PAID" || state === "READY_REQUEST_AMOUNT" || state === "FAILED_WINDOW_CLOSE" ? total : 0;
     return new Response(JSON.stringify({
       id: paymentId, transactionId: `portone-${paymentId}`, ...(state === "PAID" ? { pgTxId: `kg-${paymentId}` } : {}),
       merchantId: "synthetic-merchant", storeId: "synthetic-store", version: "V2",
       ...(state === "READY" ? {} : { channel: { key: "synthetic-channel", type: "TEST", pgProvider: "INICIS_V2" } }),
       ...(state === "PAID" ? { method: { type: "PaymentMethodCard" } } : {}),
-      status: state,
+      status: state === "READY_REQUEST_AMOUNT" ? "READY" : state === "FAILED_WINDOW_CLOSE" ? "FAILED" : state,
+      ...(state === "FAILED_WINDOW_CLOSE" ? { failedAt: "2026-09-30T00:00:01.000Z", failure: { pgCode: "01" } } : {}),
       amount: { total, paid, cancelled: 0 }, currency: "KRW",
       requestedAt: "2026-09-30T00:00:00.000Z", statusChangedAt: "2026-09-30T00:00:01.000Z",
       ...(state === "PAID" ? { paidAt: "2026-09-30T00:00:01.000Z" } : {}),
@@ -186,6 +187,35 @@ test("an abandoned PortOne window releases only an authoritatively unpaid order,
     [[ready.orderId, ready.paymentId]],
   );
   assert.deepEqual(outbox.rows.map((row) => row.event_type), ["order.cancelled", "payment.window_abandoned"]);
+
+  // Real KG window-only shape: requested amount is present, but no card,
+  // approval time or PG transaction exists. Do not create financial entries.
+  const projected = await gachaOrder(owner.id, 0);
+  providerState.set(projected.paymentId, "READY_REQUEST_AMOUNT");
+  const projectedRelease = await abandon(projected.paymentId, await ownerSession(), `abandon-projected-${randomUUID()}`, "198.51.100.2");
+  assert.equal(projectedRelease.statusCode, 200, projectedRelease.body);
+  assert.deepEqual(await orderState(projected.orderId), {
+    order_status: "CANCELLED", payment_status: "CANCELLED", reservation_status: "RELEASED",
+    reserved: 0, point_refunds: "0",
+  });
+  assert.equal((await pool.query("SELECT 1 FROM payment_ledger_entries WHERE order_id=$1", [projected.orderId])).rowCount, 0);
+  assert.equal(cancellationRequests, 0);
+
+  const closedWindow = await gachaOrder(owner.id, 0);
+  providerState.set(closedWindow.paymentId, "FAILED_WINDOW_CLOSE");
+  const closedKey = `abandon-closed-${randomUUID()}`;
+  const closedToken = await ownerSession();
+  const closedRelease = await abandon(closedWindow.paymentId, closedToken, closedKey, "198.51.100.2");
+  assert.equal(closedRelease.statusCode, 200, closedRelease.body);
+  assert.deepEqual(await orderState(closedWindow.orderId), {
+    order_status: "CANCELLED", payment_status: "FAILED", reservation_status: "RELEASED",
+    reserved: 0, point_refunds: "0",
+  });
+  assert.equal((await pool.query("SELECT 1 FROM payment_ledger_entries WHERE order_id=$1", [closedWindow.orderId])).rowCount, 0);
+  const closedReplay = await abandon(closedWindow.paymentId, closedToken, closedKey, "198.51.100.2");
+  assert.deepEqual(closedReplay.json(), closedRelease.json());
+  assert.equal(lookups.get(closedWindow.paymentId), 1);
+  assert.equal(cancellationRequests, 0);
 
   // 2) Payment evidence: PAID and PAY_PENDING are 409 with no local change;
   //    a failed provider read is 502 with no local change.

@@ -181,6 +181,18 @@ test("an uncharged PAY_PENDING payment can omit its method, but not its channel"
   );
 });
 
+test("KG READY may carry the requested amount before a card was submitted", async () => {
+  const { method: _method, paidAt: _paidAt, pgTxId: _pgTxId, ...ready } = payment({ status: "READY" });
+  const adapter = createPortOneV2Adapter({ ...contract, fetchImpl: async () => jsonResponse(ready) });
+  const result = await adapter.getPayment({ paymentId: "payment-test", expectedTotalAmount: 12_000 });
+  assert.equal(result.status, "READY");
+  assert.equal(result.method, null);
+  assert.equal(result.paidAt, null);
+  assert.equal(result.pgTransactionId, null);
+  // Preserve the provider's amount; never rewrite financial evidence to zero.
+  assert.equal(result.amount.paid, 12_000);
+});
+
 test("a paid payment still rejects a missing method or channel", async () => {
   for (const omitted of ["method", "channel"] as const) {
     const response = payment();
@@ -193,6 +205,39 @@ test("a paid payment still rejects a missing method or channel", async () => {
       adapter.getPayment({ paymentId: "payment-test", expectedTotalAmount: 12_000 }),
       errorCode("UNEXPECTED_RESPONSE"),
     );
+  }
+});
+
+test("KCP does not inherit INICIS READY or pgCode 01 positive-amount exceptions", async () => {
+  for (const status of ["READY", "FAILED"] as const) {
+    const { method: ignoredMethod, paidAt: ignoredPaidAt, pgTxId: ignoredTx, ...raw } = payment({
+      status, channel: { key: contract.channelKey, type: "TEST", pgProvider: "KCP_V2" },
+      ...(status === "FAILED" ? { failedAt: "2026-10-02T05:04:53Z", failure: { pgCode: "01" } } : {}),
+    });
+    const adapter = createPortOneV2Adapter({ ...contract, pgProvider: "KCP_V2", fetchImpl: async () => jsonResponse(raw) });
+    await assert.rejects(adapter.getPayment({ paymentId: "payment-test", expectedTotalAmount: 12_000 }), errorCode("UNEXPECTED_RESPONSE"));
+  }
+});
+
+test("KG window-close FAILED preserves amount and accepts its unsubmitted shape", async () => {
+  const { method: _method, paidAt: _paidAt, pgTxId: _pgTxId, ...closed } = payment({
+    status: "FAILED", failedAt: "2026-10-02T05:04:53.038210768Z",
+    failure: { pgCode: "01", pgMessage: "must-not-escape", reason: "must-not-escape" },
+  });
+  const adapter = createPortOneV2Adapter({ ...contract, fetchImpl: async () => jsonResponse(closed) });
+  const result = await adapter.getPayment({ paymentId: "payment-test", expectedTotalAmount: 12_000 });
+  assert.equal(result.status, "FAILED");
+  assert.equal(result.method, null);
+  assert.equal(result.amount.paid, 12_000);
+  assert.equal(JSON.stringify(result).includes("must-not-escape"), false);
+  for (const change of [
+    { failure: { pgCode: "99" } }, { failure: undefined }, { failedAt: undefined },
+    { paidAt: "2026-10-02T05:04:53Z" }, { pgTxId: "pg-charge" },
+    { amount: { ...closed.amount, paid: 1 } },
+    { amount: { ...closed.amount, cancelled: 1 } },
+  ]) {
+    const invalid = createPortOneV2Adapter({ ...contract, fetchImpl: async () => jsonResponse({ ...closed, ...change }) });
+    await assert.rejects(invalid.getPayment({ paymentId: "payment-test", expectedTotalAmount: 12_000 }), errorCode("UNEXPECTED_RESPONSE"));
   }
 });
 

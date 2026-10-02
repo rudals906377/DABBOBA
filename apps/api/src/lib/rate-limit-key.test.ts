@@ -29,7 +29,7 @@ test("anonymous, malformed-token, and login-exchange requests are keyed by clien
   assert.equal(rateLimitKey(request({}), config), "ip:192.0.2.10");
   assert.equal(rateLimitKey(request({ headers: { authorization: "Bearer short" } }), config), "ip:192.0.2.10");
   assert.equal(rateLimitKey(request({ headers: { authorization: `Basic ${token}` } }), config), "ip:192.0.2.10");
-  for (const url of ["/v1/auth/exchange", "/v1/auth/account-deletion-exchange"]) {
+  for (const url of ["/v1/auth/exchange", "/v1/auth/account-deletion-exchange", "/v1/auth/payment-review"]) {
     assert.equal(
       rateLimitKey(request({ url, headers: { authorization: `Bearer ${token}` } }), config),
       "ip:192.0.2.10",

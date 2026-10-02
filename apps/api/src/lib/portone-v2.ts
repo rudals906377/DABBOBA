@@ -110,9 +110,40 @@ export type PortOneCardPayment = {
   statusChangedAt: string;
   paidAt: string | null;
   failedAt: string | null;
+  /** Allowlisted PG failure code only; never retain provider free-text messages. */
+  failureCode?: "01" | undefined;
   cancelledAt: string | null;
   cancellations: PortOneCancellation[];
 };
+
+/** Authenticated INICIS READY projection observed before card submission only. */
+export function isPortOneUnsubmittedReady(payment: PortOneCardPayment): boolean {
+  return payment.status === "READY"
+    && payment.channel?.pgProvider === "INICIS_V2"
+    && payment.method === null
+    && payment.pgTransactionId === null
+    && payment.paidAt === null
+    && payment.failedAt === null
+    && payment.cancelledAt === null
+    && payment.cancellations.length === 0
+    && payment.amount.cancelled === 0
+    && payment.amount.paid === payment.amount.total;
+}
+
+/** Exact authenticated INICIS pgCode 01 unsubmitted cancellation shape. */
+export function isPortOneUnsubmittedFailure(payment: PortOneCardPayment): boolean {
+  return payment.status === "FAILED"
+    && payment.failureCode === "01"
+    && payment.channel?.pgProvider === "INICIS_V2"
+    && payment.method === null
+    && payment.pgTransactionId === null
+    && payment.paidAt === null
+    && payment.failedAt !== null
+    && payment.cancelledAt === null
+    && payment.cancellations.length === 0
+    && payment.amount.cancelled === 0
+    && (payment.amount.paid === 0 || payment.amount.paid === payment.amount.total);
+}
 
 export type PortOneV2AdapterOptions = {
   apiSecret: string;
@@ -339,15 +370,6 @@ function normalizePayment(
   const status = paymentStatus(raw.status);
   const paid = nonNegativeSafeInteger(amount.paid, "payment.amount.paid");
   const cancelled = nonNegativeSafeInteger(amount.cancelled, "payment.amount.cancelled");
-  // PortOne may omit channel/method while a payment is still READY. A
-  // PAY_PENDING payment may also omit method. Neither state can be treated as
-  // a paid card payment, and any positive payment amount still fails closed.
-  const awaitingPg = paid === 0 && cancelled === 0;
-  if ((!channel && !(status === "READY" && awaitingPg))
-    || (!method && !(["READY", "PAY_PENDING"].includes(status) && awaitingPg))) {
-    throw new PortOneV2Error("UNEXPECTED_RESPONSE", "PortOne returned an incomplete payment.");
-  }
-
   const mismatched = (
     raw.id !== expected.paymentId
     || raw.version !== "V2"
@@ -368,7 +390,7 @@ function normalizePayment(
   }
 
   const rawCancellations = (raw as Record<string, unknown>).cancellations;
-  return {
+  const payment: PortOneCardPayment = {
     paymentId: requiredString(raw.id, "payment.id"),
     portOneTransactionId: requiredString(raw.transactionId, "payment.transactionId"),
     pgTransactionId: optionalString(raw.pgTxId, "payment.pgTxId"),
@@ -392,9 +414,19 @@ function normalizePayment(
     statusChangedAt: timestamp(raw.statusChangedAt, "payment.statusChangedAt"),
     paidAt: optionalTimestamp(raw.paidAt, "payment.paidAt"),
     failedAt: optionalTimestamp(raw.failedAt, "payment.failedAt"),
+    ...(status === "FAILED" && record(raw.failure)?.pgCode === "01" ? { failureCode: "01" as const } : {}),
     cancelledAt: optionalTimestamp(raw.cancelledAt, "payment.cancelledAt"),
     cancellations: cancellationList(rawCancellations),
   };
+  // READY/PAY_PENDING may omit details before submission. Positive amounts
+  // are accepted only for observed INICIS shapes, never inferred for KCP.
+  const awaitingPg = paid === 0 && cancelled === 0;
+  if ((!channel && !(status === "READY" && awaitingPg))
+    || (!method && !(["READY", "PAY_PENDING"].includes(status) && awaitingPg)
+      && !isPortOneUnsubmittedReady(payment) && !isPortOneUnsubmittedFailure(payment))) {
+    throw new PortOneV2Error("UNEXPECTED_RESPONSE", "PortOne returned an incomplete payment.");
+  }
+  return payment;
 }
 
 function normalizeCancelResponse(value: unknown, expectedAmount: number): PortOneCancellation {

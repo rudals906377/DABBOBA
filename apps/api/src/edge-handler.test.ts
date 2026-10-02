@@ -39,6 +39,16 @@ function edgeEnvironment(overrides: EdgeApiEnvironment = {}): EdgeApiEnvironment
   };
 }
 
+test("Edge preserves explicit payment-test release tier without inventing or mixing environments", () => {
+  assert.equal(normalizeSupabaseEdgeApiEnvironment(edgeEnvironment()).DABBOBA_RELEASE_ENVIRONMENT_TIER, undefined);
+  assert.equal(normalizeSupabaseEdgeApiEnvironment(edgeEnvironment({
+    DABBOBA_RELEASE_ENVIRONMENT_TIER: "STAGING",
+  })).DABBOBA_RELEASE_ENVIRONMENT_TIER, "STAGING");
+  assert.throws(() => normalizeSupabaseEdgeApiEnvironment(edgeEnvironment({
+    DABBOBA_RELEASE_ENVIRONMENT_TIER: "PRODUCTION",
+  })), /release tier must match/);
+});
+
 test("admin Edge function rejects direct requests, customer paths, and mutated signed content before app creation", async () => {
   const captured: InjectOptions[] = [];
   let builds = 0;
