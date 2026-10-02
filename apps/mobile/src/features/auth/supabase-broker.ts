@@ -19,6 +19,7 @@ import {
   type PendingSocialLogin,
 } from "@/features/auth/social-login-state";
 import type { AcceptedPolicyVersions } from "@/features/auth/auth-api";
+import { createBrokerSecureStorage } from "@/features/auth/broker-secure-storage";
 import {
   normalizeKoreanMobileNumber,
   parsePendingPhoneOtp,
@@ -394,7 +395,7 @@ function requireBrokerClient(): SupabaseClient {
         storage: brokerSecureStorage,
         flowType: "pkce",
         autoRefreshToken: false,
-        persistSession: false,
+        persistSession: true,
         detectSessionInUrl: false,
         experimental: { appendPkceFlowIdToRedirects: true },
       },
@@ -404,11 +405,11 @@ function requireBrokerClient(): SupabaseClient {
   return brokerClient;
 }
 
-const brokerSecureStorage = {
+const brokerSecureStorage = createBrokerSecureStorage(BROKER_STORAGE_KEY, {
   getItem: (key: string) => SecureStore.getItemAsync(key),
   setItem: (key: string, value: string) => SecureStore.setItemAsync(key, value),
   removeItem: (key: string) => SecureStore.deleteItemAsync(key),
-};
+});
 
 async function clearPendingSocialLogin(pending: PendingSocialLogin): Promise<void> {
   const current = parsePendingSocialLogin(await SecureStore.getItemAsync(PENDING_SOCIAL_LOGIN_KEY));
