@@ -1,4 +1,6 @@
-export type ProfilePolicyId = "terms" | "privacy" | "shipping-storage" | "exchange-request";
+import { cancellationRefundNotices, deliveryPeriodNotice, postShippingNotices } from "@/features/checkout/checkout-reference-notices";
+
+export type ProfilePolicyId = "terms" | "privacy" | "shipping-storage" | "purchase-cancellation" | "exchange-request";
 
 export type ProfilePolicySection = {
   heading: string;
@@ -81,8 +83,8 @@ export const PROFILE_POLICIES: readonly ProfilePolicy[] = [
   {
     id: "shipping-storage",
     title: "배송·보관함 정책",
-    summary: "보관 상품의 선택, 무료배송과 출고 기준",
-    updatedAt: "2026.09.14",
+    summary: "배송기간, 보관 상품의 선택, 무료배송과 출고 기준",
+    updatedAt: "2026.10.02",
     sections: [
       {
         heading: "신청 가능한 상품",
@@ -103,11 +105,23 @@ export const PROFILE_POLICIES: readonly ProfilePolicy[] = [
         ],
       },
       {
-        heading: "출고 후 처리",
+        heading: "배송기간과 신청 취소",
         paragraphs: [
-          "출고가 시작되면 배송 상세에서 택배사와 송장번호를 확인할 수 있습니다. 배송을 신청해 수령한 상품은 교환, 환불 또는 포인트 환급 대상이 아닙니다.",
+          deliveryPeriodNotice,
+          "출고가 시작되면 배송 상세에서 택배사와 송장번호를 확인할 수 있습니다. 배송 신청 취소는 고객센터에서 출고 여부를 확인한 뒤 안내합니다.",
+          "배송을 신청했거나 수령한 상품은 회원 간 교환방과 선택형 포인트 환급 대상에서 제외됩니다. 하자·파손·오배송과 법령상 청약철회·교환·환불은 별도로 처리합니다.",
         ],
       },
+    ],
+  },
+  {
+    id: "purchase-cancellation",
+    title: "취소·교환·환불 정책",
+    summary: "주문 취소, 현금 환불과 배송 상품의 하자·오배송 처리",
+    updatedAt: "2026.10.02",
+    sections: [
+      { heading: "주문 취소와 환불", paragraphs: cancellationRefundNotices.map(({ text }) => text) },
+      { heading: "배송 후 교환과 반품", paragraphs: postShippingNotices.map(({ text }) => text) },
     ],
   },
   {
