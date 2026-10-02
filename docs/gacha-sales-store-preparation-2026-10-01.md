@@ -27,7 +27,7 @@
 | iOS Bundle ID | com.dabboba.mobile |
 | iOS 소유 팀 / 기존 앱 | MCZ4884P7F / 6815146511 유지 |
 | Android package | com.dabboba.mobile |
-| 버전 | 소스 1.0.0, iOS build 3, Android versionCode 1; 실제 업로드와 중복 여부는 콘솔에서 확인 |
+| 버전 | 소스 1.0.0, 최신 검증 iOS PRELAUNCH build 5, Android versionCode 1; 실제 판매판은 별도 최종 빌드·업로드와 중복 여부를 확인 |
 | iOS 부제 | 캐릭터 실물 굿즈 쇼핑 |
 | Play 짧은 설명 | 캐릭터 가챠 상품을 살펴보고, 실물 굿즈 구매부터 보관·배송 신청까지 다뽀바에서 |
 | 키워드 초안 | 가챠,캐릭터,굿즈,피규어,애니메이션,컬렉션,쇼핑 |

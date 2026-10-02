@@ -11,7 +11,7 @@ It is not proof that the values were entered or approved in either console.
 ## Product scope
 
 - Version: `1.0.0`
-- iOS build: `3` in current source; verify the actual signed upload before submission
+- iOS build: `5` in current source and validated TestFlight upload; physical STORE-build testing and public review remain separate
 - Android versionCode: `1`
 - Locale: Korean first
 - Capability: product discovery, search, wishlist, notices, account settings,
