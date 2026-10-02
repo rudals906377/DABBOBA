@@ -1,10 +1,7 @@
 diff --git a/lib/rsa.js b/lib/rsa.js
 --- a/lib/rsa.js
 +++ b/lib/rsa.js
-@@ -1168,11 +1168,17 @@ pki.setRsaPublicKey = pki.rsa.setPublicKey = function(n, e) {
-             parseAllBytes: options._parseAllDigestBytes
-           });
- 
+@@ -1171,8 +1171,14 @@ pki.setRsaPublicKey = pki.rsa.setPublicKey = function(n, e) {
 -          // validate DigestInfo structure and element count
 +          // validate DigestInfo structure and element counts (outer DigestInfo
 +          // and nested DigestAlgorithm). asn1.validate ignores extra children,

@@ -14,7 +14,7 @@ export const forge = cliRequire("node-forge");
 // Upstream PR1152 commit ceba34402e329f0365134f23fe19898756527d65 backport
 // plus local empty-NULL-content hardening. Not an official patched npm release.
 const expectedRsaHash = "be6ff389fe96f09c2da9ed28c949990890a5b4db5f39d6b14c414d88f594d8a3";
-const expectedPatchHash = "c39d3b8f56c6933e8c91380fb02e7aa1af328d3a77b3758f747ed41fcad9229b";
+const expectedPatchHash = "40ee2ae4402de9b3dcd64a51c315f59d4ced2a35f96f46ccba5e8719bf61ebfc";
 
 export function verifyForgePatch() {
   const cliPath = realpathSync(cliRequire.resolve("node-forge"));
