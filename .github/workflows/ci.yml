@@ -40,6 +40,9 @@ jobs:
       - name: Install dependencies from lockfile
         run: pnpm install --frozen-lockfile
 
+      - name: Verify pinned forge backport and Expo signing compatibility
+        run: pnpm run check:forge
+
       - name: Reject high and critical production dependency advisories
         run: pnpm run audit:prod
 
