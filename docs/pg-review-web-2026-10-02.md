@@ -6,7 +6,12 @@ The owner reports PG review submission complete. This is not PG approval.
 shipping/cancellation/refund notices, and review login on dabboba.net.
 The proxy is pinned to payment staging (`lyzcyrdiazorjaqlgblr`) and the exact
 three review products. No production commerce setting is changed.
-The existing INICIS channel is TEST; KCP payment is not configured.
+The existing INICIS channel is TEST. KCP V2 TEST channel `DABBOBA_KCP_TEST`
+was created on the same friend-owned PortOne store with public site code T0000.
+Its channel key is `channel-key-bc0b3dde-475a-490c-85df-c4f4ebdb2b3c`.
+Frontend selection stays disabled until the staging API advertises this exact
+TEST binding; KCP cannot fall back to an INICIS binding. Backend per-order channel
+binding/migration/deployment and actual KCP-window verification are separate work.
 
 The opaque customer session is held only in a Secure HttpOnly SameSite cookie.
 POSTs require same-origin checks; API routes, products, quantities and redirect

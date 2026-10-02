@@ -1,4 +1,5 @@
 import { reviewOrderIntent } from './order-intent.js';
+import { reviewChannels, orderChannel, paymentLabels } from './payment-channel.js';
 const intents = reviewOrderIntent(sessionStorage, () => crypto.randomUUID());
 const app = document.querySelector('#app');
 const state = { products: [], policies: [], config: null, signedIn: false, render: 0 };
@@ -18,7 +19,11 @@ async function api(path, body, key) {
 }
 const cards = () => `<div class="grid">${state.products.map(p => `<a class="card" href="#product/${esc(p.id)}"><img src="${image(p.imageUrl)}" alt="${esc(p.name)}"><div class="body"><h2>${esc(p.name)}</h2><p class="muted">${esc(p.metadata?.reward)} · 전체 ${p.totalQuantity}개 / ${p.openedQuantity}개 오픈</p><p class="price">${money(p.price)}</p></div></a>`).join('')}</div>`;
 const notices = () => `<div class="policies">${state.policies.map(section => `<section><h2>${esc(section.title)}</h2>${section.groups.map(group => `${group.title ? `<h3>${esc(group.title)}</h3>` : ''}<ul>${group.items.map(item => `<li>${esc(item.text)}${item.children ? `<ul>${item.children.map(v=>`<li>${esc(v)}</li>`).join('')}</ul>` : ''}</li>`).join('')}</ul>`).join('')}</section>`).join('')}</div>`;
-const about = () => `<h1>다뽀바 앱 소개</h1><p>다뽀바는 캐릭터 피규어와 캡슐 상품을 탐색하고, 무작위 구성의 실물 상품을 구매하는 모바일 서비스입니다.</p><ol><li>상품의 가격, 포함 상품, 전체·오픈 수량과 이용 규정을 확인합니다.</li><li>결제를 완료하면 구매 수량만큼 뽑기 권리가 발급됩니다.</li><li>앱에서 캡슐을 직접 열면 서버가 남은 구성에 따라 획득 상품을 확정합니다. 같은 상품이 중복될 수 있습니다.</li><li>획득한 상품은 보관함에서 확인하고 배송을 신청할 수 있습니다. 보관 기간은 60일입니다.</li></ol><p>배송 신청 접수 후 배송 완료까지 영업일 기준 2~5일이 소요됩니다. 출시 초기에는 가챠 상품만 제공하며 쿠지는 아직 판매하지 않습니다.</p><p class="muted">앱 스토어 공개 출시 전입니다. 이 웹 화면은 계약 심사를 위한 서비스 확인 경로이며, 심사 계정의 주문·재고는 운영 회원과 분리됩니다. 현재 결제창은 KG이니시스 TEST입니다. KCP 결제 연동은 별도 준비 사항입니다.</p><div class="actions"><a class="button" href="#catalog">판매 예정 상품 확인</a><a class="button secondary" href="#policies">서비스 이용 안내</a></div>`;
+const paymentNotice = () => {
+  const channels = reviewChannels(state.config);
+  return channels.length ? `현재 확인 가능한 결제창은 ${channels.map(c=>paymentLabels[c.cardPg]).join(' · ')} 신용카드 TEST입니다.` : '현재 TEST 결제 연결을 준비 중입니다.';
+};
+const about = () => `<h1>다뽀바 앱 소개</h1><p>다뽀바는 캐릭터 피규어와 캡슐 상품을 탐색하고, 무작위 구성의 실물 상품을 구매하는 모바일 서비스입니다.</p><ol><li>상품의 가격, 포함 상품, 전체·오픈 수량과 이용 규정을 확인합니다.</li><li>결제를 완료하면 구매 수량만큼 뽑기 권리가 발급됩니다.</li><li>앱에서 캡슐을 직접 열면 서버가 남은 구성에 따라 획득 상품을 확정합니다. 같은 상품이 중복될 수 있습니다.</li><li>획득한 상품은 보관함에서 확인하고 배송을 신청할 수 있습니다. 보관 기간은 60일입니다.</li></ol><p>배송 신청 접수 후 배송 완료까지 영업일 기준 2~5일이 소요됩니다. 출시 초기에는 가챠 상품만 제공하며 쿠지는 아직 판매하지 않습니다.</p><p class="muted">앱 스토어 공개 출시 전입니다. 이 웹 화면은 계약 심사를 위한 서비스 확인 경로이며, 심사 계정의 주문·재고는 운영 회원과 분리됩니다. ${esc(paymentNotice())}</p><div class="actions"><a class="button" href="#catalog">판매 예정 상품 확인</a><a class="button secondary" href="#policies">서비스 이용 안내</a></div>`;
 async function render() {
   const generation = ++state.render;
   notify('');
@@ -56,6 +61,12 @@ function checkout(product, odds) {
   if (!state.signedIn) { app.innerHTML = '<h1>로그인 후 구매할 수 있어요.</h1><a class="button" href="#login">심사 계정 로그인</a>'; return; }
   app.innerHTML = `<h1>구매 및 결제</h1><form id="checkout-form"><div class="summary"><h2>${esc(product.name)}</h2><p>상품 단가 ${money(product.price)} · 신용카드</p><p class="muted">KG이니시스 TEST · 카드 정보 입력 및 최종 결제는 심사 담당자의 지시에 따라 진행해 주세요.</p></div><label>구매 수량<select name="quantity">${Array.from({length:Math.min(10,product.availableQuantity)},(_,i)=>`<option>${i+1}</option>`).join('')}</select></label><label>결제자 이름<input name="fullName" maxlength="30" autocomplete="name" required></label><label>휴대전화<input name="phoneNumber" type="tel" pattern="[0-9+ -]{9,16}" autocomplete="tel" required></label><label>이메일<input name="customerEmail" type="email" autocomplete="email" required></label><p id="total" class="price">합계 ${money(product.price)}</p><label><input name="consent" type="checkbox" required>상품 구성·무작위 지급 방식·취소 및 환불 규정을 확인하고 결제에 동의합니다. (필수)</label><button id="purchase">구매하기</button><button type="button" id="check-payment" class="secondary">결제 상태 확인 / 닫기 복구</button></form>${notices()}`;
   const form = document.querySelector('#checkout-form');
+  const channels = reviewChannels(state.config);
+  form.querySelector('.summary').insertAdjacentHTML('afterend', `<label>결제대행사<select name="cardPg">${['INICIS','KCP'].map(cardPg=>`<option value="${cardPg}" ${channels.some(c=>c.cardPg===cardPg)?'':'disabled'}>${paymentLabels[cardPg]}${channels.some(c=>c.cardPg===cardPg)?' · 신용카드 TEST':' · 연동 준비 중'}</option>`).join('')}</select></label>`);
+  if (channels.length) form.cardPg.value = channels[0].cardPg;
+  const updateProvider = () => { form.querySelector('.summary p.muted').textContent = `${paymentLabels[form.cardPg.value]} TEST · 카드 정보 입력 및 최종 결제는 심사 담당자의 지시에 따라 진행해 주세요.`; };
+  form.cardPg.onchange = updateProvider;
+  updateProvider();
   let pending; try { pending = JSON.parse(sessionStorage.getItem('dabboba-review-order') || 'null'); } catch {pending = null;}
   form.quantity.onchange = () => { document.querySelector('#total').textContent = '합계 ' + money(product.price * Number(form.quantity.value)); };
   async function recover() {
@@ -78,11 +89,19 @@ function checkout(product, odds) {
       if (!window.PortOne?.requestPayment) throw new Error('결제창 연결을 준비하지 못했어요. 페이지를 새로 열어 주세요.');
       if (pending) {await recover(); if(pending) throw new Error('이전 결제 상태를 확인한 후 다시 시도해 주세요.');}
       const currentOdds = await api(`/products/${product.id}/draw-odds`);
-      intents.prepare({items:[{productId:product.id,quantity:Number(form.quantity.value),expectedDrawVersion:currentOdds.version}],pointAmount:0});
+      const cardPg = form.cardPg.value;
+      if (cardPg === 'KCP' && new TextEncoder().encode(product.name).length > 100) throw new Error('KCP 결제 상품명은 100바이트 이내여야 합니다. 상품 정보를 확인해 주세요.');
+      const currentConfig = await api('/config');
+      if (!reviewChannels(currentConfig).some(c=>c.cardPg===cardPg)) throw new Error('선택한 결제대행사는 아직 연동 준비 중이에요.');
+      intents.prepare({items:[{productId:product.id,quantity:Number(form.quantity.value),expectedDrawVersion:currentOdds.version}],pointAmount:0,cardPg});
       const order = await intents.resolve((body, key) => api('/orders', body, key));
       pending = {id:order.id,paymentId:order.paymentId}; sessionStorage.setItem('dabboba-review-order',JSON.stringify(pending));
+      const currentOrder = await api('/orders/' + order.id);
+      if (currentOrder.id !== order.id || currentOrder.paymentId !== order.paymentId || currentOrder.status !== 'PENDING_PAYMENT') throw new Error('주문 상태가 바뀌었어요. 결제 상태 확인을 눌러 주세요.');
+      const channel = orderChannel(currentOrder.cardPayment ? currentOrder : order, cardPg);
+      if (!Number.isSafeInteger(currentOrder.total) || currentOrder.total < 1) throw new Error('서버 주문 금액을 확인하지 못했어요.');
       await api(`/payments/${order.paymentId}/attempt`, {});
-      const response = await window.PortOne.requestPayment({storeId:'store-08e382ae-230f-46e8-a1d3-30e28ae31d3a',channelKey:'channel-key-f21d589c-94b2-4801-921a-f6f926e6dccc',paymentId:order.paymentId,orderName:product.name,totalAmount:order.total,currency:'KRW',payMethod:'CARD',productType:'REAL',customer:{fullName:form.fullName.value.trim(),phoneNumber:form.phoneNumber.value.replace(/[ -]/g,''),email:form.customerEmail.value.trim()},redirectUrl:location.origin + '/review/?return=1#checkout/' + product.id});
+      const response = await window.PortOne.requestPayment({storeId:channel.storeId,channelKey:channel.channelKey,paymentId:order.paymentId,orderName:product.name,totalAmount:currentOrder.total,currency:'KRW',payMethod:'CARD',productType:'REAL',customer:{fullName:form.fullName.value.trim(),phoneNumber:form.phoneNumber.value.replace(/[ -]/g,''),email:form.customerEmail.value.trim()},redirectUrl:location.origin + '/review/?return=1#checkout/' + product.id});
       if (response?.code) {await recover();} else {await api(`/payments/${order.paymentId}/confirm`, {});notify('결제 확인 요청을 접수했어요. 결제 상태 확인을 눌러 주세요.');}
     } catch(e) {notify(e.message);} finally {button.disabled = false;}
   };

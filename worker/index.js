@@ -109,7 +109,7 @@ export async function handlePgReviewService(request, env, externalFetch = global
   if (url.pathname !== "/review" && !url.pathname.startsWith("/review/")) return null;
   if (url.protocol !== "https:" || !(url.hostname === "dabboba.net" || url.hostname.endsWith(".dabboba-2o6.pages.dev") || url.hostname === "dabboba-2o6.pages.dev")) return pgReviewFailure("심사 페이지 주소를 확인해 주세요.", 404);
   if (!url.pathname.startsWith("/review/api/")) {
-    const paths = new Map([["/review", "/review/"], ["/review/", "/review/"], ["/review/app.js", "/review/app.js"], ["/review/order-intent.js", "/review/order-intent.js"], ["/review/styles.css", "/review/styles.css"], ["/review/policies.json", "/review/policies.json"]]);
+    const paths = new Map([["/review", "/review/"], ["/review/", "/review/"], ["/review/app.js", "/review/app.js"], ["/review/order-intent.js", "/review/order-intent.js"], ["/review/payment-channel.js", "/review/payment-channel.js"], ["/review/styles.css", "/review/styles.css"], ["/review/policies.json", "/review/policies.json"]]);
     const asset = paths.get(url.pathname);
     if (!asset || !["GET", "HEAD"].includes(request.method)) return pgReviewFailure("페이지를 찾지 못했어요.", 404);
     const assetUrl = new URL(url); assetUrl.pathname = asset; assetUrl.search = "";
@@ -150,6 +150,7 @@ export async function handlePgReviewService(request, env, externalFetch = global
     const raw = await request.text(); if (raw.length > 8192) return pgReviewFailure("입력 내용이 너무 길어요.", 413);
     try { body = JSON.parse(raw || "{}"); } catch { return pgReviewFailure("입력 내용을 확인해 주세요."); }
     if (!body || typeof body !== "object" || Array.isArray(body)) return pgReviewFailure("입력 내용을 확인해 주세요.");
+    if (route === "/orders" && body.cardPg !== undefined && !["INICIS", "KCP"].includes(body.cardPg)) return pgReviewFailure("결제대행사를 확인해 주세요.");
     if (isLogin && body.email !== "pg") return pgReviewFailure("심사 아이디 또는 비밀번호를 확인해 주세요.", 401);
     if (route === "/orders" && (!Array.isArray(body.items) || body.items.length !== 1 || !PG_REVIEW_PRODUCTS.has(body.items[0]?.productId) || !Number.isInteger(body.items[0]?.quantity) || body.items[0].quantity < 1 || body.items[0].quantity > 10 || body.pointAmount !== 0 || body.couponCode || body.kujiRoomEntryId)) return pgReviewFailure("심사 상품과 수량을 확인해 주세요.");
   }

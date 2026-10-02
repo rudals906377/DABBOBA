@@ -18,6 +18,7 @@ test('different product or quantity cannot replace an unresolved purchase',()=>{
  const intent=reviewOrderIntent(storage(),()=> 'test');intent.prepare(body);
  assert.throws(()=>intent.prepare({...body,items:[{...body.items[0],quantity:2}]}),/이전 주문/);
  assert.throws(()=>intent.prepare({...body,items:[{...body.items[0],productId:'other'}]}),/이전 주문/);
+ assert.throws(()=>intent.prepare({...body,cardPg:'KCP'}),/이전 주문/);
 });
 test('persistence failure prevents POST and expired unknown intents stay recoverable',async()=>{
  const unavailable={getItem:()=>null,setItem:()=>{throw new Error('storage unavailable');}};
