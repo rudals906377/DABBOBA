@@ -78,6 +78,7 @@ function SiteHeader() {
         <a href="#storage">보관·배송</a>
         <a href="#kuji">쿠지샵</a>
         <a href="#prelaunch">이용 안내</a>
+        <a href="/review/">심사용 웹앱</a>
       </nav>
     </header>
   );
@@ -360,7 +361,9 @@ function PrelaunchSection() {
             <a href="/support">고객지원</a>
             <a href="/account-deletion">계정 삭제</a>
           </nav>
-          <p>© DABBOBA</p>
+          <p>다뽀바 · 대표 김정미 · 사업자등록번호 508-33-01724 · 통신판매업 2026-경기파주-3579</p>
+          <p>경기도 파주시 한빛로 67, 208-501 · 대표전화 <a href="tel:0319479996">031-947-9996</a></p>
+          <p><a href="/review/">서비스 심사용 웹앱</a> · © DABBOBA</p>
         </footer>
       </div>
     </section>

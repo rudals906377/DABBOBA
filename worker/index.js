@@ -7,6 +7,9 @@ export default {
       return Response.redirect(requestUrl.toString(), 308);
     }
 
+    const reviewResponse = await handlePgReviewService(request, env);
+    if (reviewResponse) return reviewResponse;
+
     const accountDeletionResponse = await handleAccountDeletionService(request, env);
     if (accountDeletionResponse) return accountDeletionResponse;
 
@@ -76,6 +79,99 @@ export default {
 function isPublicSiteHost(hostname) {
   return hostname === "dabboba.net"
     || hostname.endsWith(".pages.dev");
+}
+
+const PG_REVIEW_API = "https://lyzcyrdiazorjaqlgblr.supabase.co/functions/v1/dabboba-api";
+const PG_REVIEW_PRODUCTS = new Set(["stg-death-note-rich", "stg-sanrio-can-figures", "stg-hatsune-miku-petadol-piapro"]);
+const PG_REVIEW_COOKIE = "__Secure-dabboba-pg-review";
+const PG_REVIEW_EXPIRY = Date.parse("2026-10-31T14:59:00Z");
+
+function pgReviewJson(body, status = 200, extra = {}) {
+  return new Response(JSON.stringify(body), { status, headers: {
+    "content-type": "application/json; charset=UTF-8", "cache-control": "no-store",
+    "x-content-type-options": "nosniff", "referrer-policy": "no-referrer", ...extra,
+  } });
+}
+function pgReviewFailure(message, status = 400) { return pgReviewJson({ error: { message } }, status); }
+function pgReviewToken(request) {
+  const matches = (request.headers.get("cookie") || "").split(";").map(v => v.trim()).filter(v => v.startsWith(`${PG_REVIEW_COOKIE}=`));
+  if (matches.length !== 1) return null;
+  const token = matches[0].slice(PG_REVIEW_COOKIE.length + 1);
+  return /^[A-Za-z0-9_.-]{32,4096}$/.test(token) ? token : null;
+}
+function pgReviewCookie(token = "", maxAge = 0) {
+  return `${PG_REVIEW_COOKIE}=${token}; Path=/review; HttpOnly; Secure; SameSite=Lax; Max-Age=${maxAge}`;
+}
+
+/** Review web app: fixed TEST backend, exact customer routes, HttpOnly session. */
+export async function handlePgReviewService(request, env, externalFetch = globalThis.fetch) {
+  const url = new URL(request.url);
+  if (url.pathname !== "/review" && !url.pathname.startsWith("/review/")) return null;
+  if (url.protocol !== "https:" || !(url.hostname === "dabboba.net" || url.hostname.endsWith(".dabboba-2o6.pages.dev") || url.hostname === "dabboba-2o6.pages.dev")) return pgReviewFailure("심사 페이지 주소를 확인해 주세요.", 404);
+  if (!url.pathname.startsWith("/review/api/")) {
+    const paths = new Map([["/review", "/review/"], ["/review/", "/review/"], ["/review/app.js", "/review/app.js"], ["/review/order-intent.js", "/review/order-intent.js"], ["/review/styles.css", "/review/styles.css"], ["/review/policies.json", "/review/policies.json"]]);
+    const asset = paths.get(url.pathname);
+    if (!asset || !["GET", "HEAD"].includes(request.method)) return pgReviewFailure("페이지를 찾지 못했어요.", 404);
+    const assetUrl = new URL(url); assetUrl.pathname = asset; assetUrl.search = "";
+    const response = await env.ASSETS.fetch(new Request(assetUrl, request));
+    const headers = new Headers(response.headers);
+    headers.set("cache-control", "no-store"); headers.set("x-robots-tag", "noindex, nofollow");
+    headers.set("x-content-type-options", "nosniff"); headers.set("referrer-policy", "strict-origin-when-cross-origin");
+    headers.set("content-security-policy", "default-src 'self'; script-src 'self' https://cdn.portone.io; style-src 'self'; img-src 'self' https://rconfxsykttfvznakile.supabase.co https://rconfxsykttfvznakile.storage.supabase.co data:; connect-src 'self' https://*.portone.io https://checkout-service.prod.iamport.co https://payment-bridge.prod.iamport.co https://tx-gateway-service.prod.iamport.co; frame-src https://*.portone.io https://checkout-service.prod.iamport.co https://service.iamport.kr https://*.inicis.com https://*.kcp.co.kr; base-uri 'none'; form-action 'self' https://*.inicis.com https://*.kcp.co.kr; frame-ancestors 'none'");
+    return new Response(response.body, { status: response.status, headers });
+  }
+  if (Date.now() >= PG_REVIEW_EXPIRY) return pgReviewFailure("심사 계정 이용기간이 끝났어요.", 403);
+  const route = url.pathname.slice("/review/api".length);
+  const getRoutes = new Map([["/config", "/v1/public/config"], ["/login", "/v1/auth/payment-review"], ["/me", "/v1/auth/me"]]);
+  let upstream = getRoutes.get(route);
+  const productMatch = /^\/products\/([a-z0-9-]+)(\/draw-odds)?$/.exec(route);
+  if (productMatch && PG_REVIEW_PRODUCTS.has(productMatch[1])) upstream = `/v1/catalog/products/${productMatch[1]}${productMatch[2] || ""}`;
+  if (route === "/products") upstream = "/v1/catalog/products?limit=100";
+  const uuid = "[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}";
+  const orderMatch = new RegExp(`^/orders/(${uuid})$`).exec(route);
+  const paymentMatch = new RegExp(`^/payments/(${uuid})/(attempt|confirm|abandon)$`).exec(route);
+  if (orderMatch) upstream = `/v1/orders/${orderMatch[1]}`;
+  if (paymentMatch) upstream = `/v1/payments/${paymentMatch[1]}/${paymentMatch[2]}`;
+  if (route === "/orders") upstream = "/v1/orders";
+  if (route === "/logout") upstream = "/v1/auth/logout";
+  const expectedMethod = route === "/login" ? request.method : route === "/logout" || route === "/orders" || paymentMatch ? "POST" : "GET";
+  if (!upstream || !["GET", "POST"].includes(request.method) || request.method !== expectedMethod) return pgReviewFailure("지원하지 않는 요청이에요.", 404);
+  if (request.method === "POST" && (request.headers.get("origin") !== url.origin || request.headers.get("sec-fetch-site") === "cross-site")) return pgReviewFailure("같은 사이트에서 다시 시도해 주세요.", 403);
+  const isLogin = route === "/login" && request.method === "POST";
+  const token = pgReviewToken(request);
+  if ((route === "/me" || orderMatch || paymentMatch || route === "/orders") && !token) return pgReviewFailure("심사 계정으로 로그인해 주세요.", 401);
+  const headers = { "content-type": "application/json", "x-request-id": crypto.randomUUID() };
+  if (token && !isLogin) headers.authorization = `Bearer ${token}`;
+  const key = request.headers.get("idempotency-key");
+  if (key) { if (!/^[A-Za-z0-9:_.-]{8,200}$/.test(key)) return pgReviewFailure("요청번호를 확인해 주세요."); headers["idempotency-key"] = key; }
+  let body;
+  if (request.method === "POST") {
+    if (Number(request.headers.get("content-length") || 0) > 8192) return pgReviewFailure("입력 내용이 너무 길어요.", 413);
+    const raw = await request.text(); if (raw.length > 8192) return pgReviewFailure("입력 내용이 너무 길어요.", 413);
+    try { body = JSON.parse(raw || "{}"); } catch { return pgReviewFailure("입력 내용을 확인해 주세요."); }
+    if (!body || typeof body !== "object" || Array.isArray(body)) return pgReviewFailure("입력 내용을 확인해 주세요.");
+    if (isLogin && body.email !== "pg") return pgReviewFailure("심사 아이디 또는 비밀번호를 확인해 주세요.", 401);
+    if (route === "/orders" && (!Array.isArray(body.items) || body.items.length !== 1 || !PG_REVIEW_PRODUCTS.has(body.items[0]?.productId) || !Number.isInteger(body.items[0]?.quantity) || body.items[0].quantity < 1 || body.items[0].quantity > 10 || body.pointAmount !== 0 || body.couponCode || body.kujiRoomEntryId)) return pgReviewFailure("심사 상품과 수량을 확인해 주세요.");
+  }
+  if (route === "/logout" && !token) return pgReviewJson({ loggedOut: true }, 200, { "set-cookie": pgReviewCookie() });
+  try {
+    const response = await externalFetch(`${PG_REVIEW_API}${upstream}`, { method: request.method, headers, body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(20000), redirect: "manual" });
+    if (response.status >= 300 && response.status < 400) return pgReviewFailure("서버 연결 주소를 확인하지 못했어요.", 502);
+    if (route === "/logout") return pgReviewJson({ loggedOut: true }, 200, { "set-cookie": pgReviewCookie() });
+    const data = await response.json().catch(() => null);
+    if (!data) return pgReviewFailure("연결 응답을 확인하지 못했어요.", 502);
+    if (isLogin && response.ok) {
+      if (!/^[A-Za-z0-9_.-]{32,4096}$/.test(data.token || "") || !Number.isFinite(Date.parse(data.expiresAt))) return pgReviewFailure("로그인 응답을 확인하지 못했어요.", 502);
+      const maxAge = Math.max(0, Math.min(86400, Math.floor((Date.parse(data.expiresAt) - Date.now()) / 1000), Math.floor((PG_REVIEW_EXPIRY - Date.now()) / 1000)));
+      return pgReviewJson({ loggedIn: true, expiresAt: data.expiresAt }, 200, { "set-cookie": pgReviewCookie(data.token, maxAge) });
+    }
+    if (route === "/products" && response.ok) data.items = (data.items || []).filter(p => PG_REVIEW_PRODUCTS.has(p.id) && p.purchasable);
+    if (!response.ok) return pgReviewFailure(data.error?.message || "요청을 처리하지 못했어요.", response.status);
+    return pgReviewJson(data);
+  } catch (error) {
+    console.warn("PG_REVIEW_UPSTREAM_FAILURE", { name: error?.name, timeout: error?.name === "TimeoutError", unsupportedTimeout: typeof AbortSignal.timeout !== "function" });
+    return pgReviewFailure("연결이 지연되고 있어요. 잠시 후 다시 시도해 주세요.", 502);
+  }
 }
 
 const PUBLIC_LEGAL_ASSET_PATHS = new Set([
