@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-import { copyFileSync, cpSync, existsSync, rmSync } from "node:fs";
+import { copyFileSync, cpSync, existsSync, rmSync, writeFileSync } from "node:fs";
+import { checkoutNoticeSections } from "../apps/mobile/src/features/checkout/checkout-reference-notices.ts";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -20,6 +21,8 @@ for (const file of [
 rmSync(output, { recursive: true, force: true });
 cpSync(storefrontSource, output, { recursive: true });
 cpSync(legalSource, path.join(output, "legal"), { recursive: true });
+cpSync(path.join(root, "public", "review"), path.join(output, "review"), { recursive: true });
+writeFileSync(path.join(output, "review", "policies.json"), JSON.stringify(checkoutNoticeSections("gacha")));
 copyFileSync(workerSource, path.join(output, "_worker.js"));
 
 console.log("Prepared storefront and policy Pages build: dist/public-site");
