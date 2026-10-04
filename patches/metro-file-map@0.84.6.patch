@@ -1,0 +1,86 @@
+diff --git a/src/watchers/common.js b/src/watchers/common.js
+index 6bf4710869bb79a254e12e241a8f658ec6595dad..2f67fdd168305a7b372aa6842126bca5514f7c85 100644
+--- a/src/watchers/common.js
++++ b/src/watchers/common.js
+@@ -11,7 +11,7 @@ exports.TOUCH_EVENT =
+ exports.includedByGlob = includedByGlob;
+ exports.posixPathMatchesPattern = void 0;
+ exports.typeFromStat = typeFromStat;
+-var _micromatch = _interopRequireDefault(require("micromatch"));
++var _picomatch = _interopRequireDefault(require("picomatch"));
+ var _path = _interopRequireDefault(require("path"));
+ function _interopRequireDefault(e) {
+   return e && e.__esModule ? e : { default: e };
+@@ -20,11 +20,21 @@ const DELETE_EVENT = (exports.DELETE_EVENT = "delete");
+ const TOUCH_EVENT = (exports.TOUCH_EVENT = "touch");
+ const RECRAWL_EVENT = (exports.RECRAWL_EVENT = "recrawl");
+ const ALL_EVENT = (exports.ALL_EVENT = "all");
++function someMatches(list, patterns, options) {
++  const items = [].concat(list);
++  for (const pattern of [].concat(patterns)) {
++    const isMatch = (0, _picomatch.default)(String(pattern), options);
++    if (items.some(item => isMatch(item))) {
++      return true;
++    }
++  }
++  return false;
++}
+ function includedByGlob(type, globs, dot, relativePath) {
+   if (globs.length === 0 || type !== "f") {
+-    return dot || _micromatch.default.some(relativePath, "**/*");
++    return dot || someMatches(relativePath, "**/*");
+   }
+-  return _micromatch.default.some(relativePath, globs, {
++  return someMatches(relativePath, globs, {
+     dot,
+   });
+ }
+diff --git a/src/watchers/common.js.flow b/src/watchers/common.js.flow
+index 16f4c705bb6446b18cb87bb8aab3179549b107aa..a0b77cbb679f000219463a42175650130c90d4d2 100644
+--- a/src/watchers/common.js.flow
++++ b/src/watchers/common.js.flow
+@@ -17,8 +17,8 @@
+ import type {ChangeEventMetadata} from '../flow-types';
+ import type {Stats} from 'fs';
+ 
+-// $FlowFixMe[untyped-import] - Write libdefs for `micromatch`
+-import micromatch from 'micromatch';
++// $FlowFixMe[untyped-import] - Write libdefs for `picomatch`
++import picomatch from 'picomatch';
+ import path from 'path';
+ 
+ /**
+@@ -38,6 +38,21 @@ export type WatcherOptions = Readonly<{
+   watchmanPath?: string,
+ }>;
+ 
++function someMatches(
++  list: string,
++  patterns: string | ReadonlyArray<string>,
++  options?: {dot: boolean},
++): boolean {
++  const items = [].concat(list);
++  for (const pattern of [].concat(patterns)) {
++    const isMatch = picomatch(String(pattern), options);
++    if (items.some(item => isMatch(item))) {
++      return true;
++    }
++  }
++  return false;
++}
++
+ /**
+  * Checks a file relative path against the globs array.
+  */
+@@ -50,9 +65,9 @@ export function includedByGlob(
+   // For non-regular files or if there are no glob matchers, just respect the
+   // `dot` option to filter dotfiles if dot === false.
+   if (globs.length === 0 || type !== 'f') {
+-    return dot || micromatch.some(relativePath, '**/*');
++    return dot || someMatches(relativePath, '**/*');
+   }
+-  return micromatch.some(relativePath, globs, {dot});
++  return someMatches(relativePath, globs, {dot});
+ }
+ 
+ /**

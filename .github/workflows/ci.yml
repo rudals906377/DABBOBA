@@ -43,6 +43,9 @@ jobs:
       - name: Verify pinned forge backport and Expo signing compatibility
         run: pnpm run check:forge
 
+      - name: Verify Metro watcher compatibility and removed Braces dependency
+        run: pnpm run check:glob
+
       - name: Reject high and critical production dependency advisories
         run: pnpm run audit:prod
 

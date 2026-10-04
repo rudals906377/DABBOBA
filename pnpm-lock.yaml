@@ -5,6 +5,9 @@ settings:
   excludeLinksFromLockfile: false
 
 overrides:
+  '@expo/metro-file-map@57.0.3>micromatch': '-'
+  metro-file-map@0.84.5>micromatch: '-'
+  metro-file-map@0.84.6>micromatch: '-'
   brace-expansion@>=2.0.0 <2.1.7: 2.1.7
   brace-expansion@>=4.0.0 <5.0.12: 5.0.12
   undici@>=7.0.0 <7.29.1: 7.29.1
@@ -16,8 +19,12 @@ overrides:
   sharp@>=0.35.0 <0.35.4: 0.35.4
   uuid@<11.1.1: 11.1.1
 
+packageExtensionsChecksum: sha256-s/j4HDDUFn7W4tkseTprVrZZqB6LvuTTnciqLnQoY6M=
+
 patchedDependencies:
-  braces@3.0.3: 8d7c743ad2ebbc9f600664cd8a84e92fc43e44dbae35409f1de3e77ea46e1690
+  '@expo/metro-file-map@57.0.3': 9bd9bf7c25c8c01c37abe38098815cac14b2b7a4e5a90a9437ee8121d444fb38
+  metro-file-map@0.84.5: 5cde4c88a105bfb3dbbc1678e9bec0c28fe92c4ad6ae525647c8a158d4215021
+  metro-file-map@0.84.6: 5cde4c88a105bfb3dbbc1678e9bec0c28fe92c4ad6ae525647c8a158d4215021
   node-forge@1.4.0: 82df5e8c086bdb3a63ad6a4be0bb777f8ae052803f62cbc921496391ae1c9bdc
 
 importers:
@@ -4036,10 +4043,6 @@ packages:
     resolution: {integrity: sha512-YovQ3rzhaLMIrDjNDMkNS01tea93qhEhG5xy8f6+R0l+dw3Ki+5sCoIoI942iuLZTHWogWktgwVDhU09iNEimQ==}
     engines: {node: 20 || >=22}
 
-  braces@3.0.3:
-    resolution: {integrity: sha512-yQbXgO/OSZVD2IsiLlro+7Hf6Q18EJrKSEsdoMzKePKXct3gvD8oLcOQdIzGupr5Fj+EDe8gO/lxc1BzfMpxvA==}
-    engines: {node: '>=8'}
-
   browserslist@4.28.8:
     resolution: {integrity: sha512-V2NpofLblG64mfOtSgDhOJESZEGogzDMBv/q+W6oc4LXWP/q75eOXoOaaOu1EOadB9U4Bwx/e0yzbvwKH8zalA==}
     engines: {node: ^6 || ^7 || ^8 || ^9 || ^10 || ^11 || ^12 || >=13.7}
@@ -4750,10 +4753,6 @@ packages:
   fetch-nodeshim@0.4.10:
     resolution: {integrity: sha512-m6I8ALe4L4XpdETy7MJZWs6L1IVMbjs99bwbpIKphxX+0CTns4IKDWJY0LWfr4YsFjfg+z1TjzTMU8lKl8rG0w==}
 
-  fill-range@7.1.1:
-    resolution: {integrity: sha512-YsGpe3WHLK8ZYi4tWDg2Jy3ebRz2rXowDxnld4bkQB00cc/1Zw9AWnC0i9ztDJitivtQvaI9KaLyKrc+hBW0yg==}
-    engines: {node: '>=8'}
-
   filter-obj@1.1.0:
     resolution: {integrity: sha512-8rXg1ZnX7xzy2NGDVkBVaAy+lSlPNwad13BtgSlLuxfIslyt5Vg64U7tFcCt4WS1R0hvtnQybT/IyCkGZ3DpXQ==}
     engines: {node: '>=0.10.0'}
@@ -5047,10 +5046,6 @@ packages:
   is-fullwidth-code-point@3.0.0:
     resolution: {integrity: sha512-zymm5+u+sCsSWyD9qNaejV3DFvhCKclKdizYaJUuHA83RLjb7nSuGnddCHGv0hk+KY7BMAlsWeK4Ueg6EV6XQg==}
     engines: {node: '>=8'}
-
-  is-number@7.0.0:
-    resolution: {integrity: sha512-41Cifkg6e8TylSpdtTpeLVMqvSBEVzTttHvERD741+pnZ8ANv0004MRL43QKPDlK9cGvNp6NZWZUBlbGXYxxng==}
-    engines: {node: '>=0.12.0'}
 
   is-promise@4.0.0:
     resolution: {integrity: sha512-hvpoI6korhJMnej285dSg6nu1+e6uxs7zG3BYAm5byqDsgJNWwxzM6z6iZiAgQR4TJ30JmBTOwqZUw3WlyH3AQ==}
@@ -5400,10 +5395,6 @@ packages:
     resolution: {integrity: sha512-ty/tx/imE5Ph2gvPU788Ckim6RAC2tyZxLz2hWRgC9U7/fGKV7qY/slADy0qHPEw9cpUgc4BfmV3oUsYwm7oeg==}
     engines: {node: ^20.19.4 || ^22.13.0 || ^24.3.0 || >= 25.0.0}
     hasBin: true
-
-  micromatch@4.0.8:
-    resolution: {integrity: sha512-PXwfBhYu0hBCPw8Dn0E+WDYb7af3dSLVWKi3HGv84IdF4TyFoC0ysxFd0Goxw7nSv4T/PzEJQxsYsEiFCKo2BA==}
-    engines: {node: '>=8.6'}
 
   mime-db@1.52.0:
     resolution: {integrity: sha512-sPU4uV7dYlvtWJxwwxHD0PuihVNiE7TyAbQ5SWxDCB9mUYvOgroQOwYQQOKPJ8CIbE+1ETVlOoK1UC2nU3gYvg==}
@@ -6388,10 +6379,6 @@ packages:
 
   tmpl@1.0.5:
     resolution: {integrity: sha512-3f0uOEAQwIqGuWW2MVzYg8fV/QNnc/IpuJNG837rLuczAaLVHslWHZQj4IGiEl5Hs3kkbhwL9Ab7Hrsmuj+Smw==}
-
-  to-regex-range@5.0.1:
-    resolution: {integrity: sha512-65P7iz6X5yEr1cwcgvQxbbIw7Uk3gOy5dIdtZ4rDveLqhrdJP+Li/Hx6tyK0NEb+2GCyneCMJiGqrADCSNk8sQ==}
-    engines: {node: '>=8.0'}
 
   toad-cache@3.7.4:
     resolution: {integrity: sha512-m1TdR/rvT7kgGJZhspNtXdsdYk0fddFpJJFlG5s+UkPFo6lkLoZ3YLOaovPYjq1R75NP5JfeTlSHaOsE09peCg==}
@@ -8233,7 +8220,7 @@ snapshots:
       '@expo/log-box': 57.0.4(@expo/dom-webview@57.0.1)(expo@57.0.25)(react-native@0.86.3(@babel/core@7.29.7(supports-color@10.2.2))(@react-native/metro-config@0.86.3(@babel/core@7.29.7(supports-color@10.2.2))(supports-color@10.2.2))(@types/react@19.2.17)(react@19.2.3)(supports-color@10.2.2))(react@19.2.3)
       '@expo/metro': 56.0.2(supports-color@10.2.2)
       '@expo/metro-config': 57.0.12(expo@57.0.25)(supports-color@10.2.2)(typescript@6.0.3)
-      '@expo/metro-file-map': 57.0.3(supports-color@10.2.2)
+      '@expo/metro-file-map': 57.0.3(patch_hash=9bd9bf7c25c8c01c37abe38098815cac14b2b7a4e5a90a9437ee8121d444fb38)(supports-color@10.2.2)
       '@expo/osascript': 2.7.1
       '@expo/package-manager': 1.13.1
       '@expo/plist': 0.8.1
@@ -8460,13 +8447,13 @@ snapshots:
       - typescript
       - utf-8-validate
 
-  '@expo/metro-file-map@57.0.3(supports-color@10.2.2)':
+  '@expo/metro-file-map@57.0.3(patch_hash=9bd9bf7c25c8c01c37abe38098815cac14b2b7a4e5a90a9437ee8121d444fb38)(supports-color@10.2.2)':
     dependencies:
       debug: 4.4.3(supports-color@10.2.2)
       fb-watchman: 2.0.2
       invariant: 2.2.4
       jest-worker: 29.7.0
-      micromatch: 4.0.8
+      picomatch: 2.3.2
       walker: 1.0.8
     transitivePeerDependencies:
       - supports-color
@@ -8492,7 +8479,7 @@ snapshots:
       metro-cache-key: 0.84.5
       metro-config: 0.84.5(supports-color@10.2.2)
       metro-core: 0.84.5
-      metro-file-map: 0.84.5(supports-color@10.2.2)
+      metro-file-map: 0.84.5(patch_hash=5cde4c88a105bfb3dbbc1678e9bec0c28fe92c4ad6ae525647c8a158d4215021)(supports-color@10.2.2)
       metro-minify-terser: 0.84.5
       metro-resolver: 0.84.5
       metro-runtime: 0.84.5
@@ -10996,10 +10983,6 @@ snapshots:
     dependencies:
       balanced-match: 4.0.4
 
-  braces@3.0.3(patch_hash=8d7c743ad2ebbc9f600664cd8a84e92fc43e44dbae35409f1de3e77ea46e1690):
-    dependencies:
-      fill-range: 7.1.1
-
   browserslist@4.28.8:
     dependencies:
       baseline-browser-mapping: 2.11.18
@@ -11888,10 +11871,6 @@ snapshots:
 
   fetch-nodeshim@0.4.10: {}
 
-  fill-range@7.1.1:
-    dependencies:
-      to-regex-range: 5.0.1
-
   filter-obj@1.1.0: {}
 
   finalhandler@1.1.2(supports-color@10.2.2):
@@ -12202,8 +12181,6 @@ snapshots:
 
   is-fullwidth-code-point@3.0.0: {}
 
-  is-number@7.0.0: {}
-
   is-promise@4.0.0: {}
 
   is-stream@2.0.1: {}
@@ -12484,7 +12461,7 @@ snapshots:
       lodash.throttle: 4.1.1
       metro-resolver: 0.84.6
 
-  metro-file-map@0.84.5(supports-color@10.2.2):
+  metro-file-map@0.84.5(patch_hash=5cde4c88a105bfb3dbbc1678e9bec0c28fe92c4ad6ae525647c8a158d4215021)(supports-color@10.2.2):
     dependencies:
       debug: 4.4.3(supports-color@10.2.2)
       fb-watchman: 2.0.2
@@ -12492,13 +12469,13 @@ snapshots:
       graceful-fs: 4.2.11
       invariant: 2.2.4
       jest-worker: 29.7.0
-      micromatch: 4.0.8
       nullthrows: 1.1.1
+      picomatch: 2.3.2
       walker: 1.0.8
     transitivePeerDependencies:
       - supports-color
 
-  metro-file-map@0.84.6(supports-color@10.2.2):
+  metro-file-map@0.84.6(patch_hash=5cde4c88a105bfb3dbbc1678e9bec0c28fe92c4ad6ae525647c8a158d4215021)(supports-color@10.2.2):
     dependencies:
       debug: 4.4.3(supports-color@10.2.2)
       fb-watchman: 2.0.2
@@ -12506,8 +12483,8 @@ snapshots:
       graceful-fs: 4.2.11
       invariant: 2.2.4
       jest-worker: 29.7.0
-      micromatch: 4.0.8
       nullthrows: 1.1.1
+      picomatch: 2.3.2
       walker: 1.0.8
     transitivePeerDependencies:
       - supports-color
@@ -12678,7 +12655,7 @@ snapshots:
       metro-cache-key: 0.84.5
       metro-config: 0.84.5(supports-color@10.2.2)
       metro-core: 0.84.5
-      metro-file-map: 0.84.5(supports-color@10.2.2)
+      metro-file-map: 0.84.5(patch_hash=5cde4c88a105bfb3dbbc1678e9bec0c28fe92c4ad6ae525647c8a158d4215021)(supports-color@10.2.2)
       metro-resolver: 0.84.5
       metro-runtime: 0.84.5
       metro-source-map: 0.84.5(supports-color@10.2.2)
@@ -12723,7 +12700,7 @@ snapshots:
       metro-cache-key: 0.84.6
       metro-config: 0.84.6(supports-color@10.2.2)
       metro-core: 0.84.6
-      metro-file-map: 0.84.6(supports-color@10.2.2)
+      metro-file-map: 0.84.6(patch_hash=5cde4c88a105bfb3dbbc1678e9bec0c28fe92c4ad6ae525647c8a158d4215021)(supports-color@10.2.2)
       metro-resolver: 0.84.6
       metro-runtime: 0.84.6
       metro-source-map: 0.84.6(supports-color@10.2.2)
@@ -12741,11 +12718,6 @@ snapshots:
       - bufferutil
       - supports-color
       - utf-8-validate
-
-  micromatch@4.0.8:
-    dependencies:
-      braces: 3.0.3(patch_hash=8d7c743ad2ebbc9f600664cd8a84e92fc43e44dbae35409f1de3e77ea46e1690)
-      picomatch: 2.3.2
 
   mime-db@1.52.0: {}
 
@@ -13806,10 +13778,6 @@ snapshots:
       picomatch: 4.0.5
 
   tmpl@1.0.5: {}
-
-  to-regex-range@5.0.1:
-    dependencies:
-      is-number: 7.0.0
 
   toad-cache@3.7.4: {}
 

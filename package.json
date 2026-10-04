@@ -60,7 +60,7 @@
     "build:all": "turbo run build",
     "audit:prod": "corepack pnpm audit --prod --audit-level high",
     "check:forge": "node scripts/check-forge-security.mjs && node --test tests/forge-security.test.mjs",
-    "check:braces": "node scripts/check-braces-security.mjs && node --test tests/braces-security.test.mjs",
+    "check:glob": "node scripts/check-glob-dependencies.mjs && node --test tests/glob-dependencies.test.mjs",
     "pretest": "node scripts/check-test-backend-env.mjs",
     "test": "corepack pnpm run test:unit",
     "test:unit": "node --test --test-concurrency=1 tests/*.test.mjs && corepack pnpm --filter @dabboba/api exec tsx --test '../../tests/*.test.ts'",

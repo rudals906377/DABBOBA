@@ -162,7 +162,9 @@ actual_context="$context_check_dir/actual.txt"
       pnpm-workspace.yaml \
       tsconfig.base.json \
       patches/node-forge@1.4.0.patch \
-      patches/braces@3.0.3.patch \
+      patches/@expo__metro-file-map@57.0.3.patch \
+      patches/metro-file-map@0.84.5.patch \
+      patches/metro-file-map@0.84.6.patch \
       apps/api/package.json \
       apps/api/tsconfig.json \
       apps/worker/package.json \

@@ -22,11 +22,31 @@ minimumReleaseAgeExclude:
 # Keep the genuine npm version and
 # every supply-chain/audit rule; version-based audit remains a release blocker.
 patchedDependencies:
-  # Local depth/resource limits; official GHSA-vfj7-8cjw-p6xm audit still blocks release.
-  braces@3.0.3: patches/braces@3.0.3.patch
+  # Preserve micromatch.some semantics using its exact existing Picomatch
+  # implementation; remove the unused Micromatch/Braces dependency below.
+  '@expo/metro-file-map@57.0.3': patches/@expo__metro-file-map@57.0.3.patch
+  metro-file-map@0.84.5: patches/metro-file-map@0.84.5.patch
+  metro-file-map@0.84.6: patches/metro-file-map@0.84.6.patch
   node-forge@1.4.0: patches/node-forge@1.4.0.patch
 
+packageExtensions:
+  '@expo/metro-file-map@57.0.3':
+    dependencies:
+      picomatch: '2.3.2'
+  metro-file-map@0.84.5:
+    dependencies:
+      picomatch: '2.3.2'
+  metro-file-map@0.84.6:
+    dependencies:
+      picomatch: '2.3.2'
+
 overrides:
+  # Only these three source-patched callers use Micromatch. Its .some path
+  # never invokes Braces; the same loop now imports Picomatch directly.
+  # No audit ignores, package relabeling, or unreviewed matcher upgrade.
+  '@expo/metro-file-map@57.0.3>micromatch': '-'
+  metro-file-map@0.84.5>micromatch: '-'
+  metro-file-map@0.84.6>micromatch: '-'
   # Security-only transitive pins. Each entry forces the first patched release of a
   # vulnerable range still reachable through third-party dependencies. Remove an
   # entry once no dependency in pnpm-lock.yaml resolves into the vulnerable range.
