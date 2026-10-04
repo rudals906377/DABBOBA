@@ -13,12 +13,14 @@ export const watcherPackages = Object.freeze([
     sourceSha256: "31f7463908e9c918ea47aa51a1a6c4464aabbebeaaf53931f0aaed877a3fa679" },
   { name: "metro-file-map", version: "0.84.5", relativeFile: "src/watchers/common.js",
     patchFile: "metro-file-map@0.84.5.patch",
-    patchSha256: "d1e96866364681f6b64447253cddaf41a4e28296ae1a3b1babb89210e15bf41e",
-    sourceSha256: "bc77f9d1e0a802eb2f5764a3fabd4f9dcf0ed0e5f1dcd69a673eae5925337ed5" },
+    patchSha256: "a0c48d06f5d42d6416befd6c125586fba83857a01934950cdfe6ef0dcc071735",
+    sourceSha256: "bc77f9d1e0a802eb2f5764a3fabd4f9dcf0ed0e5f1dcd69a673eae5925337ed5",
+    flowSourceSha256: "f4ef6c32a2e0a383ecd25b4c60a0535f70007a9a4fcc4535f2ba5982ca673f8a" },
   { name: "metro-file-map", version: "0.84.6", relativeFile: "src/watchers/common.js",
     patchFile: "metro-file-map@0.84.6.patch",
-    patchSha256: "d1e96866364681f6b64447253cddaf41a4e28296ae1a3b1babb89210e15bf41e",
-    sourceSha256: "bc77f9d1e0a802eb2f5764a3fabd4f9dcf0ed0e5f1dcd69a673eae5925337ed5" },
+    patchSha256: "a0c48d06f5d42d6416befd6c125586fba83857a01934950cdfe6ef0dcc071735",
+    sourceSha256: "bc77f9d1e0a802eb2f5764a3fabd4f9dcf0ed0e5f1dcd69a673eae5925337ed5",
+    flowSourceSha256: "f4ef6c32a2e0a383ecd25b4c60a0535f70007a9a4fcc4535f2ba5982ca673f8a" },
 ]);
 const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
 
@@ -55,7 +57,7 @@ export function verifyGlobDependencies(rootDir = repositoryRoot) {
   assert.equal([...snapshots.matchAll(/^  ['"]?(?:@expo\/metro-file-map|metro-file-map)@[^\n]+:$/gm)].length,
     watcherPackages.length, "Review every watcher version in the entire resolved graph");
   const modules = loadWatcherModules(rootDir);
-  for (const { name, version, entry, callerRequire, patchFile, patchSha256, sourceSha256 } of modules) {
+  for (const { name, version, entry, callerRequire, patchFile, patchSha256, sourceSha256, flowSourceSha256 } of modules) {
     const source = readFileSync(entry, "utf8");
     assert.equal(sha256(source), sourceSha256, "Installed watcher must match the reviewed source patch");
     assert.equal(sha256(readFileSync(path.join(rootDir, "patches", patchFile))), patchSha256);
@@ -70,6 +72,8 @@ export function verifyGlobDependencies(rootDir = repositoryRoot) {
     }
     if (name === "metro-file-map") {
       const flow = readFileSync(`${entry}.flow`, "utf8");
+      assert.equal(sha256(flow), flowSourceSha256,
+        "Installed Flow source must match the reviewed source patch");
       assert.match(flow, /import picomatch from 'picomatch'/);
       assert.doesNotMatch(flow, /import micromatch from 'micromatch'/);
     }

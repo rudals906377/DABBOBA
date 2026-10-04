@@ -44,7 +44,10 @@ index 16f4c705bb6446b18cb87bb8aab3179549b107aa..a0b77cbb679f000219463a4217565013
 -import micromatch from 'micromatch';
 +// $FlowFixMe[untyped-import] - Write libdefs for `picomatch`
 +import picomatch from 'picomatch';
-@@ -40,0 +41,15 @@ export type WatcherOptions = Readonly<{
+@@ -40,2 +40,17 @@ export type WatcherOptions = Readonly<{
+ }>;
+-
++
 +function someMatches(
 +  list: string,
 +  patterns: string | ReadonlyArray<string>,
