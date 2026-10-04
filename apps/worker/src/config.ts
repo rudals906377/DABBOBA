@@ -12,6 +12,7 @@ import {
   type InicisInquiryConfig,
 } from "./inicis-inquiry.js";
 import type { PortOneApiRequeryConfig } from "./portone-api-requery.js";
+import { DEFAULT_COMMERCE_RETENTION, normalizeCommerceRetentionConfig, type CommerceRetentionConfig } from "./commerce-retention.js";
 
 export type RuntimeEnvironment = "development" | "test" | "production";
 
@@ -96,6 +97,8 @@ export type WorkerConfig = {
     | ({ provider: "PORTONE_API" } & PortOneApiRequeryConfig);
   /** Optional only for backwards-compatible programmatic fixtures; loaded configs always set it. */
   retention?: WorkerRetentionConfig;
+  /** Disabled by default; PostgreSQL-approved policies are required even in EXECUTE mode. */
+  commerceRetention?: CommerceRetentionConfig;
   logLevel: "debug" | "info" | "warn" | "error";
 };
 
@@ -367,6 +370,10 @@ export function loadWorkerConfig(env: Environment = process.env): WorkerConfig {
     notificationDeliveryToken: optional(env, "NOTIFICATION_DELIVERY_TOKEN"),
     expoPushAccessToken,
     paymentReconciliation,
+    commerceRetention: normalizeCommerceRetentionConfig({
+      mode: (env.WORKER_COMMERCE_RETENTION_MODE?.trim() || DEFAULT_COMMERCE_RETENTION.mode) as CommerceRetentionConfig["mode"],
+      batchSize: integer(env, "WORKER_COMMERCE_RETENTION_BATCH_SIZE", DEFAULT_COMMERCE_RETENTION.batchSize, 1, 100),
+    }),
     retention: {
       outboxPublishedDays: integer(
         env,

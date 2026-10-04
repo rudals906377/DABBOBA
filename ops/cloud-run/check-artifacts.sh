@@ -161,6 +161,11 @@ actual_context="$context_check_dir/actual.txt"
       pnpm-lock.yaml \
       pnpm-workspace.yaml \
       tsconfig.base.json \
+      patches/@expo__cli@57.0.27.patch \
+      patches/@expo__code-signing-certificates@0.0.6.patch \
+      patches/@expo__metro-file-map@57.0.3.patch \
+      patches/metro-file-map@0.84.5.patch \
+      patches/metro-file-map@0.84.6.patch \
       apps/api/package.json \
       apps/api/tsconfig.json \
       apps/worker/package.json \

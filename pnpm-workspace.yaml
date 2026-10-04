@@ -16,13 +16,56 @@ minimumReleaseAgeExclude:
   - miniflare@5.20260925.0-alpha
   - wrangler@4.141.0
 
+# Native Node/OpenSSL cryptography replaces both pinned Expo Forge callers.
+# ASN.1 schemas are used for synchronous certificate/CSR metadata only.
+# Keep genuine package versions and the mandatory, unsuppressed audit gate.
+patchedDependencies:
+  # Preserve micromatch.some semantics using its exact existing Picomatch
+  # implementation; remove the unused Micromatch/Braces dependency below.
+  '@expo/metro-file-map@57.0.3': patches/@expo__metro-file-map@57.0.3.patch
+  metro-file-map@0.84.5: patches/metro-file-map@0.84.5.patch
+  metro-file-map@0.84.6: patches/metro-file-map@0.84.6.patch
+  '@expo/cli@57.0.27': patches/@expo__cli@57.0.27.patch
+  '@expo/code-signing-certificates@0.0.6': patches/@expo__code-signing-certificates@0.0.6.patch
+
+packageExtensions:
+  '@expo/code-signing-certificates@0.0.6':
+    dependencies:
+      '@peculiar/asn1-schema': '2.10.0'
+      '@peculiar/asn1-x509': '2.10.0'
+      '@peculiar/asn1-csr': '2.10.0'
+      asn1js: '3.0.10'
+  '@expo/metro-file-map@57.0.3':
+    dependencies:
+      picomatch: '2.3.2'
+  metro-file-map@0.84.5:
+    dependencies:
+      picomatch: '2.3.2'
+  metro-file-map@0.84.6:
+    dependencies:
+      picomatch: '2.3.2'
+
 overrides:
+  # Both runtime imports are source-patched above. This removes the actual
+  # vulnerable implementation, not just its advisory or package identity.
+  '@expo/cli@57.0.27>node-forge': '-'
+  '@expo/code-signing-certificates@0.0.6>node-forge': '-'
+  # Only these three source-patched callers use Micromatch. Its .some path
+  # never invokes Braces; the same loop now imports Picomatch directly.
+  # No audit ignores, package relabeling, or unreviewed matcher upgrade.
+  '@expo/metro-file-map@57.0.3>micromatch': '-'
+  metro-file-map@0.84.5>micromatch: '-'
+  metro-file-map@0.84.6>micromatch: '-'
   # Security-only transitive pins. Each entry forces the first patched release of a
   # vulnerable range still reachable through third-party dependencies. Remove an
   # entry once no dependency in pnpm-lock.yaml resolves into the vulnerable range.
   # GHSA-qhr7-859c-m2p7, GHSA-6j4f-fj2g-mc7p, GHSA-rgw5-rvv9-x895, GHSA-mh99-v99m-4gvg,
   # GHSA-q2hr-2g5m-vwhr (brace-expansion expansion DoS / recursion / quadratic rewrite).
+  brace-expansion@>=2.0.0 <2.1.7: 2.1.7
   brace-expansion@>=4.0.0 <5.0.12: 5.0.12
+  # GHSA-rfgv-xxqx-mfg5 / GHSA-w293-vg96-wgc3, undici WebSocket/TLS fixes.
+  # Same patch line; intentionally supersedes Miniflare's exact 7.29.0 pin.
+  undici@>=7.0.0 <7.29.1: 7.29.1
   # GHSA-vcc3-ghjq-m6fr, GHSA-w573-4hg7-7wgq (decode-uri-component decoding DoS).
   decode-uri-component@<=0.4.2: 0.5.0
   # GHSA-qw65-cvwx-89v3, GHSA-58mr-gqgx-xq4g, GHSA-hrr3-gc8f-f4qj, GHSA-f65p-4m7j-42xc,

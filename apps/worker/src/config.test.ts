@@ -28,6 +28,20 @@ test("loadWorkerConfig applies bounded operational defaults", () => {
   assert.equal(config.appleRevocation, null);
   assert.equal(config.expoPushAccessToken, null);
   assert.deepEqual(config.paymentReconciliation, { provider: "MANUAL_REVIEW" });
+  assert.deepEqual(config.commerceRetention, { mode: "DISABLED", batchSize: 25 });
+});
+
+test("commerce retention requires an explicit bounded mode; other retention defaults do not enable it", () => {
+  for (const mode of ["DISABLED", "PREVIEW", "EXECUTE"] as const) {
+    assert.deepEqual(loadWorkerConfig({ ...base, WORKER_COMMERCE_RETENTION_MODE: mode,
+      WORKER_COMMERCE_RETENTION_BATCH_SIZE: "10" }).commerceRetention, { mode, batchSize: 10 });
+  }
+  for (const mode of ["true", "enabled", "preview", "PURGE"]) {
+    assert.throws(() => loadWorkerConfig({ ...base, WORKER_COMMERCE_RETENTION_MODE: mode }), /Commerce retention mode/);
+  }
+  for (const batch of ["0", "101", "1.5", "abc"]) {
+    assert.throws(() => loadWorkerConfig({ ...base, WORKER_COMMERCE_RETENTION_BATCH_SIZE: batch }), /integer between 1 and 100/);
+  }
 });
 
 test("loadWorkerConfig requires a complete Apple revocation credential set", () => {

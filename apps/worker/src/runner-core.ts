@@ -1,5 +1,6 @@
 import { createDatabasePool, type DatabaseClient, type DatabasePool, WORKER_DATABASE_ROLE } from "@dabboba/db";
 import type { WorkerConfig } from "./config.js";
+import { normalizeCommerceRetentionConfig } from "./commerce-retention.js";
 import { processWorkerJob, type JobDependencies } from "./jobs.js";
 import { createLogger, errorFields, type Logger } from "./logger.js";
 import type { MediaStore } from "./media.js";
@@ -287,6 +288,8 @@ export async function runWorkerOnceCore(
       { kind: "account-auth.cleanup" } as const,
       { kind: "media.cleanup" } as const,
       { kind: "retention.sweep" } as const,
+      ...(normalizeCommerceRetentionConfig(config.commerceRetention).mode === "DISABLED"
+        ? [] : [{ kind: "commerce.retention.sweep" } as const]),
     ]) {
       if (!shouldContinue()) break;
       try {

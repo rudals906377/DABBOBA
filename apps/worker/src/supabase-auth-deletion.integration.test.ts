@@ -157,4 +157,14 @@ test("Auth deletion retries external failure without erasing identity, then fina
     identity_count: 0,
     job_count: 0,
   });
+  const audit = await fixturePool.query<{ has_marker: boolean; revoked_at: string | null }>(
+    `SELECT metadata ? 'appleTokenRevokedAt' AS has_marker,
+            metadata->>'appleTokenRevokedAt' AS revoked_at
+       FROM account_deletion_request_events
+      WHERE deletion_request_id=$1 AND status='COMPLETED'`,
+    [request.rows[0]!.id],
+  );
+  // This fixture is PHONE, so finalization must not invent an Apple revocation.
+  // The nullable marker must survive deletion of the transient job row.
+  assert.deepEqual(audit.rows, [{ has_marker: true, revoked_at: null }]);
 });

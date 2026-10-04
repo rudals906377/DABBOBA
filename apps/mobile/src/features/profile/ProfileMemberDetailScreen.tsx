@@ -519,7 +519,8 @@ function Legal() {
       <Lead title="약관과 운영정책" body="이용 중 적용되는 기준을 문서별로 확인할 수 있어요." />
       <Policy policyId="terms" title="서비스 이용약관" body="회원, 상품 구매, 가챠·쿠지, 포인트, 보관함, 배송과 교환·신청 이용 조건" />
       <Policy policyId="privacy" title="개인정보처리방침" body="수집 항목, 처리 목적, 보관 기간과 회원의 권리" />
-      <Policy policyId="shipping-storage" title="배송·보관함 정책" body="신청 가능한 상품, 무료배송, 출고와 수령 기준" />
+      <Policy policyId="shipping-storage" title="배송·보관함 정책" body="배송기간, 신청 가능한 상품, 배송비와 출고 기준" />
+      <Policy policyId="purchase-cancellation" title="취소·교환·환불 정책" body="주문 취소, 환불 방법, 배송 후 하자·오배송 처리" />
       <Policy policyId="exchange-request" title="교환방·신청방 운영정책" body="교환 제안, 상품 신청, 금지 행위와 이용 제한" />
     </>
   );

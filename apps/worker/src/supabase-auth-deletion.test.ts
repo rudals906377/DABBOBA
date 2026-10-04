@@ -80,6 +80,7 @@ test("Apple revocation is confirmed before Supabase deletion and is not stored i
   const ciphertext = Buffer.concat([cipher.update(refreshToken, "utf8"), cipher.final()]);
   const authTag = cipher.getAuthTag();
   const order: string[] = [];
+  const transactionQueries: string[] = [];
   let claimed = false;
   const pool = {
     async query(sql: string) {
@@ -109,6 +110,7 @@ test("Apple revocation is confirmed before Supabase deletion and is not stored i
     async connect() {
       return {
         async query(sql: string) {
+          transactionQueries.push(sql);
           if (sql.includes("SELECT status FROM account_deletion_requests")) {
             return { rowCount: 1, rows: [{ status: "PROCESSING" }] };
           }
@@ -139,6 +141,12 @@ test("Apple revocation is confirmed before Supabase deletion and is not stored i
   );
   assert.deepEqual(result, { completed: 1, deferred: 0 });
   assert.deepEqual(order, ["apple-revoke", "apple-marker", "supabase-delete", "supabase-marker"]);
+  const completionEvent = transactionQueries.find((sql) => sql.includes("INSERT INTO account_deletion_request_events"));
+  assert.ok(completionEvent);
+  assert.match(completionEvent, /'appleTokenRevokedAt',\s*\(SELECT apple_revoked_at FROM account_auth_deletion_jobs WHERE id=\$3::uuid\)/);
+  assert.match(completionEvent, /'COMPLETED','\{\}'::jsonb,0,\$3::text,\$4/);
+  assert.ok(transactionQueries.indexOf(completionEvent) < transactionQueries.findIndex((sql) => sql.includes("DELETE FROM account_auth_deletion_jobs")));
+  assert.ok(!completionEvent.includes(refreshToken));
 });
 
 test("an Apple identity without revocation configuration stays retryable and never reaches Supabase deletion", async () => {

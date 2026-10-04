@@ -346,7 +346,7 @@ test("a claimed payment cancelled on reservation expiry is still requeried and a
     assert.match(String(input), new RegExp(queriedId));
     const noCharge = queriedId === claimedNoCharge.paymentId;
     return new Response(JSON.stringify({
-      id: queriedId, transactionId: `portone-${suffix}`, pgTxId: `kg-${suffix}`,
+      id: queriedId, transactionId: `portone-${suffix}`, pgTxId: noCharge ? null : `kg-${suffix}`,
       merchantId: "synthetic-merchant", storeId: "synthetic-store", version: "V2",
       channel: { key: "synthetic-channel", type: "TEST", pgProvider: "INICIS_V2" },
       method: { type: "PaymentMethodCard" }, status: noCharge ? "FAILED" : providerCancelled ? "CANCELLED" : "PAID",

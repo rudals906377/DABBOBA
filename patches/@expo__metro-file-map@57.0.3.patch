@@ -1,0 +1,39 @@
+diff --git a/build/watchers/common.js b/build/watchers/common.js
+index 13cc2a4b052a50b0d0f92146e1c0eac1e988d2dc..26285de59a38a7e1322d2324956333e653d31d25 100644
+--- a/build/watchers/common.js
++++ b/build/watchers/common.js
+@@ -15,7 +15,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
+ exports.posixPathMatchesPattern = exports.ALL_EVENT = exports.RECRAWL_EVENT = exports.TOUCH_EVENT = exports.DELETE_EVENT = void 0;
+ exports.includedByGlob = includedByGlob;
+ exports.typeFromStat = typeFromStat;
+-const micromatch_1 = __importDefault(require("micromatch"));
++const picomatch_1 = __importDefault(require("picomatch"));
+ const path_1 = __importDefault(require("path"));
+ exports.DELETE_EVENT = 'delete';
+ exports.TOUCH_EVENT = 'touch';
+@@ -24,13 +24,23 @@ exports.ALL_EVENT = 'all';
+ /**
+  * Checks a file relative path against the globs array.
+  */
++function someMatches(list, patterns, options) {
++    const items = [].concat(list);
++    for (const pattern of [].concat(patterns)) {
++        const isMatch = (0, picomatch_1.default)(String(pattern), options);
++        if (items.some(item => isMatch(item))) {
++            return true;
++        }
++    }
++    return false;
++}
+ function includedByGlob(type, globs, dot, relativePath) {
+     // For non-regular files or if there are no glob matchers, just respect the
+     // `dot` option to filter dotfiles if dot === false.
+     if (globs.length === 0 || type !== 'f') {
+-        return dot || micromatch_1.default.some(relativePath, '**/*');
++        return dot || someMatches(relativePath, '**/*');
+     }
+-    return micromatch_1.default.some(relativePath, globs, { dot });
++    return someMatches(relativePath, globs, { dot });
+ }
+ /**
+  * Whether the given filePath matches the given RegExp, after converting

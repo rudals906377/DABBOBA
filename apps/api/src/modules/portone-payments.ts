@@ -8,6 +8,8 @@ import { requireLiveCommerce } from "../lib/commerce-mode.js";
 import {
   createPortOneV2Adapter,
   isPortOnePaymentNotFound,
+  isPortOneUnsubmittedReady,
+  isPortOneUnsubmittedFailure,
   PortOneV2Error,
   type PortOneCardPayment,
 } from "../lib/portone-v2.js";
@@ -259,9 +261,15 @@ export function settledLocalPaymentProviderStatus(
  * NONE only when PortOne holds no money and no approval is in flight. READY
  * (window opened, nothing submitted) and terminal no-charge FAILED/CANCELLED
  * qualify; PAY_PENDING, virtual accounts, any paid/cancelled amount, or any
- * cancellation record are evidence that the order must not be released.
+ * cancellation record are evidence that the order must not be released. The
+ * exact unsubmitted KG READY amount projection is not settlement evidence.
  */
 export function portOnePaymentEvidence(payment: PortOneCardPayment): "NONE" | "PRESENT" {
+  // Zero money is not proof of no charge when an authenticated approval
+  // timestamp or PG transaction contradicts it. Card selection alone is not
+  // approval evidence: it may precede submission to the PG.
+  if (payment.paidAt !== null || payment.pgTransactionId !== null) return "PRESENT";
+  if (isPortOneUnsubmittedReady(payment) || isPortOneUnsubmittedFailure(payment)) return "NONE";
   const noMoney = payment.amount.paid === 0 && payment.amount.cancelled === 0 && payment.cancellations.length === 0;
   if (!noMoney) return "PRESENT";
   return payment.status === "READY" || payment.status === "FAILED" || payment.status === "CANCELLED"
@@ -305,13 +313,18 @@ function providerError(error: unknown): AppError {
 export function normalizedPortOneEventForPayment(
   payment: PortOneCardPayment,
 ): NormalizedProviderEvent | null {
+  if (isPortOneUnsubmittedReady(payment)) return null;
   let eventType: NormalizedEventType;
   let amount = payment.amount.total;
   const hasMoneyBeforeSettlement = ["READY", "PAY_PENDING", "VIRTUAL_ACCOUNT_ISSUED", "FAILED"].includes(payment.status)
-    && (payment.amount.paid > 0 || payment.amount.cancelled > 0);
+    && (payment.amount.paid > 0 || payment.amount.cancelled > 0)
+    && !isPortOneUnsubmittedFailure(payment);
   const paidWithCancellation = payment.status === "PAID" && payment.amount.cancelled > 0;
+  const hasApprovalBeforeSettlement = (payment.paidAt !== null || payment.pgTransactionId !== null)
+    && (["READY", "PAY_PENDING", "VIRTUAL_ACCOUNT_ISSUED", "FAILED"].includes(payment.status)
+      || (payment.status === "CANCELLED" && payment.amount.paid === 0 && payment.amount.cancelled === 0));
 
-  if (hasMoneyBeforeSettlement || paidWithCancellation) {
+  if (hasMoneyBeforeSettlement || paidWithCancellation || hasApprovalBeforeSettlement) {
     // The status and money fields contradict one another. Neither a draw nor
     // a terminal no-charge cancellation is safe without operator review.
     eventType = "PAYMENT_STATE_ANOMALY";
@@ -359,6 +372,10 @@ export function normalizedPortOneEventForPayment(
     statusChangedAt: payment.statusChangedAt,
     paid: payment.amount.paid,
     cancelled: payment.amount.cancelled,
+    ...(hasApprovalBeforeSettlement ? {
+      paidAt: payment.paidAt,
+      pgTransactionId: payment.pgTransactionId,
+    } : {}),
   });
   return {
     eventId: `portone-${createHash("sha256").update(stateFingerprint).digest("hex")}`,

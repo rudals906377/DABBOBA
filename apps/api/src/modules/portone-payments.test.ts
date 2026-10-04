@@ -21,7 +21,7 @@ function payment(
   return {
     paymentId: "550e8400-e29b-41d4-a716-446655440000",
     portOneTransactionId: "txn-portone",
-    pgTransactionId: "txn-inicis",
+    pgTransactionId: amount.paid > 0 ? "txn-inicis" : null,
     status,
     version: "V2",
     merchantId: "merchant",
@@ -68,6 +68,24 @@ test("contradictory provider status and money amounts require review, not fulfil
   }
 });
 
+test("unsubmitted KG READY amount is not a settlement or an anomaly", () => {
+  const ready = { ...payment("READY"), method: null, pgTransactionId: null };
+  assert.equal(portOnePaymentEvidence(ready), "NONE");
+  assert.equal(normalizedPortOneEventForPayment(ready), null);
+  for (const change of [
+    { paidAt: "2026-10-02T03:45:00Z" },
+    { pgTransactionId: "pg-charge-evidence" },
+    { method: "CARD" as const },
+    { channel: null },
+    { amount: { total: 12_000, paid: 1, cancelled: 0 } },
+    { amount: { total: 12_000, paid: 12_000, cancelled: 1 } },
+    { status: "PAY_PENDING" as const },
+    { status: "PAID" as const },
+  ]) {
+    assert.equal(portOnePaymentEvidence({ ...ready, ...change }), "PRESENT");
+  }
+});
+
 test("PortOne paid, failed, and pre-payment cancelled states map to canonical events", () => {
   assert.equal(normalizedPortOneEventForPayment(payment("PAID"))?.eventType, "PAYMENT_SUCCEEDED");
   assert.equal(normalizedPortOneEventForPayment(payment("FAILED", { total: 12_000, paid: 0, cancelled: 0 }))?.eventType, "PAYMENT_FAILED");
@@ -75,6 +93,38 @@ test("PortOne paid, failed, and pre-payment cancelled states map to canonical ev
     normalizedPortOneEventForPayment(payment("CANCELLED", { total: 12_000, paid: 0, cancelled: 0 }))?.eventType,
     "PAYMENT_CANCELLED",
   );
+});
+
+test("KG window-close FAILED is a terminal failure only without charge evidence", () => {
+  const closed = { ...payment("FAILED"), method: null, pgTransactionId: null, failureCode: "01" as const };
+  assert.equal(portOnePaymentEvidence(closed), "NONE");
+  assert.equal(normalizedPortOneEventForPayment(closed)?.eventType, "PAYMENT_FAILED");
+  for (const change of [
+    { failureCode: undefined }, { failedAt: null },
+    { paidAt: "2026-10-02T05:04:53Z" }, { pgTransactionId: "pg-charge" },
+    { method: "CARD" as const }, { channel: null },
+    { amount: { total: 12_000, paid: 1, cancelled: 0 } },
+    { amount: { total: 12_000, paid: 12_000, cancelled: 1 } },
+    { status: "PAY_PENDING" as const }, { status: "PAID" as const },
+  ]) assert.equal(portOnePaymentEvidence({ ...closed, ...change }), "PRESENT");
+});
+
+test("zero money never hides an approval timestamp or PG transaction", () => {
+  for (const status of ["READY", "PAY_PENDING", "VIRTUAL_ACCOUNT_ISSUED", "FAILED", "CANCELLED"] as const) {
+    const uncharged = { ...payment(status, { total: 12_000, paid: 0, cancelled: 0 }), pgTransactionId: null };
+    for (const marker of [{ paidAt: "2026-10-02T05:04:53Z" }, { pgTransactionId: "pg-charge" }]) {
+      const contradictory = { ...uncharged, ...marker };
+      assert.equal(portOnePaymentEvidence(contradictory), "PRESENT", `${status} ${JSON.stringify(marker)}`);
+      const event = normalizedPortOneEventForPayment(contradictory);
+      assert.equal(event?.eventType, "PAYMENT_STATE_ANOMALY", `${status} ${JSON.stringify(marker)}`);
+      assert.equal(event?.amount, 0, "observed zero must not become a fabricated paid amount");
+      assert.notEqual(event?.eventId, normalizedPortOneEventForPayment(uncharged)?.eventId);
+    }
+  }
+  for (const status of ["READY", "FAILED", "CANCELLED"] as const) {
+    const selectedCardOnly = { ...payment(status, { total: 12_000, paid: 0, cancelled: 0 }), pgTransactionId: null };
+    assert.equal(portOnePaymentEvidence(selectedCardOnly), "NONE", "card selection alone is not an approval");
+  }
 });
 
 test("a paid provider status never substitutes the requested total for the amount actually paid", () => {

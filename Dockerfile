@@ -13,6 +13,11 @@ RUN corepack enable \
   && pnpm --version
 
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
+COPY patches/@expo__cli@57.0.27.patch ./patches/@expo__cli@57.0.27.patch
+COPY patches/@expo__code-signing-certificates@0.0.6.patch ./patches/@expo__code-signing-certificates@0.0.6.patch
+COPY patches/@expo__metro-file-map@57.0.3.patch ./patches/@expo__metro-file-map@57.0.3.patch
+COPY patches/metro-file-map@0.84.5.patch ./patches/metro-file-map@0.84.5.patch
+COPY patches/metro-file-map@0.84.6.patch ./patches/metro-file-map@0.84.6.patch
 COPY apps/api/package.json apps/api/tsconfig.json ./apps/api/
 COPY apps/worker/package.json apps/worker/tsconfig.json ./apps/worker/
 COPY packages/config/package.json packages/config/tsconfig.json ./packages/config/

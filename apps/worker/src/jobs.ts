@@ -16,6 +16,7 @@ import {
 } from "./payments.js";
 import { expireOrderReservations, expireReservationBatch } from "./reservations.js";
 import { runRetentionBatch } from "./retention.js";
+import { runCommerceRetentionBatch } from "./commerce-retention.js";
 import { processInventoryStorageExpiryBatch } from "./storage-expiry.js";
 import { parseOutboxEvent, parseWorkerJob, type OutboxEvent, type WorkerJob } from "./types.js";
 
@@ -172,6 +173,13 @@ export async function processWorkerJob(dependencies: JobDependencies, raw: unkno
       return runRetentionBatch(
         dependencies.pool,
         dependencies.config.retention,
+        dependencies.logger,
+        dependencies.shouldContinue,
+      );
+    case "commerce.retention.sweep":
+      return runCommerceRetentionBatch(
+        dependencies.pool,
+        dependencies.config.commerceRetention,
         dependencies.logger,
         dependencies.shouldContinue,
       );

@@ -6,6 +6,7 @@ import test from "node:test";
 import {
   mobileProductionExportInvocation,
   scanMobileProductionBundle,
+  verifyMobileProductionBundles,
 } from "../scripts/check-mobile-production-bundle.mjs";
 
 async function fixture(files) {
@@ -28,6 +29,32 @@ test("production bundle scan accepts ordinary release output and ignores source 
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
+});
+
+test("public bundle gate checks actual compiled settings on both platforms and refuses stale output", async () => {
+  const platforms = [];
+  const environment = { EXPO_PUBLIC_COMMERCE_CAPABILITY: "PRELAUNCH" };
+  await verifyMobileProductionBundles({ environment, exporter() {}, scanner() { return []; },
+    async artifactVerifier(input) {
+      platforms.push(input.platform);
+      assert.equal(input.environment, environment);
+      return { status: "pass", bundles: [] };
+    },
+  });
+  assert.deepEqual(platforms, ["ios", "android"]);
+  await assert.rejects(verifyMobileProductionBundles({ environment, exporter() {}, scanner() { return []; },
+    async artifactVerifier(input) { return { status: "fail", bundles: [{ entry: "entry.hbc", errors: [{ code: "COMPILED_VALUE_MISSING" }] }] }; },
+  }), /COMPILED_VALUE_MISSING/);
+});
+
+test("internal PG-review keeps its existing marker gate without falsely requiring the production project", async () => {
+  let markersChecked = 0;
+  await verifyMobileProductionBundles({
+    environment: { EXPO_PUBLIC_COMMERCE_CAPABILITY: "LIVE", EAS_BUILD_PROFILE: "pg-review" },
+    exporter() {}, scanner() { markersChecked += 1; return []; },
+    async artifactVerifier() { throw new Error("not a production artifact"); },
+  });
+  assert.equal(markersChecked, 2);
 });
 
 test("production bundle scan rejects test payment, demo-session, fixture, and loopback markers", async () => {

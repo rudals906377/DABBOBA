@@ -367,9 +367,11 @@ async function finalizeLocalAccountDeletion(pool: DatabasePool, job: AuthDeletio
       `INSERT INTO account_deletion_request_events
         (deletion_request_id,user_id,event_type,status,blocker_snapshot,revoked_session_count,
          correlation_id,idempotency_key,metadata,reason)
-       VALUES($1,$2,'STATUS_CHANGED','COMPLETED','{}'::jsonb,0,$3,$4,
+       VALUES($1,$2,'STATUS_CHANGED','COMPLETED','{}'::jsonb,0,$3::text,$4,
               jsonb_build_object('actor','SYSTEM_WORKER','personalDataAnonymized',true,
-                'externalIdentityDeleted',$5::boolean,'retainedData','LEGAL_AND_TRANSACTION_RECORDS'),
+                'externalIdentityDeleted',$5::boolean,
+                'appleTokenRevokedAt',(SELECT apple_revoked_at FROM account_auth_deletion_jobs WHERE id=$3::uuid),
+                'retainedData','LEGAL_AND_TRANSACTION_RECORDS'),
               'AUTOMATED_ACCOUNT_DELETION')
        ON CONFLICT (deletion_request_id,idempotency_key) DO NOTHING`,
       [job.deletion_request_id, job.user_id, job.id, `worker:${job.id}:completed`, Boolean(job.supabase_user_id)],
