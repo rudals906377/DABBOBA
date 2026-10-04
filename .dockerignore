@@ -12,6 +12,7 @@
 !patches
 patches/**
 !patches/node-forge@1.4.0.patch
+!patches/braces@3.0.3.patch
 
 !apps
 apps/**

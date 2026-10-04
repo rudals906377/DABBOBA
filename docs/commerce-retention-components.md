@@ -47,7 +47,7 @@
 
 공유 worker job은 `commerce.retention.sweep`이고 설정 타입은 `CommerceRetentionConfig`다. 핵심 함수는 `runCommerceRetentionBatch(pool, config, logger, shouldContinue)`다. 환경 값은 `WORKER_COMMERCE_RETENTION_MODE`(DISABLED/PREVIEW/EXECUTE, 기본 DISABLED)와 `WORKER_COMMERCE_RETENTION_BATCH_SIZE`(1–100, 기본 25)다. PREVIEW/EXECUTE일 때만 일반 retention 뒤에 일곱 번째 job으로 추가되며 기본 여섯 작업 구성은 유지된다.
 
-1. 별도 승인된 운영 변경에서 0083 migration을 적용하고 제한 역할/권한을 검증한다. 현재 작업은 부모가 지정한 loopback TEST DB에만 적용했다.
+1. 별도 승인된 운영 변경에서 0082 migration을 적용하고 제한 역할/권한을 검증한다. 현재 작업은 부모가 지정한 loopback TEST DB에만 적용했다.
 2. 사업자가 필드 범위·기산일·보존기간·분쟁/사본 절차를 결정한다. 권한 있는 비공개 운영 세션에서 정책을 초안 등록한 뒤 승인한다. secrets나 실제 고객 내용을 Git/이 문서/공개 로그에 넣지 않는다.
 3. 실제 분쟁 목록을 먼저 registry에 반영한다. 전체/회원/기록 hold를 적용하고, 해제 근거가 있으면 승인된 release를 기록한다.
 4. 현재 정책을 참조하는 검토 행에 전체 hold 목록과 해당 내용의 다른 사본 검토 근거를 기록한다. 미확인 내용이 있으면 기본 UNVERIFIED 상태를 유지한다.
@@ -99,4 +99,6 @@ FROM public.preview_commerce_retention(25);
 - worker TypeScript 검사와 `git diff --check` 통과. 공유 worker job/config/runner 결합의 최종 검증은 부모 통합 결과를 따른다.
 - source/migration 부재 시 실패를 먼저 재현했다. 확장 fixture의 text/varchar 매개변수 불일치는 시험 결함으로 수정한 뒤 같은 검사를 다시 통과했다.
 
-최종 0083의 checksum은 `6e8a469117d42315d10a41c4e1247772a7907e398a784c4ff725d46c593b4631`이다. 위 22개 집중 검사는 최초 구성요소 검증이며, 이후 원 승인자가 비활성화된 경우 다른 ACTIVE 관리자가 증거를 남겨 정책을 한 번만 종료할 수 있도록 보완했다. 최종 스키마는 별도 disposable TEST DB에 적용했고 암호화 백업·복원에서 두 retirement 필드와 함수 정의가 일치했다. 새 회귀 검사와 공유 worker 결합의 최종 결과는 부모 통합 증거를 따른다. 최초 fixture 종료 조회에서 정책/hold/파기 증거/시험 사용자 모두 0이었다. 운영 파기·법률 검토·자동 스케줄·알림 수신을 검증한 것은 아니다.
+최종 0082의 checksum은 `6e8a469117d42315d10a41c4e1247772a7907e398a784c4ff725d46c593b4631`이다. 위 22개 집중 검사는 최초 구성요소 검증이며, 이후 원 승인자가 비활성화된 경우 다른 ACTIVE 관리자가 증거를 남겨 정책을 한 번만 종료할 수 있도록 보완했다. 최종 스키마는 별도 disposable TEST DB에 적용했고 암호화 백업·복원에서 두 retirement 필드와 함수 정의가 일치했다. 새 회귀 검사와 공유 worker 결합의 최종 결과는 부모 통합 증거를 따른다. 최초 fixture 종료 조회에서 정책/hold/파기 증거/시험 사용자 모두 0이었다. 운영 파기·법률 검토·자동 스케줄·알림 수신을 검증한 것은 아니다.
+
+2026-10-04 커밋 후 CI에서 기존 마지막 migration이 0081이고 0082가 비어 있음을 확인했다. 운영에 적용하지 않은 새 migration의 파일 번호를 0083에서 0082로 정정하여 실제 순서를 이어 붙였다. SQL 바이트·checksum·잠금 ID·처리 동작은 바꾸지 않았다. 이전 loopback 검증과 암호화 복원 보고서는 원래의 0083 파일 이름으로 남긴 과거 증거다. 이를 운영에 적용된 migration을 다시 쓰거나 이미 적용된 DB에서 같은 SQL을 재실행할 권한으로 해석하지 않는다. 번호 정정 후 CI의 새 disposable DB로 정상 순서를 검증한다.

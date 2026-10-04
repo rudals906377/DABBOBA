@@ -162,6 +162,7 @@ actual_context="$context_check_dir/actual.txt"
       pnpm-workspace.yaml \
       tsconfig.base.json \
       patches/node-forge@1.4.0.patch \
+      patches/braces@3.0.3.patch \
       apps/api/package.json \
       apps/api/tsconfig.json \
       apps/worker/package.json \
