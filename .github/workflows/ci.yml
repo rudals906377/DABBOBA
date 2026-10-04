@@ -40,7 +40,7 @@ jobs:
       - name: Install dependencies from lockfile
         run: pnpm install --frozen-lockfile
 
-      - name: Verify pinned forge backport and Expo signing compatibility
+      - name: Verify Forge absence and native Expo signing compatibility
         run: pnpm run check:forge
 
       - name: Verify Metro watcher compatibility and removed Braces dependency

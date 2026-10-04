@@ -6,7 +6,8 @@ COPY . .
 
 RUN test -f package.json \
   && test -f pnpm-lock.yaml \
-  && test -f patches/node-forge@1.4.0.patch \
+  && test -f patches/@expo__cli@57.0.27.patch \
+  && test -f patches/@expo__code-signing-certificates@0.0.6.patch \
   && test -f patches/@expo__metro-file-map@57.0.3.patch \
   && test -f patches/metro-file-map@0.84.5.patch \
   && test -f patches/metro-file-map@0.84.6.patch \

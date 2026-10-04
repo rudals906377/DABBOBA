@@ -16,20 +16,25 @@ minimumReleaseAgeExclude:
   - miniflare@5.20260925.0-alpha
   - wrangler@4.141.0
 
-# Backport the nested DigestAlgorithm validation from upstream PR1152 at
-# ceba34402e329f0365134f23fe19898756527d65 plus empty-NULL-content and
-# exact canonical-OID validation (incomplete arcs must not be ignored).
-# Keep the genuine npm version and
-# every supply-chain/audit rule; version-based audit remains a release blocker.
+# Native Node/OpenSSL cryptography replaces both pinned Expo Forge callers.
+# ASN.1 schemas are used for synchronous certificate/CSR metadata only.
+# Keep genuine package versions and the mandatory, unsuppressed audit gate.
 patchedDependencies:
   # Preserve micromatch.some semantics using its exact existing Picomatch
   # implementation; remove the unused Micromatch/Braces dependency below.
   '@expo/metro-file-map@57.0.3': patches/@expo__metro-file-map@57.0.3.patch
   metro-file-map@0.84.5: patches/metro-file-map@0.84.5.patch
   metro-file-map@0.84.6: patches/metro-file-map@0.84.6.patch
-  node-forge@1.4.0: patches/node-forge@1.4.0.patch
+  '@expo/cli@57.0.27': patches/@expo__cli@57.0.27.patch
+  '@expo/code-signing-certificates@0.0.6': patches/@expo__code-signing-certificates@0.0.6.patch
 
 packageExtensions:
+  '@expo/code-signing-certificates@0.0.6':
+    dependencies:
+      '@peculiar/asn1-schema': '2.10.0'
+      '@peculiar/asn1-x509': '2.10.0'
+      '@peculiar/asn1-csr': '2.10.0'
+      asn1js: '3.0.10'
   '@expo/metro-file-map@57.0.3':
     dependencies:
       picomatch: '2.3.2'
@@ -41,6 +46,10 @@ packageExtensions:
       picomatch: '2.3.2'
 
 overrides:
+  # Both runtime imports are source-patched above. This removes the actual
+  # vulnerable implementation, not just its advisory or package identity.
+  '@expo/cli@57.0.27>node-forge': '-'
+  '@expo/code-signing-certificates@0.0.6>node-forge': '-'
   # Only these three source-patched callers use Micromatch. Its .some path
   # never invokes Braces; the same loop now imports Picomatch directly.
   # No audit ignores, package relabeling, or unreviewed matcher upgrade.

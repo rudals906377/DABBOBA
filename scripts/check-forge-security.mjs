@@ -2,60 +2,66 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readFileSync, realpathSync } from "node:fs";
 import { createRequire } from "node:module";
+import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const mobileRequire = createRequire(new URL("../apps/mobile/package.json", import.meta.url));
-const expoRequire = createRequire(mobileRequire.resolve("expo"));
-const cliRequire = createRequire(expoRequire.resolve("@expo/cli"));
+const repositoryRoot = fileURLToPath(new URL("../", import.meta.url));
+export const mobileRequire = createRequire(path.join(repositoryRoot, "apps/mobile/package.json"));
+const expoRequire = createRequire(mobileRequire.resolve("expo/package.json"));
+export const cliRequire = createRequire(expoRequire.resolve("@expo/cli/package.json"));
 export const certificate = cliRequire("@expo/code-signing-certificates");
-const certificateRequire = createRequire(cliRequire.resolve("@expo/code-signing-certificates"));
-export const forge = cliRequire("node-forge");
+export const certificateRequire = createRequire(cliRequire.resolve("@expo/code-signing-certificates"));
+const sha256 = bytes => createHash("sha256").update(bytes).digest("hex");
 
-// Upstream PR1152 commit ceba34402e329f0365134f23fe19898756527d65 backport
-// plus local empty-NULL-content and canonical-OID hardening. This is not an
-// official patched npm release; the version-based audit remains mandatory.
-const expectedRsaHash = "bc8e6d2f03d2f28254c38d54fbba1ced6e5992ce8dc23ffee7824cb22ba9a832";
-const expectedPatchHash = "82df5e8c086bdb3a63ad6a4be0bb777f8ae052803f62cbc921496391ae1c9bdc";
+export const signingPackages = Object.freeze([
+  { name: "@expo/cli", version: "57.0.27", file: "build/src/run/ios/codeSigning/Security.js",
+    patch: "@expo__cli@57.0.27.patch",
+    patchSha256: "032beecfe97559f300201fa3b50b47e4daf0f4df7dcb00fdb4dab010d56510aa",
+    sourceSha256: "cd289becbd5ca9473bfc8c41a0750ab530f9adc692365b2fcc629f5402d87203" },
+  { name: "@expo/code-signing-certificates", version: "0.0.6", file: "build/main.js",
+    patch: "@expo__code-signing-certificates@0.0.6.patch",
+    patchSha256: "b760dd330cd643fe750c1228956cbdd7f8361e440e6e1363ca59207b08a88cef",
+    sourceSha256: "b6651b4b5ec9d679e7fbdc88f5d3a229a78c306260b51e07d9a8d5e71c8c8855" },
+]);
 
-export function verifyForgePatch() {
-  const cliPath = realpathSync(cliRequire.resolve("node-forge"));
-  assert.equal(realpathSync(certificateRequire.resolve("node-forge")), cliPath,
-    "Expo CLI and its signing helper must resolve the same patched package");
-  const forgeRequire = createRequire(cliPath);
-  assert.equal(forgeRequire("node-forge/package.json").version, "1.4.0",
-    "Never relabel the original npm version to evade advisory checks");
-  const rsa = readFileSync(forgeRequire.resolve("node-forge/lib/rsa.js"));
-  assert.equal(createHash("sha256").update(rsa).digest("hex"), expectedRsaHash);
-  const patch = readFileSync(new URL("../patches/node-forge@1.4.0.patch", import.meta.url));
-  assert.equal(createHash("sha256").update(patch).digest("hex"), expectedPatchHash);
-  const lock = readFileSync(new URL("../pnpm-lock.yaml", import.meta.url), "utf8");
-  const references = [...lock.matchAll(/^\s+node-forge: (.+)$/gm)].map((match) => match[1]);
-  assert.equal(references.length, 2, "Review new forge callers before updating this gate");
-  for (const reference of references) {
-    assert.equal(reference, `1.4.0(patch_hash=${expectedPatchHash})`);
+// Real graph removal: never rename Forge, waive the advisory, or accept a
+// handwritten RSA verifier as an audit workaround. The audit gate is unchanged.
+export function verifyForgeRemoval() {
+  const lock = readFileSync(path.join(repositoryRoot, "pnpm-lock.yaml"), "utf8");
+  assert.doesNotMatch(lock, /^\s*(?:['"]?node-forge@|node-forge:)/m,
+    "Forge must be absent from the whole resolved graph, not just the prod filter");
+  const snapshots = lock.slice(lock.indexOf("\nsnapshots:\n"));
+  for (const spec of signingPackages) {
+    const manifestPath = cliRequire.resolve(spec.name + "/package.json");
+    const manifest = cliRequire(spec.name + "/package.json");
+    assert.equal(manifest.version, spec.version);
+    const source = readFileSync(path.join(path.dirname(realpathSync(manifestPath)), spec.file), "utf8");
+    assert.equal(sha256(source), spec.sourceSha256, "Only the reviewed installed source is allowed");
+    assert.equal(sha256(readFileSync(path.join(repositoryRoot, "patches", spec.patch))), spec.patchSha256);
+    assert.ok(lock.includes(spec.name + "@" + spec.version + "(patch_hash=" + spec.patchSha256 + ")"));
+    assert.equal([...snapshots.matchAll(new RegExp("^  ['\"]?" + spec.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "@[^\\n]+:$", "gm"))].length, 1);
+    assert.doesNotMatch(source, /require\(["']node-forge["']\)/);
   }
-  return { packageVersion: "1.4.0", rsaSha256: expectedRsaHash, callerCount: references.length };
-}
-
-// Synthetic signed encodings exercise the parser, not a real credential or an
-// end-to-end attacker forgery. Private keys are generated in memory only.
-export function digestInfoSignature(implementation, keyPair, { includeNull = true, nullContents = "",
-  nestedGarbage = false, outerGarbage = false, trailingGarbage = false,
-  algorithmIdentifier } = {}) {
-  const a = implementation.asn1;
-  const node = (type, constructed, value) => a.create(a.Class.UNIVERSAL, type, constructed, value);
-  const digest = implementation.md.sha256.create().update("DABBOBA synthetic security regression").digest().getBytes();
-  const algorithm = [node(a.Type.OID, false,
-    algorithmIdentifier ?? a.oidToDer(implementation.oids.sha256).getBytes())];
-  if (includeNull) algorithm.push(node(a.Type.NULL, false, nullContents));
-  if (nestedGarbage) algorithm.push(node(a.Type.OCTETSTRING, false, "unconsumed nested input"));
-  const content = [node(a.Type.SEQUENCE, true, algorithm), node(a.Type.OCTETSTRING, false, digest)];
-  if (outerGarbage) content.push(node(a.Type.OCTETSTRING, false, "unconsumed outer input"));
-  let encoded = a.toDer(node(a.Type.SEQUENCE, true, content)).getBytes();
-  if (trailingGarbage) encoded += "unconsumed trailing input";
-  return { digest, signature: keyPair.privateKey.sign(encoded, "NONE") };
+  for (const caller of [mobileRequire, cliRequire, certificateRequire]) {
+    assert.throws(() => caller.resolve("node-forge"), { code: "MODULE_NOT_FOUND" });
+  }
+  for (const dependency of ["@peculiar/asn1-schema", "@peculiar/asn1-x509", "@peculiar/asn1-csr"]) {
+    assert.equal(certificateRequire(dependency + "/package.json").version, "2.10.0");
+  }
+  assert.equal(certificateRequire("asn1js/package.json").version, "3.0.10");
+  const helperSource = readFileSync(cliRequire.resolve("@expo/code-signing-certificates"), "utf8");
+  assert.match(helperSource, /require\("node:crypto"\)/);
+  assert.match(helperSource, /crypto\.verify\(/);
+  assert.match(helperSource, /native\.verify\(/);
+  const securityRequire = createRequire(cliRequire.resolve("./build/src/run/ios/codeSigning/Security.js"));
+  assert.equal(realpathSync(securityRequire.resolve("@expo/code-signing-certificates")),
+    realpathSync(cliRequire.resolve("@expo/code-signing-certificates")));
+  const types = readFileSync(cliRequire.resolve("@expo/code-signing-certificates").replace(/\.js$/, ".d.ts"), "utf8");
+  assert.doesNotMatch(types, /(?:import|from).*["']node-forge["']/);
+  return { callerCount: signingPackages.length, removedDependencies: ["node-forge"],
+    verification: "Node/OpenSSL", officialAuditWaived: false };
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === realpathSync(process.argv[1])) {
-  console.log(JSON.stringify(verifyForgePatch()));
+  console.log(JSON.stringify(verifyForgeRemoval()));
 }

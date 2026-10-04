@@ -1,0 +1,776 @@
+diff --git a/build/main.js b/build/main.js
+--- a/build/main.js
++++ b/build/main.js
+@@ -1,288 +1,303 @@
+-"use strict";
+-var __importDefault = (this && this.__importDefault) || function (mod) {
+-    return (mod && mod.__esModule) ? mod : { "default": mod };
+-};
+-Object.defineProperty(exports, "__esModule", { value: true });
+-exports.generateDevelopmentCertificateFromCSR = exports.generateCSR = exports.signBufferRSASHA256AndVerify = exports.validateSelfSignedCertificate = exports.generateSelfSignedCodeSigningCertificate = exports.convertCSRPEMToCSR = exports.convertCSRToCSRPEM = exports.convertCertificatePEMToCertificate = exports.convertPrivateKeyPEMToPrivateKey = exports.convertPublicKeyPEMToPublicKey = exports.convertKeyPairPEMToKeyPair = exports.convertCertificateToCertificatePEM = exports.convertKeyPairToPEM = exports.generateKeyPair = exports.expoProjectInformationOID = void 0;
+-const assert_1 = __importDefault(require("assert"));
+-const node_forge_1 = require("node-forge");
+-const utils_1 = require("./utils");
+-/**
+- * Custom X.509 extension that stores information about the Expo project that a code signing certificate is valid for.
+- * Used to prevent spoofing of scoping identifiers in Expo Go.
+- *
+- * Note: Generated with oidgen script. Resides in the Microsoft OID space. Could apply for Expo space but would take time: https://pen.iana.org/pen/PenApplication.page
+- */
+-exports.expoProjectInformationOID = '1.2.840.113556.1.8000.2554.43437.254.128.102.157.7894389.20439.2.1';
+-/**
+- * Generate a public and private RSA key pair.
+- * @returns RSA key pair
+- */
+-function generateKeyPair() {
+-    return node_forge_1.pki.rsa.generateKeyPair();
+-}
+-exports.generateKeyPair = generateKeyPair;
+-/**
+- * Convert a key RSA key pair generated using {@link generateKeyPair} to PEM strings.
+- * @param keyPair RSA key pair
+- * @returns PEM formatted key pair
+- */
+-function convertKeyPairToPEM(keyPair) {
+-    return {
+-        privateKeyPEM: node_forge_1.pki.privateKeyToPem(keyPair.privateKey),
+-        publicKeyPEM: node_forge_1.pki.publicKeyToPem(keyPair.publicKey),
+-    };
+-}
+-exports.convertKeyPairToPEM = convertKeyPairToPEM;
+-/**
+- * Convert a X.509 certificate generated using {@link generateSelfSignedCodeSigningCertificate} to a PEM string.
+- * @param certificate X.509 certificate
+- * @returns
+- */
+-function convertCertificateToCertificatePEM(certificate) {
+-    return node_forge_1.pki.certificateToPem(certificate);
+-}
+-exports.convertCertificateToCertificatePEM = convertCertificateToCertificatePEM;
+-/**
+- * Convert a PEM-formatted RSA key pair to a key pair for use with this library.
+- * @param keyPair PEM-formatted private key and public key
+- * @returns RSA key pair
+- */
+-function convertKeyPairPEMToKeyPair({ privateKeyPEM, publicKeyPEM, }) {
+-    return {
+-        privateKey: node_forge_1.pki.privateKeyFromPem(privateKeyPEM),
+-        publicKey: node_forge_1.pki.publicKeyFromPem(publicKeyPEM),
+-    };
+-}
+-exports.convertKeyPairPEMToKeyPair = convertKeyPairPEMToKeyPair;
+-/**
+- * Convert a PEM-formatted RSA public key to a public key for use with this library.
+- * @param publicKeyPEM PEM formatted public key
+- * @returns RSA public key
+- */
+-function convertPublicKeyPEMToPublicKey(publicKeyPEM) {
+-    return node_forge_1.pki.publicKeyFromPem(publicKeyPEM);
+-}
+-exports.convertPublicKeyPEMToPublicKey = convertPublicKeyPEMToPublicKey;
+-/**
+- * Convert a PEM-formatted RSA private key to a private key for use with this library.
+- * @param privateKeyPEM PEM formatted private key
+- * @returns RSA private key
+- */
+-function convertPrivateKeyPEMToPrivateKey(privateKeyPEM) {
+-    return node_forge_1.pki.privateKeyFromPem(privateKeyPEM);
+-}
+-exports.convertPrivateKeyPEMToPrivateKey = convertPrivateKeyPEMToPrivateKey;
+-/**
+- * Convert a PEM-formatted X.509 certificate to a certificate for use with this library.
+- * @param certificatePEM PEM formatted X.509 certificate
+- * @returns  X.509 Certificate
+- */
+-function convertCertificatePEMToCertificate(certificatePEM) {
+-    return node_forge_1.pki.certificateFromPem(certificatePEM, true);
+-}
+-exports.convertCertificatePEMToCertificate = convertCertificatePEMToCertificate;
+-/**
+- * Convert a CSR to PEM-formatted X.509 CSR
+- * @param csr CSR
+- * @returns X.509 CSR
+- */
+-function convertCSRToCSRPEM(csr) {
+-    return node_forge_1.pki.certificationRequestToPem(csr);
+-}
+-exports.convertCSRToCSRPEM = convertCSRToCSRPEM;
+-/**
+- * Convert a PEM-formatted X.509 CSR to a CSR
+- * @param CSRPEM PEM-formatted X.509 CSR
+- * @returns CSR
+- */
+-function convertCSRPEMToCSR(CSRPEM) {
+-    return node_forge_1.pki.certificationRequestFromPem(CSRPEM, true);
+-}
+-exports.convertCSRPEMToCSR = convertCSRPEMToCSR;
+-/**
+- * Generate a self-signed (root) code-signing certificate valid for use with expo-updates.
+- *
+- * @returns PKI.Certificate valid for expo-updates code signing
+- */
+-function generateSelfSignedCodeSigningCertificate({ keyPair: { publicKey, privateKey }, validityNotBefore, validityNotAfter, commonName, }) {
+-    const cert = node_forge_1.pki.createCertificate();
+-    cert.publicKey = publicKey;
+-    cert.serialNumber = (0, utils_1.toPositiveHex)(node_forge_1.util.bytesToHex(node_forge_1.random.getBytesSync(9)));
+-    (0, assert_1.default)(validityNotAfter > validityNotBefore, 'validityNotAfter must be later than validityNotBefore');
+-    cert.validity.notBefore = validityNotBefore;
+-    cert.validity.notAfter = validityNotAfter;
+-    const attrs = [
+-        {
+-            name: 'commonName',
+-            value: commonName,
+-        },
+-    ];
+-    cert.setSubject(attrs);
+-    cert.setIssuer(attrs);
+-    cert.setExtensions([
+-        {
+-            name: 'keyUsage',
+-            critical: true,
+-            keyCertSign: false,
+-            digitalSignature: true,
+-            nonRepudiation: false,
+-            keyEncipherment: false,
+-            dataEncipherment: false,
+-        },
+-        {
+-            name: 'extKeyUsage',
+-            critical: true,
+-            serverAuth: false,
+-            clientAuth: false,
+-            codeSigning: true,
+-            emailProtection: false,
+-            timeStamping: false,
+-        },
+-    ]);
+-    cert.sign(privateKey, node_forge_1.md.sha256.create());
+-    return cert;
+-}
+-exports.generateSelfSignedCodeSigningCertificate = generateSelfSignedCodeSigningCertificate;
+-function arePublicKeysEqual(key1, key2) {
+-    return key1.n.equals(key2.n) && key1.e.equals(key2.e);
+-}
+-function doPrivateAndPublicKeysMatch(privateKey, publicKey) {
+-    return publicKey.n.equals(privateKey.n) && publicKey.e.equals(privateKey.e);
+-}
+-/**
+- * Validate that a certificate and corresponding key pair can be used for expo-updates code signing.
+- * @param certificate X.509 certificate
+- * @param keyPair RSA key pair
+- */
+-function validateSelfSignedCertificate(certificate, keyPair) {
+-    if (certificate.issuer.hash !== certificate.subject.hash) {
+-        throw new Error('Certificate issuer hash does not match subject hash, indicating certificate is not self-signed.');
+-    }
+-    const now = new Date();
+-    if (certificate.validity.notBefore > now || certificate.validity.notAfter < now) {
+-        throw new Error('Certificate validity expired');
+-    }
+-    const keyUsage = certificate.getExtension('keyUsage');
+-    const digitalSignature = keyUsage.digitalSignature;
+-    if (!keyUsage || !digitalSignature) {
+-        throw new Error('X509v3 Key Usage: Digital Signature not present');
+-    }
+-    const extKeyUsage = certificate.getExtension('extKeyUsage');
+-    const codeSigning = extKeyUsage.codeSigning;
+-    if (!extKeyUsage || !codeSigning) {
+-        throw new Error('X509v3 Extended Key Usage: Code Signing not present');
+-    }
+-    const isValid = certificate.verify(certificate);
+-    if (!isValid) {
+-        throw new Error('Certificate signature not valid');
+-    }
+-    const certificatePublicKey = certificate.publicKey;
+-    if (!arePublicKeysEqual(certificatePublicKey, keyPair.publicKey)) {
+-        throw new Error('Certificate pubic key does not match key pair public key');
+-    }
+-    if (!doPrivateAndPublicKeysMatch(keyPair.privateKey, keyPair.publicKey)) {
+-        throw new Error('keyPair key mismatch');
+-    }
+-}
+-exports.validateSelfSignedCertificate = validateSelfSignedCertificate;
+-/**
+- * Sign a SHA-256 hash of the provided string with an RSA private key and verify that the signature
+- * is valid for the RSA public key in the certificate. The verification part is most useful for
+- * debugging, so while this may be used in server implementation for expo-updates code signing,
+- * a similar method without verification can be created for efficiency for use in production.
+- *
+- * @param privateKey RSA private key
+- * @param certificate X.509 certificate
+- * @param bufferToSign buffer to hash, generate a signature for, and verify
+- * @returns base64-encoded RSA signature
+- */
+-function signBufferRSASHA256AndVerify(privateKey, certificate, bufferToSign) {
+-    const digest = node_forge_1.md.sha256.create().update(bufferToSign.toString('binary'));
+-    const digestSignature = privateKey.sign(digest);
+-    const isValidSignature = certificate.publicKey.verify(digest.digest().getBytes(), digestSignature);
+-    if (!isValidSignature) {
+-        throw new Error('Signature generated with private key not valid for certificate');
+-    }
+-    return node_forge_1.util.encode64(digestSignature);
+-}
+-exports.signBufferRSASHA256AndVerify = signBufferRSASHA256AndVerify;
+-/**
+- * Generate a self-signed CSR for a given key pair. Most commonly used with {@link generateDevelopmentCertificateFromCSR}.
+- * @param keyPair RSA key pair
+- * @param commonName commonName attribute of the subject of the resulting certificate (human readable name of the certificate)
+- * @returns CSR
+- */
+-function generateCSR(keyPair, commonName) {
+-    const csr = node_forge_1.pki.createCertificationRequest();
+-    csr.publicKey = keyPair.publicKey;
+-    const attrs = [
+-        {
+-            name: 'commonName',
+-            value: commonName,
+-        },
+-    ];
+-    csr.setSubject(attrs);
+-    csr.sign(keyPair.privateKey, node_forge_1.md.sha256.create());
+-    return csr;
+-}
+-exports.generateCSR = generateCSR;
+-/**
+- * For use by a server to generate a development certificate (good for 30 days) for a particular
+- * appId and scopeKey (Expo project manifest fields verified by the client during certificate validation).
+- *
+- * Note that this function assumes the issuer is trusted, and that the user that created the CSR and issued
+- * the request has permission to sign manifests for the appId and scopeKey. This constraint must be
+- * verified on the server before calling this method.
+- *
+- * @param issuerPrivateKey private key to sign the resulting certificate with
+- * @param issuerCertificate parent certificate (should be a CA) of the resulting certificate
+- * @param csr certificate signing request containing the user's public key
+- * @param appId app ID (UUID) of the app that the resulting certificate will sign the development manifest for
+- * @param scopeKey scope key of the app that the resuting certificate will sign the development manifest for
+- * @returns certificate to use to sign development manifests
+- */
+-function generateDevelopmentCertificateFromCSR(issuerPrivateKey, issuerCertificate, csr, appId, scopeKey) {
+-    (0, assert_1.default)(csr.verify(csr), 'CSR not self-signed');
+-    const certificate = node_forge_1.pki.createCertificate();
+-    certificate.publicKey = csr.publicKey;
+-    certificate.serialNumber = (0, utils_1.toPositiveHex)(node_forge_1.util.bytesToHex(node_forge_1.random.getBytesSync(9)));
+-    // set certificate subject attrs from CSR
+-    certificate.setSubject(csr.subject.attributes);
+-    // 30 day validity into the future, 1 day in the past just in case of clock skew at callsite
+-    certificate.validity.notBefore = new Date();
+-    certificate.validity.notBefore.setDate(certificate.validity.notBefore.getDate() - 1);
+-    certificate.validity.notAfter = new Date();
+-    certificate.validity.notAfter.setDate(certificate.validity.notBefore.getDate() + 30);
+-    certificate.setIssuer(issuerCertificate.subject.attributes);
+-    certificate.setExtensions([
+-        {
+-            name: 'keyUsage',
+-            critical: true,
+-            keyCertSign: false,
+-            digitalSignature: true,
+-            nonRepudiation: false,
+-            keyEncipherment: false,
+-            dataEncipherment: false,
+-        },
+-        {
+-            name: 'extKeyUsage',
+-            critical: true,
+-            serverAuth: false,
+-            clientAuth: false,
+-            codeSigning: true,
+-            emailProtection: false,
+-            timeStamping: false,
+-        },
+-        {
+-            name: 'expoProjectInformation',
+-            id: exports.expoProjectInformationOID,
+-            // critical: true, // can't be critical since openssl verify doesn't know about this extension
+-            value: `${appId},${scopeKey}`,
+-        },
+-    ]);
+-    certificate.sign(issuerPrivateKey, node_forge_1.md.sha256.create());
+-    return certificate;
+-}
+-exports.generateDevelopmentCertificateFromCSR = generateDevelopmentCertificateFromCSR;
+-//# sourceMappingURL=main.js.map
+\ No newline at end of file
++"use strict";
++// Narrow synchronous Expo adapter. Not a general, mutable Forge PKI replacement.
++// RSA operations and certificate verification are delegated to Node/OpenSSL.
++// Established ASN.1 schemas only encode/decode certificate and CSR metadata.
++const assert = require("node:assert");
++const crypto = require("node:crypto");
++const asn1 = require("asn1js");
++const { AsnParser, AsnSerializer, OctetString } = require("@peculiar/asn1-schema");
++const x = require("@peculiar/asn1-x509");
++const c = require("@peculiar/asn1-csr");
++const expoProjectInformationOID = "1.2.840.113556.1.8000.2554.43437.254.128.102.157.7894389.20439.2.1";
++const sha256RSA = "1.2.840.113549.1.1.11";
++const rsaDigests = new Map([
++  ["1.2.840.113549.1.1.5", "sha1"], ["1.2.840.113549.1.1.14", "sha224"],
++  [sha256RSA, "sha256"], ["1.2.840.113549.1.1.12", "sha384"],
++  ["1.2.840.113549.1.1.13", "sha512"],
++]);
++const certificateState = new WeakMap();
++const requestState = new WeakMap();
++const names = {
++  "2.5.4.3": ["commonName", "CN"], "2.5.4.6": ["countryName", "C"],
++  "2.5.4.7": ["localityName", "L"], "2.5.4.8": ["stateOrProvinceName", "ST"],
++  "2.5.4.10": ["organizationName", "O"], "2.5.4.11": ["organizationalUnitName", "OU"],
++  "1.2.840.113549.1.9.1": ["emailAddress", "E"],
++};
++const encode = value => Buffer.from(AsnSerializer.serialize(value));
++const buffer = value => Buffer.from(value);
++function parseDER(input, target) {
++  const der = Buffer.from(input);
++  if (!der.length || der.length > 1024 * 1024) throw new Error("Invalid DER length");
++  const decoded = asn1.fromBER(der);
++  if (decoded.offset !== der.length || decoded.result.error) throw new Error("Invalid or trailing DER input");
++  function inspect(block, depth = 0) {
++    if (depth > 64 || block.error || block.lenBlock?.isIndefiniteForm ||
++        [block, block.idBlock, block.lenBlock, block.valueBlock].some(part => part?.warnings?.some(warning => warning !== "Too big Integer for decoding, hex only" && !(warning === "Zero buffer length" && block.idBlock?.isConstructed && block.valueBlock?.value?.length === 0)))) {
++      throw new Error("Invalid or noncanonical DER input");
++    }
++    if (block instanceof asn1.BitString && block.valueBlock.unusedBits &&
++        block.valueBlock.valueHexView.length &&
++        (block.valueBlock.valueHexView.at(-1) & ((1 << block.valueBlock.unusedBits) - 1))) {
++      throw new Error("Invalid DER unused bits");
++    }
++    if (block.idBlock?.isConstructed && Array.isArray(block.valueBlock?.value)) {
++      for (const child of block.valueBlock.value) inspect(child, depth + 1);
++    }
++  }
++  inspect(decoded.result);
++  if (!Buffer.from(decoded.result.toBER(false)).equals(der)) throw new Error("Noncanonical DER input");
++  return { der, root: decoded.result, value: AsnParser.fromASN(decoded.result, target) };
++}
++function parseSigned(input, target) {
++  const parsed = parseDER(input, target);
++  const children = parsed.root.valueBlock.value;
++  if (!(parsed.root instanceof asn1.Sequence) || children.length !== 3 ||
++      !(children[2] instanceof asn1.BitString) || children[2].valueBlock.unusedBits !== 0) {
++    throw new Error("Invalid signed DER structure");
++  }
++  if (!encode(parsed.value).equals(parsed.der)) throw new Error("Noncanonical or unconsumed signed DER fields");
++  return parsed;
++}
++function pem(der, label) {
++  return "-----BEGIN " + label + "-----\r\n" +
++    der.toString("base64").match(/.{1,64}/g).join("\r\n") +
++    "\r\n-----END " + label + "-----\r\n";
++}
++function readPEM(value, labels) {
++  if (typeof value !== "string") throw new TypeError("Expected PEM string");
++  const match = /^\s*-----BEGIN ([A-Z ]+)-----\s*([A-Za-z0-9+/=\r\n]+)\s*-----END \1-----\s*$/.exec(value);
++  if (!match || !labels.includes(match[1])) throw new Error("Invalid PEM header or content");
++  const base64 = match[2].replace(/\s/g, "");
++  const der = Buffer.from(base64, "base64");
++  if (der.toString("base64") !== base64) throw new Error("Invalid PEM base64");
++  return der;
++}
++function rsa(key, type) {
++  if (!(key instanceof crypto.KeyObject) || key.type !== type || key.asymmetricKeyType !== "rsa") {
++    throw new TypeError("Expected native RSA " + type + " key");
++  }
++  return key;
++}
++function publicDER(key) {
++  return rsa(key, "public").export({ format: "der", type: "spki" });
++}
++function nameInfo(name) {
++  const attributes = Object.freeze(Array.from(name).flatMap(rdn => Array.from(rdn, attr => {
++    const [name, shortName] = names[attr.type] || [];
++    return Object.freeze({ type: attr.type, name, shortName, value: attr.value.toString() });
++  })));
++  return Object.freeze({
++    attributes,
++    getField(field) {
++      return attributes.find(attr => typeof field === "string"
++        ? [attr.type, attr.name, attr.shortName].includes(field)
++        : field && Object.entries(field).every(([key, value]) => attr[key] === value)) || null;
++    },
++  });
++}
++function commonName(value) {
++  if (typeof value !== "string") throw new TypeError("Expected commonName string");
++  const params = /^[A-Za-z0-9 '()+,\-./:=?]*$/.test(value)
++    ? { printableString: value } : { utf8String: value };
++  return new x.Name([new x.RelativeDistinguishedName([
++    new x.AttributeTypeAndValue({ type: "2.5.4.3", value: new x.AttributeValue(params) }),
++  ])]);
++}
++function usageExtensions() {
++  return new x.Extensions([
++    new x.Extension({ extnID: x.id_ce_keyUsage, critical: true,
++      extnValue: new OctetString(encode(new x.KeyUsage(x.KeyUsageFlags.digitalSignature))) }),
++    new x.Extension({ extnID: x.id_ce_extKeyUsage, critical: true,
++      extnValue: new OctetString(encode(new x.ExtendedKeyUsage([x.id_kp_codeSigning]))) }),
++  ]);
++}
++function extensionInfo(ext) {
++  const result = { id: ext.extnID, critical: ext.critical, value: buffer(ext.extnValue.buffer).toString("binary") };
++  if (ext.extnID === x.id_ce_keyUsage) {
++    result.name = "keyUsage";
++    const flags = parseDER(ext.extnValue.buffer, x.KeyUsage).value.toJSON();
++    for (const flag of ["digitalSignature", "nonRepudiation", "keyEncipherment", "dataEncipherment",
++      "keyAgreement", "keyCertSign", "crlSign", "encipherOnly", "decipherOnly"]) result[flag] = flags.includes(flag);
++  } else if (ext.extnID === x.id_ce_extKeyUsage) {
++    result.name = "extKeyUsage";
++    const ids = parseDER(ext.extnValue.buffer, x.ExtendedKeyUsage).value;
++    result.codeSigning = ids.includes(x.id_kp_codeSigning);
++    result.serverAuth = ids.includes("1.3.6.1.5.5.7.3.1");
++    result.clientAuth = ids.includes("1.3.6.1.5.5.7.3.2");
++    result.emailProtection = ids.includes("1.3.6.1.5.5.7.3.4");
++    result.timeStamping = ids.includes("1.3.6.1.5.5.7.3.8");
++  } else if (ext.extnID === expoProjectInformationOID) result.name = "expoProjectInformation";
++  return Object.freeze(result);
++}
++function getCertificate(value) {
++  const state = certificateState.get(value);
++  if (!state) throw new TypeError("Expected Expo native certificate");
++  return state;
++}
++function getRequest(value) {
++  const state = requestState.get(value);
++  if (!state) throw new TypeError("Expected Expo native certificate request");
++  return state;
++}
++class Certificate {
++  constructor(der) {
++    const parsed = parseSigned(der, x.Certificate);
++    const native = new crypto.X509Certificate(parsed.der);
++    const model = parsed.value;
++    if (!encode(model.tbsCertificate.signature).equals(encode(model.signatureAlgorithm))) {
++      throw new Error("Certificate signature algorithm mismatch");
++    }
++    const extensions = Object.freeze(Array.from(model.tbsCertificate.extensions || [], extensionInfo));
++    if (new Set(extensions.map(ext => ext.id)).size !== extensions.length) throw new Error("Duplicate certificate extension");
++    certificateState.set(this, { der: parsed.der, native, model, extensions });
++    Object.defineProperties(this, {
++      publicKey: { value: native.publicKey, enumerable: true },
++      subject: { value: nameInfo(model.tbsCertificate.subject), enumerable: true },
++      issuer: { value: nameInfo(model.tbsCertificate.issuer), enumerable: true },
++    });
++    Object.freeze(this);
++  }
++  get validity() {
++    const validity = getCertificate(this).model.tbsCertificate.validity;
++    return Object.freeze({ notBefore: new Date(validity.notBefore.getTime()), notAfter: new Date(validity.notAfter.getTime()) });
++  }
++  get serialNumber() { return buffer(getCertificate(this).model.tbsCertificate.serialNumber).toString("hex"); }
++  getExtension(field) {
++    return getCertificate(this).extensions.find(ext => typeof field === "string"
++      ? ext.id === field || ext.name === field
++      : field && Object.entries(field).every(([key, value]) => ext[key] === value)) || null;
++  }
++  verify(child) {
++    const parentState = getCertificate(this), childState = getCertificate(child);
++    if (!encode(parentState.model.tbsCertificate.subject).equals(encode(childState.model.tbsCertificate.issuer))) return false;
++    return childState.native.verify(this.publicKey);
++  }
++}
++class CertificateRequest {
++  constructor(der) {
++    const parsed = parseSigned(der, c.CertificationRequest);
++    const model = parsed.value;
++    if (model.certificationRequestInfo.version !== 0) throw new Error("Unsupported CSR version");
++    const publicKey = crypto.createPublicKey({ key: encode(model.certificationRequestInfo.subjectPKInfo), format: "der", type: "spki" });
++    rsa(publicKey, "public");
++    if (!rsaDigests.has(model.signatureAlgorithm.algorithm) ||
++        (model.signatureAlgorithm.parameters !== undefined && model.signatureAlgorithm.parameters !== null &&
++          !buffer(model.signatureAlgorithm.parameters).equals(Buffer.from([5, 0])))) {
++      throw new Error("Unsupported CSR signature algorithm");
++    }
++    requestState.set(this, { der: parsed.der, model, publicKey,
++      signed: buffer(model.certificationRequestInfoRaw), signature: buffer(model.signature) });
++    Object.defineProperties(this, {
++      publicKey: { value: publicKey, enumerable: true },
++      subject: { value: nameInfo(model.certificationRequestInfo.subject), enumerable: true },
++    });
++    Object.freeze(this);
++  }
++  verify() {
++    const state = getRequest(this);
++    return crypto.verify(rsaDigests.get(state.model.signatureAlgorithm.algorithm), state.signed,
++      { key: state.publicKey, padding: crypto.constants.RSA_PKCS1_PADDING }, state.signature);
++  }
++}
++function generateKeyPair() {
++  return crypto.generateKeyPairSync("rsa", { modulusLength: 2048, publicExponent: 65537 });
++}
++function convertKeyPairToPEM(pair) {
++  return {
++    privateKeyPEM: rsa(pair.privateKey, "private").export({ format: "pem", type: "pkcs1" }).toString(),
++    publicKeyPEM: rsa(pair.publicKey, "public").export({ format: "pem", type: "spki" }).toString(),
++  };
++}
++function convertKeyPairPEMToKeyPair({ privateKeyPEM, publicKeyPEM }) {
++  return { privateKey: convertPrivateKeyPEMToPrivateKey(privateKeyPEM), publicKey: convertPublicKeyPEMToPublicKey(publicKeyPEM) };
++}
++function convertPrivateKeyPEMToPrivateKey(value) {
++  readPEM(value, ["RSA PRIVATE KEY", "PRIVATE KEY"]);
++  return rsa(crypto.createPrivateKey(value), "private");
++}
++function convertPublicKeyPEMToPublicKey(value) {
++  readPEM(value, ["PUBLIC KEY", "RSA PUBLIC KEY"]);
++  return rsa(crypto.createPublicKey(value), "public");
++}
++function convertCertificateToCertificatePEM(value) { return pem(getCertificate(value).der, "CERTIFICATE"); }
++function convertCertificatePEMToCertificate(value) { return new Certificate(readPEM(value, ["CERTIFICATE"])); }
++function convertCSRToCSRPEM(value) { return pem(getRequest(value).der, "CERTIFICATE REQUEST"); }
++function convertCSRPEMToCSR(value) { return new CertificateRequest(readPEM(value, ["CERTIFICATE REQUEST", "NEW CERTIFICATE REQUEST"])); }
++function issueCertificate(publicKey, privateKey, subject, issuer, notBefore, notAfter, extensions) {
++  assert(notAfter > notBefore, "validityNotAfter must be later than validityNotBefore");
++  let serial = crypto.randomBytes(9);
++  serial[0] &= 0x7f;
++  // Keep the positive random value, with only the sign octet DER requires.
++  while (serial.length > 1 && serial[0] === 0 && serial[1] < 0x80) serial = serial.subarray(1);
++  if (serial.every(byte => byte === 0)) serial[serial.length - 1] = 1;
++  const algorithm = new x.AlgorithmIdentifier({ algorithm: sha256RSA, parameters: null });
++  const tbsCertificate = new x.TBSCertificate({
++    version: x.Version.v3, serialNumber: serial, signature: algorithm, subject, issuer,
++    validity: new x.Validity({ notBefore, notAfter }), extensions,
++    subjectPublicKeyInfo: parseDER(publicDER(publicKey), x.SubjectPublicKeyInfo).value,
++  });
++  const signature = crypto.sign("sha256", encode(tbsCertificate),
++    { key: rsa(privateKey, "private"), padding: crypto.constants.RSA_PKCS1_PADDING });
++  return new Certificate(encode(new x.Certificate({ tbsCertificate, signatureAlgorithm: algorithm, signatureValue: signature })));
++}
++function generateSelfSignedCodeSigningCertificate({ keyPair, validityNotBefore, validityNotAfter, commonName: cn }) {
++  const subject = commonName(cn);
++  return issueCertificate(keyPair.publicKey, keyPair.privateKey, subject, subject,
++    validityNotBefore, validityNotAfter, usageExtensions());
++}
++function validateSelfSignedCertificate(certificate, keyPair) {
++  const state = getCertificate(certificate), tbs = state.model.tbsCertificate;
++  if (!encode(tbs.issuer).equals(encode(tbs.subject))) {
++    throw new Error("Certificate issuer hash does not match subject hash, indicating certificate is not self-signed.");
++  }
++  const now = new Date(), validity = certificate.validity;
++  if (validity.notBefore > now || validity.notAfter < now) throw new Error("Certificate validity expired");
++  if (!certificate.getExtension("keyUsage")?.digitalSignature) throw new Error("X509v3 Key Usage: Digital Signature not present");
++  if (!certificate.getExtension("extKeyUsage")?.codeSigning) throw new Error("X509v3 Extended Key Usage: Code Signing not present");
++  if (!certificate.verify(certificate)) throw new Error("Certificate signature not valid");
++  if (!publicDER(certificate.publicKey).equals(publicDER(keyPair.publicKey))) {
++    throw new Error("Certificate pubic key does not match key pair public key");
++  }
++  if (!publicDER(crypto.createPublicKey(rsa(keyPair.privateKey, "private"))).equals(publicDER(keyPair.publicKey))) {
++    throw new Error("keyPair key mismatch");
++  }
++}
++function signBufferRSASHA256AndVerify(privateKey, certificate, payload) {
++  const signature = crypto.sign("sha256", payload, { key: rsa(privateKey, "private"), padding: crypto.constants.RSA_PKCS1_PADDING });
++  if (!crypto.verify("sha256", payload, { key: rsa(getCertificate(certificate).native.publicKey, "public"),
++    padding: crypto.constants.RSA_PKCS1_PADDING }, signature)) {
++    throw new Error("Signature generated with private key not valid for certificate");
++  }
++  return signature.toString("base64");
++}
++function generateCSR(keyPair, cn) {
++  const certificationRequestInfo = new c.CertificationRequestInfo({
++    subject: commonName(cn), subjectPKInfo: parseDER(publicDER(keyPair.publicKey), x.SubjectPublicKeyInfo).value,
++  });
++  const signature = crypto.sign("sha256", encode(certificationRequestInfo),
++    { key: rsa(keyPair.privateKey, "private"), padding: crypto.constants.RSA_PKCS1_PADDING });
++  return new CertificateRequest(encode(new c.CertificationRequest({
++    certificationRequestInfo, signatureAlgorithm: new x.AlgorithmIdentifier({ algorithm: sha256RSA, parameters: null }), signature,
++  })));
++}
++function generateDevelopmentCertificateFromCSR(issuerPrivateKey, issuerCertificate, csr, appId, scopeKey) {
++  assert(csr.verify(), "CSR not self-signed");
++  const subject = getRequest(csr).model.certificationRequestInfo.subject;
++  const issuer = getCertificate(issuerCertificate).model.tbsCertificate.subject;
++  const notBefore = new Date();
++  notBefore.setDate(notBefore.getDate() - 1);
++  const notAfter = new Date();
++  // Preserve Expo 0.0.6 local-calendar validity behavior, including its month-boundary quirk.
++  notAfter.setDate(notBefore.getDate() + 30);
++  const extensions = usageExtensions();
++  extensions.push(new x.Extension({ extnID: expoProjectInformationOID,
++    extnValue: new OctetString(Buffer.from(appId + "," + scopeKey, "binary")) }));
++  return issueCertificate(csr.publicKey, issuerPrivateKey, subject, issuer, notBefore, notAfter, extensions);
++}
++module.exports = {
++  expoProjectInformationOID, generateKeyPair, convertKeyPairToPEM, convertKeyPairPEMToKeyPair,
++  convertCertificateToCertificatePEM, convertPublicKeyPEMToPublicKey, convertPrivateKeyPEMToPrivateKey,
++  convertCertificatePEMToCertificate, convertCSRToCSRPEM, convertCSRPEMToCSR,
++  generateSelfSignedCodeSigningCertificate, validateSelfSignedCertificate,
++  signBufferRSASHA256AndVerify, generateCSR, generateDevelopmentCertificateFromCSR,
++};
+diff --git a/build/main.d.ts b/build/main.d.ts
+--- a/build/main.d.ts
++++ b/build/main.d.ts
+@@ -1,135 +1,41 @@
+-/// <reference types="node" />
+-import { pki as PKI } from 'node-forge';
+-/**
+- * Custom X.509 extension that stores information about the Expo project that a code signing certificate is valid for.
+- * Used to prevent spoofing of scoping identifiers in Expo Go.
+- *
+- * Note: Generated with oidgen script. Resides in the Microsoft OID space. Could apply for Expo space but would take time: https://pen.iana.org/pen/PenApplication.page
+- */
+-export declare const expoProjectInformationOID = "1.2.840.113556.1.8000.2554.43437.254.128.102.157.7894389.20439.2.1";
+-/**
+- * Generate a public and private RSA key pair.
+- * @returns RSA key pair
+- */
+-export declare function generateKeyPair(): PKI.rsa.KeyPair;
+-/**
+- * Convert a key RSA key pair generated using {@link generateKeyPair} to PEM strings.
+- * @param keyPair RSA key pair
+- * @returns PEM formatted key pair
+- */
+-export declare function convertKeyPairToPEM(keyPair: PKI.rsa.KeyPair): {
+-    privateKeyPEM: string;
+-    publicKeyPEM: string;
+-};
+-/**
+- * Convert a X.509 certificate generated using {@link generateSelfSignedCodeSigningCertificate} to a PEM string.
+- * @param certificate X.509 certificate
+- * @returns
+- */
+-export declare function convertCertificateToCertificatePEM(certificate: PKI.Certificate): string;
+-/**
+- * Convert a PEM-formatted RSA key pair to a key pair for use with this library.
+- * @param keyPair PEM-formatted private key and public key
+- * @returns RSA key pair
+- */
+-export declare function convertKeyPairPEMToKeyPair({ privateKeyPEM, publicKeyPEM, }: {
+-    privateKeyPEM: string;
+-    publicKeyPEM: string;
+-}): PKI.rsa.KeyPair;
+-/**
+- * Convert a PEM-formatted RSA public key to a public key for use with this library.
+- * @param publicKeyPEM PEM formatted public key
+- * @returns RSA public key
+- */
+-export declare function convertPublicKeyPEMToPublicKey(publicKeyPEM: string): PKI.rsa.PublicKey;
+-/**
+- * Convert a PEM-formatted RSA private key to a private key for use with this library.
+- * @param privateKeyPEM PEM formatted private key
+- * @returns RSA private key
+- */
+-export declare function convertPrivateKeyPEMToPrivateKey(privateKeyPEM: string): PKI.rsa.PrivateKey;
+-/**
+- * Convert a PEM-formatted X.509 certificate to a certificate for use with this library.
+- * @param certificatePEM PEM formatted X.509 certificate
+- * @returns  X.509 Certificate
+- */
+-export declare function convertCertificatePEMToCertificate(certificatePEM: string): PKI.Certificate;
+-/**
+- * Convert a CSR to PEM-formatted X.509 CSR
+- * @param csr CSR
+- * @returns X.509 CSR
+- */
+-export declare function convertCSRToCSRPEM(csr: PKI.CertificateRequest): string;
+-/**
+- * Convert a PEM-formatted X.509 CSR to a CSR
+- * @param CSRPEM PEM-formatted X.509 CSR
+- * @returns CSR
+- */
+-export declare function convertCSRPEMToCSR(CSRPEM: string): PKI.CertificateRequest;
+-declare type GenerateParameters = {
+-    /**
+-     * Public/private key pair generated via {@link generateKeyPair}.
+-     */
+-    keyPair: PKI.rsa.KeyPair;
+-    /**
+-     * Certificate validity range start.
+-     */
+-    validityNotBefore: Date;
+-    /**
+-     * Certificate validity range end.
+-     */
+-    validityNotAfter: Date;
+-    /**
+-     * CN issuer and subject Distinguished Name (DN).
+-     * Used for both issuer and subject in the case of self-signed certificates.
+-     */
+-    commonName: string;
+-};
+-/**
+- * Generate a self-signed (root) code-signing certificate valid for use with expo-updates.
+- *
+- * @returns PKI.Certificate valid for expo-updates code signing
+- */
+-export declare function generateSelfSignedCodeSigningCertificate({ keyPair: { publicKey, privateKey }, validityNotBefore, validityNotAfter, commonName, }: GenerateParameters): PKI.Certificate;
+-/**
+- * Validate that a certificate and corresponding key pair can be used for expo-updates code signing.
+- * @param certificate X.509 certificate
+- * @param keyPair RSA key pair
+- */
+-export declare function validateSelfSignedCertificate(certificate: PKI.Certificate, keyPair: PKI.rsa.KeyPair): void;
+-/**
+- * Sign a SHA-256 hash of the provided string with an RSA private key and verify that the signature
+- * is valid for the RSA public key in the certificate. The verification part is most useful for
+- * debugging, so while this may be used in server implementation for expo-updates code signing,
+- * a similar method without verification can be created for efficiency for use in production.
+- *
+- * @param privateKey RSA private key
+- * @param certificate X.509 certificate
+- * @param bufferToSign buffer to hash, generate a signature for, and verify
+- * @returns base64-encoded RSA signature
+- */
+-export declare function signBufferRSASHA256AndVerify(privateKey: PKI.rsa.PrivateKey, certificate: PKI.Certificate, bufferToSign: Buffer): string;
+-/**
+- * Generate a self-signed CSR for a given key pair. Most commonly used with {@link generateDevelopmentCertificateFromCSR}.
+- * @param keyPair RSA key pair
+- * @param commonName commonName attribute of the subject of the resulting certificate (human readable name of the certificate)
+- * @returns CSR
+- */
+-export declare function generateCSR(keyPair: PKI.rsa.KeyPair, commonName: string): PKI.CertificateRequest;
+-/**
+- * For use by a server to generate a development certificate (good for 30 days) for a particular
+- * appId and scopeKey (Expo project manifest fields verified by the client during certificate validation).
+- *
+- * Note that this function assumes the issuer is trusted, and that the user that created the CSR and issued
+- * the request has permission to sign manifests for the appId and scopeKey. This constraint must be
+- * verified on the server before calling this method.
+- *
+- * @param issuerPrivateKey private key to sign the resulting certificate with
+- * @param issuerCertificate parent certificate (should be a CA) of the resulting certificate
+- * @param csr certificate signing request containing the user's public key
+- * @param appId app ID (UUID) of the app that the resulting certificate will sign the development manifest for
+- * @param scopeKey scope key of the app that the resuting certificate will sign the development manifest for
+- * @returns certificate to use to sign development manifests
+- */
+-export declare function generateDevelopmentCertificateFromCSR(issuerPrivateKey: PKI.rsa.PrivateKey, issuerCertificate: PKI.Certificate, csr: PKI.CertificateRequest, appId: string, scopeKey: string): PKI.Certificate;
+-export {};
++/// <reference types="node" />
++import { KeyObject } from "node:crypto";
++// Owned, immutable native representations for the pinned Expo callers.
++// These are not arbitrary mutable node-forge PKI objects.
++export interface KeyPair { publicKey: KeyObject; privateKey: KeyObject; }
++export interface NameAttribute { readonly type: string; readonly name?: string; readonly shortName?: string; readonly value: string; }
++export interface DistinguishedName {
++  readonly attributes: readonly NameAttribute[];
++  getField(field: string | Partial<NameAttribute>): NameAttribute | null;
++}
++export interface CertificateExtension {
++  readonly id: string; readonly name?: string; readonly critical: boolean; readonly value: string;
++  readonly digitalSignature?: boolean; readonly codeSigning?: boolean;
++}
++export interface Certificate {
++  readonly publicKey: KeyObject; readonly subject: DistinguishedName; readonly issuer: DistinguishedName;
++  readonly validity: Readonly<{ notBefore: Date; notAfter: Date }>; readonly serialNumber: string;
++  getExtension(field: string | Partial<CertificateExtension>): CertificateExtension | null;
++  verify(child: Certificate): boolean;
++}
++export interface CertificateRequest {
++  readonly publicKey: KeyObject; readonly subject: DistinguishedName;
++  verify(): boolean;
++}
++export declare const expoProjectInformationOID: "1.2.840.113556.1.8000.2554.43437.254.128.102.157.7894389.20439.2.1";
++export declare function generateKeyPair(): KeyPair;
++export declare function convertKeyPairToPEM(pair: KeyPair): { privateKeyPEM: string; publicKeyPEM: string };
++export declare function convertKeyPairPEMToKeyPair(pair: { privateKeyPEM: string; publicKeyPEM: string }): KeyPair;
++export declare function convertPrivateKeyPEMToPrivateKey(pem: string): KeyObject;
++export declare function convertPublicKeyPEMToPublicKey(pem: string): KeyObject;
++export declare function convertCertificateToCertificatePEM(certificate: Certificate): string;
++export declare function convertCertificatePEMToCertificate(pem: string): Certificate;
++export declare function convertCSRToCSRPEM(csr: CertificateRequest): string;
++export declare function convertCSRPEMToCSR(pem: string): CertificateRequest;
++export declare function generateSelfSignedCodeSigningCertificate(parameters: {
++  keyPair: KeyPair; validityNotBefore: Date; validityNotAfter: Date; commonName: string;
++}): Certificate;
++export declare function validateSelfSignedCertificate(certificate: Certificate, pair: KeyPair): void;
++export declare function signBufferRSASHA256AndVerify(privateKey: KeyObject, certificate: Certificate, payload: Buffer): string;
++export declare function generateCSR(pair: KeyPair, commonName: string): CertificateRequest;
++export declare function generateDevelopmentCertificateFromCSR(privateKey: KeyObject, issuer: Certificate, csr: CertificateRequest, appId: string, scopeKey: string): Certificate;
