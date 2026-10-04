@@ -17,10 +17,13 @@ minimumReleaseAgeExclude:
   - wrangler@4.141.0
 
 # Backport the nested DigestAlgorithm validation from upstream PR1152 at
-# ceba34402e329f0365134f23fe19898756527d65 plus empty-NULL-content validation.
+# ceba34402e329f0365134f23fe19898756527d65 plus empty-NULL-content and
+# exact canonical-OID validation (incomplete arcs must not be ignored).
 # Keep the genuine npm version and
 # every supply-chain/audit rule; version-based audit remains a release blocker.
 patchedDependencies:
+  # Local depth/resource limits; official GHSA-vfj7-8cjw-p6xm audit still blocks release.
+  braces@3.0.3: patches/braces@3.0.3.patch
   node-forge@1.4.0: patches/node-forge@1.4.0.patch
 
 overrides:
@@ -29,7 +32,11 @@ overrides:
   # entry once no dependency in pnpm-lock.yaml resolves into the vulnerable range.
   # GHSA-qhr7-859c-m2p7, GHSA-6j4f-fj2g-mc7p, GHSA-rgw5-rvv9-x895, GHSA-mh99-v99m-4gvg,
   # GHSA-q2hr-2g5m-vwhr (brace-expansion expansion DoS / recursion / quadratic rewrite).
+  brace-expansion@>=2.0.0 <2.1.7: 2.1.7
   brace-expansion@>=4.0.0 <5.0.12: 5.0.12
+  # GHSA-rfgv-xxqx-mfg5 / GHSA-w293-vg96-wgc3, undici WebSocket/TLS fixes.
+  # Same patch line; intentionally supersedes Miniflare's exact 7.29.0 pin.
+  undici@>=7.0.0 <7.29.1: 7.29.1
   # GHSA-vcc3-ghjq-m6fr, GHSA-w573-4hg7-7wgq (decode-uri-component decoding DoS).
   decode-uri-component@<=0.4.2: 0.5.0
   # GHSA-qw65-cvwx-89v3, GHSA-58mr-gqgx-xq4g, GHSA-hrr3-gc8f-f4qj, GHSA-f65p-4m7j-42xc,

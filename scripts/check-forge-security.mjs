@@ -12,9 +12,10 @@ const certificateRequire = createRequire(cliRequire.resolve("@expo/code-signing-
 export const forge = cliRequire("node-forge");
 
 // Upstream PR1152 commit ceba34402e329f0365134f23fe19898756527d65 backport
-// plus local empty-NULL-content hardening. Not an official patched npm release.
-const expectedRsaHash = "be6ff389fe96f09c2da9ed28c949990890a5b4db5f39d6b14c414d88f594d8a3";
-const expectedPatchHash = "40ee2ae4402de9b3dcd64a51c315f59d4ced2a35f96f46ccba5e8719bf61ebfc";
+// plus local empty-NULL-content and canonical-OID hardening. This is not an
+// official patched npm release; the version-based audit remains mandatory.
+const expectedRsaHash = "bc8e6d2f03d2f28254c38d54fbba1ced6e5992ce8dc23ffee7824cb22ba9a832";
+const expectedPatchHash = "82df5e8c086bdb3a63ad6a4be0bb777f8ae052803f62cbc921496391ae1c9bdc";
 
 export function verifyForgePatch() {
   const cliPath = realpathSync(cliRequire.resolve("node-forge"));
@@ -39,11 +40,13 @@ export function verifyForgePatch() {
 // Synthetic signed encodings exercise the parser, not a real credential or an
 // end-to-end attacker forgery. Private keys are generated in memory only.
 export function digestInfoSignature(implementation, keyPair, { includeNull = true, nullContents = "",
-  nestedGarbage = false, outerGarbage = false, trailingGarbage = false } = {}) {
+  nestedGarbage = false, outerGarbage = false, trailingGarbage = false,
+  algorithmIdentifier } = {}) {
   const a = implementation.asn1;
   const node = (type, constructed, value) => a.create(a.Class.UNIVERSAL, type, constructed, value);
   const digest = implementation.md.sha256.create().update("DABBOBA synthetic security regression").digest().getBytes();
-  const algorithm = [node(a.Type.OID, false, a.oidToDer(implementation.oids.sha256).getBytes())];
+  const algorithm = [node(a.Type.OID, false,
+    algorithmIdentifier ?? a.oidToDer(implementation.oids.sha256).getBytes())];
   if (includeNull) algorithm.push(node(a.Type.NULL, false, nullContents));
   if (nestedGarbage) algorithm.push(node(a.Type.OCTETSTRING, false, "unconsumed nested input"));
   const content = [node(a.Type.SEQUENCE, true, algorithm), node(a.Type.OCTETSTRING, false, digest)];

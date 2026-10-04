@@ -3,6 +3,7 @@ import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from "node:f
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { verifyMobileArtifactConfig } from "./verify-mobile-artifact-config.mjs";
 
 const repositoryRoot = fileURLToPath(new URL("../", import.meta.url));
 const bundleExtensions = new Set([".js", ".json", ".html", ".hbc", ".bundle", ".jsbundle"]);
@@ -94,8 +95,13 @@ function exportPlatform(platform, outputDirectory) {
   }
 }
 
-export function verifyMobileProductionBundles() {
-  const capability = process.env.EXPO_PUBLIC_COMMERCE_CAPABILITY?.trim();
+export async function verifyMobileProductionBundles({
+  environment = process.env,
+  exporter = exportPlatform,
+  scanner = scanMobileProductionBundle,
+  artifactVerifier = verifyMobileArtifactConfig,
+} = {}) {
+  const capability = environment.EXPO_PUBLIC_COMMERCE_CAPABILITY?.trim();
   if (capability !== "PRELAUNCH" && capability !== "LIVE") {
     throw new Error("EXPO_PUBLIC_COMMERCE_CAPABILITY must be PRELAUNCH or LIVE before bundle verification");
   }
@@ -105,8 +111,20 @@ export function verifyMobileProductionBundles() {
     const issues = [];
     for (const platform of ["ios", "android"]) {
       const outputDirectory = path.join(temporaryRoot, platform);
-      exportPlatform(platform, outputDirectory);
-      issues.push(...scanMobileProductionBundle(outputDirectory).map((issue) => ({ ...issue, platform })));
+      await exporter(platform, outputDirectory);
+      issues.push(...scanner(outputDirectory).map((issue) => ({ ...issue, platform })));
+      // The internal PG-review profile is deliberately a different test
+      // project. Public release profiles must also prove exact compiled
+      // public settings, rather than only absence of forbidden markers.
+      if (environment.EAS_BUILD_PROFILE !== "pg-review") {
+        const report = await artifactVerifier({ artifactPath: outputDirectory, platform, environment });
+        if (report.status !== "pass") {
+          for (const bundle of report.bundles) {
+            issues.push(...bundle.errors.map(({ code }) => ({ code, platform, file: bundle.entry })));
+          }
+          if (!report.bundles.length || !issues.length) issues.push({ code: "ARTIFACT_CONFIG_FAILED", platform, file: "metadata.json" });
+        }
+      }
     }
     if (issues.length > 0) {
       const summary = issues.map((issue) => `${issue.platform}:${issue.code}:${issue.file}`).join("\n");
@@ -119,8 +137,8 @@ export function verifyMobileProductionBundles() {
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
-    verifyMobileProductionBundles();
-    process.stdout.write("iOS and Android production bundles contain no test payment, demo-session, fixture, or customer API loopback markers.\n");
+    await verifyMobileProductionBundles();
+    process.stdout.write("iOS and Android production bundle gates passed; this is not device, signing or authentication proof.\n");
   } catch (error) {
     process.stderr.write(`${error instanceof Error ? error.message : "Mobile production bundle verification failed"}\n`);
     process.exitCode = 1;

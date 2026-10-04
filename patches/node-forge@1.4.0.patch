@@ -18,3 +18,19 @@ diff --git a/lib/rsa.js b/lib/rsa.js
              var error = new Error(
                'ASN.1 object does not contain a valid RSASSA-PKCS1-v1_5 ' +
                'DigestInfo value.');
+@@ -1185,6 +1191,15 @@ pki.setRsaPublicKey = pki.rsa.setPublicKey = function(n, e) {
+           // see PKCS1-v1-5DigestAlgorithms in RFC 8017
+           // FIXME: add support to validator for strict value choices
+           var oid = asn1.derToOid(capture.algorithmIdentifier);
++          // derToOid can silently discard unfinished base-128 arcs. Require
++          // the exact canonical OID bytes so ignored or nonminimal content
++          // cannot supply another unconsumed DigestAlgorithm representation.
++          if(asn1.oidToDer(oid).getBytes() !== capture.algorithmIdentifier) {
++            throw new Error(
++              'ASN.1 object does not contain a valid RSASSA-PKCS1-v1_5 ' +
++              'DigestAlgorithm identifier encoding.');
++          }
++
+           if(!(oid === forge.oids.md2 ||
+             oid === forge.oids.md5 ||
+             oid === forge.oids.sha1 ||

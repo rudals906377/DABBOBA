@@ -375,15 +375,25 @@ test("API and worker database identities are isolated around pgmq", {
       pgmq_create: false,
       extensions_usage: false,
     }]);
-    const unreviewedCallable = await migrationPool.query<{ count: string }>(
-      `SELECT count(*) AS count
+    const publicCallable = await migrationPool.query<{
+      schema_name: string; routine_name: string; argument_types: string;
+    }>(
+      `SELECT namespace.nspname AS schema_name,routine.proname AS routine_name,
+              oidvectortypes(routine.proargtypes) AS argument_types
          FROM pg_proc AS routine
+         JOIN pg_namespace AS namespace ON namespace.oid=routine.pronamespace
         WHERE routine.pronamespace IN (to_regnamespace('public'),to_regnamespace('extensions'))
           AND has_schema_privilege($1,routine.pronamespace,'USAGE')
-          AND has_function_privilege($1,routine.oid,'EXECUTE')`,
+          AND has_function_privilege($1,routine.oid,'EXECUTE')
+        ORDER BY namespace.nspname,routine.proname,argument_types`,
       [WORKER_DATABASE_ROLE],
     );
-    assert.equal(unreviewedCallable.rows[0]?.count, "0");
+    // 0083 adds only these two reviewed, bounded component-disposal functions.
+    // Exact names/signatures retain the failure on any extra callable routine.
+    assert.deepEqual(publicCallable.rows, [
+      { schema_name: "public", routine_name: "execute_commerce_retention", argument_types: "integer" },
+      { schema_name: "public", routine_name: "preview_commerce_retention", argument_types: "integer" },
+    ]);
     const setVtDependency = await migrationPool.query<{
       timestamp_overload_exists: boolean;
       worker_can_execute: boolean | null;
@@ -421,6 +431,8 @@ test("API and worker database identities are isolated around pgmq", {
       "SELECT * FROM pgmq.read('dabboba_worker'::text, 900::integer, 1::integer)",
       "SELECT pgmq.delete('dabboba_worker'::text, 1::bigint)",
       "SELECT * FROM pgmq.set_vt('dabboba_worker'::text, 1::bigint, 900::integer)",
+      "SELECT * FROM public.preview_commerce_retention(1)",
+      "SELECT public.execute_commerce_retention(1)",
       `INSERT INTO public.worker_dead_letters
          (queue_name, message_id, read_count, job_payload, error_message)
        VALUES ('dabboba_worker', 1, 1, '{}'::jsonb, 'must fail')`,
@@ -441,6 +453,10 @@ test("API and worker database identities are isolated around pgmq", {
       for (const deniedTable of [
         "admin_credentials",
         "schema_migrations",
+        "commerce_retention_policies",
+        "commerce_retention_reviews",
+        "commerce_retention_holds",
+        "commerce_retention_disposals",
       ]) {
         await assert.rejects(
           workerClient.query(`SELECT 1 FROM public.${deniedTable} LIMIT 0`),
