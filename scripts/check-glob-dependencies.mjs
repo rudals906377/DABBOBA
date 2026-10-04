@@ -13,11 +13,11 @@ export const watcherPackages = Object.freeze([
     sourceSha256: "31f7463908e9c918ea47aa51a1a6c4464aabbebeaaf53931f0aaed877a3fa679" },
   { name: "metro-file-map", version: "0.84.5", relativeFile: "src/watchers/common.js",
     patchFile: "metro-file-map@0.84.5.patch",
-    patchSha256: "5cde4c88a105bfb3dbbc1678e9bec0c28fe92c4ad6ae525647c8a158d4215021",
+    patchSha256: "d1e96866364681f6b64447253cddaf41a4e28296ae1a3b1babb89210e15bf41e",
     sourceSha256: "bc77f9d1e0a802eb2f5764a3fabd4f9dcf0ed0e5f1dcd69a673eae5925337ed5" },
   { name: "metro-file-map", version: "0.84.6", relativeFile: "src/watchers/common.js",
     patchFile: "metro-file-map@0.84.6.patch",
-    patchSha256: "5cde4c88a105bfb3dbbc1678e9bec0c28fe92c4ad6ae525647c8a158d4215021",
+    patchSha256: "d1e96866364681f6b64447253cddaf41a4e28296ae1a3b1babb89210e15bf41e",
     sourceSha256: "bc77f9d1e0a802eb2f5764a3fabd4f9dcf0ed0e5f1dcd69a673eae5925337ed5" },
 ]);
 const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");

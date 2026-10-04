@@ -39,21 +39,12 @@ diff --git a/src/watchers/common.js.flow b/src/watchers/common.js.flow
 index 16f4c705bb6446b18cb87bb8aab3179549b107aa..a0b77cbb679f000219463a42175650130c90d4d2 100644
 --- a/src/watchers/common.js.flow
 +++ b/src/watchers/common.js.flow
-@@ -17,8 +17,8 @@
- import type {ChangeEventMetadata} from '../flow-types';
- import type {Stats} from 'fs';
- 
+@@ -20,2 +20,2 @@ import type {Stats} from 'fs';
 -// $FlowFixMe[untyped-import] - Write libdefs for `micromatch`
 -import micromatch from 'micromatch';
 +// $FlowFixMe[untyped-import] - Write libdefs for `picomatch`
 +import picomatch from 'picomatch';
- import path from 'path';
- 
- /**
-@@ -38,6 +38,21 @@ export type WatcherOptions = Readonly<{
-   watchmanPath?: string,
- }>;
- 
+@@ -40,0 +41,15 @@ export type WatcherOptions = Readonly<{
 +function someMatches(
 +  list: string,
 +  patterns: string | ReadonlyArray<string>,
@@ -69,18 +60,9 @@ index 16f4c705bb6446b18cb87bb8aab3179549b107aa..a0b77cbb679f000219463a4217565013
 +  return false;
 +}
 +
- /**
-  * Checks a file relative path against the globs array.
-  */
-@@ -50,9 +65,9 @@ export function includedByGlob(
-   // For non-regular files or if there are no glob matchers, just respect the
-   // `dot` option to filter dotfiles if dot === false.
-   if (globs.length === 0 || type !== 'f') {
+@@ -53 +68 @@ export function includedByGlob(
 -    return dot || micromatch.some(relativePath, '**/*');
 +    return dot || someMatches(relativePath, '**/*');
-   }
+@@ -55 +70 @@ export function includedByGlob(
 -  return micromatch.some(relativePath, globs, {dot});
 +  return someMatches(relativePath, globs, {dot});
- }
- 
- /**

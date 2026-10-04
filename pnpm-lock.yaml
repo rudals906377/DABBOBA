@@ -23,8 +23,8 @@ packageExtensionsChecksum: sha256-s/j4HDDUFn7W4tkseTprVrZZqB6LvuTTnciqLnQoY6M=
 
 patchedDependencies:
   '@expo/metro-file-map@57.0.3': 9bd9bf7c25c8c01c37abe38098815cac14b2b7a4e5a90a9437ee8121d444fb38
-  metro-file-map@0.84.5: 5cde4c88a105bfb3dbbc1678e9bec0c28fe92c4ad6ae525647c8a158d4215021
-  metro-file-map@0.84.6: 5cde4c88a105bfb3dbbc1678e9bec0c28fe92c4ad6ae525647c8a158d4215021
+  metro-file-map@0.84.5: d1e96866364681f6b64447253cddaf41a4e28296ae1a3b1babb89210e15bf41e
+  metro-file-map@0.84.6: d1e96866364681f6b64447253cddaf41a4e28296ae1a3b1babb89210e15bf41e
   node-forge@1.4.0: 82df5e8c086bdb3a63ad6a4be0bb777f8ae052803f62cbc921496391ae1c9bdc
 
 importers:
@@ -8479,7 +8479,7 @@ snapshots:
       metro-cache-key: 0.84.5
       metro-config: 0.84.5(supports-color@10.2.2)
       metro-core: 0.84.5
-      metro-file-map: 0.84.5(patch_hash=5cde4c88a105bfb3dbbc1678e9bec0c28fe92c4ad6ae525647c8a158d4215021)(supports-color@10.2.2)
+      metro-file-map: 0.84.5(patch_hash=d1e96866364681f6b64447253cddaf41a4e28296ae1a3b1babb89210e15bf41e)(supports-color@10.2.2)
       metro-minify-terser: 0.84.5
       metro-resolver: 0.84.5
       metro-runtime: 0.84.5
@@ -12461,7 +12461,7 @@ snapshots:
       lodash.throttle: 4.1.1
       metro-resolver: 0.84.6
 
-  metro-file-map@0.84.5(patch_hash=5cde4c88a105bfb3dbbc1678e9bec0c28fe92c4ad6ae525647c8a158d4215021)(supports-color@10.2.2):
+  metro-file-map@0.84.5(patch_hash=d1e96866364681f6b64447253cddaf41a4e28296ae1a3b1babb89210e15bf41e)(supports-color@10.2.2):
     dependencies:
       debug: 4.4.3(supports-color@10.2.2)
       fb-watchman: 2.0.2
@@ -12475,7 +12475,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  metro-file-map@0.84.6(patch_hash=5cde4c88a105bfb3dbbc1678e9bec0c28fe92c4ad6ae525647c8a158d4215021)(supports-color@10.2.2):
+  metro-file-map@0.84.6(patch_hash=d1e96866364681f6b64447253cddaf41a4e28296ae1a3b1babb89210e15bf41e)(supports-color@10.2.2):
     dependencies:
       debug: 4.4.3(supports-color@10.2.2)
       fb-watchman: 2.0.2
@@ -12655,7 +12655,7 @@ snapshots:
       metro-cache-key: 0.84.5
       metro-config: 0.84.5(supports-color@10.2.2)
       metro-core: 0.84.5
-      metro-file-map: 0.84.5(patch_hash=5cde4c88a105bfb3dbbc1678e9bec0c28fe92c4ad6ae525647c8a158d4215021)(supports-color@10.2.2)
+      metro-file-map: 0.84.5(patch_hash=d1e96866364681f6b64447253cddaf41a4e28296ae1a3b1babb89210e15bf41e)(supports-color@10.2.2)
       metro-resolver: 0.84.5
       metro-runtime: 0.84.5
       metro-source-map: 0.84.5(supports-color@10.2.2)
@@ -12700,7 +12700,7 @@ snapshots:
       metro-cache-key: 0.84.6
       metro-config: 0.84.6(supports-color@10.2.2)
       metro-core: 0.84.6
-      metro-file-map: 0.84.6(patch_hash=5cde4c88a105bfb3dbbc1678e9bec0c28fe92c4ad6ae525647c8a158d4215021)(supports-color@10.2.2)
+      metro-file-map: 0.84.6(patch_hash=d1e96866364681f6b64447253cddaf41a4e28296ae1a3b1babb89210e15bf41e)(supports-color@10.2.2)
       metro-resolver: 0.84.6
       metro-runtime: 0.84.6
       metro-source-map: 0.84.6(supports-color@10.2.2)
