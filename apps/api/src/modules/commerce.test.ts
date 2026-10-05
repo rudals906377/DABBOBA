@@ -131,6 +131,9 @@ test("gacha probability uses each remaining quantity over the whole remaining po
   assert.throws(() => gachaRemainingQuantityWeights([{ weight: 2, remaining_quantity: 50 }]), (error: unknown) => error instanceof AppError && error.statusCode === 409);
   assert.throws(() => gachaRemainingQuantityWeights([{ weight: 1, remaining_quantity: null }]), (error: unknown) => error instanceof AppError && error.statusCode === 409);
   assert.throws(() => assertDrawVersionCategoryConfiguration("gacha", null, [{ prizeProductId: "prize-a", rarity: "A", weight: 2, quantity: 50, tierCode: null, tierRank: null }]), (error: unknown) => error instanceof AppError && error.statusCode === 400);
+  // The contract marks weight optional for gacha; omitting it means weight 1.
+  assert.doesNotThrow(() => assertDrawVersionCategoryConfiguration("gacha", null, [{ prizeProductId: "prize-a", rarity: "A", weight: null, quantity: 50, tierCode: null, tierRank: null }]));
+  assert.doesNotThrow(() => assertDrawVersionCategoryConfiguration("gacha", null, [{ prizeProductId: "prize-a", rarity: "A", weight: 1, quantity: 50, tierCode: null, tierRank: null }]));
 });
 
 test("a paid entitlement is consumed under its own version's weight rule", async () => {

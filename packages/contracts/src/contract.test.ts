@@ -1025,3 +1025,18 @@ test("current-policy gate advertises a shared 428 response without blocking reco
   assert.match(acceptance, /LegalAcceptanceRequiredErrorEnvelope/);
   assert.doesNotMatch(acceptance, /components\/responses\/LegalAcceptanceRequired/);
 });
+
+test("recent-draw lists match the server limits for Home and Product Detail", () => {
+  const document = readFileSync(fileURLToPath(new URL("../openapi/dabboba.openapi.yaml", import.meta.url)), "utf8");
+  const schema = (name: string) => {
+    const start = document.indexOf(`\n    ${name}:\n`) + 1;
+    const rest = document.slice(start + name.length + 6);
+    const next = rest.search(/\n    [A-Za-z][A-Za-z0-9]*:\n/);
+    return document.slice(start, start + name.length + 6 + (next === -1 ? rest.length : next));
+  };
+  // Home returns two records; Product Detail history returns up to eight.
+  assert.match(schema("HomeRecentDrawActivityList"), /maxItems: 2/);
+  assert.match(schema("ProductRecentDrawActivityList"), /maxItems: 8/);
+  const productPath = document.slice(document.indexOf("  /v1/catalog/products/{productId}/recent-draws:\n"), document.indexOf("  /v1/catalog/home-product-clicks/{productId}:\n"));
+  assert.match(productPath, /\$ref: "#\/components\/schemas\/ProductRecentDrawActivityList"/);
+});

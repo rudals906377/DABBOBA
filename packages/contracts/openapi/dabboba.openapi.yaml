@@ -922,7 +922,7 @@ paths:
       description: Returns only server-committed draw results for active Home products. Customer identity is intentionally omitted.
       responses:
         "200":
-          description: Up to three newest immutable prize snapshots, newest first.
+          description: Up to two newest immutable prize snapshots, newest first.
           headers:
             Cache-Control:
               schema: { type: string }
@@ -944,7 +944,7 @@ paths:
               schema: { type: string }
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/HomeRecentDrawActivityList" }
+              schema: { $ref: "#/components/schemas/ProductRecentDrawActivityList" }
   /v1/catalog/home-product-clicks/{productId}:
     post:
       tags: [Catalog]
@@ -5385,6 +5385,17 @@ components:
         items:
           type: array
           maxItems: 2
+          items: { $ref: "#/components/schemas/HomeRecentDrawActivity" }
+    ProductRecentDrawActivityList:
+      type: object
+      additionalProperties: false
+      description: Product Detail history. The same snapshot shape as Home, with up to eight results.
+      required: [serverNow, items]
+      properties:
+        serverNow: { type: string, format: date-time }
+        items:
+          type: array
+          maxItems: 8
           items: { $ref: "#/components/schemas/HomeRecentDrawActivity" }
     AdminHomeCatalogSection:
       type: object

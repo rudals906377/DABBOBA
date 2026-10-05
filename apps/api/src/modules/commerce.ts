@@ -403,7 +403,8 @@ export function assertDrawVersionCategoryConfiguration(
 
   if (totalSlots !== null) throw badRequest("가챠·일반 구매 상품에는 쿠지 전체 장수를 보낼 수 없습니다.");
   for (const entry of entries) {
-    if (entry.weight !== 1) throw badRequest("가챠는 상세상품별 남은 수량만으로 확률을 계산하므로 가중치는 1이어야 합니다.");
+    // The contract makes weight optional for gacha; an omitted weight is stored as 1.
+    if (entry.weight !== null && entry.weight !== 1) throw badRequest("가챠는 상세상품별 남은 수량만으로 확률을 계산하므로 가중치는 1이어야 합니다.");
     if (entry.quantity === null) throw badRequest("가챠 경품마다 유한한 상세상품 수량이 필요합니다.");
     if (entry.tierCode !== null || entry.tierRank !== null) {
       throw badRequest("가챠 확률표에는 쿠지 tierCode 또는 tierRank를 보낼 수 없습니다.");
