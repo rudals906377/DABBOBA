@@ -164,6 +164,29 @@ test('real installed Hermes output uses exact string-table entries and detects s
   assert.ok(stale.bundles[0].errors.some((error) => error.code === 'COMPILED_VALUE_MISSING' && error.variable === 'EXPO_PUBLIC_DABBOBA_API_URL'));
 });
 
+test('markers inside non-ASCII Hermes strings are decoded and rejected by both release scanners', async (t) => {
+  const directory = fixture(t);
+  const compiler = resolveArtifactHermesCompiler();
+  const input = path.join(directory, 'input.js');
+  const bundleDirectory = path.join(directory, '_expo/static/js/ios');
+  mkdirSync(bundleDirectory, { recursive: true });
+  const hbc = path.join(bundleDirectory, 'entry.hbc');
+  // Development payment copy is Korean, so Hermes stores it as a UTF-16 table entry.
+  writeFileSync(input, `${source()}\nglobalThis.devPaymentCopy = "TEST_PG · 실제 과금 없음";`);
+  assert.equal(spawnSync(compiler, ['-O', '-emit-binary', '-out', hbc, input]).status, 0);
+  const report = await verifyMobileArtifactConfig({ artifactPath: hbc, platform: 'ios', environment });
+  assert.equal(report.status, 'fail');
+  assert.ok(codes(report.bundles[0]).has('FORBIDDEN_RELEASE_MARKER'));
+  assert.ok(scanMobileProductionBundle(directory).some((issue) => issue.code === 'TEST_PAYMENT'));
+
+  // Ordinary Korean copy still decodes exactly and passes.
+  writeFileSync(input, `${source()}\nglobalThis.copy = "결제 금액을 확인해 주세요 · é";`);
+  assert.equal(spawnSync(compiler, ['-O', '-emit-binary', '-out', hbc, input]).status, 0);
+  const clean = await verifyMobileArtifactConfig({ artifactPath: hbc, platform: 'ios', environment });
+  assert.equal(clean.status, 'pass');
+  assert.deepEqual(scanMobileProductionBundle(directory), []);
+});
+
 test('CLI returns nonzero for absent declarations without emitting public keys', (t) => {
   const directory = fixture(t);
   exportBundle(directory);
