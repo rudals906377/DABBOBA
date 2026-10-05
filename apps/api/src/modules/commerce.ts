@@ -426,6 +426,21 @@ export function gachaRemainingQuantityWeights(
   return { weights, total };
 }
 
+/**
+ * Selection weights for consuming an entitlement that was already paid for.
+ * The entitlement stays pinned to the version it was sold under, so this keeps
+ * that version's own `weight × remaining` rule instead of refusing it. For a
+ * current gacha version (weight 1, finite quantities) the result equals
+ * `gachaRemainingQuantityWeights`; a version published before that rule (custom
+ * weights or unlimited entries) stays consumable. New orders, odds and
+ * publishing still require the quantity-ratio rule.
+ */
+export function drawConsumeWeights(
+  entries: readonly { weight: number | string; remaining_quantity: number | string | null }[],
+): number[] {
+  return entries.map((entry) => numberValue(entry.weight) * (entry.remaining_quantity === null ? 1 : numberValue(entry.remaining_quantity)));
+}
+
 type LockedKujiCheckoutEntry = {
   id: string;
   product_id: string;
@@ -795,8 +810,8 @@ export async function registerCommerceRoutes(app:FastifyInstance,context:ApiCont
       }else{
         const entries=await client.query<ConsumableDrawPoolRow>("SELECT id,prize_product_id,prize_name_snapshot,prize_image_url_snapshot,prize_sku_snapshot,prize_ip_id_snapshot,prize_category_snapshot,rarity,weight,remaining_quantity FROM draw_pool_entries WHERE probability_version_id=$1 AND (remaining_quantity IS NULL OR remaining_quantity>0) ORDER BY id FOR UPDATE",[ticket.probability_version_id]);
         if(!entries.rowCount)throw conflict("남은 경품이 없습니다.");
-        const gachaWeights=gachaRemainingQuantityWeights(entries.rows);
-        const weighted=entries.rows.map((entry,index)=>({entry,effective:gachaWeights.weights[index]!}));
+        const consumeWeights=drawConsumeWeights(entries.rows);
+        const weighted=entries.rows.map((entry,index)=>({entry,effective:consumeWeights[index]!}));
         totalWeight=weighted.reduce((sum,item)=>sum+item.effective,0);
         if(!Number.isSafeInteger(totalWeight)||totalWeight<=0)throw conflict("추첨 확률표가 올바르지 않습니다.");
         const evidence=createDrawSelectionEvidence(totalWeight);

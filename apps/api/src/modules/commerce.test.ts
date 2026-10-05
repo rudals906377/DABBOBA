@@ -19,6 +19,7 @@ import {
   DRAW_SELECTION_ALGORITHM,
   drawPrizeSnapshotFields,
   drawRollFromEntropy,
+  drawConsumeWeights,
   gachaRemainingQuantityWeights,
   loadValidatedDrawPrizeSnapshots,
   refundRequiresReview,
@@ -130,6 +131,22 @@ test("gacha probability uses each remaining quantity over the whole remaining po
   assert.throws(() => gachaRemainingQuantityWeights([{ weight: 2, remaining_quantity: 50 }]), (error: unknown) => error instanceof AppError && error.statusCode === 409);
   assert.throws(() => gachaRemainingQuantityWeights([{ weight: 1, remaining_quantity: null }]), (error: unknown) => error instanceof AppError && error.statusCode === 409);
   assert.throws(() => assertDrawVersionCategoryConfiguration("gacha", null, [{ prizeProductId: "prize-a", rarity: "A", weight: 2, quantity: 50, tierCode: null, tierRank: null }]), (error: unknown) => error instanceof AppError && error.statusCode === 400);
+});
+
+test("a paid entitlement is consumed under its own version's weight rule", async () => {
+  // A current gacha version: consuming matches the remaining-quantity ratio exactly.
+  const current = [
+    ...Array.from({ length: 4 }, () => ({ weight: 1, remaining_quantity: 50 })),
+    { weight: 1, remaining_quantity: 2 },
+  ];
+  assert.deepEqual(drawConsumeWeights(current), gachaRemainingQuantityWeights(current).weights);
+  // A version published before that rule keeps working for tickets already sold under it,
+  // even though new orders and the odds endpoint refuse it.
+  const legacy = [{ weight: 3, remaining_quantity: 10 }, { weight: "1", remaining_quantity: "4" }, { weight: 2, remaining_quantity: null }];
+  assert.throws(() => gachaRemainingQuantityWeights(legacy as never), (error: unknown) => error instanceof AppError && error.statusCode === 409);
+  assert.deepEqual(drawConsumeWeights(legacy), [30, 4, 2]);
+  const source = await readFile(new URL("../../src/modules/commerce.ts", import.meta.url), "utf8");
+  assert.match(source, /const consumeWeights=drawConsumeWeights\(entries\.rows\);/);
 });
 
 test("refunds require review when a purchased unit moved owners or fulfillment is incomplete", () => {
