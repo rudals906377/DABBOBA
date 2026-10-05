@@ -388,7 +388,8 @@ test("API and worker database identities are isolated around pgmq", {
         ORDER BY namespace.nspname,routine.proname,argument_types`,
       [WORKER_DATABASE_ROLE],
     );
-    // 0082 adds only these two reviewed, bounded component-disposal functions.
+    // 0082 adds only these two reviewed, bounded component-disposal functions;
+    // 0083's shared assessment stays owner-only behind them.
     // Exact names/signatures retain the failure on any extra callable routine.
     assert.deepEqual(publicCallable.rows, [
       { schema_name: "public", routine_name: "execute_commerce_retention", argument_types: "integer" },

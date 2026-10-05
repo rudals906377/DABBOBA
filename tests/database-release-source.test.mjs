@@ -59,7 +59,7 @@ test('current deploy candidate commits every migration in a contiguous sequence'
   try {
     const report = checkDatabaseReleaseSource({ repositoryRoot: directory });
     assert.equal(report.status, 'pass', JSON.stringify(report));
-    assert.equal(report.latestMigration, '0082_commerce_retention_components.sql');
+    assert.equal(report.latestMigration, '0083_commerce_retention_bounded_assessment.sql');
     assert.deepEqual(report.blockers, []);
   } finally {
     await rm(directory, { recursive: true, force: true });

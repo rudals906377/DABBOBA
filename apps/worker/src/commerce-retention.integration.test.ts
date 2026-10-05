@@ -153,6 +153,18 @@ test("real restricted worker previews approved components and scrubs only expire
     await owner.query(`INSERT INTO worker_payment_reconciliations(payment_id,payment_version,attempts,last_outcome,last_observed_state,last_attempted_at,next_attempt_at)
       VALUES($1,1,1,'UNKNOWN','UNKNOWN',now(),now()+interval '1 hour')`, [ids.payment]);
     assert.equal(await previewFor(ids.shipping), "PAYMENT_UNRESOLVED");
+    // A settled check stops blocking: a verified RECONCILED outcome, or a commerce
+    // review an administrator closed after the last attempt. An unknown outcome
+    // on a payment cancelled without provider confirmation keeps blocking.
+    await owner.query("UPDATE worker_payment_reconciliations SET last_outcome='RECONCILED',last_observed_state='CANCELLED' WHERE payment_id=$1", [ids.payment]);
+    assert.equal(await previewFor(ids.shipping), null);
+    await owner.query("UPDATE worker_payment_reconciliations SET last_outcome='MANUAL_REVIEW',last_observed_state='UNKNOWN' WHERE payment_id=$1", [ids.payment]);
+    assert.equal(await previewFor(ids.shipping), "PAYMENT_UNRESOLVED");
+    await owner.query("INSERT INTO admin_commerce_reviews(payment_id,status,closed_at) VALUES($1,'CLOSED',now())", [ids.payment]);
+    assert.equal(await previewFor(ids.shipping), null);
+    await owner.query("UPDATE worker_payment_reconciliations SET last_attempted_at=now()+interval '1 minute',next_attempt_at=now()+interval '2 hours' WHERE payment_id=$1", [ids.payment]);
+    assert.equal(await previewFor(ids.shipping), "PAYMENT_UNRESOLVED", "a review closed before a newer attempt does not settle it");
+    await owner.query("DELETE FROM admin_commerce_reviews WHERE payment_id=$1", [ids.payment]);
     await owner.query("DELETE FROM worker_payment_reconciliations WHERE payment_id=$1", [ids.payment]);
     await owner.query("INSERT INTO payment_ledger_entries(payment_id,order_id,entry_type,amount,reference_id) VALUES($1,$2,'ADJUSTMENT',1,$3)", [ids.payment, ids.order, `${suffix}-recent`]);
     assert.equal(await previewFor(ids.shipping), "NOT_EXPIRED");

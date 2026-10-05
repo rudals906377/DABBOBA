@@ -18,6 +18,9 @@ export type CommerceRetentionResult = {
   blocked: Record<string, number>;
 };
 
+// The same key the registry triggers and execute_commerce_retention take.
+const COMMERCE_RETENTION_LOCK_KEY = "7922024082400083";
+
 const BLOCKERS = new Set([
   "POLICY_MISSING", "POLICY_REVIEW_REQUIRED", "HOLD_REVIEW_REQUIRED",
   "EXTERNAL_COPIES_UNVERIFIED", "LEGAL_HOLD", "SERVICE_ACTIVE", "NOT_EXPIRED",
@@ -57,7 +60,21 @@ export async function runCommerceRetentionBatch(
   if (config.mode === "DISABLED" || !shouldContinue()) return result;
   const client = await pool.connect();
   let destroyClient = false;
+  let sessionLocked = false;
   try {
+    if (config.mode === "EXECUTE") {
+      // Take the registry lock before the serializable snapshot exists. A hold,
+      // review retirement or commerce review committed just before the sweep is
+      // then visible to it, and later registry writes wait until it commits.
+      const locked = await client.query<{ locked: boolean }>(
+        "SELECT pg_try_advisory_lock($1::bigint) AS locked", [COMMERCE_RETENTION_LOCK_KEY],
+      );
+      sessionLocked = locked.rows[0]?.locked === true;
+      if (!sessionLocked) {
+        logger.info(result, "Commerce retention component sweep deferred by a registry change");
+        return result;
+      }
+    }
     await client.query(config.mode === "PREVIEW" ? "BEGIN READ ONLY" : "BEGIN ISOLATION LEVEL SERIALIZABLE");
     await client.query("SET LOCAL lock_timeout = '2s'");
     await client.query("SET LOCAL statement_timeout = '5s'");
@@ -91,6 +108,11 @@ export async function runCommerceRetentionBatch(
     catch { destroyClient = true; }
     throw error;
   } finally {
+    if (sessionLocked && !destroyClient) {
+      // A pooled connection must never keep the session lock.
+      try { await client.query("SELECT pg_advisory_unlock($1::bigint)", [COMMERCE_RETENTION_LOCK_KEY]); }
+      catch { destroyClient = true; }
+    }
     client.release(destroyClient);
   }
   logger.info(result, "Commerce retention component sweep completed");

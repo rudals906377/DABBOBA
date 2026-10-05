@@ -71,17 +71,58 @@ test("execute delegates to the guarded bounded database operation", async () => 
             assert.deepEqual(params, [3]);
             return { rows: [{ disposed: "2" }] };
           }
+          if (sql.includes("pg_try_advisory_lock")) return { rows: [{ locked: true }] };
           return { rows: [] };
         },
-        release() { calls.push("RELEASE"); },
+        release(destroy?: boolean) { calls.push(destroy ? "DESTROY" : "RELEASE"); },
       };
     },
   } as unknown as DatabasePool;
   assert.deepEqual(await runCommerceRetentionBatch(pool, { mode: "EXECUTE", batchSize: 3 }, logger), {
     mode: "EXECUTE", examined: 2, eligible: 2, disposed: 2, blocked: {},
   });
-  assert.equal(calls[0], "BEGIN ISOLATION LEVEL SERIALIZABLE");
+  // The registry lock is held before the snapshot and released before the
+  // connection returns to the pool.
+  assert.equal(calls[0], "SELECT pg_try_advisory_lock($1::bigint) AS locked");
+  assert.equal(calls[1], "BEGIN ISOLATION LEVEL SERIALIZABLE");
   assert.ok(calls.some(sql => /set_config\('dabboba\.commerce_retention_execute','on',true\)/.test(sql)));
+  assert.deepEqual(calls.slice(-3), ["COMMIT", "SELECT pg_advisory_unlock($1::bigint)", "RELEASE"]);
+});
+
+test("execute defers without a snapshot while a registry change holds the lock", async () => {
+  const calls: string[] = [];
+  const pool = {
+    async connect() {
+      return {
+        async query(sql: string) {
+          calls.push(sql);
+          return { rows: sql.includes("pg_try_advisory_lock") ? [{ locked: false }] : [] };
+        },
+        release() { calls.push("RELEASE"); },
+      };
+    },
+  } as unknown as DatabasePool;
+  assert.equal((await runCommerceRetentionBatch(pool, { mode: "EXECUTE", batchSize: 3 }, logger)).disposed, 0);
+  assert.deepEqual(calls, ["SELECT pg_try_advisory_lock($1::bigint) AS locked", "RELEASE"]);
+});
+
+test("a connection that cannot release the registry lock is destroyed, not pooled", async () => {
+  let released: boolean | undefined;
+  const pool = {
+    async connect() {
+      return {
+        async query(sql: string) {
+          if (sql.includes("pg_try_advisory_lock")) return { rows: [{ locked: true }] };
+          if (sql.includes("execute_commerce_retention")) return { rows: [{ disposed: 0 }] };
+          if (sql.includes("pg_advisory_unlock")) throw new Error("connection lost");
+          return { rows: [] };
+        },
+        release(destroy?: boolean) { released = destroy === true; },
+      };
+    },
+  } as unknown as DatabasePool;
+  assert.equal((await runCommerceRetentionBatch(pool, { mode: "EXECUTE", batchSize: 3 }, logger)).disposed, 0);
+  assert.equal(released, true);
 });
 
 test("deadline prevents even an enabled sweep from opening a connection", async () => {
@@ -117,6 +158,7 @@ test("unexpected database blocker and invalid counts cannot become reported succ
     const pool = {
       async connect() {
         return { async query(sql: string) {
+          if (sql.includes("pg_try_advisory_lock")) return { rows: [{ locked: true }] };
           return { rows: sql.includes("commerce_retention($1)") ? rows : [] };
         }, release() {} };
       },
