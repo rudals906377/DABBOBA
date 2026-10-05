@@ -28,3 +28,22 @@ test('persistence failure prevents POST and expired unknown intents stay recover
  await assert.rejects(expired.resolve(()=>{throw new Error('must not POST');}),/고객센터/);
  assert.ok(expired.read());
 });
+test('a refused order request is forgotten, while an unknown outcome stays replayable',async()=>{
+ const refused=(status)=>{const error=new Error('재고가 부족해요');error.status=status;return error;};
+ for(const status of [400,404,409,422]){
+  const store=storage();const intent=reviewOrderIntent(store,()=> 'refused',()=>100);intent.prepare(body);
+  await assert.rejects(intent.resolve(async()=>{throw refused(status);}),/재고가 부족해요/);
+  assert.equal(intent.read(),null,`status ${status}`);
+  assert.equal(intent.prepare({...body,items:[{...body.items[0],quantity:2}]}).body.items[0].quantity,2);
+ }
+ for(const status of [undefined,401,403,408,429,500,503]){
+  const store=storage();const intent=reviewOrderIntent(store,()=> 'unknown',()=>100);intent.prepare(body);
+  await assert.rejects(intent.resolve(async()=>{throw refused(status);}));
+  assert.ok(intent.read(),`status ${status}`);
+ }
+});
+test('a server-confirmed paid order releases the review session for the next purchase',async()=>{
+ const {readFile}=await import('node:fs/promises');
+ const app=await readFile(new URL('../public/review/app.js',import.meta.url),'utf8');
+ assert.match(app,/if \(order\.id === pending\.id && \['PAID','FULFILLED'\]\.includes\(order\.status\)\) \{pending = null; intents\.clear\(\); sessionStorage\.removeItem\('dabboba-review-order'\);/);
+});

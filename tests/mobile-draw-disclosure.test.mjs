@@ -25,7 +25,7 @@ test("product detail shows included products without presenting illustrative odd
   assert.match(detailSource, /includedProductOpenQuantityLabel\(snapshot\.product, included\.length\)/);
   assert.match(detailSource, /!isDrawCategory\(product\.category\) && shouldShowCatalogInventory\(product, commerceEnabled\)/);
   assert.match(quantitySource, /\$\{totalQuantity\.toLocaleString\("ko-KR"\)\}개 중 \$\{openedQuantity\.toLocaleString\("ko-KR"\)\}개 오픈/);
-  assert.match(detailSource, /이 숫자는 계산 방식을 설명하는 예시이며 이 상품의 실제 수량이나 확률이 아닙니다/);
+  assert.doesNotMatch(detailSource, /계산 예시|50\/202/);
   assert.doesNotMatch(detailSource, /현재 확률 \{entry\.probabilityPercent/);
   assert.doesNotMatch(detailSource, /남은 상품 \{entry\.remainingQuantity/);
   assert.doesNotMatch(detailSource, /includeDrawOdds: false/);
@@ -37,7 +37,7 @@ test("product detail shows included products without presenting illustrative odd
   assert.match(detailSource, /상품 목록을 불러오지 못했어요/);
   assert.match(shopApiSource, /includedProductsLoaded: Boolean\(drawOdds \|\| prizeLineup \|\| registeredIncludedProducts\)/);
   assert.doesNotMatch(detailSource, /snapshot\?\.drawOdds/);
-  assert.match(shopApiSource, /if \(!drawOdds\) \{/);
+  assert.match(shopApiSource, /if \(!drawOdds && \(drawOddsWithheld\(oddsResult\.error\) \|\| product\.saleStatus !== "ON_SALE"\)\) \{/);
   assert.match(shopApiSource, /\/prize-lineup/);
   assert.match(checkoutSource, /fetchProductDetail\(runtime\.apiBaseUrl, productId, tokens\.accessToken\)/);
   assert.match(detailSource, /snapshot\.product\.remainingKujiTiers\?\.length \?\? 0/);
@@ -67,8 +67,8 @@ test("draw detail exposes the referenced hierarchy without inventing odds or rec
   assert.match(detailSource, /정식 오픈 후 확정된 뽑기 기록이 생기면 이곳에 표시돼요/);
   assert.match(detailSource, /서버에서 확정된 결과만 표시하며 고객 정보는 공개하지 않아요/);
   assert.match(detailSource, /<DrawProductInformation snapshot=\{snapshot\}/);
-  assert.match(detailSource, /중복 상품이 생겼나요/);
-  assert.match(detailSource, /상품 공유하기/);
+  assert.doesNotMatch(detailSource, /중복 상품이 생겼나요/);
+  assert.match(detailSource, /label=\{!snapshot\?\.wishlistLoaded \? "찜 상태 다시 불러오기" : snapshot\.wishedByViewer \? "찜 해제" : "찜하기"\}/);
   assert.doesNotMatch(detailSource, /무조건 환불 불가|미확정 재고.*\d+개/);
 });
 

@@ -64,7 +64,15 @@ test("draw draft controls auto-allocate gacha slots and keep physical-lot safegu
   assert.match(form, /판매 가용 수량/);
   assert.match(form, /물리 재고 lot 대조 필수/);
   assert.match(form, /물리 lot이 중복되지 않는지 공개 전에 대조하세요/);
-  assert.match(form, /allocateGachaDrawQuantities\(product\.availableQuantity, entries\.length\)/);
+  // Publishing checks prize capacity against stock including checkout reservations,
+  // so the draft is planned against that stock whenever the operator may read it.
+  assert.match(form, /const capacityBase = stockOnHand \?\? product\.availableQuantity;/);
+  assert.match(form, /allocateGachaDrawQuantities\(capacityBase, entries\.length\)/);
+  assert.match(form, /const quantityDifference = calculation\.totalQuantity - capacityBase;/);
+  assert.match(form, /재고 조회 권한이 없어 판매 가용 수량으로 계산했어요/);
+  const page = await readFile(join(adminRoot, "app/(admin)/catalog/products/[productId]/draws/page.tsx"), "utf8");
+  assert.match(page, /can\(session\.actor, "inventory\.read"\)[\s\S]*?\/v1\/admin\/commerce\/inventory\//);
+  assert.match(page, /stockOnHand=\{stock\?\.productId === product\.id && Number\.isSafeInteger\(stock\.onHand\) \? stock\.onHand : null\}/);
   assert.match(form, /자동 배정 수량/);
   assert.match(form, /isKuji \? <label>유한 수량/);
   assert.match(form, /초안은 저장할 수 있지만 공개 전 판매 재고와 물리 lot을 맞춰야 합니다/);

@@ -17,7 +17,10 @@ async function api(path, body, key) {
   if (!response.ok) { const error = new Error(data.error?.message || '요청을 처리하지 못했어요.'); error.status = response.status; throw error; }
   return data;
 }
-const cards = () => `<div class="grid">${state.products.map(p => `<a class="card" href="#product/${esc(p.id)}"><img src="${image(p.imageUrl)}" alt="${esc(p.name)}"><div class="body"><h2>${esc(p.name)}</h2><p class="muted">${esc(p.metadata?.reward)} · 전체 ${p.totalQuantity}개 / ${p.openedQuantity}개 오픈</p><p class="price">${money(p.price)}</p></div></a>`).join('')}</div>`;
+// Totals are withheld before LIVE or while a product is not on sale; show the line only for real counts.
+const quantityLine = p => Number.isSafeInteger(p.totalQuantity) && Number.isSafeInteger(p.openedQuantity) && p.totalQuantity >= 0 && p.openedQuantity >= 0
+  ? `전체 ${esc(p.totalQuantity.toLocaleString('ko-KR'))}개 / ${esc(p.openedQuantity.toLocaleString('ko-KR'))}개 오픈` : '';
+const cards = () => `<div class="grid">${state.products.map(p => `<a class="card" href="#product/${esc(p.id)}"><img src="${image(p.imageUrl)}" alt="${esc(p.name)}"><div class="body"><h2>${esc(p.name)}</h2><p class="muted">${[esc(p.metadata?.reward), quantityLine(p)].filter(Boolean).join(' · ')}</p><p class="price">${money(p.price)}</p></div></a>`).join('')}</div>`;
 const notices = () => `<div class="policies">${state.policies.map(section => `<section><h2>${esc(section.title)}</h2>${section.groups.map(group => `${group.title ? `<h3>${esc(group.title)}</h3>` : ''}<ul>${group.items.map(item => `<li>${esc(item.text)}${item.children ? `<ul>${item.children.map(v=>`<li>${esc(v)}</li>`).join('')}</ul>` : ''}</li>`).join('')}</ul>`).join('')}</section>`).join('')}</div>`;
 const paymentNotice = () => {
   const channels = reviewChannels(state.config);
@@ -42,7 +45,7 @@ async function render() {
     const odds = await api(`/products/${id}/draw-odds`);
     if (generation !== state.render) return;
     if (route === 'checkout') checkout(product, odds);
-    else app.innerHTML = `<div class="detail-top"><img class="main-photo" src="${image(product.imageUrl)}" alt="${esc(product.name)}"><div><p class="muted">가챠 · 실물 상품</p><h1>${esc(product.name)}</h1><p class="price">${money(product.price)}</p><p>${esc(product.metadata?.reward)}</p><p>전체 ${product.totalQuantity}개 / ${product.openedQuantity}개 오픈</p><p class="muted">배송 신청 후 영업일 2~5일 · 60일 보관<br>가챠 배송 신청 합계 24,900원 이상 무료배송</p><a class="button" href="#checkout/${id}">뽑으러 가기</a></div></div><section><h2>포함 상품</h2><p class="muted">남은 구성 수량에 따라 무작위로 지급되며 동일 상품을 여러 번 받을 수 있습니다. 심사 환경의 내부 수량은 별도로 배분된 시험 재고입니다.</p><div class="grid lineup">${odds.entries.map(e => `<div class="card"><img src="${image(e.prizeImageUrl)}" alt="${esc(e.prizeName)}"><div class="body">${esc(e.prizeName)}</div></div>`).join('')}</div></section>${notices()}`;
+    else app.innerHTML = `<div class="detail-top"><img class="main-photo" src="${image(product.imageUrl)}" alt="${esc(product.name)}"><div><p class="muted">가챠 · 실물 상품</p><h1>${esc(product.name)}</h1><p class="price">${money(product.price)}</p><p>${esc(product.metadata?.reward)}</p>${quantityLine(product) ? `<p>${quantityLine(product)}</p>` : ''}<p class="muted">배송 신청 후 영업일 2~5일 · 60일 보관<br>가챠 배송 신청 합계 24,900원 이상 무료배송</p><a class="button" href="#checkout/${id}">뽑으러 가기</a></div></div><section><h2>포함 상품</h2><p class="muted">남은 구성 수량에 따라 무작위로 지급되며 동일 상품을 여러 번 받을 수 있습니다. 심사 환경의 내부 수량은 별도로 배분된 시험 재고입니다.</p><div class="grid lineup">${odds.entries.map(e => `<div class="card"><img src="${image(e.prizeImageUrl)}" alt="${esc(e.prizeName)}"><div class="body">${esc(e.prizeName)}</div></div>`).join('')}</div></section>${notices()}`;
   } else app.innerHTML = '<h1>페이지를 찾지 못했어요.</h1><a href="#home">메인으로 돌아가기</a>';
 }
 function login() {
@@ -76,7 +79,7 @@ function checkout(product, odds) {
     }
     if (!pending) {notify('확인할 결제가 없어요.'); return;}
     const order = await api('/orders/' + pending.id);
-    if (['PAID','FULFILLED'].includes(order.status)) { notify('서버에서 결제 완료를 확인했어요. 실제 상품 획득·배송은 앱에서 진행합니다.'); return; }
+    if (order.id === pending.id && ['PAID','FULFILLED'].includes(order.status)) {pending = null; intents.clear(); sessionStorage.removeItem('dabboba-review-order'); notify('서버에서 결제 완료를 확인했어요. 실제 상품 획득·배송은 앱에서 진행하며, 다른 결제창도 이어서 확인할 수 있어요.'); return;}
     if (['CANCELLED','EXPIRED','FAILED','REFUNDED'].includes(order.status)) {pending = null; intents.clear(); sessionStorage.removeItem('dabboba-review-order'); notify('종료된 주문이에요. 다시 구매할 수 있습니다.'); return;}
     try {await api(`/payments/${pending.paymentId}/abandon`, {}, 'web-abandon:' + pending.id); pending = null;intents.clear();sessionStorage.removeItem('dabboba-review-order');notify('결제창을 닫은 주문을 정리했어요. 다시 구매할 수 있습니다.');}
     catch(e) { if(e.status === 409) {await api(`/payments/${pending.paymentId}/confirm`, {});notify('결제 정보를 다시 확인했어요. 결제 상태 확인을 눌러 주세요.');} else throw e; }

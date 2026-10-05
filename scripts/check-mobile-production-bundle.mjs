@@ -52,8 +52,13 @@ export function scanMobileProductionBundle(directory) {
   const issues = [];
   for (const file of walk(directory)) {
     if (!bundleExtensions.has(path.extname(file)) || file.endsWith(".map")) continue;
-    const source = readFileSync(file, "utf8");
+    const bytes = readFileSync(file);
     const isBytecode = path.extname(file) === ".hbc";
+    // Hermes stores non-ASCII string-table entries as UTF-16LE, so a marker inside
+    // Korean copy never appears as UTF-8 text. Scan both UTF-16 alignments too.
+    const source = isBytecode
+      ? [bytes.toString("utf8"), bytes.toString("utf16le"), bytes.subarray(1).toString("utf16le")].join("\n")
+      : bytes.toString("utf8");
     for (const marker of forbiddenMarkers) {
       // Hermes embeds Expo/dev-library URL defaults in its string table. The
       // release config gate checks the actual API origin; here only a loopback

@@ -242,8 +242,12 @@ export async function fetchProductDetail(
       signal: context.signal,
     });
     drawOdds = oddsResult.data ?? null;
-    if (!drawOdds) {
-      // Before LIVE the server withholds odds; the lineup still shows what can be won.
+    // Before LIVE (COMMERCE_NOT_AVAILABLE) or before a product is on sale the server
+    // withholds odds, and the lineup still shows what can be won. An on-sale product in
+    // LIVE must not fall back: a failed odds read stays unloaded so the page offers a
+    // retry and the draw action stays disabled instead of reaching a checkout that
+    // requires the odds version.
+    if (!drawOdds && (drawOddsWithheld(oddsResult.error) || product.saleStatus !== "ON_SALE")) {
       const lineupResult = await client.GET("/v1/catalog/products/{productId}/prize-lineup", {
         params: { path: { productId } },
         signal: context.signal,
@@ -316,4 +320,10 @@ export { catalogQuantityLabel };
 export function productMetadataText(product: CatalogProduct, key: string): string | null {
   const value = product.metadata[key];
   return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function drawOddsWithheld(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const envelope = error as { error?: { code?: unknown } };
+  return envelope.error?.code === "COMMERCE_NOT_AVAILABLE";
 }

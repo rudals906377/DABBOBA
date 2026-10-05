@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
-import { imageCropRect } from "../lib/image-crop-geometry";
+import { cropOutputSize, imageCropRect } from "../lib/image-crop-geometry";
 
 type ImageSource = { file: File; url: string; width: number; height: number };
 type ImageCropPickerProps = {
@@ -36,6 +36,14 @@ export function ImageCropPicker({ productId, expectedVersion, returnTo, role, id
 
   useEffect(() => () => { if (source) URL.revokeObjectURL(source.url); }, [source]);
 
+  // A page restored from the back/forward cache, or an upload the browser
+  // stopped, must not leave the save button stuck on "사진 저장 중…".
+  useEffect(() => {
+    const restore = (event: PageTransitionEvent) => { if (event.persisted) setSubmitting(false); };
+    window.addEventListener("pageshow", restore);
+    return () => window.removeEventListener("pageshow", restore);
+  }, []);
+
   useEffect(() => {
     const canvas = previewRef.current;
     const image = imageRef.current;
@@ -58,12 +66,14 @@ export function ImageCropPicker({ productId, expectedVersion, returnTo, role, id
     setHorizontal(50);
     setVertical(50);
     setConfirmed(false);
+    setSubmitting(false);
     setMessage("");
   }
 
   function invalidateCrop() {
     cropRevisionRef.current += 1;
     setConfirmed(false);
+    setSubmitting(false);
     setMessage("");
   }
 
@@ -117,9 +127,7 @@ export function ImageCropPicker({ productId, expectedVersion, returnTo, role, id
     try {
       const effectiveRatio = ratio === 0 ? source.width / source.height : ratio;
       const rect = imageCropRect(source.width, source.height, effectiveRatio, zoom, horizontal, vertical);
-      const scale = Math.min(1, 2400 / Math.max(rect.width, rect.height));
-      const width = Math.round(rect.width * scale);
-      const height = Math.round(rect.height * scale);
+      const { width, height } = cropOutputSize(rect, effectiveRatio, 2400);
       if (width < 1 || height < 1) throw new Error("선택한 사진 영역이 너무 작습니다. 확대를 줄여 주세요.");
       if (width < minimumWidth || height < minimumHeight) {
         throw new Error(`선택한 영역은 최소 ${minimumWidth}×${minimumHeight}px이어야 합니다. 확대를 줄이거나 더 큰 원본을 선택해 주세요.`);
@@ -188,7 +196,11 @@ export function ImageCropPicker({ productId, expectedVersion, returnTo, role, id
       <button type="button" disabled={applying} onClick={() => void applyCrop()}>{applying ? "사진 자르는 중…" : "자르기 적용"}</button>
       {source.file.type === "image/gif" ? <small>GIF는 잘라낸 첫 장면을 PNG 사진으로 저장합니다.</small> : null}
     </div> : null}
-    {message ? <p role="status" className={confirmed ? "catalog-crop-success" : "catalog-crop-error"}>{message}</p> : null}
+    {/* Both live regions stay mounted so screen readers announce new text. */}
+    <div className="catalog-crop-messages">
+      <p role="status" className="catalog-crop-success">{confirmed ? message : ""}</p>
+      <p role="alert" className="catalog-crop-error">{confirmed ? "" : message}</p>
+    </div>
     <label className="reason-field"><span>{label} 변경 사유<b>필수</b></span><textarea name="reason" minLength={2} maxLength={1000} required placeholder="감사 로그에 남길 구체적인 사유를 입력하세요." /></label>
     <div className="form-actions"><button className="primary" disabled={!confirmed || applying || submitting}>{submitting ? "사진 저장 중…" : buttonLabel}</button></div>
   </form>;

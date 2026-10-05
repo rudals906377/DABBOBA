@@ -5,7 +5,8 @@ import { EmptyState, Feedback, PageHeader, ReasonField, ReturnTo, StatusBadge, f
 import { publishDrawVersion } from "../../../../../../lib/actions";
 import { adminApi, queryString } from "../../../../../../lib/api";
 import { requireCapability } from "../../../../../../lib/auth";
-import type { CatalogProduct, CursorPage, DrawProbabilityVersionList, SearchParams } from "../../../../../../lib/admin-types";
+import { can } from "../../../../../../lib/capabilities";
+import type { AdminInventory, CatalogProduct, CursorPage, DrawProbabilityVersionList, SearchParams } from "../../../../../../lib/admin-types";
 
 async function loadPrizeProducts(token: string, ipId: string) {
   const items: CatalogProduct[] = [];
@@ -36,7 +37,13 @@ export default async function DrawVersionsPage({ params, searchParams }: {
     adminApi<CatalogProduct>(`/v1/admin/products/${encodeURIComponent(productId)}`, { token: session.token }),
     adminApi<DrawProbabilityVersionList>(`/v1/admin/products/${encodeURIComponent(productId)}/draw-versions`, { token: session.token }),
   ]);
-  const candidates = await loadPrizeProducts(session.token, product.ipId);
+  const [candidates, stock] = await Promise.all([
+    loadPrizeProducts(session.token, product.ipId),
+    // Stock including checkout reservations, when this operator may read it.
+    can(session.actor, "inventory.read")
+      ? adminApi<AdminInventory>(`/v1/admin/commerce/inventory/${encodeURIComponent(productId)}`, { token: session.token }).catch(() => null)
+      : Promise.resolve(null),
+  ]);
   const prizeProducts = candidates.filter((candidate) => (
     candidate.id !== product.id
     && candidate.isPrizeOnly
@@ -65,6 +72,7 @@ export default async function DrawVersionsPage({ params, searchParams }: {
         prizeProducts={prizeProducts}
         returnTo={returnTo}
         idempotencyKey={randomUUID()}
+        stockOnHand={stock?.productId === product.id && Number.isSafeInteger(stock.onHand) ? stock.onHand : null}
       />
     </section>
     {result.items.length === 0 ? <section className="data-panel"><EmptyState title={product.category === "kuji" ? "아직 공개할 상 구성이 없습니다." : "아직 확률표 버전이 없습니다."} description="경품 SKU와 실제 검수 재고를 확인한 뒤 첫 초안을 만드세요." /></section> : null}
@@ -76,7 +84,7 @@ export default async function DrawVersionsPage({ params, searchParams }: {
       <div className="panel-heading"><div><h2>버전 {version.version} <StatusBadge value={version.status} /></h2><p>생성 {formatDate(version.createdAt)}{version.publishedAt ? ` · 공개 ${formatDate(version.publishedAt)}` : ""} · {product.category === "kuji"
         ? `전체 장수 ${(version.totalSlots ?? 0).toLocaleString("ko-KR")}`
         : gachaQuantityRatioReady ? `전체 남은 수량 ${gachaRemainingTotal.toLocaleString("ko-KR")}개` : "기존 확률 설정 확인 필요"}</p></div></div>
-      {product.category === "gacha" && !gachaQuantityRatioReady ? <p className="draw-capacity-message" data-kind="error">이 버전은 상세상품 수량 비례 규칙에 맞지 않아 공개·구매·뽑기에 사용할 수 없습니다. 수량을 입력한 새 초안을 만드세요.</p> : null}
+      {product.category === "gacha" && !gachaQuantityRatioReady ? <p className="draw-capacity-message" data-kind="error">이 버전은 상세상품 수량 비례 규칙에 맞지 않아 공개·구매에 사용할 수 없습니다. 이미 결제된 뽑기권은 이 버전의 기존 규칙대로 열립니다. 수량을 입력한 새 초안을 만드세요.</p> : null}
       <div className="data-panel"><table className="data-table">
         <thead><tr><th>경품 상품</th><th>{product.category === "kuji" ? "상 이름" : "등급"}</th>{product.category === "kuji" ? <><th>관리 코드</th><th>노출 순서</th></> : null}<th>초기/남은 수량</th><th>{product.category === "kuji" ? "전체 구성 비율" : "현재 확률"}</th></tr></thead>
         <tbody>{[...version.entries].sort((left, right) => product.category === "kuji"

@@ -28,7 +28,12 @@ function mobileDependencyRequire(rootDir) {
 }
 
 export function resolveArtifactHermesCompiler(rootDir = repositoryRoot) {
-  const compilerRoot = path.dirname(mobileDependencyRequire(rootDir).resolve('hermes-compiler/package.json'));
+  // hermes-compiler is a declared dependency of react-native, the package that
+  // compiles the release bundle. Resolve it from there so the gate does not rely
+  // on pnpm hoisting it next to an unrelated package.
+  const appRequire = createRequire(path.join(rootDir, 'apps/mobile/package.json'));
+  const reactNativeRequire = createRequire(appRequire.resolve('react-native/package.json'));
+  const compilerRoot = path.dirname(reactNativeRequire.resolve('hermes-compiler/package.json'));
   const executable = { darwin: 'osx-bin/hermesc', linux: 'linux64-bin/hermesc', win32: 'win64-bin/hermesc.exe' }[process.platform];
   if (!executable) throw new Error('HERMES_HOST_UNSUPPORTED');
   const compiler = path.join(compilerRoot, 'hermesc', executable);
@@ -208,6 +213,26 @@ function javascriptStrings(bytes, rootDir) {
   return { strings, format: 'javascript-literals' };
 }
 
+function decodeHermesAsciiLiteral(text) {
+  return text.replace(/\\x([\dA-Fa-f]{2})|\\u([\dA-Fa-f]{4})/g, (_, byte, code) => String.fromCharCode(parseInt(byte ?? code, 16)));
+}
+
+/**
+ * `hermesc -dump-bytecode` prints a UTF-16 table entry as its little-endian bytes
+ * (`\x54\x00...`). Reading each byte as a character would turn "TEST_PG · 실제"
+ * into "T\0E\0S\0T..." and hide every marker in non-ASCII copy, so rebuild the
+ * byte sequence and decode it as UTF-16LE. An odd byte count is not a valid entry.
+ */
+function decodeHermesUtf16Literal(text) {
+  const bytes = [];
+  for (const [, byte, code, raw] of text.matchAll(/\\x([\dA-Fa-f]{2})|\\u([\dA-Fa-f]{4})|([\s\S])/g)) {
+    if (byte !== undefined) bytes.push(parseInt(byte, 16));
+    else if (code !== undefined) { const unit = parseInt(code, 16); bytes.push(unit & 0xff, unit >> 8); }
+    else { const unit = raw.charCodeAt(0); if (unit > 0xff) return null; bytes.push(unit); }
+  }
+  return bytes.length % 2 === 0 ? Buffer.from(bytes).toString('utf16le') : null;
+}
+
 async function hermesStrings(bytes, compiler) {
   const temporary = mkdtempSync(path.join(tmpdir(), 'dabboba-artifact-hbc-'));
   try {
@@ -234,8 +259,12 @@ async function hermesStrings(bytes, compiler) {
         if (bytecodeVersion) version = Number(bytecodeVersion[1]);
         if (line === 'Global String Table:') { inTable = true; continue; }
         if (!inTable) continue;
-        const literal = /^[is]\d+\[(?:ASCII|UTF-16), [^\]]+\](?: #[\dA-Fa-f]+)?: (.*)$/.exec(line);
-        if (literal) strings.push(literal[1].replace(/\\x([\dA-Fa-f]{2})|\\u([\dA-Fa-f]{4})/g, (_, byte, code) => String.fromCharCode(parseInt(byte ?? code, 16))));
+        const literal = /^[is]\d+\[(ASCII|UTF-16), [^\]]+\](?: #[\dA-Fa-f]+)?: (.*)$/.exec(line);
+        if (literal) {
+          const value = literal[1] === 'UTF-16' ? decodeHermesUtf16Literal(literal[2]) : decodeHermesAsciiLiteral(literal[2]);
+          if (value === null) malformed = true;
+          else strings.push(value);
+        }
         else if (strings.length && line === '') { tableComplete = true; pending = ''; break; }
         else if (line) malformed = true;
       }

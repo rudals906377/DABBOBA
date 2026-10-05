@@ -20,7 +20,14 @@ const nextConfig: NextConfig = {
   output: "standalone",
   poweredByHeader: false,
   transpilePackages: ["@dabboba/api-client", "@dabboba/config", "@dabboba/contracts", "@dabboba/ui"],
-  experimental: { serverActions: { bodySizeLimit: "11mb" } },
+  experimental: {
+    serverActions: { bodySizeLimit: "11mb" },
+    // proxy.ts runs for every console request, including the image upload route
+    // and server actions. Next buffers proxied bodies only up to this size and
+    // silently truncates longer ones (default 10 MiB), so it must match the
+    // 11 MB upload limit or that limit never applies.
+    proxyClientMaxBodySize: "11mb",
+  },
   async headers() {
     return [
       { source: "/(.*)", headers: [...securityHeaders] },

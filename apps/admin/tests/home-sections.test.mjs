@@ -166,6 +166,7 @@ test("home section page loads complete choices and renders empty and missing-IP 
   const calls = [];
   const pageModule = await loadModule(join(adminRoot, "app/(admin)/catalog/home-sections/page.tsx"), {
     "next/link": { __esModule: true, default: ({ children, href }) => React.createElement("a", { href }, children) },
+    "../../../../components/home-product-picker": { HomeProductChoicesProvider: ({ children }) => React.createElement(React.Fragment, null, children) },
     "../../../../components/home-section-form": { HomeSectionForm: ({ item }) => React.createElement("div", null, item ? `edit:${item.id}` : "create") },
     "../../../../components/operations": {
       PageHeader: ({ title, description }) => React.createElement(React.Fragment, null,
@@ -194,6 +195,7 @@ test("home section page loads complete choices and renders empty and missing-IP 
   calls.length = 0;
   const emptyModule = await loadModule(join(adminRoot, "app/(admin)/catalog/home-sections/page.tsx"), {
     "next/link": { __esModule: true, default: ({ children }) => React.createElement("a", null, children) },
+    "../../../../components/home-product-picker": { HomeProductChoicesProvider: ({ children }) => React.createElement(React.Fragment, null, children) },
     "../../../../components/home-section-form": { HomeSectionForm: () => React.createElement("div") },
     "../../../../components/operations": { PageHeader: () => null, Feedback: () => null, FilterBar: ({ children }) => React.createElement("form", null, children), NextCursor: () => null, EmptyState: ({ title, description }) => React.createElement("div", null, title, description), StatusBadge: () => null, first: (v) => v, formatDate: (v) => v },
     "../../../../lib/api": { queryString: () => "", adminApi: async (path) => path.includes("home-sections") ? { configured: false, items: [] } : { items: [ip], nextCursor: null } },

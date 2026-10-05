@@ -12,7 +12,7 @@ const output = ts.transpileModule(source, {
   fileName: "shop-api.ts",
 }).outputText;
 
-function apiHarness({ saleStatus = "COMING_SOON", included, lineup, odds } = {}) {
+function apiHarness({ saleStatus = "COMING_SOON", included, lineup, odds, oddsErrorCode = "COMMERCE_NOT_AVAILABLE" } = {}) {
   const calls = [];
   const signal = new AbortController().signal;
   const module = { exports: {} };
@@ -32,9 +32,9 @@ function apiHarness({ saleStatus = "COMING_SOON", included, lineup, odds } = {})
           calls.push({ route, options });
           if (route === "/v1/catalog/products/{productId}") return { data: { id: "sylvanian", category: "gacha", saleStatus, ipId: "ip" } };
           if (route === "/v1/catalog/ips") return { data: { items: [{ id: "ip" }] } };
-          if (route.endsWith("/draw-odds")) return odds ? { data: odds } : { error: { code: "COMMERCE_PRELAUNCH" } };
-          if (route.endsWith("/prize-lineup")) return lineup ? { data: lineup } : { error: { code: "NOT_FOUND" } };
-          if (route.endsWith("/included-products")) return included === undefined ? { error: { code: "UNAVAILABLE" } } : { data: { items: included } };
+          if (route.endsWith("/draw-odds")) return odds ? { data: odds } : { error: { error: { code: oddsErrorCode } } };
+          if (route.endsWith("/prize-lineup")) return lineup ? { data: lineup } : { error: { error: { code: "NOT_FOUND" } } };
+          if (route.endsWith("/included-products")) return included === undefined ? { error: { error: { code: "UNAVAILABLE" } } } : { data: { items: included } };
           throw new Error(`Unexpected request: ${route}`);
         } }),
       };
@@ -79,5 +79,22 @@ test("published draw entries remain authoritative and need no registered-product
     assert.equal(snapshot.includedProductsLoaded, true);
     assert.equal(snapshot.includedProducts[0].id, "published");
     assert.equal(harness.calls.some(({ route }) => route.endsWith("/included-products")), false);
+  }
+});
+
+test("an on-sale product falls back to the lineup only while the server withholds odds", async () => {
+  const lineup = { entries: [{ prizeProductId: "published", prizeName: "확정 구성", prizeImageUrl: null }] };
+  const prelaunch = apiHarness({ saleStatus: "ON_SALE", lineup });
+  const withheld = await prelaunch.load();
+  assert.equal(withheld.includedProductsLoaded, true);
+  assert.equal(withheld.drawOdds, null);
+  assert.equal(withheld.prizeLineup, lineup);
+
+  for (const oddsErrorCode of ["INTERNAL_ERROR", "CONFLICT", "RATE_LIMITED", null]) {
+    const live = apiHarness({ saleStatus: "ON_SALE", lineup, oddsErrorCode });
+    const snapshot = await live.load();
+    assert.equal(snapshot.includedProductsLoaded, false, `odds error ${oddsErrorCode}`);
+    assert.equal(snapshot.prizeLineup, null);
+    assert.equal(live.calls.some(({ route }) => route.endsWith("/prize-lineup")), false);
   }
 });

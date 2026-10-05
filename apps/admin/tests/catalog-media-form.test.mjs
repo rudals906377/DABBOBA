@@ -37,7 +37,10 @@ async function loadModule(path, mocks = {}, context = {}) {
 async function loadCropPicker() {
   return loadModule(join(adminRoot, "components/image-crop-picker.tsx"), {
     "../lib/actions": { uploadProductImage() {} },
-    "../lib/image-crop-geometry": { imageCropRect() { throw new Error("rendering must not crop before selection"); } },
+    "../lib/image-crop-geometry": {
+      imageCropRect() { throw new Error("rendering must not crop before selection"); },
+      cropOutputSize() { throw new Error("rendering must not size a crop before selection"); },
+    },
   });
 }
 
@@ -545,4 +548,44 @@ test("crop geometry keeps the selected aspect ratio and shifts within the origin
   assert.equal(portrait.y + portrait.height, 2000);
   assert.throws(() => imageCropRect(0, 1000, 1, 1, 50, 50), /올바르지/);
   assert.throws(() => imageCropRect(1000, 1000, 1, 0.5, 50, 50), /올바르지/);
+});
+
+test("crop picker never strands the save button and keeps its live regions mounted", async () => {
+  const source = await readFile(join(adminRoot, "components/image-crop-picker.tsx"), "utf8");
+  // Restored pages and any new file or crop change release the saving state.
+  assert.match(source, /addEventListener\("pageshow", restore\)/);
+  assert.match(source, /if \(event\.persisted\) setSubmitting\(false\)/);
+  assert.equal(source.match(/setSubmitting\(false\);/g)?.length, 3);
+  // Text is swapped inside regions that are always present, so it is announced.
+  assert.match(source, /<p role="status" className="catalog-crop-success">\{confirmed \? message : ""\}<\/p>/);
+  assert.match(source, /<p role="alert" className="catalog-crop-error">\{confirmed \? "" : message\}<\/p>/);
+  assert.doesNotMatch(source, /\{message \? <p role="status"/);
+});
+
+test("crop output keeps fixed ratios exact so the API accepts the encoded size", async () => {
+  const { cropOutputSize, imageCropRect } = await loadModule(join(adminRoot, "lib/image-crop-geometry.ts"));
+  // The reported failure: a 1500×1000 source cropped to 16:9 used to encode as 1500×844.
+  assert.deepEqual({ ...cropOutputSize(imageCropRect(1500, 1000, 16 / 9, 1, 50, 50), 16 / 9, 2400) }, { width: 1488, height: 837 });
+  const ratios = [[1, 1], [6, 5], [4, 3], [16, 9]];
+  let checked = 0;
+  for (const [across, down] of ratios) {
+    for (let sourceWidth = 900; sourceWidth <= 4200; sourceWidth += 137) {
+      for (let sourceHeight = 700; sourceHeight <= 3600; sourceHeight += 151) {
+        for (const zoom of [1, 1.07, 1.2, 1.3, 1.85, 2.5]) {
+          const rect = imageCropRect(sourceWidth, sourceHeight, across / down, zoom, 37, 61);
+          const { width, height } = cropOutputSize(rect, across / down, 2400);
+          const scale = Math.min(1, 2400 / Math.max(rect.width, rect.height));
+          assert.equal(width * down, height * across, `${across}:${down} from ${sourceWidth}×${sourceHeight} at ${zoom}`);
+          assert.ok(width <= rect.width * scale + 0.5 && height <= rect.height * scale + 0.5, "never enlarges beyond rounding");
+          assert.ok(width >= rect.width * scale - across - 0.5, "keeps the largest whole multiple");
+          assert.ok(Math.max(width, height) <= 2400);
+          checked += 1;
+        }
+      }
+    }
+  }
+  assert.ok(checked > 3000);
+  // The original-ratio choice has no fixed ratio to keep, so each side rounds on its own.
+  const original = imageCropRect(1501, 997, 1501 / 997, 1, 50, 50);
+  assert.deepEqual({ ...cropOutputSize(original, 1501 / 997, 2400) }, { width: 1501, height: 997 });
 });

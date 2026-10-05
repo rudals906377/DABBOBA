@@ -3717,6 +3717,12 @@ export interface components {
             serverNow: string;
             items: components["schemas"]["HomeRecentDrawActivity"][];
         };
+        /** @description Product Detail history. The same snapshot shape as Home, with up to eight results. */
+        ProductRecentDrawActivityList: {
+            /** Format: date-time */
+            serverNow: string;
+            items: components["schemas"]["HomeRecentDrawActivity"][];
+        };
         /** @description Full operator view. layoutKind is null only for a legacy row created before category-specific Home layouts were introduced. */
         AdminHomeCatalogSection: {
             id: string;
@@ -6721,7 +6727,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Up to three newest immutable prize snapshots, newest first. */
+            /** @description Up to two newest immutable prize snapshots, newest first. */
             200: {
                 headers: {
                     "Cache-Control"?: string;
@@ -6751,7 +6757,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HomeRecentDrawActivityList"];
+                    "application/json": components["schemas"]["ProductRecentDrawActivityList"];
                 };
             };
         };

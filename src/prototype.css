@@ -6751,6 +6751,64 @@
   line-height: 1.55;
 }
 
+/* Server prize list on web Product Detail: images stay inside their tile. */
+.detail-prize-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.detail-prize-heading h2 {
+  margin-bottom: 13px;
+}
+
+.detail-prize-heading span {
+  color: var(--db-muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.detail-prize-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.detail-prize-card {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 14px 10px 12px;
+  border: 1px solid var(--db-line);
+  border-radius: 12px;
+  background: #fff;
+  text-align: center;
+}
+
+.detail-prize-card img {
+  display: block;
+  width: 56px;
+  height: 56px;
+  max-width: 100%;
+  object-fit: contain;
+}
+
+.detail-prize-card strong {
+  width: 100%;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+  line-height: 18px;
+}
+
+.detail-probability-example {
+  margin: 13px 2px 0;
+  color: var(--db-muted);
+  font-size: 12px;
+  line-height: 18px;
+}
+
 .route-footer {
   display: flex;
   box-sizing: border-box;

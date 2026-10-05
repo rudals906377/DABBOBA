@@ -233,12 +233,13 @@ test('first LIVE mobile release requires gacha and keeps kuji deferred', async (
   });
   assert.equal(result.commerceMode, 'LIVE');
   const apiCalls = valid.calls.filter((call) => call.host === 'api.dabboba.net');
-  assert.equal(apiCalls.length, 8);
+  assert.equal(apiCalls.length, 9);
   assert.deepEqual(valid.calls.filter((call) => call.host === 'cdn.dabboba.net').map((call) => call.path), ['/gacha.jpg']);
   assert.equal(valid.calls.every((call) => call.method === 'GET'), true);
   assert.equal(apiCalls[3].path, '/v1/auth/providers');
-  assert.deepEqual(apiCalls.slice(-1).map(({ path, search }) => `${path}${search}`), [
+  assert.deepEqual(apiCalls.slice(-2).map(({ path, search }) => `${path}${search}`), [
     '/v1/catalog/products?category=gacha&saleStatus=ON_SALE&excludeSoldOut=true&limit=1',
+    '/v1/catalog/products?category=kuji&saleStatus=ON_SALE&limit=1',
   ]);
 
   const missingLogin = fetchLive({
@@ -278,6 +279,14 @@ test('first LIVE mobile release requires gacha and keeps kuji deferred', async (
   await assert.rejects(publicApiSmoke.verifyMobilePublicApiSurface({
     apiBaseUrl: 'https://api.dabboba.net', expectedCommerceMode: 'LIVE', fetchImpl: prematureKuji.fetchImpl,
   }), /Kuji is deferred/);
+  // An older on-sale Kuji behind a newer coming-soon one is still caught.
+  const olderOnSaleKuji = fetchLive({
+    '/v1/catalog/products?category=kuji&limit=1': { items: [{ ...product('kuji'), saleStatus: 'COMING_SOON', purchasable: false }], nextCursor: null },
+    '/v1/catalog/products?category=kuji&saleStatus=ON_SALE&limit=1': { items: [{ ...product('kuji'), id: 'kuji-older' }], nextCursor: null },
+  });
+  await assert.rejects(publicApiSmoke.verifyMobilePublicApiSurface({
+    apiBaseUrl: 'https://api.dabboba.net', expectedCommerceMode: 'LIVE', fetchImpl: olderOnSaleKuji.fetchImpl,
+  }), /no Kuji product may be on sale/);
   const comingSoonKuji = fetchLive({
     '/v1/catalog/products?category=kuji&limit=1': { items: [{ ...product('kuji'), saleStatus: 'COMING_SOON', purchasable: false }], nextCursor: null },
   });

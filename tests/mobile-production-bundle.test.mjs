@@ -86,6 +86,21 @@ test("production bundle scan inspects Hermes and embedded native bundles", async
   }
 });
 
+test("production bundle scan finds markers stored as UTF-16 in Hermes bytecode", async () => {
+  // Hermes keeps non-ASCII strings as UTF-16LE; test both byte alignments.
+  const utf16 = Buffer.from("TEST_PG · 실제 과금 없음", "utf16le");
+  for (const prefix of [Buffer.alloc(0), Buffer.from([0x00])]) {
+    const directory = await fixture({});
+    try {
+      await mkdir(path.join(directory, "_expo/static/js/ios"), { recursive: true });
+      await writeFile(path.join(directory, "_expo/static/js/ios/entry.hbc"), Buffer.concat([Buffer.from([0xc6, 0x1f]), prefix, utf16]));
+      assert.deepEqual(scanMobileProductionBundle(directory).map((issue) => issue.code), ["TEST_PAYMENT"]);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  }
+});
+
 test("production bundle scan accepts loopback rejection logic without a configured loopback URL", async () => {
   const directory = await fixture({
     "_expo/static/js/ios/entry.hbc": 'if (hostname === "localhost") throw new Error("Invalid API host");',
