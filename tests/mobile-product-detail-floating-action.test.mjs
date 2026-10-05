@@ -76,6 +76,10 @@ test("native Product Detail bounds category artwork and leads with prize informa
 
 test("product detail wishlist reads all pages and never treats a failed lookup as not wished", () => {
   assert.match(source, /useFocusEffect\(useCallback\(\(\) => \{\s*void load\(\)/);
+  // A refocus refresh keeps the loaded page instead of flashing the full spinner,
+  // and a failed background refresh keeps the last verified snapshot.
+  assert.match(source, /const refreshing = loadedSnapshotRef\.current\?\.product\.id === productId;\s*if \(!refreshing\) setLoading\(true\);/);
+  assert.match(source, /if \(!controller\.signal\.aborted && !refreshing\) setMessage\(/);
   assert.match(shopApiSource, /fetchShopWishlistProductIds\(apiBaseUrl, accessToken, context\.signal\)\.catch\(\(\) => null\)/);
   assert.match(shopApiSource, /wishlistLoaded: !accessToken \|\| wishlistIds !== null/);
   assert.match(shopApiSource, /wishedByViewer:[\s\S]*?wishlistIds\?\.has\(productId\)/);

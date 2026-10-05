@@ -101,12 +101,17 @@ export function ProductDetailScreen() {
   } | null>(null);
   const [recentReloadKey, setRecentReloadKey] = useState(0);
   const loadAbortRef = useRef<AbortController | null>(null);
+  const loadedSnapshotRef = useRef<ProductDetailSnapshot | null>(null);
 
   const load = useCallback(async () => {
     loadAbortRef.current?.abort();
     const controller = new AbortController();
     loadAbortRef.current = controller;
-    setLoading(true);
+    // Returning from checkout, login or another screen refreshes this product in
+    // place: keep the page, its scroll position and gallery, and keep the last
+    // verified snapshot if the background refresh fails.
+    const refreshing = loadedSnapshotRef.current?.product.id === productId;
+    if (!refreshing) setLoading(true);
     try {
       const tokens = await readAuthTokens();
       if (controller.signal.aborted) return;
@@ -120,13 +125,14 @@ export function ProductDetailScreen() {
       const currentTokens = await readAuthTokens();
       if (controller.signal.aborted) return;
       setAccessToken(currentTokens?.accessToken ?? null);
+      loadedSnapshotRef.current = next;
       setSnapshot(next);
       if (!next.ownedCollectible && !next.exchangeReference) {
         void recordRecentlyViewedProduct(db, next.product.id).catch(() => undefined);
       }
       setMessage("");
     } catch (error) {
-      if (!controller.signal.aborted) setMessage(error instanceof Error ? error.message : "상품 정보를 불러오지 못했어요.");
+      if (!controller.signal.aborted && !refreshing) setMessage(error instanceof Error ? error.message : "상품 정보를 불러오지 못했어요.");
     } finally {
       if (loadAbortRef.current === controller) {
         loadAbortRef.current = null;
