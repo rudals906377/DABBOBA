@@ -21,6 +21,9 @@ const MOBILE_CATALOG_ROUTES = Object.freeze([
 const DELETION_METHODS = new Set(['PHONE', 'KAKAO', 'NAVER', 'GOOGLE', 'APPLE', 'EMAIL']);
 const LIVE_MOBILE_ROUTES = Object.freeze([
   ['/v1/catalog/products?category=gacha&saleStatus=ON_SALE&excludeSoldOut=true&limit=1', 'Gacha products'],
+  // The newest-first Kuji shop page cannot prove deferral: an older Kuji could
+  // be on sale behind a newer coming-soon one. Ask for on-sale Kuji directly.
+  ['/v1/catalog/products?category=kuji&saleStatus=ON_SALE&limit=1', 'Kuji on sale'],
 ]);
 // PHONE (SMS OTP) is required in LIVE only when the build attests verified SMS
 // delivery with DABBOBA_PHONE_LOGIN_READY=true; otherwise it must stay off.
@@ -87,6 +90,13 @@ function assertBody(route, body, expectedCommerceMode, { requirePhoneLogin = fal
     if (category && expectedCommerceMode === 'PRELAUNCH'
       && body.items.some(exposesPrelaunchInventory)) {
       throw new Error(`${route} exposes inventory during PRELAUNCH.`);
+    }
+  } else if (route === 'Kuji on sale') {
+    if (!Array.isArray(body.items) || !(body.nextCursor === null || typeof body.nextCursor === 'string')) {
+      throw new Error('Kuji on-sale catalog contract is incomplete.');
+    }
+    if (body.items.length > 0) {
+      throw new Error('Kuji is deferred; no Kuji product may be on sale.');
     }
   } else if (route === 'Gacha products' || route === 'Kuji products') {
     const category = route === 'Gacha products' ? 'gacha' : 'kuji';

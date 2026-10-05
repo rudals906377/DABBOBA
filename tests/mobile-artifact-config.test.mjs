@@ -187,6 +187,13 @@ test('markers inside non-ASCII Hermes strings are decoded and rejected by both r
   assert.deepEqual(scanMobileProductionBundle(directory), []);
 });
 
+test('the Hermes compiler is resolved through react-native, which declares it', () => {
+  const source = readFileSync(new URL('../scripts/verify-mobile-artifact-config.mjs', import.meta.url), 'utf8');
+  assert.match(source, /createRequire\(appRequire\.resolve\('react-native\/package\.json'\)\)/);
+  assert.match(source, /reactNativeRequire\.resolve\('hermes-compiler\/package\.json'\)/);
+  assert.match(resolveArtifactHermesCompiler(), /hermes-compiler[\\/]hermesc[\\/]/);
+});
+
 test('CLI returns nonzero for absent declarations without emitting public keys', (t) => {
   const directory = fixture(t);
   exportBundle(directory);

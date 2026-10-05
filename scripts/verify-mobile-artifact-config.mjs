@@ -28,7 +28,12 @@ function mobileDependencyRequire(rootDir) {
 }
 
 export function resolveArtifactHermesCompiler(rootDir = repositoryRoot) {
-  const compilerRoot = path.dirname(mobileDependencyRequire(rootDir).resolve('hermes-compiler/package.json'));
+  // hermes-compiler is a declared dependency of react-native, the package that
+  // compiles the release bundle. Resolve it from there so the gate does not rely
+  // on pnpm hoisting it next to an unrelated package.
+  const appRequire = createRequire(path.join(rootDir, 'apps/mobile/package.json'));
+  const reactNativeRequire = createRequire(appRequire.resolve('react-native/package.json'));
+  const compilerRoot = path.dirname(reactNativeRequire.resolve('hermes-compiler/package.json'));
   const executable = { darwin: 'osx-bin/hermesc', linux: 'linux64-bin/hermesc', win32: 'win64-bin/hermesc.exe' }[process.platform];
   if (!executable) throw new Error('HERMES_HOST_UNSUPPORTED');
   const compiler = path.join(compilerRoot, 'hermesc', executable);
