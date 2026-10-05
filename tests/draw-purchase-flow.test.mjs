@@ -47,6 +47,7 @@ test("gacha opens checkout while kuji claims its one-person room before checkout
   assert.match(productDetail, /isDrawCategory\(product\.category\) \? "뽑으러 가기" : "구매 준비"/);
   assert.match(productDetail, /const drawUnavailable = Boolean/);
   assert.match(productDetail, /snapshot\?\.includedProductsLoaded !== true/);
+  assert.match(productDetail, /\(commerceEnabled && !snapshot\.drawOdds\?\.entries\.length\)/);
   assert.match(productDetail, /snapshot\.includedProducts\.length === 0/);
   assert.match(productDetail, /disabled=\{!commerceEnabled \|\| drawUnavailable\}/);
   assert.match(productDetail, /if \(!commerceEnabled\) return;/);

@@ -33,7 +33,8 @@ test("before LIVE the lineup shows composition quantities and no probability", (
 
 test("product detail falls back to the lineup only when the odds are withheld", () => {
   const api = readFileSync(new URL("../apps/mobile/src/features/shop/shop-api.ts", import.meta.url), "utf8");
-  assert.match(api, /if \(!drawOdds\) \{[\s\S]*?\/v1\/catalog\/products\/\{productId\}\/prize-lineup/);
+  assert.match(api, /if \(!drawOdds && \(drawOddsWithheld\(oddsResult\.error\) \|\| product\.saleStatus !== "ON_SALE"\)\) \{[\s\S]*?\/v1\/catalog\/products\/\{productId\}\/prize-lineup/);
+  assert.match(api, /envelope\.error\?\.code === "COMMERCE_NOT_AVAILABLE"/);
   const screen = readFileSync(new URL("../apps/mobile/src/features/shop/ProductDetailScreen.tsx", import.meta.url), "utf8");
   assert.match(screen, /const prizes = includedPrizes\(snapshot\);/);
   // The probability disclosure caption appears only with real odds.

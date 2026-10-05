@@ -59,7 +59,7 @@ test("root actions, product controls, storage actions, and legal actions own exp
 
   assert.match(tabs, /accessibilityRole="tab"[\s\S]*?accessibilityLabel=[\s\S]*?accessibilityState=\{\{ selected \}\}/);
   assert.match(shop, /accessibilityRole="switch"[\s\S]*?accessibilityLabel="품절 상품 제외"[\s\S]*?accessibilityState=\{\{ checked: draftExcludeSoldOut \}\}/);
-  assert.match(product, /accessibilityLabel=\{!snapshot\.wishlistLoaded[\s\S]*?accessibilityState=\{\{ busy: wishlistPending \}\}/);
+  assert.match(product, /<DetailPageHeaderAction\s+label=\{!snapshot\?\.wishlistLoaded \? "찜 상태 다시 불러오기" : snapshot\.wishedByViewer \? "찜 해제" : "찜하기"\}\s+disabled=\{wishlistPending \|\| !snapshot\}/);
   assert.match(product, /accessibilityLabel=\{!commerceEnabled[\s\S]*?accessibilityState=\{\{ disabled: !commerceEnabled \|\| drawUnavailable \}\}/);
   assert.match(storage, /accessibilityLabel=\{submitLabel\}[\s\S]*?accessibilityState=\{\{ disabled: !selectedCount \|\| submitting, busy: submitting \}\}/);
   assert.match(legal, /accessibilityLabel="회원탈퇴 요청"[\s\S]*?accessibilityState=\{\{ disabled: deletionPending, busy: deletionPending \}\}/);

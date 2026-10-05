@@ -39,7 +39,9 @@ test("native Product Detail keeps its commerce action in a floating content over
   assert.doesNotMatch(source, /footerLayer|footer:\s*\{[^}]*borderTopWidth/);
   assert.match(source, /quantityButton:\s*\{ width: seed\.size\.touchTarget/);
   assert.match(source, /commerceEnabled && !isDrawCategory\(product\.category\) \? \(/);
-  assert.match(source, /isDrawCategory\(product\.category\) \? \([\s\S]*?styles\.wishlistButton/);
+  // The draw action owns one full-width line; the wishlist lives in the header.
+  assert.doesNotMatch(source, /wishlistButton|wishlistLabel/);
+  assert.match(source, /<DetailPageHeaderAction\s+label=\{!snapshot\?\.wishlistLoaded \? "찜 상태 다시 불러오기" : snapshot\.wishedByViewer \? "찜 해제" : "찜하기"\}\s+disabled=\{wishlistPending \|\| !snapshot\}/);
   assert.match(source, /disabled=\{!commerceEnabled \|\| drawUnavailable\}/);
   assert.match(source, /!commerceEnabled\s*\? "뽑기 오픈 준비 중"/);
   assert.match(source, /isDrawCategory\(product\.category\) \? "뽑으러 가기" : "구매 준비"/);
@@ -65,7 +67,10 @@ test("native Product Detail bounds category artwork and leads with prize informa
   const informationIndex = source.indexOf("<DrawProductInformation snapshot={snapshot} />");
   const noticesIndex = source.indexOf("<DrawProductNotices");
   assert.ok(detailIndex >= 0 && oddsIndex > detailIndex && recentIndex > oddsIndex && informationIndex > recentIndex && noticesIndex > informationIndex);
-  assert.doesNotMatch(source, /CommerceGuidance/);
+  assert.doesNotMatch(source, /CommerceGuidance|구매·보관 안내|사전오픈 안내/);
+  // No promotional or tutorial cards: guidance is text-only and the near-black surface stays reserved.
+  assert.doesNotMatch(source, /중복 상품이 생겼나요|exchangeBanner|계산 예시|highlightRow|backgroundColor: colors\.ink, flexDirection/);
+  assert.match(source, /function DrawHighlights[\s\S]*?<SeedInlineGuidance\s+style=\{styles\.highlights\}\s+paragraphs=\{\[/);
   assert.match(source, /확률표 버전 \$\{odds\.version\}/);
 });
 
@@ -75,7 +80,7 @@ test("product detail wishlist reads all pages and never treats a failed lookup a
   assert.match(shopApiSource, /wishlistLoaded: !accessToken \|\| wishlistIds !== null/);
   assert.match(shopApiSource, /wishedByViewer:[\s\S]*?wishlistIds\?\.has\(productId\)/);
   assert.match(source, /if \(!snapshot\.wishlistLoaded\) \{[\s\S]*?fetchShopWishlistProductIds\(runtime\.apiBaseUrl, accessToken\)/);
-  assert.match(source, /accessibilityLabel=\{!snapshot\.wishlistLoaded \? "찜 상태 다시 불러오기"/);
+  assert.match(source, /label=\{!snapshot\?\.wishlistLoaded \? "찜 상태 다시 불러오기"/);
 });
 
 test("included products center their artwork and names in compact reference-proportioned cards", () => {

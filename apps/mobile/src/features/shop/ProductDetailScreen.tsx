@@ -1,5 +1,4 @@
 import Constants from "expo-constants";
-import * as Linking from "expo-linking";
 import { type Href, useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { useSQLiteContext } from "expo-sqlite";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -9,7 +8,6 @@ import {
   Platform,
   Pressable,
   ScrollView,
-  Share,
   StyleSheet,
   View,
 } from "react-native";
@@ -177,6 +175,8 @@ export function ProductDetailScreen() {
         || product.availableQuantity <= 0
         || snapshot?.includedProductsLoaded !== true
         || snapshot.includedProducts.length === 0
+        // Checkout sells only against the server odds version, so a live draw needs it here too.
+        || (commerceEnabled && !snapshot.drawOdds?.entries.length)
       ),
   );
 
@@ -220,17 +220,6 @@ export function ProductDetailScreen() {
       Alert.alert("찜을 변경하지 못했어요", error instanceof Error ? error.message : "잠시 후 다시 시도해 주세요.");
     } finally {
       setWishlistPending(false);
-    }
-  };
-
-  const shareProduct = async () => {
-    if (!product || readOnlyReference) return;
-    try {
-      await Share.share({
-        message: `${product.name}\n${Linking.createURL(`/product/${encodeURIComponent(product.id)}`)}`,
-      });
-    } catch {
-      Alert.alert("공유하지 못했어요", "잠시 후 다시 시도해 주세요.");
     }
   };
 
@@ -294,13 +283,14 @@ export function ProductDetailScreen() {
         onBack={goBack}
         action={readOnlyReference || productComingSoon ? null : (
           <DetailPageHeaderAction
-            label="상품 공유하기"
-            onPress={() => void shareProduct()}
+            label={!snapshot?.wishlistLoaded ? "찜 상태 다시 불러오기" : snapshot.wishedByViewer ? "찜 해제" : "찜하기"}
+            disabled={wishlistPending || !snapshot}
+            onPress={() => void toggleWishlist()}
           >
             <DecorativeIonicon
-              name="share-social-outline"
+              name={snapshot?.wishedByViewer ? "heart" : "heart-outline"}
               size={24}
-              color={colors.ink}
+              color={snapshot?.wishedByViewer ? colors.greenInk : colors.ink}
             />
           </DetailPageHeaderAction>
         )}
@@ -359,21 +349,6 @@ export function ProductDetailScreen() {
                 <RecentDrawSection items={recentDraws} prelaunch={!commerceEnabled} onRetry={() => {
                   setRecentReloadKey((current) => current + 1);
                 }} />
-                {product.category === "gacha" ? (
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel="중복 가챠 상품 교환방 보기"
-                    onPress={() => router.push("/exchange" as Href)}
-                    style={({ pressed }) => [styles.exchangeBanner, pressed && styles.pressed]}
-                  >
-                    <DecorativeIonicon name="swap-horizontal-outline" size={25} color={colors.white} />
-                    <View style={styles.exchangeBannerCopy}>
-                      <Text style={styles.exchangeBannerTitle}>중복 상품이 생겼나요?</Text>
-                      <Text style={styles.exchangeBannerBody}>직접 뽑아 보관 중인 가챠 상품은 교환방에서 교환할 수 있어요.</Text>
-                    </View>
-                    <DecorativeIonicon name="chevron-forward" size={19} color={colors.white} />
-                  </Pressable>
-                ) : null}
                 <DrawProductInformation snapshot={snapshot} />
                 <DrawProductNotices category={product.category} prelaunch={!commerceEnabled} />
               </>
@@ -388,19 +363,6 @@ export function ProductDetailScreen() {
           </ScrollView>
 
           {!readOnlyReference ? <FloatingBottomActionPanel panelStyle={styles.footer}>
-            {isDrawCategory(product.category) ? (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={!snapshot.wishlistLoaded ? "찜 상태 다시 불러오기" : snapshot.wishedByViewer ? "찜 해제" : "찜하기"}
-                accessibilityState={{ busy: wishlistPending }}
-                disabled={wishlistPending}
-                onPress={() => void toggleWishlist()}
-                style={({ pressed }) => [styles.wishlistButton, pressed && styles.pressed]}
-              >
-                <DecorativeIonicon name={snapshot.wishedByViewer ? "heart" : "heart-outline"} size={26} color={snapshot.wishedByViewer ? colors.greenInk : colors.ink} />
-                <Text style={styles.wishlistLabel}>{!snapshot.wishlistLoaded ? "재확인" : snapshot.wishedByViewer ? "찜함" : "찜"}</Text>
-              </Pressable>
-            ) : null}
             {commerceEnabled && !isDrawCategory(product.category) ? (
               <View style={styles.quantityBox}>
                 <Pressable accessibilityRole="button" accessibilityLabel="수량 줄이기" accessibilityState={{ disabled: quantity <= 1 }} disabled={quantity <= 1} onPress={() => setQuantity((current) => Math.max(1, current - 1))} style={({ pressed }) => [styles.quantityButton, pressed && styles.pressed]}>
@@ -504,22 +466,14 @@ function ProductHero({ snapshot, assetBaseUrl }: { snapshot: ProductDetailSnapsh
 function DrawHighlights({ category, prelaunch }: { category: "gacha" | "kuji"; prelaunch: boolean }) {
   const threshold = category === "kuji" ? KUJI_INCLUDED_FREE_SHIPPING_THRESHOLD : GACHA_ONLY_FREE_SHIPPING_THRESHOLD;
   return (
-    <View style={styles.highlights}>
-      {prelaunch ? <View style={styles.highlightRow}>
-        <DecorativeIonicon name="shield-checkmark-outline" size={21} color={colors.ink} />
-        <Text style={styles.highlightText}>정식 오픈 준비 중 · 결제와 뽑기는 아직 이용할 수 없어요.</Text>
-      </View> : null}
-      <View style={styles.highlightRow}>
-        <DecorativeIonicon name="videocam-outline" size={21} color={colors.ink} />
-        <Text style={styles.highlightText}>오배송·파손 문의 시 포장과 개봉 상태를 확인할 수 있는 사진이나 영상이 도움이 됩니다.</Text>
-      </View>
-      <View style={styles.highlightRow}>
-        <DecorativeIonicon name="car-outline" size={21} color={colors.ink} />
-        <Text style={styles.highlightText}>
-          보관 상품 배송 신청 합계 {threshold.toLocaleString("ko-KR")}원부터 무료배송
-        </Text>
-      </View>
-    </View>
+    <SeedInlineGuidance
+      style={styles.highlights}
+      paragraphs={[
+        ...(prelaunch ? ["정식 오픈 준비 중 · 결제와 뽑기는 아직 이용할 수 없어요."] : []),
+        "오배송·파손 문의 시 포장과 개봉 상태를 확인할 수 있는 사진이나 영상이 도움이 됩니다.",
+        `보관 상품 배송 신청 합계 ${threshold.toLocaleString("ko-KR")}원부터 무료배송`,
+      ]}
+    />
   );
 }
 
@@ -583,11 +537,6 @@ function OddsSection({ snapshot, onRetry }: { snapshot: ProductDetailSnapshot; o
               ? "쿠지는 봉인된 번호별 정확한 상품을 열기 전까지 알 수 없습니다."
               : "가챠는 포함 상품 중 하나가 지급되며, 같은 상품이 중복될 수 있어요. 결과에 따라 남은 구성과 확률은 달라질 수 있습니다."}
           </Text>
-          {snapshot.product.category === "gacha" ? (
-            <Text style={styles.disclosure}>
-              계산 예시 · A·B·C·D 각 50개, 시크릿 2개라면 총 202개 중 A는 50/202, 시크릿은 2/202입니다. 이 숫자는 계산 방식을 설명하는 예시이며 이 상품의 실제 수량이나 확률이 아닙니다.
-            </Text>
-          ) : null}
           {snapshot.product.category === "kuji" && (snapshot.product.remainingKujiTiers?.length ?? 0) > 0 ? (
             <Text style={styles.disclosure}>
               남은 상 · {[...(snapshot.product.remainingKujiTiers ?? [])]
@@ -729,9 +678,7 @@ const styles = StyleSheet.create({
   ipName: { color: colors.muted, fontSize: 13 },
   productName: { color: seed.color.foreground.neutral, ...seed.typography.sectionTitle, marginTop: seed.spacing.x1 },
   price: { color: colors.ink, ...seed.typography.amount, fontWeight: "900", marginTop: seed.spacing.x2 },
-  highlights: { marginHorizontal: seed.spacing.globalGutter, marginTop: seed.spacing.x4, gap: seed.spacing.x2 },
-  highlightRow: { minHeight: 46, paddingHorizontal: seed.spacing.x3_5, paddingVertical: seed.spacing.x2, borderRadius: seed.radius.r3, backgroundColor: seed.color.background.neutralWeak, flexDirection: "row", alignItems: "center", gap: seed.spacing.x3 },
-  highlightText: { flex: 1, color: colors.ink, fontSize: 13, lineHeight: 20, fontWeight: "700" },
+  highlights: { marginHorizontal: seed.spacing.globalGutter, marginTop: seed.spacing.x4 },
   guidance: { marginHorizontal: seed.spacing.globalGutter, marginTop: seed.spacing.x4, borderRadius: seed.radius.r4, borderWidth: 1, borderColor: seed.color.stroke.neutral, backgroundColor: seed.color.layer.default, overflow: "hidden" },
   guidanceTrigger: { minHeight: seed.size.touchTarget, paddingHorizontal: seed.spacing.x3_5, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: seed.spacing.x3 },
   guidanceTitleRow: { flex: 1, flexDirection: "row", alignItems: "center", gap: seed.spacing.x2_5 },
@@ -760,10 +707,6 @@ const styles = StyleSheet.create({
   historyImage: { width: "100%", height: "100%" },
   historyPrize: { color: colors.ink, fontSize: 12, lineHeight: 17, fontWeight: "700" },
   historyDate: { color: colors.muted, fontSize: 11, lineHeight: 16 },
-  exchangeBanner: { minHeight: 88, marginHorizontal: seed.spacing.globalGutter, marginTop: seed.spacing.x5, paddingHorizontal: seed.spacing.x4, paddingVertical: seed.spacing.x3, borderRadius: seed.radius.r3, backgroundColor: colors.ink, flexDirection: "row", alignItems: "center", gap: seed.spacing.x3 },
-  exchangeBannerCopy: { flex: 1, gap: 3 },
-  exchangeBannerTitle: { color: colors.white, fontSize: 14, lineHeight: 20, fontWeight: "800" },
-  exchangeBannerBody: { color: colors.white, opacity: 0.82, fontSize: 12, lineHeight: 18 },
   noticeSection: { marginHorizontal: seed.spacing.globalGutter, marginTop: seed.spacing.x6, paddingTop: seed.spacing.x4, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: seed.color.stroke.neutral },
   noticeHeading: { marginBottom: seed.spacing.x3 },
   noticeGroup: { marginTop: seed.spacing.x4 },
@@ -780,8 +723,6 @@ const styles = StyleSheet.create({
   infoLabel: { color: colors.muted, fontSize: 13 },
   infoValue: { flex: 1, color: colors.ink, fontSize: 13, fontWeight: "800", textAlign: "right" },
   footer: { flexDirection: "row", alignItems: "center", gap: seed.spacing.x2_5 },
-  wishlistButton: { minWidth: 54, minHeight: 54, justifyContent: "center", alignItems: "center", gap: 2 },
-  wishlistLabel: { color: colors.ink, fontSize: 11, lineHeight: 16, fontWeight: "700" },
   quantityBox: { height: 54, borderRadius: seed.radius.r3_5, borderWidth: 1, borderColor: seed.color.stroke.neutral, flexDirection: "row", alignItems: "center", backgroundColor: seed.color.layer.basement },
   quantityButton: { width: seed.size.touchTarget, height: 52, alignItems: "center", justifyContent: "center" },
   quantityLabel: { minWidth: 24, color: colors.ink, fontSize: 16, fontWeight: "900", textAlign: "center" },
