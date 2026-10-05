@@ -105,6 +105,24 @@ test("home product choices preserve saved order with named reorder and removal b
   assert.match(html, /상품 위로/);
   assert.match(html, /상품 아래로/);
 });
+test("home product choices are sent once and narrowed to the section's layout and work", async () => {
+  const { HomeProductChoicesProvider, HomeProductPicker } = await load("components/home-product-picker.tsx");
+  const products = [{ id: "g", name: "가챠 상품", category: "gacha", ipId: "ip-a" }, { id: "k", name: "쿠지 상품", category: "kuji", ipId: "ip-b" }];
+  const html = renderToStaticMarkup(React.createElement(HomeProductChoicesProvider, { products },
+    React.createElement(HomeProductPicker, { initialIds: ["g"] })));
+  assert.match(html, /\[가챠\] 가챠 상품/);
+  assert.match(html, /<option value="k">\[쿠지\] 쿠지 상품<\/option>/);
+  const [picker, form, page] = await Promise.all([
+    readFile(join(root, "components/home-product-picker.tsx"), "utf8"),
+    readFile(join(root, "components/home-section-form.tsx"), "utf8"),
+    readFile(join(root, "app/(admin)/catalog/home-sections/page.tsx"), "utf8"),
+  ]);
+  assert.match(picker, /product\.category === filter\.layoutKind/);
+  assert.match(picker, /product\.ipId === filter\.ipId/);
+  assert.match(picker, /선택한 상품 유형·작품과 맞지 않아요/);
+  assert.doesNotMatch(form, /products=/);
+  assert.equal(page.match(/products=\{productChoices\}/g)?.length, 1);
+});
 test("catalog choices fetch beyond the first page and fail on a repeated cursor", async () => {
   const calls = [];
   const module = await load("lib/catalog-choices.ts", { "./api": {

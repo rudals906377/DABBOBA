@@ -34,20 +34,27 @@ export function DrawVersionForm({
   prizeProducts,
   returnTo,
   idempotencyKey,
+  stockOnHand = null,
 }: {
   product: CatalogProduct;
   prizeProducts: CatalogProduct[];
   returnTo: string;
   idempotencyKey: string;
+  /** Stock including checkout reservations; publishing checks prize capacity against it. */
+  stockOnHand?: number | null;
 }) {
   const nextKey = useRef(2);
   const [entries, setEntries] = useState<DraftEntry[]>([emptyEntry("entry-1")]);
   const [totalSlots, setTotalSlots] = useState("");
   const category = product.category === "kuji" ? "kuji" : "gacha";
   const isKuji = category === "kuji";
+  // Publishing requires prize capacity for all stock, including units held by
+  // pending checkouts, so plan against on-hand stock whenever it is readable.
+  const capacityBase = stockOnHand ?? product.availableQuantity;
+  const capacityLabel = stockOnHand === null ? "판매 가용 수량" : "판매 재고(결제 대기 포함)";
 
   const calculation = useMemo(() => {
-    const automaticGachaQuantities = isKuji ? null : allocateGachaDrawQuantities(product.availableQuantity, entries.length);
+    const automaticGachaQuantities = isKuji ? null : allocateGachaDrawQuantities(capacityBase, entries.length);
     const candidateIds = new Set(prizeProducts.map((candidate) => candidate.id));
     const selectedIds = entries.map((entry) => entry.prizeProductId).filter(Boolean);
     const duplicateIds = new Set(selectedIds.filter((id, index) => selectedIds.indexOf(id) !== index));
@@ -98,7 +105,7 @@ export function DrawVersionForm({
       parsed, duplicateIds, duplicateTierCodes, duplicateTierRanks, totalEffectiveWeight,
       totalQuantity, parsedTotalSlots, complete, serialized,
     };
-  }, [category, entries, isKuji, prizeProducts, product.availableQuantity, totalSlots]);
+  }, [capacityBase, category, entries, isKuji, prizeProducts, totalSlots]);
 
   function updateEntry(key: string, patch: Partial<DraftEntry>) {
     setEntries((current) => current.map((entry) => entry.key === key ? { ...entry, ...patch } : entry));
@@ -122,7 +129,7 @@ export function DrawVersionForm({
     </div>;
   }
 
-  const quantityDifference = calculation.totalQuantity - product.availableQuantity;
+  const quantityDifference = calculation.totalQuantity - capacityBase;
   const hasIncompleteEntry = !calculation.complete && calculation.duplicateIds.size === 0;
 
   return <form className="stack-form draw-version-form" action={createDrawVersion}>
@@ -136,7 +143,8 @@ export function DrawVersionForm({
       <strong>물리 재고 lot 대조 필수</strong>
       <p>{isKuji
         ? "전체 쿠지 장수와 등급별 수량은 실제 봉인 덱과 정확히 같아야 합니다. 공개 전 tier 순서와 입고·검수 원장을 직접 대조하세요."
-        : "전체 판매 가용 수량을 선택한 경품 종류에 자동 배분합니다. 이는 추첨용 내부 배정량이며 상세 SKU의 실제 실물 재고를 확인했다는 뜻이 아닙니다. 기존 버전과 물리 lot이 중복되지 않는지 공개 전에 대조하세요."}</p>
+        : `전체 ${capacityLabel}을 선택한 경품 종류에 자동 배분합니다. 이는 추첨용 내부 배정량이며 상세 SKU의 실제 실물 재고를 확인했다는 뜻이 아닙니다. 기존 버전과 물리 lot이 중복되지 않는지 공개 전에 대조하세요.`}</p>
+      {stockOnHand === null ? <p className="muted">재고 조회 권한이 없어 판매 가용 수량으로 계산했어요. 결제 대기 중인 예약이 있으면 공개가 거부될 수 있어요.</p> : null}
     </aside>
 
     {isKuji ? <label>전체 쿠지 장수
@@ -245,7 +253,7 @@ export function DrawVersionForm({
     </div>
 
     <dl className="draw-live-summary">
-      <div><dt>판매 가용 수량</dt><dd>{product.availableQuantity.toLocaleString("ko-KR")}</dd></div>
+      <div><dt>{capacityLabel}</dt><dd>{capacityBase.toLocaleString("ko-KR")}</dd></div>
       {isKuji ? <div><dt>전체 쿠지 장수</dt><dd>{calculation.parsedTotalSlots?.toLocaleString("ko-KR") ?? "-"}</dd></div> : null}
       <div><dt>입력한 경품 수량</dt><dd>{calculation.totalQuantity.toLocaleString("ko-KR")}</dd></div>
       {!isKuji ? <div><dt>확률 계산용 전체 수량</dt><dd>{calculation.totalEffectiveWeight.toLocaleString("ko-KR")}개</dd></div> : null}
@@ -256,10 +264,10 @@ export function DrawVersionForm({
         : isKuji && calculation.duplicateTierRanks.size > 0 ? <p className="draw-capacity-message" data-kind="error" role="alert">같은 tierRank를 두 번 사용할 수 없습니다.</p>
           : isKuji && calculation.parsedTotalSlots === null ? <p className="draw-capacity-message" data-kind="neutral">전체 쿠지 장수를 1~10,000 사이로 입력하세요.</p>
             : isKuji && calculation.totalQuantity !== calculation.parsedTotalSlots ? <p className="draw-capacity-message" data-kind="error" role="alert">경품 수량 합계가 전체 쿠지 장수와 정확히 같아야 합니다.</p>
-      : calculation.totalQuantity > 0 && quantityDifference < 0 ? <p className="draw-capacity-message" data-kind="error" role="alert">경품 수량이 현재 판매 가용 수량보다 {Math.abs(quantityDifference).toLocaleString("ko-KR")}개 부족합니다. 초안은 저장할 수 있지만 공개 전 판매 재고와 물리 lot을 맞춰야 합니다.</p>
-        : calculation.totalQuantity > 0 && quantityDifference > 0 ? <p className="draw-capacity-message" data-kind="warning">경품 수량이 현재 판매 가용 수량보다 {quantityDifference.toLocaleString("ko-KR")}개 많습니다. 실제 입고·판매 계획과 일치하는지 확인하세요.</p>
-          : calculation.totalQuantity > 0 && quantityDifference === 0 ? <p className="draw-capacity-message" data-kind="success">{isKuji ? "전체 쿠지 장수, 경품 수량, 판매 가용 수량이 모두 일치합니다." : "경품 수량과 현재 판매 가용 수량이 일치합니다."}</p>
-            : hasIncompleteEntry ? <p className="draw-capacity-message" data-kind="neutral">{isKuji ? "경품, 등급, tierCode, tierRank, 유한 수량을 모두 입력하세요." : "경품과 등급을 선택하세요. 전체 판매 가용 수량은 경품 종류 수 이상이어야 합니다."}</p> : null}
+      : calculation.totalQuantity > 0 && quantityDifference < 0 ? <p className="draw-capacity-message" data-kind="error" role="alert">경품 수량이 현재 {capacityLabel}보다 {Math.abs(quantityDifference).toLocaleString("ko-KR")}개 부족합니다. 초안은 저장할 수 있지만 공개 전 판매 재고와 물리 lot을 맞춰야 합니다.</p>
+        : calculation.totalQuantity > 0 && quantityDifference > 0 ? <p className="draw-capacity-message" data-kind="warning">경품 수량이 현재 {capacityLabel}보다 {quantityDifference.toLocaleString("ko-KR")}개 많습니다. 실제 입고·판매 계획과 일치하는지 확인하세요.</p>
+          : calculation.totalQuantity > 0 && quantityDifference === 0 ? <p className="draw-capacity-message" data-kind="success">{isKuji ? `전체 쿠지 장수, 경품 수량, ${capacityLabel}이 모두 일치합니다.` : `경품 수량과 현재 ${capacityLabel}이 일치합니다.`}</p>
+            : hasIncompleteEntry ? <p className="draw-capacity-message" data-kind="neutral">{isKuji ? "경품, 등급, tierCode, tierRank, 유한 수량을 모두 입력하세요." : `경품과 등급을 선택하세요. 전체 ${capacityLabel}은 경품 종류 수 이상이어야 합니다.`}</p> : null}
 
     <label className="reason-field"><span>초안 생성 사유<b>필수</b></span><textarea name="reason" minLength={2} maxLength={1000} required placeholder="감사 로그에 남길 구체적인 사유를 입력하세요." /></label>
     <div className="form-actions"><button className="primary" disabled={!calculation.complete}>{isKuji ? "쿠지 상 구성 초안 생성" : "확률표 초안 생성"}</button></div>

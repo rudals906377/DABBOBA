@@ -1,7 +1,7 @@
 import type { AdminHomeSection, CatalogIp } from "../lib/admin-types";
 import { createHomeSection, updateHomeSection } from "../lib/actions";
 import { ReasonField, ReturnTo } from "./operations";
-import { HomeProductPicker, type HomeProductChoice } from "./home-product-picker";
+import { HomeProductPicker } from "./home-product-picker";
 
 const HOME_SECTION_LAYOUT_LABELS = {
   gacha: "가챠",
@@ -15,12 +15,11 @@ const HOME_SECTION_SOURCE_LABELS = {
   POPULAR: "최근 30일 인기순",
 } as const;
 
-export function HomeSectionForm({ item, ips, returnTo, configured, products = [] }: {
+export function HomeSectionForm({ item, ips, returnTo, configured }: {
   item?: AdminHomeSection;
   ips: CatalogIp[];
   returnTo: string;
   configured: boolean;
-  products?: HomeProductChoice[];
 }) {
   const selectedIpAvailable = !item?.ipId || ips.some((ip) => ip.id === item.ipId);
   return <form className="stack-form" action={item ? updateHomeSection : createHomeSection}>
@@ -52,7 +51,7 @@ export function HomeSectionForm({ item, ips, returnTo, configured, products = []
       {item ? <label className="check-field"><input type="checkbox" name="isActive" defaultChecked={item.isActive} /> 홈 노출</label>
         : <input type="hidden" name="isActive" value="off" />}
     </div>
-    <details className="catalog-optional" open={item?.sourceKind === "MANUAL"}><summary>수동으로 상품 선택·순서 변경</summary><HomeProductPicker products={products} initialIds={item?.manualProductIds ?? []} /></details>
+    <details className="catalog-optional" open={item?.sourceKind === "MANUAL"}><summary>수동으로 상품 선택·순서 변경</summary><HomeProductPicker initialIds={item?.manualProductIds ?? []} /></details>
     {(item?.sourceKind ?? "IP") === "IP" && !item?.ipId ? <aside className="draw-lot-warning">
       <strong>연결 IP 선택 필요</strong>
       <p>IP 최신순 구성은 연결 IP를 선택해야 저장할 수 있습니다.</p>

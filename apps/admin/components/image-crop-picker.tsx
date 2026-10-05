@@ -36,6 +36,14 @@ export function ImageCropPicker({ productId, expectedVersion, returnTo, role, id
 
   useEffect(() => () => { if (source) URL.revokeObjectURL(source.url); }, [source]);
 
+  // A page restored from the back/forward cache, or an upload the browser
+  // stopped, must not leave the save button stuck on "사진 저장 중…".
+  useEffect(() => {
+    const restore = (event: PageTransitionEvent) => { if (event.persisted) setSubmitting(false); };
+    window.addEventListener("pageshow", restore);
+    return () => window.removeEventListener("pageshow", restore);
+  }, []);
+
   useEffect(() => {
     const canvas = previewRef.current;
     const image = imageRef.current;
@@ -58,12 +66,14 @@ export function ImageCropPicker({ productId, expectedVersion, returnTo, role, id
     setHorizontal(50);
     setVertical(50);
     setConfirmed(false);
+    setSubmitting(false);
     setMessage("");
   }
 
   function invalidateCrop() {
     cropRevisionRef.current += 1;
     setConfirmed(false);
+    setSubmitting(false);
     setMessage("");
   }
 
@@ -186,7 +196,11 @@ export function ImageCropPicker({ productId, expectedVersion, returnTo, role, id
       <button type="button" disabled={applying} onClick={() => void applyCrop()}>{applying ? "사진 자르는 중…" : "자르기 적용"}</button>
       {source.file.type === "image/gif" ? <small>GIF는 잘라낸 첫 장면을 PNG 사진으로 저장합니다.</small> : null}
     </div> : null}
-    {message ? <p role="status" className={confirmed ? "catalog-crop-success" : "catalog-crop-error"}>{message}</p> : null}
+    {/* Both live regions stay mounted so screen readers announce new text. */}
+    <div className="catalog-crop-messages">
+      <p role="status" className="catalog-crop-success">{confirmed ? message : ""}</p>
+      <p role="alert" className="catalog-crop-error">{confirmed ? "" : message}</p>
+    </div>
     <label className="reason-field"><span>{label} 변경 사유<b>필수</b></span><textarea name="reason" minLength={2} maxLength={1000} required placeholder="감사 로그에 남길 구체적인 사유를 입력하세요." /></label>
     <div className="form-actions"><button className="primary" disabled={!confirmed || applying || submitting}>{submitting ? "사진 저장 중…" : buttonLabel}</button></div>
   </form>;

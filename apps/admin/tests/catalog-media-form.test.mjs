@@ -550,6 +550,18 @@ test("crop geometry keeps the selected aspect ratio and shifts within the origin
   assert.throws(() => imageCropRect(1000, 1000, 1, 0.5, 50, 50), /올바르지/);
 });
 
+test("crop picker never strands the save button and keeps its live regions mounted", async () => {
+  const source = await readFile(join(adminRoot, "components/image-crop-picker.tsx"), "utf8");
+  // Restored pages and any new file or crop change release the saving state.
+  assert.match(source, /addEventListener\("pageshow", restore\)/);
+  assert.match(source, /if \(event\.persisted\) setSubmitting\(false\)/);
+  assert.equal(source.match(/setSubmitting\(false\);/g)?.length, 3);
+  // Text is swapped inside regions that are always present, so it is announced.
+  assert.match(source, /<p role="status" className="catalog-crop-success">\{confirmed \? message : ""\}<\/p>/);
+  assert.match(source, /<p role="alert" className="catalog-crop-error">\{confirmed \? "" : message\}<\/p>/);
+  assert.doesNotMatch(source, /\{message \? <p role="status"/);
+});
+
 test("crop output keeps fixed ratios exact so the API accepts the encoded size", async () => {
   const { cropOutputSize, imageCropRect } = await loadModule(join(adminRoot, "lib/image-crop-geometry.ts"));
   // The reported failure: a 1500×1000 source cropped to 16:9 used to encode as 1500×844.
