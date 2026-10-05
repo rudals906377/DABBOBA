@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
-import { imageCropRect } from "../lib/image-crop-geometry";
+import { cropOutputSize, imageCropRect } from "../lib/image-crop-geometry";
 
 type ImageSource = { file: File; url: string; width: number; height: number };
 type ImageCropPickerProps = {
@@ -117,9 +117,7 @@ export function ImageCropPicker({ productId, expectedVersion, returnTo, role, id
     try {
       const effectiveRatio = ratio === 0 ? source.width / source.height : ratio;
       const rect = imageCropRect(source.width, source.height, effectiveRatio, zoom, horizontal, vertical);
-      const scale = Math.min(1, 2400 / Math.max(rect.width, rect.height));
-      const width = Math.round(rect.width * scale);
-      const height = Math.round(rect.height * scale);
+      const { width, height } = cropOutputSize(rect, effectiveRatio, 2400);
       if (width < 1 || height < 1) throw new Error("선택한 사진 영역이 너무 작습니다. 확대를 줄여 주세요.");
       if (width < minimumWidth || height < minimumHeight) {
         throw new Error(`선택한 영역은 최소 ${minimumWidth}×${minimumHeight}px이어야 합니다. 확대를 줄이거나 더 큰 원본을 선택해 주세요.`);
