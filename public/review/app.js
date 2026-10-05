@@ -76,7 +76,7 @@ function checkout(product, odds) {
     }
     if (!pending) {notify('확인할 결제가 없어요.'); return;}
     const order = await api('/orders/' + pending.id);
-    if (['PAID','FULFILLED'].includes(order.status)) { notify('서버에서 결제 완료를 확인했어요. 실제 상품 획득·배송은 앱에서 진행합니다.'); return; }
+    if (order.id === pending.id && ['PAID','FULFILLED'].includes(order.status)) {pending = null; intents.clear(); sessionStorage.removeItem('dabboba-review-order'); notify('서버에서 결제 완료를 확인했어요. 실제 상품 획득·배송은 앱에서 진행하며, 다른 결제창도 이어서 확인할 수 있어요.'); return;}
     if (['CANCELLED','EXPIRED','FAILED','REFUNDED'].includes(order.status)) {pending = null; intents.clear(); sessionStorage.removeItem('dabboba-review-order'); notify('종료된 주문이에요. 다시 구매할 수 있습니다.'); return;}
     try {await api(`/payments/${pending.paymentId}/abandon`, {}, 'web-abandon:' + pending.id); pending = null;intents.clear();sessionStorage.removeItem('dabboba-review-order');notify('결제창을 닫은 주문을 정리했어요. 다시 구매할 수 있습니다.');}
     catch(e) { if(e.status === 409) {await api(`/payments/${pending.paymentId}/confirm`, {});notify('결제 정보를 다시 확인했어요. 결제 상태 확인을 눌러 주세요.');} else throw e; }
