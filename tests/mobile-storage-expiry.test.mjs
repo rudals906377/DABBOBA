@@ -62,12 +62,14 @@ test("stored inventory cards show the 60-day policy, server expiry date, and rem
   assert.doesNotMatch(profileSectionSource, /acquiredAt[\s\S]{0,120}60\s*\*/);
 });
 
-test("expired inventory is returned only in the explicit non-actionable hold state", () => {
+test("expired inventory stays visible but is never actionable", () => {
   assert.match(
     accountApiSource,
     /iu\.status IN \('OWNED','EXCHANGE_LISTED','EXCHANGE_OFFERED','SHIPPING','EXPIRED_HOLD'\)/,
   );
-  assert.match(
+  // The automatic EXPIRED_HOLD transition is off by default, so a unit past its
+  // deadline must not disappear from the storage list.
+  assert.doesNotMatch(
     accountApiSource,
     /\(iu\.status IN \('SHIPPING','EXPIRED_HOLD'\) OR iu\.storage_expires_at>now\(\)\)/,
   );
@@ -81,5 +83,7 @@ test("expired inventory is returned only in the explicit non-actionable hold sta
   );
   assert.match(profileSectionSource, /item\.status === "OWNED" \|\| item\.status === "EXPIRED_HOLD"/);
   assert.match(profileSectionSource, /item\.status === "EXPIRED_HOLD"[\s\S]*?자동 폐기되지 않아요/);
+  assert.match(profileSectionSource, /storageExpiryState\(item\.storageExpiresAt\)\?\.isExpired\) \?/);
+  assert.match(profileSectionSource, /보관 기간이 지난 상품은 자동으로 폐기하지 않아요/);
   assert.match(profileSectionSource, /selectable=\{commerceEnabled && item\.status === "OWNED"/);
 });

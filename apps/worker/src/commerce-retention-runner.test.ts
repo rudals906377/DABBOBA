@@ -42,7 +42,7 @@ test("disabled commerce disposal is not scheduled or invoked by a queued job", a
   const config = loadWorkerConfig(base);
   const { trace, pool, operations } = fixture();
   const summary = await runWorkerOnce(config, logger, () => false, () => pool, operations);
-  assert.equal(summary.periodicCompleted, 6);
+  assert.equal(summary.periodicCompleted, 5);
   assert.equal(trace.includes("commerce.retention.sweep"), false);
   let connected = false;
   const result = await processWorkerJob({
@@ -57,7 +57,7 @@ for (const mode of ["PREVIEW", "EXECUTE"] as const) {
     const config = loadWorkerConfig({ ...base, WORKER_COMMERCE_RETENTION_MODE: mode });
     const { trace, pool, operations } = fixture();
     const summary = await runWorkerOnce(config, logger, () => false, () => pool, operations);
-    assert.equal(summary.periodicCompleted, 7);
+    assert.equal(summary.periodicCompleted, 6);
     assert.equal(trace.filter((kind) => kind === "commerce.retention.sweep").length, 1);
     assert.equal(trace.indexOf("commerce.retention.sweep"), trace.indexOf("retention.sweep") + 1);
     assert.ok(trace.indexOf("commerce.retention.sweep") < trace.indexOf("queue"));

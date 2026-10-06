@@ -1245,8 +1245,9 @@ export async function registerAccountRoutes(app: FastifyInstance, context: ApiCo
     const values: unknown[] = [request.actor!.userId, limit + 1];
     const filters = [
       "iu.owner_id=$1",
+      // Units past their storage deadline stay visible as non-actionable rows:
+      // the automatic EXPIRED_HOLD transition is off until that policy is approved.
       "iu.status IN ('OWNED','EXCHANGE_LISTED','EXCHANGE_OFFERED','SHIPPING','EXPIRED_HOLD')",
-      "(iu.status IN ('SHIPPING','EXPIRED_HOLD') OR iu.storage_expires_at>now())",
       "iu.source_type IN ('GACHA','KUJI')",
       `(EXISTS (
          SELECT 1 FROM draw_results draw_result

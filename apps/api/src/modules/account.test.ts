@@ -642,7 +642,7 @@ test("account inventory returns the owner's stored, exchanging, or shipping GACH
   assert.deepEqual(capturedParams, [actorId, 3]);
   assert.match(capturedSql, /iu\.owner_id=\$1/);
   assert.match(capturedSql, /iu\.status IN \('OWNED','EXCHANGE_LISTED','EXCHANGE_OFFERED','SHIPPING','EXPIRED_HOLD'\)/);
-  assert.match(capturedSql, /\(iu\.status IN \('SHIPPING','EXPIRED_HOLD'\) OR iu\.storage_expires_at>now\(\)\)/);
+  assert.doesNotMatch(capturedSql, /\(iu\.status IN \('SHIPPING','EXPIRED_HOLD'\) OR iu\.storage_expires_at>now\(\)\)/);
   assert.match(capturedSql, /point_purchase\.reference_amount >= 2/);
   assert.match(capturedSql, /SELECT p\.price AS reference_amount/);
   assert.match(capturedSql, /iu\.source_type IN \('GACHA','KUJI'\)/);

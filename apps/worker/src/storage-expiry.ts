@@ -29,6 +29,27 @@ const EMPTY_RESULT: StorageExpiryBatchResult = {
   reminders: 0,
 };
 
+export type InventoryStorageExpiryMode = "DISABLED" | "ENABLED";
+
+/**
+ * Storage-deadline reminders, the EXPIRED_HOLD transition and the expired
+ * exchange cleanup are not an approved operating policy yet (AGENTS.md: scheduled
+ * reminders and automatic expiry handling remain unapproved). They stay off
+ * unless an operator explicitly enables them, so turning on the every-minute
+ * worker Cron does not start them.
+ */
+export const DEFAULT_INVENTORY_STORAGE_EXPIRY_MODE: InventoryStorageExpiryMode = "DISABLED";
+
+export function normalizeInventoryStorageExpiryMode(value: string | undefined): InventoryStorageExpiryMode {
+  const mode = value?.trim() || DEFAULT_INVENTORY_STORAGE_EXPIRY_MODE;
+  if (mode !== "DISABLED" && mode !== "ENABLED") {
+    throw new Error("Inventory storage expiry mode must be DISABLED or ENABLED");
+  }
+  return mode;
+}
+
+export const DISABLED_STORAGE_EXPIRY_RESULT: Readonly<StorageExpiryBatchResult> = Object.freeze({ ...EMPTY_RESULT });
+
 /** Reminder milestones, in days before the storage deadline. */
 export const STORAGE_REMINDER_MILESTONE_DAYS = Object.freeze([1, 3, 7, 14] as const);
 /**
