@@ -447,10 +447,13 @@ export async function loadDeletionBlockers(queryable: Queryable, userId: string)
   const result = await queryable.query<AccountDeletionBlockerRow>(
     `SELECT
        COALESCE((SELECT balance FROM point_accounts WHERE user_id=$1),0) AS point_balance,
+       -- PAID is a settled order: nothing moves it to FULFILLED, and what it
+       -- still owes the customer (unused draws, stored or shipping items) is
+       -- counted below. Only unsettled or frozen orders and payments block.
        (SELECT count(*) FROM orders
-         WHERE user_id=$1 AND status IN ('PENDING_PAYMENT','PAID','REFUND_REVIEW')) AS active_order_count,
+         WHERE user_id=$1 AND status IN ('PENDING_PAYMENT','REFUND_REVIEW')) AS active_order_count,
        (SELECT count(*) FROM payments p JOIN orders o ON o.id=p.order_id
-         WHERE o.user_id=$1 AND p.status IN ('PENDING','AUTHORIZED','PAID','REFUND_REVIEW')) AS active_payment_count,
+         WHERE o.user_id=$1 AND p.status IN ('PENDING','AUTHORIZED','REFUND_REVIEW')) AS active_payment_count,
        (SELECT count(*) FROM draw_entitlements
          WHERE user_id=$1 AND status='AVAILABLE') AS available_draw_entitlement_count,
        (SELECT count(*) FROM inventory_units
@@ -459,8 +462,11 @@ export async function loadDeletionBlockers(queryable: Queryable, userId: string)
         WHERE user_id=$1 AND status IN ('PAYMENT_PENDING','REQUESTED','PROCESSING','SHIPPED')) AS active_shipping_request_count,
        (SELECT count(*) FROM exchange_listings
          WHERE author_id=$1 AND status IN ('OPEN','MATCHED')) AS active_exchange_listing_count,
-       (SELECT count(*) FROM exchange_offers
-         WHERE proposer_id=$1 AND status IN ('PENDING','ACCEPTED')) AS active_exchange_offer_count`,
+       -- An accepted offer stays ACCEPTED after its exchange completes or is
+       -- cancelled; it blocks only while the listing is still MATCHED.
+       (SELECT count(*) FROM exchange_offers offer JOIN exchange_listings listing ON listing.id=offer.listing_id
+         WHERE offer.proposer_id=$1
+           AND (offer.status='PENDING' OR (offer.status='ACCEPTED' AND listing.status='MATCHED'))) AS active_exchange_offer_count`,
     [userId],
   );
   return mapDeletionBlockers(result.rows[0]!);

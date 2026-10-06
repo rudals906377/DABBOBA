@@ -154,10 +154,12 @@ async function deletionHasBlockers(pool: DatabasePool, job: Pick<AuthDeletionJob
             THEN 0
             ELSE COALESCE((SELECT balance FROM point_accounts WHERE user_id=$1),0)
        END AS point_balance,
+       -- Same blockers as the API's loadDeletionBlockers: PAID orders are
+       -- settled and their remaining obligations are counted separately.
        (SELECT count(*) FROM orders
-         WHERE user_id=$1 AND status IN ('PENDING_PAYMENT','PAID','REFUND_REVIEW')) AS active_order_count,
+         WHERE user_id=$1 AND status IN ('PENDING_PAYMENT','REFUND_REVIEW')) AS active_order_count,
        (SELECT count(*) FROM payments p JOIN orders o ON o.id=p.order_id
-         WHERE o.user_id=$1 AND p.status IN ('PENDING','AUTHORIZED','PAID','REFUND_REVIEW')) AS active_payment_count,
+         WHERE o.user_id=$1 AND p.status IN ('PENDING','AUTHORIZED','REFUND_REVIEW')) AS active_payment_count,
        (SELECT count(*) FROM draw_entitlements
          WHERE user_id=$1 AND status='AVAILABLE') AS available_draw_entitlement_count,
        (SELECT count(*) FROM inventory_units
@@ -166,8 +168,9 @@ async function deletionHasBlockers(pool: DatabasePool, job: Pick<AuthDeletionJob
          WHERE user_id=$1 AND status IN ('PAYMENT_PENDING','REQUESTED','PROCESSING','SHIPPED')) AS active_shipping_request_count,
        (SELECT count(*) FROM exchange_listings
          WHERE author_id=$1 AND status IN ('OPEN','MATCHED')) AS active_exchange_listing_count,
-       (SELECT count(*) FROM exchange_offers
-         WHERE proposer_id=$1 AND status IN ('PENDING','ACCEPTED')) AS active_exchange_offer_count`,
+       (SELECT count(*) FROM exchange_offers offer JOIN exchange_listings listing ON listing.id=offer.listing_id
+         WHERE offer.proposer_id=$1
+           AND (offer.status='PENDING' OR (offer.status='ACCEPTED' AND listing.status='MATCHED'))) AS active_exchange_offer_count`,
     [job.user_id, job.deletion_request_id],
   );
   return Object.values(result.rows[0] ?? {}).some((value) => Number(value) > 0);
