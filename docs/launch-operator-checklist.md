@@ -52,6 +52,28 @@ corepack pnpm exec wrangler deploy --keep-vars      # 기존 Secret/환경값 �
 
 - 공개 웹(dabboba.net, `/review` 포함)은 main 병합 시 Cloudflare Pages가 자동 배포한다. Pages 대시보드에서 최신 커밋 배포 성공을 확인한다.
 
+## 4-1. 관리자 2단계 인증 — Cloudflare Access (2026-10-06 결정, LIVE 전 필수)
+
+관리자 비밀번호가 첫 번째 인증이고, Cloudflare Access가 두 번째 인증이다. 순서를 지킨다. Access 앱을 만들기 전에
+Worker 설정부터 배포하면 관리자 화면이 403으로 잠긴다(되돌리려면 두 값을 빼고 다시 배포).
+
+1. Cloudflare 대시보드 → Zero Trust. 처음이면 팀 이름을 정한다. 팀 도메인은 `<팀>.cloudflareaccess.com`이다.
+2. 로그인 방법: 기본 One-time PIN(운영자 이메일로 코드 발송)을 쓰거나, 2단계 인증이 켜진 Google 계정 같은 제공자를 연결한다.
+3. Access → Applications → Self-hosted 앱을 추가한다.
+   - 도메인: `admin.dabboba.net`. 경로는 비워 전체를 보호한다.
+   - 세션 시간: 24시간 이하.
+4. 정책: Allow, Include → Emails에 운영자 이메일만 넣는다. `Everyone`이나 도메인 전체 허용은 쓰지 않는다.
+5. 앱 개요에서 Application Audience(AUD) 태그를 복사한다.
+6. `apps/admin/wrangler.jsonc`의 `vars`에 두 값을 넣고 커밋한 뒤 4단계 명령으로 다시 배포한다. 빈 값은 넣지 않는다.
+   - `"ADMIN_CLOUDFLARE_ACCESS_TEAM_DOMAIN": "<팀>.cloudflareaccess.com"`
+   - `"ADMIN_CLOUDFLARE_ACCESS_AUD": "<AUD 태그>"`
+7. 확인:
+   - 시크릿 창에서 `admin.dabboba.net`에 들어가면 Access 로그인이 먼저 나오고, 통과한 뒤 관리자 로그인이 나온다.
+   - `corepack pnpm run admin:access:verify`가 `Admin console is behind Cloudflare Access`를 출력한다.
+
+관리자 웹은 Access가 서명한 토큰을 직접 검증하므로 Access를 거치지 않은 요청은 403으로 막힌다.
+`workers.dev`와 미리보기 주소는 꺼 두었다. LIVE 전환 명령은 이 검사가 통과하지 않으면 시작하지 않는다.
+
 ## 5. 워커 자동 실행(Cron) 켜기
 
 ```
@@ -60,8 +82,8 @@ corepack pnpm run supabase:worker:schedule <2단계 check:release의 targetHash>
 
 - 1분마다 `dabboba-worker`를 호출하는 `dabboba-worker-every-minute` 작업과 Vault 비밀값을 설정한다.
 - 확인: Supabase 대시보드 → Cron 작업 실행 기록이 성공으로 쌓이는지, 워커 로그에 탈퇴 처리·대사·만료 정리가 도는지.
-- 기록 정리(retention)는 `WORKER_COMMERCE_RETENTION_MODE` 기본값 `DISABLED`로 계속 꺼져 있다. 보존기간 정책 승인 전에는 켜지 않는다.
-- 보관기한 알림·만료 보류·만료 교환 정리도 `WORKER_INVENTORY_STORAGE_EXPIRY_MODE` 기본값 `DISABLED`로 꺼져 있다. Edge 워커는 이 값을 전달하지 않으므로 Cron을 켜도 돌지 않는다. 정책을 승인한 뒤 코드 변경(전달 키 추가)으로만 켠다.
+- 기록 정리(retention)는 `WORKER_COMMERCE_RETENTION_MODE` 기본값 `DISABLED`로 계속 꺼져 있다. 보존기간 정책은 법률 검토 답변(질문지 B7)과 함께 관리자 화면에서 승인한다. 승인 전에는 켜지 않는다.
+- 보관기한 알림·만료 보류·만료 교환 정리도 `WORKER_INVENTORY_STORAGE_EXPIRY_MODE` 기본값 `DISABLED`로 꺼져 있다. Edge 워커는 이 값을 전달하지 않으므로 Cron을 켜도 돌지 않는다. 운영 여부는 첫 LIVE 판매일부터 60일 안에 소유자가 정한다(2026-10-06 결정). 켜기로 하면 코드 변경(전달 키 추가)과 안내 문구·약관 반영으로만 켠다.
 - Cron이 켜져야 15분 넘게 결제하지 않은 주문·배송비 신청이 자동 취소되고 재고·포인트·보관함이 돌아온다. LIVE 전에 반드시 켠다.
 
 ## 6. 판매 준비 (관리자 화면)
@@ -117,7 +139,9 @@ corepack pnpm run supabase:worker:schedule <2단계 check:release의 targetHash>
 
 `docs/live-cutover-runbook.md`: LIVE 프로필 작성 → `supabase:edge:live:check` →
 `node scripts/deploy-supabase-live-edge.mjs --confirm=LIVE:rconfxsykttfvznakile`.
-실패하면 자동으로 PRELAUNCH로 되돌아간다.
+전환 명령은 4-1의 관리자 Access 검사를 먼저 통과해야 진행한다. 실패하면 자동으로 PRELAUNCH로 되돌아간다.
+
+전환한 날짜를 기록한다. 그날부터 60일 안에 보관기한 알림·만료 보류 운영 여부를 정한다.
 
 ## 이 문서가 다루지 않는 것
 

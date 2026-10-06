@@ -36,12 +36,13 @@ const live = {
 };
 const release = { sourceHead: 'a'.repeat(40), latestMigration: '0085_session_review_access_deadline.sql', targetHash: 'b'.repeat(64) };
 
-function harness({ liveSecrets = [], verifyLive, rollback } = {}) {
+function harness({ liveSecrets = [], verifyLive, rollback, adminAccess } = {}) {
   const calls = [];
   const options = {
     readLiveProfile: () => { calls.push('read-live'); return live; },
     prepareProfile: () => { calls.push('read-prelaunch'); return prelaunch; },
     preflight: async ({ edgeProfile }) => { calls.push('preflight'); assert.equal(edgeProfile, live); return release; },
+    verifyAdminAccess: adminAccess ?? (async () => calls.push('admin-access')),
     verifyProjectAccess: () => calls.push('project-access'),
     listSecretNames: () => { calls.push('list-secrets'); return new Set(['DABBOBA_API_DATABASE_URL', ...liveSecrets]); },
     run: (command, args) => calls.push(`run:${command} ${args.join(' ')}`),
@@ -69,7 +70,7 @@ test('LIVE cutover checks everything before uploading LIVE secrets, then deploys
   const { calls, options } = harness();
   const result = await deploySupabaseLiveEdge(options);
   assert.deepEqual(result, { commerceMode: 'LIVE', transition: 'PRELAUNCH to LIVE cutover', ...release });
-  assert.deepEqual(calls.slice(0, 5), ['read-live', 'read-prelaunch', 'preflight', 'project-access', 'list-secrets']);
+  assert.deepEqual(calls.slice(0, 6), ['read-live', 'read-prelaunch', 'preflight', 'admin-access', 'project-access', 'list-secrets']);
   const secretsSet = calls.indexOf(`supabase:secrets set --env-file ${SUPABASE_LIVE_CANDIDATE_FILE} --project-ref ${ref}`);
   assert.ok(secretsSet > calls.indexOf('run:corepack pnpm --filter @dabboba/worker build:edge'));
   for (const fn of ['dabboba-api', 'dabboba-admin-api', 'dabboba-worker']) {
@@ -94,6 +95,12 @@ test('a changed baseline or failed preflight stops before any build, secret or d
   for (const { calls } of [changed, blocked]) {
     assert.equal(calls.some((call) => call.startsWith('run:') || call.startsWith('supabase:')), false);
   }
+});
+
+test('an administrator console without Cloudflare Access stops the cutover before anything changes', async () => {
+  const { calls, options } = harness({ adminAccess: async () => { calls.push('admin-access'); throw new Error('admin.dabboba.net answered 200'); } });
+  await assert.rejects(deploySupabaseLiveEdge(options), /answered 200/);
+  assert.deepEqual(calls, ['read-live', 'read-prelaunch', 'preflight', 'admin-access']);
 });
 
 test('a failed LIVE verification returns the project to PRELAUNCH and removes LIVE payment secrets', async () => {

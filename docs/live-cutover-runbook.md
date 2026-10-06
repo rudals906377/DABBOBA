@@ -42,7 +42,10 @@
 ## 전환 명령이 하는 일
 
 1. 확인 문구 검사 → LIVE 프로필(`0600`, LIVE 검증)과 PRELAUNCH 기준 프로필 읽기 → 기준값 일치 검사.
-2. 소스(깨끗한 커밋, 최신 마이그레이션)와 운영 DB 읽기 전용 릴리스 검사, Supabase CLI 접근 확인.
+2. 소스(깨끗한 커밋, 최신 마이그레이션)와 운영 DB 읽기 전용 릴리스 검사, 관리자 웹 Cloudflare Access 검사,
+   Supabase CLI 접근 확인. Access 검사는 `apps/admin/wrangler.jsonc`의 Access 팀 도메인·AUD 태그와
+   `workers.dev`·미리보기 주소 꺼짐을 확인하고, 로그인하지 않은 요청이 `admin.dabboba.net`에서 그 팀의 Access
+   로그인으로 넘어가는지 본다(`corepack pnpm run admin:access:verify`와 같은 검사, 체크리스트 4-1).
 3. 함수 3개 빌드 → LIVE 비밀값 업로드 → `dabboba-api`·`dabboba-admin-api`·`dabboba-worker` 배포.
 4. 운영 API를 LIVE 기준으로 검증(공개 설정·로그인 방법·구매 가능한 가챠·쿠지 미판매·정책 버전·상품 이미지)하고, 워커 경계(GET 405, 익명 POST 401)를 확인.
 5. 1~2단계에서 실패하면 프로젝트는 바뀌지 않는다. 3~4단계에서 실패하면 **자동으로 PRELAUNCH로 되돌린다**

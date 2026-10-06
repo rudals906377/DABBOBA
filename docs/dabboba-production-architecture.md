@@ -154,7 +154,7 @@ API는 업무 상태와 outbox event를 같은 PostgreSQL 트랜잭션에 기록
 | 항목 | 저장소 상태 | 출시 판단 |
 | --- | --- | --- |
 | Workspace/계약/DB/API/worker/admin 골격 | 구현됨 | 통합 검증과 배포 환경 검증 필요 |
-| 관리자 화면과 API RBAC | 구현됨 | 실제 운영 계정, 부정 권한 테스트, MFA 정책 필요 |
+| 관리자 화면과 API RBAC | 구현됨, 2단계 인증은 Cloudflare Access 토큰 검증(설정 시) | 실제 운영 계정, 부정 권한 테스트, Access 앱 설정 필요 |
 | PostgreSQL 마이그레이션 | 구현됨 | disposable PostgreSQL CI와 운영/복원 환경 검증 필요 |
 | 관리자·교환 PostgreSQL 통합 테스트 | 구현됨 | CI 또는 로컬 disposable DB 실행 증거 필요 |
 | 계정 탈퇴 | preview → request → receipt status, 차단 항목 재계산, 즉시 세션 폐기, 외부 Auth 삭제 선행, Storage·로컬 PII 정리, UGC 익명화, idempotent 재시도 구현 | 운영 Supabase/Storage 계정, 보존 기간·익명화 범위·재가입 정책과 장애 복구 runbook 검증 필요 |

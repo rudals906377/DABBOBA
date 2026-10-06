@@ -25,6 +25,7 @@ import {
 } from './prepare-supabase-edge-profile.mjs';
 import { runSupabaseEdgeReleasePreflight } from './supabase-edge-release-preflight.mjs';
 import { SUPABASE_INTEGRATION_PROJECT_REF } from './supabase-integration-profile.mjs';
+import { verifyAdminCloudflareAccess } from './verify-admin-cloudflare-access.mjs';
 import { verifyLiveEdgeWorkerBoundary } from './verify-live-edge-worker-boundary.mjs';
 import {
   verifyMobilePublicApiSurface,
@@ -111,14 +112,15 @@ export async function rollbackSupabaseLiveEdge({
 
 /**
  * LIVE cutover or LIVE redeploy. Nothing on the project changes until the LIVE
- * profile, its PRELAUNCH baseline, the source/database preflight and CLI access
- * all pass. Any failure after the LIVE secrets are uploaded returns the project
+ * profile, its PRELAUNCH baseline, the source/database preflight, the
+ * administrator console's Cloudflare Access gate and CLI access all pass. Any failure after the LIVE secrets are uploaded returns the project
  * to PRELAUNCH so payments fail closed instead of staying half configured.
  */
 export async function deploySupabaseLiveEdge({
   readLiveProfile = readSupabaseLiveCandidateProfile,
   prepareProfile = prepareSupabaseEdgeProfile,
   preflight = ({ edgeProfile }) => runSupabaseEdgeReleasePreflight({ edgeProfile, expectedCommerceMode: 'LIVE' }),
+  verifyAdminAccess = verifyAdminCloudflareAccess,
   verifyProjectAccess = verifySupabaseTargetProjectAccess,
   listSecretNames = listSupabaseSecretNames,
   fetchCommerceMode = fetchDeployedCommerceMode,
@@ -139,6 +141,8 @@ export async function deploySupabaseLiveEdge({
     throw new Error('Supabase Storage S3 access key is not prepared.');
   }
   const release = await preflight({ edgeProfile: live });
+  // Refund-capable operators must pass the second factor before real payments.
+  await verifyAdminAccess();
   verifyProjectAccess();
   const wasLive = await projectHoldsLiveSettings({ listSecretNames, fetchCommerceMode });
   run('corepack', ['pnpm', '--filter', '@dabboba/api', 'build:supabase']);
