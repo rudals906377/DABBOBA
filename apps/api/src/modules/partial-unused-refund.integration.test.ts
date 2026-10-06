@@ -348,6 +348,27 @@ test("an unknown cancel outcome keeps the order frozen until a provider read sho
   // The frozen order cannot be drawn while the cancellation is unresolved.
   assert.equal((await consume(app, fixture, issued[1]!)).statusCode, 409);
 
+  // Right after the timeout the cancel may still land, so the plan stays frozen.
+  const early = await app.inject({
+    method: "POST", url: `/v1/admin/commerce/payments/${order.paymentId}/partial-refund/reconcile`,
+    headers: fixture.adminAuth("결제사 상태 확인"), payload: { reason: "결제사 상태 확인" },
+  });
+  assert.equal(early.statusCode, 200, early.body);
+  assert.equal((early.json() as { status: string }).status, "INDETERMINATE");
+  assert.equal((await consume(app, fixture, issued[1]!)).statusCode, 409);
+  // Age the plan past the settle window (the updated_at trigger is bypassed).
+  const ager = await pool.connect();
+  try {
+    await ager.query("BEGIN");
+    await ager.query("SET LOCAL session_replication_role = replica");
+    await ager.query(
+      "UPDATE partial_unused_draw_refunds SET updated_at=now()-interval '11 minutes' WHERE payment_id=$1",
+      [order.paymentId],
+    );
+    await ager.query("COMMIT");
+  } finally {
+    ager.release();
+  }
   const reconciled = await app.inject({
     method: "POST", url: `/v1/admin/commerce/payments/${order.paymentId}/partial-refund/reconcile`,
     headers: fixture.adminAuth("결제사 상태 확인"), payload: { reason: "결제사 상태 확인" },

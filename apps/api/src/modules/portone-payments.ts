@@ -1,6 +1,6 @@
 import { createHash, createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { lockLinkedKujiRoomForOrder, releaseLockedKujiOrderRoom, withTransaction } from "@dabboba/db";
+import { lockLinkedKujiRoomForOrder, releaseLockedKujiOrderRoom, withTransaction, type DatabaseClient } from "@dabboba/db";
 import { adminIdempotentMutation, sendAdminMutation } from "../lib/admin-idempotency.js";
 import { adminMutationHeaders, writeAdminAudit, writeOutbox } from "../lib/audit.js";
 import { AppError, badRequest, conflict, notFound, unauthorized } from "../lib/errors.js";
@@ -162,7 +162,25 @@ export const REFUND_CANDIDATE_LOOKUP_SQL = `SELECT p.id,p.order_id,p.provider,p.
   (SELECT count(*) FROM stock_reservations r WHERE r.order_id=o.id AND r.status='ACTIVE') AS active_reservation_count
   FROM payments p JOIN orders o ON o.id=p.order_id
   LEFT JOIN shipping_requests shipping ON shipping.id=o.shipping_request_id WHERE p.id=$1`;
-const REFUND_CANDIDATE_SQL = `${REFUND_CANDIDATE_LOOKUP_SQL} FOR UPDATE OF p,o`;
+const REFUND_CANDIDATE_LOCK_SQL = "SELECT p.id FROM payments p JOIN orders o ON o.id=p.order_id WHERE p.id=$1 FOR UPDATE OF p,o";
+
+/** The payment's single refund attempt row as it is now. */
+async function currentRefundAttempt(context: ApiContext, paymentId: string): Promise<RefundAttempt> {
+  const current = await context.pool.query<RefundAttempt>(
+    "SELECT * FROM portone_refund_cancellation_attempts WHERE payment_id=$1", [paymentId],
+  );
+  return current.rows[0]!;
+}
+
+/**
+ * Locks the payment and order first, then reads every count in a new
+ * statement. A single locking statement would compute its draw counts from the
+ * snapshot taken before it waited, missing a draw committed in the meantime.
+ */
+async function lockRefundCandidate(client: DatabaseClient, paymentId: string) {
+  await client.query(REFUND_CANDIDATE_LOCK_SQL, [paymentId]);
+  return client.query<NormalDrawRefundCandidate>(REFUND_CANDIDATE_LOOKUP_SQL, [paymentId]);
+}
 
 const PRECHECK_STALE_MS = 30_000;
 // Review codes where no provider cancellation can be in flight or have moved
@@ -173,7 +191,26 @@ const RESUMABLE_REVIEW_CODES = new Set([
   "LOCAL_STATE_CHANGED",
   "PROVIDER_STATE_MISMATCH",
   "PROVIDER_CANCEL_FAILED",
+  "PROVIDER_NOT_CANCELLED",
 ]);
+
+// After this long, an INDETERMINATE or PROVIDER_PENDING cancellation that a
+// fresh provider read still shows as fully uncancelled (no pending or
+// completed cancellation listed) is treated as never applied, so the operator
+// may abort it or send it again. Every cancel carries currentCancellableAmount,
+// so a late duplicate cannot cancel twice.
+export const REFUND_CANCEL_SETTLE_MS = 10 * 60_000;
+
+/** Whether an audited reconcile should re-read PortOne to settle an unanswered cancel. */
+export function refundCancellationSettleCheckDue(
+  attempt: Pick<RefundAttempt, "status" | "updated_at">,
+  localPaymentStatus: string | undefined,
+  now = Date.now(),
+): boolean {
+  return (attempt.status === "INDETERMINATE" || attempt.status === "PROVIDER_PENDING")
+    && localPaymentStatus === "REFUND_REVIEW"
+    && now - attempt.updated_at.getTime() >= REFUND_CANCEL_SETTLE_MS;
+}
 
 /**
  * Whether a later request may reuse this payment's single attempt row after a
@@ -603,26 +640,43 @@ export async function registerPortOnePaymentRoutes(
       }, { retryReviewedRefund: localBefore.rows[0]?.status === "REFUND_REVIEW" });
       const local = await context.pool.query<{ status: string }>("SELECT status FROM payments WHERE id=$1", [paymentId]);
       const providerReview = observation.providerStatus === "PARTIAL_CANCELLED" || observation.outcome === "review";
-      const status = observation.providerStatus === "CANCELLED" && local.rows[0]?.status === "REFUNDED"
+      let status = observation.providerStatus === "CANCELLED" && local.rows[0]?.status === "REFUNDED"
         ? "RECONCILED"
         : providerReview
           ? "REVIEW_REQUIRED"
           : current.status === "INDETERMINATE" || current.status === "CALLING"
             ? "INDETERMINATE" : current.status;
+      let providerNotCancelled = false;
+      if (status !== "RECONCILED" && refundCancellationSettleCheckDue(current, local.rows[0]?.status)) {
+        try {
+          const providerPayment = await createPortOneV2Adapter(
+            (await boundPaymentAdapterOptions(context.pool, context.config, paymentId)).options,
+          ).getPayment({ paymentId, expectedTotalAmount: numberValue(current.amount) });
+          providerNotCancelled = portOnePaymentFullyCancellable(providerPayment, numberValue(current.amount));
+        } catch {
+          providerNotCancelled = false;
+        }
+        if (providerNotCancelled) status = "REVIEW_REQUIRED";
+      }
+      // An unchanged attempt is not rewritten, so its updated_at keeps
+      // measuring the settle window from the last real change.
+      const unchanged = status === current.status && observation.providerStatus === current.provider_status
+        && !providerReview && !providerNotCancelled;
       const recorded = await withTransaction(context.pool, async (client) => {
-        const changed = await client.query<RefundAttempt>(
+        const changed = unchanged ? { rows: [current] } : await client.query<RefundAttempt>(
           `UPDATE portone_refund_cancellation_attempts
            SET status=$2,provider_status=$3,last_error_code=CASE
              WHEN $2='RECONCILED' THEN NULL
+             WHEN $5::boolean THEN 'PROVIDER_NOT_CANCELLED'
              WHEN $4::boolean THEN 'PROVIDER_REVIEW_REQUIRED'
              WHEN $2='REVIEW_REQUIRED' AND last_error_code IS NULL THEN 'PROVIDER_REVIEW_REQUIRED'
              ELSE last_error_code END
-           WHERE payment_id=$1 RETURNING *`, [paymentId, status, observation.providerStatus, providerReview],
+           WHERE payment_id=$1 RETURNING *`, [paymentId, status, observation.providerStatus, providerReview, providerNotCancelled],
         );
         await writeAdminAudit(client, request, request.actor!, {
           action: "PORTONE_REFUND_RECONCILED", targetType: "PAYMENT", targetId: paymentId, reason,
           before: { attemptStatus: current.status },
-          after: { attemptStatus: status, providerStatus: observation.providerStatus, outcome: observation.outcome },
+          after: { attemptStatus: status, providerStatus: observation.providerStatus, outcome: observation.outcome, providerNotCancelled },
           metadata: { providerCancellationRetried: false },
         });
         return changed.rows[0]!;
@@ -680,7 +734,7 @@ export async function registerPortOnePaymentRoutes(
         throw providerError(error);
       }
       const prepared = await withTransaction(context.pool, async (client) => {
-        const payment = await client.query<NormalDrawRefundCandidate>(REFUND_CANDIDATE_SQL, [paymentId]);
+        const payment = await lockRefundCandidate(client, paymentId);
         if (!payment.rowCount) throw notFound("결제 정보를 찾을 수 없습니다.");
         const existing = await client.query<RefundAttempt>(
           "SELECT * FROM portone_refund_cancellation_attempts WHERE payment_id=$1 FOR UPDATE",
@@ -766,7 +820,7 @@ export async function registerPortOnePaymentRoutes(
       }
 
       const calling = await withTransaction(context.pool, async (client) => {
-        const payment = await client.query<NormalDrawRefundCandidate>(REFUND_CANDIDATE_SQL, [paymentId]);
+        const payment = await lockRefundCandidate(client, paymentId);
         const blocker = !payment.rowCount
           ? "결제 정보를 찾을 수 없습니다."
           : payment.rows[0]!.cancelled_at
@@ -807,7 +861,7 @@ export async function registerPortOnePaymentRoutes(
           `UPDATE portone_refund_cancellation_attempts SET status='INDETERMINATE',last_error_code='CANCEL_OUTCOME_UNKNOWN'
            WHERE payment_id=$1 AND status='CALLING' AND idempotency_key=$2 RETURNING *`, [paymentId, ownKey],
         );
-        return reply.code(202).send(refundAttemptView(unknown.rows[0]!));
+        return reply.code(202).send(refundAttemptView(unknown.rows[0] ?? await currentRefundAttempt(context, paymentId)));
       }
       let finalStatus = cancellationOutcome === "FAILED" ? "REVIEW_REQUIRED" : "PROVIDER_PENDING";
       let providerStatus: string | null = providerPayment.status;
@@ -835,7 +889,8 @@ export async function registerPortOnePaymentRoutes(
          WHERE payment_id=$1 AND status='CALLING' AND idempotency_key=$5 RETURNING *`,
         [paymentId, finalStatus, cancellationId, providerStatus, ownKey, cancellationOutcome === "FAILED"],
       );
-      return reply.code(202).send(refundAttemptView(recorded.rows[0]!));
+      // A reconcile request may already have moved a long CALLING attempt.
+      return reply.code(202).send(refundAttemptView(recorded.rows[0] ?? await currentRefundAttempt(context, paymentId)));
   };
   const refundGuard = { preHandler: [requireLiveCommerce(context), context.auth.requirePermission("refunds.cancel")] };
   app.post("/v1/admin/commerce/refund-reviews/:paymentId/cancel", refundGuard, refundHandler);
@@ -868,7 +923,7 @@ export async function registerPortOnePaymentRoutes(
         target: { type: "PORTONE_REFUND_ATTEMPT", paymentId },
         bodyReason: reason,
         work: async (client) => {
-          const payment = await client.query<NormalDrawRefundCandidate>(REFUND_CANDIDATE_SQL, [paymentId]);
+          const payment = await lockRefundCandidate(client, paymentId);
           if (!payment.rowCount) throw notFound("결제 정보를 찾을 수 없습니다.");
           const locked = await client.query<RefundAttempt>(
             "SELECT * FROM portone_refund_cancellation_attempts WHERE payment_id=$1 FOR UPDATE", [paymentId],

@@ -9,8 +9,10 @@ import {
   normalizedPortOneEventForPayment,
   portOnePaymentEvidence,
   portOnePaymentFullyCancellable,
+  REFUND_CANCEL_SETTLE_MS,
   refundAttemptAbortable,
   refundAttemptResumable,
+  refundCancellationSettleCheckDue,
   settledLocalPaymentProviderStatus,
 } from "./portone-payments.js";
 
@@ -345,7 +347,7 @@ test("refund attempts resume or abort only before a provider cancellation can be
   assert.equal(refundAttemptResumable(attempt("PRECHECK", null), now), true);
   assert.equal(refundAttemptResumable(attempt("PRECHECK", null, 5_000), now), false);
   assert.equal(refundAttemptResumable(attempt("PRECHECK_FAILED", "ABORTED_BY_ADMIN"), now), true);
-  for (const code of ["LOCAL_STATE_CHANGED", "PROVIDER_STATE_MISMATCH", "PROVIDER_CANCEL_FAILED"]) {
+  for (const code of ["LOCAL_STATE_CHANGED", "PROVIDER_STATE_MISMATCH", "PROVIDER_CANCEL_FAILED", "PROVIDER_NOT_CANCELLED"]) {
     assert.equal(refundAttemptResumable(attempt("REVIEW_REQUIRED", code), now), true, code);
     assert.equal(refundAttemptAbortable(attempt("REVIEW_REQUIRED", code), now), true, code);
   }
@@ -356,6 +358,18 @@ test("refund attempts resume or abort only before a provider cancellation can be
   }
   assert.equal(refundAttemptResumable(attempt("INDETERMINATE", "CANCEL_OUTCOME_UNKNOWN", 86_400_000), now), false);
   assert.equal(refundAttemptAbortable(attempt("PRECHECK_FAILED", "ABORTED_BY_ADMIN"), now), false);
+
+  // An unanswered cancel is re-read only after the settle window, and only
+  // while the order is still frozen for the refund.
+  const settled = REFUND_CANCEL_SETTLE_MS;
+  for (const status of ["INDETERMINATE", "PROVIDER_PENDING"]) {
+    assert.equal(refundCancellationSettleCheckDue(attempt(status, null, settled), "REFUND_REVIEW", now), true, status);
+    assert.equal(refundCancellationSettleCheckDue(attempt(status, null, settled - 1), "REFUND_REVIEW", now), false, status);
+    assert.equal(refundCancellationSettleCheckDue(attempt(status, null, settled), "REFUNDED", now), false, status);
+  }
+  for (const status of ["CALLING", "PRECHECK", "REVIEW_REQUIRED", "RECONCILED"]) {
+    assert.equal(refundCancellationSettleCheckDue(attempt(status, null, settled), "REFUND_REVIEW", now), false, status);
+  }
 
   assert.equal(portOnePaymentFullyCancellable(payment("PAID"), 12_000), true);
   assert.equal(portOnePaymentFullyCancellable(payment("PAID"), 11_000), false);
