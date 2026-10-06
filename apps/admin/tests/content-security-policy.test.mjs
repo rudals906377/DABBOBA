@@ -22,7 +22,7 @@ test("console scripts are allowed by a per-request nonce, never 'unsafe-inline'"
 
 test("proxy issues the nonce CSP on pages but skips hashed static assets", async () => {
   const proxy = await readFile(join(adminRoot, "proxy.ts"), "utf8");
-  assert.match(proxy, /export function proxy\(/);
+  assert.match(proxy, /export async function proxy\(/);
   assert.match(proxy, /requestHeaders\.set\("content-security-policy", policy\)/);
   assert.match(proxy, /response\.headers\.set\("content-security-policy", policy\)/);
   assert.match(proxy, /_next\/static/);

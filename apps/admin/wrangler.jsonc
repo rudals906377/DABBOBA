@@ -11,6 +11,8 @@
   "routes": [
     { "pattern": "admin.dabboba.net", "custom_domain": true }
   ],
+  "workers_dev": false,
+  "preview_urls": false,
   "vars": {
     "DABBOBA_ENVIRONMENT_TIER": "PRODUCTION",
     "DABBOBA_API_URL": "https://rconfxsykttfvznakile.supabase.co/functions/v1/dabboba-admin-api",
