@@ -35,6 +35,7 @@ import { rebaseLegacyCatalogMediaReplayBody, rebaseLegacyCatalogMediaUrl } from 
 import { KUJI_SLOT_SELECTION_ALGORITHM, loadSealedKujiSlotForConsume } from "./kuji-slots.js";
 import { registerPortOnePaymentRoutes } from "./portone-payments.js";
 import { selectCardChannel, type PortOneChannelBinding } from "../lib/portone-channel-binding.js";
+import { applyPlannedPartialUnusedRefund } from "./partial-unused-refund-apply.js";
 
 type ProductOrderRow = {
   id: string; name: string; category: "gacha" | "figure" | "kuji" | "tcg"; price: number;
@@ -584,6 +585,11 @@ export async function applyCanonicalPaymentEventInTransaction(client:DatabaseCli
         return markReview("payment.provider_state_anomaly_requires_reconciliation",observation);
       }
       if(eventType==="REFUND_PARTIAL"){
+        // A partial cancellation is applied only when it is exactly the card
+        // part of an operator's recorded unused-draw refund; anything else stays
+        // with the operator.
+        const planned=await applyPlannedPartialUnusedRefund(client,{paymentId:pay.id,orderId:order.id,userId:order.user_id,paymentStatus:pay.status,orderStatus:order.status,providerCancelledAmount:amount,ledgerReference:eventId,providerPaymentId:providerPaymentId||null,providerStatus:"PARTIAL_CANCELLED",correlationId});
+        if(planned)return planned;
         return markReview("payment.partial_refund_requires_reconciliation",{providerCancelledAmount:amount,previousPaymentStatus:pay.status});
       }
       if(amount!==numberValue(pay.amount)){if(pay.status==="REFUNDED"){await writeOutbox(client,correlationId,{aggregateType:"PAYMENT",aggregateId:pay.id,eventType:"payment.amount_mismatch_after_refund_observed",payload:{paymentId:pay.id,orderId:order.id,providerEventId:eventId,providerAmount:amount,ledgerAmount:numberValue(pay.amount),eventType}});return "ignored" as const;}return markReview("payment.amount_mismatch_requires_reconciliation",{providerAmount:amount,ledgerAmount:numberValue(pay.amount),eventType});}

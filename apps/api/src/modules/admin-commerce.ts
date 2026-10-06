@@ -5,6 +5,7 @@ import { assertDrawCapacity } from "../lib/draw-capacity.js";
 import { effectiveCommerceMode, requireLiveCommerce } from "../lib/commerce-mode.js";
 import { isPortOneCardProvider } from "../lib/portone-channel-binding.js";
 import { lateRefundBlocker, normalDrawRefundBlocker, REFUND_CANDIDATE_LOOKUP_SQL, type NormalDrawRefundCandidate } from "./portone-payments.js";
+import { partialUnusedRefundDetail } from "./partial-unused-refunds.js";
 import { POINT_ORDER_PAYMENT_PROVIDER, pointOrderRefundBlocker } from "./point-order-refunds.js";
 import { badRequest, conflict, notFound } from "../lib/errors.js";
 import { beginIdempotency, completeIdempotency, requestHash } from "../lib/idempotency.js";
@@ -346,6 +347,13 @@ export async function registerAdminCommerceRoutes(app: FastifyInstance, context:
     const refundActionBlocker = candidate?.rows[0]
       ? pointOrder ? pointOrderRefundBlocker(candidate.rows[0]) : normalDrawRefundBlocker(candidate.rows[0], "PAID")
       : null;
+    // A partial refund of unused draws uses the card cancellation for card
+    // orders and is local for points-only orders.
+    const partialRefund = await partialUnusedRefundDetail(
+      context.pool,
+      paymentId,
+      pointOrder ? commerceLive : refundConfigured && isPortOneCardProvider(paymentRow.provider),
+    );
     return {
       ...paymentSummary(paymentRow),
       orderPointTotal: numberValue(paymentRow.order_point_total),
@@ -353,6 +361,7 @@ export async function registerAdminCommerceRoutes(app: FastifyInstance, context:
       refundActionKind,
       refundActionAvailable: Boolean(candidate?.rowCount) && refundActionBlocker === null,
       refundActionBlocker,
+      partialRefund,
       ledger: ledger.rows.map((entry) => ({
         id: entry.id, entryType: entry.entry_type, amount: numberValue(entry.amount), currency: entry.currency,
         referenceId: entry.reference_id, reason: entry.reason, createdAt: iso(entry.created_at),

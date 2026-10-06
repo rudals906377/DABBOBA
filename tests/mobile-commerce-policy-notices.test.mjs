@@ -46,6 +46,9 @@ test("gacha and kuji purchase notices explain cancellation and refund separately
     const copy = JSON.stringify(sections);
     assert.match(copy, /취소·환불 규정/);
     assert.match(copy, /뽑기 권리를 사용하지 않은 주문은 고객센터로 취소를 요청하면 전액 취소합니다/);
+    // Owner decision 2026-10-06: unused draws of a partly used gacha order.
+    assert.match(copy, /사용하지 않은 뽑기만 환불하며, 환불액은 결제 금액\(카드 결제액과 사용 포인트의 합\)을 뽑기 수로 나눈 금액에 사용하지 않은 뽑기 수를 곱해 원 단위 미만을 버린 금액입니다/);
+    assert.match(copy, /쿠폰 할인액은 돌려드리지 않습니다/);
     assert.match(copy, /기존 결제 수단/);
     assert.match(copy, /주문에 사용한 포인트는 포인트로 되돌려 드립니다/);
     assert.match(copy, /7일 이내/);

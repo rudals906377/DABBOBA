@@ -662,6 +662,35 @@ export async function requestPointOrderRefund(form: FormData) {
   }, "포인트 주문을 환불했습니다. 사용한 포인트를 회원에게 되돌리고 뽑기권을 취소했습니다.");
 }
 
+export async function requestPartialUnusedRefund(form: FormData) {
+  await mutate("refunds.cancel", form, async (session, operationReason) => {
+    if (operationReason.length > 500) throw new Error("환불 사유는 500자 이내로 입력하세요.");
+    if (String(form.get("confirmPartialRefund") || "") !== "yes") {
+      throw new Error("미사용 뽑기 부분 환불 내용을 확인해 주세요.");
+    }
+    await adminApi(`/v1/admin/commerce/payments/${id(form, "paymentId")}/partial-refund`, {
+      method: "POST",
+      token: session.token,
+      reason: operationReason,
+      headers: mutationHeaders(form),
+      body: { reason: operationReason },
+    });
+  }, "미사용 뽑기 부분 환불을 요청했습니다. 아래 진행 상태를 확인해 주세요.");
+}
+
+export async function reconcilePartialUnusedRefund(form: FormData) {
+  await mutate("refunds.cancel", form, async (session, operationReason) => {
+    if (operationReason.length > 500) throw new Error("확인 사유는 500자 이내로 입력하세요.");
+    await adminApi(`/v1/admin/commerce/payments/${id(form, "paymentId")}/partial-refund/reconcile`, {
+      method: "POST",
+      token: session.token,
+      reason: operationReason,
+      headers: mutationHeaders(form),
+      body: { reason: operationReason },
+    });
+  }, "결제사 상태를 다시 확인했습니다. 부분 환불 진행 상태를 확인해 주세요.");
+}
+
 export async function requestPortOneLateRefund(form: FormData) {
   await mutate("refunds.cancel", form, async (session, operationReason) => {
     if (operationReason.length > 500) throw new Error("환불 사유는 500자 이내로 입력하세요.");

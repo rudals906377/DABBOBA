@@ -2653,6 +2653,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/commerce/payments/{paymentId}/partial-refund": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description Requires refunds.cancel. Refunds the unused draws of a PAID gacha order that has at least one used and one unused draw (kuji orders are excluded). The server fixes the amounts and the exact unused entitlements, freezes the order, then cancels only the card part on PortOne. The entitlements are cancelled, their stock relisted, the point part returned and the order returned to PAID only when a verified provider read shows exactly that partial cancellation. A points-only plan is applied in the request transaction. A provider-reported failure releases the freeze; an unknown outcome stays frozen for the requery. Audited. */
+        post: operations["refundAdminPartialUnusedDraws"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/commerce/payments/{paymentId}/partial-refund/reconcile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description Requires refunds.cancel. Reads PortOne again for an open partial refund and never sends another cancellation. Applies the plan when the exact partial cancellation is present, releases the freeze when the provider still holds the whole payment with no cancellation in flight, and otherwise leaves it for operator review. Audited. */
+        post: operations["reconcileAdminPartialUnusedRefund"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/commerce/refund-reviews/{paymentId}/cancellation/reconcile": {
         parameters: {
             query?: never;
@@ -3164,6 +3198,17 @@ export interface components {
             pointTotal: number;
             total: number;
             lines: components["schemas"]["AccountOrderLine"][];
+            /** @description The applied refund of this order's unused draws; null when there is none. */
+            partialRefund?: {
+                /** @description Card amount cancelled on the original card. */
+                cardAmount: number;
+                /** @description Points returned. */
+                pointAmount: number;
+                /** @description Unused draws refunded. */
+                drawUnits: number;
+                /** Format: date-time */
+                refundedAt: string;
+            } | null;
             /** Format: date-time */
             createdAt: string;
             /** Format: date-time */
@@ -4948,6 +4993,42 @@ export interface components {
             refundActionKind: "CARD_CANCELLATION" | "POINT_ORDER" | null;
             refundActionAvailable: boolean;
             refundActionBlocker: string | null;
+            partialRefund: components["schemas"]["AdminPartialUnusedRefundDetail"];
+        };
+        /** @description Refund of the unused draws of a partly used gacha order. Refund value = floor((card paid + points used) x unused / total draws); the card part is floor(card paid x unused / total draws) and the rest returns as points. Coupon discounts are not returned. */
+        AdminPartialUnusedRefundDetail: {
+            available: boolean;
+            blocker: string | null;
+            preview: {
+                totalDrawUnits: number;
+                unusedDrawUnits: number;
+                cardRefundAmount: number;
+                pointRefundAmount: number;
+            } | null;
+            attempt: components["schemas"]["AdminPartialUnusedRefund"] | null;
+        };
+        AdminPartialUnusedRefund: {
+            /** Format: uuid */
+            paymentId: string;
+            /** Format: uuid */
+            orderId: string;
+            /**
+             * @description APPLIED after a verified matching card cancellation (or locally for a points-only plan); RELEASED when no money moved and the order returned to PAID.
+             * @enum {string}
+             */
+            status: "CALLING" | "PROVIDER_PENDING" | "INDETERMINATE" | "REVIEW_REQUIRED" | "APPLIED" | "RELEASED";
+            totalDrawUnits: number;
+            unusedDrawUnits: number;
+            cardRefundAmount: number;
+            pointRefundAmount: number;
+            providerStatus: string | null;
+            lastErrorCode: string | null;
+            /** Format: date-time */
+            appliedAt: string | null;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
         };
         AdminPaymentPage: components["schemas"]["PageMeta"] & {
             items: components["schemas"]["AdminPayment"][];
@@ -10984,6 +11065,86 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             /** @description LIVE commerce is not enabled. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    refundAdminPartialUnusedDraws: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description ASCII reasons remain compatible. For non-ASCII text, percent-encode UTF-8 and also send X-Admin-Reason-Encoding as utf-8-percent. */
+                "X-Admin-Reason": components["parameters"]["AdminReason"];
+            };
+            path: {
+                paymentId: components["parameters"]["PaymentId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminPortOneRefundReasonInput"];
+            };
+        };
+        responses: {
+            /** @description The recorded partial refund and its current state. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminPartialUnusedRefund"];
+                };
+            };
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            /** @description LIVE commerce or PortOne is not configured. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    reconcileAdminPartialUnusedRefund: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description ASCII reasons remain compatible. For non-ASCII text, percent-encode UTF-8 and also send X-Admin-Reason-Encoding as utf-8-percent. */
+                "X-Admin-Reason": components["parameters"]["AdminReason"];
+            };
+            path: {
+                paymentId: components["parameters"]["PaymentId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminPortOneRefundReasonInput"];
+            };
+        };
+        responses: {
+            /** @description The partial refund after the provider read. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminPartialUnusedRefund"];
+                };
+            };
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            /** @description LIVE commerce or PortOne is not configured. */
             503: {
                 headers: {
                     [name: string]: unknown;

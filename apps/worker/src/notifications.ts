@@ -52,6 +52,8 @@ export function notificationTemplate(event: OutboxEvent): NotificationTemplate |
       return { kind: "ORDER_CANCELLED", title: "주문이 취소됐어요", body: "예약된 재고와 사용한 혜택이 복구됐습니다." };
     case "order.refunded":
       return { kind: "ORDER_REFUNDED", title: "환불이 완료됐어요", body: "구매 내역에서 환불 결과를 확인해 주세요." };
+    case "order.partially_refunded":
+      return { kind: "ORDER_REFUNDED", title: "사용하지 않은 뽑기를 환불했어요", body: "구매 내역에서 환불 금액을 확인해 주세요." };
     case "draw.committed":
       return { kind: "DRAW_RESULT", title: "뽑기 결과가 보관됐어요", body: "보관함에서 획득한 상품을 확인해 주세요." };
     case "shipping.requested":

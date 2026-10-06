@@ -1307,8 +1307,13 @@ export async function registerAccountRoutes(app: FastifyInstance, context: ApiCo
         values.push(cursor.createdAt, cursor.id);
         filters.push(`(created_at,id)<($${values.length - 1},$${values.length})`);
       }
-      const orders = await client.query<OrderRow>(
-        `SELECT id,order_kind,shipping_request_id,status,currency,subtotal,discount_total,point_total,total,created_at,updated_at
+      const orders = await client.query<OrderRow & {
+        partial_refund: { cardAmount: number; pointAmount: number; drawUnits: number; refundedAt: string } | null;
+      }>(
+        `SELECT id,order_kind,shipping_request_id,status,currency,subtotal,discount_total,point_total,total,created_at,updated_at,
+           (SELECT jsonb_build_object('cardAmount',r.card_refund_amount,'pointAmount',r.point_refund_amount,
+                     'drawUnits',r.unused_draw_units,'refundedAt',r.applied_at)
+              FROM partial_unused_draw_refunds r WHERE r.order_id=orders.id AND r.status='APPLIED') AS partial_refund
          FROM orders WHERE ${filters.join(" AND ")} ORDER BY created_at DESC,id DESC LIMIT $2`,
         values,
       );
@@ -1344,6 +1349,15 @@ export async function registerAccountRoutes(app: FastifyInstance, context: ApiCo
           quantity: numberValue(line.quantity),
           lineTotal: numberValue(line.line_total),
         })),
+        // The applied refund of this order's unused draws, if any.
+        partialRefund: order.partial_refund
+          ? {
+              cardAmount: numberValue(order.partial_refund.cardAmount),
+              pointAmount: numberValue(order.partial_refund.pointAmount),
+              drawUnits: numberValue(order.partial_refund.drawUnits),
+              refundedAt: iso(new Date(order.partial_refund.refundedAt)),
+            }
+          : null,
         createdAt: iso(order.created_at),
         updatedAt: iso(order.updated_at),
       }));
