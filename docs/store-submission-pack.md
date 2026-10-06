@@ -282,6 +282,7 @@ Google 기준 공유 예외는 서비스 제공자(수탁), 법적 요청, 사�
 - 운영 Edge에 심사 로그인을 켠다: `DABBOBA_API_STORE_REVIEW_LOGIN_ENABLED/EMAIL/SUBJECT/EXPIRES_AT`. 종료 시각은 30일 이내로, 심사 기간을 덮도록 정한다.
 - `GET /v1/auth/store-review`가 `enabled: true`인지 확인한다. 2026-10-06 운영 확인에서는 새 코드가 배포되지 않아 404였다.
 - 새로 설치한 **제출 빌드**에서 로그인 → 탐색 → 결제 직전 → 로그아웃을 직접 확인한다.
+- 운영 API에 게시 전 자동 필터(아래 "게시 전 자동 필터")가 배포됐는지 확인한다. 금칙어나 전화번호가 든 교환 글·신청 글 등록이 `400 CONTENT_NOT_ALLOWED`로 거절되어야 한다. 배포 전이면 메모의 필터 문장을 빼고 제출한다.
 - 심사 세션은 한 번에 최대 1일이며 종료 시각을 넘지 않는다. 시도 제한은 IP당 15분 5회다. 앱에는 심사용 아이디·비밀번호가 들어 있지 않다.
 - 심사자 결제 방식: `[소유자 판단 필요: PG와 합의한 심사 결제 절차, 실제 청구 발생 여부, 취소 방법]`. 심사자에게 개인 카드 결제를 요구하지 않는다. 숨은 우회 경로를 만들지 않는다. 스테이징 PG 심사 웹(`dabboba.net/review`)은 TEST 백엔드용이므로 스토어 심사 경로로 쓰지 않는다.
 
@@ -364,13 +365,27 @@ User-generated content
 The Exchange Room (product-for-product listings) and the Request Room
 (product requests with an optional photo) contain user content. Users accept
 the community policy (https://dabboba.net/community-operations) before
-posting, can report content and block users from the detail screens, and
-operators review reports and can hide content or restrict accounts.
+posting. Before anything is published, our server rejects listing, request,
+nickname and bio text that contains profanity or sexual or hateful slurs,
+and rejects exchange and request text that contains links, phone numbers or
+messenger-ID requests. Users can report content and block users from the
+detail screens, and operators review reports and can hide content or
+restrict accounts.
 
 Support: support@dabboba.net / https://dabboba.net/support
 ```
 
-- 메모의 마지막 UGC 단락은 지침 1.2를 염두에 둔 것이다. 지침 1.2는 신고·차단·연락처와 함께 **부적절한 콘텐츠 게시를 거르는 방법**을 요구한다. 코드에는 정책 동의, 신고, 차단, 운영자 숨김·제재만 있고 자동 필터는 찾지 못했다. `[확인 필요: 사전 필터링 방식 — 없으면 운영 검토 절차를 메모에 정확히 적거나 기능 보완]`
+- 메모의 마지막 UGC 단락은 지침 1.2를 염두에 둔 것이다. 지침 1.2는 신고·차단·연락처와 함께 **부적절한 콘텐츠 게시를 거르는 방법**을 요구한다. 그 방법이 아래 게시 전 자동 필터다.
+
+### 게시 전 자동 필터 (지침 1.2)
+
+- 서버가 공개 텍스트를 DB에 쓰기 전에 검사한다. 걸리면 `400 CONTENT_NOT_ALLOWED`와 "부적절한 표현이나 외부 연락처가 포함되어 등록할 수 없어요."를 돌려주고 아무것도 저장하지 않는다. 어떤 단어나 항목이 걸렸는지는 알려 주지 않는다. 앱은 이 서버 문구를 등록 실패 알림에 그대로 보여 준다.
+- 구현은 공용 함수 하나다: `apps/api/src/lib/content-filter.ts`.
+- 비속어·성적·혐오 표현: 한국어·영어 31개 항목의 짧은 목록이다. 적용 대상은 교환 글 제목·상세(`POST /v1/exchange/listings`), 신청 글의 작품명·찾는 상품·상세(`POST`·`PATCH /v1/wanted-requests`), 닉네임·소개(`PATCH /v1/account/profile`, `PATCH /v1/account/basic-info`), 덕룸 글·댓글이다. 덕룸은 기능을 켰을 때만 노출된다.
+- 외부 연락처: URL·도메인, `open.kakao.com`, 01로 시작하는 10~11자리 휴대전화 번호(하이픈·점·띄어쓰기·`+82` 형태 포함), 카톡 아이디·오픈채팅·DM 요청을 막는다. 교환 글과 신청 글에만 적용하고 닉네임·소개에는 적용하지 않는다.
+- 비교 전에 NFKC 정규화, 소문자 변환, 보이지 않는 문자 제거, 단어 안 구분 기호 제거, 한 글자씩 띄운 철자(`시 발`, `s.e.x`) 합치기를 한다. 상품명 오탐을 줄이려고 모호한 단어는 목록에서 뺐다. `시바`, `보스`, `자지러지다`, `다시 발매`, `12,000원`, `1/8 스케일`, `2024년`은 통과한다.
+- 비공개 텍스트는 거르지 않는다. 고객센터 문의와 추가 메시지, 신고 사유, 상품 등록 요청, 배송 메모가 해당한다. 고객이 문제를 알리는 길은 항상 열려 있다.
+- 자동 필터는 1차 방어다. 정책 동의, 신고, 차단, 운영자 숨김·제재는 그대로 유지한다. 목록에 없는 표현은 신고와 운영 검토로 처리한다.
 
 ### 근거
 
@@ -379,7 +394,9 @@ Support: support@dabboba.net / https://dabboba.net/support
 - `apps/api/src/modules/customer-auth.ts:417-418`, `apps/api/src/lib/rate-limit-key.ts`(IP 기준 제한 경로), `packages/db/migrations/0085_session_review_access_deadline.sql`
 - `docs/gacha-sales-store-preparation-2026-10-01.md` "심사 담당자 안내 초안", "리뷰 계정 준비 서식"
 - `apps/mobile/src/features/profile/ProfileMemberDetailScreen.tsx`(회원탈퇴 경로 문구), `public/legal/terms/index.html` 4·6조
-- `apps/api/src/modules/exchange.ts:1089-1110`(정책 동의 확인), `apps/api/src/modules/community.ts:380, 424, 471`(차단·신고·운영 조치)
+- `apps/api/src/modules/exchange.ts:1091-1112`(정책 동의 확인), `apps/api/src/modules/community.ts:382, 426, 473`(차단·신고·운영 조치)
+- `apps/api/src/lib/content-filter.ts`(게시 전 필터), 적용 위치 `apps/api/src/modules/exchange.ts:1046`, `apps/api/src/modules/wanted.ts:137, 196`, `apps/api/src/modules/account.ts:783, 820`, `apps/api/src/modules/community.ts:269, 523, 727`
+- `apps/api/src/lib/content-filter.test.ts`(차단·통과 사례), `apps/api/src/modules/content-filter.integration.test.ts`(거절 시 저장 없음, 같은 문구의 고객센터 문의는 접수)
 - `apps/mobile/src/features/profile/business-information.ts`, `worker/index.js`(`/review`는 TEST 백엔드 고정)
 
 ---
@@ -527,7 +544,7 @@ DABBOBA(다뽀바)는 좋아하는 캐릭터의 실물 가챠 상품을 살펴�
 4. (2026-10-06 문서 정리) 네이버 콘솔은 이름·이메일·성별·생일·전화번호를 필수로 둔 상태다. `docs/customer-auth-setup.md` 4절은 이제 이 사실과, 검수 전 콘솔을 식별자+이메일(선택)로 줄이는 절차를 적는다. 콘솔 변경은 아직 하지 않았다.
 5. `docs/prelaunch-store-submission.md`의 부제·짧은 설명·키워드는 쿠지를 전면에 둔다. 첫 판매 범위(가챠만, 쿠지 미판매)와 맞지 않으므로 판매판에 재사용하지 않는다.
 6. `docs/google-play-paid-draw-inquiry.md`는 가챠를 "게시된 확률표에 따라" 정한다고 쓴다. 판매 준비 문서는 실제 추첨이 서버의 남은 종류별 수량에 비례하고 잔여 수량에 따라 확률이 바뀐다고 쓴다. 문의를 보낼 때는 후자 표현으로 맞춘다.
-7. Apple 지침 1.2가 요구하는 '부적절한 콘텐츠 사전 필터링'에 해당하는 코드를 찾지 못했다. 신고·차단·운영자 숨김은 있다.
+7. (해결) Apple 지침 1.2가 요구하는 '부적절한 콘텐츠 사전 필터링'을 `apps/api/src/lib/content-filter.ts`로 추가했다. 교환 글·신청 글·닉네임·소개·덕룸 글과 댓글을 게시 전에 검사하고, 교환 글·신청 글은 외부 연락처도 막는다. 신고·차단·운영자 숨김은 그대로다. 운영 배포 여부는 5장 선행 조건에서 확인한다.
 8. (2026-10-06 해결) 공개 약관·개인정보처리방침은 탈퇴 후 거래기록을 "계정과 분리해 보관"한다고 쓰지만, 실제로는 회원 행만 익명화하고 배송지 스냅샷을 그대로 두었으며 3년 보존 대상인 문의 내용은 덮어썼다. 0086과 워커 변경으로 탈퇴 시 배송지·문의 내용을 소유자 전용 테이블로 옮긴 뒤 서비스 테이블에서 지운다.
 9. (2026-10-06 해결) 남은 포인트가 있으면 탈퇴가 영구히 막혔다. 앱 탈퇴 화면에서 잔액 전액 소멸에 동의하면 탈퇴할 수 있다. 웹 계정 삭제 페이지는 보호 파일 `worker/index.js`가 요청 본문을 `{}`로 고정해 보내므로 아직 이 동의를 보낼 수 없다(승인 필요).
 10. (2026-10-06 일부 해결) 결제 화면의 취소·환불 안내는 법정 청약철회(7일)와 환급 기한(3영업일)을 고지한다. 미사용 주문 전액 환불(카드·포인트 전용·혼합)은 관리자 화면에서 가능해졌다. 일부 뽑기를 사용한 주문의 미사용분 환불은 금액 산정 기준이 정해지지 않아 아직 처리 수단이 없다.
