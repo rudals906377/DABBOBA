@@ -858,6 +858,53 @@ test("profile updates reject a stale owner version before changing the user row"
   assert.equal(queries.some(({ sql }) => sql === "ROLLBACK"), true);
 });
 
+test("public nickname and bio reject objectionable terms before any database work but allow contact text", async () => {
+  const actorId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  let databaseCalls = 0;
+  const pool = {
+    async connect() { databaseCalls += 1; throw new Error("database must not be reached"); },
+    async query() { databaseCalls += 1; throw new Error("database must not be reached"); },
+  };
+  const { app, routes } = routeCapture();
+  await registerAccountRoutes(app, testContext(pool));
+  const profile = routes.get("/v1/account/profile");
+  const basicInfo = routes.get("/v1/account/basic-info");
+  assert.ok(profile);
+  assert.ok(basicInfo);
+  const isContentNotAllowed = (error: unknown) => error instanceof AppError
+    && error.statusCode === 400
+    && error.code === "CONTENT_NOT_ALLOWED";
+
+  for (const body of [
+    { nickname: "시 발", expectedVersion: 1 },
+    { bio: "fuck this", expectedVersion: 1 },
+  ]) {
+    await assert.rejects(
+      profile({ actor: { userId: actorId }, headers: { "idempotency-key": "profile-filter-0001" }, body }, {}),
+      isContentNotAllowed,
+    );
+  }
+  await assert.rejects(
+    basicInfo({
+      actor: { userId: actorId },
+      headers: { "idempotency-key": "basic-info-filter-0001" },
+      body: { nickname: "병신", expectedVersion: 1 },
+    }, {}),
+    isContentNotAllowed,
+  );
+  assert.equal(databaseCalls, 0);
+
+  // Off-platform contact rules belong to the marketplace, not the profile.
+  await assert.rejects(
+    profile({
+      actor: { userId: actorId },
+      headers: { "idempotency-key": "profile-filter-0002" },
+      body: { bio: "피규어 수집가 · 인스타 dabboba.collector", expectedVersion: 1 },
+    }, {}),
+    (error: unknown) => error instanceof Error && error.message === "database must not be reached",
+  );
+});
+
 test("account basic info updates reject a stale version before changing private data", async () => {
   const actorId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
   const queries: Array<{ sql: string; params: unknown[] }> = [];

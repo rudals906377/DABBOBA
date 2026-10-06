@@ -5258,7 +5258,7 @@ export interface components {
         };
     };
     responses: {
-        /** @description Request input is malformed or references an inactive catalog item. */
+        /** @description Request input is malformed or references an inactive catalog item. Public customer text (exchange listings, wanted requests, Dukroom posts and comments, nickname and bio) containing an objectionable term, or exchange and wanted-request text containing off-platform contact details (links, phone numbers, messenger-ID requests), returns error.code CONTENT_NOT_ALLOWED with one generic message that never reveals the matched word or field. */
         BadRequest: {
             headers: {
                 [name: string]: unknown;
@@ -6572,6 +6572,7 @@ export interface operations {
                     "application/json": components["schemas"]["CommunityPost"];
                 };
             };
+            400: components["responses"]["BadRequest"];
             409: components["responses"]["Conflict"];
             428: components["responses"]["LegalAcceptanceRequired"];
         };
@@ -6657,6 +6658,7 @@ export interface operations {
                     "application/json": components["schemas"]["CommunityPost"];
                 };
             };
+            400: components["responses"]["BadRequest"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
@@ -6747,6 +6749,7 @@ export interface operations {
                     "application/json": components["schemas"]["Comment"];
                 };
             };
+            400: components["responses"]["BadRequest"];
             428: components["responses"]["LegalAcceptanceRequired"];
         };
     };
@@ -7319,6 +7322,7 @@ export interface operations {
                     "application/json": components["schemas"]["WantedRequest"];
                 };
             };
+            400: components["responses"]["BadRequest"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
@@ -7435,6 +7439,7 @@ export interface operations {
                     "application/json": components["schemas"]["ExchangeListing"];
                 };
             };
+            400: components["responses"]["BadRequest"];
             409: components["responses"]["Conflict"];
             428: components["responses"]["LegalAcceptanceRequired"];
             503: components["responses"]["CommerceUnavailable"];
@@ -8345,6 +8350,7 @@ export interface operations {
                     "application/json": components["schemas"]["AccountProfile"];
                 };
             };
+            400: components["responses"]["BadRequest"];
             409: components["responses"]["Conflict"];
             428: components["responses"]["LegalAcceptanceRequired"];
         };

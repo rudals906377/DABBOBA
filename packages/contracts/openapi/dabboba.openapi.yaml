@@ -769,6 +769,7 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/CommunityPost" }
+        "400": { $ref: "#/components/responses/BadRequest" }
         "409": { $ref: "#/components/responses/Conflict" }
         "428": { $ref: "#/components/responses/LegalAcceptanceRequired" }
   /v1/community/posts/{postId}:
@@ -802,6 +803,7 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/CommunityPost" }
+        "400": { $ref: "#/components/responses/BadRequest" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
@@ -888,6 +890,7 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Comment" }
+        "400": { $ref: "#/components/responses/BadRequest" }
         "428": { $ref: "#/components/responses/LegalAcceptanceRequired" }
   /v1/community/comments/{commentId}:
     delete:
@@ -1275,6 +1278,7 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/WantedRequest" }
+        "400": { $ref: "#/components/responses/BadRequest" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
@@ -1378,6 +1382,7 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ExchangeListing" }
+        "400": { $ref: "#/components/responses/BadRequest" }
         "409": { $ref: "#/components/responses/Conflict" }
         "503": { $ref: "#/components/responses/CommerceUnavailable" }
         "428": { $ref: "#/components/responses/LegalAcceptanceRequired" }
@@ -2068,6 +2073,7 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/AccountProfile" }
+        "400": { $ref: "#/components/responses/BadRequest" }
         "409": { $ref: "#/components/responses/Conflict" }
         "428": { $ref: "#/components/responses/LegalAcceptanceRequired" }
   /v1/account/basic-info:
@@ -4237,7 +4243,7 @@ components:
       schema: { type: string, format: uuid }
   responses:
     BadRequest:
-      description: Request input is malformed or references an inactive catalog item.
+      description: Request input is malformed or references an inactive catalog item. Public customer text (exchange listings, wanted requests, Dukroom posts and comments, nickname and bio) containing an objectionable term, or exchange and wanted-request text containing off-platform contact details (links, phone numbers, messenger-ID requests), returns error.code CONTENT_NOT_ALLOWED with one generic message that never reveals the matched word or field.
       content:
         application/json:
           schema: { $ref: "#/components/schemas/ErrorEnvelope" }

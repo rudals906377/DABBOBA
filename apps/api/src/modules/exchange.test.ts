@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import type { FastifyInstance } from "fastify";
 import type { ApiContext } from "../types.js";
+import { AppError } from "../lib/errors.js";
 import {
   createThrottledExchangeExpirySweep,
   EXCHANGE_READ_EXPIRY_SWEEP_INTERVAL_MS,
@@ -416,4 +417,40 @@ test("browse hides lapsed OPEN listings between sweeps and admin resolution is c
     source,
     /"\/v1\/admin\/exchange\/listings\/:listingId\/resolution",\s*\{ preHandler: \[requireLiveCommerce\(context\), context\.auth\.requirePermission\("exchange\.resolve"\)\] \}/,
   );
+});
+
+test("exchange listing creation rejects objectionable text or contact details before any database work", async () => {
+  const { app, routes } = routeHarness();
+  let databaseCalls = 0;
+  const context = {
+    pool: {
+      async connect() { databaseCalls += 1; throw new Error("database must not be reached"); },
+      async query() { databaseCalls += 1; throw new Error("database must not be reached"); },
+    },
+    config: { environment: "test" },
+    auth: authStub,
+  } as unknown as ApiContext;
+  await registerExchangeRoutes(app, context);
+  const handler = routes.get("POST /v1/exchange/listings");
+  assert.ok(handler);
+
+  for (const text of [
+    { title: "씨발 급처", details: "교환해요" },
+    { title: "귀멸의 칼날 가챠 교환", details: "010-1234-5678로 연락 주세요" },
+    { title: "오픈채팅으로 교환", details: "교환해요" },
+    { title: "교환해요", details: "https://example.com/item 참고" },
+  ]) {
+    await assert.rejects(
+      handler({
+        actor: { userId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" },
+        headers: { "idempotency-key": "exchange-content-filter-0001" },
+        body: { ...text, offeredInventoryUnitIds: ["bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"] },
+        id: "exchange-content-filter",
+      }),
+      (error: unknown) => error instanceof AppError
+        && error.statusCode === 400
+        && error.code === "CONTENT_NOT_ALLOWED",
+    );
+  }
+  assert.equal(databaseCalls, 0);
 });

@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { withTransaction, type DatabaseClient, type Queryable } from "@dabboba/db";
 import { PRODUCT_CATEGORIES } from "@dabboba/domain";
 import { writeOutbox } from "../lib/audit.js";
+import { assertPublicContentAllowed } from "../lib/content-filter.js";
 import { AppError, badRequest, conflict, forbidden, notFound } from "../lib/errors.js";
 import { beginIdempotency, completeIdempotency, idempotencyKey, requestHash } from "../lib/idempotency.js";
 import { booleanInput, enumInput, integerInput, objectInput, queryString, slugIdInput, stringInput, uuidInput, likeContainsPattern } from "../lib/input.js";
@@ -133,6 +134,7 @@ function wantedPatch(body: unknown) {
   if (category === undefined && ipId === undefined && ipNameKo === undefined && desiredItem === undefined && details === undefined && mediaId === undefined) {
     throw badRequest("수정할 신청 글 값을 보내 주세요.");
   }
+  assertPublicContentAllowed("MARKETPLACE", ipNameKo, desiredItem, details);
   return { expectedVersion, category, ipId, ipNameKo, desiredItem, details, mediaId };
 }
 
@@ -191,6 +193,7 @@ export async function registerWantedRoutes(app: FastifyInstance, context: ApiCon
       details: stringInput(body, "details", { max: 5000 })!,
       mediaId: body.mediaId === undefined || body.mediaId === null ? null : uuidInput(body.mediaId, "mediaId"),
     };
+    assertPublicContentAllowed("MARKETPLACE", typedIpName, input.desiredItem, input.details);
     const result = await idempotentMutation(context, request, {
       scope: "WANTED_REQUEST_CREATE",
       payload: input,

@@ -4,6 +4,7 @@ import { withTransaction, type DatabaseClient, type Queryable } from "@dabboba/d
 import { writeOutbox } from "../lib/audit.js";
 import { AppError, badRequest, conflict, notFound } from "../lib/errors.js";
 import { requireLiveCommerce } from "../lib/commerce-mode.js";
+import { assertPublicContentAllowed } from "../lib/content-filter.js";
 import {
   beginIdempotency,
   completeIdempotency,
@@ -779,6 +780,7 @@ function profilePatch(body: unknown) {
   if (nickname === undefined && bio === undefined && favoriteIpId === undefined) {
     throw badRequest("수정할 프로필 값을 입력해 주세요.");
   }
+  assertPublicContentAllowed("PUBLIC_PROFILE", nickname, bio);
   return { nickname, bio, favoriteIpId, expectedVersion };
 }
 
@@ -815,6 +817,7 @@ function accountBasicInfoPatch(body: unknown) {
   if (nickname === undefined && birthDate === undefined) {
     throw badRequest("수정할 계정 기본정보를 입력해 주세요.");
   }
+  assertPublicContentAllowed("PUBLIC_PROFILE", nickname);
   return { nickname, birthDate, expectedVersion };
 }
 

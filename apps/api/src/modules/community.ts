@@ -3,6 +3,7 @@ import { withTransaction, type DatabaseClient, type Queryable } from "@dabboba/d
 import { CONTENT_STATUSES, INQUIRY_STATUSES, REPORT_STATUSES, canTransitionInquiry, canTransitionReport } from "@dabboba/domain";
 import { adminIdempotentMutation, sendAdminMutation } from "../lib/admin-idempotency.js";
 import { adminMutationHeaders, writeAdminAudit, writeOutbox } from "../lib/audit.js";
+import { assertPublicContentAllowed } from "../lib/content-filter.js";
 import { AppError, badRequest, conflict, forbidden, notFound } from "../lib/errors.js";
 import { beginIdempotency, completeIdempotency, idempotencyKey, requestHash } from "../lib/idempotency.js";
 import { booleanInput, enumInput, integerInput, nullableStringInput, objectInput, queryString, stringArrayInput, stringInput, uuidInput, likeContainsPattern } from "../lib/input.js";
@@ -265,6 +266,7 @@ function communityPostPatch(body: unknown) {
   if (title === undefined && content === undefined && ipId === undefined && mediaIds === undefined) {
     throw badRequest("수정할 게시물 값을 보내 주세요.");
   }
+  assertPublicContentAllowed("COMMUNITY", title, content);
   return { expectedVersion, title, content, ipId, mediaIds };
 }
 
@@ -518,6 +520,7 @@ export async function registerDukroomRoutes(app: FastifyInstance, context: ApiCo
     config: { rateLimit: { max: 12, timeWindow: "1 minute" } },
   }, async(request,reply)=>{
     const input=objectInput(request.body);const kind=enumInput(input,"kind",["DUKROOM","SNAP","GENERAL"] as const)!;const title=stringInput(input,"title",{max:160})!;const content=stringInput(input,"content",{max:20_000})!;
+    assertPublicContentAllowed("COMMUNITY",title,content);
     const ipId=nullableStringInput(input,"ipId",{max:120});const normalizedMediaIds=(stringArrayInput(input,"mediaIds",10,true)||[]).map((value)=>uuidInput(value,"mediaId"));const key=idempotencyKey(request.headers);const hash=requestHash({kind,title,content,ipId:ipId||null,mediaIds:normalizedMediaIds});
     const result=await withTransaction(context.pool,async(client)=>{const idem=await beginIdempotency(client,{actorId:request.actor!.userId,scope:"CREATE_COMMUNITY_POST",key,hash});if(!idem.fresh)return{replay:true,statusCode:idem.statusCode,body:idem.body};await assertUgcOperationsPolicyAccepted(client,request.actor!.userId);await assertReadyOwnedMedia(client,request.actor!.userId,normalizedMediaIds,["POST"]);const created=await client.query<{id:string}>("INSERT INTO community_posts(author_id,ip_id,kind,title,content) VALUES($1,$2,$3,$4,$5) RETURNING id",[request.actor!.userId,ipId||null,kind,title,content]);
       for(const [index,mediaId] of normalizedMediaIds.entries())await client.query("INSERT INTO community_post_media(post_id,media_id,sort_order) VALUES($1,$2,$3)",[created.rows[0]!.id,mediaId,index]);const saved=await client.query<PostRow>(`${postSelect()} WHERE p.id=$1`,[created.rows[0]!.id]);const body=mapPost(saved.rows[0]!);await completeIdempotency(client,idem.id,{statusCode:201,body,resourceType:"COMMUNITY_POST",resourceId:created.rows[0]!.id});return{replay:false,statusCode:201,body};});if(result.replay)reply.header("x-idempotent-replay","true");return reply.code(result.statusCode).send(result.body);
@@ -721,6 +724,7 @@ export async function registerDukroomRoutes(app: FastifyInstance, context: ApiCo
     const postId = uuidInput((request.params as Record<string, unknown>).postId, "postId");
     const body = objectInput(request.body);
     const content = stringInput(body, "content", { max: 2000 })!;
+    assertPublicContentAllowed("COMMUNITY", content);
     const result = await idempotentMutation(context, request, {
       scope: "COMMUNITY_COMMENT_CREATE",
       payload: { postId, content },
