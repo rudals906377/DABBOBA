@@ -62,7 +62,50 @@ export async function exchangeBrokerSession(
     },
   });
   if (!result.data) throw new Error(errorMessage(result.error, "로그인 정보를 저장하지 못했습니다."));
-  const session = result.data;
+  await storeIssuedSession(apiBaseUrl, result.data, previousCustomerStored, clearLocalDataBeforeLogin);
+}
+
+/**
+ * True only while the server has an active app-store review window. Any
+ * failure hides the reviewer entry; customer login is unaffected.
+ */
+export async function fetchStoreReviewAvailability(apiBaseUrl: string): Promise<boolean> {
+  const client = createDabbobaClient({ baseUrl: apiBaseUrl, requestId: randomUUID });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), PROVIDER_REQUEST_TIMEOUT_MS);
+  try {
+    const result = await client.GET("/v1/auth/store-review", { signal: controller.signal });
+    return result.data?.enabled === true;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+/** Signs in the single app-store review account the server has enabled. */
+export async function loginStoreReviewer(
+  apiBaseUrl: string,
+  email: string,
+  password: string,
+  acceptedPolicies: AcceptedPolicyVersions,
+  clearLocalDataBeforeLogin: ClearLocalDataBeforeLogin,
+): Promise<void> {
+  const previousCustomerStored = Boolean((await readAuthTokens())?.accessToken);
+  const client = createDabbobaClient({ baseUrl: apiBaseUrl, requestId: randomUUID });
+  const result = await client.POST("/v1/auth/store-review", {
+    body: { email: email.trim(), password, acceptedPolicies },
+  });
+  if (!result.data) throw new Error(errorMessage(result.error, "심사용 계정으로 로그인하지 못했어요."));
+  await storeIssuedSession(apiBaseUrl, result.data, previousCustomerStored, clearLocalDataBeforeLogin);
+}
+
+async function storeIssuedSession(
+  apiBaseUrl: string,
+  session: { token: string; expiresAt: string },
+  previousCustomerStored: boolean,
+  clearLocalDataBeforeLogin: ClearLocalDataBeforeLogin,
+): Promise<void> {
   try {
     await commitAccountSessionAfterCleanup({
       clearLocalData: () => clearLocalDataBeforeLogin(previousCustomerStored),

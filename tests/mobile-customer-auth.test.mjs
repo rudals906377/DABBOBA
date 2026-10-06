@@ -377,3 +377,21 @@ test("customer sessions restore with expiry-aware single-flight rotation", () =>
   assert.ok(customerBootstrapReturnIndex > customerBootstrapIndex);
   assert.ok(internalBootstrapIndex > customerBootstrapReturnIndex);
 });
+
+test("the app-store reviewer login appears only while the server reports an active review window", () => {
+  const screen = read("apps/mobile/src/features/auth/LoginScreen.tsx");
+  const api = read("apps/mobile/src/features/auth/auth-api.ts");
+  // Discovery fails closed: any error hides the entry instead of showing it.
+  assert.match(api, /client\.GET\("\/v1\/auth\/store-review"[\s\S]*?return result\.data\?\.enabled === true;[\s\S]*?catch \{\s*return false;/);
+  assert.match(api, /client\.POST\("\/v1\/auth\/store-review", \{\s*body: \{ email: email\.trim\(\), password, acceptedPolicies \}/);
+  // The issued session goes through the same cleanup-then-store path as social login.
+  assert.equal((api.match(/await storeIssuedSession\(/g) ?? []).length, 2);
+  // Visible (not a hidden gesture), gated on the server flag, and behind the same policy consent.
+  assert.match(screen, /\{storeReviewEnabled \? \(\s*<View style=\{styles\.storeReview\}>/);
+  assert.match(screen, /앱 심사용 계정으로 로그인/);
+  assert.match(screen, /secureTextEntry/);
+  assert.match(screen, /const loginReviewer = async \(\) => \{\s*if \(!requiredPolicyVersions \|\| !termsAccepted \|\| !privacyAccepted\)/);
+  assert.match(screen, /disabled=\{unavailable \|\| !reviewEmail\.trim\(\) \|\| !reviewPassword\}/);
+  // No reviewer credential is bundled into the app.
+  for (const source of [screen, api]) assert.doesNotMatch(source, /store-review@|STORE_REVIEW_LOGIN/);
+});
