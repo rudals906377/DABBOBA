@@ -22,6 +22,7 @@ const PAYMENT_STATUSES = [
 
 export type PortOnePaymentStatus = (typeof PAYMENT_STATUSES)[number];
 export type PortOneChannelEnvironment = "LIVE" | "TEST";
+export type PortOneCardPgProvider = "INICIS_V2" | "KCP_V2";
 export type PortOneCancelRequester = "CUSTOMER" | "ADMIN";
 export type PortOneCancellationOutcome = "SUCCEEDED" | "PENDING" | "FAILED";
 
@@ -96,7 +97,7 @@ export type PortOneCardPayment = {
   channel: {
     key: string;
     environment: PortOneChannelEnvironment;
-    pgProvider: "INICIS_V2";
+    pgProvider: PortOneCardPgProvider;
   } | null;
   method: "CARD" | null;
   amount: {
@@ -116,15 +117,16 @@ export type PortOneCardPayment = {
 };
 
 /**
- * Observed KG READY response: amount.paid may equal the requested total even
- * before a card was selected. Keep the raw amount, but distinguish this exact
- * unsubmitted shape from settlement evidence. A known channel is required for
- * the positive-amount case; any PG transaction, payment method, terminal time,
- * cancellation or partial amount keeps the existing fail-closed behavior.
+ * Observed KG Inicis READY response: amount.paid may equal the requested total
+ * even before a card was selected. Keep the raw amount, but distinguish this
+ * exact unsubmitted shape from settlement evidence. Only the INICIS channel
+ * qualifies; KCP has no such evidence and stays fail-closed. Any PG
+ * transaction, payment method, terminal time, cancellation or partial amount
+ * keeps the existing fail-closed behavior.
  */
 export function isPortOneUnsubmittedReady(payment: PortOneCardPayment): boolean {
   return payment.status === "READY"
-    && payment.channel !== null
+    && payment.channel?.pgProvider === "INICIS_V2"
     && payment.method === null
     && payment.pgTransactionId === null
     && payment.paidAt === null
@@ -136,10 +138,11 @@ export function isPortOneUnsubmittedReady(payment: PortOneCardPayment): boolean 
 }
 
 /**
- * Observed authenticated KG response after closing the unsubmitted window:
- * FAILED / pgCode 01 (user cancelled), still carrying the requested amount.
- * Any approval, card method, PG transaction, refund or different failure keeps
- * the existing fail-closed handling. Do not infer this from a client callback.
+ * Observed authenticated KG Inicis response after closing the unsubmitted
+ * window: FAILED / pgCode 01 (user cancelled), still carrying the requested
+ * amount. Any approval, card method, PG transaction, refund, other failure or
+ * non-INICIS channel keeps the existing fail-closed handling. Do not infer
+ * this from a client callback.
  */
 export function isPortOneUnsubmittedFailure(payment: PortOneCardPayment): boolean {
   return payment.status === "FAILED"
@@ -161,6 +164,8 @@ export type PortOneV2AdapterOptions = {
   storeId: string;
   channelKey: string;
   channelEnvironment: PortOneChannelEnvironment;
+  /** Trusted persisted channel binding; legacy callers remain INICIS-only. */
+  pgProvider?: PortOneCardPgProvider;
   timeoutMs?: number;
   maxResponseBytes?: number;
   fetchImpl?: PortOneFetch;
@@ -364,6 +369,7 @@ function normalizePayment(
     storeId: string;
     channelKey: string;
     channelEnvironment: PortOneChannelEnvironment;
+    pgProvider: PortOneCardPgProvider;
   },
 ): PortOneCardPayment {
   const raw = record(value) as (Payment & Record<string, unknown>) | null;
@@ -384,7 +390,7 @@ function normalizePayment(
     || raw.storeId !== expected.storeId
     || (channel && (channel.key !== expected.channelKey
       || channel.type !== expected.channelEnvironment
-      || channel.pgProvider !== "INICIS_V2"))
+      || channel.pgProvider !== expected.pgProvider))
     || (method && method.type !== "PaymentMethodCard")
     || raw.currency !== "KRW"
     || amount.total !== expected.totalAmount
@@ -392,7 +398,7 @@ function normalizePayment(
   if (mismatched) {
     throw new PortOneV2Error(
       "PAYMENT_CONTRACT_MISMATCH",
-      "The PortOne payment does not match the expected V2 KG Inicis card contract.",
+      "The PortOne payment does not match the expected V2 card channel contract.",
     );
   }
 
@@ -408,7 +414,7 @@ function normalizePayment(
     channel: channel ? {
       key: requiredString(channel.key, "payment.channel.key"),
       environment: channel.type as PortOneChannelEnvironment,
-      pgProvider: "INICIS_V2",
+      pgProvider: expected.pgProvider,
     } : null,
     method: method ? "CARD" : null,
     amount: {
@@ -425,8 +431,8 @@ function normalizePayment(
     cancelledAt: optionalTimestamp(raw.cancelledAt, "payment.cancelledAt"),
     cancellations: cancellationList(rawCancellations),
   };
-  // READY/PAY_PENDING may omit details before submission. The actual KG READY
-  // amount projection is accepted only by the narrow predicate above.
+  // READY/PAY_PENDING may omit details before submission. Positive amounts
+  // are accepted only for the observed INICIS shapes, never inferred for KCP.
   const awaitingPg = paid === 0 && cancelled === 0;
   if ((!channel && !(status === "READY" && awaitingPg))
     || (!method && !(["READY", "PAY_PENDING"].includes(status) && awaitingPg)
@@ -466,6 +472,10 @@ function validateOptions(options: PortOneV2AdapterOptions) {
   if (options.channelEnvironment !== "LIVE" && options.channelEnvironment !== "TEST") {
     throw new PortOneV2Error("INVALID_CONFIGURATION", "channelEnvironment is invalid.");
   }
+  const pgProvider = options.pgProvider === undefined ? "INICIS_V2" : options.pgProvider;
+  if (pgProvider !== "INICIS_V2" && pgProvider !== "KCP_V2") {
+    throw new PortOneV2Error("INVALID_CONFIGURATION", "pgProvider is invalid.");
+  }
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 30_000) {
     throw new PortOneV2Error("INVALID_CONFIGURATION", "timeoutMs is invalid.");
@@ -480,6 +490,7 @@ function validateOptions(options: PortOneV2AdapterOptions) {
     storeId,
     channelKey,
     channelEnvironment: options.channelEnvironment,
+    pgProvider,
     timeoutMs,
     maxResponseBytes,
     fetchImpl: options.fetchImpl ?? globalThis.fetch,
@@ -578,6 +589,7 @@ export function createPortOneV2Adapter(options: PortOneV2AdapterOptions): PortOn
         storeId: config.storeId,
         channelKey: config.channelKey,
         channelEnvironment: config.channelEnvironment,
+        pgProvider: config.pgProvider,
       });
     },
 

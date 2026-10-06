@@ -3,6 +3,7 @@ import { withTransaction } from "@dabboba/db";
 import { adminMutationHeaders, writeAdminAudit, writeOutbox } from "../lib/audit.js";
 import { assertDrawCapacity } from "../lib/draw-capacity.js";
 import { effectiveCommerceMode, requireLiveCommerce } from "../lib/commerce-mode.js";
+import { isPortOneCardProvider } from "../lib/portone-channel-binding.js";
 import { lateRefundBlocker, normalDrawRefundBlocker, REFUND_CANDIDATE_LOOKUP_SQL, type NormalDrawRefundCandidate } from "./portone-payments.js";
 import { badRequest, conflict, notFound } from "../lib/errors.js";
 import { beginIdempotency, completeIdempotency, requestHash } from "../lib/idempotency.js";
@@ -339,7 +340,7 @@ export async function registerAdminCommerceRoutes(app: FastifyInstance, context:
       : null;
     return {
       ...paymentSummary(paymentRow),
-      providerReconciliationAvailable: refundConfigured && paymentRow.provider === "PORTONE_V2_INICIS",
+      providerReconciliationAvailable: refundConfigured && isPortOneCardProvider(paymentRow.provider),
       refundActionAvailable: Boolean(candidate?.rowCount) && refundActionBlocker === null,
       refundActionBlocker,
       ledger: ledger.rows.map((entry) => ({

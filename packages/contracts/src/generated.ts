@@ -121,6 +121,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/auth/payment-review": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Dedicated internal payment-review login discovery. Disabled outside the pinned STAGING project and TEST channel; normal customer providers are unchanged. */
+        get: operations["getPaymentReviewLogin"];
+        put?: never;
+        /** @description Auth server verifies the designated review customer's password. Pinned Auth subject, test project, TEST channel and expiry are independently enforced on the server. Never authenticates administrators. */
+        post: operations["loginPaymentReviewer"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/auth/exchange": {
         parameters: {
             query?: never;
@@ -1334,7 +1352,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** @description Owner-only release of an unpaid PortOne payment window. The server performs a fresh PortOne lookup and cancels the still-pending order (releasing stock reservations, the kuji room entry, coupons, and points) only when PortOne authoritatively reports no payment (READY with no money, or PAYMENT_NOT_FOUND). A terminal no-charge FAILED/CANCELLED provider state is applied through the canonical provider path. Any payment evidence (PAY_PENDING, virtual account, paid or cancelled amounts, cancellation records) returns 409 PAYMENT_EVIDENCE_PRESENT with no change. Replays with the same Idempotency-Key return the original response without another provider call. */
+        /** @description Owner-only release of an unpaid PortOne payment window. A fresh authenticated PortOne lookup must establish no submitted payment before reservations, room entry, coupons, and points can be released. READY with zero money or PAYMENT_NOT_FOUND qualify. The adapter also recognizes the narrowly validated KG unsubmitted-window shape whose paid field projects the requested total, with a verified channel and no card method, PG transaction, approval, or cancellation. For FAILED this additionally requires PG user-close code 01 and a failure timestamp. Terminal no-charge FAILED/CANCELLED states use the canonical provider path. Other payment evidence or uncertain reads never release the order. Same-key replays return the original result without another provider call. */
         post: operations["abandonOwnPortOnePaymentWindow"];
         delete?: never;
         options?: never;
@@ -2773,6 +2791,18 @@ export interface components {
         PublicConfig: {
             commerceMode: components["schemas"]["CommerceLaunchMode"];
             requiredPolicyVersions: components["schemas"]["RequiredPolicyVersions"];
+            cardPaymentOptions?: components["schemas"]["PortOneCardChannelBinding"][];
+        };
+        PortOneCardChannelBinding: {
+            /** @enum {string} */
+            provider: "PORTONE_V2_INICIS" | "PORTONE_V2_KCP";
+            /** @enum {string} */
+            pgProvider: "INICIS_V2" | "KCP_V2";
+            merchantId: string;
+            storeId: string;
+            channelKey: string;
+            /** @enum {string} */
+            channelEnvironment: "TEST" | "LIVE";
         };
         /** @enum {string} */
         CustomerAuthProvider: "PHONE" | "KAKAO" | "NAVER" | "GOOGLE" | "APPLE";
@@ -4018,6 +4048,8 @@ export interface components {
              * @description First server-claimed PortOne window time, or null before any attempt. A non-null value requires provider reconciliation, not another window.
              */
             paymentAttemptStartedAt?: string | null;
+            /** @description Immutable server-selected channel snapshot; never choose a different PG for an existing payment. */
+            cardPayment?: components["schemas"]["PortOneCardChannelBinding"] | null;
             /** @enum {string} */
             status: "PENDING_PAYMENT" | "PAID" | "FULFILLED" | "CANCELLED" | "REFUND_REVIEW" | "REFUNDED";
             /** Format: uuid */
@@ -4043,6 +4075,11 @@ export interface components {
             updatedAt: string;
         };
         CreateOrderInput: {
+            /**
+             * @description Optional explicit configured card rail. Omission retains the existing default.
+             * @enum {string}
+             */
+            cardPg?: "INICIS" | "KCP";
             items: {
                 productId: string;
                 quantity: number;
@@ -5407,6 +5444,85 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CustomerLoginProviders"];
+                };
+            };
+        };
+    };
+    getPaymentReviewLogin: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Review access availability; never exposes account credentials. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        enabled: boolean;
+                        /** Format: date-time */
+                        expiresAt: string | null;
+                    };
+                };
+            };
+        };
+    };
+    loginPaymentReviewer: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    email: string;
+                    password: string;
+                    acceptedPolicies: {
+                        terms: string;
+                        privacy: string;
+                    };
+                };
+            };
+        };
+        responses: {
+            /** @description Password-verified customer session; lifetime is capped by review expiry. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionCreated"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            /** @description Explicit current policy acceptance required. */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LegalAcceptanceRequiredErrorEnvelope"];
+                };
+            };
+            429: components["responses"]["RateLimited"];
+            /** @description Auth server temporarily unavailable. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
         };

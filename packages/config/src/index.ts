@@ -1,5 +1,6 @@
 type Environment = Record<string, string | undefined>;
 import { loadMediaStorageConfig, type MediaStorageConfiguration } from "./media-storage.js";
+import { loadPaymentReviewLogin, type PaymentReviewLogin } from "./payment-review-login.js";
 import {
   assertDatabaseUrlForTier,
   assertLocalTestProviderBoundary,
@@ -11,6 +12,7 @@ export * from "./admin-proxy-identity.js";
 export * from "./admin-service-signature.js";
 export * from "./backend-environment.js";
 export * from "./media-storage.js";
+export * from "./payment-review-login.js";
 
 export type RuntimeEnvironment = "development" | "test" | "production";
 export type ApiSurface = "customer" | "admin" | "all";
@@ -52,6 +54,8 @@ export type ApiConfig = {
   supabaseJwtAudience?: string | null;
   supabasePublishableKey?: string | null;
   customerLoginProviders?: CustomerLoginProvider[];
+  /** Dedicated password-verified customer on the pinned TEST payment project only. */
+  paymentReviewLogin?: PaymentReviewLogin | null;
   /** Server-only AES-256-GCM key used to seal Apple refresh tokens before DB storage. */
   appleCredentialEncryption?: { key: string; keyVersion: number } | null;
   /**
@@ -87,6 +91,8 @@ export type ApiConfig = {
     channelKey: string;
     channelEnvironment: "LIVE" | "TEST";
     webhookSecret: string;
+    /** Optional additional KCP V2 channel in the same merchant/store/environment. */
+    kcpChannelKey?: string;
   } | null;
   gcsBucket: string | null;
   gcsProjectId: string | null;
@@ -328,6 +334,11 @@ function paymentConfig(
   };
   const portOneConfigured = Object.values(portOneValues).some(Boolean);
   const portOneComplete = Object.values(portOneValues).every(Boolean);
+  const kcpChannelKey = optional(env, "PORTONE_KCP_CHANNEL_KEY");
+  if (kcpChannelKey && (!portOneComplete || paymentProvider !== "PORTONE_V2_INICIS"
+    || kcpChannelKey === portOneValues.channelKey || !/^channel-key-[A-Za-z0-9-]{1,160}$/.test(kcpChannelKey))) {
+    throw new Error("PORTONE_KCP_CHANNEL_KEY requires a complete PortOne rail and a distinct valid channel key");
+  }
   const explicitSupabaseDemoTestRail = (
     env.DABBOBA_BACKEND_PROFILE?.trim() === "supabase-demo"
     && env.DABBOBA_ENVIRONMENT_TIER?.trim() === "STAGING"
@@ -408,6 +419,7 @@ function paymentConfig(
           channelKey: portOneValues.channelKey!,
           channelEnvironment: portOneValues.channelEnvironment as "LIVE" | "TEST",
           webhookSecret: portOneValues.webhookSecret!,
+          ...(kcpChannelKey ? { kcpChannelKey } : {}),
         }
       : null,
   };
@@ -628,6 +640,10 @@ export function loadApiConfig(env: Environment = process.env): ApiConfig {
     }
   }
   const payment = paymentConfig(env, runtime, pepper, proxyIdentitySecret);
+  const paymentReviewLogin = includesCustomer ? loadPaymentReviewLogin(env, {
+    environmentTier, databaseUrl: required(env, "DATABASE_URL"),
+    supabaseUrl: supabaseAuth.supabaseUrl ?? null, portOne: payment.portOne ?? null,
+  }) : null;
   const paymentReconciliationWorkerSecret = optional(env, "PAYMENT_RECONCILIATION_WORKER_SECRET");
   if (paymentReconciliationWorkerSecret) {
     const size = Buffer.byteLength(paymentReconciliationWorkerSecret, "utf8");
@@ -673,6 +689,7 @@ export function loadApiConfig(env: Environment = process.env): ApiConfig {
     adminProxyIdentitySecret: proxyIdentitySecret,
     trustedClientIpHeader: trustedClientIpHeader(env),
     ...supabaseAuth,
+    paymentReviewLogin,
     communityEnabled: communityFlag === "true",
     commerceMode,
     sessionTtlDays: integer(env, "SESSION_TTL_DAYS", 30, 1, 365),

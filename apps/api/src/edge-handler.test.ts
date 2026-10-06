@@ -39,6 +39,16 @@ function edgeEnvironment(overrides: EdgeApiEnvironment = {}): EdgeApiEnvironment
   };
 }
 
+test("Edge preserves explicit payment-test release tier without inventing or mixing environments", () => {
+  assert.equal(normalizeSupabaseEdgeApiEnvironment(edgeEnvironment()).DABBOBA_RELEASE_ENVIRONMENT_TIER, undefined);
+  assert.equal(normalizeSupabaseEdgeApiEnvironment(edgeEnvironment({
+    DABBOBA_RELEASE_ENVIRONMENT_TIER: "STAGING",
+  })).DABBOBA_RELEASE_ENVIRONMENT_TIER, "STAGING");
+  assert.throws(() => normalizeSupabaseEdgeApiEnvironment(edgeEnvironment({
+    DABBOBA_RELEASE_ENVIRONMENT_TIER: "PRODUCTION",
+  })), /release tier must match/);
+});
+
 test("admin Edge function rejects direct requests, customer paths, and mutated signed content before app creation", async () => {
   const captured: InjectOptions[] = [];
   let builds = 0;
@@ -493,12 +503,15 @@ test("Edge API maps PortOne credentials and the distinct worker requery secret o
     DABBOBA_API_PORTONE_MERCHANT_ID: "merchant-fixture",
     DABBOBA_API_PORTONE_STORE_ID: "store-fixture",
     DABBOBA_API_PORTONE_CHANNEL_KEY: "channel-fixture",
+    DABBOBA_API_PORTONE_KCP_CHANNEL_KEY: "channel-key-kcp-fixture",
     DABBOBA_API_PORTONE_CHANNEL_ENVIRONMENT: "TEST",
     DABBOBA_API_PORTONE_WEBHOOK_SECRET: "provider-webhook-secret-for-tests",
   }));
   assert.equal(normalized.PAYMENT_RECONCILIATION_WORKER_SECRET, "worker-requery-secret-for-tests");
   assert.equal(normalized.PORTONE_API_SECRET, "provider-api-secret-for-tests");
   assert.equal(normalized.PORTONE_CHANNEL_ENVIRONMENT, "TEST");
+  assert.equal(normalized.PORTONE_KCP_CHANNEL_KEY, "channel-key-kcp-fixture");
+  assert.equal(normalized.DABBOBA_API_PORTONE_KCP_CHANNEL_KEY, undefined);
   assert.equal(normalized.DABBOBA_API_PORTONE_API_SECRET, undefined);
 });
 

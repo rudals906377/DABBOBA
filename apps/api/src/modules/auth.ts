@@ -195,7 +195,18 @@ export async function registerAuthRoutes(app: FastifyInstance, context: ApiConte
       if (revoked.rowCount !== 1) throw unauthorized("세션이 만료되었거나 이미 갱신되었습니다.");
 
       const token = randomBytes(32).toString("base64url");
-      const expiresAt = new Date(Date.now() + context.config.sessionTtlDays * 86_400_000);
+      let expiresAt = new Date(Date.now() + context.config.sessionTtlDays * 86_400_000);
+      const review = context.config.paymentReviewLogin;
+      if (review) {
+        const reviewer = await client.query(
+          "SELECT 1 FROM auth_identities WHERE user_id=$1 AND provider='EMAIL' AND provider_subject=$2",
+          [actor.userId, `${context.config.supabaseUrl}/auth/v1#${review.subject}`],
+        );
+        if (reviewer.rowCount) {
+          expiresAt = new Date(Math.min(Date.now() + 86_400_000, Date.parse(review.expiresAt)));
+          if (expiresAt.getTime() <= Date.now()) throw unauthorized("심사 계정 사용 기한이 만료되었습니다.");
+        }
+      }
       const requestUserAgent = userAgent(request.headers["user-agent"]);
       const created = await client.query<CurrentSessionRow>(
         `INSERT INTO sessions

@@ -764,6 +764,11 @@ test("PortOne KG INICIS requires a complete environment-specific credential set"
 
   assert.throws(() => loadApiConfig({ ...base, PORTONE_API_SECRET: "" }), /configured together/);
   assert.throws(() => loadApiConfig({ ...base, PORTONE_CHANNEL_ENVIRONMENT: "SANDBOX" }), /LIVE or TEST/);
+  assert.equal(loadApiConfig({ ...base, PORTONE_KCP_CHANNEL_KEY: "channel-key-kcp-test" }).portOne?.kcpChannelKey, "channel-key-kcp-test");
+  for (const key of [base.PORTONE_CHANNEL_KEY, "invalid-kcp-channel"]) {
+    assert.throws(() => loadApiConfig({ ...base, PORTONE_KCP_CHANNEL_KEY: key }), /distinct valid channel/);
+  }
+  assert.throws(() => loadApiConfig({ ...base, PORTONE_API_SECRET: "", PORTONE_KCP_CHANNEL_KEY: "channel-key-kcp-test" }));
   assert.throws(() => loadApiConfig({
     ...base,
     PAYMENT_PROVIDER: "UNCONFIGURED",

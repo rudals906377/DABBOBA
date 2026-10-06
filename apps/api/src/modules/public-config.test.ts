@@ -43,6 +43,24 @@ test("public config exposes fail-closed commerce and exact required policy versi
   assert.deepEqual(body, {
     commerceMode: "PRELAUNCH",
     requiredPolicyVersions: { terms: "2026-09-22", privacy: "2026-09-22" },
+    cardPaymentOptions: [],
   });
   assert.match(headers.get("cache-control") || "", /max-age=60/);
+});
+
+test("LIVE public config exposes configured card options without credentials", async () => {
+  const { app, routes } = routeHarness();
+  const context = {
+    config: { environment: "test", commerceMode: "LIVE", paymentProvider: "PORTONE_V2_INICIS", paymentWebhookSecret: "private-hook",
+      portOne: { apiSecret: "private-api", webhookSecret: "private-hook", merchantId: "merchant", storeId: "store",
+        channelKey: "channel-inicis", kcpChannelKey: "channel-key-kcp", channelEnvironment: "TEST" } },
+    pool: { async query() { return { rowCount: 2, rows: [
+      { policy_key: "PRIVACY", policy_version: "2026-09-22", content_sha256: "b".repeat(64) },
+      { policy_key: "TERMS", policy_version: "2026-09-22", content_sha256: "a".repeat(64) },
+    ] }; } },
+  } as unknown as ApiContext;
+  await registerPublicConfigRoutes(app, context);
+  const body = await routes.get("GET /v1/public/config")!({}, { header() { return this; } }) as { cardPaymentOptions: Array<{ provider: string }> };
+  assert.deepEqual(body.cardPaymentOptions.map((option) => option.provider), ["PORTONE_V2_INICIS", "PORTONE_V2_KCP"]);
+  assert.doesNotMatch(JSON.stringify(body), /private-api|private-hook|apiSecret|webhookSecret/);
 });

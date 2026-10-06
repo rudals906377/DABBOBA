@@ -348,7 +348,8 @@ test("restricted worker records a verified API transition but cannot directly up
   assert.deepEqual(record.rows, [{ last_outcome: "RECONCILED", last_observed_state: "PAID" }]);
 });
 
-test("restricted worker retries only claimed cancelled PortOne payments until a verified no-charge result", {
+for (const pgProvider of ["INICIS_V2", "KCP_V2"] as const) {
+test(`${pgProvider}: restricted worker retries only claimed cancelled PortOne payments until a verified no-charge result`, {
   skip: !migrationDatabaseUrl,
   timeout: 30_000,
 }, async (t) => {
@@ -357,6 +358,8 @@ test("restricted worker retries only claimed cancelled PortOne payments until a 
   const userId = randomUUID();
   const orderIds = [randomUUID(), randomUUID()];
   const paymentIds = [randomUUID(), randomUUID()];
+  const binding = { provider: pgProvider === "KCP_V2" ? "PORTONE_V2_KCP" : "PORTONE_V2_INICIS",
+    pgProvider, merchantId: "synthetic-merchant", storeId: "synthetic-store", channelKey: "synthetic-channel", channelEnvironment: "TEST" };
   t.after(async () => {
     await fixturePool.query("DELETE FROM worker_payment_reconciliations WHERE payment_id=ANY($1::uuid[])", [paymentIds]).catch(() => undefined);
     await fixturePool.query("DELETE FROM payments WHERE id=ANY($1::uuid[])", [paymentIds]).catch(() => undefined);
@@ -373,9 +376,9 @@ test("restricted worker retries only claimed cancelled PortOne payments until a 
       [orderIds[index], userId],
     );
     await fixturePool.query(
-      `INSERT INTO payments(id,order_id,provider,status,amount,pg_attempt_started_at,created_at,updated_at)
-       VALUES($1,$2,'PORTONE_V2_INICIS','CANCELLED',10000,$3,'2000-01-01','2000-01-01')`,
-      [paymentIds[index], orderIds[index], index === 0 ? new Date("2000-01-01T00:00:00.000Z") : null],
+      `INSERT INTO payments(id,order_id,provider,status,amount,pg_attempt_started_at,created_at,updated_at,portone_channel_binding)
+       VALUES($1,$2,$4,'CANCELLED',10000,$3,'2000-01-01','2000-01-01',$5)`,
+      [paymentIds[index], orderIds[index], index === 0 ? new Date("2000-01-01T00:00:00.000Z") : null, binding.provider, JSON.stringify(binding)],
     );
   }
   const scopedPool = { query(sql: string, values?: unknown[]) {
@@ -407,6 +410,8 @@ test("restricted worker retries only claimed cancelled PortOne payments until a 
   assert.equal(ledger.rows.find((row) => row.id === paymentIds[0])?.last_outcome, "RECONCILED");
   assert.equal(ledger.rows.find((row) => row.id === paymentIds[1])?.last_outcome, null);
 });
+
+}
 
 test("restricted worker closes expired READY PG windows as PENDING_EXPIRED without touching payments", {
   skip: !migrationDatabaseUrl,

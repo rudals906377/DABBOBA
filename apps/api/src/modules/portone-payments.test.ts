@@ -127,6 +127,17 @@ test("zero money never hides an approval timestamp or PG transaction", () => {
   }
 });
 
+test("KCP positive READY and failed 01 remain financial anomalies, not abandon permission", () => {
+  for (const status of ["READY", "FAILED"] as const) {
+    const observed = { ...payment(status), method: null, pgTransactionId: null,
+      channel: { key: "channel-kcp", environment: "TEST" as const, pgProvider: "KCP_V2" as const },
+      ...(status === "FAILED" ? { failureCode: "01" as const } : {}),
+    };
+    assert.equal(portOnePaymentEvidence(observed), "PRESENT");
+    assert.equal(normalizedPortOneEventForPayment(observed)?.eventType, "PAYMENT_STATE_ANOMALY");
+  }
+});
+
 test("a paid provider status never substitutes the requested total for the amount actually paid", () => {
   const inconsistentPaid = normalizedPortOneEventForPayment(
     payment("PAID", { total: 12_000, paid: 9_000, cancelled: 0 }),

@@ -40,12 +40,12 @@ async function releaseRepository({ omit = [], mutate = null, includeAllMigration
   return directory;
 }
 
-test('release source accepts a clean Git commit containing every reviewed release migration through 0081', async () => {
+test('release source accepts a clean Git commit containing every reviewed release migration through 0082', async () => {
   const directory = await releaseRepository();
   try {
     const report = checkDatabaseReleaseSource({ repositoryRoot: directory });
     assert.equal(report.status, 'pass', JSON.stringify(report));
-    assert.equal(report.latestMigration, '0081_draft_draw_snapshot_media_rebase.sql');
+    assert.equal(report.latestMigration, '0082_portone_card_channel_binding.sql');
     assert.deepEqual(report.blockers, []);
     assert.match(report.head, /^[0-9a-f]{40,64}$/);
     assert.equal(report.worktreeClean, true);
@@ -155,9 +155,9 @@ test('release source rejects a release missing the draft snapshot media rebase m
   try {
     const report = checkDatabaseReleaseSource({ repositoryRoot: directory });
     assert.equal(report.status, 'blocked');
-    assert.equal(report.latestMigration, '0080_retention_indexes.sql');
+    assert.equal(report.latestMigration, '0082_portone_card_channel_binding.sql');
     assert.ok(report.blockers.includes('required_migration_not_committed:0081_draft_draw_snapshot_media_rebase.sql'));
-    assert.ok(report.blockers.includes('latest_committed_migration_below_0081'));
+    assert.ok(report.blockers.includes('committed_migration_sequence_incomplete:0081'));
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
@@ -165,11 +165,12 @@ test('release source rejects a release missing the draft snapshot media rebase m
 
 test('release source registers every migration from 0078 without a gap', () => {
   const files = DATABASE_RELEASE_MIGRATIONS.map((migration) => migration.file);
-  assert.deepEqual(files.slice(-4), [
+  assert.deepEqual(files.slice(-5), [
     '0078_commerce_indexes.sql',
     '0079_worker_retention.sql',
     '0080_retention_indexes.sql',
     '0081_draft_draw_snapshot_media_rebase.sql',
+    '0082_portone_card_channel_binding.sql',
   ]);
   const versions = files.map((file) => Number(file.slice(0, 4)));
   for (let index = 1; index < versions.length; index += 1) {
