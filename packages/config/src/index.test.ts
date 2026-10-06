@@ -842,3 +842,32 @@ test("the review proxy secret is used only with an enabled review login and must
   }
   assert.throws(() => loadPaymentReviewProxySecret({ PAYMENT_REVIEW_PROXY_SECRET: secret }, review, [null, secret]), /distinct/);
 });
+
+test("the store review login is pinned to the production project and a bounded window", async () => {
+  const { loadStoreReviewLogin, STORE_REVIEW_PROJECT_REF } = await import("./payment-review-login.js");
+  const project = STORE_REVIEW_PROJECT_REF;
+  const config = {
+    environmentTier: "PRODUCTION" as const,
+    databaseUrl: `postgres://dabboba_runtime.${project}:x@aws-0-ap-northeast-2.pooler.supabase.com:6543/postgres`,
+    supabaseUrl: `https://${project}.supabase.co`,
+  };
+  const now = Date.parse("2026-10-06T00:00:00Z");
+  const env = {
+    STORE_REVIEW_LOGIN_ENABLED: "true",
+    STORE_REVIEW_LOGIN_EMAIL: "Store-Review@Example.test",
+    STORE_REVIEW_LOGIN_SUBJECT: "00000000-0000-4000-8000-000000000001",
+    STORE_REVIEW_LOGIN_EXPIRES_AT: "2026-10-20T00:00:00Z",
+  };
+  assert.deepEqual(loadStoreReviewLogin(env, config, now), {
+    email: "store-review@example.test", subject: env.STORE_REVIEW_LOGIN_SUBJECT, expiresAt: "2026-10-20T00:00:00.000Z",
+  });
+  assert.equal(loadStoreReviewLogin({}, config, now), null);
+  assert.equal(loadStoreReviewLogin({ ...env, STORE_REVIEW_LOGIN_ENABLED: "false" }, { ...config, environmentTier: "STAGING" }, now), null);
+  for (const boundary of [
+    { ...config, environmentTier: "STAGING" as const },
+    { ...config, supabaseUrl: "https://lyzcyrdiazorjaqlgblr.supabase.co" },
+    { ...config, databaseUrl: "postgres://dabboba_runtime.lyzcyrdiazorjaqlgblr:x@aws-0-ap-northeast-2.pooler.supabase.com:6543/postgres" },
+  ]) assert.throws(() => loadStoreReviewLogin(env, boundary, now), /pinned PRODUCTION project/);
+  assert.throws(() => loadStoreReviewLogin({ ...env, STORE_REVIEW_LOGIN_EXPIRES_AT: "2026-12-01T00:00:00Z" }, config, now), /within 30 days/);
+  assert.throws(() => loadStoreReviewLogin({ ...env, STORE_REVIEW_LOGIN_SUBJECT: "not-a-uuid" }, config, now), /email, Auth subject and fixed expiry/);
+});

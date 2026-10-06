@@ -139,6 +139,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/auth/store-review": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description App-store reviewer login discovery. Enabled only on the pinned production project during an operator-configured review window; normal customer providers are unchanged. */
+        get: operations["getStoreReviewLogin"];
+        put?: never;
+        /** @description Auth server verifies the designated app-store review customer's password. The pinned production project, Auth subject and expiry are enforced on the server; the session never outlives the review window and is not an ordinary customer login method. Never authenticates administrators. */
+        post: operations["loginStoreReviewer"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/auth/exchange": {
         parameters: {
             query?: never;
@@ -5473,6 +5491,85 @@ export interface operations {
         };
     };
     loginPaymentReviewer: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    email: string;
+                    password: string;
+                    acceptedPolicies: {
+                        terms: string;
+                        privacy: string;
+                    };
+                };
+            };
+        };
+        responses: {
+            /** @description Password-verified customer session; lifetime is capped by review expiry. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionCreated"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            /** @description Explicit current policy acceptance required. */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LegalAcceptanceRequiredErrorEnvelope"];
+                };
+            };
+            429: components["responses"]["RateLimited"];
+            /** @description Auth server temporarily unavailable. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    getStoreReviewLogin: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Review access availability; never exposes account credentials. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        enabled: boolean;
+                        /** Format: date-time */
+                        expiresAt: string | null;
+                    };
+                };
+            };
+        };
+    };
+    loginStoreReviewer: {
         parameters: {
             query?: never;
             header?: never;

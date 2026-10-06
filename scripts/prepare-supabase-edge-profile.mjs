@@ -98,6 +98,15 @@ export const SUPABASE_EDGE_EXTERNAL_REQUIRED_KEYS = Object.freeze([
 // Apple becomes an all-or-none requirement when APPLE is advertised. Expo push
 // remains optional because database-backed in-app notifications do not depend
 // on a remote-push credential.
+// App-store reviewer access on this production project: one dedicated
+// password-verified Auth user, enabled only for a bounded review window.
+export const STORE_REVIEW_EDGE_KEYS = Object.freeze([
+  'DABBOBA_API_STORE_REVIEW_LOGIN_ENABLED',
+  'DABBOBA_API_STORE_REVIEW_LOGIN_EMAIL',
+  'DABBOBA_API_STORE_REVIEW_LOGIN_SUBJECT',
+  'DABBOBA_API_STORE_REVIEW_LOGIN_EXPIRES_AT',
+]);
+
 export const SUPABASE_EDGE_EXTERNAL_OPTIONAL_KEYS = Object.freeze([
   'DABBOBA_API_SUPABASE_PUBLISHABLE_KEY',
   'DABBOBA_API_APPLE_TOKEN_ENCRYPTION_KEY',
@@ -108,6 +117,7 @@ export const SUPABASE_EDGE_EXTERNAL_OPTIONAL_KEYS = Object.freeze([
   'DABBOBA_WORKER_APPLE_TOKEN_ENCRYPTION_KEY_VERSION',
   'DABBOBA_WORKER_EXPO_PUSH_ACCESS_TOKEN',
   PHONE_LOGIN_READY_KEY,
+  ...STORE_REVIEW_EDGE_KEYS,
 ]);
 
 const REQUIRED_KEYS = [
@@ -285,6 +295,24 @@ function assertLivePaymentConfiguration(values, providers) {
   }
 }
 
+export function assertStoreReviewLoginProfile(values, now = Date.now()) {
+  const enabled = values?.DABBOBA_API_STORE_REVIEW_LOGIN_ENABLED?.trim();
+  if (!enabled || enabled === 'false') return false;
+  const email = values.DABBOBA_API_STORE_REVIEW_LOGIN_EMAIL?.trim();
+  const subject = values.DABBOBA_API_STORE_REVIEW_LOGIN_SUBJECT?.trim();
+  const expiresAt = Date.parse(values.DABBOBA_API_STORE_REVIEW_LOGIN_EXPIRES_AT?.trim() ?? '');
+  if (enabled !== 'true'
+    || !email || email.length > 254 || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)
+    || !subject || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(subject)
+    || !Number.isFinite(expiresAt) || expiresAt <= now || expiresAt > now + 30 * 86_400_000) {
+    throw new Error('Store review login needs ENABLED=true, one email, an Auth subject UUID and an expiry within 30 days.');
+  }
+  if (!values.DABBOBA_API_SUPABASE_PUBLISHABLE_KEY?.trim()) {
+    throw new Error('Store review login requires DABBOBA_API_SUPABASE_PUBLISHABLE_KEY for password verification.');
+  }
+  return true;
+}
+
 function assertNoPaymentReviewLogin(values) {
   for (const key of PAYMENT_REVIEW_EDGE_KEYS) {
     const value = values?.[key]?.trim();
@@ -296,6 +324,7 @@ function assertNoPaymentReviewLogin(values) {
 
 export function assertSupabaseEdgeReleaseConfiguration(values, { expectedCommerceMode = 'PRELAUNCH' } = {}) {
   assertNoPaymentReviewLogin(values);
+  assertStoreReviewLoginProfile(values);
   for (const key of SUPABASE_EDGE_EXTERNAL_REQUIRED_KEYS) {
     if (!values?.[key]?.trim()) {
       throw new Error(`Supabase Edge release profile is missing externally verified ${key}.`);

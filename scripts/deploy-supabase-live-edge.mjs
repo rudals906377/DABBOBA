@@ -18,6 +18,7 @@ import {
   LIVE_PAYMENT_PROFILE_KEYS,
   phoneLoginReady,
   prepareSupabaseEdgeProfile,
+  STORE_REVIEW_EDGE_KEYS,
   SUPABASE_EDGE_PROFILE_FILE,
 } from './prepare-supabase-edge-profile.mjs';
 import { runSupabaseEdgeReleasePreflight } from './supabase-edge-release-preflight.mjs';
@@ -43,6 +44,7 @@ const LIVE_PROFILE_MAY_DIFFER = new Set([
   'DABBOBA_PHONE_LOGIN_READY',
   'DABBOBA_API_LOG_LEVEL',
   'DABBOBA_WORKER_EXPO_PUSH_ACCESS_TOKEN',
+  ...STORE_REVIEW_EDGE_KEYS,
   ...LIVE_PAYMENT_PROFILE_KEYS,
 ]);
 

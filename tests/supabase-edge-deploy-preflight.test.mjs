@@ -13,8 +13,10 @@ import {
   assertProductionWorkerCredential,
   assertSupabaseEdgeReleaseConfiguration,
   edgeExternalValuesFromSource,
+  assertStoreReviewLoginProfile,
   PAYMENT_REVIEW_EDGE_KEYS,
   serializeSupabaseEdgeProfile,
+  STORE_REVIEW_EDGE_KEYS,
   SUPABASE_EDGE_EXTERNAL_OPTIONAL_KEYS,
   SUPABASE_EDGE_EXTERNAL_REQUIRED_KEYS,
   SUPABASE_EDGE_PROFILE_FILE,
@@ -620,4 +622,32 @@ test('the production Edge profile refuses the staging payment-review login', () 
       key,
     );
   }
+});
+
+test('the production profile accepts only a complete, bounded app-store review login', () => {
+  const now = Date.parse('2026-10-06T00:00:00Z');
+  const review = {
+    ...edgeProfile,
+    DABBOBA_API_SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_fixture-key-value',
+    DABBOBA_API_STORE_REVIEW_LOGIN_ENABLED: 'true',
+    DABBOBA_API_STORE_REVIEW_LOGIN_EMAIL: 'store-review@example.test',
+    DABBOBA_API_STORE_REVIEW_LOGIN_SUBJECT: '00000000-0000-4000-8000-000000000001',
+    DABBOBA_API_STORE_REVIEW_LOGIN_EXPIRES_AT: '2026-10-20T00:00:00Z',
+  };
+  assert.equal(assertStoreReviewLoginProfile(review, now), true);
+  assert.equal(assertStoreReviewLoginProfile({ ...review, DABBOBA_API_STORE_REVIEW_LOGIN_ENABLED: 'false' }, now), false);
+  assert.equal(assertStoreReviewLoginProfile(edgeProfile, now), false);
+  for (const change of [
+    { DABBOBA_API_STORE_REVIEW_LOGIN_ENABLED: 'yes' },
+    { DABBOBA_API_STORE_REVIEW_LOGIN_EMAIL: '' },
+    { DABBOBA_API_STORE_REVIEW_LOGIN_SUBJECT: 'subject' },
+    { DABBOBA_API_STORE_REVIEW_LOGIN_EXPIRES_AT: '2026-10-05T00:00:00Z' },
+    { DABBOBA_API_STORE_REVIEW_LOGIN_EXPIRES_AT: '2026-12-01T00:00:00Z' },
+  ]) assert.throws(() => assertStoreReviewLoginProfile({ ...review, ...change }, now), /Store review login needs/);
+  assert.throws(
+    () => assertStoreReviewLoginProfile({ ...review, DABBOBA_API_SUPABASE_PUBLISHABLE_KEY: '' }, now),
+    /PUBLISHABLE_KEY/,
+  );
+  const serialized = serializeSupabaseEdgeProfile(review);
+  for (const key of STORE_REVIEW_EDGE_KEYS) assert.match(serialized, new RegExp(`^${key}=`, 'm'));
 });
