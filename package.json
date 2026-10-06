@@ -35,6 +35,8 @@
     "supabase:edge:public:verify": "node scripts/verify-public-edge-surface.mjs",
     "supabase:edge:verify": "node scripts/verify-supabase-edge-runtime.mjs",
     "supabase:edge:live:check": "node scripts/check-supabase-live-candidate.mjs",
+    "supabase:edge:live:deploy": "node scripts/deploy-supabase-live-edge.mjs",
+    "supabase:edge:live:rollback": "node scripts/deploy-supabase-live-edge.mjs --rollback",
     "supabase:worker:provision": "node scripts/provision-supabase-worker-role.mjs",
     "supabase:worker:schedule": "node scripts/configure-supabase-worker-schedule.mjs",
     "catalog:photos:check": "node scripts/sync-product-photo-catalog.mjs --check",

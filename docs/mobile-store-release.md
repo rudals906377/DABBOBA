@@ -226,10 +226,12 @@ function, enable Cron, charge a card, or establish provider/store approval.
 After the same preflight and project check, `supabase:edge:deploy` builds and
 deploys `dabboba-api`, `dabboba-admin-api` (with the shared WASM image
 sanitizer, so admin catalog-media completion works), and `dabboba-worker`.
-The existing `supabase:edge:deploy` command remains PRELAUNCH-only; do not
-point it at a LIVE profile or treat this preflight as authorization to switch
-shared production secrets before a reviewed cutover and rollback sequence is
-ready.
+The existing `supabase:edge:deploy` command remains PRELAUNCH-only and now
+refuses a project that still holds LIVE payment secrets. The LIVE cutover,
+LIVE redeploy and explicit PRELAUNCH rollback commands are described in
+[`live-cutover-runbook.md`](live-cutover-runbook.md); having those commands is
+not authorization to switch shared production secrets before every
+prerequisite listed there is met.
 
 The 2026-09-26 read-only recheck still blocks LIVE: the source release check
 finds uncommitted migrations `0069`–`0075` and a dirty worktree; the separate

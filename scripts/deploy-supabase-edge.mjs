@@ -3,6 +3,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { parseEnv } from 'node:util';
 import {
+  LIVE_PAYMENT_PROFILE_KEYS,
   prepareSupabaseEdgeProfile,
   SUPABASE_EDGE_PROFILE_FILE,
 } from './prepare-supabase-edge-profile.mjs';
@@ -40,7 +41,36 @@ export function verifySupabaseTargetProjectAccess({
   }
 }
 
-function run(command, args) {
+/** Names (never values) of the custom secrets currently set on the target project. */
+export function listSupabaseSecretNames({
+  projectRef = SUPABASE_INTEGRATION_PROJECT_REF,
+  runCommand = spawnSync,
+} = {}) {
+  const result = runCommand('npx', supabaseCommandArgs('secrets', 'list', '--project-ref', projectRef, '--output', 'json'), {
+    cwd: new URL('../', import.meta.url),
+    env: process.env,
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let secrets;
+  try {
+    secrets = JSON.parse(result.stdout);
+  } catch {
+    throw new Error('Supabase project secrets could not be listed.');
+  }
+  if (result.error || result.status !== 0 || !Array.isArray(secrets)
+    || secrets.some((secret) => typeof secret?.name !== 'string')) {
+    throw new Error('Supabase project secrets could not be listed.');
+  }
+  return new Set(secrets.map((secret) => secret.name));
+}
+
+/** LIVE-only payment settings currently present on the project (names only). */
+export function liveOnlySecretNames(names) {
+  return LIVE_PAYMENT_PROFILE_KEYS.filter((key) => names.has(key));
+}
+
+export function run(command, args) {
   const result = spawnSync(command, args, {
     cwd: new URL('../', import.meta.url),
     env: process.env,
@@ -49,7 +79,7 @@ function run(command, args) {
   if (result.error || result.status !== 0) throw new Error('Supabase deployment command failed.');
 }
 
-function supabase(...args) {
+export function supabase(...args) {
   run('npx', supabaseCommandArgs(...args));
 }
 
@@ -58,6 +88,7 @@ export async function deploySupabaseEdge({
   readEdgeProfile = () => parseEnv(readFileSync(SUPABASE_EDGE_PROFILE_FILE, 'utf8')),
   preflight = ({ edgeProfile }) => runSupabaseEdgeReleasePreflight({ edgeProfile }),
   verifyProjectAccess = verifySupabaseTargetProjectAccess,
+  listSecretNames = listSupabaseSecretNames,
   run: runCommand = run,
   supabase: runSupabase = supabase,
   verifyPublicSurface = waitForPublicEdgeSurface,
@@ -78,6 +109,13 @@ export async function deploySupabaseEdge({
 
   const release = await preflight({ edgeProfile: profile });
   verifyProjectAccess();
+  // A LIVE project keeps its PortOne secrets. Uploading this PRELAUNCH profile
+  // over them would leave an API that refuses to start, so a LIVE project is
+  // updated with supabase:edge:live:deploy and returned to PRELAUNCH only by
+  // the explicit supabase:edge:live:rollback command.
+  if (liveOnlySecretNames(listSecretNames()).length) {
+    throw new Error('The project has LIVE payment secrets; use supabase:edge:live:deploy or supabase:edge:live:rollback.');
+  }
   runCommand('corepack', ['pnpm', '--filter', '@dabboba/api', 'build:supabase']);
   runCommand('corepack', ['pnpm', '--filter', '@dabboba/api', 'build:supabase:admin']);
   runCommand('corepack', ['pnpm', '--filter', '@dabboba/worker', 'build:edge']);
