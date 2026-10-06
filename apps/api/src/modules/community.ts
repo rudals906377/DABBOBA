@@ -118,17 +118,27 @@ async function hideExchangeListingForModeration(
   listingId: string,
   reason: string,
 ) {
-  const listing = await client.query<{ status: "OPEN" | "MATCHED" | "COMPLETED" | "CANCELLED" | "HIDDEN" }>(
-    "SELECT status FROM exchange_listings WHERE id=$1 FOR UPDATE",
+  const listing = await client.query<{
+    status: "OPEN" | "MATCHED" | "COMPLETED" | "CANCELLED" | "HIDDEN";
+    accepted_offer_id: string | null;
+  }>(
+    "SELECT status,accepted_offer_id FROM exchange_listings WHERE id=$1 FOR UPDATE",
     [listingId],
   );
   if (!listing.rowCount || !["OPEN", "MATCHED"].includes(listing.rows[0]!.status)) {
     throw notFound("신고 대상 교환 글을 찾을 수 없습니다.");
   }
-  await client.query(
-    "UPDATE exchange_offers SET status='REJECTED',decided_at=now() WHERE listing_id=$1 AND status='PENDING'",
+  const rejected = await client.query<{ id: string }>(
+    "UPDATE exchange_offers SET status='REJECTED',decided_at=now() WHERE listing_id=$1 AND status='PENDING' RETURNING id",
     [listingId],
   );
+  // Release only the units this listing still holds: offers rejected now and,
+  // for a matched exchange, the accepted offer. A withdrawn or earlier
+  // rejected offer's unit may already be offered on another listing.
+  const releasedOfferIds = rejected.rows.map((offer) => offer.id);
+  if (listing.rows[0]!.status === "MATCHED" && listing.rows[0]!.accepted_offer_id) {
+    releasedOfferIds.push(listing.rows[0]!.accepted_offer_id);
+  }
   await client.query(
     `UPDATE inventory_units inventory
         SET status='OWNED'
@@ -145,10 +155,9 @@ async function hideExchangeListingForModeration(
         AND inventory.id IN (
           SELECT item.inventory_unit_id
             FROM exchange_offer_items item
-            JOIN exchange_offers offer ON offer.id=item.offer_id
-           WHERE offer.listing_id=$1
+           WHERE item.offer_id=ANY($1::uuid[])
         )`,
-    [listingId],
+    [releasedOfferIds],
   );
   const hidden = await client.query(
     `UPDATE exchange_listings

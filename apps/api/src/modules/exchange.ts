@@ -809,6 +809,31 @@ export async function expireStaleExchangeListings(queryable: Queryable): Promise
      )
      SELECT id FROM expired_listings`,
   );
+  // The statement above reads one snapshot taken before it waited for any
+  // listing lock, so an offer committed by a request that held that lock is
+  // missed. A fresh statement rejects every offer still PENDING on a closed
+  // listing and frees its units; it also heals any offer stranded earlier.
+  await queryable.query(
+    `WITH stranded_offers AS (
+       UPDATE exchange_offers offer
+          SET status='REJECTED',decided_at=now()
+        WHERE offer.status='PENDING'
+          AND EXISTS (
+            SELECT 1 FROM exchange_listings listing
+             WHERE listing.id=offer.listing_id
+               AND listing.status IN ('CANCELLED','COMPLETED','HIDDEN')
+          )
+        RETURNING offer.id
+     )
+     UPDATE inventory_units inventory
+        SET status='OWNED'
+      WHERE inventory.status='EXCHANGE_OFFERED'
+        AND inventory.id IN (
+          SELECT item.inventory_unit_id
+            FROM exchange_offer_items item
+           WHERE item.offer_id IN (SELECT id FROM stranded_offers)
+        )`,
+  );
   return expired.rowCount ?? expired.rows.length;
 }
 
