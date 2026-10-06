@@ -10,6 +10,7 @@ import {
   STANDARD_SHIPPING_FEE,
   accountNotificationDestination,
   publicNotificationData,
+  accountDeletionNeedsOnlyPointForfeiture,
   accountDeletionStatus,
   calculateAccountShippingPolicy,
   canonicalPointReturnInventoryIds,
@@ -533,6 +534,25 @@ test("account deletion starts automatically only when every authoritative blocke
   assert.equal(accountDeletionStatus(clear), "PROCESSING");
   assert.equal(accountDeletionStatus({ ...clear, pointBalance: 1 }), "BLOCKED");
   assert.equal(accountDeletionStatus({ ...clear, activeExchangeOfferCount: 1 }), "BLOCKED");
+});
+
+test("only an exact point forfeiture agreement clears the point blocker", () => {
+  const clear = {
+    pointBalance: 0,
+    activeOrderCount: 0,
+    activePaymentCount: 0,
+    availableDrawEntitlementCount: 0,
+    activeInventoryCount: 0,
+    activeShippingRequestCount: 0,
+    activeExchangeListingCount: 0,
+    activeExchangeOfferCount: 0,
+  };
+  assert.equal(accountDeletionStatus({ ...clear, pointBalance: 1200 }, 1200), "PROCESSING");
+  assert.equal(accountDeletionStatus({ ...clear, pointBalance: 1200 }, 1100), "BLOCKED");
+  assert.equal(accountDeletionStatus({ ...clear, pointBalance: 1200, activeInventoryCount: 1 }, 1200), "BLOCKED");
+  assert.equal(accountDeletionNeedsOnlyPointForfeiture({ ...clear, pointBalance: 1200 }), true);
+  assert.equal(accountDeletionNeedsOnlyPointForfeiture({ ...clear, pointBalance: 1200, activeOrderCount: 1 }), false);
+  assert.equal(accountDeletionNeedsOnlyPointForfeiture(clear), false);
 });
 
 test("wishlist reads hide prize-only catalog items", async () => {

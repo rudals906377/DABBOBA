@@ -143,10 +143,17 @@ function retryDelayMs(attempts: number, baseDelayMs: number): number {
   return Math.min(baseDelayMs * 2 ** Math.max(0, Math.min(attempts - 1, 20)), 15 * 60_000);
 }
 
-async function deletionHasBlockers(pool: DatabasePool, userId: string): Promise<boolean> {
+async function deletionHasBlockers(pool: DatabasePool, job: Pick<AuthDeletionJob, "user_id" | "deletion_request_id">): Promise<boolean> {
   const result = await pool.query<Record<string, string | number>>(
     `SELECT
-       COALESCE((SELECT balance FROM point_accounts WHERE user_id=$1),0) AS point_balance,
+       -- A balance the customer explicitly agreed to forfeit is not a blocker;
+       -- any other balance, including one changed after that agreement, is.
+       CASE WHEN COALESCE((SELECT balance FROM point_accounts WHERE user_id=$1),0)
+                 = COALESCE((SELECT point_forfeiture_acknowledged FROM account_deletion_requests
+                              WHERE id=$2 AND user_id=$1),0)
+            THEN 0
+            ELSE COALESCE((SELECT balance FROM point_accounts WHERE user_id=$1),0)
+       END AS point_balance,
        (SELECT count(*) FROM orders
          WHERE user_id=$1 AND status IN ('PENDING_PAYMENT','PAID','REFUND_REVIEW')) AS active_order_count,
        (SELECT count(*) FROM payments p JOIN orders o ON o.id=p.order_id
@@ -161,7 +168,7 @@ async function deletionHasBlockers(pool: DatabasePool, userId: string): Promise<
          WHERE author_id=$1 AND status IN ('OPEN','MATCHED')) AS active_exchange_listing_count,
        (SELECT count(*) FROM exchange_offers
          WHERE proposer_id=$1 AND status IN ('PENDING','ACCEPTED')) AS active_exchange_offer_count`,
-    [userId],
+    [job.user_id, job.deletion_request_id],
   );
   return Object.values(result.rows[0] ?? {}).some((value) => Number(value) > 0);
 }
@@ -224,8 +231,8 @@ async function deleteAuthoredMediaObjects(
 
 async function finalizeLocalAccountDeletion(pool: DatabasePool, job: AuthDeletionJob): Promise<void> {
   await withTransaction(pool, async (transaction) => {
-    const request = await transaction.query<{ status: string }>(
-      `SELECT status FROM account_deletion_requests
+    const request = await transaction.query<{ status: string; point_forfeiture_acknowledged: number | null }>(
+      `SELECT status,point_forfeiture_acknowledged FROM account_deletion_requests
         WHERE id=$1 AND user_id=$2 FOR UPDATE`,
       [job.deletion_request_id, job.user_id],
     );
@@ -240,6 +247,39 @@ async function finalizeLocalAccountDeletion(pool: DatabasePool, job: AuthDeletio
     if (request.rows[0]!.status !== "PROCESSING" && request.rows[0]!.status !== "APPROVED") {
       throw new Error("Account deletion request is not ready for finalization");
     }
+
+    // Points end only with the exact balance the customer agreed to forfeit.
+    const points = await transaction.query<{ balance: number | string }>(
+      "SELECT balance FROM point_accounts WHERE user_id=$1 FOR UPDATE",
+      [job.user_id],
+    );
+    const pointBalance = Number(points.rows[0]?.balance ?? 0);
+    let pointsForfeited = 0;
+    if (pointBalance > 0) {
+      if (pointBalance !== Number(request.rows[0]!.point_forfeiture_acknowledged ?? 0)) {
+        throw new Error("Account deletion point balance differs from the acknowledged forfeiture");
+      }
+      // The ledger's unique (user, type, reference) key rejects a second
+      // forfeiture for the same request; the worker role cannot read the ledger.
+      await transaction.query(
+        `INSERT INTO point_ledger_entries(user_id,entry_type,amount,reference_type,reference_id,reason)
+         VALUES($1,'EXPIRE',$2,'ACCOUNT_DELETION',$3,'Points forfeited at account deletion')`,
+        [job.user_id, -pointBalance, job.deletion_request_id],
+      );
+      await transaction.query(
+        "UPDATE point_accounts SET balance=0,version=version+1 WHERE user_id=$1 AND balance=$2",
+        [job.user_id, pointBalance],
+      );
+      pointsForfeited = pointBalance;
+    }
+
+    // Legally retained shipping addresses and inquiry text move to the
+    // owner-only separated store before the service copies are blanked below.
+    const separated = await transaction.query<{ separated: number | string }>(
+      "SELECT public.separate_deleted_account_records($1,$2) AS separated",
+      [job.deletion_request_id, job.user_id],
+    );
+    const separatedRecords = Number(separated.rows[0]?.separated ?? 0);
 
     await transaction.query(
       `UPDATE sessions
@@ -371,10 +411,15 @@ async function finalizeLocalAccountDeletion(pool: DatabasePool, job: AuthDeletio
               jsonb_build_object('actor','SYSTEM_WORKER','personalDataAnonymized',true,
                 'externalIdentityDeleted',$5::boolean,
                 'appleTokenRevokedAt',(SELECT apple_revoked_at FROM account_auth_deletion_jobs WHERE id=$3::uuid),
-                'retainedData','LEGAL_AND_TRANSACTION_RECORDS'),
+                'retainedData','LEGAL_AND_TRANSACTION_RECORDS',
+                'retainedRecordsSeparated',$6::integer,
+                'pointsForfeited',$7::integer),
               'AUTOMATED_ACCOUNT_DELETION')
        ON CONFLICT (deletion_request_id,idempotency_key) DO NOTHING`,
-      [job.deletion_request_id, job.user_id, job.id, `worker:${job.id}:completed`, Boolean(job.supabase_user_id)],
+      [
+        job.deletion_request_id, job.user_id, job.id, `worker:${job.id}:completed`, Boolean(job.supabase_user_id),
+        separatedRecords, pointsForfeited,
+      ],
     );
     await transaction.query("DELETE FROM account_auth_deletion_jobs WHERE id=$1", [job.id]);
   });
@@ -421,7 +466,7 @@ export async function cleanupSupabaseAuthUsers(
 
     try {
       if (!job.external_deleted_at) {
-        if (await deletionHasBlockers(pool, job.user_id)) {
+        if (await deletionHasBlockers(pool, job)) {
           await returnBlockedDeletionToCustomer(pool, job);
           result.deferred += 1;
           continue;

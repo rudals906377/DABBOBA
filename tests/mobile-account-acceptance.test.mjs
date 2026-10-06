@@ -61,6 +61,11 @@ test("account deletion previews blockers, preserves blocked sessions, and stores
 
   assert.match(member, /await fetchAccountDeletionPreview/);
   assert.match(member, /if \(!preview\.canDeleteNow\)/);
+  // Points never block alone: the customer explicitly forfeits the exact balance.
+  assert.match(member, /if \(preview\.canDeleteWithPointForfeiture\) \{\s*forfeitPointBalance = preview\.blockers\.pointBalance;/);
+  assert.match(member, /탈퇴와 함께 소멸하고 되돌릴 수 없어요/);
+  assert.match(member, /"포인트 포기하고 탈퇴"/);
+  assert.match(api, /forfeitPointBalance && forfeitPointBalance > 0 \? \{ forfeitPointBalance \} : \{\}/);
   assert.match(member, /await storeAccountDeletionReceipt/);
   assert.match(member, /readAccountDeletionReceipt/);
   assert.match(member, /fetchAccountDeletionStatusByReceipt/);

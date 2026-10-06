@@ -302,6 +302,7 @@ type AccountDeletionRequestRow = {
   last_requested_at: Date;
   completed_at: Date | null;
   auth_deletion_status: "NOT_REQUIRED" | "PENDING" | "COMPLETED";
+  point_forfeiture_acknowledged: number | null;
 };
 
 export type AccountDeletionBlockers = {
@@ -368,8 +369,22 @@ function assertOnlyKeys(input: Record<string, unknown>, allowed: readonly string
   if (unknown) throw badRequest(`지원하지 않는 입력 항목입니다: ${unknown}`);
 }
 
-export function accountDeletionStatus(blockers: AccountDeletionBlockers): "PROCESSING" | "BLOCKED" {
-  return Object.values(blockers).some((value) => value > 0) ? "BLOCKED" : "PROCESSING";
+export function accountDeletionStatus(
+  blockers: AccountDeletionBlockers,
+  pointForfeitureAcknowledged: number | null = null,
+): "PROCESSING" | "BLOCKED" {
+  // A remaining point balance stops blocking only when the customer agreed to
+  // forfeit exactly that balance. Every other blocker still has to be cleared.
+  const pointsCleared = blockers.pointBalance === 0
+    || (pointForfeitureAcknowledged !== null && pointForfeitureAcknowledged === blockers.pointBalance);
+  return Object.entries(blockers).some(([key, value]) => value > 0 && !(key === "pointBalance" && pointsCleared))
+    ? "BLOCKED"
+    : "PROCESSING";
+}
+
+/** Whether the remaining point balance is the only thing standing in the way. */
+export function accountDeletionNeedsOnlyPointForfeiture(blockers: AccountDeletionBlockers): boolean {
+  return blockers.pointBalance > 0 && accountDeletionStatus(blockers, blockers.pointBalance) === "PROCESSING";
 }
 
 function mapDeletionBlockers(row: AccountDeletionBlockerRow): AccountDeletionBlockers {
@@ -394,6 +409,7 @@ function mapDeletionRequest(row: AccountDeletionRequestRow) {
     hardDeletePerformed: false,
     policy: "AUTOMATED_SERVER_DELETION" as const,
     authDeletionStatus: row.auth_deletion_status,
+    pointForfeitureAcknowledged: row.point_forfeiture_acknowledged === null ? null : numberValue(row.point_forfeiture_acknowledged),
     requestedAt: iso(row.requested_at),
     lastRequestedAt: iso(row.last_requested_at),
     completedAt: nullableIso(row.completed_at),
@@ -1994,6 +2010,7 @@ export async function registerAccountRoutes(app: FastifyInstance, context: ApiCo
     const blockers = await loadDeletionBlockers(context.pool, request.actor!.userId);
     return reply.header("cache-control", "no-store").send({
       canDeleteNow: !Object.values(blockers).some((value) => value > 0),
+      canDeleteWithPointForfeiture: accountDeletionNeedsOnlyPointForfeiture(blockers),
       blockers,
     });
   });
@@ -2064,7 +2081,7 @@ export async function registerAccountRoutes(app: FastifyInstance, context: ApiCo
   }, async (request, reply) => {
     const result = await context.pool.query<AccountDeletionRequestRow>(
       `SELECT id,status,blocker_snapshot,request_count,requested_at,last_requested_at,
-              completed_at,auth_deletion_status
+              completed_at,auth_deletion_status,point_forfeiture_acknowledged
        FROM account_deletion_requests
        WHERE user_id=$1
        ORDER BY requested_at DESC,id DESC
@@ -2086,7 +2103,7 @@ export async function registerAccountRoutes(app: FastifyInstance, context: ApiCo
       if (!token) throw notFound("탈퇴 요청을 찾을 수 없습니다.");
       const result = await context.pool.query<AccountDeletionRequestRow>(
         `SELECT id,status,blocker_snapshot,request_count,requested_at,last_requested_at,
-                completed_at,auth_deletion_status
+                completed_at,auth_deletion_status,point_forfeiture_acknowledged
            FROM account_deletion_requests
           WHERE id=$1 AND status_token_digest=$2
           LIMIT 1`,
@@ -2102,7 +2119,9 @@ export async function registerAccountRoutes(app: FastifyInstance, context: ApiCo
     config: { allowAccountDeletionScope: true },
   }, async (request, reply) => {
     const input = objectInput(request.body);
-    assertOnlyKeys(input, []);
+    assertOnlyKeys(input, ["forfeitPointBalance"]);
+    // The exact balance the customer agreed to give up; omitted means no agreement.
+    const forfeitPointBalance = integerInput(input, "forfeitPointBalance", { min: 1, optional: true }) ?? null;
     const actorId = request.actor!.userId;
     const key = idempotencyKey(request.headers);
     const result = await withTransaction(context.pool, async (client) => {
@@ -2110,7 +2129,9 @@ export async function registerAccountRoutes(app: FastifyInstance, context: ApiCo
         actorId,
         scope: "ACCOUNT_DELETION_REQUEST",
         key,
-        hash: requestHash({ operation: "REQUEST_ACCOUNT_DELETION" }),
+        hash: requestHash(forfeitPointBalance === null
+          ? { operation: "REQUEST_ACCOUNT_DELETION" }
+          : { operation: "REQUEST_ACCOUNT_DELETION", forfeitPointBalance }),
       });
 
       if (!started.fresh) return { replay: true, statusCode: started.statusCode, body: started.body };
@@ -2121,13 +2142,18 @@ export async function registerAccountRoutes(app: FastifyInstance, context: ApiCo
       );
       if (!user.rowCount) throw notFound("사용자 계정을 찾을 수 없습니다.");
 
+      // Lock the balance so the agreed amount cannot change before it is recorded.
+      await client.query("SELECT balance FROM point_accounts WHERE user_id=$1 FOR UPDATE", [actorId]);
       const blockers = await loadDeletionBlockers(client, actorId);
-      const assessedStatus: AccountDeletionStatus = accountDeletionStatus(blockers);
+      if (forfeitPointBalance !== null && forfeitPointBalance !== blockers.pointBalance) {
+        throw conflict("남은 포인트가 바뀌었어요. 탈퇴 화면을 다시 확인해 주세요.", { pointBalance: blockers.pointBalance });
+      }
+      const assessedStatus: AccountDeletionStatus = accountDeletionStatus(blockers, forfeitPointBalance);
       const receiptToken = randomBytes(32).toString("base64url");
       const receiptDigest = deletionStatusTokenDigest(receiptToken);
       const existing = await client.query<AccountDeletionRequestRow>(
         `SELECT id,status,blocker_snapshot,request_count,requested_at,last_requested_at,
-                completed_at,auth_deletion_status
+                completed_at,auth_deletion_status,point_forfeiture_acknowledged
          FROM account_deletion_requests
          WHERE user_id=$1 AND status IN ('PENDING_REVIEW','BLOCKED','PROCESSING','APPROVED')
          ORDER BY requested_at DESC,id DESC
@@ -2150,22 +2176,22 @@ export async function registerAccountRoutes(app: FastifyInstance, context: ApiCo
           `UPDATE account_deletion_requests
            SET status=$2,blocker_snapshot=$3,request_count=request_count+1,last_requested_at=now(),
                status_token_digest=$4,processing_started_at=CASE WHEN $2='PROCESSING' THEN now() ELSE NULL END,
-               auth_deletion_status='NOT_REQUIRED'
+               auth_deletion_status='NOT_REQUIRED',point_forfeiture_acknowledged=$5
            WHERE id=$1
            RETURNING id,status,blocker_snapshot,request_count,requested_at,last_requested_at,
-                     completed_at,auth_deletion_status`,
-          [current.id, assessedStatus, JSON.stringify(blockers), receiptDigest],
+                     completed_at,auth_deletion_status,point_forfeiture_acknowledged`,
+          [current.id, assessedStatus, JSON.stringify(blockers), receiptDigest, forfeitPointBalance],
         );
         deletionRequest = updated.rows[0]!;
         eventType = "REASSESSED";
       } else {
         const created = await client.query<AccountDeletionRequestRow>(
           `INSERT INTO account_deletion_requests(
-             user_id,status,blocker_snapshot,status_token_digest,processing_started_at
-           ) VALUES($1,$2,$3,$4,CASE WHEN $2='PROCESSING' THEN now() ELSE NULL END)
+             user_id,status,blocker_snapshot,status_token_digest,processing_started_at,point_forfeiture_acknowledged
+           ) VALUES($1,$2,$3,$4,CASE WHEN $2='PROCESSING' THEN now() ELSE NULL END,$5)
            RETURNING id,status,blocker_snapshot,request_count,requested_at,last_requested_at,
-                     completed_at,auth_deletion_status`,
-          [actorId, assessedStatus, JSON.stringify(blockers), receiptDigest],
+                     completed_at,auth_deletion_status,point_forfeiture_acknowledged`,
+          [actorId, assessedStatus, JSON.stringify(blockers), receiptDigest, forfeitPointBalance],
         );
         deletionRequest = created.rows[0]!;
         eventType = "CREATED";
@@ -2224,6 +2250,7 @@ export async function registerAccountRoutes(app: FastifyInstance, context: ApiCo
             hardDeletePerformed: false,
             policy: "AUTOMATED_SERVER_DELETION",
             processingQueued: assessedStatus === "PROCESSING",
+            pointForfeitureAcknowledged: forfeitPointBalance,
           }),
         ],
       );

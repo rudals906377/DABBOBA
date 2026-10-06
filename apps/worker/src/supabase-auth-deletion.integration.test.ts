@@ -168,3 +168,113 @@ test("Auth deletion retries external failure without erasing identity, then fina
   // The nullable marker must survive deletion of the transient job row.
   assert.deepEqual(audit.rows, [{ has_marker: true, revoked_at: null }]);
 });
+
+test("Deletion forfeits only the acknowledged points and separates retained shipping and inquiry records", {
+  skip: !migrationDatabaseUrl || !workerDatabaseUrl,
+  timeout: 60_000,
+}, async (t) => {
+  assertDatabaseUrlForTier(migrationDatabaseUrl!, "DATABASE_MIGRATION_URL", "TEST");
+  assertDatabaseUrlForTier(workerDatabaseUrl!, "DABBOBA_WORKER_TEST_DATABASE_URL", "TEST");
+  const fixturePool = createMigrationDatabasePool(migrationDatabaseUrl!, "deletion-separation-fixture");
+  const workerPool = createDatabasePool(workerDatabaseUrl!, "deletion-separation-worker", {
+    expectedRole: WORKER_DATABASE_ROLE,
+  });
+  t.after(async () => {
+    await Promise.allSettled([workerPool.end(), fixturePool.end()]);
+  });
+
+  const config = { outboxBatchSize: 1, jobBackoffMs: 1_000, supabaseAuthAdmin: null, appleRevocation: null } as WorkerConfig;
+  const logger = { debug() {}, info() {}, warn() {}, error() {} } as Logger;
+  const mediaStore = { async deleteObject() { return "deleted"; } } as MediaStore;
+  const address = {
+    recipient: "보관 확인", phone: "01012345678", postalCode: "04524",
+    addressLine1: "서울특별시 중구 세종대로 110", addressLine2: "1층", deliveryNote: "",
+  };
+
+  const seed = async (acknowledged: number | null) => {
+    const user = await fixturePool.query<{ id: string }>(
+      "INSERT INTO users(email,nickname,role,status) VALUES($1,'분리 보관 검증','USER','ACTIVE') RETURNING id",
+      [`deletion-separation-${randomUUID()}@example.test`],
+    );
+    const userId = user.rows[0]!.id;
+    await fixturePool.query("INSERT INTO point_accounts(user_id,balance) VALUES($1,1200)", [userId]);
+    const shipping = await fixturePool.query<{ id: string }>(
+      "INSERT INTO shipping_requests(user_id,status,address_snapshot) VALUES($1,'CANCELLED',$2::jsonb) RETURNING id",
+      [userId, JSON.stringify(address)],
+    );
+    const inquiry = await fixturePool.query<{ id: string }>(
+      "INSERT INTO inquiries(user_id,category,title,status,closed_at) VALUES($1,'ORDER','배송 지연 문의','CLOSED',now()) RETURNING id",
+      [userId],
+    );
+    await fixturePool.query(
+      "INSERT INTO inquiry_messages(inquiry_id,author_id,author_role,content) VALUES($1,$2,'USER','상품이 아직 오지 않았어요.')",
+      [inquiry.rows[0]!.id, userId],
+    );
+    const request = await fixturePool.query<{ id: string }>(
+      `INSERT INTO account_deletion_requests
+         (user_id,status,processing_started_at,auth_deletion_status,point_forfeiture_acknowledged)
+       VALUES($1,'PROCESSING',now(),'NOT_REQUIRED',$2) RETURNING id`,
+      [userId, acknowledged],
+    );
+    await fixturePool.query(
+      `INSERT INTO account_auth_deletion_jobs(deletion_request_id,user_id,supabase_user_id,available_at)
+       VALUES($1,$2,NULL,'2000-01-01T00:00:00Z')`,
+      [request.rows[0]!.id, userId],
+    );
+    return { userId, requestId: request.rows[0]!.id, shippingId: shipping.rows[0]!.id, inquiryId: inquiry.rows[0]!.id };
+  };
+  const run = () => cleanupSupabaseAuthUsers(
+    workerPool, config, logger, () => true, { async deleteUser() { throw new Error("no Auth user"); } }, mediaStore,
+  );
+
+  // A balance without an exact agreement keeps blocking the deletion.
+  const unacknowledged = await seed(1100);
+  assert.deepEqual(await run(), { completed: 0, deferred: 1 });
+  const blocked = await fixturePool.query<{ status: string; balance: number }>(
+    `SELECT d.status,p.balance FROM account_deletion_requests d JOIN point_accounts p ON p.user_id=d.user_id WHERE d.id=$1`,
+    [unacknowledged.requestId],
+  );
+  assert.deepEqual(blocked.rows[0], { status: "BLOCKED", balance: 1200 });
+
+  const agreed = await seed(1200);
+  assert.deepEqual(await run(), { completed: 1, deferred: 0 });
+  const state = await fixturePool.query<{
+    request_status: string; balance: number; ledger: Array<{ entry_type: string; amount: number; reference_type: string }>;
+    shipping_snapshot: unknown; inquiry_title: string; message: string;
+  }>(
+    `SELECT d.status AS request_status,p.balance,
+            (SELECT jsonb_agg(jsonb_build_object('entry_type',l.entry_type,'amount',l.amount,'reference_type',l.reference_type))
+               FROM point_ledger_entries l WHERE l.user_id=d.user_id) AS ledger,
+            (SELECT address_snapshot FROM shipping_requests WHERE id=$2) AS shipping_snapshot,
+            (SELECT title FROM inquiries WHERE id=$3) AS inquiry_title,
+            (SELECT content FROM inquiry_messages WHERE inquiry_id=$3) AS message
+       FROM account_deletion_requests d JOIN point_accounts p ON p.user_id=d.user_id
+      WHERE d.id=$1`,
+    [agreed.requestId, agreed.shippingId, agreed.inquiryId],
+  );
+  assert.deepEqual(state.rows[0], {
+    request_status: "COMPLETED",
+    balance: 0,
+    ledger: [{ entry_type: "EXPIRE", amount: -1200, reference_type: "ACCOUNT_DELETION" }],
+    shipping_snapshot: { retainedSeparately: true },
+    inquiry_title: "삭제된 문의",
+    message: "삭제된 문의 내용",
+  });
+  const separated = await fixturePool.query<{ record_kind: string; payload: Record<string, unknown> }>(
+    "SELECT record_kind,payload FROM deleted_account_retained_records WHERE user_id=$1 ORDER BY record_kind",
+    [agreed.userId],
+  );
+  assert.deepEqual(separated.rows.map((row) => row.record_kind), ["INQUIRY_CONTENT", "SHIPPING_ADDRESS"]);
+  assert.deepEqual(separated.rows[1]!.payload, address);
+  assert.equal(separated.rows[0]!.payload.title, "배송 지연 문의");
+  assert.equal((separated.rows[0]!.payload.messages as Array<{ content: string }>)[0]!.content, "상품이 아직 오지 않았어요.");
+  const audit = await fixturePool.query<{ separated: number; forfeited: number }>(
+    `SELECT (metadata->>'retainedRecordsSeparated')::integer AS separated,(metadata->>'pointsForfeited')::integer AS forfeited
+       FROM account_deletion_request_events WHERE deletion_request_id=$1 AND status='COMPLETED'`,
+    [agreed.requestId],
+  );
+  assert.deepEqual(audit.rows, [{ separated: 2, forfeited: 1200 }]);
+
+  // The worker itself cannot read the separated copies.
+  await assert.rejects(workerPool.query("SELECT 1 FROM deleted_account_retained_records LIMIT 1"), /permission denied/);
+});

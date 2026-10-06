@@ -16,8 +16,11 @@ test("customer deletion exposes preview, queues processing, and returns a hashed
   assert.match(source, /\/v1\/account\/deletion-requests\/:requestId\/status/);
   assert.match(source, /randomBytes\(32\)\.toString\("base64url"\)/);
   assert.match(source, /createHash\("sha256"\)\.update\(token\)\.digest\("hex"\)/);
-  assert.match(source, /function accountDeletionStatus[\s\S]{0,220}\? "BLOCKED" : "PROCESSING"/);
-  assert.match(source, /assessedStatus[^\n]*accountDeletionStatus\(blockers\)/);
+  assert.match(source, /function accountDeletionStatus[\s\S]{0,700}\? "BLOCKED"\s*: "PROCESSING"/);
+  assert.match(source, /assessedStatus[^\n]*accountDeletionStatus\(blockers, forfeitPointBalance\)/);
+  // A forfeiture agreement must match the locked balance exactly.
+  assert.match(source, /SELECT balance FROM point_accounts WHERE user_id=\$1 FOR UPDATE/);
+  assert.match(source, /forfeitPointBalance !== null && forfeitPointBalance !== blockers\.pointBalance/);
   assert.match(source, /INSERT INTO account_auth_deletion_jobs/);
   assert.doesNotMatch(source, /DELETE FROM auth_identities/);
   assert.doesNotMatch(source, /SET email=NULL,phone_e164=NULL/);
@@ -49,4 +52,9 @@ test("worker verifies blockers and external deletion before local anonymization"
   assert.match(source, /UPDATE inquiry_messages[\s\S]{0,180}SET content='삭제된 문의 내용'/);
   assert.match(source, /UPDATE inquiries SET title='삭제된 문의'/);
   assert.match(source, /SET status='COMPLETED'/);
+  // Retained shipping addresses and inquiry text are separated before blanking.
+  const separation = source.indexOf("public.separate_deleted_account_records");
+  const inquiryBlanking = source.indexOf("SET content='삭제된 문의 내용'");
+  assert.ok(separation > 0 && separation < inquiryBlanking);
+  assert.match(source, /VALUES\(\$1,'EXPIRE',\$2,'ACCOUNT_DELETION',\$3,'Points forfeited at account deletion'\)/);
 });

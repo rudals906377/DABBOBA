@@ -2595,7 +2595,7 @@ paths:
         required: true
         content:
           application/json:
-            schema: { $ref: "#/components/schemas/EmptyObject" }
+            schema: { $ref: "#/components/schemas/AccountDeletionRequestInput" }
       responses:
         "202":
           description: Deletion is blocked for the customer to resolve, or safely queued with all sessions revoked.
@@ -6693,7 +6693,7 @@ components:
     AccountDeletionRequest:
       type: object
       additionalProperties: false
-      required: [id, status, blockers, requestCount, hardDeletePerformed, policy, authDeletionStatus, requestedAt, lastRequestedAt, completedAt]
+      required: [id, status, blockers, requestCount, hardDeletePerformed, policy, authDeletionStatus, pointForfeitureAcknowledged, requestedAt, lastRequestedAt, completedAt]
       properties:
         id: { type: string, format: uuid }
         status: { $ref: "#/components/schemas/AccountDeletionStatus" }
@@ -6702,13 +6702,17 @@ components:
         hardDeletePerformed: { type: boolean, const: false }
         policy: { type: string, const: AUTOMATED_SERVER_DELETION }
         authDeletionStatus: { type: string, enum: [NOT_REQUIRED, PENDING, COMPLETED] }
+        pointForfeitureAcknowledged:
+          type: [integer, "null"]
+          minimum: 1
+          description: The exact point balance the customer agreed to forfeit with this request.
         requestedAt: { type: string, format: date-time }
         lastRequestedAt: { type: string, format: date-time }
         completedAt: { type: [string, "null"], format: date-time }
     AccountDeletionReceipt:
       type: object
       additionalProperties: false
-      required: [id, status, blockers, requestCount, hardDeletePerformed, policy, authDeletionStatus, requestedAt, lastRequestedAt, completedAt, statusToken]
+      required: [id, status, blockers, requestCount, hardDeletePerformed, policy, authDeletionStatus, pointForfeitureAcknowledged, requestedAt, lastRequestedAt, completedAt, statusToken]
       properties:
         id: { type: string, format: uuid }
         status: { $ref: "#/components/schemas/AccountDeletionStatus" }
@@ -6717,6 +6721,7 @@ components:
         hardDeletePerformed: { type: boolean, const: false }
         policy: { type: string, const: AUTOMATED_SERVER_DELETION }
         authDeletionStatus: { type: string, enum: [NOT_REQUIRED, PENDING, COMPLETED] }
+        pointForfeitureAcknowledged: { type: [integer, "null"], minimum: 1 }
         requestedAt: { type: string, format: date-time }
         lastRequestedAt: { type: string, format: date-time }
         completedAt: { type: [string, "null"], format: date-time }
@@ -6724,10 +6729,21 @@ components:
     AccountDeletionPreview:
       type: object
       additionalProperties: false
-      required: [canDeleteNow, blockers]
+      required: [canDeleteNow, canDeleteWithPointForfeiture, blockers]
       properties:
         canDeleteNow: { type: boolean }
+        canDeleteWithPointForfeiture:
+          type: boolean
+          description: True when the remaining point balance is the only blocker, so the customer may delete by forfeiting exactly that balance.
         blockers: { $ref: "#/components/schemas/AccountDeletionBlockers" }
+    AccountDeletionRequestInput:
+      type: object
+      additionalProperties: false
+      properties:
+        forfeitPointBalance:
+          type: integer
+          minimum: 1
+          description: The exact current point balance the customer agrees to forfeit. A different balance is rejected with 409.
     AccountPolicyAcceptanceStatus:
       type: object
       additionalProperties: false

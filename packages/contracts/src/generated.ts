@@ -4637,6 +4637,8 @@ export interface components {
             policy: "AUTOMATED_SERVER_DELETION";
             /** @enum {string} */
             authDeletionStatus: "NOT_REQUIRED" | "PENDING" | "COMPLETED";
+            /** @description The exact point balance the customer agreed to forfeit with this request. */
+            pointForfeitureAcknowledged: number | null;
             /** Format: date-time */
             requestedAt: string;
             /** Format: date-time */
@@ -4656,6 +4658,7 @@ export interface components {
             policy: "AUTOMATED_SERVER_DELETION";
             /** @enum {string} */
             authDeletionStatus: "NOT_REQUIRED" | "PENDING" | "COMPLETED";
+            pointForfeitureAcknowledged: number | null;
             /** Format: date-time */
             requestedAt: string;
             /** Format: date-time */
@@ -4666,7 +4669,13 @@ export interface components {
         };
         AccountDeletionPreview: {
             canDeleteNow: boolean;
+            /** @description True when the remaining point balance is the only blocker, so the customer may delete by forfeiting exactly that balance. */
+            canDeleteWithPointForfeiture: boolean;
             blockers: components["schemas"]["AccountDeletionBlockers"];
+        };
+        AccountDeletionRequestInput: {
+            /** @description The exact current point balance the customer agrees to forfeit. A different balance is rejected with 409. */
+            forfeitPointBalance?: number;
         };
         AccountPolicyAcceptanceStatus: {
             documents: {
@@ -9068,7 +9077,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["EmptyObject"];
+                "application/json": components["schemas"]["AccountDeletionRequestInput"];
             };
         };
         responses: {
