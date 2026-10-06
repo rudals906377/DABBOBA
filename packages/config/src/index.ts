@@ -1,6 +1,12 @@
 type Environment = Record<string, string | undefined>;
 import { loadMediaStorageConfig, type MediaStorageConfiguration } from "./media-storage.js";
-import { loadPaymentReviewLogin, loadPaymentReviewProxySecret, type PaymentReviewLogin } from "./payment-review-login.js";
+import {
+  loadPaymentReviewLogin,
+  loadPaymentReviewProxySecret,
+  loadStoreReviewLogin,
+  type PaymentReviewLogin,
+  type StoreReviewLogin,
+} from "./payment-review-login.js";
 import {
   assertDatabaseUrlForTier,
   assertLocalTestProviderBoundary,
@@ -56,6 +62,8 @@ export type ApiConfig = {
   customerLoginProviders?: CustomerLoginProvider[];
   /** Dedicated password-verified customer on the pinned TEST payment project only. */
   paymentReviewLogin?: PaymentReviewLogin | null;
+  /** Dedicated password-verified app-store reviewer on the pinned production project only. */
+  storeReviewLogin?: StoreReviewLogin | null;
   /**
    * Shared with the public review site worker only. It signs the visitor IP
    * that Cloudflare observed, so the review login limit is per reviewer
@@ -650,6 +658,10 @@ export function loadApiConfig(env: Environment = process.env): ApiConfig {
     environmentTier, databaseUrl: required(env, "DATABASE_URL"),
     supabaseUrl: supabaseAuth.supabaseUrl ?? null, portOne: payment.portOne ?? null,
   }) : null;
+  const storeReviewLogin = includesCustomer ? loadStoreReviewLogin(env, {
+    environmentTier, databaseUrl: required(env, "DATABASE_URL"),
+    supabaseUrl: supabaseAuth.supabaseUrl ?? null,
+  }) : null;
   const paymentReviewProxySecret = loadPaymentReviewProxySecret(env, paymentReviewLogin, [
     pepper, proxyIdentitySecret, payment.paymentWebhookSecret, payment.portOne?.apiSecret, payment.portOne?.webhookSecret,
   ]);
@@ -699,6 +711,7 @@ export function loadApiConfig(env: Environment = process.env): ApiConfig {
     trustedClientIpHeader: trustedClientIpHeader(env),
     ...supabaseAuth,
     paymentReviewLogin,
+    storeReviewLogin,
     paymentReviewProxySecret,
     communityEnabled: communityFlag === "true",
     commerceMode,

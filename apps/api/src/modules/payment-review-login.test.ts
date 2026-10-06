@@ -130,3 +130,85 @@ test("one reviewer's failed attempts behind the shared site worker never lock ou
     assert.equal((await attempt({ [PAYMENT_REVIEW_CLIENT_IP_HEADERS.ip]: "203.0.113.22" })).statusCode, 401);
   } finally { await app.close(); }
 });
+
+const productionIssuer = "https://rconfxsykttfvznakile.supabase.co/auth/v1";
+const storeReviewer = "store-review@example.invalid";
+
+async function setupStoreReview({ tier = "PRODUCTION", project = "rconfxsykttfvznakile" } = {}) {
+  const sessionInserts: unknown[][] = [];
+  const authRequests: string[] = [];
+  const client = {
+    release() {},
+    async query(sql: string, params: unknown[] = []) {
+      if (sql.includes("INSERT INTO sessions")) sessionInserts.push(params);
+      if (sql.includes("legal_document_versions")) return { rows: [
+        { policy_key: "PRIVACY", policy_version: policies.privacy, content_sha256: "a".repeat(64) },
+        { policy_key: "TERMS", policy_version: policies.terms, content_sha256: "b".repeat(64) },
+      ], rowCount: 2 };
+      if (sql.includes("INSERT INTO users") || sql.includes("SELECT id,email::text,nickname")) return { rows: [{ ...customer, email: storeReviewer }], rowCount: 1 };
+      if (sql.includes("INSERT INTO auth_identities")) return { rows: [{ provider: "EMAIL" }], rowCount: 1 };
+      if (sql.includes("INSERT INTO sessions")) return { rows: [{ id: "00000000-0000-4000-8000-000000000004" }], rowCount: 1 };
+      return { rows: [], rowCount: 0 };
+    },
+  };
+  const deadline = new Date(Date.now() + 3 * 86_400_000).toISOString();
+  const context = {
+    config: {
+      environmentTier: tier,
+      databaseUrl: `postgres://dabboba_runtime.${project}:synthetic@aws-0-ap-northeast-2.pooler.supabase.com:6543/postgres`,
+      supabaseUrl: `https://${project}.supabase.co`, supabasePublishableKey: "sb_publishable_synthetic",
+      customerLoginProviders: ["KAKAO", "NAVER", "GOOGLE", "APPLE"],
+      storeReviewLogin: { subject, email: storeReviewer, expiresAt: deadline },
+      sessionTtlDays: 30, sessionTokenPepper: "synthetic-store-review-pepper",
+    },
+    pool: { ...client, connect: async () => client },
+  } as unknown as ApiContext;
+  const app = Fastify({ logger: false });
+  registerErrorHandler(app);
+  await app.register(rateLimit, { max: 240, keyGenerator: request => rateLimitKey(request, context.config) });
+  await registerCustomerAuthRoutes(app, context, {
+    reviewAuthFetch: async (_url, init) => {
+      authRequests.push(String(init?.body));
+      return new Response(JSON.stringify({ access_token: "synthetic-token" }), { status: 200 });
+    },
+    verifyAccessToken: async () => ({ issuer: productionIssuer, subject, canonicalSubject: `${productionIssuer}#${subject}`, providers: ["EMAIL"], email: storeReviewer }),
+  });
+  await app.ready();
+  return { app, deadline, sessionInserts, authRequests };
+}
+
+test("app-store reviewers sign in only on the pinned production project, inside the review window", async () => {
+  const { app, deadline, sessionInserts, authRequests } = await setupStoreReview();
+  try {
+    const discovery = await app.inject({ method: "GET", url: "/v1/auth/store-review" });
+    assert.deepEqual(discovery.json(), { enabled: true, expiresAt: deadline });
+    assert.equal(discovery.headers["cache-control"], "no-store");
+    // The PG review login stays closed on production.
+    assert.equal((await app.inject({ method: "GET", url: "/v1/auth/payment-review" })).json().enabled, false);
+    assert.equal((await app.inject({ method: "POST", url: "/v1/auth/payment-review", payload: { email: "pg", password: "x", acceptedPolicies: policies } })).statusCode, 404);
+    // The staging-only short ID never resolves for store review.
+    assert.equal((await app.inject({ method: "POST", url: "/v1/auth/store-review", payload: { email: "pg", password: "x", acceptedPolicies: policies } })).statusCode, 401);
+    assert.equal(authRequests.length, 0);
+
+    const result = await app.inject({ method: "POST", url: "/v1/auth/store-review", payload: { email: storeReviewer.toUpperCase(), password: "synthetic-password", acceptedPolicies: policies } });
+    assert.equal(result.statusCode, 201, result.body);
+    assert.equal(result.json().actor.role, "USER");
+    assert.deepEqual(result.json().actor.permissions, []);
+    assert.ok(Date.parse(result.json().expiresAt) <= Date.now() + 86_400_000 + 1_000, "one day at a time");
+    assert.equal((sessionInserts[0]![7] as Date).toISOString(), deadline, "the review window is stored on the session");
+    assert.deepEqual(JSON.parse(authRequests[0]!), { email: storeReviewer, password: "synthetic-password" });
+    assert.doesNotMatch(result.body, /synthetic-password|synthetic-token/);
+  } finally { await app.close(); }
+});
+
+test("store review stays closed outside the pinned production project", async () => {
+  for (const options of [{ tier: "STAGING" }, { project: "lyzcyrdiazorjaqlgblr" }]) {
+    const { app, authRequests } = await setupStoreReview(options);
+    try {
+      assert.equal((await app.inject({ method: "GET", url: "/v1/auth/store-review" })).json().enabled, false);
+      const result = await app.inject({ method: "POST", url: "/v1/auth/store-review", payload: { email: storeReviewer, password: "x", acceptedPolicies: policies } });
+      assert.equal(result.statusCode, 404);
+      assert.equal(authRequests.length, 0);
+    } finally { await app.close(); }
+  }
+});

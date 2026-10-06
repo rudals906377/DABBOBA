@@ -13,6 +13,7 @@ import type { FastifyRequest } from "fastify";
 export const IP_KEYED_RATE_LIMIT_ROUTES: ReadonlySet<string> = new Set([
   "/v1/auth/exchange",
   "/v1/auth/payment-review",
+  "/v1/auth/store-review",
   "/v1/auth/account-deletion-exchange",
 ]);
 

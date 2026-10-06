@@ -23,6 +23,8 @@ import {
   completeSocialCustomerLogin,
   exchangeBrokerSession,
   fetchAuthProviderAvailability,
+  fetchStoreReviewAvailability,
+  loginStoreReviewer,
 } from "@/features/auth/auth-api";
 import { useCommerceCapability } from "@/features/commerce/CommerceCapabilityProvider";
 import { resolveAfterLoginPath } from "@/features/auth/login-navigation";
@@ -60,7 +62,7 @@ function openCurrentPolicy(kind: "terms" | "privacy") {
 }
 
 type PhoneStep = "NUMBER" | "OTP";
-type LoginMethod = DabbobaLoginProvider | "SESSION_RECOVERY";
+type LoginMethod = DabbobaLoginProvider | "SESSION_RECOVERY" | "STORE_REVIEW";
 type InternalSessionState = "checking" | "unavailable" | "failed";
 
 export function LoginScreen() {
@@ -100,6 +102,13 @@ export function LoginScreen() {
   const [internalSessionState, setInternalSessionState] = useState<InternalSessionState>(
     __DEV__ ? "checking" : "unavailable",
   );
+  // Shown only while the server has an active app-store review window.
+  const [storeReviewEnabled, setStoreReviewEnabled] = useState(false);
+  const [reviewFormOpen, setReviewFormOpen] = useState(false);
+  const [reviewEmail, setReviewEmail] = useState("");
+  const [reviewPassword, setReviewPassword] = useState("");
+  const [reviewEmailFocused, setReviewEmailFocused] = useState(false);
+  const [reviewPasswordFocused, setReviewPasswordFocused] = useState(false);
 
   const applyPendingPhoneOtp = (pending: PendingPhoneOtp) => {
     setPhoneInput(pending.phone);
@@ -134,8 +143,11 @@ export function LoginScreen() {
     setProviderCheckFailed(false);
     try {
       const localConfigured = Boolean(resolveSupabaseBrokerConfig());
+      const reviewAvailability = fetchStoreReviewAvailability(runtime.apiBaseUrl);
       const availability = await fetchAuthProviderAvailability(runtime.apiBaseUrl);
+      const reviewEnabled = await reviewAvailability;
       if (generation !== providerRequestGeneration.current) return;
+      setStoreReviewEnabled(reviewEnabled);
       const ready = localConfigured && availability.brokerExchangeConfigured;
       const supportedMethods = availability.methods.filter((provider) => provider !== "APPLE" || Platform.OS === "ios");
       setEnabledProviders(supportedMethods);
@@ -147,6 +159,7 @@ export function LoginScreen() {
       );
     } catch (error) {
       if (generation !== providerRequestGeneration.current) return;
+      setStoreReviewEnabled(false);
       setEnabledProviders([]);
       setBrokerReady(false);
       setProviderCheckFailed(true);
@@ -220,6 +233,30 @@ export function LoginScreen() {
       router.replace(completedReturnTo as Href);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "로그인을 완료하지 못했어요.");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const loginReviewer = async () => {
+    if (!requiredPolicyVersions || !termsAccepted || !privacyAccepted) {
+      setMessage("필수 약관을 각각 확인하고 동의해 주세요.");
+      return;
+    }
+    setBusy("STORE_REVIEW");
+    setMessage("");
+    try {
+      await loginStoreReviewer(
+        runtime.apiBaseUrl,
+        reviewEmail,
+        reviewPassword,
+        requiredPolicyVersions,
+        (previousCustomerStored) => clearLocalDataBeforeCustomerLogin(db, previousCustomerStored),
+      );
+      setReviewPassword("");
+      router.replace(returnPath);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "심사용 계정으로 로그인하지 못했어요.");
     } finally {
       setBusy(null);
     }
@@ -492,6 +529,69 @@ export function LoginScreen() {
             </View>
           ) : null}
 
+          {storeReviewEnabled ? (
+            <View style={styles.storeReview}>
+              {reviewFormOpen ? (
+                <>
+                  <Text style={styles.fieldLabel}>심사용 아이디</Text>
+                  <SeedInputShell focused={reviewEmailFocused}>
+                    <TextInput
+                      accessibilityLabel="심사용 아이디"
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                      autoComplete="username"
+                      keyboardType="email-address"
+                      textContentType="username"
+                      value={reviewEmail}
+                      onChangeText={setReviewEmail}
+                      onFocus={() => setReviewEmailFocused(true)}
+                      onBlur={() => setReviewEmailFocused(false)}
+                      placeholder="이메일"
+                      placeholderTextColor={seed.color.foreground.muted}
+                      maxLength={254}
+                      style={styles.input}
+                    />
+                  </SeedInputShell>
+                  <Text style={[styles.fieldLabel, styles.storeReviewFieldGap]}>비밀번호</Text>
+                  <SeedInputShell focused={reviewPasswordFocused}>
+                    <TextInput
+                      accessibilityLabel="심사용 비밀번호"
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                      autoComplete="password"
+                      secureTextEntry
+                      textContentType="password"
+                      value={reviewPassword}
+                      onChangeText={setReviewPassword}
+                      onFocus={() => setReviewPasswordFocused(true)}
+                      onBlur={() => setReviewPasswordFocused(false)}
+                      maxLength={256}
+                      style={styles.input}
+                    />
+                  </SeedInputShell>
+                  <SeedActionButton
+                    label="심사용 계정으로 로그인"
+                    variant="neutralSolid"
+                    loading={busy === "STORE_REVIEW"}
+                    disabled={unavailable || !reviewEmail.trim() || !reviewPassword}
+                    onPress={() => void loginReviewer()}
+                    style={styles.storeReviewSubmit}
+                  />
+                </>
+              ) : (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityState={{ disabled: busy !== null }}
+                  disabled={busy !== null}
+                  onPress={() => setReviewFormOpen(true)}
+                  style={({ pressed }) => [styles.storeReviewToggle, pressed && styles.pressed]}
+                >
+                  <Text style={styles.storeReviewToggleLabel}>앱 심사용 계정으로 로그인</Text>
+                </Pressable>
+              )}
+            </View>
+          ) : null}
+
           {message ? <Text accessibilityRole="alert" style={styles.message}>{message}</Text> : null}
           <View style={styles.legalLinks}>
             <PolicyAcceptanceRow
@@ -643,6 +743,20 @@ const styles = StyleSheet.create({
   status: { marginTop: 24 },
   message: { color: seed.color.foreground.critical, fontSize: 12, lineHeight: 18, textAlign: "center", marginTop: 20 },
   connectionRetry: { alignSelf: "center", marginTop: seed.spacing.x3 },
+  storeReview: {
+    width: "100%",
+    maxWidth: 480,
+    alignSelf: "center",
+    marginTop: 28,
+    paddingTop: 16,
+    gap: 8,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: seed.color.stroke.neutral,
+  },
+  storeReviewFieldGap: { marginTop: 4 },
+  storeReviewSubmit: { marginTop: 4 },
+  storeReviewToggle: { minHeight: seed.size.touchTarget, alignSelf: "center", alignItems: "center", justifyContent: "center", paddingHorizontal: seed.spacing.x2 },
+  storeReviewToggleLabel: { color: colors.muted, fontSize: 12, fontWeight: "700", textDecorationLine: "underline" },
   legalLinks: { alignItems: "center", marginTop: 28, paddingHorizontal: seed.spacing.x3 },
   requiredPolicyRow: { width: "100%", minHeight: 48, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: seed.spacing.x2 },
   requiredPolicyToggle: { flex: 1, minHeight: 44, flexDirection: "row", alignItems: "center", gap: seed.spacing.x2 },

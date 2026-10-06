@@ -8,7 +8,8 @@ import { acceptRequiredPoliciesForIntegrationTest } from "./integration-test-fix
 import { issueSession } from "./plugins/auth.js";
 
 const databaseUrl = process.env.DABBOBA_TEST_DATABASE_URL;
-const reviewSubject = "00000000-0000-4000-8000-0000000000aa";
+// Unique per run: auth identities are globally unique in a reused test database.
+const reviewSubject = randomUUID();
 
 test(
   "payment-review sessions stay capped to the stored review deadline and end once review login is disabled",
@@ -131,5 +132,66 @@ test(
       ),
       /sessions_review_access_check/,
     );
+  },
+);
+
+test(
+  "app-store review sessions on production refresh only inside their window and end when disabled",
+  { skip: !databaseUrl, timeout: 60_000 },
+  async (t) => {
+    const pool = createDatabasePool(databaseUrl!, "dabboba-store-review-session-integration");
+    const deadline = new Date(Date.now() + 3 * 86_400_000);
+    const production = "rconfxsykttfvznakile";
+    const storeConfig: ApiConfig = {
+      environment: "test",
+      host: "127.0.0.1",
+      port: 8788,
+      databaseUrl: `postgres://dabboba_runtime.${production}:synthetic@aws-0-ap-northeast-2.pooler.supabase.com:6543/postgres`,
+      redisUrl: "redis://127.0.0.1:6379",
+      webOrigins: ["http://127.0.0.1:4174"],
+      adminOrigins: ["http://127.0.0.1:4180"],
+      sessionTokenPepper: "store-review-session-pepper-value",
+      adminProxyIdentitySecret: null,
+      sessionTtlDays: 30,
+      paymentProvider: "UNCONFIGURED",
+      paymentWebhookSecret: null,
+      gcsBucket: null,
+      gcsProjectId: null,
+      logLevel: "silent",
+      environmentTier: "PRODUCTION",
+      supabaseUrl: `https://${production}.supabase.co`,
+      storeReviewLogin: { email: "store-review@example.test", subject: reviewSubject, expiresAt: deadline.toISOString() },
+    };
+    const enabled = await buildApp({ config: storeConfig, pool, redis: null });
+    const disabled = await buildApp({ config: { ...storeConfig, storeReviewLogin: null }, pool, redis: null });
+    t.after(async () => {
+      await enabled.app.close();
+      await disabled.app.close();
+      await pool.end();
+    });
+    const user = await pool.query<{ id: string }>(
+      "INSERT INTO users(email,nickname) VALUES($1,'스토어 심사 테스트') RETURNING id",
+      [`store-review-${randomUUID().slice(0, 12)}@example.test`],
+    );
+    await acceptRequiredPoliciesForIntegrationTest(pool, user.rows[0]!.id);
+    const issued = await issueSession(pool, storeConfig, {
+      userId: user.rows[0]!.id, kind: "USER", expiresInMs: 86_400_000, reviewAccessExpiresAt: deadline,
+    });
+    const rotated = await enabled.app.inject({
+      method: "POST", url: "/v1/auth/refresh", headers: { authorization: `Bearer ${issued.token}` },
+    });
+    assert.equal(rotated.statusCode, 201, rotated.body);
+    const rotatedBody = rotated.json() as { token: string; session: { id: string } };
+    const row = await pool.query<{ expires_at: Date; review_access_expires_at: Date }>(
+      "SELECT expires_at,review_access_expires_at FROM sessions WHERE id=$1", [rotatedBody.session.id],
+    );
+    assert.equal(row.rows[0]!.review_access_expires_at.getTime(), deadline.getTime());
+    assert.ok(row.rows[0]!.expires_at.getTime() <= Date.now() + 86_400_000 + 5_000);
+    const ended = await disabled.app.inject({
+      method: "POST", url: "/v1/auth/refresh", headers: { authorization: `Bearer ${rotatedBody.token}` },
+    });
+    assert.equal(ended.statusCode, 401, ended.body);
+    const revoked = await pool.query<{ revoke_reason: string }>("SELECT revoke_reason FROM sessions WHERE id=$1", [rotatedBody.session.id]);
+    assert.equal(revoked.rows[0]!.revoke_reason, "REVIEW_ACCESS_ENDED");
   },
 );

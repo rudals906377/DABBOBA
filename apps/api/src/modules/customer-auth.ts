@@ -1,7 +1,12 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { withTransaction, type DatabaseClient } from "@dabboba/db";
 import type { UserRole, UserStatus } from "@dabboba/domain";
-import { activePaymentReviewLogin, authenticatePaymentReviewer } from "../lib/payment-review-auth.js";
+import {
+  activePaymentReviewLogin,
+  activeStoreReviewLogin,
+  authenticateReviewer,
+  type ReviewLoginKind,
+} from "../lib/payment-review-auth.js";
 import { AppError, badRequest, conflict, forbidden, unauthorized } from "../lib/errors.js";
 import { enumInput, objectInput, stringInput } from "../lib/input.js";
 import { sealAppleRefreshToken, validateAppleRefreshToken } from "../lib/apple-credential.js";
@@ -358,21 +363,27 @@ export async function registerCustomerAuthRoutes(
   context: ApiContext,
   dependencies: CustomerAuthRouteDependencies = {},
 ) {
-  app.get("/v1/auth/payment-review", async (_request, reply) => {
-    const review = activePaymentReviewLogin(context.config);
+  // Dedicated review logins: the PG card review on the pinned staging project
+  // and app-store review on the pinned production project. Neither is a
+  // customer login method; each signs in exactly one configured Auth user.
+  const reviewLoginDiscovery = (active: typeof activePaymentReviewLogin) => async (
+    _request: FastifyRequest,
+    reply: FastifyReply,
+  ) => {
+    const review = active(context.config);
     return reply.header("cache-control", "no-store").send({ enabled: Boolean(review), expiresAt: review?.expiresAt ?? null });
-  });
-
-  app.post("/v1/auth/payment-review", {
-    config: { rateLimit: { max: 5, timeWindow: "15 minutes" } },
-  }, async (request, reply) => {
-    const review = activePaymentReviewLogin(context.config);
+  };
+  const reviewLogin = (kind: ReviewLoginKind, active: typeof activePaymentReviewLogin) => async (
+    request: FastifyRequest,
+    reply: FastifyReply,
+  ) => {
+    const review = active(context.config);
     if (!review) throw new AppError(404, "NOT_FOUND", "요청한 정보를 찾을 수 없습니다.");
     const input = objectInput(request.body);
     if (Object.keys(input).some(key => !["email", "password", "acceptedPolicies"].includes(key))) throw badRequest();
     const policy = await loadRequiredPolicyDocuments(context.pool);
     requiredPolicyAcceptance(input, policy.versions);
-    const claims = await authenticatePaymentReviewer(context.config,
+    const claims = await authenticateReviewer(context.config, kind,
       stringInput(input, "email", { max: 254 })!,
       stringInput(input, "password", { min: 1, max: 256, trim: false })!, {
         ...(dependencies.reviewAuthFetch ? { fetch: dependencies.reviewAuthFetch } : {}),
@@ -399,7 +410,12 @@ export async function registerCustomerAuthRoutes(
       actor: { userId: user.id, email: user.email, nickname: user.nickname,
         role: user.role, status: user.status, sessionId: session.sessionId, permissions: [] },
     });
-  });
+  };
+  const reviewLoginLimit = { config: { rateLimit: { max: 5, timeWindow: "15 minutes" } } };
+  app.get("/v1/auth/payment-review", reviewLoginDiscovery(activePaymentReviewLogin));
+  app.post("/v1/auth/payment-review", reviewLoginLimit, reviewLogin("PAYMENT", activePaymentReviewLogin));
+  app.get("/v1/auth/store-review", reviewLoginDiscovery(activeStoreReviewLogin));
+  app.post("/v1/auth/store-review", reviewLoginLimit, reviewLogin("STORE", activeStoreReviewLogin));
 
   app.get("/v1/auth/providers", async (_request, reply) => {
     const policy = await loadRequiredPolicyDocuments(context.pool);

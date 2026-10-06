@@ -13,7 +13,7 @@ import {
 import { badRequest, forbidden, notFound, unauthorized } from "../lib/errors.js";
 import { objectInput, stringInput } from "../lib/input.js";
 import { verifyPassword, type PasswordRecord } from "../lib/password.js";
-import { activePaymentReviewLogin } from "../lib/payment-review-auth.js";
+import { configuredReviewLogins, isReviewLoginActive } from "../lib/payment-review-auth.js";
 import { adminSessionLimits, issueSession, tokenDigest } from "../plugins/auth.js";
 import type { ApiContext } from "../types.js";
 
@@ -187,22 +187,31 @@ export async function registerAuthRoutes(app: FastifyInstance, context: ApiConte
       );
       if (!current.rowCount) throw unauthorized("세션이 만료되었거나 이미 갱신되었습니다.");
 
-      // Payment-review provenance lives on the session, so refresh stays capped
-      // (or ends) even after the review login is disabled. Sessions issued
-      // before the column existed are recognized by the configured identity.
+      // Review-login provenance (PG or app-store review) lives on the session,
+      // so refresh stays capped (or ends) even after the review login is
+      // disabled. Sessions issued before the column existed are recognized by
+      // a configured review identity.
       let reviewDeadline = current.rows[0]!.review_access_expires_at?.getTime() ?? null;
-      const configuredReview = context.config.paymentReviewLogin;
-      if (reviewDeadline === null && configuredReview) {
-        const reviewer = await client.query(
-          "SELECT 1 FROM auth_identities WHERE user_id=$1 AND provider='EMAIL' AND provider_subject=$2",
-          [actor.userId, `${context.config.supabaseUrl}/auth/v1#${configuredReview.subject}`],
+      const reviewIdentities = [context.config.paymentReviewLogin, context.config.storeReviewLogin]
+        .filter((review): review is NonNullable<typeof review> => Boolean(review));
+      if (reviewDeadline === null && reviewIdentities.length) {
+        const subjects = reviewIdentities.map((review) => `${context.config.supabaseUrl}/auth/v1#${review.subject}`);
+        const reviewer = await client.query<{ provider_subject: string }>(
+          "SELECT provider_subject FROM auth_identities WHERE user_id=$1 AND provider='EMAIL' AND provider_subject=ANY($2::text[])",
+          [actor.userId, subjects],
         );
-        if (reviewer.rowCount) reviewDeadline = Date.parse(configuredReview.expiresAt);
+        const matched = reviewIdentities.find((review) => reviewer.rows.some(
+          (row) => row.provider_subject === `${context.config.supabaseUrl}/auth/v1#${review.subject}`,
+        ));
+        if (matched) reviewDeadline = Date.parse(matched.expiresAt);
       }
       if (reviewDeadline !== null) {
-        const activeReview = activePaymentReviewLogin(context.config);
-        if (activeReview) reviewDeadline = Math.min(reviewDeadline, Date.parse(activeReview.expiresAt));
-        if (!activeReview || reviewDeadline <= Date.now() + 60_000) {
+        const activeDeadlines = configuredReviewLogins(context.config)
+          .filter((review) => isReviewLoginActive(review))
+          .map((review) => Date.parse(review.login.expiresAt));
+        const activeDeadline = activeDeadlines.length ? Math.max(...activeDeadlines) : null;
+        if (activeDeadline !== null) reviewDeadline = Math.min(reviewDeadline, activeDeadline);
+        if (activeDeadline === null || reviewDeadline <= Date.now() + 60_000) {
           await client.query(
             `UPDATE sessions SET revoked_at=now(),revoke_reason='REVIEW_ACCESS_ENDED'
              WHERE id=$1 AND user_id=$2 AND revoked_at IS NULL`,

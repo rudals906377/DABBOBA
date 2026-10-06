@@ -79,6 +79,8 @@ any test environment explicitly, without creating a hidden authorization bypass.
 
 ## 리뷰 계정 준비 서식 — 비밀번호는 별도 보관
 
+심사 기간에만 열리는 운영 심사자 로그인 절차는 [`store-review-login.md`](store-review-login.md)를 따른다.
+
 - 제출 빌드 식별자 / 실제 설치 파일:
 - 운영 프로젝트 / API:
 - 리뷰어가 사용 가능한 일반 회원 로그인 방법:
