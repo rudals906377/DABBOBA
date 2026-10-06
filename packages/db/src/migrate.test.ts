@@ -10,6 +10,8 @@ import {
   MIGRATION_LOCK_RETRIES,
   MIGRATION_LOCK_TIMEOUT,
   NO_TRANSACTION_HEADER,
+  RENUMBERED_MIGRATIONS,
+  renumberedMigrationRenames,
   runNoTransactionMigration,
   runTransactionalMigration,
   splitSqlStatements,
@@ -193,4 +195,34 @@ test("the migration runner refuses to apply 0067+ to the retired demo project", 
   assert.doesNotThrow(() => assertMigrationTargetAllowed("yxkmvgfruphgghowzvmo", []));
   assert.doesNotThrow(() => assertMigrationTargetAllowed("rconfxsykttfvznakile", ["0080_retention_indexes.sql"]));
   assert.doesNotThrow(() => assertMigrationTargetAllowed(null, ["0080_retention_indexes.sql"]));
+});
+
+test("a renumbered migration already applied under its previous name is renamed, never re-run", () => {
+  const renumbered = [{ file: "0084_new.sql", previousFile: "0082_old.sql" }];
+  const disk = new Map([["0082_other.sql", "a"], ["0084_new.sql", "same"]]);
+  assert.deepEqual(renumberedMigrationRenames(disk, new Map([["0082_old.sql", "same"]]), renumbered), renumbered);
+  // Fresh databases and databases that already use the new name do nothing.
+  assert.deepEqual(renumberedMigrationRenames(disk, new Map(), renumbered), []);
+  assert.deepEqual(renumberedMigrationRenames(disk, new Map([["0084_new.sql", "same"]]), renumbered), []);
+  assert.throws(
+    () => renumberedMigrationRenames(disk, new Map([["0082_old.sql", "changed"]]), renumbered),
+    /checksum mismatch: 0082_old\.sql/,
+  );
+  assert.throws(
+    () => renumberedMigrationRenames(disk, new Map([["0082_old.sql", "same"], ["0084_new.sql", "same"]]), renumbered),
+    /recorded under both/,
+  );
+  assert.throws(
+    () => renumberedMigrationRenames(new Map([...disk, ["0082_old.sql", "same"]]), new Map(), renumbered),
+    /must not remain on disk/,
+  );
+});
+
+test("every renumbered migration exists on disk only under its new name", async () => {
+  const files = new Set(await readdir(new URL("../migrations/", import.meta.url)));
+  for (const entry of RENUMBERED_MIGRATIONS) {
+    assert.equal(files.has(entry.file), true, entry.file);
+    assert.equal(files.has(entry.previousFile), false, entry.previousFile);
+    assert.equal(entry.file.slice(5), entry.previousFile.slice(5), "only the number may change");
+  }
 });

@@ -8,8 +8,15 @@ remains PRELAUNCH until the separate release gates are met.
 
 ## Deployment order
 
-1. Apply committed migration `0082_portone_card_channel_binding.sql` before the
+1. Apply committed migration `0084_portone_card_channel_binding.sql` before the
    new API version. Do not edit previously applied migrations.
+   This file was first committed as `0082_portone_card_channel_binding.sql`, which
+   collided with the production `0082_commerce_retention_components.sql`. Only the
+   number changed; the SQL bytes and checksum are identical. A database that
+   already applied the old name (the staging review project) is not re-run: the
+   migration runner verifies the identical checksum and renames that one
+   `schema_migrations` record to `0084_…` under its advisory lock, then applies
+   only the genuinely missing migrations. Back up first as for any migration.
 2. Configure the additional public KCP channel key only in the intended backend.
    API/webhook secrets remain server-only. TEST and LIVE channels cannot be mixed.
    Supabase Edge uses the namespaced `DABBOBA_API_PORTONE_KCP_CHANNEL_KEY`.

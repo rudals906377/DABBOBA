@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 import {
   DATABASE_RELEASE_MIGRATIONS,
+  MINIMUM_DATABASE_RELEASE_VERSION,
   checkDatabaseReleaseSource,
 } from '../scripts/check-database-release-source.mjs';
 
@@ -22,7 +23,7 @@ async function releaseRepository({ omit = [], mutate = null, includeAllMigration
   await mkdir(join(directory, 'apps/worker/src'), { recursive: true });
   const migrationDirectory = new URL('packages/db/migrations/', repositoryRoot);
   const migrations = (await readdir(migrationDirectory))
-    .filter((file) => /^\d{4}_[a-z0-9_]+\.sql$/.test(file) && (includeAllMigrations || Number(file.slice(0, 4)) <= 81))
+    .filter((file) => /^\d{4}_[a-z0-9_]+\.sql$/.test(file) && (includeAllMigrations || file.slice(0, 4) <= MINIMUM_DATABASE_RELEASE_VERSION))
     .sort();
   for (const file of migrations) {
     if (omit.includes(file)) continue;
@@ -40,12 +41,12 @@ async function releaseRepository({ omit = [], mutate = null, includeAllMigration
   return directory;
 }
 
-test('release source accepts a clean Git commit containing every reviewed release migration through 0082', async () => {
+test('release source accepts a clean Git commit containing every reviewed release migration', async () => {
   const directory = await releaseRepository();
   try {
     const report = checkDatabaseReleaseSource({ repositoryRoot: directory });
     assert.equal(report.status, 'pass', JSON.stringify(report));
-    assert.equal(report.latestMigration, '0082_portone_card_channel_binding.sql');
+    assert.equal(report.latestMigration, '0084_portone_card_channel_binding.sql');
     assert.deepEqual(report.blockers, []);
     assert.match(report.head, /^[0-9a-f]{40,64}$/);
     assert.equal(report.worktreeClean, true);
@@ -59,7 +60,9 @@ test('current deploy candidate commits every migration in a contiguous sequence'
   try {
     const report = checkDatabaseReleaseSource({ repositoryRoot: directory });
     assert.equal(report.status, 'pass', JSON.stringify(report));
-    assert.equal(report.latestMigration, '0083_commerce_retention_bounded_assessment.sql');
+    const committed = (await readdir(new URL('packages/db/migrations/', repositoryRoot)))
+      .filter((file) => /^\d{4}_[a-z0-9_]+\.sql$/.test(file)).sort();
+    assert.equal(report.latestMigration, committed.at(-1));
     assert.deepEqual(report.blockers, []);
   } finally {
     await rm(directory, { recursive: true, force: true });
@@ -155,7 +158,7 @@ test('release source rejects a release missing the draft snapshot media rebase m
   try {
     const report = checkDatabaseReleaseSource({ repositoryRoot: directory });
     assert.equal(report.status, 'blocked');
-    assert.equal(report.latestMigration, '0082_portone_card_channel_binding.sql');
+    assert.equal(report.latestMigration, '0084_portone_card_channel_binding.sql');
     assert.ok(report.blockers.includes('required_migration_not_committed:0081_draft_draw_snapshot_media_rebase.sql'));
     assert.ok(report.blockers.includes('committed_migration_sequence_incomplete:0081'));
   } finally {
@@ -165,12 +168,14 @@ test('release source rejects a release missing the draft snapshot media rebase m
 
 test('release source registers every migration from 0078 without a gap', () => {
   const files = DATABASE_RELEASE_MIGRATIONS.map((migration) => migration.file);
-  assert.deepEqual(files.slice(-5), [
+  assert.deepEqual(files.slice(files.indexOf('0078_commerce_indexes.sql')), [
     '0078_commerce_indexes.sql',
     '0079_worker_retention.sql',
     '0080_retention_indexes.sql',
     '0081_draft_draw_snapshot_media_rebase.sql',
-    '0082_portone_card_channel_binding.sql',
+    '0082_commerce_retention_components.sql',
+    '0083_commerce_retention_bounded_assessment.sql',
+    '0084_portone_card_channel_binding.sql',
   ]);
   const versions = files.map((file) => Number(file.slice(0, 4)));
   for (let index = 1; index < versions.length; index += 1) {
