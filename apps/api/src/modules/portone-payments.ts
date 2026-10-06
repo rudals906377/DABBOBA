@@ -27,7 +27,7 @@ import { boundPaymentAdapterOptions, isPortOneCardProvider, PORTONE_CARD_PROVIDE
 
 const PORTONE_PROVIDER = "PORTONE_V2_INICIS";
 
-type LocalPayment = {
+export type LocalPayment = {
   id: string;
   order_id: string;
   amount: number;
@@ -295,7 +295,7 @@ export function portOnePaymentEvidence(payment: PortOneCardPayment): "NONE" | "P
     : "PRESENT";
 }
 
-function configuredContext(context: ApiContext) {
+export function configuredContext(context: ApiContext) {
   if (
     context.config.paymentProvider !== PORTONE_PROVIDER
     || !context.config.paymentWebhookSecret
@@ -306,7 +306,7 @@ function configuredContext(context: ApiContext) {
   return context.config.portOne;
 }
 
-function providerError(error: unknown): AppError {
+export function providerError(error: unknown): AppError {
   if (error instanceof PortOneV2Error) {
     const status = error.code === "PAYMENT_CONTRACT_MISMATCH" ? 409 : 502;
     return new AppError(
@@ -430,14 +430,15 @@ async function dispatchCanonicalEvent(
   );
 }
 
-async function reconcilePayment(
+export async function reconcilePayment(
   context: ApiContext,
   correlationId: string,
   localPayment: LocalPayment,
   {
     retryReviewedRefund = false,
+    retryPartialRefund = false,
     reportMissingProviderPayment = false,
-  }: { retryReviewedRefund?: boolean; reportMissingProviderPayment?: boolean } = {},
+  }: { retryReviewedRefund?: boolean; retryPartialRefund?: boolean; reportMissingProviderPayment?: boolean } = {},
 ) {
   const config = configuredContext(context);
   const bound = await boundPaymentAdapterOptions(context.pool, context.config, localPayment.id);
@@ -462,7 +463,10 @@ async function reconcilePayment(
   // same fingerprint would otherwise deduplicate forever after the operator
   // fixes those assets. Only an audited admin requery may make a new canonical
   // processing attempt; provider observation and amount are still re-fetched.
-  const event = observedEvent?.eventType === "REFUND_SUCCEEDED" && retryReviewedRefund
+  // The audited partial-refund requery may likewise retry a partial
+  // cancellation that was observed before its plan could be applied.
+  const event = (observedEvent?.eventType === "REFUND_SUCCEEDED" && retryReviewedRefund)
+    || (observedEvent?.eventType === "REFUND_PARTIAL" && retryPartialRefund)
     ? { ...observedEvent, eventId: `${observedEvent.eventId}-review-${randomUUID()}` }
     : observedEvent;
   if (!event) {

@@ -29,6 +29,7 @@ import { registerKujiRoomRoutes } from "./modules/kuji-rooms.js";
 import { registerKujiSlotRoutes } from "./modules/kuji-slots.js";
 import { registerMediaRoutes } from "./modules/media.js";
 import { registerNotificationPreferenceRoutes } from "./modules/notification-preferences.js";
+import { registerPartialUnusedRefundRoutes } from "./modules/partial-unused-refunds.js";
 import { registerPointOrderRefundRoutes } from "./modules/point-order-refunds.js";
 import { registerPublicConfigRoutes } from "./modules/public-config.js";
 import { registerWantedRoutes } from "./modules/wanted.js";
@@ -266,6 +267,7 @@ export async function buildAppCore(options: BuildAppCoreOptions) {
   await registerKujiSlotRoutes(routeApp, context);
   await registerAdminCommerceRoutes(routeApp, context);
   await registerPointOrderRefundRoutes(routeApp, context);
+  await registerPartialUnusedRefundRoutes(routeApp, context);
   await registerAdminAccountDeletionRoutes(routeApp, context);
   await registerAdminRoutes(routeApp, context);
 

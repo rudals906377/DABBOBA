@@ -3957,6 +3957,56 @@ paths:
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
         "503": { description: LIVE commerce is not enabled. }
+  /v1/admin/commerce/payments/{paymentId}/partial-refund:
+    post:
+      tags: [Admin, Commerce]
+      operationId: refundAdminPartialUnusedDraws
+      description: Requires refunds.cancel. Refunds the unused draws of a PAID gacha order that has at least one used and one unused draw (kuji orders are excluded). The server fixes the amounts and the exact unused entitlements, freezes the order, then cancels only the card part on PortOne. The entitlements are cancelled, their stock relisted, the point part returned and the order returned to PAID only when a verified provider read shows exactly that partial cancellation. A points-only plan is applied in the request transaction. A provider-reported failure releases the freeze; an unknown outcome stays frozen for the requery. Audited.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PaymentId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/AdminReason"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AdminPortOneRefundReasonInput" }
+      responses:
+        "202":
+          description: The recorded partial refund and its current state.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminPartialUnusedRefund" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "503": { description: LIVE commerce or PortOne is not configured. }
+  /v1/admin/commerce/payments/{paymentId}/partial-refund/reconcile:
+    post:
+      tags: [Admin, Commerce]
+      operationId: reconcileAdminPartialUnusedRefund
+      description: Requires refunds.cancel. Reads PortOne again for an open partial refund and never sends another cancellation. Applies the plan when the exact partial cancellation is present, releases the freeze when the provider still holds the whole payment with no cancellation in flight, and otherwise leaves it for operator review. Audited.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PaymentId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/AdminReason"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AdminPortOneRefundReasonInput" }
+      responses:
+        "200":
+          description: The partial refund after the provider read.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminPartialUnusedRefund" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "503": { description: LIVE commerce or PortOne is not configured. }
   /v1/admin/commerce/refund-reviews/{paymentId}/cancellation/reconcile:
     post:
       tags: [Admin, Commerce]
@@ -4755,6 +4805,18 @@ components:
         pointTotal: { type: integer, minimum: 0 }
         total: { type: integer, minimum: 0 }
         lines: { type: array, items: { $ref: "#/components/schemas/AccountOrderLine" } }
+        partialRefund:
+          description: The applied refund of this order's unused draws; null when there is none.
+          oneOf:
+            - type: object
+              additionalProperties: false
+              required: [cardAmount, pointAmount, drawUnits, refundedAt]
+              properties:
+                cardAmount: { type: integer, minimum: 0, description: Card amount cancelled on the original card. }
+                pointAmount: { type: integer, minimum: 0, description: Points returned. }
+                drawUnits: { type: integer, minimum: 1, description: Unused draws refunded. }
+                refundedAt: { type: string, format: date-time }
+            - { type: "null" }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
     AccountOrderPage:
@@ -7048,7 +7110,7 @@ components:
       allOf:
         - $ref: "#/components/schemas/AdminPayment"
         - type: object
-          required: [orderPointTotal, ledger, providerEvents, providerReconciliationAvailable, refundActionKind, refundActionAvailable, refundActionBlocker]
+          required: [orderPointTotal, ledger, providerEvents, providerReconciliationAvailable, refundActionKind, refundActionAvailable, refundActionBlocker, partialRefund]
           properties:
             orderPointTotal: { type: integer, minimum: 0, description: Points spent on the order; a full refund returns them as points. }
             ledger: { type: array, items: { $ref: "#/components/schemas/AdminPaymentLedgerEntry" } }
@@ -7060,6 +7122,48 @@ components:
               description: The full-refund action that applies to this payment - a PortOne card cancellation, or the local refund of a points-only (INTERNAL_ZERO) order. Null when neither is configured.
             refundActionAvailable: { type: boolean }
             refundActionBlocker: { type: [string, "null"] }
+            partialRefund: { $ref: "#/components/schemas/AdminPartialUnusedRefundDetail" }
+    AdminPartialUnusedRefundDetail:
+      type: object
+      additionalProperties: false
+      required: [available, blocker, preview, attempt]
+      description: Refund of the unused draws of a partly used gacha order. Refund value = floor((card paid + points used) x unused / total draws); the card part is floor(card paid x unused / total draws) and the rest returns as points. Coupon discounts are not returned.
+      properties:
+        available: { type: boolean }
+        blocker: { type: [string, "null"] }
+        preview:
+          type: [object, "null"]
+          additionalProperties: false
+          required: [totalDrawUnits, unusedDrawUnits, cardRefundAmount, pointRefundAmount]
+          properties:
+            totalDrawUnits: { type: integer, minimum: 2 }
+            unusedDrawUnits: { type: integer, minimum: 1 }
+            cardRefundAmount: { type: integer, minimum: 0 }
+            pointRefundAmount: { type: integer, minimum: 0 }
+        attempt:
+          oneOf:
+            - { $ref: "#/components/schemas/AdminPartialUnusedRefund" }
+            - { type: "null" }
+    AdminPartialUnusedRefund:
+      type: object
+      additionalProperties: false
+      required: [paymentId, orderId, status, totalDrawUnits, unusedDrawUnits, cardRefundAmount, pointRefundAmount, providerStatus, lastErrorCode, appliedAt, createdAt, updatedAt]
+      properties:
+        paymentId: { type: string, format: uuid }
+        orderId: { type: string, format: uuid }
+        status:
+          type: string
+          enum: [CALLING, PROVIDER_PENDING, INDETERMINATE, REVIEW_REQUIRED, APPLIED, RELEASED]
+          description: APPLIED after a verified matching card cancellation (or locally for a points-only plan); RELEASED when no money moved and the order returned to PAID.
+        totalDrawUnits: { type: integer, minimum: 2 }
+        unusedDrawUnits: { type: integer, minimum: 1 }
+        cardRefundAmount: { type: integer, minimum: 0 }
+        pointRefundAmount: { type: integer, minimum: 0 }
+        providerStatus: { type: [string, "null"] }
+        lastErrorCode: { type: [string, "null"] }
+        appliedAt: { type: [string, "null"], format: date-time }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
     AdminPaymentPage:
       allOf:
         - $ref: "#/components/schemas/PageMeta"

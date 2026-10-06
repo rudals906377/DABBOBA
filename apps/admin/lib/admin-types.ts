@@ -124,6 +124,21 @@ export type AdminPayment = {
   updatedAt: string;
 };
 
+export type AdminPartialUnusedRefund = {
+  paymentId: string;
+  orderId: string;
+  status: "CALLING" | "PROVIDER_PENDING" | "INDETERMINATE" | "REVIEW_REQUIRED" | "APPLIED" | "RELEASED";
+  totalDrawUnits: number;
+  unusedDrawUnits: number;
+  cardRefundAmount: number;
+  pointRefundAmount: number;
+  providerStatus: string | null;
+  lastErrorCode: string | null;
+  appliedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type AdminPaymentDetail = AdminPayment & {
   orderPointTotal: number;
   providerReconciliationAvailable: boolean;
@@ -131,6 +146,13 @@ export type AdminPaymentDetail = AdminPayment & {
   refundActionKind: "CARD_CANCELLATION" | "POINT_ORDER" | null;
   refundActionAvailable: boolean;
   refundActionBlocker: string | null;
+  /** Refund of the unused draws of a partly used gacha order. */
+  partialRefund: {
+    available: boolean;
+    blocker: string | null;
+    preview: { totalDrawUnits: number; unusedDrawUnits: number; cardRefundAmount: number; pointRefundAmount: number } | null;
+    attempt: AdminPartialUnusedRefund | null;
+  };
   ledger: Array<{
     id: string; entryType: string; amount: number; currency: string; referenceId: string;
     reason: string | null; createdAt: string;

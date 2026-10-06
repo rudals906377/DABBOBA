@@ -384,6 +384,7 @@ function OrderDetail({
           <Text style={styles.totalLabel}>총 결제 금액</Text>
           <Text style={styles.totalValue}>{formatWon(order.total)}</Text>
         </View>
+        {order.partialRefund ? <InfoRow label={`미사용 뽑기 ${order.partialRefund.drawUnits}장 환불`} value={partialRefundLabel(order.partialRefund)} /> : null}
       </Section>
 
       <Section title={order.orderKind === "SHIPPING_FEE" ? "배송비 결제 정보" : "주문 정보"}>
@@ -631,6 +632,15 @@ function formatWon(value: number): string {
 
 function formatDeduction(value: number): string {
   return value > 0 ? `-${formatWon(value)}` : "0원";
+}
+
+/** Card part cancelled on the card and point part returned as points. */
+function partialRefundLabel(refund: NonNullable<AccountOrder["partialRefund"]>): string {
+  const parts = [
+    refund.cardAmount > 0 ? `카드 ${formatWon(refund.cardAmount)}` : null,
+    refund.pointAmount > 0 ? `${refund.pointAmount.toLocaleString("ko-KR")}P` : null,
+  ].filter((part): part is string => part !== null);
+  return parts.join(" · ");
 }
 
 function fullShippingDestination(

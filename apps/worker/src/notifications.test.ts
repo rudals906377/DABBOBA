@@ -46,6 +46,8 @@ function event(eventType: string, payload: Record<string, unknown> = {}): Outbox
 
 test("user-facing events map to stable in-app notification kinds", () => {
   assert.equal(notificationTemplate(event("order.paid"))?.kind, "ORDER_PAID");
+  assert.equal(notificationTemplate(event("order.partially_refunded"))?.kind, "ORDER_REFUNDED");
+  assert.equal(notificationTemplate(event("order.partially_refunded"))?.title, "사용하지 않은 뽑기를 환불했어요");
   assert.equal(notificationTemplate(event("exchange.offer.accepted"))?.kind, "EXCHANGE_OFFER_ACCEPTED");
   assert.equal(notificationTemplate(event("inquiry.answered"))?.kind, "INQUIRY_ANSWERED");
   assert.equal(notificationTemplate(event("user.warning_requested"))?.kind, "USER_WARNING");

@@ -58,15 +58,25 @@ test("runtime database role can operate app data but cannot administer the schem
        ORDER BY relation.relname`,
       [RUNTIME_DATABASE_ROLE],
     );
-    assert.equal(tableAccess.rows.filter((row) => row.can_select).length, 81);
-    assert.equal(tableAccess.rows.filter((row) => row.can_insert).length, 81);
-    assert.equal(tableAccess.rows.filter((row) => row.can_update).length, 46);
+    assert.equal(tableAccess.rows.filter((row) => row.can_select).length, 82);
+    assert.equal(tableAccess.rows.filter((row) => row.can_insert).length, 82);
+    assert.equal(tableAccess.rows.filter((row) => row.can_update).length, 47);
     assert.equal(tableAccess.rows.filter((row) => row.can_delete).length, 8);
-    assert.deepEqual(tableAccess.rows.find((row) => row.relname === "portone_refund_cancellation_attempts"), {
-      relname: "portone_refund_cancellation_attempts",
-      can_select: true,
-      can_insert: true,
-      can_update: true,
+    for (const relname of ["portone_refund_cancellation_attempts", "partial_unused_draw_refunds"]) {
+      assert.deepEqual(tableAccess.rows.find((row) => row.relname === relname), {
+        relname,
+        can_select: true,
+        can_insert: true,
+        can_update: true,
+        can_delete: false,
+      });
+    }
+    // 0086's separated deletion records are owner-only.
+    assert.deepEqual(tableAccess.rows.find((row) => row.relname === "deleted_account_retained_records"), {
+      relname: "deleted_account_retained_records",
+      can_select: false,
+      can_insert: false,
+      can_update: false,
       can_delete: false,
     });
     assert.deepEqual(tableAccess.rows.find((row) => row.relname === "home_catalog_sections"), {

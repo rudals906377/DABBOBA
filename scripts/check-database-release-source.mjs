@@ -197,6 +197,11 @@ export const DATABASE_RELEASE_MIGRATIONS = Object.freeze([
     path: 'packages/db/migrations/0086_deleted_account_record_separation.sql',
     sha256: 'cb8d66ad39abd34511137140c7ea36da788152b86123b0826cb2e187d2ae6e94',
   }),
+  Object.freeze({
+    file: '0087_partial_unused_draw_refunds.sql',
+    path: 'packages/db/migrations/0087_partial_unused_draw_refunds.sql',
+    sha256: '1c5c8e4bb8b10b1893793f44decd20cba1ce925f93fa0aac09c7a7a42ca4caca',
+  }),
 ]);
 
 export const MINIMUM_DATABASE_RELEASE_VERSION =
