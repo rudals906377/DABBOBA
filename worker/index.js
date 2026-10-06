@@ -750,6 +750,15 @@ async function handleDeletionRequest(request, runtime, externalFetch) {
   if (!idempotencyKey || idempotencyKey.length > 200 || /[\u0000-\u001f\u007f]/.test(idempotencyKey)) {
     return jsonResponse({ error: { code: "INVALID_REQUEST", message: "요청 정보를 확인해 주세요." } }, 400);
   }
+  // Only an explicit forfeiture of the exact remaining point balance is
+  // forwarded; the API rejects any amount other than the locked balance.
+  const input = await readJsonObject(request);
+  const keys = input ? Object.keys(input) : [];
+  const forfeitPointBalance = input?.forfeitPointBalance;
+  if (!input || keys.some((key) => key !== "forfeitPointBalance")
+    || (forfeitPointBalance !== undefined && (!Number.isSafeInteger(forfeitPointBalance) || forfeitPointBalance < 1))) {
+    return jsonResponse({ error: { code: "INVALID_REQUEST", message: "요청 정보를 확인해 주세요." } }, 400);
+  }
   try {
     const result = await fetchJson(externalFetch, `${runtime.apiOrigin}/v1/account/deletion-request`, {
       method: "POST",
@@ -758,7 +767,7 @@ async function handleDeletionRequest(request, runtime, externalFetch) {
         "content-type": "application/json",
         "idempotency-key": idempotencyKey,
       },
-      body: "{}",
+      body: JSON.stringify(forfeitPointBalance === undefined ? {} : { forfeitPointBalance }),
       signal: requestTimeoutSignal(),
     });
     if (!result.response.ok) return accountApiError(result.response.status);
@@ -1033,7 +1042,7 @@ function accountApiError(status) {
   if (status >= 500) return accountDeletionUnavailable();
   if (status === 401 || status === 403) return authenticationRequired();
   if (status === 409) {
-    return jsonResponse({ error: { code: "ACCOUNT_DELETION_CONFLICT", message: "이미 탈퇴 처리가 진행 중입니다." } }, 409);
+    return jsonResponse({ error: { code: "ACCOUNT_DELETION_CONFLICT", message: "이미 탈퇴 처리가 진행 중이거나 남은 포인트가 바뀌었습니다." } }, 409);
   }
   if (status === 429) {
     return jsonResponse({ error: { code: "RATE_LIMITED", message: "잠시 후 다시 시도해 주세요." } }, 429);
@@ -1070,6 +1079,7 @@ function isDeletionBlockers(value) {
 function isDeletionPreview(value) {
   return value && typeof value === "object" && !Array.isArray(value)
     && typeof value.canDeleteNow === "boolean"
+    && (value.canDeleteWithPointForfeiture === undefined || typeof value.canDeleteWithPointForfeiture === "boolean")
     && isDeletionBlockers(value.blockers);
 }
 

@@ -677,6 +677,64 @@ test("web deletion proxies only preview, request, session logout, and receipt-st
   assert.equal(statusCall?.init.headers["x-deletion-status-token"], statusToken);
 });
 
+test("web deletion forwards only an explicit positive point forfeiture", async () => {
+  const customerSession = "f".repeat(43);
+  const requestId = "33333333-3333-4333-8333-333333333333";
+  const statusToken = "s".repeat(43);
+  const forwarded = [];
+  const fetcher = async (url, init) => {
+    if (url.endsWith("/deletion-request")) {
+      forwarded.push(init.body);
+      return json({
+        id: requestId, status: "PROCESSING", blockers: { ...emptyBlockers, pointBalance: 1250 }, requestCount: 1,
+        hardDeletePerformed: false, policy: "AUTOMATED_SERVER_DELETION", authDeletionStatus: "PENDING",
+        pointForfeitureAcknowledged: 1250, requestedAt: "2026-10-06T00:00:00.000Z",
+        lastRequestedAt: "2026-10-06T00:00:00.000Z", completedAt: null, statusToken,
+      }, 202);
+    }
+    if (url.endsWith("/v1/auth/logout")) return new Response(null, { status: 204 });
+    return json({}, 404);
+  };
+  const send = (body) => handleAccountDeletionService(
+    new Request("https://dabboba.net/account-deletion/service/request", {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${customerSession}`,
+        "content-type": "application/json",
+        "idempotency-key": "44444444-4444-4444-8444-444444444444",
+      },
+      body,
+    }),
+    accountDeletionRuntime,
+    fetcher,
+  );
+  const accepted = await send(JSON.stringify({ forfeitPointBalance: 1250 }));
+  assert.equal(accepted?.status, 202);
+  assert.deepEqual(forwarded, [JSON.stringify({ forfeitPointBalance: 1250 })]);
+  for (const body of [
+    JSON.stringify({ forfeitPointBalance: 0 }),
+    JSON.stringify({ forfeitPointBalance: "1250" }),
+    JSON.stringify({ forfeitPointBalance: 1.5 }),
+    JSON.stringify({ hardDelete: true }),
+    "[]",
+    "not json",
+  ]) {
+    const rejected = await send(body);
+    assert.equal(rejected?.status, 400, body);
+  }
+  assert.equal(forwarded.length, 1);
+});
+
+test("account deletion page asks for an explicit point forfeiture when points are the only blocker", async () => {
+  const html = await readFile(new URL("../public/legal/account-deletion/index.html", import.meta.url), "utf8");
+  const script = await readFile(new URL("../public/legal/account-deletion/app.js", import.meta.url), "utf8");
+  assert.match(html, /id="confirm-point-forfeiture"/);
+  assert.match(script, /preview\.canDeleteWithPointForfeiture === true/);
+  assert.match(script, /blockers\.length === 1 && blockers\[0\]\[0\] === "pointBalance"/);
+  assert.match(script, /pointForfeitureBalance > 0 \? \{ forfeitPointBalance: pointForfeitureBalance \} : \{\}/);
+  assert.match(script, /pointForfeitureBalance > 0 && !elements\["confirm-point-forfeiture"\]\.checked/);
+});
+
 test("web deletion can revoke an abandoned verified session without exposing API details", async () => {
   const customerSession = "d".repeat(43);
   const calls = [];
