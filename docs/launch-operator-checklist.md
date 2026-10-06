@@ -16,18 +16,19 @@ corepack pnpm run build:all
 corepack pnpm run db:release-source:check      # 확인: "blockers": []
 ```
 
-## 2. 운영 DB 백업 → 마이그레이션 0083·0084·0085
+## 2. 운영 DB 백업 → 마이그레이션 0083·0084·0085·0086
 
 ```
 node ops/database/backup.mjs backup /절대경로/archive.dbbenc /절대경로/key-file
 node ops/database/backup.mjs verify /절대경로/archive.dbbenc /절대경로/key-file   # 확인: archive-authenticated
-corepack pnpm run db:migrate     # 확인: Applied 3 migration(s).
+corepack pnpm run db:migrate     # 확인: Applied 4 migration(s).
 corepack pnpm run db:migrate     # 확인: Database schema is current.
 corepack pnpm --filter @dabboba/db check:release   # 확인: "blockers": [] — 출력의 targetHash를 기록
 ```
 
-- 0083은 기록 정리 평가 함수만 바꾼다. 0084는 `payments`에 결제 채널 기록 컬럼·불변 트리거를, 0085는 `sessions`에 심사 마감 컬럼을 추가한다. 데이터는 바꾸지 않는다.
-- API는 0084·0085 컬럼을 읽으므로 반드시 이 단계 다음에 배포한다.
+- 0083은 기록 정리 평가 함수만 바꾼다. 0084는 `payments`에 결제 채널 기록 컬럼·불변 트리거를, 0085는 `sessions`에 심사 마감 컬럼을 추가한다.
+- 0086은 `account_deletion_requests`에 포인트 소멸 동의 금액 컬럼을, 탈퇴 회원의 배송지·문의 내용을 따로 두는 소유자 전용 테이블과 분리 함수를 추가한다. 이 테이블은 API·관리자·워커 어느 역할도 읽을 수 없다.
+- 네 마이그레이션 모두 기존 데이터를 바꾸지 않는다. API·워커가 0084~0086을 사용하므로 반드시 이 단계 다음에 배포한다.
 
 ## 3. 서버(Edge) 배포 — PRELAUNCH 유지
 
@@ -59,6 +60,8 @@ corepack pnpm run supabase:worker:schedule <2단계 check:release의 targetHash>
 - 1분마다 `dabboba-worker`를 호출하는 `dabboba-worker-every-minute` 작업과 Vault 비밀값을 설정한다.
 - 확인: Supabase 대시보드 → Cron 작업 실행 기록이 성공으로 쌓이는지, 워커 로그에 탈퇴 처리·대사·만료 정리가 도는지.
 - 기록 정리(retention)는 `WORKER_COMMERCE_RETENTION_MODE` 기본값 `DISABLED`로 계속 꺼져 있다. 보존기간 정책 승인 전에는 켜지 않는다.
+- 보관기한 알림·만료 보류·만료 교환 정리도 `WORKER_INVENTORY_STORAGE_EXPIRY_MODE` 기본값 `DISABLED`로 꺼져 있다. Edge 워커는 이 값을 전달하지 않으므로 Cron을 켜도 돌지 않는다. 정책을 승인한 뒤 코드 변경(전달 키 추가)으로만 켠다.
+- Cron이 켜져야 15분 넘게 결제하지 않은 주문·배송비 신청이 자동 취소되고 재고·포인트·보관함이 돌아온다. LIVE 전에 반드시 켠다.
 
 ## 6. 판매 준비 (관리자 화면)
 
@@ -73,6 +76,12 @@ corepack pnpm run supabase:worker:schedule <2단계 check:release의 targetHash>
 3. `corepack pnpm run supabase:edge:deploy` → 확인: `GET /v1/auth/store-review`가 `{"enabled":true,…}`.
 4. 새로 설치한 앱에서 "앱 심사용 계정으로 로그인" 로그인·로그아웃 확인.
 5. App Store Connect 앱 심사 정보, Play Console 앱 액세스에 아이디·비밀번호 입력. 심사 후 `ENABLED=false`로 닫는다.
+
+## 7-1. 네이버 로그인 제공 정보 줄이기 (검수 요청 전)
+
+`docs/customer-auth-setup.md` 4절. 네이버 개발자센터 → 내 애플리케이션 → API 설정 → 제공 정보 선택에서
+이름·성별·생일·휴대전화번호를 해제하고 이메일은 추가(선택)로 둔다. 테스터 계정으로 동의 화면을 다시
+캡처한 뒤에 검수를 요청한다.
 
 ## 8. 앱 빌드·스토어 제출
 
@@ -91,6 +100,16 @@ corepack pnpm run supabase:worker:schedule <2단계 check:release의 targetHash>
 - 정식 판매용 약관·개인정보처리방침 초안의 `[확인 필요]` 항목을 채우고 법률 검토를 받는다.
 - 검토본을 `public/legal/terms`·`privacy`에 반영하고 새 정책 버전 마이그레이션을 추가하면 기존 회원에게
   재동의가 표시된다. 이 단계는 LIVE 전환 직전에 한다(현재 공개 문서는 사전오픈판 문구 때문에 LIVE 검사에 걸린다).
+
+## 9-1. KG이니시스 테스트 채널 검증 (LIVE 전)
+
+스테이징(`lyzcyrdiazorjaqlgblr`) 테스트 채널에서 다음을 실제로 한 번씩 확인하고 기록한다.
+
+- 카드 결제 → 뽑기 → 결과, 미사용 주문 전액 환불(관리자) → 카드 취소·재고·포인트 복구
+- 포인트+카드 혼합 주문 전액 환불 → 사용 포인트 복구
+- 포인트만으로 결제한 주문 환불(관리자 포인트 주문 환불)
+- 무료배송 미달 배송 신청 → 배송비 3,000원 결제 → 출고 가능 상태, 배송비 환불
+- 결제창을 닫거나 15분 방치 → 주문·배송 신청 자동 취소(Cron 필요)
 
 ## 10. KG이니시스 승인 후 — LIVE 전환
 
