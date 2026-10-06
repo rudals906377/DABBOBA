@@ -97,24 +97,23 @@ export function lateRefundBlocker(row: LateRefundCandidate): string | null {
   return null;
 }
 
-export function normalDrawRefundBlocker(
-  row: NormalDrawRefundCandidate,
-  expectedStatus: "PAID" | "REFUND_REVIEW",
-): string | null {
-  if (!isPortOneCardProvider(row.provider) || row.status !== expectedStatus || row.order_status !== expectedStatus) {
-    return "결제와 주문 상태가 전액 환불 요청 조건에 맞지 않습니다.";
-  }
+/** A full draw refund applies only to an uncancelled product order. */
+export function drawRefundOrderBlocker(row: Pick<NormalDrawRefundCandidate, "order_kind" | "cancelled_at">): string | null {
   if (row.order_kind !== "PRODUCT" || row.cancelled_at) return "취소되지 않은 상품 주문만 환불할 수 있습니다.";
-  if (numberValue(row.amount) <= 0 || numberValue(row.order_total) !== numberValue(row.amount)) {
-    return "카드 결제 금액과 주문 금액을 먼저 대사해야 합니다.";
-  }
-  if (numberValue(row.paid_ledger) !== numberValue(row.amount) || numberValue(row.refund_ledger) !== 0) {
-    return "결제·환불 원장 금액을 먼저 대사해야 합니다.";
-  }
+  return null;
+}
+
+/**
+ * Every line is gacha/kuji and nothing of the order has been used: each
+ * issued entitlement is still AVAILABLE, no draw result exists, no purchase
+ * inventory was issued and no stock reservation is still active. Shared by the
+ * card cancellation and the internal point-order refund.
+ */
+export function unusedDrawAssetsBlocker(row: NormalDrawRefundCandidate): string | null {
   const lineCount = numberValue(row.line_count);
   const expectedDrawUnits = numberValue(row.expected_draw_units);
   if (lineCount < 1 || numberValue(row.draw_line_count) !== lineCount || expectedDrawUnits < 1) {
-    return "가챠·쿠지만 포함된 유료 주문을 전액 환불할 수 있습니다.";
+    return "가챠·쿠지만 포함된 주문을 전액 환불할 수 있습니다.";
   }
   if (
     numberValue(row.entitlement_count) !== expectedDrawUnits
@@ -126,6 +125,24 @@ export function normalDrawRefundBlocker(
     return "이미 사용한 추첨권이나 이동한 상품이 있어 자동 전액 환불할 수 없습니다.";
   }
   return null;
+}
+
+export function normalDrawRefundBlocker(
+  row: NormalDrawRefundCandidate,
+  expectedStatus: "PAID" | "REFUND_REVIEW",
+): string | null {
+  if (!isPortOneCardProvider(row.provider) || row.status !== expectedStatus || row.order_status !== expectedStatus) {
+    return "결제와 주문 상태가 전액 환불 요청 조건에 맞지 않습니다.";
+  }
+  const orderBlocker = drawRefundOrderBlocker(row);
+  if (orderBlocker) return orderBlocker;
+  if (numberValue(row.amount) <= 0 || numberValue(row.order_total) !== numberValue(row.amount)) {
+    return "카드 결제 금액과 주문 금액을 먼저 대사해야 합니다.";
+  }
+  if (numberValue(row.paid_ledger) !== numberValue(row.amount) || numberValue(row.refund_ledger) !== 0) {
+    return "결제·환불 원장 금액을 먼저 대사해야 합니다.";
+  }
+  return unusedDrawAssetsBlocker(row);
 }
 
 export const REFUND_CANDIDATE_LOOKUP_SQL = `SELECT p.id,p.order_id,p.provider,p.status,p.amount,o.status AS order_status,

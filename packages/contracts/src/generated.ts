@@ -2636,6 +2636,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/commerce/payments/{paymentId}/point-refund": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description Requires refunds.cancel. Fully refunds a PAID gacha/kuji order whose whole total was covered by points and/or a coupon (INTERNAL_ZERO payment, amount 0, order total 0) while every draw entitlement is still unused. No PG call is made. In one transaction the server locks the order, rechecks that nothing was used, and applies one operator-authorized internal REFUND_SUCCEEDED event through the canonical refund - entitlements cancelled, stock relisted, a linked kuji room released, the order's points returned once through a unique REFUND point-ledger row, the coupon redemption released, and payment/order REFUNDED. A consumed entitlement, draw result, or any other change is rejected with no state change. A repeated request after success, with any Idempotency-Key, returns the committed refund with alreadyRefunded true and never credits points again. Audited. */
+        post: operations["refundAdminPointOrder"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/commerce/refund-reviews/{paymentId}/cancellation/reconcile": {
         parameters: {
             query?: never;
@@ -4919,9 +4936,16 @@ export interface components {
             } | null;
         };
         AdminPaymentDetail: components["schemas"]["AdminPayment"] & {
+            /** @description Points spent on the order; a full refund returns them as points. */
+            orderPointTotal: number;
             ledger: components["schemas"]["AdminPaymentLedgerEntry"][];
             providerEvents: components["schemas"]["AdminPaymentProviderEvent"][];
             providerReconciliationAvailable: boolean;
+            /**
+             * @description The full-refund action that applies to this payment - a PortOne card cancellation, or the local refund of a points-only (INTERNAL_ZERO) order. Null when neither is configured.
+             * @enum {string|null}
+             */
+            refundActionKind: "CARD_CANCELLATION" | "POINT_ORDER" | null;
             refundActionAvailable: boolean;
             refundActionBlocker: string | null;
         };
@@ -4987,6 +5011,22 @@ export interface components {
         };
         AdminPortOneRefundReasonInput: {
             reason: string;
+        };
+        AdminPointOrderRefund: {
+            /** Format: uuid */
+            paymentId: string;
+            /** Format: uuid */
+            orderId: string;
+            paymentStatus: components["schemas"]["PaymentStatus"];
+            orderStatus: components["schemas"]["OrderStatus"];
+            pointTotal: number;
+            /** @description Points returned by the order's single REFUND point-ledger row. */
+            restoredPoints: number;
+            cancelledEntitlements: number;
+            /** Format: date-time */
+            refundedAt: string | null;
+            /** @description True when this request found the refund already committed and changed nothing. */
+            alreadyRefunded: boolean;
         };
         AdminPortOneRefundCancellation: {
             /** Format: uuid */
@@ -10898,6 +10938,46 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             /** @description LIVE commerce or PortOne provider is not configured. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    refundAdminPointOrder: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description ASCII reasons remain compatible. For non-ASCII text, percent-encode UTF-8 and also send X-Admin-Reason-Encoding as utf-8-percent. */
+                "X-Admin-Reason": components["parameters"]["AdminReason"];
+            };
+            path: {
+                paymentId: components["parameters"]["PaymentId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminPortOneRefundReasonInput"];
+            };
+        };
+        responses: {
+            /** @description The point order is refunded (or was already refunded by this operation). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminPointOrderRefund"];
+                };
+            };
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            /** @description LIVE commerce is not enabled. */
             503: {
                 headers: {
                     [name: string]: unknown;

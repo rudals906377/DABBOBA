@@ -125,7 +125,10 @@ export type AdminPayment = {
 };
 
 export type AdminPaymentDetail = AdminPayment & {
+  orderPointTotal: number;
   providerReconciliationAvailable: boolean;
+  /** CARD_CANCELLATION: PortOne card refund. POINT_ORDER: local refund of a points-only (INTERNAL_ZERO) order. */
+  refundActionKind: "CARD_CANCELLATION" | "POINT_ORDER" | null;
   refundActionAvailable: boolean;
   refundActionBlocker: string | null;
   ledger: Array<{

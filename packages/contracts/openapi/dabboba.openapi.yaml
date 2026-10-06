@@ -3926,6 +3926,31 @@ paths:
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
         "503": { description: LIVE commerce or PortOne provider is not configured. }
+  /v1/admin/commerce/payments/{paymentId}/point-refund:
+    post:
+      tags: [Admin, Commerce]
+      operationId: refundAdminPointOrder
+      description: Requires refunds.cancel. Fully refunds a PAID gacha/kuji order whose whole total was covered by points and/or a coupon (INTERNAL_ZERO payment, amount 0, order total 0) while every draw entitlement is still unused. No PG call is made. In one transaction the server locks the order, rechecks that nothing was used, and applies one operator-authorized internal REFUND_SUCCEEDED event through the canonical refund - entitlements cancelled, stock relisted, a linked kuji room released, the order's points returned once through a unique REFUND point-ledger row, the coupon redemption released, and payment/order REFUNDED. A consumed entitlement, draw result, or any other change is rejected with no state change. A repeated request after success, with any Idempotency-Key, returns the committed refund with alreadyRefunded true and never credits points again. Audited.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PaymentId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/AdminReason"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AdminPortOneRefundReasonInput" }
+      responses:
+        "200":
+          description: The point order is refunded (or was already refunded by this operation).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminPointOrderRefund" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "503": { description: LIVE commerce is not enabled. }
   /v1/admin/commerce/refund-reviews/{paymentId}/cancellation/reconcile:
     post:
       tags: [Admin, Commerce]
@@ -7017,11 +7042,16 @@ components:
       allOf:
         - $ref: "#/components/schemas/AdminPayment"
         - type: object
-          required: [ledger, providerEvents, providerReconciliationAvailable, refundActionAvailable, refundActionBlocker]
+          required: [orderPointTotal, ledger, providerEvents, providerReconciliationAvailable, refundActionKind, refundActionAvailable, refundActionBlocker]
           properties:
+            orderPointTotal: { type: integer, minimum: 0, description: Points spent on the order; a full refund returns them as points. }
             ledger: { type: array, items: { $ref: "#/components/schemas/AdminPaymentLedgerEntry" } }
             providerEvents: { type: array, items: { $ref: "#/components/schemas/AdminPaymentProviderEvent" } }
             providerReconciliationAvailable: { type: boolean }
+            refundActionKind:
+              type: [string, "null"]
+              enum: [CARD_CANCELLATION, POINT_ORDER, null]
+              description: The full-refund action that applies to this payment - a PortOne card cancellation, or the local refund of a points-only (INTERNAL_ZERO) order. Null when neither is configured.
             refundActionAvailable: { type: boolean }
             refundActionBlocker: { type: [string, "null"] }
     AdminPaymentPage:
@@ -7114,6 +7144,20 @@ components:
       required: [reason]
       properties:
         reason: { type: string, minLength: 2, maxLength: 500 }
+    AdminPointOrderRefund:
+      type: object
+      additionalProperties: false
+      required: [paymentId, orderId, paymentStatus, orderStatus, pointTotal, restoredPoints, cancelledEntitlements, refundedAt, alreadyRefunded]
+      properties:
+        paymentId: { type: string, format: uuid }
+        orderId: { type: string, format: uuid }
+        paymentStatus: { $ref: "#/components/schemas/PaymentStatus" }
+        orderStatus: { $ref: "#/components/schemas/OrderStatus" }
+        pointTotal: { type: integer, minimum: 0 }
+        restoredPoints: { type: integer, minimum: 0, description: Points returned by the order's single REFUND point-ledger row. }
+        cancelledEntitlements: { type: integer, minimum: 0 }
+        refundedAt: { type: [string, "null"], format: date-time }
+        alreadyRefunded: { type: boolean, description: True when this request found the refund already committed and changed nothing. }
     AdminPortOneRefundCancellation:
       type: object
       additionalProperties: false

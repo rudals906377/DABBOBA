@@ -5,6 +5,7 @@ import { assertDrawCapacity } from "../lib/draw-capacity.js";
 import { effectiveCommerceMode, requireLiveCommerce } from "../lib/commerce-mode.js";
 import { isPortOneCardProvider } from "../lib/portone-channel-binding.js";
 import { lateRefundBlocker, normalDrawRefundBlocker, REFUND_CANDIDATE_LOOKUP_SQL, type NormalDrawRefundCandidate } from "./portone-payments.js";
+import { POINT_ORDER_PAYMENT_PROVIDER, pointOrderRefundBlocker } from "./point-order-refunds.js";
 import { badRequest, conflict, notFound } from "../lib/errors.js";
 import { beginIdempotency, completeIdempotency, requestHash } from "../lib/idempotency.js";
 import { enumInput, integerInput, nullableStringInput, objectInput, queryString, slugIdInput, stringInput, uuidInput, likeContainsPattern } from "../lib/input.js";
@@ -316,8 +317,8 @@ export async function registerAdminCommerceRoutes(app: FastifyInstance, context:
 
   app.get("/v1/admin/commerce/payments/:paymentId", { preHandler: context.auth.requirePermission("payments.read") }, async (request) => {
     const paymentId = uuidInput((request.params as Record<string, unknown>).paymentId, "paymentId");
-    const result = await context.pool.query<PaymentSummaryRow>(`
-      SELECT p.*,o.status AS order_status,o.user_id,u.email::text AS user_email,u.nickname
+    const result = await context.pool.query<PaymentSummaryRow & { order_point_total: number | string }>(`
+      SELECT p.*,o.status AS order_status,o.user_id,u.email::text AS user_email,u.nickname,o.point_total AS order_point_total
       FROM payments p JOIN orders o ON o.id=p.order_id JOIN users u ON u.id=o.user_id WHERE p.id=$1`, [paymentId]);
     if (!result.rowCount) throw notFound("결제 내역을 찾을 수 없습니다.");
     const ledger = await context.pool.query<{
@@ -329,18 +330,27 @@ export async function registerAdminCommerceRoutes(app: FastifyInstance, context:
         CASE WHEN event_type='PAYMENT_STATE_ANOMALY' THEN payload->'providerObservation' ELSE NULL END AS provider_observation
        FROM payment_provider_events WHERE payment_id=$1 ORDER BY occurred_at DESC,id DESC`, [paymentId]);
     const paymentRow = result.rows[0]!;
-    const refundConfigured = effectiveCommerceMode(context.config) === "LIVE"
+    const commerceLive = effectiveCommerceMode(context.config) === "LIVE";
+    const refundConfigured = commerceLive
       && context.config.paymentProvider === "PORTONE_V2_INICIS"
       && Boolean(context.config.paymentWebhookSecret && context.config.portOne);
-    const candidate = refundConfigured && paymentRow.status === "PAID" && paymentRow.order_status === "PAID"
+    // A points-only order has no card payment to cancel: its full refund is the
+    // local point-order refund, available whenever commerce is LIVE.
+    const pointOrder = paymentRow.provider === POINT_ORDER_PAYMENT_PROVIDER;
+    const refundActionKind = pointOrder
+      ? (commerceLive ? "POINT_ORDER" as const : null)
+      : (refundConfigured ? "CARD_CANCELLATION" as const : null);
+    const candidate = refundActionKind && paymentRow.status === "PAID" && paymentRow.order_status === "PAID"
       ? await context.pool.query<NormalDrawRefundCandidate>(REFUND_CANDIDATE_LOOKUP_SQL, [paymentId])
       : null;
     const refundActionBlocker = candidate?.rows[0]
-      ? normalDrawRefundBlocker(candidate.rows[0], "PAID")
+      ? pointOrder ? pointOrderRefundBlocker(candidate.rows[0]) : normalDrawRefundBlocker(candidate.rows[0], "PAID")
       : null;
     return {
       ...paymentSummary(paymentRow),
+      orderPointTotal: numberValue(paymentRow.order_point_total),
       providerReconciliationAvailable: refundConfigured && isPortOneCardProvider(paymentRow.provider),
+      refundActionKind,
       refundActionAvailable: Boolean(candidate?.rowCount) && refundActionBlocker === null,
       refundActionBlocker,
       ledger: ledger.rows.map((entry) => ({
