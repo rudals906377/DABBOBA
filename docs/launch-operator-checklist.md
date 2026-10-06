@@ -87,7 +87,7 @@ corepack pnpm run supabase:worker:schedule <2단계 check:release의 targetHash>
 ## 8. 앱 빌드·스토어 제출
 
 - 제출 자료(개인정보 라벨·Data safety·연령 등급·설명·심사 메모): `docs/store-submission-pack.md`.
-- iOS: 빌드 번호는 현재 `app.json`의 5보다 커야 한다. 친구 팀으로 서명 후
+- iOS: `app.json`의 빌드 번호를 6으로 올려 두었다(마지막 업로드 5). 이후 빌드마다 1씩 올린다. 친구 팀으로 서명 후
   `node scripts/verify-ios-artifact-team.mjs <경로.ipa>` (Team `MCZ4884P7F`)와
   `node scripts/verify-mobile-artifact-config.mjs`로 확인.
 - Android: Play Console 앱 생성, 업로드 키·Play 앱 서명 결정, 친구 계정으로 AAB 서명.
