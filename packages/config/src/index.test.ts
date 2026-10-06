@@ -764,6 +764,11 @@ test("PortOne KG INICIS requires a complete environment-specific credential set"
 
   assert.throws(() => loadApiConfig({ ...base, PORTONE_API_SECRET: "" }), /configured together/);
   assert.throws(() => loadApiConfig({ ...base, PORTONE_CHANNEL_ENVIRONMENT: "SANDBOX" }), /LIVE or TEST/);
+  assert.equal(loadApiConfig({ ...base, PORTONE_KCP_CHANNEL_KEY: "channel-key-kcp-test" }).portOne?.kcpChannelKey, "channel-key-kcp-test");
+  for (const key of [base.PORTONE_CHANNEL_KEY, "invalid-kcp-channel"]) {
+    assert.throws(() => loadApiConfig({ ...base, PORTONE_KCP_CHANNEL_KEY: key }), /distinct valid channel/);
+  }
+  assert.throws(() => loadApiConfig({ ...base, PORTONE_API_SECRET: "", PORTONE_KCP_CHANNEL_KEY: "channel-key-kcp-test" }));
   assert.throws(() => loadApiConfig({
     ...base,
     PAYMENT_PROVIDER: "UNCONFIGURED",
@@ -823,4 +828,17 @@ test("signed admin proxy identity normalizes addresses and rejects tampering or 
     readHeader: (name) => withoutUserAgent[name],
     nowMs,
   })?.userAgent, null);
+});
+
+test("the review proxy secret is used only with an enabled review login and must be distinct", async () => {
+  const { loadPaymentReviewProxySecret } = await import("./payment-review-login.js");
+  const review = { email: "review@example.test", subject: "00000000-0000-4000-8000-000000000001", expiresAt: new Date().toISOString() };
+  const secret = "review-proxy-secret-0123456789abcdefghij";
+  assert.equal(loadPaymentReviewProxySecret({ PAYMENT_REVIEW_PROXY_SECRET: secret }, review, []), secret);
+  assert.equal(loadPaymentReviewProxySecret({ PAYMENT_REVIEW_PROXY_SECRET: secret }, null, []), null);
+  assert.equal(loadPaymentReviewProxySecret({}, review, []), null);
+  for (const invalid of ["short-secret", "change-me-review-proxy-secret-0123456789"]) {
+    assert.throws(() => loadPaymentReviewProxySecret({ PAYMENT_REVIEW_PROXY_SECRET: invalid }, review, []), /distinct 32-512 byte/);
+  }
+  assert.throws(() => loadPaymentReviewProxySecret({ PAYMENT_REVIEW_PROXY_SECRET: secret }, review, [null, secret]), /distinct/);
 });

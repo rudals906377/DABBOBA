@@ -60,6 +60,8 @@ export async function issueSession(
     ip?: string;
     userAgent?: string;
     expiresInMs?: number;
+    /** Absolute payment-review deadline; the session never outlives it and refresh keeps it. */
+    reviewAccessExpiresAt?: Date;
   },
 ) {
   const token = randomBytes(32).toString("base64url");
@@ -79,10 +81,22 @@ export async function issueSession(
   ) {
     throw new Error("Session expiry override must be at least one minute");
   }
-  const expiresAt = new Date(Date.now() + Math.min(input.expiresInMs ?? configuredTtlMs, configuredTtlMs));
+  const now = Date.now();
+  let expiresAtMs = now + Math.min(input.expiresInMs ?? configuredTtlMs, configuredTtlMs);
+  const reviewDeadline = input.reviewAccessExpiresAt?.getTime();
+  if (reviewDeadline !== undefined) {
+    if (input.kind !== "USER" || scope !== "FULL") {
+      throw new Error("Review access applies only to full customer sessions");
+    }
+    if (!Number.isFinite(reviewDeadline) || reviewDeadline <= now) throw new Error("Review access has already expired");
+    // Clamp once against the absolute deadline: deriving a relative TTL before
+    // the surrounding transaction would let the session outlive it.
+    expiresAtMs = Math.min(expiresAtMs, reviewDeadline);
+  }
+  const expiresAt = new Date(expiresAtMs);
   const result = await pool.query<{ id: string }>(
-    `INSERT INTO sessions (user_id, session_kind, scope, token_digest, ip_address, user_agent, expires_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
+    `INSERT INTO sessions (user_id, session_kind, scope, token_digest, ip_address, user_agent, expires_at, review_access_expires_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
     [
       input.userId,
       input.kind,
@@ -91,6 +105,7 @@ export async function issueSession(
       input.ip || null,
       input.userAgent || null,
       expiresAt,
+      reviewDeadline === undefined ? null : new Date(reviewDeadline),
     ],
   );
   return { token, sessionId: result.rows[0]!.id, expiresAt };

@@ -2,7 +2,14 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { FastifyRequest } from "fastify";
 import { tokenDigest } from "../plugins/auth.js";
-import { clientIpForRateLimit, opaqueClientKey, rateLimitKey } from "./rate-limit-key.js";
+import {
+  clientIpForRateLimit,
+  opaqueClientKey,
+  PAYMENT_REVIEW_CLIENT_IP_HEADERS,
+  paymentReviewClientIpSignature,
+  rateLimitKey,
+  signedPaymentReviewClientIp,
+} from "./rate-limit-key.js";
 
 const pepper = "rate-limit-key-test-pepper";
 const token = "A".repeat(43);
@@ -29,7 +36,7 @@ test("anonymous, malformed-token, and login-exchange requests are keyed by clien
   assert.equal(rateLimitKey(request({}), config), "ip:192.0.2.10");
   assert.equal(rateLimitKey(request({ headers: { authorization: "Bearer short" } }), config), "ip:192.0.2.10");
   assert.equal(rateLimitKey(request({ headers: { authorization: `Basic ${token}` } }), config), "ip:192.0.2.10");
-  for (const url of ["/v1/auth/exchange", "/v1/auth/account-deletion-exchange"]) {
+  for (const url of ["/v1/auth/exchange", "/v1/auth/account-deletion-exchange", "/v1/auth/payment-review"]) {
     assert.equal(
       rateLimitKey(request({ url, headers: { authorization: `Bearer ${token}` } }), config),
       "ip:192.0.2.10",
@@ -91,4 +98,34 @@ test("opaque client keys are pepper-bound and never contain the raw key", () => 
   assert.equal(opaqueClientKey("ip:192.0.2.10", pepper), key);
   assert.notEqual(opaqueClientKey("ip:192.0.2.10", `${pepper}-2`), key);
   assert.doesNotMatch(key, /192/);
+});
+
+test("the review login is keyed by the signed reviewer IP only when the worker signature is fresh and valid", () => {
+  const secret = "review-proxy-secret-for-rate-limit-tests-0001";
+  const config = { sessionTokenPepper: pepper, trustedClientIpHeader: null, paymentReviewProxySecret: secret };
+  const now = Date.now();
+  const time = String(Math.floor(now / 1_000));
+  const signed = (ip: string, at = time, key = secret) => ({
+    [PAYMENT_REVIEW_CLIENT_IP_HEADERS.ip]: ip,
+    [PAYMENT_REVIEW_CLIENT_IP_HEADERS.time]: at,
+    [PAYMENT_REVIEW_CLIENT_IP_HEADERS.signature]: paymentReviewClientIpSignature(key, at, ip),
+  });
+  const reviewRoute = "/v1/auth/payment-review";
+  // Two reviewers behind the same worker egress address get separate buckets.
+  assert.equal(rateLimitKey(request({ url: reviewRoute, headers: signed("203.0.113.7") }), config), "ip:203.0.113.7");
+  assert.equal(rateLimitKey(request({ url: reviewRoute, headers: signed("203.0.113.8") }), config), "ip:203.0.113.8");
+  assert.equal(rateLimitKey(request({ url: reviewRoute, headers: signed("2001:db8:1:2::5") }), config), "ip:2001:db8:1:2::");
+
+  const fallback = "ip:192.0.2.10";
+  for (const headers of [
+    { ...signed("203.0.113.7"), [PAYMENT_REVIEW_CLIENT_IP_HEADERS.ip]: "203.0.113.9" },
+    signed("203.0.113.7", String(Math.floor(now / 1_000) - 61)),
+    signed("203.0.113.7", time, "another-secret-that-is-long-enough-0001"),
+    signed("not-an-ip"),
+    { [PAYMENT_REVIEW_CLIENT_IP_HEADERS.ip]: "203.0.113.7", [PAYMENT_REVIEW_CLIENT_IP_HEADERS.time]: time },
+  ]) assert.equal(rateLimitKey(request({ url: reviewRoute, headers }), config), fallback);
+  // Other routes and deployments without the secret ignore the headers.
+  assert.equal(rateLimitKey(request({ url: "/v1/auth/exchange", headers: signed("203.0.113.7") }), config), fallback);
+  assert.equal(rateLimitKey(request({ url: reviewRoute, headers: signed("203.0.113.7") }), { ...config, paymentReviewProxySecret: null }), fallback);
+  assert.equal(signedPaymentReviewClientIp(request({ headers: signed("203.0.113.7") }), secret, now + 59_000), "203.0.113.7");
 });

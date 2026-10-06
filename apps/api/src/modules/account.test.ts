@@ -1330,7 +1330,7 @@ test("shipping request below the free-shipping threshold creates a 3,000 won pay
         return { rowCount: 1, rows: [{ id: orderId }] };
       }
       if (sql.includes("INSERT INTO payments")) {
-        assert.deepEqual(params, [orderId, "TEST_PG", 3_000]);
+        assert.deepEqual(params, [orderId, "TEST_PG", 3_000, null], "non-card rails carry no channel binding");
         return { rowCount: 1, rows: [{ id: paymentId }] };
       }
       if (sql.includes("UPDATE shipping_quotes")) return { rowCount: 1, rows: [] };
@@ -1440,7 +1440,7 @@ test("mixed Gacha and Kuji shipping one won below 54,900 creates the same 3,000 
       if (sql.includes("UPDATE inventory_units SET status='SHIPPING'")) return { rowCount: 2, rows: [{ id: gachaId }, { id: kujiId }] };
       if (sql.includes("INSERT INTO orders(")) return { rowCount: 1, rows: [{ id: orderId }] };
       if (sql.includes("INSERT INTO payments")) {
-        assert.deepEqual(params, [orderId, "TEST_PG", 3_000]);
+        assert.deepEqual(params, [orderId, "TEST_PG", 3_000, null], "non-card rails carry no channel binding");
         return { rowCount: 1, rows: [{ id: paymentId }] };
       }
       if (sql.includes("UPDATE shipping_quotes")) return { rowCount: 1, rows: [] };

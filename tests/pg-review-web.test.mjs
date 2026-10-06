@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {createHmac} from 'node:crypto';
 import {handlePgReviewService} from '../worker/index.js';
 const token = 'a'.repeat(43);
 function request(route, body, extra={}) {return new Request('https://dabboba.net/review/api'+route,{method:body===undefined?'GET':'POST',headers:{origin:'https://dabboba.net','content-type':'application/json',...extra},...(body===undefined?{}:{body:JSON.stringify(body)})});}
@@ -38,4 +39,16 @@ test('upstream redirects are not followed with customer credentials',async()=>{
   assert.equal(opts.redirect,'manual'); return new Response(null,{status:302,headers:{location:'https://unrelated.test'}});
  });
  assert.equal(response.status,502);
+});
+test('login forwards only a freshly signed Cloudflare visitor IP for per-reviewer limits',async()=>{
+ const secret='review-proxy-secret-0123456789abcdefghij';
+ const login=(env,extra)=>{let sent;return handlePgReviewService(request('/login',{email:'pg',password:'fixture'},{'cf-connecting-ip':'203.0.113.7','x-dabboba-review-client-ip':'198.51.100.1',...extra}),env,async(_url,opts)=>{sent=opts.headers;return json({error:{message:'denied'}},401);}).then(()=>sent);};
+ const signed=await login({PG_REVIEW_PROXY_SECRET:secret});
+ assert.equal(signed['x-dabboba-review-client-ip'],'203.0.113.7','the client-supplied header is never trusted');
+ const time=signed['x-dabboba-review-client-ip-time'];
+ assert.ok(Math.abs(Number(time)-Date.now()/1000)<5);
+ assert.equal(signed['x-dabboba-review-client-ip-signature'],createHmac('sha256',secret).update(`dabboba-review-client-ip:v1\n${time}\n203.0.113.7`).digest('hex'));
+ for (const env of [{},{PG_REVIEW_PROXY_SECRET:'too-short'}]) assert.equal((await login(env))['x-dabboba-review-client-ip'],undefined);
+ let meHeaders;await handlePgReviewService(request('/me',undefined,{cookie:'__Secure-dabboba-pg-review='+token,'cf-connecting-ip':'203.0.113.7'}),{PG_REVIEW_PROXY_SECRET:secret},async(_url,opts)=>{meHeaders=opts.headers;return json({actor:{role:'USER'}});});
+ assert.equal(meHeaders['x-dabboba-review-client-ip'],undefined,'only the login request carries the signed IP');
 });

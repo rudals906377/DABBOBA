@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { SUPABASE_INTEGRATION_PROJECT_REF } from '../scripts/supabase-integration-profile.mjs';
+import { DATABASE_RELEASE_MIGRATIONS, MINIMUM_DATABASE_RELEASE_VERSION } from '../scripts/check-database-release-source.mjs';
 import { defaultReleaseCheck, runSupabaseEdgeReleasePreflight } from '../scripts/supabase-edge-release-preflight.mjs';
 import {
   deploySupabaseEdge,
@@ -12,6 +13,7 @@ import {
   assertProductionWorkerCredential,
   assertSupabaseEdgeReleaseConfiguration,
   edgeExternalValuesFromSource,
+  PAYMENT_REVIEW_EDGE_KEYS,
   serializeSupabaseEdgeProfile,
   SUPABASE_EDGE_EXTERNAL_OPTIONAL_KEYS,
   SUPABASE_EDGE_EXTERNAL_REQUIRED_KEYS,
@@ -40,6 +42,9 @@ const completeAppleProfile = {
   DABBOBA_WORKER_APPLE_TOKEN_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString('base64url'),
   DABBOBA_WORKER_APPLE_TOKEN_ENCRYPTION_KEY_VERSION: '1',
 };
+
+// The newest required release migration; source fixtures must reach it.
+const releaseMigration = DATABASE_RELEASE_MIGRATIONS.at(-1).file;
 
 const liveEdgeProfile = {
   ...completeAppleProfile,
@@ -289,12 +294,12 @@ test('LIVE Edge preflight refuses incomplete payment configuration before source
   assert.equal(databaseCalled, false);
 });
 
-test('LIVE Edge preflight requires complete isolated roles and migration 0081 before database access', async () => {
+test('LIVE Edge preflight requires complete isolated roles and the newest release migration before database access', async () => {
   let databaseCalled = false;
   await assert.rejects(runSupabaseEdgeReleasePreflight({
     edgeProfile: { ...fullLiveEdgeProfile, DABBOBA_ENABLE_PRODUCTION_WORKER: '' },
     expectedCommerceMode: 'LIVE',
-    checkSource: () => ({ status: 'pass', head: 'a'.repeat(40), latestMigration: '0081_draft_draw_snapshot_media_rebase.sql', worktreeClean: true }),
+    checkSource: () => ({ status: 'pass', head: 'a'.repeat(40), latestMigration: releaseMigration, worktreeClean: true }),
     runReleaseCheck() { databaseCalled = true; },
   }), /DABBOBA_ENABLE_PRODUCTION_WORKER/);
   assert.equal(databaseCalled, false);
@@ -303,7 +308,7 @@ test('LIVE Edge preflight requires complete isolated roles and migration 0081 be
     expectedCommerceMode: 'LIVE',
     checkSource: () => ({ status: 'pass', head: 'a'.repeat(40), latestMigration: '0075_shipping_request_retry_after_cancellation.sql', worktreeClean: true }),
     runReleaseCheck() { databaseCalled = true; },
-  }), /migration 0081/);
+  }), new RegExp(`migration ${MINIMUM_DATABASE_RELEASE_VERSION}`));
   assert.equal(databaseCalled, false);
 });
 
@@ -314,14 +319,14 @@ test('complete LIVE Edge candidate reaches the read-only target database release
     sourceEnvironment: { DATABASE_MIGRATION_URL: 'postgresql://migration:fixture@migration.example.test/postgres' },
     checkSource: () => ({
       status: 'pass', head: 'a'.repeat(40),
-      latestMigration: '0081_draft_draw_snapshot_media_rebase.sql', worktreeClean: true,
+      latestMigration: releaseMigration, worktreeClean: true,
     }),
     runReleaseCheck: () => ({ status: 0, stdout: JSON.stringify({
       scope: 'database-release-check/v1', status: 'pass',
       environmentTier: 'PRODUCTION', targetHash: 'b'.repeat(64),
     }) }),
   });
-  assert.equal(result.latestMigration, '0081_draft_draw_snapshot_media_rebase.sql');
+  assert.equal(result.latestMigration, releaseMigration);
   assert.equal(result.targetHash, 'b'.repeat(64));
   assert.deepEqual(result.releaseConfiguration.customerAuthProviders, ['PHONE', 'KAKAO', 'NAVER', 'GOOGLE', 'APPLE']);
 });
@@ -354,7 +359,7 @@ test('Supabase Edge release preflight requires a committed source and a passing 
     },
     checkSource() {
       calls.push('source');
-      return { status: 'pass', head: 'a'.repeat(40), latestMigration: '0081_draft_draw_snapshot_media_rebase.sql', worktreeClean: true, blockers: [] };
+      return { status: 'pass', head: 'a'.repeat(40), latestMigration: releaseMigration, worktreeClean: true, blockers: [] };
     },
     runReleaseCheck({ environment }) {
       calls.push('database');
@@ -580,4 +585,36 @@ test('LIVE Edge requires PHONE only when verified SMS delivery is explicitly att
     edgeExternalValuesFromSource({ DABBOBA_PHONE_LOGIN_READY: 'true' }).DABBOBA_PHONE_LOGIN_READY,
     'true',
   );
+});
+
+test('a LIVE profile keeps and validates the optional KCP channel through serialization', () => {
+  const kcp = { ...liveEdgeProfile, DABBOBA_API_PORTONE_KCP_CHANNEL_KEY: 'channel-key-kcp-live-fixture' };
+  assert.equal(assertSupabaseEdgeReleaseConfiguration(kcp, { expectedCommerceMode: 'LIVE' }).customerAuthProviders.length, 5);
+  const serialized = serializeSupabaseEdgeProfile(kcp);
+  for (const key of ['DABBOBA_API_PORTONE_KCP_CHANNEL_KEY', 'DABBOBA_API_PORTONE_CHANNEL_KEY', 'DABBOBA_API_PORTONE_API_SECRET', 'PAYMENT_RECONCILIATION_PROVIDER']) {
+    assert.match(serialized, new RegExp(`^${key}=`, 'm'), key);
+  }
+  for (const invalid of ['channel-live-fixture', 'not-a-channel', ' channel-key-kcp-live-fixture']) {
+    assert.throws(
+      () => assertSupabaseEdgeReleaseConfiguration({ ...kcp, DABBOBA_API_PORTONE_KCP_CHANNEL_KEY: invalid }, { expectedCommerceMode: 'LIVE' }),
+      /distinct valid channel key/,
+    );
+  }
+  assert.throws(
+    () => assertSupabaseEdgeReleaseConfiguration({ ...edgeProfile, DABBOBA_API_PORTONE_KCP_CHANNEL_KEY: 'channel-key-kcp-live-fixture' }),
+    /must not contain LIVE payment/,
+  );
+});
+
+test('the production Edge profile refuses the staging payment-review login', () => {
+  assert.equal(assertSupabaseEdgeReleaseConfiguration({ ...edgeProfile, DABBOBA_API_PAYMENT_REVIEW_LOGIN_ENABLED: 'false' }).remotePushConfigured, false);
+  for (const key of PAYMENT_REVIEW_EDGE_KEYS) {
+    const value = key.endsWith('_ENABLED') ? 'true' : 'review-fixture-value-that-is-long-enough';
+    assert.throws(() => assertSupabaseEdgeReleaseConfiguration({ ...edgeProfile, [key]: value }), /staging payment-review login/, key);
+    assert.throws(
+      () => assertSupabaseEdgeReleaseConfiguration({ ...liveEdgeProfile, [key]: value }, { expectedCommerceMode: 'LIVE' }),
+      /staging payment-review login/,
+      key,
+    );
+  }
 });

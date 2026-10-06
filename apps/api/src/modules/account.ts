@@ -25,6 +25,7 @@ import {
   loadRequiredPolicyDocuments,
   recordRequiredPolicyAcceptanceEvents,
 } from "../lib/legal-policy.js";
+import { selectCardChannel } from "../lib/portone-channel-binding.js";
 import { CUSTOMER_SUBJECT_LOOKUP_PROVIDERS } from "../lib/supabase-auth.js";
 import { requiredPolicyAcceptance } from "./customer-auth.js";
 import type { ApiContext } from "../types.js";
@@ -1910,9 +1911,21 @@ export async function registerAccountRoutes(app: FastifyInstance, context: ApiCo
             [actorId, shippingPolicy.shippingFee, shippingRequestId],
           );
           paymentOrderId = paymentOrder.rows[0]!.id;
+          // Bind the shipping fee to the configured primary card channel now,
+          // so later window, webhook and refund checks never fall back to a
+          // mutable current channel (null stays reserved for legacy rows).
+          const cardChannel = context.config.paymentProvider === "PORTONE_V2_INICIS"
+            ? selectCardChannel(context.config, "INICIS")
+            : null;
           const payment = await client.query<{ id: string }>(
-            "INSERT INTO payments(order_id,provider,amount) VALUES($1,$2,$3) RETURNING id",
-            [paymentOrderId, context.config.paymentProvider, shippingPolicy.shippingFee],
+            `INSERT INTO payments(order_id,provider,amount,portone_channel_binding)
+             VALUES($1,$2,$3,$4::jsonb) RETURNING id`,
+            [
+              paymentOrderId,
+              cardChannel?.provider ?? context.config.paymentProvider,
+              shippingPolicy.shippingFee,
+              cardChannel ? JSON.stringify(cardChannel) : null,
+            ],
           );
           paymentId = payment.rows[0]!.id;
         }

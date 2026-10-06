@@ -99,6 +99,27 @@ function pgReviewToken(request) {
   const token = matches[0].slice(PG_REVIEW_COOKIE.length + 1);
   return /^[A-Za-z0-9_.-]{32,4096}$/.test(token) ? token : null;
 }
+const PG_REVIEW_CLIENT_IP_CONTEXT = "dabboba-review-client-ip:v1";
+/**
+ * Signs the visitor IP Cloudflare observed so the API limits failed review
+ * logins per reviewer instead of per worker egress address. Without the
+ * dedicated PG_REVIEW_PROXY_SECRET nothing is sent and the API keeps its
+ * shared fallback bucket.
+ */
+export async function pgReviewClientIpHeaders(request, env, now = Date.now()) {
+  const secret = typeof env?.PG_REVIEW_PROXY_SECRET === "string" ? env.PG_REVIEW_PROXY_SECRET.trim() : "";
+  const ip = (request.headers.get("cf-connecting-ip") || "").trim();
+  if (secret.length < 32 || !ip || ip.length > 64 || !/^[0-9A-Fa-f:.]+$/.test(ip)) return {};
+  const time = String(Math.floor(now / 1000));
+  const encoder = new TextEncoder();
+  const key = await crypto.subtle.importKey("raw", encoder.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const digest = new Uint8Array(await crypto.subtle.sign("HMAC", key, encoder.encode(`${PG_REVIEW_CLIENT_IP_CONTEXT}\n${time}\n${ip}`)));
+  return {
+    "x-dabboba-review-client-ip": ip,
+    "x-dabboba-review-client-ip-time": time,
+    "x-dabboba-review-client-ip-signature": Array.from(digest, (byte) => byte.toString(16).padStart(2, "0")).join(""),
+  };
+}
 function pgReviewCookie(token = "", maxAge = 0) {
   return `${PG_REVIEW_COOKIE}=${token}; Path=/review; HttpOnly; Secure; SameSite=Lax; Max-Age=${maxAge}`;
 }
@@ -142,6 +163,7 @@ export async function handlePgReviewService(request, env, externalFetch = global
   if ((route === "/me" || orderMatch || paymentMatch || route === "/orders") && !token) return pgReviewFailure("심사 계정으로 로그인해 주세요.", 401);
   const headers = { "content-type": "application/json", "x-request-id": crypto.randomUUID() };
   if (token && !isLogin) headers.authorization = `Bearer ${token}`;
+  if (isLogin) Object.assign(headers, await pgReviewClientIpHeaders(request, env));
   const key = request.headers.get("idempotency-key");
   if (key) { if (!/^[A-Za-z0-9:_.-]{8,200}$/.test(key)) return pgReviewFailure("요청번호를 확인해 주세요."); headers["idempotency-key"] = key; }
   let body;

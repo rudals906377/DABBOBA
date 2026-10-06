@@ -4,12 +4,14 @@ import test from "node:test";
 import type { ApiConfig } from "@dabboba/config";
 import { createDatabasePool } from "@dabboba/db";
 import { buildApp } from "../app.js";
+import { selectCardChannel } from "../lib/portone-channel-binding.js";
 import { issueSession } from "../plugins/auth.js";
 import { acceptRequiredPoliciesForIntegrationTest } from "../integration-test-fixtures.js";
 
 const databaseUrl = process.env.DABBOBA_TEST_DATABASE_URL;
 
-test("late PortOne refund is full, durable, super-admin only, and never sent twice", {
+for (const cardPg of ["INICIS", "KCP"] as const) {
+test(`${cardPg}: late PortOne refund is full, durable, super-admin only, and never sent twice`, {
   skip: !databaseUrl,
   timeout: 60_000,
 }, async (t) => {
@@ -22,11 +24,12 @@ test("late PortOne refund is full, durable, super-admin only, and never sent twi
     paymentWebhookSecret: "portone-refund-integration-webhook-secret",
     portOne: {
       apiSecret: "synthetic-secret", merchantId: "synthetic-merchant", storeId: "synthetic-store",
-      channelKey: "synthetic-channel", channelEnvironment: "TEST",
+      channelKey: "synthetic-channel", kcpChannelKey: "channel-key-synthetic-kcp", channelEnvironment: "TEST",
       webhookSecret: "portone-refund-integration-webhook-secret",
     },
     gcsBucket: null, gcsProjectId: null, logLevel: "silent",
   };
+  const selectedChannel = selectCardChannel(config, cardPg);
   const { app } = await buildApp({ config, pool, redis: null });
   t.after(async () => { await app.close(); await pool.end(); });
   const suffix = randomUUID().replaceAll("-", "").slice(0, 12);
@@ -67,8 +70,8 @@ test("late PortOne refund is full, durable, super-admin only, and never sent twi
      VALUES($1,$2,$3,'gacha',$4,10000,1,10000)`, [orderId, productId, `환불 테스트 가챠 ${suffix}`, drawVersion.rows[0]!.id],
   );
   const payment = await pool.query<{ id: string }>(
-    "INSERT INTO payments(order_id,provider,status,amount,paid_at) VALUES($1,'PORTONE_V2_INICIS','REFUND_REVIEW',10000,now()) RETURNING id",
-    [orderId],
+    "INSERT INTO payments(order_id,provider,status,amount,paid_at,portone_channel_binding) VALUES($1,$2,'REFUND_REVIEW',10000,now(),$3) RETURNING id",
+    [orderId, selectedChannel.provider, JSON.stringify(selectedChannel)],
   );
   const paymentId = payment.rows[0]!.id;
   await pool.query(
@@ -120,7 +123,7 @@ test("late PortOne refund is full, durable, super-admin only, and never sent twi
     return new Response(JSON.stringify({
       id: requestedPaymentId, transactionId: `portone-${suffix}-${requestedPaymentId}`, pgTxId: `kg-${suffix}-${requestedPaymentId}`,
       merchantId: "synthetic-merchant", storeId: "synthetic-store", version: "V2",
-      channel: { key: "synthetic-channel", type: "TEST", pgProvider: "INICIS_V2" },
+      channel: { key: selectedChannel.channelKey, type: "TEST", pgProvider: selectedChannel.pgProvider },
       method: { type: "PaymentMethodCard" },
       status: cancelled ? "CANCELLED" : "PAID",
       amount: { total: 10_000, paid: 10_000, cancelled: cancelled ? 10_000 : 0 }, currency: "KRW",
@@ -165,8 +168,8 @@ test("late PortOne refund is full, durable, super-admin only, and never sent twi
     [unsafeOrder.rows[0]!.id, unsafeProductId, `환불 테스트 상품 ${suffix}`],
   );
   const unsafePayment = await pool.query<{ id: string }>(
-    "INSERT INTO payments(order_id,provider,status,amount,paid_at) VALUES($1,'PORTONE_V2_INICIS','REFUND_REVIEW',10000,now()) RETURNING id",
-    [unsafeOrder.rows[0]!.id],
+    "INSERT INTO payments(order_id,provider,status,amount,paid_at,portone_channel_binding) VALUES($1,$2,'REFUND_REVIEW',10000,now(),$3) RETURNING id",
+    [unsafeOrder.rows[0]!.id, selectedChannel.provider, JSON.stringify(selectedChannel)],
   );
   await pool.query(
     "INSERT INTO payment_ledger_entries(payment_id,order_id,entry_type,amount,reference_id) VALUES($1,$2,'PAYMENT',10000,$3)",
@@ -194,8 +197,8 @@ test("late PortOne refund is full, durable, super-admin only, and never sent twi
     [uncertainOrder.rows[0]!.id, productId, `환불 테스트 가챠 ${suffix}`, drawVersion.rows[0]!.id],
   );
   const uncertainPayment = await pool.query<{ id: string }>(
-    "INSERT INTO payments(order_id,provider,status,amount,paid_at) VALUES($1,'PORTONE_V2_INICIS','REFUND_REVIEW',10000,now()) RETURNING id",
-    [uncertainOrder.rows[0]!.id],
+    "INSERT INTO payments(order_id,provider,status,amount,paid_at,portone_channel_binding) VALUES($1,$2,'REFUND_REVIEW',10000,now(),$3) RETURNING id",
+    [uncertainOrder.rows[0]!.id, selectedChannel.provider, JSON.stringify(selectedChannel)],
   );
   uncertainPaymentId = uncertainPayment.rows[0]!.id;
   await pool.query(
@@ -262,7 +265,7 @@ test("late PortOne refund is full, durable, super-admin only, and never sent twi
   assert.equal(cancelCount, 1);
 });
 
-test("a paid unused gacha order freezes before one PortOne refund and restores its entitlement and stock", {
+test(`${cardPg}: a paid unused gacha order freezes before one PortOne refund and restores its entitlement and stock`, {
   skip: !databaseUrl,
   timeout: 60_000,
 }, async (t) => {
@@ -275,11 +278,12 @@ test("a paid unused gacha order freezes before one PortOne refund and restores i
     paymentWebhookSecret: "normal-refund-integration-webhook-secret",
     portOne: {
       apiSecret: "synthetic-secret", merchantId: "synthetic-merchant", storeId: "synthetic-store",
-      channelKey: "synthetic-channel", channelEnvironment: "TEST",
+      channelKey: "synthetic-channel", kcpChannelKey: "channel-key-synthetic-kcp", channelEnvironment: "TEST",
       webhookSecret: "normal-refund-integration-webhook-secret",
     },
     gcsBucket: null, gcsProjectId: null, logLevel: "silent",
   };
+  const selectedChannel = selectCardChannel(config, cardPg);
   const { app } = await buildApp({ config, pool, redis: null });
   t.after(async () => { await app.close(); await pool.end(); });
   const suffix = randomUUID().replaceAll("-", "").slice(0, 12);
@@ -336,8 +340,8 @@ test("a paid unused gacha order freezes before one PortOne refund and restores i
       [line.rows[0]!.id, owner.rows[0]!.id, productId, drawVersion.rows[0]!.id, entitlementStatus],
     );
     const payment = await pool.query<{ id: string }>(
-      "INSERT INTO payments(order_id,provider,status,amount,paid_at) VALUES($1,'PORTONE_V2_INICIS','PAID',10000,now()) RETURNING id",
-      [order.rows[0]!.id],
+      "INSERT INTO payments(order_id,provider,status,amount,paid_at,portone_channel_binding) VALUES($1,$2,'PAID',10000,now(),$3) RETURNING id",
+      [order.rows[0]!.id, selectedChannel.provider, JSON.stringify(selectedChannel)],
     );
     await pool.query(
       "INSERT INTO payment_ledger_entries(payment_id,order_id,entry_type,amount,reference_id) VALUES($1,$2,'PAYMENT',10000,$3)",
@@ -379,7 +383,7 @@ test("a paid unused gacha order freezes before one PortOne refund and restores i
       return new Response(JSON.stringify({
         id: failedPrecheckPaymentId, transactionId: `portone-precheck-${suffix}`, pgTxId: `kg-precheck-${suffix}`,
         merchantId: "synthetic-merchant", storeId: "synthetic-store", version: "V2",
-        channel: { key: "synthetic-channel", type: "TEST", pgProvider: "INICIS_V2" },
+        channel: { key: selectedChannel.channelKey, type: "TEST", pgProvider: selectedChannel.pgProvider },
         method: { type: "PaymentMethodCard" }, status: cancelled ? "CANCELLED" : "PAID",
         amount: { total: 10_000, paid: 10_000, cancelled: cancelled ? 10_000 : 0 }, currency: "KRW",
         requestedAt: "2026-09-20T00:00:00.000Z", statusChangedAt: cancelled ? "2026-09-20T00:01:01.000Z" : "2026-09-20T00:00:02.000Z",
@@ -404,7 +408,7 @@ test("a paid unused gacha order freezes before one PortOne refund and restores i
     return new Response(JSON.stringify({
       id: paid.paymentId, transactionId: `portone-${suffix}`, pgTxId: `kg-${suffix}`,
       merchantId: "synthetic-merchant", storeId: "synthetic-store", version: "V2",
-      channel: { key: "synthetic-channel", type: "TEST", pgProvider: "INICIS_V2" },
+      channel: { key: selectedChannel.channelKey, type: "TEST", pgProvider: selectedChannel.pgProvider },
       method: { type: "PaymentMethodCard" }, status: cancelled ? "CANCELLED" : "PAID",
       amount: { total: 10_000, paid: 10_000, cancelled: cancelled ? 10_000 : 0 }, currency: "KRW",
       requestedAt: "2026-09-20T00:00:00.000Z", statusChangedAt: cancelled ? "2026-09-20T00:01:01.000Z" : "2026-09-20T00:00:02.000Z",
@@ -511,3 +515,5 @@ test("a paid unused gacha order freezes before one PortOne refund and restores i
   );
   assert.equal(recoveredTicket.rows[0]?.status, "CANCELLED");
 });
+
+}

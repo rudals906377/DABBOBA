@@ -5,6 +5,7 @@ import type { ApiConfig } from "@dabboba/config";
 import { createDatabasePool } from "@dabboba/db";
 import { buildApp } from "../app.js";
 import { acceptRequiredPoliciesForIntegrationTest } from "../integration-test-fixtures.js";
+import { selectCardChannel } from "../lib/portone-channel-binding.js";
 import { issueSession } from "../plugins/auth.js";
 
 const databaseUrl = process.env.DABBOBA_TEST_DATABASE_URL;
@@ -183,6 +184,12 @@ test("a late paid shipping fee for a cancelled request is cancelled once without
   assert.notEqual(retryBody.id, shippingRequestId);
   assert.equal(retryBody.status, "PAYMENT_PENDING");
   assert.ok(retryBody.paymentId);
+  // A new shipping-fee payment is bound to the primary card channel snapshot.
+  const binding = await pool.query("SELECT provider,portone_channel_binding FROM payments WHERE id=$1", [retryBody.paymentId]);
+  assert.deepEqual(binding.rows[0], {
+    provider: "PORTONE_V2_INICIS",
+    portone_channel_binding: selectCardChannel(config, "INICIS"),
+  });
   const history = await pool.query<{ count: string }>(
     "SELECT count(*)::text AS count FROM shipping_request_items WHERE inventory_unit_id=$1",
     [inventory.rows[0]!.id],

@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { withTransaction, type DatabaseClient } from "@dabboba/db";
 import type { UserRole, UserStatus } from "@dabboba/domain";
+import { activePaymentReviewLogin, authenticatePaymentReviewer } from "../lib/payment-review-auth.js";
 import { AppError, badRequest, conflict, forbidden, unauthorized } from "../lib/errors.js";
 import { enumInput, objectInput, stringInput } from "../lib/input.js";
 import { sealAppleRefreshToken, validateAppleRefreshToken } from "../lib/apple-credential.js";
@@ -36,6 +37,7 @@ type CustomerUserRow = {
 
 export type CustomerAuthRouteDependencies = {
   verifyAccessToken?: typeof verifySupabaseCustomerAccessToken;
+  reviewAuthFetch?: typeof fetch;
 };
 
 function configuredBroker(context: ApiContext): { supabaseUrl: string; audience: string; publishableKey: string } | null {
@@ -270,7 +272,7 @@ async function existingBrokeredCustomerForDeletion(
 async function upsertBrokeredCustomer(
   client: DatabaseClient,
   claims: VerifiedSupabaseCustomer,
-  loginProvider: (typeof CUSTOMER_LOGIN_METHODS)[number],
+  loginProvider: (typeof CUSTOMER_AUTH_PROVIDERS)[number],
 ): Promise<CustomerUserRow> {
   await client.query(
     "SELECT pg_advisory_xact_lock(hashtextextended($1::text,0))",
@@ -356,6 +358,49 @@ export async function registerCustomerAuthRoutes(
   context: ApiContext,
   dependencies: CustomerAuthRouteDependencies = {},
 ) {
+  app.get("/v1/auth/payment-review", async (_request, reply) => {
+    const review = activePaymentReviewLogin(context.config);
+    return reply.header("cache-control", "no-store").send({ enabled: Boolean(review), expiresAt: review?.expiresAt ?? null });
+  });
+
+  app.post("/v1/auth/payment-review", {
+    config: { rateLimit: { max: 5, timeWindow: "15 minutes" } },
+  }, async (request, reply) => {
+    const review = activePaymentReviewLogin(context.config);
+    if (!review) throw new AppError(404, "NOT_FOUND", "요청한 정보를 찾을 수 없습니다.");
+    const input = objectInput(request.body);
+    if (Object.keys(input).some(key => !["email", "password", "acceptedPolicies"].includes(key))) throw badRequest();
+    const policy = await loadRequiredPolicyDocuments(context.pool);
+    requiredPolicyAcceptance(input, policy.versions);
+    const claims = await authenticatePaymentReviewer(context.config,
+      stringInput(input, "email", { max: 254 })!,
+      stringInput(input, "password", { min: 1, max: 256, trim: false })!, {
+        ...(dependencies.reviewAuthFetch ? { fetch: dependencies.reviewAuthFetch } : {}),
+        ...(dependencies.verifyAccessToken ? { verifyAccessToken: dependencies.verifyAccessToken } : {}),
+      });
+    const requestUserAgent = userAgent(request.headers["user-agent"]);
+    const { user, session } = await withTransaction(context.pool, async (client) => {
+      const user = await upsertBrokeredCustomer(client, claims, "EMAIL");
+      await recordRequiredPolicyAcceptanceEvents(client, {
+        userId: user.id, documents: policy.documents, correlationId: request.id,
+        source: "MOBILE_LOGIN", ipAddress: request.ip,
+        ...(requestUserAgent ? { userAgent: requestUserAgent } : {}),
+      });
+      const session = await issueSession(client, context.config, {
+        userId: user.id, kind: "USER", ip: request.ip,
+        expiresInMs: 86_400_000,
+        reviewAccessExpiresAt: new Date(review.expiresAt),
+        ...(requestUserAgent ? { userAgent: requestUserAgent } : {}),
+      });
+      return { user, session };
+    });
+    return reply.header("cache-control", "no-store").code(201).send({
+      token: session.token, expiresAt: session.expiresAt.toISOString(),
+      actor: { userId: user.id, email: user.email, nickname: user.nickname,
+        role: user.role, status: user.status, sessionId: session.sessionId, permissions: [] },
+    });
+  });
+
   app.get("/v1/auth/providers", async (_request, reply) => {
     const policy = await loadRequiredPolicyDocuments(context.pool);
     return reply.header("cache-control", "no-store").send(

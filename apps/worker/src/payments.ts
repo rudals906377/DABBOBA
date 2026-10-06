@@ -247,7 +247,7 @@ export async function reconcilePaymentBatch(
        LEFT JOIN worker_payment_reconciliations r ON r.payment_id=p.id
       WHERE (
           p.status IN ('PENDING','AUTHORIZED','REFUND_REVIEW')
-          OR (p.status='CANCELLED' AND p.provider='PORTONE_V2_INICIS'
+          OR (p.status='CANCELLED' AND p.provider IN ('PORTONE_V2_INICIS','PORTONE_V2_KCP')
               AND p.pg_attempt_started_at IS NOT NULL)
         )
         AND p.updated_at <= $1

@@ -172,6 +172,26 @@ export const DATABASE_RELEASE_MIGRATIONS = Object.freeze([
     path: 'packages/db/migrations/0081_draft_draw_snapshot_media_rebase.sql',
     sha256: '7846f17121e9a2d720d1ea53bea32877317b1b8d609d41991d9282fd7ca7c281',
   }),
+  Object.freeze({
+    file: '0082_commerce_retention_components.sql',
+    path: 'packages/db/migrations/0082_commerce_retention_components.sql',
+    sha256: '6e8a469117d42315d10a41c4e1247772a7907e398a784c4ff725d46c593b4631',
+  }),
+  Object.freeze({
+    file: '0083_commerce_retention_bounded_assessment.sql',
+    path: 'packages/db/migrations/0083_commerce_retention_bounded_assessment.sql',
+    sha256: '0618fd9094eb264963fd13c3c272551dfaadfdb6db83e1d8d175cc45593591b7',
+  }),
+  Object.freeze({
+    file: '0084_portone_card_channel_binding.sql',
+    path: 'packages/db/migrations/0084_portone_card_channel_binding.sql',
+    sha256: '33a10f982c51aead5a4e4a90c6d944a20a6312302f126d0e8a20ea05c4cfcb15',
+  }),
+  Object.freeze({
+    file: '0085_session_review_access_deadline.sql',
+    path: 'packages/db/migrations/0085_session_review_access_deadline.sql',
+    sha256: 'ef9f803aef714291ebfaf4aacdf9216c5f8a430be7990345045bd0a59126efe9',
+  }),
 ]);
 
 export const MINIMUM_DATABASE_RELEASE_VERSION =

@@ -45,6 +45,29 @@ const LIVE_PAYMENT_IDENTIFIERS = [
   'DABBOBA_API_PORTONE_STORE_ID',
   'DABBOBA_API_PORTONE_CHANNEL_KEY',
 ];
+// Optional second card channel (KCP) in the same LIVE store; see
+// docs/portone-multi-card-channel.md.
+export const PORTONE_KCP_CHANNEL_KEY = 'DABBOBA_API_PORTONE_KCP_CHANNEL_KEY';
+// Every LIVE payment setting the release validator reads. The serializer keeps
+// them so a reviewed LIVE profile never silently loses a channel on rewrite.
+export const LIVE_PAYMENT_PROFILE_KEYS = Object.freeze([
+  ...LIVE_PAYMENT_SECRETS,
+  ...LIVE_PAYMENT_IDENTIFIERS,
+  'DABBOBA_API_PORTONE_CHANNEL_ENVIRONMENT',
+  PORTONE_KCP_CHANNEL_KEY,
+  'PAYMENT_RECONCILIATION_PROVIDER',
+  'PORTONE_RECONCILIATION_API_BASE_URL',
+  'PAYMENT_RECONCILIATION_WORKER_SECRET',
+]);
+// The password review login is pinned to the staging payment project and is
+// never part of a production profile.
+export const PAYMENT_REVIEW_EDGE_KEYS = Object.freeze([
+  'DABBOBA_API_PAYMENT_REVIEW_LOGIN_ENABLED',
+  'DABBOBA_API_PAYMENT_REVIEW_LOGIN_EMAIL',
+  'DABBOBA_API_PAYMENT_REVIEW_LOGIN_SUBJECT',
+  'DABBOBA_API_PAYMENT_REVIEW_LOGIN_EXPIRES_AT',
+  'DABBOBA_API_PAYMENT_REVIEW_PROXY_SECRET',
+]);
 
 const GENERATED_REQUIRED_KEYS = [
   'DABBOBA_ENVIRONMENT_TIER',
@@ -148,6 +171,7 @@ export function serializeSupabaseEdgeProfile(values) {
   const keys = [
     ...REQUIRED_KEYS,
     ...SUPABASE_EDGE_EXTERNAL_OPTIONAL_KEYS,
+    ...LIVE_PAYMENT_PROFILE_KEYS,
     'DABBOBA_STORAGE_S3_ACCESS_KEY_ID',
     'DABBOBA_STORAGE_S3_SECRET_ACCESS_KEY',
   ];
@@ -251,9 +275,27 @@ function assertLivePaymentConfiguration(values, providers) {
   for (const key of ['KG_INICIS_ENVIRONMENT', 'KG_INICIS_MID', 'KG_INICIS_INIAPI_KEY', 'KG_INICIS_CLIENT_IP']) {
     if (values[key]?.trim()) throw new Error('LIVE Edge PortOne API requery cannot use the legacy KG INICIS inquiry rail.');
   }
+  const kcpChannelKey = values[PORTONE_KCP_CHANNEL_KEY];
+  if (kcpChannelKey !== undefined && kcpChannelKey !== '' && (
+    kcpChannelKey !== kcpChannelKey.trim()
+    || !/^channel-key-[A-Za-z0-9-]{1,160}$/.test(kcpChannelKey)
+    || kcpChannelKey === values.DABBOBA_API_PORTONE_CHANNEL_KEY
+  )) {
+    throw new Error(`LIVE Edge ${PORTONE_KCP_CHANNEL_KEY} must be a distinct valid channel key in the same store.`);
+  }
+}
+
+function assertNoPaymentReviewLogin(values) {
+  for (const key of PAYMENT_REVIEW_EDGE_KEYS) {
+    const value = values?.[key]?.trim();
+    if (value && !(key === 'DABBOBA_API_PAYMENT_REVIEW_LOGIN_ENABLED' && value === 'false')) {
+      throw new Error('The production Edge profile must not configure the staging payment-review login.');
+    }
+  }
 }
 
 export function assertSupabaseEdgeReleaseConfiguration(values, { expectedCommerceMode = 'PRELAUNCH' } = {}) {
+  assertNoPaymentReviewLogin(values);
   for (const key of SUPABASE_EDGE_EXTERNAL_REQUIRED_KEYS) {
     if (!values?.[key]?.trim()) {
       throw new Error(`Supabase Edge release profile is missing externally verified ${key}.`);
@@ -275,6 +317,7 @@ export function assertSupabaseEdgeReleaseConfiguration(values, { expectedCommerc
       ...LIVE_PAYMENT_SECRETS,
       ...LIVE_PAYMENT_IDENTIFIERS,
       'DABBOBA_API_PORTONE_CHANNEL_ENVIRONMENT',
+      PORTONE_KCP_CHANNEL_KEY,
       'PAYMENT_RECONCILIATION_PROVIDER',
       'PORTONE_RECONCILIATION_API_BASE_URL',
       'PAYMENT_RECONCILIATION_WORKER_SECRET',

@@ -56,6 +56,12 @@ function providerReturning(body: Record<string, unknown>) {
   });
 }
 
+test("KCP uses the same authenticated canonical requery rather than a local mutation", async () => {
+  assert.deepEqual(await providerReturning({ providerStatus: "PAID", outcome: "processed", localStatus: "PAID" }).observe({ ...payment, provider: "PORTONE_V2_KCP" }), {
+    state: "PAID", observedAt: "2026-09-26T08:00:00.000Z", canonicalStatus: "PAID", providerStatus: "PAID",
+  });
+});
+
 test("an authoritative PortOne not-found is a no-payment observation, never a mutation", async () => {
   assert.deepEqual(await providerReturning({
     providerStatus: null, outcome: "provider_not_found", localStatus: "PENDING",

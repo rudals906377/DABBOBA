@@ -24,6 +24,51 @@ type MigrationFile = {
 type MigrationClient = Pick<DatabaseClient, "query">;
 
 /**
+ * Migrations renumbered after a non-production database (staging) had already
+ * applied them under an earlier file name. The SQL bytes are unchanged, so the
+ * recorded checksum must match exactly; the runner then renames the record
+ * instead of executing the SQL a second time. Production never recorded the
+ * previous names.
+ */
+export const RENUMBERED_MIGRATIONS = Object.freeze([
+  Object.freeze({
+    file: "0084_portone_card_channel_binding.sql",
+    previousFile: "0082_portone_card_channel_binding.sql",
+  }),
+]);
+
+export type MigrationRename = { file: string; previousFile: string };
+
+/**
+ * Decides which renumbered migrations are already applied under their previous
+ * name. Fails closed when the previous file still exists, when both names are
+ * recorded, or when the recorded checksum differs from the renumbered bytes.
+ */
+export function renumberedMigrationRenames(
+  diskChecksums: ReadonlyMap<string, string>,
+  appliedChecksums: ReadonlyMap<string, string>,
+  renumbered: readonly MigrationRename[] = RENUMBERED_MIGRATIONS,
+): MigrationRename[] {
+  const renames: MigrationRename[] = [];
+  for (const entry of renumbered) {
+    if (diskChecksums.has(entry.previousFile)) {
+      throw new Error(`Renumbered migration ${entry.previousFile} must not remain on disk`);
+    }
+    const previousChecksum = appliedChecksums.get(entry.previousFile);
+    if (previousChecksum === undefined) continue;
+    if (appliedChecksums.has(entry.file)) {
+      throw new Error(`Migration ${entry.file} is recorded under both ${entry.previousFile} and its new name`);
+    }
+    const checksum = diskChecksums.get(entry.file);
+    if (checksum === undefined || previousChecksum !== checksum) {
+      throw new Error(`Migration checksum mismatch: ${entry.previousFile} (renumbered to ${entry.file})`);
+    }
+    renames.push({ file: entry.file, previousFile: entry.previousFile });
+  }
+  return renames;
+}
+
+/**
  * A migration whose first line is exactly this header runs outside a
  * transaction, one statement at a time. It is still applied under the
  * migration advisory lock and recorded with its checksum only after every
@@ -299,20 +344,38 @@ export async function migrate(pool: DatabasePool, options: MigrateOptions = {}):
       )
     `);
 
-    const migrations: MigrationFile[] = [];
+    const sources = new Map<string, { sql: string; checksum: string }>();
     for (const file of files) {
       const sql = await readFile(new URL(`../migrations/${file}`, import.meta.url), "utf8");
-      const checksum = createHash("sha256").update(sql).digest("hex");
-      const existing = await client.query<{ checksum: string }>(
-        "SELECT checksum FROM schema_migrations WHERE version = $1",
-        [file],
+      sources.set(file, { sql, checksum: createHash("sha256").update(sql).digest("hex") });
+    }
+    const recorded = await client.query<{ version: string; checksum: string }>(
+      "SELECT version,checksum FROM schema_migrations",
+    );
+    const appliedChecksums = new Map(recorded.rows.map((row) => [row.version, row.checksum]));
+    const renames = renumberedMigrationRenames(
+      new Map([...sources].map(([file, source]) => [file, source.checksum])),
+      appliedChecksums,
+    );
+    for (const rename of renames) {
+      const renamed = await client.query(
+        "UPDATE schema_migrations SET version=$1 WHERE version=$2 AND checksum=$3",
+        [rename.file, rename.previousFile, sources.get(rename.file)!.checksum],
       );
-      if (existing.rowCount) {
-        if (existing.rows[0]?.checksum !== checksum) {
-          throw new Error(`Migration checksum mismatch: ${file}`);
-        }
+      if (renamed.rowCount !== 1) throw new Error(`Could not record renumbered migration ${rename.file}`);
+      appliedChecksums.delete(rename.previousFile);
+      appliedChecksums.set(rename.file, sources.get(rename.file)!.checksum);
+      process.stderr.write(`Recorded already-applied ${rename.previousFile} as ${rename.file}.\n`);
+    }
+
+    const migrations: MigrationFile[] = [];
+    for (const file of files) {
+      const { sql, checksum } = sources.get(file)!;
+      const existing = appliedChecksums.get(file);
+      if (existing !== undefined && existing !== checksum) {
+        throw new Error(`Migration checksum mismatch: ${file}`);
       }
-      migrations.push({ file, sql, checksum, applied: Boolean(existing.rowCount) });
+      migrations.push({ file, sql, checksum, applied: existing !== undefined });
     }
 
     assertMigrationTargetAllowed(
