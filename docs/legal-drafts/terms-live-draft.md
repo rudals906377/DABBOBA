@@ -88,8 +88,8 @@
 ## 10. 취소·환불과 청약철회
 
 - 취소·환불은 앱의 내정보 → 고객센터 → 1:1 문의에서 주문번호와 사유를 남겨 요청합니다. 앱 안에서 회원이 직접 환불을 완료하는 기능은 제공하지 않습니다.
-- 결제 후 뽑기권을 하나도 사용하지 않은 가챠 주문은 회사가 결제·뽑기권 상태를 확인한 뒤 결제 전액을 취소할 수 있습니다. 이때 뽑기권은 취소되고, 사용한 포인트는 다시 적립됩니다. 확인 중에는 해당 주문의 뽑기가 잠깁니다.
-- 뽑기권을 일부 사용한 주문, 일부 금액 취소 [확인 필요: 일부 사용·부분 취소·전액 포인트 결제 주문의 환불 기준]
+- 결제 후 뽑기권을 하나도 사용하지 않은 가챠 주문은 회사가 결제·뽑기권 상태를 확인한 뒤 결제 전액을 취소할 수 있습니다. 이때 뽑기권은 취소되고, 사용한 포인트는 다시 적립됩니다. 포인트만으로 결제한 주문도 같은 기준으로 환불합니다. 확인 중에는 해당 주문의 뽑기가 잠깁니다.
+- 가챠 뽑기권을 일부 사용한 주문은 사용하지 않은 뽑기만 환불합니다. 환불액은 결제 금액(카드 결제액과 사용 포인트의 합)을 주문한 뽑기 수로 나눈 금액에 사용하지 않은 뽑기 수를 곱하고 원 단위 미만을 버린 금액입니다. 이 중 카드 결제액을 같은 비율로 나눈 금액(원 단위 미만 버림)은 카드 부분 취소로, 나머지는 포인트로 돌려드립니다. 쿠폰 할인액은 돌려드리지 않으며, 사용한 뽑기와 그 결과 상품은 환불 대상이 아닙니다.
 - 카드 결제분은 원래 결제수단으로 취소하며, 카드사에 반영되는 시점은 결제수단에 따라 다를 수 있습니다.
 - 청약철회는 관련 법령에서 정한 기간과 제한 사유에 따릅니다. 회사는 법령상 제한 사유가 있으면 결제 전에 그 내용을 알리며, 무작위 상품이라는 이유만으로 법령상 권리를 일괄 제한하지 않습니다. [확인 필요: 청약철회 기간·제한 사유(전자상거래법 제17조)·환급 기한·반품 배송비 문구]
 - 받은 상품의 하자·파손·오배송은 고객지원으로 접수할 수 있으며, 관련 법령에 따라 교환 또는 환불합니다.
@@ -142,7 +142,7 @@
 - 사업자 정보: `apps/mobile/src/features/profile/business-information.ts`, `scripts/check-mobile-release-config.mjs`(`validateLiveLegalDocuments`, `PRELAUNCH_LEGAL_MARKERS`, `validateLegalBusinessPhone`)
 - `AGENTS.md`: DABBOBA Product Decisions(로그인 수단, 배송 기준, 포인트 환급, 교환방, 보관함), Native Checkout Reference — 2026-09-09, Native Exchange Room And Lifecycle — 2026-09-11, Review Follow-up Decisions — 2026-09-30, First Launch Scope And Product Gallery — 2026-10-01
 - 결제·뽑기: `apps/api/src/modules/commerce.ts`(주문 생성·15분 재고 예약·확률표 버전 확인·`draw-odds`·`REMAINING_QUANTITY_RATIO`·CSPRNG 선택 근거·환불 시 포인트 복원), `docs/gacha-sales-store-preparation-2026-10-01.md`
-- 환불: `apps/api/src/modules/portone-payments.ts`(`normalDrawRefundBlocker`, `lateRefundBlocker`, `REFUND_REVIEW`), `apps/api/src/modules/admin-commerce.ts`, `docs/mobile-store-release.md`(셀프 환불·부분 환불 미완료)
+- 환불: `apps/api/src/modules/portone-payments.ts`(`normalDrawRefundBlocker`, `lateRefundBlocker`, `REFUND_REVIEW`), `apps/api/src/modules/point-order-refunds.ts`(포인트 전용 주문), `apps/api/src/modules/partial-unused-refunds.ts`·`partial-unused-refund-apply.ts`(미사용 뽑기 부분 환불, 2026-10-06 소유자 결정), `apps/api/src/modules/admin-commerce.ts`
 - 보관·배송·포인트: `apps/api/src/modules/account.ts`(배송 기준 상수, 포인트 환급 적격 조건, 탈퇴 차단 항목), `packages/db/migrations/0049_shipping_storage_policy.sql`, `0050_shipping_fee_policy.sql`, `0061_inventory_storage_expiry_lifecycle.sql`
 - 교환: `apps/api/src/modules/exchange.ts`, `packages/db/migrations/0043_exchange_customer_lifecycle.sql`
 - 로그인·탈퇴: `docs/customer-auth-setup.md`, `apps/worker/src/supabase-auth-deletion.ts`

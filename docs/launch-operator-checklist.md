@@ -16,19 +16,20 @@ corepack pnpm run build:all
 corepack pnpm run db:release-source:check      # 확인: "blockers": []
 ```
 
-## 2. 운영 DB 백업 → 마이그레이션 0083·0084·0085·0086
+## 2. 운영 DB 백업 → 마이그레이션 0083~0087
 
 ```
 node ops/database/backup.mjs backup /절대경로/archive.dbbenc /절대경로/key-file
 node ops/database/backup.mjs verify /절대경로/archive.dbbenc /절대경로/key-file   # 확인: archive-authenticated
-corepack pnpm run db:migrate     # 확인: Applied 4 migration(s).
+corepack pnpm run db:migrate     # 확인: Applied 5 migration(s).
 corepack pnpm run db:migrate     # 확인: Database schema is current.
 corepack pnpm --filter @dabboba/db check:release   # 확인: "blockers": [] — 출력의 targetHash를 기록
 ```
 
 - 0083은 기록 정리 평가 함수만 바꾼다. 0084는 `payments`에 결제 채널 기록 컬럼·불변 트리거를, 0085는 `sessions`에 심사 마감 컬럼을 추가한다.
 - 0086은 `account_deletion_requests`에 포인트 소멸 동의 금액 컬럼을, 탈퇴 회원의 배송지·문의 내용을 따로 두는 소유자 전용 테이블과 분리 함수를 추가한다. 이 테이블은 API·관리자·워커 어느 역할도 읽을 수 없다.
-- 네 마이그레이션 모두 기존 데이터를 바꾸지 않는다. API·워커가 0084~0086을 사용하므로 반드시 이 단계 다음에 배포한다.
+- 0087은 미사용 뽑기 부분 환불 요청·계획 테이블(`partial_unused_draw_refunds`)을 추가한다.
+- 다섯 마이그레이션 모두 기존 데이터를 바꾸지 않는다. API·워커가 0084~0087을 사용하므로 반드시 이 단계 다음에 배포한다.
 
 ## 3. 서버(Edge) 배포 — PRELAUNCH 유지
 
@@ -108,6 +109,7 @@ corepack pnpm run supabase:worker:schedule <2단계 check:release의 targetHash>
 - 카드 결제 → 뽑기 → 결과, 미사용 주문 전액 환불(관리자) → 카드 취소·재고·포인트 복구
 - 포인트+카드 혼합 주문 전액 환불 → 사용 포인트 복구
 - 포인트만으로 결제한 주문 환불(관리자 포인트 주문 환불)
+- 일부 뽑기를 사용한 주문의 미사용 뽑기 부분 환불: 카드 부분 취소 금액이 관리자 화면 미리보기와 같은지, 반영 후 주문이 결제 완료로 돌아오고 고객 구매 내역에 "미사용 뽑기 N장 환불"이 보이는지, 포인트 전용 주문도 포인트로만 돌아오는지
 - 무료배송 미달 배송 신청 → 배송비 3,000원 결제 → 출고 가능 상태, 배송비 환불
 - 결제창을 닫거나 15분 방치 → 주문·배송 신청 자동 취소(Cron 필요)
 
