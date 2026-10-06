@@ -83,3 +83,7 @@ overrides:
   sharp@>=0.35.0 <0.35.4: 0.35.4
   # GHSA-w5hq-g745-h8pq (uuid v3/v5/v6 missing buffer bounds check).
   uuid@<11.1.1: 11.1.1
+  # GHSA-68fv-2mgg-jv7q (source-map-js indexed source-map section offset event-loop DoS).
+  source-map-js@>=1.0.0 <1.2.2: 1.2.2
+  # GHSA-vc2v-76pw-4v95 (compression memory leak on premature response close).
+  compression@<1.8.2: 1.8.2
