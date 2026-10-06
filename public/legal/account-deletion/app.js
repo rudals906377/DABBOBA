@@ -36,6 +36,7 @@
     "accept-terms", "accept-privacy", "verify-otp-button", "resend-otp-button", "change-email-button",
     "preview-step", "deletion-ready", "deletion-blocked", "blocker-list",
     "confirm-deletion", "request-deletion-button", "refresh-preview-button",
+    "point-forfeiture-notice", "point-forfeiture-row", "confirm-point-forfeiture",
     "flow-message", "flow-error",
   ].map(function (id) { return [id, document.getElementById(id)]; }));
 
@@ -49,6 +50,8 @@
   let resendAvailableAt = 0;
   let countdownTimer = null;
   let deletionRequestKey = null;
+  // The exact remaining balance the customer agrees to forfeit; 0 when none.
+  let pointForfeitureBalance = 0;
 
   void initialize();
 
@@ -80,9 +83,8 @@
     }
     void loadDeletionPreview();
   });
-  elements["confirm-deletion"].addEventListener("change", function () {
-    elements["request-deletion-button"].disabled = !elements["confirm-deletion"].checked;
-  });
+  elements["confirm-deletion"].addEventListener("change", updateDeletionButton);
+  elements["confirm-point-forfeiture"].addEventListener("change", updateDeletionButton);
   elements["request-deletion-button"].addEventListener("click", function () { void submitDeletionRequest(); });
   elements["refresh-status-button"].addEventListener("click", function () { void refreshReceiptStatus(); });
   elements["clear-receipt-button"].addEventListener("click", clearReceiptAndRestart);
@@ -393,14 +395,29 @@
     }
   }
 
+  function updateDeletionButton() {
+    elements["request-deletion-button"].disabled = !elements["confirm-deletion"].checked
+      || (pointForfeitureBalance > 0 && !elements["confirm-point-forfeiture"].checked);
+  }
+
   function renderDeletionPreview(preview) {
     const blockers = BLOCKERS.filter(function (entry) {
       return Number.isSafeInteger(preview.blockers && preview.blockers[entry[0]])
         && preview.blockers[entry[0]] > 0;
     });
-    const canDeleteNow = preview.canDeleteNow === true && blockers.length === 0;
+    // Points alone never block: the customer may forfeit exactly that balance.
+    const forfeitable = preview.canDeleteWithPointForfeiture === true
+      && blockers.length === 1 && blockers[0][0] === "pointBalance";
+    pointForfeitureBalance = forfeitable ? preview.blockers.pointBalance : 0;
+    const canDeleteNow = (preview.canDeleteNow === true && blockers.length === 0) || forfeitable;
     elements["deletion-ready"].hidden = !canDeleteNow;
     elements["deletion-blocked"].hidden = canDeleteNow;
+    elements["point-forfeiture-notice"].hidden = !forfeitable;
+    elements["point-forfeiture-row"].hidden = !forfeitable;
+    elements["point-forfeiture-notice"].textContent = forfeitable
+      ? "남은 포인트 " + pointForfeitureBalance.toLocaleString("ko-KR") + "P는 현금으로 돌려드리지 않으며 탈퇴와 함께 소멸합니다. 소멸한 포인트는 되살릴 수 없습니다."
+      : "";
+    elements["confirm-point-forfeiture"].checked = false;
     elements["confirm-deletion"].checked = false;
     elements["request-deletion-button"].disabled = true;
     elements["blocker-list"].replaceChildren();
@@ -416,6 +433,7 @@
   async function submitDeletionRequest() {
     clearError();
     if (!elements["confirm-deletion"].checked) return;
+    if (pointForfeitureBalance > 0 && !elements["confirm-point-forfeiture"].checked) return;
     if (!activeVerifiedSession()) return resetAuthentication("본인 확인 시간이 지났습니다. 다시 인증해 주세요.");
     if (!window.confirm("계정을 삭제하면 일반 회원정보와 로그인 연결을 복구할 수 없습니다. 탈퇴를 요청할까요?")) return;
 
@@ -429,7 +447,7 @@
           "content-type": "application/json",
           "idempotency-key": deletionRequestKey,
         },
-        body: "{}",
+        body: JSON.stringify(pointForfeitureBalance > 0 ? { forfeitPointBalance: pointForfeitureBalance } : {}),
       });
       if (!isReceipt(receipt)) throw new Error("invalid receipt");
       storeReceipt({ requestId: receipt.id, statusToken: receipt.statusToken });
@@ -441,7 +459,7 @@
       const status = error && typeof error === "object" ? error.status : 0;
       if (status === 401 || status === 403) return resetAuthentication("본인 확인 시간이 지났습니다. 다시 인증해 주세요.");
       showError(status === 409
-        ? "이미 탈퇴 처리가 진행 중입니다. 저장된 접수정보가 없다면 고객지원으로 문의해 주세요."
+        ? "이미 탈퇴 처리가 진행 중이거나 남은 포인트가 바뀌었습니다. 다시 확인하거나, 저장된 접수정보가 없다면 고객지원으로 문의해 주세요."
         : "탈퇴 요청을 접수하지 못했습니다. 잠시 후 다시 시도해 주세요.");
     } finally {
       setBusy(elements["request-deletion-button"], false, "계정 삭제 요청");
@@ -588,6 +606,7 @@
     otpExpiresAt = 0;
     resendAvailableAt = 0;
     deletionRequestKey = null;
+    pointForfeitureBalance = 0;
     elements["account-otp"].value = "";
     try {
       sessionStorage.removeItem(SOCIAL_PKCE_STORAGE_KEY);
