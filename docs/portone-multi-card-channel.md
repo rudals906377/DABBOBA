@@ -20,6 +20,9 @@ remains PRELAUNCH until the separate release gates are met.
 2. Configure the additional public KCP channel key only in the intended backend.
    API/webhook secrets remain server-only. TEST and LIVE channels cannot be mixed.
    Supabase Edge uses the namespaced `DABBOBA_API_PORTONE_KCP_CHANNEL_KEY`.
+   The production profile tooling (`scripts/prepare-supabase-edge-profile.mjs`)
+   keeps it with the other LIVE payment keys, rejects it in a PRELAUNCH profile,
+   and requires a distinct `channel-key-…` value in a LIVE profile.
    The worker receives no PG channels or API secrets; its existing authenticated
    canonical API requery is also responsible for KCP recovery.
 3. Deploy API/worker with the matching frontend. No migration or provider-setting
@@ -47,6 +50,34 @@ Historical INICIS orders without a snapshot retain the legacy primary fallback;
 KCP orders without a complete snapshot are rejected. Channel removal/rotation
 fails closed for affected snapshots: reconcile pending orders and preserve a
 supported channel until refunds/recovery for its orders are no longer needed.
+
+## Staging payment-review login
+
+The `/review` web page on dabboba.net proxies to the staging payment project
+(`lyzcyrdiazorjaqlgblr`) only. Its password login is configured on that staging
+Edge API, never in the production profile (the production profile tooling
+refuses these keys):
+
+| Staging Edge secret | Purpose |
+| --- | --- |
+| `DABBOBA_API_PAYMENT_REVIEW_LOGIN_ENABLED` | `true` only during a review window |
+| `DABBOBA_API_PAYMENT_REVIEW_LOGIN_EMAIL` / `_SUBJECT` | the single pinned review Auth user |
+| `DABBOBA_API_PAYMENT_REVIEW_LOGIN_EXPIRES_AT` | absolute end, at most 30 days ahead |
+| `DABBOBA_API_PAYMENT_REVIEW_PROXY_SECRET` | optional; same value as the Pages secret below |
+
+Review sessions store their absolute deadline on the session row (migration
+0085). A session never outlives that deadline, refresh issues at most one day
+at a time, and once the review login is disabled or expired a refresh revokes
+the session instead of issuing an ordinary customer session.
+
+Failed review logins are limited to 5 per 15 minutes. Every `/review` request
+reaches the API from the Cloudflare worker, so without per-visitor keying all
+reviewers would share one bucket. Set the same random 32+ byte value as the
+Cloudflare Pages secret `PG_REVIEW_PROXY_SECRET` and the staging Edge secret
+`DABBOBA_API_PAYMENT_REVIEW_PROXY_SECRET`: the worker then signs the visitor IP
+from `CF-Connecting-IP` on the login request, and the API keys the limit by that
+IP only when the HMAC and a 60-second timestamp verify. Until both are set the
+limit stays on the shared fallback bucket.
 
 ## Provider-specific browser constraints
 
