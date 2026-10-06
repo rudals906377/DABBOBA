@@ -397,8 +397,8 @@ When any text-entry control loses focus, dismiss the simulated keyboard. If the 
 
 ## Owner Launch Decisions — 2026-10-06
 
-- Storage-expiry reminders and the automatic `EXPIRED_HOLD` transition stay off (`WORKER_INVENTORY_STORAGE_EXPIRY_MODE=DISABLED`, not passed through to the Edge worker). The owner decides whether to run them within 60 days of the first LIVE sale, before the first stored prize reaches its 60-day baseline deadline. Turning them on still needs that decision, the Edge pass-through change, approved customer copy and a matching terms update. Until then, expired items are never discarded automatically and are handled through support.
-- The commerce retention policy is approved by the operator in the admin retention screen together with the legal review answers. Never approve, seed or enable a retention policy from code. Until approval, `WORKER_COMMERCE_RETENTION_MODE` stays `DISABLED` and nothing is disposed of automatically.
+- Storage-expiry reminders and the automatic `EXPIRED_HOLD` transition stay off (`WORKER_INVENTORY_STORAGE_EXPIRY_MODE` is passed through to the Edge worker but left unset, so it stays `DISABLED`). The owner decides whether to run them within 60 days of the first LIVE sale, before the first stored prize reaches its 60-day baseline deadline. Turning them on needs that decision, approved customer copy, a matching terms update, and then only the Edge setting `WORKER_INVENTORY_STORAGE_EXPIRY_MODE=ENABLED`. Until then, expired items are never discarded automatically and are handled through support.
+- The operator approves the commerce retention policy together with the finalized legal documents. Use the registration, review and PREVIEW/EXECUTE procedure in `docs/commerce-retention-components.md`; there is no admin screen for it yet. Never approve, seed or enable a retention policy from code. Until approval, `WORKER_COMMERCE_RETENTION_MODE` stays `DISABLED` and nothing is disposed of automatically.
 - Remaining stored items at account deletion are decided after launch. Gacha-only first launch keeps the current rule: stored, exchange-reserved, shipping-requested and expired-hold units block deletion until they are shipped or returned for points. A point balance alone may be forfeited with explicit acknowledgement. Revisit before Kuji sales, because Kuji prizes cannot be returned for points.
 - Cloudflare Access in front of `admin.dabboba.net` is the administrator second factor. The admin password remains the first factor, and Access allows only named operator emails through an identity provider with enforced two-step verification or the Access one-time PIN.
   - The console verifies the Access JWT itself when `ADMIN_CLOUDFLARE_ACCESS_TEAM_DOMAIN` and `ADMIN_CLOUDFLARE_ACCESS_AUD` are set in `apps/admin/wrangler.jsonc`. Half or invalid settings close the console.
@@ -410,6 +410,10 @@ When any text-entry control loses focus, dismiss the simulated keyboard. If the 
   - nicknames, bios and community posts block severe terms only;
   - private text (inquiries, reports, catalog requests, shipping notes) is never filtered.
   Adjust only for reported false positives.
+- The LIVE terms, privacy policy and internal privacy-management plan are finalized without waiting for counsel. They follow the KFTC e-commerce standard terms and the PIPC privacy-policy guideline, matched to the implemented code and in-app notices (`docs/legal-drafts/`).
+  - Only facts known to the business or a console remain as `{{…}}` publication fields: effective date, courier name, support-mail inbox service and Supabase storage region.
+  - Publish just before LIVE in one deployment with: the new policy version, removal of the 맞춤 추천 toggle with withdrawal of stored consents, the 90-day session-record retention, and the operator's retention-policy approval.
+  - A later counsel opinion overrides these texts.
 
 ## First Launch Scope And Product Gallery — 2026-10-01
 
