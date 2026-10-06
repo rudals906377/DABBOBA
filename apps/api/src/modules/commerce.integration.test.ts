@@ -273,7 +273,17 @@ test(
          (SELECT count(*) FROM stock_reservations WHERE order_id=$1 AND status='ACTIVE')::text AS active_reservations`,
       [anomalousOrder.id],
     );
-    assert.deepEqual(anomalousAssets.rows[0], { entitlements: "0", results: "0", active_reservations: "1" });
+    // Nothing later releases a REFUND_REVIEW order, so an anomaly before any
+    // verified success releases the unpaid order's reservation immediately and
+    // records cancelled_at for the late-success refund path.
+    assert.deepEqual(anomalousAssets.rows[0], { entitlements: "0", results: "0", active_reservations: "0" });
+    const anomalousCancelled = await pool.query<{ cancelled: boolean; released: string }>(
+      `SELECT o.cancelled_at IS NOT NULL AS cancelled,
+         (SELECT count(*) FROM stock_reservations WHERE order_id=o.id AND status='RELEASED')::text AS released
+       FROM orders o WHERE o.id=$1`,
+      [anomalousOrder.id],
+    );
+    assert.deepEqual(anomalousCancelled.rows[0], { cancelled: true, released: "1" });
     const duplicateAnomaly = await sendWebhook(app, anomalousInput);
     assert.equal(duplicateAnomaly.statusCode, 202, duplicateAnomaly.body);
     assert.equal((duplicateAnomaly.json() as { outcome: string }).outcome, "duplicate");

@@ -575,14 +575,34 @@ export async function applyCanonicalPaymentEvent(context:ApiContext,event:Canoni
 export async function applyCanonicalPaymentEventInTransaction(client:DatabaseClient,event:CanonicalPaymentEvent,correlationId:string):Promise<CanonicalPaymentOutcome>{
   const {provider,eventId,eventType,paymentId,providerPaymentId,occurredAt,amount,observedStatus,observedPaidAmount,observedCancelledAmount,signatureDigest}=event;const body=event.payload;
   const paymentLookup=await client.query<{order_id:string}>("SELECT order_id FROM payments WHERE id=$1",[paymentId]);if(!paymentLookup.rowCount)throw notFound("결제 정보를 찾을 수 없습니다.");const linkedKujiRoom=await lockLinkedKujiRoomForOrder(client,paymentLookup.rows[0]!.order_id);const payment=await client.query<{id:string;order_id:string;provider:string;status:string;amount:number;provider_payment_id:string|null}>("SELECT id,order_id,provider,status,amount,provider_payment_id FROM payments WHERE id=$1 FOR UPDATE",[paymentId]);if(!payment.rowCount)throw notFound("결제 정보를 찾을 수 없습니다.");const pay=payment.rows[0]!;if(pay.order_id!==paymentLookup.rows[0]!.order_id)throw new Error(`Payment order changed while locking ${paymentId}`);if(pay.provider!==provider)throw forbidden("결제 제공자가 일치하지 않습니다.");const inserted=await client.query<{id:string}>(`INSERT INTO payment_provider_events(provider,provider_event_id,event_type,payment_id,signature_digest,payload,occurred_at,processed_at) VALUES($1,$2,$3,$4,$5,$6,$7,now()) ON CONFLICT (provider,provider_event_id) DO NOTHING RETURNING id`,[provider,eventId,eventType,paymentId,signatureDigest,JSON.stringify(body),occurredAt]);if(!inserted.rowCount){const existingEvent=await client.query<{payment_id:string;event_type:string;payload_matches:boolean}>("SELECT payment_id,event_type,payload=$3::jsonb AS payload_matches FROM payment_provider_events WHERE provider=$1 AND provider_event_id=$2",[provider,eventId,JSON.stringify(body)]);const prior=existingEvent.rows[0];if(!prior||prior.payment_id!==paymentId||prior.event_type!==eventType||!prior.payload_matches)throw conflict("같은 결제 이벤트 ID의 내용이 일치하지 않습니다.");return "duplicate" as const;}const orderResult=await client.query<OrderRow & {cancelled_at:Date|null}>("SELECT o.*,p.id AS payment_id FROM orders o JOIN payments p ON p.order_id=o.id WHERE o.id=$1 FOR UPDATE OF o",[pay.order_id]);const order=orderResult.rows[0]!;
-      const markReview=async(reason:string,payload:Record<string,unknown>={})=>{await client.query("UPDATE payments SET status='REFUND_REVIEW',provider_payment_id=COALESCE($2,provider_payment_id),version=version+1 WHERE id=$1",[pay.id,providerPaymentId||null]);await client.query("UPDATE orders SET status='REFUND_REVIEW',version=version+1 WHERE id=$1",[order.id]);await writeOutbox(client,correlationId,{aggregateType:"PAYMENT",aggregateId:pay.id,eventType:reason,payload:{paymentId:pay.id,orderId:order.id,providerEventId:eventId,...payload}});return "review" as const;};
+      // An anomaly, amount mismatch or partial-refund notice that arrives
+      // before any verified success must not strand the unpaid order's assets:
+      // nothing later releases a REFUND_REVIEW order's stock reservation,
+      // points, coupon, shipping hold or kuji room, and the late-refund path
+      // needs cancelled_at. Release them here exactly as a provider failure
+      // would; captured money is then handled by the late-success refund.
+      const markReview=async(reason:string,payload:Record<string,unknown>={},options:{releaseUnpaid?:boolean}={})=>{
+        const releaseUnpaid=Boolean(options.releaseUnpaid)&&["PENDING","AUTHORIZED"].includes(pay.status);
+        if(releaseUnpaid)await releasePendingOrder(client,order,"PAYMENT_REVIEW_BEFORE_SUCCESS");
+        await client.query("UPDATE payments SET status='REFUND_REVIEW',provider_payment_id=COALESCE($2,provider_payment_id),version=version+1 WHERE id=$1",[pay.id,providerPaymentId||null]);
+        if(releaseUnpaid){
+          const releaseTime=await client.query<{server_now:Date}>("SELECT clock_timestamp() AS server_now");
+          const serverNow=releaseTime.rows[0]!.server_now;
+          await client.query("UPDATE orders SET status='REFUND_REVIEW',cancelled_at=COALESCE(cancelled_at,$2),version=version+1 WHERE id=$1",[order.id,serverNow]);
+          if(linkedKujiRoom)await releaseLockedKujiOrderRoom(client,{orderId:order.id,serverNow,terminalState:"CANCELLED"});
+        }else{
+          await client.query("UPDATE orders SET status='REFUND_REVIEW',version=version+1 WHERE id=$1",[order.id]);
+        }
+        await writeOutbox(client,correlationId,{aggregateType:"PAYMENT",aggregateId:pay.id,eventType:reason,payload:{paymentId:pay.id,orderId:order.id,providerEventId:eventId,...payload,...(releaseUnpaid?{localAssetsReleased:true}:{})}});
+        return "review" as const;
+      };
       if(eventType==="PAYMENT_STATE_ANOMALY"){
         const observation={providerStatus:observedStatus,providerPaidAmount:observedPaidAmount,providerCancelledAmount:observedCancelledAmount,previousPaymentStatus:pay.status};
         if(pay.status==="REFUNDED"){
           await writeOutbox(client,correlationId,{aggregateType:"PAYMENT",aggregateId:pay.id,eventType:"payment.provider_state_anomaly_after_refund_observed",payload:{paymentId:pay.id,orderId:order.id,providerEventId:eventId,...observation}});
           return "ignored" as const;
         }
-        return markReview("payment.provider_state_anomaly_requires_reconciliation",observation);
+        return markReview("payment.provider_state_anomaly_requires_reconciliation",observation,{releaseUnpaid:true});
       }
       if(eventType==="REFUND_PARTIAL"){
         // A partial cancellation is applied only when it is exactly the card
@@ -590,9 +610,9 @@ export async function applyCanonicalPaymentEventInTransaction(client:DatabaseCli
         // with the operator.
         const planned=await applyPlannedPartialUnusedRefund(client,{paymentId:pay.id,orderId:order.id,userId:order.user_id,paymentStatus:pay.status,orderStatus:order.status,providerCancelledAmount:amount,ledgerReference:eventId,providerPaymentId:providerPaymentId||null,providerStatus:"PARTIAL_CANCELLED",correlationId});
         if(planned)return planned;
-        return markReview("payment.partial_refund_requires_reconciliation",{providerCancelledAmount:amount,previousPaymentStatus:pay.status});
+        return markReview("payment.partial_refund_requires_reconciliation",{providerCancelledAmount:amount,previousPaymentStatus:pay.status},{releaseUnpaid:true});
       }
-      if(amount!==numberValue(pay.amount)){if(pay.status==="REFUNDED"){await writeOutbox(client,correlationId,{aggregateType:"PAYMENT",aggregateId:pay.id,eventType:"payment.amount_mismatch_after_refund_observed",payload:{paymentId:pay.id,orderId:order.id,providerEventId:eventId,providerAmount:amount,ledgerAmount:numberValue(pay.amount),eventType}});return "ignored" as const;}return markReview("payment.amount_mismatch_requires_reconciliation",{providerAmount:amount,ledgerAmount:numberValue(pay.amount),eventType});}
+      if(amount!==numberValue(pay.amount)){if(pay.status==="REFUNDED"){await writeOutbox(client,correlationId,{aggregateType:"PAYMENT",aggregateId:pay.id,eventType:"payment.amount_mismatch_after_refund_observed",payload:{paymentId:pay.id,orderId:order.id,providerEventId:eventId,providerAmount:amount,ledgerAmount:numberValue(pay.amount),eventType}});return "ignored" as const;}return markReview("payment.amount_mismatch_requires_reconciliation",{providerAmount:amount,ledgerAmount:numberValue(pay.amount),eventType},{releaseUnpaid:true});}
 
       if(eventType==="PAYMENT_SUCCEEDED"){
         if(pay.status==="REFUNDED"){await writeOutbox(client,correlationId,{aggregateType:"PAYMENT",aggregateId:pay.id,eventType:"payment.success_after_refund_observed",payload:{paymentId:pay.id,orderId:order.id,providerEventId:eventId}});return "ignored" as const;}
