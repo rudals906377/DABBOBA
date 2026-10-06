@@ -5,13 +5,14 @@ import rateLimit from "@fastify/rate-limit";
 import type { ApiContext } from "../types.js";
 import { registerCustomerAuthRoutes } from "./customer-auth.js";
 import { registerErrorHandler } from "../lib/errors.js";
-import { rateLimitKey } from "../lib/rate-limit-key.js";
+import { PAYMENT_REVIEW_CLIENT_IP_HEADERS, paymentReviewClientIpSignature, rateLimitKey } from "../lib/rate-limit-key.js";
 
 const email = "review@example.invalid";
 const subject = "00000000-0000-4000-8000-000000000001";
 const issuer = "https://lyzcyrdiazorjaqlgblr.supabase.co/auth/v1";
 const customer = { id: "00000000-0000-4000-8000-000000000002", email, nickname: "심사 회원", role: "USER", status: "ACTIVE", phone_e164: null };
 const policies = { terms: "2026-09-30", privacy: "2026-09-30" };
+const proxySecret = "synthetic-review-proxy-secret-with-32-bytes-or-more";
 
 async function setup(production = false, wrongPassword = false) {
   const queries: string[] = [];
@@ -42,6 +43,7 @@ async function setup(production = false, wrongPassword = false) {
       portOne: { channelEnvironment: "TEST" }, customerLoginProviders: [],
       paymentReviewLogin: { subject, email, expiresAt: new Date(Date.now() + 2 * 3_600_000).toISOString() },
       sessionTtlDays: 30, sessionTokenPepper: "synthetic-review-session-pepper",
+      paymentReviewProxySecret: proxySecret,
     },
     pool: { ...client, connect: async () => client },
   } as unknown as ApiContext;
@@ -105,5 +107,26 @@ test("wrong password never writes a customer; fabricated bearer headers cannot b
     }
     assert.equal(requests(), 5);
     assert.ok(!queries.some(sql => sql.includes("INSERT INTO users") || sql.includes("INSERT INTO sessions")));
+  } finally { await app.close(); }
+});
+
+test("one reviewer's failed attempts behind the shared site worker never lock out another reviewer", async () => {
+  const { app } = await setup(false, true);
+  const viaWorker = (ip: string) => {
+    const time = String(Math.floor(Date.now() / 1_000));
+    return {
+      [PAYMENT_REVIEW_CLIENT_IP_HEADERS.ip]: ip,
+      [PAYMENT_REVIEW_CLIENT_IP_HEADERS.time]: time,
+      [PAYMENT_REVIEW_CLIENT_IP_HEADERS.signature]: paymentReviewClientIpSignature(proxySecret, time, ip),
+    };
+  };
+  const attempt = (headers: Record<string, string>) => app.inject({ method: "POST", url: "/v1/auth/payment-review",
+    headers, payload: { email, password: "synthetic-wrong", acceptedPolicies: policies } });
+  try {
+    for (let index = 0; index < 5; index += 1) assert.equal((await attempt(viaWorker("203.0.113.20"))).statusCode, 401);
+    assert.equal((await attempt(viaWorker("203.0.113.20"))).statusCode, 429);
+    assert.equal((await attempt(viaWorker("203.0.113.21"))).statusCode, 401, "a different reviewer keeps its own budget");
+    // Unsigned or forged client IPs stay on the shared socket-address bucket.
+    assert.equal((await attempt({ [PAYMENT_REVIEW_CLIENT_IP_HEADERS.ip]: "203.0.113.22" })).statusCode, 401);
   } finally { await app.close(); }
 });

@@ -37,3 +37,23 @@ export function loadPaymentReviewLogin(
   if (Date.parse(expiresAt) > now + 30 * 86_400_000) throw new Error("Payment review login expiry must be within 30 days");
   return { email, subject, expiresAt: new Date(expiresAt).toISOString() };
 }
+
+/**
+ * Optional secret shared only with the public review site worker, which signs
+ * the visitor IP so the review login limit applies per reviewer. Ignored while
+ * the review login is disabled; otherwise it must be a distinct server secret.
+ */
+export function loadPaymentReviewProxySecret(
+  env: Record<string, string | undefined>,
+  review: PaymentReviewLogin | null,
+  otherSecrets: readonly (string | null | undefined)[],
+): string | null {
+  const secret = env.PAYMENT_REVIEW_PROXY_SECRET?.trim();
+  if (!review || !secret) return null;
+  const size = Buffer.byteLength(secret, "utf8");
+  if (size < 32 || size > 512 || /[\r\n]/.test(secret) || /(?:change-me|local-development)/i.test(secret)
+    || otherSecrets.some((other) => other && other === secret)) {
+    throw new Error("PAYMENT_REVIEW_PROXY_SECRET must be a distinct 32-512 byte server-only secret");
+  }
+  return secret;
+}

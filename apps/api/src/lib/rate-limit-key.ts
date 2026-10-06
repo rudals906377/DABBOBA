@@ -1,4 +1,4 @@
-import { createHash, createHmac } from "node:crypto";
+import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { isIP } from "node:net";
 import type { ApiConfig } from "@dabboba/config";
 import { normalizeIP } from "@fastify/rate-limit";
@@ -15,6 +15,43 @@ export const IP_KEYED_RATE_LIMIT_ROUTES: ReadonlySet<string> = new Set([
   "/v1/auth/payment-review",
   "/v1/auth/account-deletion-exchange",
 ]);
+
+const PAYMENT_REVIEW_ROUTE = "/v1/auth/payment-review";
+/** Headers the public review site worker adds to its login proxy request. */
+export const PAYMENT_REVIEW_CLIENT_IP_HEADERS = Object.freeze({
+  ip: "x-dabboba-review-client-ip",
+  time: "x-dabboba-review-client-ip-time",
+  signature: "x-dabboba-review-client-ip-signature",
+});
+const PAYMENT_REVIEW_CLIENT_IP_CONTEXT = "dabboba-review-client-ip:v1";
+const PAYMENT_REVIEW_CLIENT_IP_SKEW_SECONDS = 60;
+
+export function paymentReviewClientIpSignature(secret: string, time: string, ip: string): string {
+  return createHmac("sha256", secret).update(`${PAYMENT_REVIEW_CLIENT_IP_CONTEXT}\n${time}\n${ip}`).digest("hex");
+}
+
+/**
+ * Visitor IP observed by the review site worker, accepted only with a fresh
+ * HMAC from the dedicated shared secret. Every request reaches the API from the
+ * worker's egress address, so without this all reviewers share one login
+ * bucket and anyone could lock them out with wrong passwords.
+ */
+export function signedPaymentReviewClientIp(
+  request: FastifyRequest,
+  secret: string | null | undefined,
+  nowMs = Date.now(),
+): string | null {
+  if (!secret) return null;
+  const ip = firstHeader(request.headers[PAYMENT_REVIEW_CLIENT_IP_HEADERS.ip])?.trim();
+  const time = firstHeader(request.headers[PAYMENT_REVIEW_CLIENT_IP_HEADERS.time])?.trim();
+  const signature = firstHeader(request.headers[PAYMENT_REVIEW_CLIENT_IP_HEADERS.signature])?.trim();
+  if (!ip || !time || !signature || ip.length > 64 || !isIP(ip)
+    || !/^\d{1,12}$/.test(time) || !/^[0-9a-f]{64}$/.test(signature)) return null;
+  if (Math.abs(Math.floor(nowMs / 1_000) - Number(time)) > PAYMENT_REVIEW_CLIENT_IP_SKEW_SECONDS) return null;
+  const expected = Buffer.from(paymentReviewClientIpSignature(secret, time, ip), "hex");
+  const provided = Buffer.from(signature, "hex");
+  return provided.length === expected.length && timingSafeEqual(provided, expected) ? normalizedIp(ip) : null;
+}
 
 /** Session tokens are 32 random bytes encoded as unpadded base64url. */
 const SESSION_TOKEN_SHAPE = /^[A-Za-z0-9_-]{43}$/;
@@ -60,9 +97,13 @@ function bearerSessionToken(request: FastifyRequest): string | null {
  */
 export function rateLimitKey(
   request: FastifyRequest,
-  config: Pick<ApiConfig, "trustedClientIpHeader" | "sessionTokenPepper">,
+  config: Pick<ApiConfig, "trustedClientIpHeader" | "sessionTokenPepper" | "paymentReviewProxySecret">,
 ): string {
   const route = request.routeOptions?.url;
+  if (route === PAYMENT_REVIEW_ROUTE) {
+    const reviewer = signedPaymentReviewClientIp(request, config.paymentReviewProxySecret);
+    if (reviewer) return `ip:${reviewer}`;
+  }
   const token = route && IP_KEYED_RATE_LIMIT_ROUTES.has(route) ? null : bearerSessionToken(request);
   if (token) {
     return `session:${createHmac("sha256", config.sessionTokenPepper).update(token).digest("hex").slice(0, 32)}`;
