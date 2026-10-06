@@ -395,6 +395,22 @@ When any text-entry control loses focus, dismiss the simulated keyboard. If the 
 - The owner approved this rule for refunding the unused draws of a partly used gacha order: refund value = floor((card amount paid + points used) × unused draws ÷ ordered draws). The card part is floor(card amount paid × unused ÷ ordered) and is cancelled on the original card as a PortOne partial cancellation; the remainder returns as points. Coupon discounts are not returned, and used draws and their prizes are not refunded. An entirely unused order keeps the existing full refund (card, mixed, or points-only).
 - Only an operator with `refunds.cancel` starts it from the admin payment detail. The server fixes the amounts and the exact unused entitlements, freezes the order before the provider call, and applies the refund (entitlements cancelled, stock of the active version relisted, points returned once, card refund ledger, order back to PAID, customer notification) only when a verified provider read shows exactly the planned partial cancellation. A provider-reported failure or a later read showing no cancellation releases the freeze; an unknown outcome stays frozen for the audited requery or the worker reconciliation. Never apply a partial refund from a client claim, never send a second cancellation for an open attempt, and keep kuji orders out until kuji slot release is designed.
 
+## Owner Launch Decisions — 2026-10-06
+
+- Storage-expiry reminders and the automatic `EXPIRED_HOLD` transition stay off (`WORKER_INVENTORY_STORAGE_EXPIRY_MODE=DISABLED`, not passed through to the Edge worker). The owner decides whether to run them within 60 days of the first LIVE sale, before the first stored prize reaches its 60-day baseline deadline. Turning them on still needs that decision, the Edge pass-through change, approved customer copy and a matching terms update. Until then, expired items are never discarded automatically and are handled through support.
+- The commerce retention policy is approved by the operator in the admin retention screen together with the legal review answers. Never approve, seed or enable a retention policy from code. Until approval, `WORKER_COMMERCE_RETENTION_MODE` stays `DISABLED` and nothing is disposed of automatically.
+- Remaining stored items at account deletion are decided after launch. Gacha-only first launch keeps the current rule: stored, exchange-reserved, shipping-requested and expired-hold units block deletion until they are shipped or returned for points. A point balance alone may be forfeited with explicit acknowledgement. Revisit before Kuji sales, because Kuji prizes cannot be returned for points.
+- Cloudflare Access in front of `admin.dabboba.net` is the administrator second factor. The admin password remains the first factor, and Access allows only named operator emails through an identity provider with enforced two-step verification or the Access one-time PIN.
+  - The console verifies the Access JWT itself when `ADMIN_CLOUDFLARE_ACCESS_TEAM_DOMAIN` and `ADMIN_CLOUDFLARE_ACCESS_AUD` are set in `apps/admin/wrangler.jsonc`. Half or invalid settings close the console.
+  - Keep `workers_dev` and `preview_urls` false, and never commit empty placeholders for the two Access variables.
+  - The LIVE cutover refuses unless the live hostname redirects an unauthenticated visitor to that team's Access login (`corepack pnpm run admin:access:verify`).
+  - Do not add an in-app TOTP without a new decision.
+- Keep the current customer-text filter scope:
+  - exchange-room and request-room text blocks severe terms plus links, phone numbers and messenger-ID requests;
+  - nicknames, bios and community posts block severe terms only;
+  - private text (inquiries, reports, catalog requests, shipping notes) is never filtered.
+  Adjust only for reported false positives.
+
 ## First Launch Scope And Product Gallery — 2026-10-01
 
 - First launch contains the eight operator-confirmed gacha products only. Kuji is deferred: preserve its code, history and empty/coming-soon shop, but do not require a sellable Kuji product in launch verification or activate Kuji sales. Do not infer an exemption from any gacha payment, legal, authentication or inventory gate.

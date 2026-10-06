@@ -60,7 +60,7 @@ Google Cloud 결제 연결·API 활성화·배포·secret 생성, Supabase stagi
 
 ### 남은 코드 수정과 위험
 
-- **필수 추가 구현:** KG이니시스 결제창·승인·취소·환불 연동, 승인된 관리자 MFA. KG 거래조회와 실결제 연동 완료를 구분한다. 사용자가 직접 코드를 수정할 항목이 아니라 외부 준비 후 개발을 이어갈 항목이다.
+- **필수 추가 구현:** KG이니시스 결제창·승인·취소·환불 연동. 관리자 MFA는 Cloudflare Access로 정했고 관리자 웹 검증 코드가 있다(운영자 설정 필요). KG 거래조회와 실결제 연동 완료를 구분한다. 사용자가 직접 코드를 수정할 항목이 아니라 외부 준비 후 개발을 이어갈 항목이다.
 - **의존성 수정:** Expo Router 하위 `decode-uri-component@0.2.2`의 moderate 경고 1건이 남는다. 현재 native 입력 완화는 유지하되 지원되는 업그레이드와 실제 로그인/deep-link 회귀 후 해소한다. 무리한 전체 override로 통과 표시하지 않는다.
 - **연결 후 확인:** SMS/OAuth·Storage·push·배송 공급자의 실제 계약과 맞지 않는 부분이 있으면 해당 adapter를 수정한다. 계정 설정만으로 모든 연동이 검증됐다고 보지 않는다.
 - **데이터·자산 교체:** 현재 고객 catalog는 의도적으로 비어 있다. 비활성화한 개발 상품을 다시 켜지 말고 승인받은 상품·이미지·실재고로 등록한다.
@@ -118,10 +118,11 @@ Google Cloud 결제 연결·API 활성화·배포·secret 생성, Supabase stagi
 - [ ] `검증 필요` 신뢰 edge가 선택한 전용 client-IP header를 외부 요청에서 제거·덮어쓰도록 설정하고, BFF/API에 동일한 `ADMIN_PROXY_IDENTITY_SECRET`을 secret manager로 주입
 - [ ] `검증 필요` BFF/API 시계 동기화와 운영 로그인에서 IP별 rate-limit·감사 IP/UA가 실제 edge 경로 기준으로 분리되는지 확인
 - [ ] `검증 필요` `USER`의 관리자 API 거부, `ADMIN`의 관리자 생성/역할 변경 거부, 정지 계정 session revoke 확인
-- [ ] `미결정` 관리자 MFA와 비상 접근 정책 결정
+- [x] `결정 완료` 관리자 MFA는 `admin.dabboba.net` 앞 Cloudflare Access — 2026-10-06 사용자 결정. 설정 절차는 `docs/launch-operator-checklist.md` 4-1
+- [ ] `미결정` 비상 접근 정책(Access 운영자 이메일 분실·IdP 장애 시 절차)
 - [ ] `미결정` 개인정보 열람 사유, 감사 로그 검토 주기, 관리자 퇴사/권한 회수 SLA 결정
 
-현재 관리자 로그인은 강한 비밀번호와 server-only session 경계를 제공하지만 MFA는 구현돼 있지 않다. 공개 운영 전 MFA 방식과 구현 범위를 승인해야 한다.
+관리자 로그인은 강한 비밀번호와 server-only session 경계를 제공하고, 두 번째 인증은 Cloudflare Access가 맡는다(2026-10-06 결정). 관리자 웹은 Access 팀 도메인과 AUD 태그가 설정되면 Access가 서명한 토큰을 직접 검증하고, LIVE 전환 명령은 운영 주소가 Access 로그인으로 넘어가는지 확인한다. Access 앱 생성과 Worker 설정 반영은 운영자가 해야 한다.
 
 ## 4. 결제, 환불, 정산
 
