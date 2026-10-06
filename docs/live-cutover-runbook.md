@@ -65,6 +65,11 @@ PRELAUNCH 프로필 업로드 → PRELAUNCH 공개 API 검증. 함수 코드는 
 PRELAUNCH 프로필을 LIVE 비밀값 위에 올리면 API가 시작하지 못하기 때문이다. LIVE 중 코드 배포는
 LIVE 명령으로, PRELAUNCH 복귀는 되돌리기 명령으로만 한다.
 
+비밀값 존재 여부는 Supabase CLI의 비밀값 이름 목록(`secrets list --output json`, 값은 읽지 않음)으로
+확인한다. 목록을 읽지 못하면 운영 API의 `/v1/public/config`가 PRELAUNCH라고 답할 때만 비밀값이 없다고
+보고, 그 외에는 아무것도 바꾸지 않고 멈춘다. 되돌리기 중 목록을 읽지 못하면 LIVE 전용 키 이름을
+모두 삭제 대상으로 지정한다.
+
 ## 이 명령이 하지 않는 것
 
 마이그레이션 적용, 백업, Cron·자동 작업 활성화, 앱 빌드·스토어 제출, PG 승인 확인, 카드 결제 실행.

@@ -8,8 +8,10 @@ import {
   SUPABASE_LIVE_CANDIDATE_FILE,
 } from './check-supabase-live-candidate.mjs';
 import {
+  fetchDeployedCommerceMode,
   listSupabaseSecretNames,
   liveOnlySecretNames,
+  projectHoldsLiveSettings,
   run as runCommandDefault,
   supabase as supabaseDefault,
   verifySupabaseTargetProjectAccess,
@@ -91,9 +93,15 @@ export async function rollbackSupabaseLiveEdge({
     throw new Error('The rollback profile must be the reviewed PRELAUNCH production profile.');
   }
   verifyProjectAccess();
-  const liveKeys = liveOnlySecretNames(listSecretNames());
+  let liveKeys;
+  try {
+    liveKeys = liveOnlySecretNames(listSecretNames());
+  } catch {
+    // Unlisted is not proof of absence: remove every LIVE-only key name.
+    liveKeys = [...LIVE_PAYMENT_PROFILE_KEYS];
+  }
   if (liveKeys.length) {
-    supabase('secrets', 'unset', ...liveKeys, '--project-ref', SUPABASE_INTEGRATION_PROJECT_REF);
+    supabase('secrets', 'unset', ...liveKeys, '--project-ref', SUPABASE_INTEGRATION_PROJECT_REF, '--yes');
   }
   supabase('secrets', 'set', '--env-file', SUPABASE_EDGE_PROFILE_FILE, '--project-ref', SUPABASE_INTEGRATION_PROJECT_REF);
   log(`Removed ${liveKeys.length} LIVE payment setting(s) and restored the PRELAUNCH profile.`);
@@ -113,6 +121,7 @@ export async function deploySupabaseLiveEdge({
   preflight = ({ edgeProfile }) => runSupabaseEdgeReleasePreflight({ edgeProfile, expectedCommerceMode: 'LIVE' }),
   verifyProjectAccess = verifySupabaseTargetProjectAccess,
   listSecretNames = listSupabaseSecretNames,
+  fetchCommerceMode = fetchDeployedCommerceMode,
   run = runCommandDefault,
   supabase = supabaseDefault,
   verifyLive = verifyLiveSurface,
@@ -131,7 +140,7 @@ export async function deploySupabaseLiveEdge({
   }
   const release = await preflight({ edgeProfile: live });
   verifyProjectAccess();
-  const wasLive = liveOnlySecretNames(listSecretNames()).length > 0;
+  const wasLive = await projectHoldsLiveSettings({ listSecretNames, fetchCommerceMode });
   run('corepack', ['pnpm', '--filter', '@dabboba/api', 'build:supabase']);
   run('corepack', ['pnpm', '--filter', '@dabboba/api', 'build:supabase:admin']);
   run('corepack', ['pnpm', '--filter', '@dabboba/worker', 'build:edge']);

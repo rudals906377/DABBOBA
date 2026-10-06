@@ -3,7 +3,7 @@ import { spawnSync } from 'node:child_process';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { SUPABASE_LIVE_CANDIDATE_FILE } from '../scripts/check-supabase-live-candidate.mjs';
-import { deploySupabaseEdge, listSupabaseSecretNames } from '../scripts/deploy-supabase-edge.mjs';
+import { deploySupabaseEdge, listSupabaseSecretNames, projectHoldsLiveSettings } from '../scripts/deploy-supabase-edge.mjs';
 import {
   assertLiveProfileKeepsProductionBaseline,
   deploySupabaseLiveEdge,
@@ -111,7 +111,7 @@ test('a failed LIVE verification returns the project to PRELAUNCH and removes LI
   assert.deepEqual(afterFailure, [
     'verify-live',
     'list-secrets',
-    `supabase:secrets unset ${present.join(' ')} --project-ref ${ref}`,
+    `supabase:secrets unset ${present.join(' ')} --project-ref ${ref} --yes`,
     `supabase:secrets set --env-file ${SUPABASE_EDGE_PROFILE_FILE} --project-ref ${ref}`,
     'verify:PRELAUNCH',
   ]);
@@ -141,7 +141,7 @@ test('rollback removes only LIVE-only settings that exist and refuses a non-PREL
   assert.deepEqual(result, { commerceMode: 'PRELAUNCH', removedLiveSettings: 1 });
   assert.deepEqual(calls, [
     'project-access',
-    `secrets unset DABBOBA_API_PORTONE_KCP_CHANNEL_KEY --project-ref ${ref}`,
+    `secrets unset DABBOBA_API_PORTONE_KCP_CHANNEL_KEY --project-ref ${ref} --yes`,
     `secrets set --env-file ${SUPABASE_EDGE_PROFILE_FILE} --project-ref ${ref}`,
     'verify:PRELAUNCH',
   ]);
@@ -169,6 +169,10 @@ test('secret listing returns names only and fails closed on unexpected CLI outpu
     runCommand: () => ({ status: 0, stdout: JSON.stringify([{ name: 'A', value: 'digest' }, { name: 'B', value: 'digest' }]) }),
   });
   assert.deepEqual([...names], ['A', 'B']);
+  const wrapped = listSupabaseSecretNames({
+    runCommand: () => ({ status: 0, stdout: JSON.stringify({ secrets: [{ Name: 'C', Value: 'digest' }] }) }),
+  });
+  assert.deepEqual([...wrapped], ['C']);
   for (const output of [{ status: 1, stdout: '[]' }, { status: 0, stdout: 'not json' }, { status: 0, stdout: '[{"value":"x"}]' }]) {
     assert.throws(() => listSupabaseSecretNames({ runCommand: () => output }), /could not be listed/);
   }
@@ -181,4 +185,28 @@ test('the command line requires the exact project confirmation before reading an
     assert.equal(result.status, 1, result.stderr);
     assert.ok(result.stderr.includes(`--confirm=${phrase}`), result.stderr);
   }
+});
+
+test('an unlistable project counts as LIVE-free only when its running API reports PRELAUNCH', async () => {
+  const unlistable = () => { throw new Error('cli output changed'); };
+  assert.equal(await projectHoldsLiveSettings({ listSecretNames: unlistable, fetchCommerceMode: async () => 'PRELAUNCH' }), false);
+  assert.equal(await projectHoldsLiveSettings({ listSecretNames: unlistable, fetchCommerceMode: async () => 'LIVE' }), true);
+  await assert.rejects(
+    projectHoldsLiveSettings({ listSecretNames: unlistable, fetchCommerceMode: async () => null }),
+    /nothing was changed/,
+  );
+  assert.equal(await projectHoldsLiveSettings({ listSecretNames: () => new Set(['PAYMENT_RECONCILIATION_PROVIDER']) }), true);
+});
+
+test('rollback removes every LIVE-only key name when the secret list cannot be read', async () => {
+  const calls = [];
+  await rollbackSupabaseLiveEdge({
+    prepareProfile: () => prelaunch,
+    verifyProjectAccess: () => {},
+    listSecretNames: () => { throw new Error('cli output changed'); },
+    supabase: (...args) => calls.push(args),
+    verifyPublicSurface: async () => {},
+    log: () => {},
+  });
+  assert.deepEqual(calls[0], ['secrets', 'unset', ...LIVE_PAYMENT_PROFILE_KEYS, '--project-ref', ref, '--yes']);
 });

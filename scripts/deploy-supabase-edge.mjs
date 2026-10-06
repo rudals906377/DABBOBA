@@ -52,17 +52,56 @@ export function listSupabaseSecretNames({
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
   });
-  let secrets;
+  let parsed;
   try {
-    secrets = JSON.parse(result.stdout);
+    parsed = JSON.parse(result.stdout);
   } catch {
     throw new Error('Supabase project secrets could not be listed.');
   }
-  if (result.error || result.status !== 0 || !Array.isArray(secrets)
-    || secrets.some((secret) => typeof secret?.name !== 'string')) {
+  const secrets = Array.isArray(parsed) ? parsed : parsed?.secrets;
+  const names = Array.isArray(secrets) ? secrets.map((secret) => secret?.name ?? secret?.Name) : null;
+  if (result.error || result.status !== 0 || !names || names.some((name) => typeof name !== 'string' || !name)) {
     throw new Error('Supabase project secrets could not be listed.');
   }
-  return new Set(secrets.map((secret) => secret.name));
+  return new Set(names);
+}
+
+/** Commerce mode reported by the deployed production API, or null when unreachable. */
+export async function fetchDeployedCommerceMode({
+  fetchImpl = globalThis.fetch,
+  baseUrl = `https://${SUPABASE_INTEGRATION_PROJECT_REF}.supabase.co/functions/v1/dabboba-api`,
+} = {}) {
+  try {
+    const response = await fetchImpl(`${baseUrl}/v1/public/config`, {
+      headers: { accept: 'application/json', 'cache-control': 'no-cache' },
+      redirect: 'error',
+      signal: AbortSignal.timeout(8_000),
+    });
+    if (response.status !== 200) return null;
+    const mode = (await response.json())?.commerceMode;
+    return mode === 'PRELAUNCH' || mode === 'LIVE' ? mode : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Whether the project still holds LIVE payment secrets. Uses the CLI secret
+ * names; if they cannot be listed, a running API that reports PRELAUNCH proves
+ * none are set (PortOne credentials without a PortOne provider stop the API).
+ */
+export async function projectHoldsLiveSettings({
+  listSecretNames = listSupabaseSecretNames,
+  fetchCommerceMode = fetchDeployedCommerceMode,
+} = {}) {
+  try {
+    return liveOnlySecretNames(listSecretNames()).length > 0;
+  } catch {
+    const mode = await fetchCommerceMode();
+    if (mode === 'PRELAUNCH') return false;
+    if (mode === 'LIVE') return true;
+    throw new Error('Could not confirm whether the project holds LIVE payment secrets; nothing was changed.');
+  }
 }
 
 /** LIVE-only payment settings currently present on the project (names only). */
@@ -89,6 +128,7 @@ export async function deploySupabaseEdge({
   preflight = ({ edgeProfile }) => runSupabaseEdgeReleasePreflight({ edgeProfile }),
   verifyProjectAccess = verifySupabaseTargetProjectAccess,
   listSecretNames = listSupabaseSecretNames,
+  fetchCommerceMode = fetchDeployedCommerceMode,
   run: runCommand = run,
   supabase: runSupabase = supabase,
   verifyPublicSurface = waitForPublicEdgeSurface,
@@ -113,7 +153,7 @@ export async function deploySupabaseEdge({
   // over them would leave an API that refuses to start, so a LIVE project is
   // updated with supabase:edge:live:deploy and returned to PRELAUNCH only by
   // the explicit supabase:edge:live:rollback command.
-  if (liveOnlySecretNames(listSecretNames()).length) {
+  if (await projectHoldsLiveSettings({ listSecretNames, fetchCommerceMode })) {
     throw new Error('The project has LIVE payment secrets; use supabase:edge:live:deploy or supabase:edge:live:rollback.');
   }
   runCommand('corepack', ['pnpm', '--filter', '@dabboba/api', 'build:supabase']);
