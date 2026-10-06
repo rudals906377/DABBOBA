@@ -187,6 +187,11 @@ export const DATABASE_RELEASE_MIGRATIONS = Object.freeze([
     path: 'packages/db/migrations/0084_portone_card_channel_binding.sql',
     sha256: '33a10f982c51aead5a4e4a90c6d944a20a6312302f126d0e8a20ea05c4cfcb15',
   }),
+  Object.freeze({
+    file: '0085_session_review_access_deadline.sql',
+    path: 'packages/db/migrations/0085_session_review_access_deadline.sql',
+    sha256: 'ef9f803aef714291ebfaf4aacdf9216c5f8a430be7990345045bd0a59126efe9',
+  }),
 ]);
 
 export const MINIMUM_DATABASE_RELEASE_VERSION =

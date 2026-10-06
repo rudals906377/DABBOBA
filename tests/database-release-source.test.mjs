@@ -46,7 +46,7 @@ test('release source accepts a clean Git commit containing every reviewed releas
   try {
     const report = checkDatabaseReleaseSource({ repositoryRoot: directory });
     assert.equal(report.status, 'pass', JSON.stringify(report));
-    assert.equal(report.latestMigration, '0084_portone_card_channel_binding.sql');
+    assert.equal(report.latestMigration, '0085_session_review_access_deadline.sql');
     assert.deepEqual(report.blockers, []);
     assert.match(report.head, /^[0-9a-f]{40,64}$/);
     assert.equal(report.worktreeClean, true);
@@ -158,7 +158,7 @@ test('release source rejects a release missing the draft snapshot media rebase m
   try {
     const report = checkDatabaseReleaseSource({ repositoryRoot: directory });
     assert.equal(report.status, 'blocked');
-    assert.equal(report.latestMigration, '0084_portone_card_channel_binding.sql');
+    assert.equal(report.latestMigration, '0085_session_review_access_deadline.sql');
     assert.ok(report.blockers.includes('required_migration_not_committed:0081_draft_draw_snapshot_media_rebase.sql'));
     assert.ok(report.blockers.includes('committed_migration_sequence_incomplete:0081'));
   } finally {
@@ -176,6 +176,7 @@ test('release source registers every migration from 0078 without a gap', () => {
     '0082_commerce_retention_components.sql',
     '0083_commerce_retention_bounded_assessment.sql',
     '0084_portone_card_channel_binding.sql',
+    '0085_session_review_access_deadline.sql',
   ]);
   const versions = files.map((file) => Number(file.slice(0, 4)));
   for (let index = 1; index < versions.length; index += 1) {

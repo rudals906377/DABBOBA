@@ -13,6 +13,7 @@ import {
 import { badRequest, forbidden, notFound, unauthorized } from "../lib/errors.js";
 import { objectInput, stringInput } from "../lib/input.js";
 import { verifyPassword, type PasswordRecord } from "../lib/password.js";
+import { activePaymentReviewLogin } from "../lib/payment-review-auth.js";
 import { adminSessionLimits, issueSession, tokenDigest } from "../plugins/auth.js";
 import type { ApiContext } from "../types.js";
 
@@ -176,8 +177,8 @@ export async function registerAuthRoutes(app: FastifyInstance, context: ApiConte
   app.post("/v1/auth/refresh", { preHandler: context.auth.requireUser }, async (request, reply) => {
     const actor = request.actor!;
     const rotated = await withTransaction(context.pool, async (client) => {
-      const current = await client.query<CurrentSessionRow>(
-        `SELECT id,session_kind,created_at,last_seen_at,expires_at
+      const current = await client.query<CurrentSessionRow & { review_access_expires_at: Date | null }>(
+        `SELECT id,session_kind,created_at,last_seen_at,expires_at,review_access_expires_at
          FROM sessions
          WHERE id=$1 AND user_id=$2 AND session_kind='USER'
            AND revoked_at IS NULL AND expires_at>now()
@@ -185,6 +186,31 @@ export async function registerAuthRoutes(app: FastifyInstance, context: ApiConte
         [actor.sessionId, actor.userId],
       );
       if (!current.rowCount) throw unauthorized("세션이 만료되었거나 이미 갱신되었습니다.");
+
+      // Payment-review provenance lives on the session, so refresh stays capped
+      // (or ends) even after the review login is disabled. Sessions issued
+      // before the column existed are recognized by the configured identity.
+      let reviewDeadline = current.rows[0]!.review_access_expires_at?.getTime() ?? null;
+      const configuredReview = context.config.paymentReviewLogin;
+      if (reviewDeadline === null && configuredReview) {
+        const reviewer = await client.query(
+          "SELECT 1 FROM auth_identities WHERE user_id=$1 AND provider='EMAIL' AND provider_subject=$2",
+          [actor.userId, `${context.config.supabaseUrl}/auth/v1#${configuredReview.subject}`],
+        );
+        if (reviewer.rowCount) reviewDeadline = Date.parse(configuredReview.expiresAt);
+      }
+      if (reviewDeadline !== null) {
+        const activeReview = activePaymentReviewLogin(context.config);
+        if (activeReview) reviewDeadline = Math.min(reviewDeadline, Date.parse(activeReview.expiresAt));
+        if (!activeReview || reviewDeadline <= Date.now() + 60_000) {
+          await client.query(
+            `UPDATE sessions SET revoked_at=now(),revoke_reason='REVIEW_ACCESS_ENDED'
+             WHERE id=$1 AND user_id=$2 AND revoked_at IS NULL`,
+            [actor.sessionId, actor.userId],
+          );
+          return null;
+        }
+      }
 
       const revoked = await client.query(
         `UPDATE sessions
@@ -195,23 +221,15 @@ export async function registerAuthRoutes(app: FastifyInstance, context: ApiConte
       if (revoked.rowCount !== 1) throw unauthorized("세션이 만료되었거나 이미 갱신되었습니다.");
 
       const token = randomBytes(32).toString("base64url");
-      let expiresAt = new Date(Date.now() + context.config.sessionTtlDays * 86_400_000);
-      const review = context.config.paymentReviewLogin;
-      if (review) {
-        const reviewer = await client.query(
-          "SELECT 1 FROM auth_identities WHERE user_id=$1 AND provider='EMAIL' AND provider_subject=$2",
-          [actor.userId, `${context.config.supabaseUrl}/auth/v1#${review.subject}`],
-        );
-        if (reviewer.rowCount) {
-          expiresAt = new Date(Math.min(Date.now() + 86_400_000, Date.parse(review.expiresAt)));
-          if (expiresAt.getTime() <= Date.now()) throw unauthorized("심사 계정 사용 기한이 만료되었습니다.");
-        }
-      }
+      const ordinaryExpiry = Date.now() + context.config.sessionTtlDays * 86_400_000;
+      const expiresAt = new Date(reviewDeadline === null
+        ? ordinaryExpiry
+        : Math.min(ordinaryExpiry, Date.now() + 86_400_000, reviewDeadline));
       const requestUserAgent = userAgent(request.headers["user-agent"]);
       const created = await client.query<CurrentSessionRow>(
         `INSERT INTO sessions
-          (user_id,session_kind,token_digest,ip_address,user_agent,expires_at,rotated_from_session_id)
-         VALUES($1,'USER',$2,$3,$4,$5,$6)
+          (user_id,session_kind,token_digest,ip_address,user_agent,expires_at,rotated_from_session_id,review_access_expires_at)
+         VALUES($1,'USER',$2,$3,$4,$5,$6,$7)
          RETURNING id,session_kind,created_at,last_seen_at,expires_at`,
         [
           actor.userId,
@@ -220,10 +238,12 @@ export async function registerAuthRoutes(app: FastifyInstance, context: ApiConte
           requestUserAgent || null,
           expiresAt,
           actor.sessionId,
+          reviewDeadline === null ? null : new Date(reviewDeadline),
         ],
       );
       return { token, session: created.rows[0]! };
     });
+    if (!rotated) throw unauthorized("심사 계정 사용 기한이 만료되었습니다.");
 
     return reply.code(201).send({
       token: rotated.token,

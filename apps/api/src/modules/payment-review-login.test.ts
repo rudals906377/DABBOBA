@@ -15,11 +15,15 @@ const policies = { terms: "2026-09-30", privacy: "2026-09-30" };
 
 async function setup(production = false, wrongPassword = false) {
   const queries: string[] = [];
+  const sessionInserts: unknown[][] = [];
   let requests = 0;
   const client = {
     release() {},
-    async query(sql: string) {
+    async query(sql: string, params: unknown[] = []) {
       queries.push(sql);
+      // Real transactions take time between login checks and session insert.
+      if (sql.includes("INSERT INTO auth_identities")) await new Promise((resolve) => setTimeout(resolve, 5));
+      if (sql.includes("INSERT INTO sessions")) sessionInserts.push(params);
       if (sql.includes("legal_document_versions")) return { rows: [
         { policy_key: "PRIVACY", policy_version: policies.privacy, content_sha256: "a".repeat(64) },
         { policy_key: "TERMS", policy_version: policies.terms, content_sha256: "b".repeat(64) },
@@ -49,11 +53,11 @@ async function setup(production = false, wrongPassword = false) {
     verifyAccessToken: async () => ({ issuer, subject, canonicalSubject: `${issuer}#${subject}`, providers: ["EMAIL"], email }),
   });
   await app.ready();
-  return { app, context, queries, requests: () => requests };
+  return { app, context, queries, sessionInserts, requests: () => requests };
 }
 
 test("review login creates only a normal customer session capped to the review deadline", async () => {
-  const { app, context, queries } = await setup();
+  const { app, context, queries, sessionInserts } = await setup();
   try {
     const normal = await app.inject({ method: "GET", url: "/v1/auth/providers" });
     assert.deepEqual(normal.json().methods, []);
@@ -65,7 +69,11 @@ test("review login creates only a normal customer session capped to the review d
     assert.equal(result.statusCode, 201, result.body);
     assert.equal(result.json().actor.role, "USER");
     assert.match(result.json().token, /^[A-Za-z0-9_-]{43}$/);
-    assert.ok(Date.parse(result.json().expiresAt) <= Date.parse(context.config.paymentReviewLogin!.expiresAt));
+    const deadline = Date.parse(context.config.paymentReviewLogin!.expiresAt);
+    assert.ok(Date.parse(result.json().expiresAt) <= deadline);
+    assert.equal(sessionInserts.length, 1);
+    assert.ok((sessionInserts[0]![6] as Date).getTime() <= deadline, "stored expiry never passes the review deadline");
+    assert.equal((sessionInserts[0]![7] as Date).getTime(), deadline, "the review deadline is stored on the session");
     assert.equal(result.headers["cache-control"], "no-store");
     assert.ok(queries.some(sql => sql.includes("INSERT INTO sessions")));
     assert.ok(queries.includes("COMMIT"));

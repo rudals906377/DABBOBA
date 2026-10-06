@@ -388,7 +388,8 @@ export async function registerCustomerAuthRoutes(
       });
       const session = await issueSession(client, context.config, {
         userId: user.id, kind: "USER", ip: request.ip,
-        expiresInMs: Math.floor(Math.min(86_400_000, Date.parse(review.expiresAt) - Date.now())),
+        expiresInMs: 86_400_000,
+        reviewAccessExpiresAt: new Date(review.expiresAt),
         ...(requestUserAgent ? { userAgent: requestUserAgent } : {}),
       });
       return { user, session };
