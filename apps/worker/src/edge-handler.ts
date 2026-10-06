@@ -41,6 +41,9 @@ const PASSTHROUGH_WORKER_KEYS = [
   "WORKER_MAX_MESSAGES_PER_RUN",
   "WORKER_MAX_RUN_SECONDS",
   "WORKER_DATABASE_OPERATION_TIMEOUT_MS",
+  // Storage-expiry reminders and holds stay DISABLED unless the owner turns
+  // them on (decision due within 60 days of the first LIVE sale).
+  "WORKER_INVENTORY_STORAGE_EXPIRY_MODE",
   "DATABASE_POOL_MAX",
   "NOTIFICATION_DELIVERY_URL",
   "NOTIFICATION_DELIVERY_TOKEN",
