@@ -646,6 +646,22 @@ export async function requestPortOneFullDrawRefund(form: FormData) {
   }, "전액 환불 요청을 기록했습니다. 공급자 확인 전에는 최종 환불로 표시하지 않습니다.");
 }
 
+export async function requestPointOrderRefund(form: FormData) {
+  await mutate("refunds.cancel", form, async (session, operationReason) => {
+    if (operationReason.length > 500) throw new Error("환불 사유는 500자 이내로 입력하세요.");
+    if (String(form.get("confirmPointRefund") || "") !== "yes") {
+      throw new Error("포인트 주문 환불 내용을 확인해 주세요.");
+    }
+    await adminApi(`/v1/admin/commerce/payments/${id(form, "paymentId")}/point-refund`, {
+      method: "POST",
+      token: session.token,
+      reason: operationReason,
+      headers: mutationHeaders(form),
+      body: { reason: operationReason },
+    });
+  }, "포인트 주문을 환불했습니다. 사용한 포인트를 회원에게 되돌리고 뽑기권을 취소했습니다.");
+}
+
 export async function requestPortOneLateRefund(form: FormData) {
   await mutate("refunds.cancel", form, async (session, operationReason) => {
     if (operationReason.length > 500) throw new Error("환불 사유는 500자 이내로 입력하세요.");

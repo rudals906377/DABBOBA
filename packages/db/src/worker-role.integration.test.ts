@@ -389,11 +389,14 @@ test("API and worker database identities are isolated around pgmq", {
       [WORKER_DATABASE_ROLE],
     );
     // 0082 adds only these two reviewed, bounded component-disposal functions;
-    // 0083's shared assessment stays owner-only behind them.
+    // 0083's shared assessment stays owner-only behind them. 0086 adds the
+    // account-deletion record separation, which the worker calls but whose
+    // separated table it cannot read.
     // Exact names/signatures retain the failure on any extra callable routine.
     assert.deepEqual(publicCallable.rows, [
       { schema_name: "public", routine_name: "execute_commerce_retention", argument_types: "integer" },
       { schema_name: "public", routine_name: "preview_commerce_retention", argument_types: "integer" },
+      { schema_name: "public", routine_name: "separate_deleted_account_records", argument_types: "uuid, uuid" },
     ]);
     const setVtDependency = await migrationPool.query<{
       timestamp_overload_exists: boolean;

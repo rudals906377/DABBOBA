@@ -71,11 +71,13 @@ export async function fetchAccountPolicyAcceptances(
 export async function requestAccountDeletion(
   apiBaseUrl: string,
   accessToken: string,
+  forfeitPointBalance?: number,
 ): Promise<AccountDeletionReceipt> {
   const client = authorizedClient(apiBaseUrl, accessToken);
   const result = await client.POST("/v1/account/deletion-request", {
     params: { header: { "Idempotency-Key": randomUUID() } },
-    body: {},
+    // Only the exact balance the customer agreed to give up; the server rejects any other amount.
+    body: forfeitPointBalance && forfeitPointBalance > 0 ? { forfeitPointBalance } : {},
   });
   if (!result.data) throw new Error(errorMessage(result.error, "회원탈퇴를 요청하지 못했어요."));
   return result.data;

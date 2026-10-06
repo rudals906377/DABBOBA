@@ -1,6 +1,7 @@
 import { createDatabasePool, type DatabaseClient, type DatabasePool, WORKER_DATABASE_ROLE } from "@dabboba/db";
 import type { WorkerConfig } from "./config.js";
 import { normalizeCommerceRetentionConfig } from "./commerce-retention.js";
+import { normalizeInventoryStorageExpiryMode } from "./storage-expiry.js";
 import { processWorkerJob, type JobDependencies } from "./jobs.js";
 import { createLogger, errorFields, type Logger } from "./logger.js";
 import type { MediaStore } from "./media.js";
@@ -284,7 +285,8 @@ export async function runWorkerOnceCore(
     for (const job of [
       { kind: "payment.reconcile" } as const,
       { kind: "reservation.sweep" } as const,
-      { kind: "inventory.storage-expiry" } as const,
+      ...(normalizeInventoryStorageExpiryMode(config.inventoryStorageExpiry) === "DISABLED"
+        ? [] : [{ kind: "inventory.storage-expiry" } as const]),
       { kind: "account-auth.cleanup" } as const,
       { kind: "media.cleanup" } as const,
       { kind: "retention.sweep" } as const,

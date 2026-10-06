@@ -709,7 +709,6 @@ test(
     });
     assert.equal(replaySessionPreserved.statusCode, 200, replaySessionPreserved.body);
 
-    await pool.query("UPDATE point_accounts SET balance=0 WHERE user_id=$1", [first.actor.userId]);
     await pool.query(
       "UPDATE payments SET status='CANCELLED' WHERE order_id=$1",
       [order.rows[0]!.id],
@@ -727,6 +726,29 @@ test(
     await pool.query("UPDATE inventory_units SET status='REFUNDED' WHERE id=$1", [inventory.rows[0]!.id]);
 
     const reassessmentSession = await createDevSession(customerEmail);
+    // Only the 1,250P balance remains: deletion needs an exact forfeiture agreement.
+    const pointsOnlyPreview = await app.inject({
+      method: "GET",
+      url: "/v1/account/deletion-preview",
+      headers: authorization(reassessmentSession.token),
+    });
+    assert.equal(pointsOnlyPreview.statusCode, 200, pointsOnlyPreview.body);
+    assert.deepEqual(
+      (({ canDeleteNow, canDeleteWithPointForfeiture }) => ({ canDeleteNow, canDeleteWithPointForfeiture }))(
+        pointsOnlyPreview.json() as { canDeleteNow: boolean; canDeleteWithPointForfeiture: boolean },
+      ),
+      { canDeleteNow: false, canDeleteWithPointForfeiture: true },
+    );
+    const staleForfeiture = await app.inject({
+      method: "POST",
+      url: "/v1/account/deletion-request",
+      headers: {
+        ...authorization(reassessmentSession.token),
+        "idempotency-key": `delete-stale-forfeit-${randomUUID()}`,
+      },
+      payload: { forfeitPointBalance: 1000 },
+    });
+    assert.equal(staleForfeiture.statusCode, 409, staleForfeiture.body);
     const reassessed = await app.inject({
       method: "POST",
       url: "/v1/account/deletion-request",
@@ -734,13 +756,18 @@ test(
         ...authorization(reassessmentSession.token),
         "idempotency-key": `delete-reassess-${randomUUID()}`,
       },
-      payload: {},
+      payload: { forfeitPointBalance: 1250 },
     });
     assert.equal(reassessed.statusCode, 202, reassessed.body);
-    const reassessedBody = reassessed.json() as { id: string; status: string; requestCount: number };
+    const reassessedBody = reassessed.json() as {
+      id: string; status: string; requestCount: number; pointForfeitureAcknowledged: number | null;
+      blockers: Record<string, number>;
+    };
     assert.equal(reassessedBody.id, deletionBody.id);
     assert.equal(reassessedBody.status, "PROCESSING");
     assert.equal(reassessedBody.requestCount, 2);
+    assert.equal(reassessedBody.pointForfeitureAcknowledged, 1250);
+    assert.equal(reassessedBody.blockers.pointBalance, 1250);
 
     const durableState = await pool.query<{
       status: string;

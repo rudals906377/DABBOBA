@@ -59,7 +59,7 @@ test("configured KG INICIS reconciliation is wired into actual worker job depend
 
   await runWorkerOnce(config, logger, () => false, () => pool, operations);
 
-  assert.equal(observedProviders.length, 6);
+  assert.equal(observedProviders.length, 5);
   assert.equal(observedProviders.every((provider) => provider instanceof InicisInquiryPaymentProvider), true);
   assert.ok(createPaymentReconciliationProvider(config) instanceof InicisInquiryPaymentProvider);
   assert.throws(
@@ -146,6 +146,7 @@ test("a productive run prioritizes lease-sensitive periodic work before queue co
   const config = loadWorkerConfig({
     NODE_ENV: "test",
     WORKER_DATABASE_URL: "postgresql://worker:secret@127.0.0.1:5432/dabboba",
+    WORKER_INVENTORY_STORAGE_EXPIRY_MODE: "ENABLED",
   });
   const trace: string[] = [];
   const pool = {
@@ -203,6 +204,7 @@ test("a failed periodic class does not starve later maintenance or one bounded q
   const config = loadWorkerConfig({
     NODE_ENV: "test",
     WORKER_DATABASE_URL: "postgresql://worker:secret@127.0.0.1:5432/dabboba",
+    WORKER_INVENTORY_STORAGE_EXPIRY_MODE: "ENABLED",
   });
   const trace: string[] = [];
   const errors: Array<{ fields: Record<string, unknown>; message: string }> = [];

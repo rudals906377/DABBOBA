@@ -111,7 +111,7 @@ test("Apple revocation is confirmed before Supabase deletion and is not stored i
       return {
         async query(sql: string) {
           transactionQueries.push(sql);
-          if (sql.includes("SELECT status FROM account_deletion_requests")) {
+          if (sql.includes("SELECT status,point_forfeiture_acknowledged FROM account_deletion_requests")) {
             return { rowCount: 1, rows: [{ status: "PROCESSING" }] };
           }
           if (sql.includes("SELECT id AS media_id")) return { rowCount: 0, rows: [] };
@@ -309,7 +309,7 @@ test("successful Auth deletion completes the request and removes the transient i
       return {
         async query(sql: string) {
           if (sql !== "BEGIN" && sql !== "COMMIT") transactionQueries.push(sql);
-          if (sql.includes("SELECT status FROM account_deletion_requests")) {
+          if (sql.includes("SELECT status,point_forfeiture_acknowledged FROM account_deletion_requests")) {
             return { rowCount: 1, rows: [{ status: "PROCESSING" }] };
           }
           if (sql.includes("SELECT id AS media_id")) {
@@ -490,7 +490,7 @@ test("local finalization retries after provider deletion without calling the pro
       return {
         async query(sql: string) {
           if (sql === "BEGIN" || sql === "COMMIT" || sql === "ROLLBACK") return { rowCount: 1, rows: [] };
-          if (sql.includes("SELECT status FROM account_deletion_requests")) {
+          if (sql.includes("SELECT status,point_forfeiture_acknowledged FROM account_deletion_requests")) {
             return { rowCount: 1, rows: [{ status: "PROCESSING" }] };
           }
           if (sql.includes("SELECT id AS media_id")) return { rowCount: 0, rows: [] };

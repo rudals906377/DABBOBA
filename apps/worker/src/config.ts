@@ -13,6 +13,7 @@ import {
 } from "./inicis-inquiry.js";
 import type { PortOneApiRequeryConfig } from "./portone-api-requery.js";
 import { DEFAULT_COMMERCE_RETENTION, normalizeCommerceRetentionConfig, type CommerceRetentionConfig } from "./commerce-retention.js";
+import { normalizeInventoryStorageExpiryMode, type InventoryStorageExpiryMode } from "./storage-expiry.js";
 
 export type RuntimeEnvironment = "development" | "test" | "production";
 
@@ -99,6 +100,8 @@ export type WorkerConfig = {
   retention?: WorkerRetentionConfig;
   /** Disabled by default; PostgreSQL-approved policies are required even in EXECUTE mode. */
   commerceRetention?: CommerceRetentionConfig;
+  /** Disabled by default: storage reminders and EXPIRED_HOLD are not an approved policy yet. */
+  inventoryStorageExpiry?: InventoryStorageExpiryMode;
   logLevel: "debug" | "info" | "warn" | "error";
 };
 
@@ -374,6 +377,7 @@ export function loadWorkerConfig(env: Environment = process.env): WorkerConfig {
       mode: (env.WORKER_COMMERCE_RETENTION_MODE?.trim() || DEFAULT_COMMERCE_RETENTION.mode) as CommerceRetentionConfig["mode"],
       batchSize: integer(env, "WORKER_COMMERCE_RETENTION_BATCH_SIZE", DEFAULT_COMMERCE_RETENTION.batchSize, 1, 100),
     }),
+    inventoryStorageExpiry: normalizeInventoryStorageExpiryMode(env.WORKER_INVENTORY_STORAGE_EXPIRY_MODE),
     retention: {
       outboxPublishedDays: integer(
         env,

@@ -4,6 +4,7 @@ import { PRODUCT_CATEGORIES } from "@dabboba/domain";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { adminMutationHeaders, writeAdminAudit, writeOutbox } from "../lib/audit.js";
 import { requireLiveCommerce } from "../lib/commerce-mode.js";
+import { assertPublicContentAllowed } from "../lib/content-filter.js";
 import { AppError, badRequest, conflict, forbidden, notFound } from "../lib/errors.js";
 import {
   beginIdempotency,
@@ -1042,6 +1043,7 @@ export async function registerExchangeRoutes(app: FastifyInstance, context: ApiC
       const title = stringInput(body, "title", { max: 160 })!;
       const details = stringInput(body, "details", { max: 5000 })!;
       const inventoryIds = exchangeInventoryBundleInput(body);
+      assertPublicContentAllowed("MARKETPLACE", title, details);
       const result = await runIdempotentMutation(
         context,
         request,

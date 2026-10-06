@@ -269,6 +269,53 @@ test("wanted request creation stores a custom work name and one ready owned phot
   ]);
 });
 
+test("wanted request create and update reject objectionable text or contact details before any database work", async () => {
+  let databaseCalls = 0;
+  const pool = {
+    async connect() { databaseCalls += 1; throw new Error("database must not be reached"); },
+    async query() { databaseCalls += 1; throw new Error("database must not be reached"); },
+  };
+  const { app, routes } = routeCapture();
+  await registerWantedRoutes(app, testContext(pool, authorId));
+  const create = routes.get("POST /v1/wanted-requests");
+  const update = routes.get("PATCH /v1/wanted-requests/:requestId");
+  assert.ok(create);
+  assert.ok(update);
+  const isContentNotAllowed = (error: unknown) => error instanceof AppError
+    && error.statusCode === 400
+    && error.code === "CONTENT_NOT_ALLOWED"
+    && error.message === "부적절한 표현이나 외부 연락처가 포함되어 등록할 수 없어요.";
+  const valid = { category: "figure", ipId: "spy-family", desiredItem: "아냐 교복 피규어", details: "재입고되면 알려주세요." };
+
+  for (const body of [
+    { ...valid, desiredItem: "씨발 피규어" },
+    { ...valid, details: "010-1234-5678로 연락 주세요" },
+    { ...valid, details: "카톡 아이디 dabboba 로 연락" },
+    { ...valid, ipId: null, ipNameKo: "open.kakao.com/o/abc" },
+  ]) {
+    await assert.rejects(
+      create({
+        actor: { userId: authorId },
+        headers: { "idempotency-key": "wanted-content-filter-0001" },
+        body,
+        id: "wanted-content-filter-create",
+      }, replyCapture().reply),
+      isContentNotAllowed,
+    );
+  }
+  await assert.rejects(
+    update({
+      actor: { userId: authorId },
+      params: { requestId },
+      headers: { "idempotency-key": "wanted-content-filter-0002" },
+      body: { expectedVersion: 1, details: "s.e.x 굿즈 구해요" },
+      id: "wanted-content-filter-update",
+    }, replyCapture().reply),
+    isContentNotAllowed,
+  );
+  assert.equal(databaseCalls, 0);
+});
+
 test("wanted like commits the explicit state and rejects self-like attempts", async () => {
   const successfulQueries: string[] = [];
   const successfulClient = {

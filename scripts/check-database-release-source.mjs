@@ -192,6 +192,11 @@ export const DATABASE_RELEASE_MIGRATIONS = Object.freeze([
     path: 'packages/db/migrations/0085_session_review_access_deadline.sql',
     sha256: 'ef9f803aef714291ebfaf4aacdf9216c5f8a430be7990345045bd0a59126efe9',
   }),
+  Object.freeze({
+    file: '0086_deleted_account_record_separation.sql',
+    path: 'packages/db/migrations/0086_deleted_account_record_separation.sql',
+    sha256: 'cb8d66ad39abd34511137140c7ea36da788152b86123b0826cb2e187d2ae6e94',
+  }),
 ]);
 
 export const MINIMUM_DATABASE_RELEASE_VERSION =

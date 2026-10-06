@@ -45,8 +45,11 @@ test("gacha and kuji purchase notices explain cancellation and refund separately
     const sections = notices.checkoutNoticeSections(category);
     const copy = JSON.stringify(sections);
     assert.match(copy, /취소·환불 규정/);
-    assert.match(copy, /뽑기 권리를 사용하지 않은 주문/);
+    assert.match(copy, /뽑기 권리를 사용하지 않은 주문은 고객센터로 취소를 요청하면 전액 취소합니다/);
     assert.match(copy, /기존 결제 수단/);
+    assert.match(copy, /주문에 사용한 포인트는 포인트로 되돌려 드립니다/);
+    assert.match(copy, /7일 이내/);
+    assert.match(copy, /3영업일 이내/);
     assert.match(copy, /법령상 청약철회/);
     assert.match(copy, /하자·파손·오배송/);
     assert.match(copy, /고객센터/);

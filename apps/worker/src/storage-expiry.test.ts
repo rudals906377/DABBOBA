@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { DatabasePool } from "@dabboba/db";
+import { loadWorkerConfig } from "./config.js";
+import { processWorkerJob } from "./jobs.js";
 import type { Logger } from "./logger.js";
 import {
+  normalizeInventoryStorageExpiryMode,
   processInventoryStorageExpiryBatch,
   STORAGE_REMINDER_MILESTONE_DAYS,
   STORAGE_REMINDER_WINDOW_DAYS,
@@ -147,4 +150,24 @@ test("storage expiry periodic job payload is finite and deadline stops before op
     },
   );
   assert.equal(connections, 0);
+});
+
+test("storage expiry stays off by default and a queued job cannot start it", async () => {
+  const config = loadWorkerConfig({
+    NODE_ENV: "test",
+    WORKER_DATABASE_URL: "postgresql://worker:secret@127.0.0.1:5432/dabboba",
+  });
+  assert.equal(config.inventoryStorageExpiry, "DISABLED");
+  let connected = false;
+  const result = await processWorkerJob({
+    config,
+    logger: loggerWith([]),
+    pool: { async connect() { connected = true; throw new Error("must not access DB"); } } as unknown as DatabasePool,
+  } as Parameters<typeof processWorkerJob>[0], { kind: "inventory.storage-expiry" });
+  assert.deepEqual(result, {
+    cancelledListings: 0, rejectedOffers: 0, releasedExchangeInventory: 0, heldInventory: 0, reminders: 0,
+  });
+  assert.equal(connected, false);
+  assert.equal(normalizeInventoryStorageExpiryMode(" ENABLED "), "ENABLED");
+  assert.throws(() => normalizeInventoryStorageExpiryMode("EXECUTE"), /DISABLED or ENABLED/);
 });

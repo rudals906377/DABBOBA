@@ -17,7 +17,7 @@ import {
 import { expireOrderReservations, expireReservationBatch } from "./reservations.js";
 import { runRetentionBatch } from "./retention.js";
 import { runCommerceRetentionBatch } from "./commerce-retention.js";
-import { processInventoryStorageExpiryBatch } from "./storage-expiry.js";
+import { DISABLED_STORAGE_EXPIRY_RESULT, normalizeInventoryStorageExpiryMode, processInventoryStorageExpiryBatch } from "./storage-expiry.js";
 import { parseOutboxEvent, parseWorkerJob, type OutboxEvent, type WorkerJob } from "./types.js";
 
 export type JobDependencies = {
@@ -141,6 +141,10 @@ export async function processWorkerJob(dependencies: JobDependencies, raw: unkno
         dependencies.shouldContinue,
       );
     case "inventory.storage-expiry":
+      // A queued job cannot start unapproved storage handling either.
+      if (normalizeInventoryStorageExpiryMode(dependencies.config.inventoryStorageExpiry) === "DISABLED") {
+        return { ...DISABLED_STORAGE_EXPIRY_RESULT };
+      }
       return processInventoryStorageExpiryBatch(
         dependencies.pool,
         dependencies.config.outboxBatchSize,

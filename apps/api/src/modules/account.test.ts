@@ -10,6 +10,7 @@ import {
   STANDARD_SHIPPING_FEE,
   accountNotificationDestination,
   publicNotificationData,
+  accountDeletionNeedsOnlyPointForfeiture,
   accountDeletionStatus,
   calculateAccountShippingPolicy,
   canonicalPointReturnInventoryIds,
@@ -535,6 +536,25 @@ test("account deletion starts automatically only when every authoritative blocke
   assert.equal(accountDeletionStatus({ ...clear, activeExchangeOfferCount: 1 }), "BLOCKED");
 });
 
+test("only an exact point forfeiture agreement clears the point blocker", () => {
+  const clear = {
+    pointBalance: 0,
+    activeOrderCount: 0,
+    activePaymentCount: 0,
+    availableDrawEntitlementCount: 0,
+    activeInventoryCount: 0,
+    activeShippingRequestCount: 0,
+    activeExchangeListingCount: 0,
+    activeExchangeOfferCount: 0,
+  };
+  assert.equal(accountDeletionStatus({ ...clear, pointBalance: 1200 }, 1200), "PROCESSING");
+  assert.equal(accountDeletionStatus({ ...clear, pointBalance: 1200 }, 1100), "BLOCKED");
+  assert.equal(accountDeletionStatus({ ...clear, pointBalance: 1200, activeInventoryCount: 1 }, 1200), "BLOCKED");
+  assert.equal(accountDeletionNeedsOnlyPointForfeiture({ ...clear, pointBalance: 1200 }), true);
+  assert.equal(accountDeletionNeedsOnlyPointForfeiture({ ...clear, pointBalance: 1200, activeOrderCount: 1 }), false);
+  assert.equal(accountDeletionNeedsOnlyPointForfeiture(clear), false);
+});
+
 test("wishlist reads hide prize-only catalog items", async () => {
   const { app, routes } = routeCapture();
   let capturedSql = "";
@@ -642,7 +662,7 @@ test("account inventory returns the owner's stored, exchanging, or shipping GACH
   assert.deepEqual(capturedParams, [actorId, 3]);
   assert.match(capturedSql, /iu\.owner_id=\$1/);
   assert.match(capturedSql, /iu\.status IN \('OWNED','EXCHANGE_LISTED','EXCHANGE_OFFERED','SHIPPING','EXPIRED_HOLD'\)/);
-  assert.match(capturedSql, /\(iu\.status IN \('SHIPPING','EXPIRED_HOLD'\) OR iu\.storage_expires_at>now\(\)\)/);
+  assert.doesNotMatch(capturedSql, /\(iu\.status IN \('SHIPPING','EXPIRED_HOLD'\) OR iu\.storage_expires_at>now\(\)\)/);
   assert.match(capturedSql, /point_purchase\.reference_amount >= 2/);
   assert.match(capturedSql, /SELECT p\.price AS reference_amount/);
   assert.match(capturedSql, /iu\.source_type IN \('GACHA','KUJI'\)/);
@@ -836,6 +856,53 @@ test("profile updates reject a stale owner version before changing the user row"
   assert.deepEqual(lock?.params, [actorId]);
   assert.equal(queries.some(({ sql }) => sql.startsWith("UPDATE users")), false);
   assert.equal(queries.some(({ sql }) => sql === "ROLLBACK"), true);
+});
+
+test("public nickname and bio reject objectionable terms before any database work but allow contact text", async () => {
+  const actorId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  let databaseCalls = 0;
+  const pool = {
+    async connect() { databaseCalls += 1; throw new Error("database must not be reached"); },
+    async query() { databaseCalls += 1; throw new Error("database must not be reached"); },
+  };
+  const { app, routes } = routeCapture();
+  await registerAccountRoutes(app, testContext(pool));
+  const profile = routes.get("/v1/account/profile");
+  const basicInfo = routes.get("/v1/account/basic-info");
+  assert.ok(profile);
+  assert.ok(basicInfo);
+  const isContentNotAllowed = (error: unknown) => error instanceof AppError
+    && error.statusCode === 400
+    && error.code === "CONTENT_NOT_ALLOWED";
+
+  for (const body of [
+    { nickname: "시 발", expectedVersion: 1 },
+    { bio: "fuck this", expectedVersion: 1 },
+  ]) {
+    await assert.rejects(
+      profile({ actor: { userId: actorId }, headers: { "idempotency-key": "profile-filter-0001" }, body }, {}),
+      isContentNotAllowed,
+    );
+  }
+  await assert.rejects(
+    basicInfo({
+      actor: { userId: actorId },
+      headers: { "idempotency-key": "basic-info-filter-0001" },
+      body: { nickname: "병신", expectedVersion: 1 },
+    }, {}),
+    isContentNotAllowed,
+  );
+  assert.equal(databaseCalls, 0);
+
+  // Off-platform contact rules belong to the marketplace, not the profile.
+  await assert.rejects(
+    profile({
+      actor: { userId: actorId },
+      headers: { "idempotency-key": "profile-filter-0002" },
+      body: { bio: "피규어 수집가 · 인스타 dabboba.collector", expectedVersion: 1 },
+    }, {}),
+    (error: unknown) => error instanceof Error && error.message === "database must not be reached",
+  );
 });
 
 test("account basic info updates reject a stale version before changing private data", async () => {

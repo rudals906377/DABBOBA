@@ -622,13 +622,16 @@ function AccountActions({ profileState }: { profileState: ReturnType<typeof useP
       Alert.alert("로그인이 필요해요", "로그인하면 회원탈퇴를 요청할 수 있어요.");
       return;
     }
+    let forfeitPointBalance: number | undefined;
     try {
       setDeletionPending(true);
       const preview = await fetchAccountDeletionPreview(
         profileState.runtime.apiBaseUrl,
         profileState.accessToken,
       );
-      if (!preview.canDeleteNow) {
+      if (preview.canDeleteWithPointForfeiture) {
+        forfeitPointBalance = preview.blockers.pointBalance;
+      } else if (!preview.canDeleteNow) {
         Alert.alert("아직 탈퇴할 수 없어요", deletionBlockerMessage(preview.blockers));
         return;
       }
@@ -639,17 +642,23 @@ function AccountActions({ profileState }: { profileState: ReturnType<typeof useP
       setDeletionPending(false);
     }
     Alert.alert(
-      "회원탈퇴를 요청할까요?",
-      "진행 중인 주문·배송·교환과 보관 상품을 확인한 뒤 처리되며, 요청이 접수되면 모든 기기에서 로그아웃돼요.",
+      forfeitPointBalance ? "남은 포인트가 모두 사라져요" : "회원탈퇴를 요청할까요?",
+      forfeitPointBalance
+        ? `남은 ${forfeitPointBalance.toLocaleString("ko-KR")}P는 탈퇴와 함께 소멸하고 되돌릴 수 없어요. 요청이 접수되면 모든 기기에서 로그아웃돼요.`
+        : "진행 중인 주문·배송·교환과 보관 상품을 확인한 뒤 처리되며, 요청이 접수되면 모든 기기에서 로그아웃돼요.",
       [
         { text: "취소", style: "cancel" },
         {
-          text: "탈퇴 요청",
+          text: forfeitPointBalance ? "포인트 포기하고 탈퇴" : "탈퇴 요청",
           style: "destructive",
           onPress: () => { void (async () => {
             try {
               setDeletionPending(true);
-              const result = await requestAccountDeletion(profileState.runtime.apiBaseUrl, profileState.accessToken!);
+              const result = await requestAccountDeletion(
+                profileState.runtime.apiBaseUrl,
+                profileState.accessToken!,
+                forfeitPointBalance,
+              );
               setDeletionRequest(result);
               await finalizeAcceptedDeletion(result);
             } catch (error) {
@@ -674,7 +683,7 @@ function AccountActions({ profileState }: { profileState: ReturnType<typeof useP
       <View style={styles.dangerCard}>
         <DecorativeIonicon name="warning-outline" size={25} color={colors.danger} />
         <Text style={styles.dangerTitle}>탈퇴 후 되돌릴 수 없어요</Text>
-        <Text style={styles.dangerBody}>보관 상품, 진행 중인 주문·배송·교환, 남은 포인트가 있으면 탈퇴 요청이 보류될 수 있어요. 법령상 보관이 필요한 거래 기록은 계정과 분리해 정해진 기간 동안 보관될 수 있어요.</Text>
+        <Text style={styles.dangerBody}>보관 상품이나 진행 중인 주문·배송·교환이 있으면 탈퇴 요청이 보류돼요. 남은 포인트는 동의를 받은 뒤 탈퇴와 함께 소멸해요. 법령상 보관이 필요한 거래 기록은 계정과 분리해 정해진 기간 동안 보관해요.</Text>
         {deletionRequest ? <View style={styles.deletionStatus}><Text style={styles.deletionStatusLabel}>현재 상태</Text><Text style={styles.deletionStatusValue}>{deletionStatusLabel(deletionRequest.status)}</Text></View> : null}
         <Pressable accessibilityRole="button" accessibilityLabel="회원탈퇴 요청" accessibilityState={{ disabled: deletionPending, busy: deletionPending }} disabled={deletionPending} onPress={() => void requestDeletion()} style={({ pressed }) => [styles.dangerButton, deletionPending && styles.disabled, pressed && styles.pressed]}><Text style={styles.dangerButtonLabel}>{deletionPending ? "확인 중" : "회원탈퇴 요청"}</Text></Pressable>
         {publicDeletionUrl ? (

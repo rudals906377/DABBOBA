@@ -654,9 +654,9 @@ function Shipping({
           </View>
         </View> : null}
       </View>
-      {sortedItems.some((item) => item.status === "EXPIRED_HOLD") ? (
+      {sortedItems.some((item) => item.status === "EXPIRED_HOLD" || storageExpiryState(item.storageExpiresAt)?.isExpired) ? (
         <SeedInlineGuidance style={styles.prelaunchStorageGuidance}>
-          보관 기간이 만료된 상품은 자동 폐기되지 않고 보류돼요. 고객센터에 문의해 주세요.
+          보관 기간이 지난 상품은 자동으로 폐기하지 않아요. 고객센터에 문의해 주세요.
         </SeedInlineGuidance>
       ) : null}
       {sortedItems.map((item) => {
