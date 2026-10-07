@@ -142,16 +142,56 @@ SELECT :'step' = 'approve' AS step_approve,
     DO $$ BEGIN RAISE EXCEPTION 'commerce-retention-approval: invalid copies_status' USING ERRCODE = '22023'; END $$;
   \endif
   BEGIN;
+  SELECT set_config('dabboba.retention_admin', :'admin_id', true) AS retention_admin,
+         set_config('dabboba.retention_evidence', :'evidence', true) AS retention_evidence,
+         set_config('dabboba.retention_copies', :'copies_status', true) AS retention_copies \gset
   -- A review is valid for 24 hours and only the newest row counts; add a new
-  -- row for every run instead of editing an old one.
-  INSERT INTO public.commerce_retention_reviews
-    (policy_id, reviewed_by_admin_id, hold_registry_reviewed_at,
-     external_copies_reviewed_at, external_copies_status, evidence_reference)
-  SELECT policy.id, :'admin_id'::uuid, now(),
-         CASE WHEN :'copies_status' = 'CLEARED' THEN now() END,
-         :'copies_status', :'evidence'
-    FROM public.commerce_retention_policies policy
-   WHERE policy.approved_at IS NOT NULL AND policy.retired_at IS NULL;
+  -- row for every run instead of editing an old one. Only the approved
+  -- 2026-10-07 60/36-month policies are reviewed, and only when they are the
+  -- whole current approved set: an unapproved launch policy or an older
+  -- current version stops the run instead of reviewing nothing or the wrong
+  -- version.
+  DO $$
+  DECLARE
+    reviewed integer;
+  BEGIN
+    IF NOT EXISTS (
+      SELECT 1 FROM public.users
+       WHERE id = current_setting('dabboba.retention_admin')::uuid
+         AND role IN ('ADMIN','SUPER_ADMIN') AND status = 'ACTIVE'
+    ) THEN
+      RAISE EXCEPTION 'admin_id is not an ACTIVE ADMIN or SUPER_ADMIN' USING ERRCODE = '42501';
+    END IF;
+    IF (
+      SELECT count(*) FROM public.commerce_retention_policies
+       WHERE approved_at IS NOT NULL AND retired_at IS NULL
+    ) <> 2 THEN
+      RAISE EXCEPTION 'The current approved retention policies are not exactly the 2026-10-07 launch policy'
+        USING ERRCODE = '55000';
+    END IF;
+    INSERT INTO public.commerce_retention_reviews
+      (policy_id, reviewed_by_admin_id, hold_registry_reviewed_at,
+       external_copies_reviewed_at, external_copies_status, evidence_reference)
+    SELECT policy.id, current_setting('dabboba.retention_admin')::uuid, now(),
+           CASE WHEN current_setting('dabboba.retention_copies') = 'CLEARED' THEN now() END,
+           current_setting('dabboba.retention_copies'),
+           current_setting('dabboba.retention_evidence')
+      FROM public.commerce_retention_policies policy
+     WHERE policy.approved_at IS NOT NULL
+       AND policy.retired_at IS NULL
+       AND policy.policy_version = DATE '2026-10-07'
+       AND policy.anchor_rule = 'LATEST_RELEVANT_ACTIVITY'
+       AND policy.retention_months = CASE policy.record_kind
+                                       WHEN 'SHIPPING_ADDRESS' THEN 60
+                                       WHEN 'INQUIRY_CONTENT' THEN 36
+                                     END;
+    GET DIAGNOSTICS reviewed = ROW_COUNT;
+    IF reviewed <> 2 THEN
+      RAISE EXCEPTION 'The current approved retention policies are not exactly the 2026-10-07 launch policy'
+        USING ERRCODE = '55000';
+    END IF;
+  END;
+  $$;
   SELECT policy.record_kind, review.external_copies_status, review.created_at
     FROM public.commerce_retention_reviews review
     JOIN public.commerce_retention_policies policy ON policy.id = review.policy_id
