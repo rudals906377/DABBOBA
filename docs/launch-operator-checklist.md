@@ -122,11 +122,11 @@ corepack pnpm run supabase:worker:schedule <2단계 check:release의 targetHash>
 
 - 판매판 약관·개인정보처리방침·내부관리계획은 업계 표준 기준으로 확정했다(2026-10-06 결정, 자문은 선택).
 - `{{…}}` 값 4개(시행일, 택배사 상호, 지원 메일 수신 서비스, Supabase 저장 리전)는 2026-10-07에 모두 채웠다. 근거는 `docs/legal-drafts/review-questionnaire.md`에 있다.
-- LIVE 전환 직전에 한 배포로 게시한다. 코드는 2026-10-07에 모두 준비됐고, 게시 순서는 `docs/live-cutover-runbook.md`의 "법적 문서 게시 번들" 절을 따른다.
+- 게시 순서는 `docs/live-cutover-runbook.md`의 "법적 문서 게시 번들" 절을 따른다. 2026-10-07 PR #37 병합으로 공개 HTML은 이미 새 판이고(해시 확인), 운영 DB에 `0090`·`0091`을 적용하는 일이 남았다.
   - `public/legal/terms`·`privacy`가 2026-10-07 판이고 마이그레이션 `0090`이 정책 버전을 발행한다(기존 회원 재동의).
   - 맞춤 추천 토글은 앱·API에서 제거됐고 마이그레이션 `0091`이 기존 동의를 철회한다.
   - 워커 세션 기록 보관 기간은 기본 90일이다.
-- 같은 날 `docs/commerce-retention-components.md`의 운영 절차로 보존기간 정책을 승인하고, 대표가 내부관리계획을 승인한다.
+- 같은 날 `ops/database/commerce-retention-approval.sql`(`step=approve`)로 보존기간 정책을 승인하고, 대표가 내부관리계획을 승인한다. 절차는 `docs/commerce-retention-components.md`.
 
 ## 9-1. KG이니시스 테스트 채널 검증 (LIVE 전)
 
@@ -144,6 +144,7 @@ corepack pnpm run supabase:worker:schedule <2단계 check:release의 targetHash>
 `docs/live-cutover-runbook.md`: LIVE 프로필 작성 → `supabase:edge:live:check` →
 `node scripts/deploy-supabase-live-edge.mjs --confirm=LIVE:rconfxsykttfvznakile`.
 전환 명령은 4-1의 관리자 Access 검사를 먼저 통과해야 진행한다. 실패하면 자동으로 PRELAUNCH로 되돌아간다.
+성공하면 Cloudflare Pages Production 변수 `VITE_DABBOBA_COMMERCE_MODE=LIVE`를 넣고 배포를 다시 실행해 첫 화면을 판매판 문구로 바꾼다(되돌릴 때는 변수를 지우고 다시 배포).
 
 전환한 날짜를 기록한다. 그날부터 60일 안에 보관기한 알림·만료 보류 운영 여부를 정한다.
 

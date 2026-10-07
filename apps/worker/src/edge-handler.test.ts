@@ -173,6 +173,8 @@ test("Edge normalization maps only DABBOBA storage/database secrets after auth",
   assert.equal(normalized.DABBOBA_WORKER_INVOKE_SECRET, undefined);
   assert.equal(normalized.SUPABASE_DB_URL, undefined);
   assert.equal(normalized.WORKER_INVENTORY_STORAGE_EXPIRY_MODE, undefined);
+  assert.equal(normalized.WORKER_COMMERCE_RETENTION_MODE, undefined);
+  assert.equal(normalized.WORKER_COMMERCE_RETENTION_BATCH_SIZE, undefined);
 
   for (const poisoned of [
     { WORKER_DATABASE_URL: workerDatabaseUrl },
@@ -196,6 +198,18 @@ test("Edge normalization passes the storage-expiry mode only when the owner sets
   assert.equal(normalizeSupabaseEdgeWorkerEnvironment(sourceEnvironment()).WORKER_INVENTORY_STORAGE_EXPIRY_MODE, undefined);
   const enabled = normalizeSupabaseEdgeWorkerEnvironment(sourceEnvironment({ WORKER_INVENTORY_STORAGE_EXPIRY_MODE: "ENABLED" }));
   assert.equal(enabled.WORKER_INVENTORY_STORAGE_EXPIRY_MODE, "ENABLED");
+});
+
+test("Edge normalization passes the commerce-retention mode only when the operator sets it", () => {
+  const unset = normalizeSupabaseEdgeWorkerEnvironment(sourceEnvironment());
+  assert.equal(unset.WORKER_COMMERCE_RETENTION_MODE, undefined);
+  assert.equal(unset.WORKER_COMMERCE_RETENTION_BATCH_SIZE, undefined);
+  const preview = normalizeSupabaseEdgeWorkerEnvironment(sourceEnvironment({
+    WORKER_COMMERCE_RETENTION_MODE: "PREVIEW",
+    WORKER_COMMERCE_RETENTION_BATCH_SIZE: "10",
+  }));
+  assert.equal(preview.WORKER_COMMERCE_RETENTION_MODE, "PREVIEW");
+  assert.equal(preview.WORKER_COMMERCE_RETENTION_BATCH_SIZE, "10");
 });
 
 test("Edge worker reuses the managed Supabase service role key without leaking it before auth", () => {

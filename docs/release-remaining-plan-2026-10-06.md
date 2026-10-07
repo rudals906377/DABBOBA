@@ -1,20 +1,22 @@
-# 출시까지 남은 일 — 누가·어디서·어떻게 (2026-10-06 갱신)
+# 출시까지 남은 일 — 누가·어디서·어떻게 (2026-10-07 갱신)
 
 목표: 친구 명의 계정으로 가챠 8종 판매판(LIVE)을 iOS·Android에 출시한다. 쿠지는 첫 출시 범위 밖이다.
 명령은 [`launch-operator-checklist.md`](launch-operator-checklist.md), 제출 답안은 [`store-submission-pack.md`](store-submission-pack.md),
 법률 확정 항목은 [`legal-drafts/review-questionnaire.md`](legal-drafts/review-questionnaire.md)를 따른다.
 
-## 0. 현재 상태
+## 0. 현재 상태 (2026-10-07)
 
-- **코드**: 출시 차단 코드는 남아 있지 않다. 2026-10-06 기준 main에 병합된 것:
-  - 탈퇴 기록 분리 보관(0086)과 포인트 소멸 동의 탈퇴(앱·웹)
-  - 포인트 전용 주문 환불, 미사용 뽑기 부분 환불(0087, 소유자 승인 산정식)
-  - 보관기한 자동 처리 기본 꺼짐, 만료 상품 보관함 표시
-  - 게시 전 글 필터(앱스토어 지침 1.2)
-  - LIVE 전환·되돌리기 명령, 스토어 심사자 로그인
-- **출시 전 점검**: 결제·환불·뽑기·탈퇴 경로를 다시 읽고 잠김·탈퇴 불가 문제 9건을 고쳤다. 남은 10건은 [`pre-launch-money-review-2026-10-06.md`](pre-launch-money-review-2026-10-06.md)에 우선순위로 정리했고, LIVE 전에 고친다.
-- **운영 서버**: 아직 이전 코드다. DB는 0082까지 적용, Edge·관리자 웹은 이전 배포, Cron은 꺼짐, 공개 설정은 PRELAUNCH.
-- **외부**: KG이니시스는 PortOne 입점 심사 중. Apple 친구 팀 준비 완료. Google Play 앱 레코드 없음. 약관·개인정보처리방침은 업계 표준으로 확정(게시는 LIVE 직전).
+- **코드**: 출시 차단 코드는 남아 있지 않다. 2026-10-07까지 main에 병합된 것:
+  - 출시 전 돈·탈퇴 경로 점검 19건 모두 수정(PR #35·#36). 점검 기록은 [`pre-launch-money-review-2026-10-06.md`](pre-launch-money-review-2026-10-06.md).
+  - 판매판 약관·개인정보처리방침과 게시 번들(PR #37): 정책 버전 `2026-10-07` 마이그레이션 `0090`, 맞춤 추천 동의 철회 `0091`, 세션 기록 90일.
+  - 그 밖에 탈퇴 기록 분리 보관, 포인트 소멸 동의 탈퇴, 미사용 뽑기 부분 환불, LIVE 전환·되돌리기 명령, 스토어 심사자 로그인.
+- **이번 작업 브랜치(병합 전)**: 로그인 동의에 "만 14세 이상" 확인 추가, 첫 화면 문구를 Pages 변수로 판매판 전환, 보존기간 승인 스크립트(`ops/database/commerce-retention-approval.sql`), Edge 워커의 보존 실행 설정 전달.
+- **운영 서버(2026-10-07 읽기 전용 확인)**:
+  - DB는 `0087`까지 적용(88개). 남은 마이그레이션은 `0088`~`0091` 4개이고, `0090`·`0091`의 사전 조건(현재 2026-09-30 문서 해시, 제약 이름)과 일치한다. 저장된 맞춤 추천 동의는 0건이다.
+  - 공개 설정은 PRELAUNCH, 요구 정책 버전은 아직 2026-09-30이다. Edge·관리자 웹은 이전 배포이고 Cron은 꺼져 있다.
+  - 보존기간 정책·검토·보류·파기 기록은 모두 0건이다. ACTIVE 관리자는 1명이다.
+  - **주의**: PR #37 병합으로 `dabboba.net/terms`·`/privacy`는 이미 2026-10-07 판이다(해시 확인). DB는 아직 이전 판이라 앱 동의 화면의 버전과 공개 문서가 어긋나 있다. 운영 반영(1단계)에서 `0090`·`0091`을 빨리 적용해야 한다.
+- **외부**: KG이니시스는 PortOne 입점 심사 중. Apple 친구 팀 준비 완료. Google Play 앱 레코드 없음.
 
 ## 1. 운영 반영 — 개발·운영자, 운영자 컴퓨터, 1~2일
 
@@ -22,7 +24,7 @@
 |---|---|---|
 | 1-1 | `git pull` → `corepack pnpm install --frozen-lockfile` → `build:all` → `db:release-source:check` | `"blockers": []` |
 | 1-2 | `node ops/database/backup.mjs backup …` → `verify` | `archive-authenticated` |
-| 1-3 | `corepack pnpm run db:migrate` 두 번 | 첫 번째 `Applied 5 migration(s).`, 두 번째 `Database schema is current.` |
+| 1-3 | `corepack pnpm run db:migrate` 두 번 | 첫 번째 `Applied 4 migration(s).`(0088~0091), 두 번째 `Database schema is current.` 적용 직후 공개 설정의 정책 버전이 `2026-10-07`이 된다 |
 | 1-4 | `corepack pnpm --filter @dabboba/db check:release` | `"blockers": []`, `targetHash` 기록 |
 | 1-5 | `corepack pnpm run supabase:edge:deploy` → `supabase:edge:public:verify` → `release:edge:worker:verify` | 공개 설정 PRELAUNCH, 워커 GET 405·익명 POST 401 |
 | 1-6 | `apps/admin`에서 `build:cloudflare` → `wrangler deploy --dry-run` → `wrangler deploy --keep-vars` | 관리자 결제 상세에 "미사용 뽑기 부분 환불"·"포인트 주문 환불" 패널이 조건에 맞게 표시 |
@@ -62,7 +64,7 @@ Cron을 켜면 결제 대사, 15분 미결제 주문·배송비 신청 자동 �
 - **네이버**: 제공 정보에서 이름·성별·생일·전화번호를 빼고 이메일을 선택으로 바꾼다. 테스터로 동의 화면을 캡처한 뒤 검수를 요청한다(체크리스트 7-1).
 - **구글**: OAuth 동의 화면을 게시하고 필요하면 검증을 받는다. 범위는 `openid`·`email`·`profile`만.
 - **카카오**: 비즈 앱으로 전환하고 검수를 받는다. 이메일 권한은 요청하지 않는다.
-- **휴대폰 로그인**: 첫 출시는 끄는 것을 권한다. 켜려면 Twilio를 설정하고 개인정보처리방침에 국외 이전을 적는다.
+- **휴대폰 로그인**: 2026-10-07 결정으로 제공하지 않는다. `PHONE`을 켜지 않으며 Twilio 설정도 하지 않는다.
 - 끝난 기준: 실제 고객 계정으로 4종 모두 신규 로그인·재로그인·로그아웃이 된다.
 
 ## 5. 법률·정책 — 친구(자문은 선택)
@@ -77,8 +79,8 @@ Cron을 켜면 결제 대사, 15분 미결제 주문·배송비 신청 자동 �
    - 정책 버전 `2026-10-07` 마이그레이션 `0090`(기존 회원 재동의)
    - 맞춤 추천 토글 제거(앱·API)와 기존 동의 철회 마이그레이션 `0091`
    - 워커 세션 기록 보관 30일 → 90일
-   - 보존기간 정책 승인은 운영 절차로 남음(관리자 화면은 아직 없음)
-   - 권장: 가입 동의 화면에 "만 14세 이상" 확인 추가
+   - 보존기간 정책 승인은 운영 절차로 남음. 실행용 스크립트 `ops/database/commerce-retention-approval.sql`(관리자 화면은 아직 없음)
+   - 가입 동의 화면의 "만 14세 이상" 확인 추가(2026-10-07)
 5. **Google Play 정책 문의**: 친구 Play Console에서 [`google-play-paid-draw-inquiry.md`](google-play-paid-draw-inquiry.md)의 본문을 제출하고 서면 회신을 받는다. Play 출시 가능 여부가 걸려 있다.
 
 ## 6. 결제 — KG이니시스 승인 후, 운영자·개발
@@ -128,6 +130,7 @@ Cron을 켜면 결제 대사, 15분 미결제 주문·배송비 신청 자동 �
   - 판매판 약관·개인정보처리방침 게시와 새 정책 버전
   - 전환 직전 백업과 `verify`
   - 상품 `ON_SALE`, Cron 동작
+  - 전환 성공 직후 Pages 변수 `VITE_DABBOBA_COMMERCE_MODE=LIVE`로 첫 화면 문구 전환(런북 "공개 사이트 문구 전환")
 - 명령: `node scripts/deploy-supabase-live-edge.mjs --confirm=LIVE:rconfxsykttfvznakile`
 - 실패하면 자동으로 PRELAUNCH로 돌아간다. 되돌리기는 `--rollback --confirm=PRELAUNCH:rconfxsykttfvznakile`이다.
 

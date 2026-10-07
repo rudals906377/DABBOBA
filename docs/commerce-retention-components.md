@@ -55,6 +55,24 @@
 6. 검토자가 대상 범위와 미리보기 결과를 승인한 별도 실행에서만 EXECUTE를 선택한다. 환경의 EXECUTE만으로는 승인된 정책·24시간 검토·hold 등 DB 조건을 우회할 수 없다. 코드가 여는 transaction-local 플래그 및 serializable 상태가 없으면 DB 실행 함수도 거부한다.
 7. 건수, 정책/검토/hold, 파기 증거, 원장·예외 상태를 확인하고 기본 DISABLED로 돌린다. 경보/스케줄/비용 변경과 지속 실행은 별도 승인 및 직접 증거가 필요하다.
 
+### 출시용 승인 스크립트 (2026-10-07)
+
+결정된 기간(배송 주소 60개월, 문의 36개월, 질문지 B7)은 `ops/database/commerce-retention-approval.sql`에 들어 있다. 운영자는 비공개 세션에서 마이그레이션 소유자 URL로 단계별로 실행한다. 이 스크립트는 파기를 실행하지 않는다.
+
+```text
+# 1) 정책 등록과 승인(ACTIVE ADMIN 또는 SUPER_ADMIN의 users.id, 비공개 근거 코드)
+psql "$DATABASE_MIGRATION_URL" -v step=approve -v admin_id=<관리자 id> -v evidence=<근거 코드> -f ops/database/commerce-retention-approval.sql
+# 2) 분쟁 목록을 holds에 반영한 뒤, 실행 직전 24시간 안에 검토 행 추가
+psql "$DATABASE_MIGRATION_URL" -v step=review -v admin_id=<검토자 id> -v evidence=<근거 코드> -v holds_reviewed=yes -v copies_status=UNVERIFIED -f ops/database/commerce-retention-approval.sql
+# 3) 읽기 전용 미리보기(종류별 처리 가능·차단 건수)
+psql "$DATABASE_MIGRATION_URL" -v step=preview -f ops/database/commerce-retention-approval.sql
+```
+
+- `copies_status=CLEARED`는 외부 사본 검토 근거가 실제로 있을 때만 쓴다. `UNVERIFIED`이면 미리보기와 실행 모두 `EXTERNAL_COPIES_UNVERIFIED`로 막힌다.
+- 승인은 다시 실행해도 같은 결과다. 다른 버전의 승인 정책이 이미 현재 정책이면 멈춘다.
+- 실행은 별도 검토 후 Edge 워커 설정 `WORKER_COMMERCE_RETENTION_MODE=EXECUTE`(필요하면 `WORKER_COMMERCE_RETENTION_BATCH_SIZE`)로 한 번 돌리고 설정을 지운다. 2026-10-07부터 Edge 워커가 이 두 값을 전달한다. 설정하지 않으면 계속 `DISABLED`다.
+- 2026-10-07 로컬 disposable DB에서 단계별 동작을 확인했다: 인자 누락·비관리자·잘못된 사본 상태 거부, 승인 재실행, 검토 전 `HOLD_REVIEW_REQUIRED`, 검토 후 `EXTERNAL_COPIES_UNVERIFIED`, 파기 0건.
+
 예를 들어 운영 등록은 다음 매개변수 계약을 따른다. 실제 실행을 승인하거나 값/근거를 만들어주는 예시는 아니다.
 
 ```sql

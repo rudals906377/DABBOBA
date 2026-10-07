@@ -33,6 +33,8 @@
 기록된 문서 해시가 같아야 하기 때문이다.
 
 1. `main`에 병합한다. Cloudflare Pages가 `main`을 빌드해 `https://dabboba.net/terms`·`/privacy`를 바로 교체한다.
+   (2026-10-07 완료: PR #37 병합. 같은 날 게시 바이트가 아래 두 해시와 같음을 확인했다. 운영 DB는 아직 2026-09-30 판이므로
+   3단계를 미루는 동안 앱 동의 화면의 버전과 공개 문서 내용이 어긋난다. 3단계를 가능한 한 빨리 진행한다.)
 2. 게시된 바이트가 `0090`의 해시와 같은지 확인한다. 같을 때까지 3단계로 가지 않는다(Pages 배포 완료 대기 또는 캐시 비우기).
    ```
    curl -sS https://dabboba.net/terms | sha256sum    # 54e45f9237ea45f6063337976a3ce6beee14fa898916c9bfb59fa814ac7b52d2
@@ -46,11 +48,24 @@
    DB의 버전을 그대로 읽고, 워커는 세션 기록을 만료·폐기 후 90일 뒤에 지운다.
 5. `corepack pnpm run supabase:edge:public:verify`로 두 공개 엔드포인트의 버전이 같은지 보고, 앱에서 재동의 화면이
    새 문서 링크를 여는지 확인한다.
-6. 같은 날 운영자가 `docs/commerce-retention-components.md`의 절차로 보존기간 정책을 등록·승인한다(관리자 화면 없음,
-   `WORKER_COMMERCE_RETENTION_MODE`는 DISABLED 유지). 대표가 내부관리계획을 승인한다.
+6. 같은 날 운영자가 `ops/database/commerce-retention-approval.sql`의 `step=approve`로 보존기간 정책을 등록·승인한다
+   (절차는 `docs/commerce-retention-components.md`, 관리자 화면 없음, `WORKER_COMMERCE_RETENTION_MODE`는 DISABLED 유지).
+   대표가 내부관리계획을 승인한다.
 
 되돌리기: HTML만 이전 판으로 되돌리면 DB 해시와 어긋나 재동의가 실패한다. 문서를 고쳐야 하면 새 버전(새 시행일,
 새 마이그레이션)으로 다시 발행하고, `0090`·`0091`은 취소하지 않는다.
+
+## 공개 사이트 문구 전환 (LIVE 전환 성공 직후)
+
+`dabboba.net` 첫 화면(스토어프런트)은 빌드 변수로 문구를 고른다. 공개 사이트 보안 정책이 다른 도메인 요청을 막아
+API의 판매 상태를 실시간으로 읽을 수 없기 때문이다. 변수가 정확히 `LIVE`일 때만 판매판 문구(가챠 정식 오픈, NOW OPEN)를
+쓰고, 그 밖에는 사전오픈 문구를 유지한다. 쿠지는 어느 쪽이든 OPENING SOON이다.
+
+1. LIVE 전환 명령이 성공하면 Cloudflare Pages의 Production 환경변수에 `VITE_DABBOBA_COMMERCE_MODE=LIVE`를 추가한다.
+2. 최신 `main` 배포를 다시 실행(Retry deployment)한다. 정책 HTML 바이트는 바뀌지 않으므로 `0090` 해시는 그대로다.
+3. `curl -sS https://dabboba.net/ | grep -o '보관함에 모아 받아요'`로 판매판 메타 문구가 나오는지 확인한다.
+
+되돌리기 명령을 실행했다면 같은 변수를 지우고 배포를 다시 실행해 사전오픈 문구로 돌린다.
 
 ## LIVE 프로필 준비
 

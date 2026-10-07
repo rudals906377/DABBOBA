@@ -44,6 +44,11 @@ const PASSTHROUGH_WORKER_KEYS = [
   // Storage-expiry reminders and holds stay DISABLED unless the owner turns
   // them on (decision due within 60 days of the first LIVE sale).
   "WORKER_INVENTORY_STORAGE_EXPIRY_MODE",
+  // Commerce retention stays DISABLED until the operator approves the policy
+  // (docs/commerce-retention-components.md); PREVIEW then EXECUTE are set only
+  // for an approved run and removed afterwards.
+  "WORKER_COMMERCE_RETENTION_MODE",
+  "WORKER_COMMERCE_RETENTION_BATCH_SIZE",
   "DATABASE_POOL_MAX",
   "NOTIFICATION_DELIVERY_URL",
   "NOTIFICATION_DELIVERY_TOKEN",

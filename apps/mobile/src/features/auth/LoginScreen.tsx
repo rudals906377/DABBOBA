@@ -99,6 +99,9 @@ export function LoginScreen() {
   const [otpFocused, setOtpFocused] = useState(false);
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [privacyAccepted, setPrivacyAccepted] = useState(false);
+  // Terms 3조: 만 14세 미만은 가입할 수 없다. The confirmation gates every login
+  // method together with the two required policy documents.
+  const [ageConfirmed, setAgeConfirmed] = useState(false);
   const [internalSessionState, setInternalSessionState] = useState<InternalSessionState>(
     __DEV__ ? "checking" : "unavailable",
   );
@@ -197,8 +200,8 @@ export function LoginScreen() {
   }, [db, returnPath, runtime.apiBaseUrl]);
 
   const finishPhone = async (supabaseAccessToken: string) => {
-    if (!requiredPolicyVersions || !termsAccepted || !privacyAccepted) {
-      throw new Error("필수 약관을 각각 확인하고 동의해 주세요.");
+    if (!requiredPolicyVersions || !termsAccepted || !privacyAccepted || !ageConfirmed) {
+      throw new Error("필수 항목을 모두 확인하고 동의해 주세요.");
     }
     let exchanged = false;
     try {
@@ -217,8 +220,8 @@ export function LoginScreen() {
   };
 
   const loginSocial = async (provider: DabbobaSocialLoginProvider) => {
-    if (!requiredPolicyVersions || !termsAccepted || !privacyAccepted) {
-      setMessage("필수 약관을 각각 확인하고 동의해 주세요.");
+    if (!requiredPolicyVersions || !termsAccepted || !privacyAccepted || !ageConfirmed) {
+      setMessage("필수 항목을 모두 확인하고 동의해 주세요.");
       return;
     }
     setBusy(provider);
@@ -239,8 +242,8 @@ export function LoginScreen() {
   };
 
   const loginReviewer = async () => {
-    if (!requiredPolicyVersions || !termsAccepted || !privacyAccepted) {
-      setMessage("필수 약관을 각각 확인하고 동의해 주세요.");
+    if (!requiredPolicyVersions || !termsAccepted || !privacyAccepted || !ageConfirmed) {
+      setMessage("필수 항목을 모두 확인하고 동의해 주세요.");
       return;
     }
     setBusy("STORE_REVIEW");
@@ -310,7 +313,8 @@ export function LoginScreen() {
     || !configReady
     || !requiredPolicyVersions
     || !termsAccepted
-    || !privacyAccepted;
+    || !privacyAccepted
+    || !ageConfirmed;
   const providerAvailable = (provider: DabbobaLoginProvider) => (
     brokerReady && enabledProviders.includes(provider) && (provider !== "APPLE" || Platform.OS === "ios")
   );
@@ -595,6 +599,11 @@ export function LoginScreen() {
           {message ? <Text accessibilityRole="alert" style={styles.message}>{message}</Text> : null}
           <View style={styles.legalLinks}>
             <PolicyAcceptanceRow
+              label="[필수] 만 14세 이상입니다"
+              checked={ageConfirmed}
+              onToggle={() => setAgeConfirmed((value) => !value)}
+            />
+            <PolicyAcceptanceRow
               label="[필수] 서비스 이용약관 동의"
               checked={termsAccepted}
               onToggle={() => setTermsAccepted((value) => !value)}
@@ -628,7 +637,7 @@ function PolicyAcceptanceRow({
   label: string;
   checked: boolean;
   onToggle: () => void;
-  onOpen: () => void;
+  onOpen?: () => void;
 }) {
   return (
     <View style={styles.requiredPolicyRow}>
@@ -644,14 +653,16 @@ function PolicyAcceptanceRow({
         </View>
         <Text style={styles.legalNotice}>{label}</Text>
       </Pressable>
-      <Pressable
-        accessibilityRole="link"
-        accessibilityLabel={`${label.replace(" 동의", "")} 보기`}
-        onPress={onOpen}
-        style={({ pressed }) => [styles.legalLinkTarget, pressed && styles.pressed]}
-      >
-        <Text style={styles.legalLink}>보기</Text>
-      </Pressable>
+      {onOpen ? (
+        <Pressable
+          accessibilityRole="link"
+          accessibilityLabel={`${label.replace(" 동의", "")} 보기`}
+          onPress={onOpen}
+          style={({ pressed }) => [styles.legalLinkTarget, pressed && styles.pressed]}
+        >
+          <Text style={styles.legalLink}>보기</Text>
+        </Pressable>
+      ) : null}
     </View>
   );
 }
