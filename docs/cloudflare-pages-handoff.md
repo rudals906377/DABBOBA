@@ -37,6 +37,8 @@ NODE_VERSION=24
 PNPM_VERSION=11.22.0
 ```
 
+LIVE 전환이 성공한 뒤에만 Production 환경에 `VITE_DABBOBA_COMMERCE_MODE=LIVE`를 추가하고 배포를 다시 실행한다. 이 값이 없거나 다른 값이면 첫 화면은 사전오픈 문구를 유지한다(`docs/live-cutover-runbook.md` "공개 사이트 문구 전환"). Preview 환경에는 넣지 않는다.
+
 2026-09-22 현재 접속 중인 Cloudflare 계정에는 Pages 프로젝트 `dabboba`, `dabboba.net` zone, Email Routing이 존재한다. 계정에는 활성 Super Administrator가 한 명만 보이지만 그 관리자가 지정 친구인지, 복구·결제 주체가 친구인지, 2FA가 활성화됐는지는 확인되지 않았다. 현재 production branch도 대시보드에서 `main`인지 다시 확인해야 한다. 이 세 가지가 확인되기 전에는 최종 운영 계정으로 판정하지 않는다.
 
 중요:

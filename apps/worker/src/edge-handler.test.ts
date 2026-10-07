@@ -173,6 +173,8 @@ test("Edge normalization maps only DABBOBA storage/database secrets after auth",
   assert.equal(normalized.DABBOBA_WORKER_INVOKE_SECRET, undefined);
   assert.equal(normalized.SUPABASE_DB_URL, undefined);
   assert.equal(normalized.WORKER_INVENTORY_STORAGE_EXPIRY_MODE, undefined);
+  assert.equal(normalized.WORKER_COMMERCE_RETENTION_MODE, undefined);
+  assert.equal(normalized.WORKER_COMMERCE_RETENTION_BATCH_SIZE, undefined);
 
   for (const poisoned of [
     { WORKER_DATABASE_URL: workerDatabaseUrl },
@@ -196,6 +198,97 @@ test("Edge normalization passes the storage-expiry mode only when the owner sets
   assert.equal(normalizeSupabaseEdgeWorkerEnvironment(sourceEnvironment()).WORKER_INVENTORY_STORAGE_EXPIRY_MODE, undefined);
   const enabled = normalizeSupabaseEdgeWorkerEnvironment(sourceEnvironment({ WORKER_INVENTORY_STORAGE_EXPIRY_MODE: "ENABLED" }));
   assert.equal(enabled.WORKER_INVENTORY_STORAGE_EXPIRY_MODE, "ENABLED");
+});
+
+test("Edge normalization passes the commerce-retention mode only when the operator sets it", () => {
+  const unset = normalizeSupabaseEdgeWorkerEnvironment(sourceEnvironment());
+  assert.equal(unset.WORKER_COMMERCE_RETENTION_MODE, undefined);
+  assert.equal(unset.WORKER_COMMERCE_RETENTION_BATCH_SIZE, undefined);
+  const preview = normalizeSupabaseEdgeWorkerEnvironment(sourceEnvironment({
+    WORKER_COMMERCE_RETENTION_MODE: "PREVIEW",
+    WORKER_COMMERCE_RETENTION_BATCH_SIZE: "10",
+  }));
+  assert.equal(preview.WORKER_COMMERCE_RETENTION_MODE, "PREVIEW");
+  assert.equal(preview.WORKER_COMMERCE_RETENTION_BATCH_SIZE, "10");
+});
+
+test("Edge normalization keeps a configured EXECUTE to an explicit one-shot request", () => {
+  const execute = sourceEnvironment({ WORKER_COMMERCE_RETENTION_MODE: "EXECUTE" });
+  assert.equal(normalizeSupabaseEdgeWorkerEnvironment(execute).WORKER_COMMERCE_RETENTION_MODE, "PREVIEW");
+  assert.equal(
+    normalizeSupabaseEdgeWorkerEnvironment(execute, { commerceRetentionExecuteRequested: false }).WORKER_COMMERCE_RETENTION_MODE,
+    "PREVIEW",
+  );
+  assert.equal(
+    normalizeSupabaseEdgeWorkerEnvironment(execute, { commerceRetentionExecuteRequested: true }).WORKER_COMMERCE_RETENTION_MODE,
+    "EXECUTE",
+  );
+  // A request never raises the configured mode.
+  for (const mode of [undefined, "DISABLED", "PREVIEW"]) {
+    const normalized = normalizeSupabaseEdgeWorkerEnvironment(
+      sourceEnvironment({ WORKER_COMMERCE_RETENTION_MODE: mode }),
+      { commerceRetentionExecuteRequested: true },
+    );
+    assert.equal(normalized.WORKER_COMMERCE_RETENTION_MODE, mode);
+  }
+});
+
+test("scheduled Edge runs preview retention while one operator request executes one batch alone", async () => {
+  let configuredMode: string | undefined = "EXECUTE";
+  const workerModes: string[] = [];
+  const retentionModes: string[] = [];
+  let retentionFailure: Error | null = null;
+  const handler = createSupabaseEdgeWorkerHandler({
+    readInvokeSecret: () => invokeSecret,
+    readEnvironment: () => sourceEnvironment({ WORKER_COMMERCE_RETENTION_MODE: configuredMode }),
+    async runWorker(config) {
+      workerModes.push(config.commerceRetention?.mode ?? "unset");
+      return summary();
+    },
+    async runCommerceRetention(config) {
+      retentionModes.push(config.commerceRetention?.mode ?? "unset");
+      if (retentionFailure) throw retentionFailure;
+      return { mode: "EXECUTE", examined: 3, eligible: 3, disposed: 3, blocked: {} };
+    },
+  });
+  const post = (body?: string) => handler(new Request("https://example.test/functions/v1/dabboba-worker", {
+    method: "POST",
+    headers: { authorization: `Bearer ${invokeSecret}`, "content-type": "application/json" },
+    ...(body === undefined ? {} : { body }),
+  }));
+  const executeBody = JSON.stringify({ source: "operator", commerceRetention: "EXECUTE" });
+
+  assert.equal((await post(JSON.stringify({ source: "supabase-cron" }))).status, 200);
+  assert.equal((await post()).status, 200);
+  assert.equal((await post("not json")).status, 200);
+  assert.equal((await post(JSON.stringify({ commerceRetention: "execute" }))).status, 200);
+  assert.deepEqual(workerModes, ["PREVIEW", "PREVIEW", "PREVIEW", "PREVIEW"]);
+  assert.deepEqual(retentionModes, []);
+
+  // The explicit request runs only the retention batch and reports its count.
+  const executed = await post(executeBody);
+  assert.equal(executed.status, 200);
+  assert.deepEqual(await executed.json(), { ok: true, commerceRetention: { mode: "EXECUTE", disposed: 3 } });
+  assert.deepEqual(retentionModes, ["EXECUTE"]);
+  assert.equal(workerModes.length, 4);
+
+  // A failure may follow a commit whose acknowledgement was lost, so it is
+  // reported as an unknown outcome and nothing else runs.
+  retentionFailure = new Error("private failure detail");
+  const failed = await post(executeBody);
+  assert.equal(failed.status, 500);
+  assert.deepEqual(await failed.json(), { ok: false, code: "COMMERCE_RETENTION_OUTCOME_UNKNOWN" });
+  assert.equal(workerModes.length, 4);
+
+  // Without a configured EXECUTE the request is refused and nothing runs.
+  for (const mode of [undefined, "DISABLED", "PREVIEW"]) {
+    configuredMode = mode;
+    const refused = await post(executeBody);
+    assert.equal(refused.status, 409);
+    assert.deepEqual(await refused.json(), { ok: false, code: "COMMERCE_RETENTION_EXECUTE_NOT_CONFIGURED" });
+  }
+  assert.equal(retentionModes.length, 2);
+  assert.equal(workerModes.length, 4);
 });
 
 test("Edge worker reuses the managed Supabase service role key without leaking it before auth", () => {

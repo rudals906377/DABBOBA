@@ -1,6 +1,8 @@
 # 거래정보 보관 종료: 로컬 준비와 운영 경계
 
-이 기능은 **배송 주소 스냅샷과 종결된 문의 내용의 제한된 파기**를 준비한다. 전체 거래 기록·법정 보존 종료·분리보관·외부 사본 삭제가 완료됐다는 뜻은 아니다. 정책이나 운영 근거를 migration에서 승인하지 않으며, 기본 설정은 `DISABLED`다. 운영 DB 적용·정책 승인·실행·Cron 활성화는 수행하지 않았다.
+이 기능은 **배송 주소 스냅샷과 종결된 문의 내용의 제한된 파기**를 준비한다. 전체 거래 기록·법정 보존 종료·분리보관·외부 사본 삭제가 완료됐다는 뜻은 아니다. 정책이나 운영 근거를 migration에서 승인하지 않으며, 기본 설정은 `DISABLED`다.
+
+현재 운영 상태(2026-10-07): 관련 마이그레이션은 운영 DB에 적용됐고, 배송 주소 60개월·문의 36개월 정책을 승인했다(읽기 전용 미리보기 대상 0건). 검토(`review`) 단계, 실행(EXECUTE), 워커 Cron은 아직 하지 않았다.
 
 ## 구현된 범위
 
@@ -54,6 +56,29 @@
 5. PREVIEW로 한 묶음의 처리 가능 수와 차단 원인을 확인한다. PREVIEW는 `BEGIN READ ONLY`에서 SELECT만 수행하며 정책·검토·hold·파기 증거를 기록하지 않는다. 기록 ID가 필요한 운영 확인은 제한 함수 결과를 비공개 세션에서 확인한다.
 6. 검토자가 대상 범위와 미리보기 결과를 승인한 별도 실행에서만 EXECUTE를 선택한다. 환경의 EXECUTE만으로는 승인된 정책·24시간 검토·hold 등 DB 조건을 우회할 수 없다. 코드가 여는 transaction-local 플래그 및 serializable 상태가 없으면 DB 실행 함수도 거부한다.
 7. 건수, 정책/검토/hold, 파기 증거, 원장·예외 상태를 확인하고 기본 DISABLED로 돌린다. 경보/스케줄/비용 변경과 지속 실행은 별도 승인 및 직접 증거가 필요하다.
+
+### 출시용 승인 스크립트 (2026-10-07)
+
+결정된 기간(배송 주소 60개월, 문의 36개월, 질문지 B7)은 `ops/database/commerce-retention-approval.sql`에 들어 있다. 운영자는 비공개 세션에서 마이그레이션 소유자 URL로 단계별로 실행한다. 이 스크립트는 파기를 실행하지 않는다.
+
+```text
+# 1) 정책 등록과 승인(ACTIVE ADMIN 또는 SUPER_ADMIN의 users.id, 비공개 근거 코드)
+psql "$DATABASE_MIGRATION_URL" -v step=approve -v admin_id=<관리자 id> -v evidence=<근거 코드> -f ops/database/commerce-retention-approval.sql
+# 2) 분쟁 목록을 holds에 반영한 뒤, 실행 직전 24시간 안에 검토 행 추가
+psql "$DATABASE_MIGRATION_URL" -v step=review -v admin_id=<검토자 id> -v evidence=<근거 코드> -v holds_reviewed=yes -v copies_status=UNVERIFIED -f ops/database/commerce-retention-approval.sql
+# 3) 읽기 전용 미리보기(종류별 처리 가능·차단 건수)
+psql "$DATABASE_MIGRATION_URL" -v step=preview -f ops/database/commerce-retention-approval.sql
+```
+
+- `copies_status=CLEARED`는 외부 사본 검토 근거가 실제로 있을 때만 쓴다. `UNVERIFIED`이면 미리보기와 실행 모두 `EXTERNAL_COPIES_UNVERIFIED`로 막힌다.
+- 승인은 다시 실행해도 같은 결과다. 다른 버전의 승인 정책이 이미 현재 정책이면 멈춘다.
+- 2026-10-07 판 행이 이미 있으면(미승인 초안) 기간이 60/36개월과 다르거나 근거 코드가 이번 실행과 다를 때 아무것도 승인하지 않고 멈춘다. 초안을 확인한 뒤 같은 근거 코드로 다시 실행한다.
+- 인자가 빠지거나 `step` 값이 틀리면 SQL 오류로 끝나 psql이 0이 아닌 종료 코드를 낸다. 종료 코드 0만 성공으로 본다.
+- `review`는 현재 승인 정책이 정확히 2026-10-07 판 60/36개월 두 행일 때만 그 두 행에 검토 기록을 남긴다. 승인 전이거나 다른 버전이 현재 정책이면 아무것도 남기지 않고 멈춘다. 검토자도 ACTIVE 관리자여야 한다.
+- 실행은 별도 검토 후 Edge 워커 설정 `WORKER_COMMERCE_RETENTION_MODE=EXECUTE`(필요하면 `WORKER_COMMERCE_RETENTION_BATCH_SIZE`)로 한 번 돌리고 설정을 지운다. 2026-10-07부터 Edge 워커가 이 두 값을 전달한다. 설정하지 않으면 계속 `DISABLED`다.
+- Edge 워커는 1분마다 Cron으로 호출되므로, 설정이 `EXECUTE`여도 Cron 호출은 `PREVIEW`로만 돈다. 실제 파기 한 배치는 운영자가 워커 호출 비밀값으로 본문 `{"source":"operator","commerceRetention":"EXECUTE"}`을 담아 `dabboba-worker`를 한 번 POST할 때만 돈다. 이 호출은 다른 워커 작업 없이 파기 배치만 실행하고 `{"ok":true,"commerceRetention":{"mode":"EXECUTE","disposed":N}}`를 돌려준다. 설정이 `EXECUTE`가 아니면 409로 거절한다. 실패 응답(`COMMERCE_RETENTION_OUTCOME_UNKNOWN`)이나 응답 없음은 결과를 알 수 없다는 뜻이다(DB가 커밋한 뒤 확인 응답만 끊겼을 수 있다). 다시 호출하기 전에 반드시 `commerce_retention_disposals`에서 이번 호출의 파기 기록이 있는지 확인한다. 끝나면 설정을 지운다.
+- 2026-10-07 운영 DB에서 `approve` 단계를 실행했다(오너 승인, ACTIVE 관리자 1명이 승인자). 두 정책이 현재 승인 정책이고 읽기 전용 미리보기 대상은 0건이다. `review` 단계는 분쟁 목록을 holds에 넣은 뒤 실행 직전에 따로 한다.
+- 2026-10-07 로컬 disposable DB에서 단계별 동작을 확인했다: 인자 누락·비관리자·잘못된 사본 상태 거부, 승인 재실행, 검토 전 `HOLD_REVIEW_REQUIRED`, 검토 후 `EXTERNAL_COPIES_UNVERIFIED`, 파기 0건. 같은 날 추가 확인: 누락·오타 인자는 종료 코드 3, 120개월 초안이나 다른 근거 코드의 초안이 있으면 승인 없이 종료 코드 3, 같은 근거 코드의 60/36개월 초안은 승인.
 
 예를 들어 운영 등록은 다음 매개변수 계약을 따른다. 실제 실행을 승인하거나 값/근거를 만들어주는 예시는 아니다.
 

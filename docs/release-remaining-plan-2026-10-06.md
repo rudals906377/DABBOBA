@@ -1,28 +1,32 @@
-# 출시까지 남은 일 — 누가·어디서·어떻게 (2026-10-06 갱신)
+# 출시까지 남은 일 — 누가·어디서·어떻게 (2026-10-07 갱신)
 
 목표: 친구 명의 계정으로 가챠 8종 판매판(LIVE)을 iOS·Android에 출시한다. 쿠지는 첫 출시 범위 밖이다.
 명령은 [`launch-operator-checklist.md`](launch-operator-checklist.md), 제출 답안은 [`store-submission-pack.md`](store-submission-pack.md),
 법률 확정 항목은 [`legal-drafts/review-questionnaire.md`](legal-drafts/review-questionnaire.md)를 따른다.
 
-## 0. 현재 상태
+## 0. 현재 상태 (2026-10-07)
 
-- **코드**: 출시 차단 코드는 남아 있지 않다. 2026-10-06 기준 main에 병합된 것:
-  - 탈퇴 기록 분리 보관(0086)과 포인트 소멸 동의 탈퇴(앱·웹)
-  - 포인트 전용 주문 환불, 미사용 뽑기 부분 환불(0087, 소유자 승인 산정식)
-  - 보관기한 자동 처리 기본 꺼짐, 만료 상품 보관함 표시
-  - 게시 전 글 필터(앱스토어 지침 1.2)
-  - LIVE 전환·되돌리기 명령, 스토어 심사자 로그인
-- **출시 전 점검**: 결제·환불·뽑기·탈퇴 경로를 다시 읽고 잠김·탈퇴 불가 문제 9건을 고쳤다. 남은 10건은 [`pre-launch-money-review-2026-10-06.md`](pre-launch-money-review-2026-10-06.md)에 우선순위로 정리했고, LIVE 전에 고친다.
-- **운영 서버**: 아직 이전 코드다. DB는 0082까지 적용, Edge·관리자 웹은 이전 배포, Cron은 꺼짐, 공개 설정은 PRELAUNCH.
-- **외부**: KG이니시스는 PortOne 입점 심사 중. Apple 친구 팀 준비 완료. Google Play 앱 레코드 없음. 약관·개인정보처리방침은 업계 표준으로 확정(게시는 LIVE 직전).
+- **코드**: 출시 차단 코드는 남아 있지 않다. 2026-10-07까지 main에 병합된 것:
+  - 출시 전 돈·탈퇴 경로 점검 19건 모두 수정(PR #35·#36). 점검 기록은 [`pre-launch-money-review-2026-10-06.md`](pre-launch-money-review-2026-10-06.md).
+  - 판매판 약관·개인정보처리방침과 게시 번들(PR #37): 정책 버전 `2026-10-07` 마이그레이션 `0090`, 맞춤 추천 동의 철회 `0091`, 세션 기록 90일.
+  - 그 밖에 탈퇴 기록 분리 보관, 포인트 소멸 동의 탈퇴, 미사용 뽑기 부분 환불, LIVE 전환·되돌리기 명령, 스토어 심사자 로그인.
+- **PR #38**: 로그인 동의에 "만 14세 이상" 확인 추가, 첫 화면 문구를 Pages 변수로 판매판 전환, 보존기간 승인 스크립트(`ops/database/commerce-retention-approval.sql`), Edge 워커의 보존 실행 설정 전달, `0092`(아래).
+- **운영 DB(2026-10-07 오너 승인으로 반영)**:
+  - Supabase 커넥터로 `0088`~`0092`를 적용했다. 저장소 마이그레이션 실행기와 같은 방식(같은 advisory lock, `lock_timeout` 5초, 마이그레이션마다 한 트랜잭션, 직전 버전 확인, 파일 sha256을 `schema_migrations`에 기록)이고 지금 93개, 최신 `0092`다.
+  - `0092`는 `0088`이 `CREATE OR REPLACE`로 지운 `set_updated_at()`의 `search_path` 고정을 되돌린다. 적용 후 Supabase 보안 점검의 `function_search_path_mutable` 경고가 없다.
+  - 공개 설정·로그인 공급자 응답 모두 약관·개인정보 `2026-10-07`을 요구한다(공개 문서 해시와 일치). 판매 모드는 PRELAUNCH, 로그인은 카카오·네이버·구글·Apple.
+  - 보존기간 정책 승인 완료: 배송지 60개월, 문의 36개월(정책 버전 2026-10-07, 승인자 ACTIVE 관리자 1명). 파기 미리보기 대상 0건. 검토(review) 단계와 실행은 하지 않았고 `WORKER_COMMERCE_RETENTION_MODE`는 꺼진 그대로다.
+  - **백업**: 이 세션에는 DB 접속 비밀값이 없어 `ops/database/backup.mjs` 전체 암호화 백업은 하지 못했다. 대신 바뀌는 객체만 적용 직전 상태를 기록하고 되돌리기 SQL을 만들어 두었다. 다음 운영자 작업 때 전체 백업을 한 번 받아 둔다.
+- **아직 이전 배포인 것**: Edge 함수 3개(10월 4일 배포), 관리자 웹(10월 1일 배포, Cloudflare Access 없음). Cron은 꺼져 있다(pg_cron·pg_net·Vault 비밀값 없음). 모두 운영자 컴퓨터의 Supabase·Cloudflare 토큰과 Edge 비밀 프로필이 있어야 해서 아래 1-5~1-7로 남는다.
+- **외부**: KG이니시스는 PortOne 입점 심사 중. Apple 친구 팀 준비 완료. Google Play 앱 레코드 없음.
 
 ## 1. 운영 반영 — 개발·운영자, 운영자 컴퓨터, 1~2일
 
 | 단계 | 어떻게 | 끝난 기준 |
 |---|---|---|
 | 1-1 | `git pull` → `corepack pnpm install --frozen-lockfile` → `build:all` → `db:release-source:check` | `"blockers": []` |
-| 1-2 | `node ops/database/backup.mjs backup …` → `verify` | `archive-authenticated` |
-| 1-3 | `corepack pnpm run db:migrate` 두 번 | 첫 번째 `Applied 5 migration(s).`, 두 번째 `Database schema is current.` |
+| 1-2 | `node ops/database/backup.mjs backup …` → `verify` | `archive-authenticated` (2026-10-07 마이그레이션 때 못 받은 전체 백업) |
+| 1-3 | `corepack pnpm run db:migrate` | 2026-10-07에 `0088`~`0092` 적용 완료. 지금은 `Database schema is current.`만 나와야 한다 |
 | 1-4 | `corepack pnpm --filter @dabboba/db check:release` | `"blockers": []`, `targetHash` 기록 |
 | 1-5 | `corepack pnpm run supabase:edge:deploy` → `supabase:edge:public:verify` → `release:edge:worker:verify` | 공개 설정 PRELAUNCH, 워커 GET 405·익명 POST 401 |
 | 1-6 | `apps/admin`에서 `build:cloudflare` → `wrangler deploy --dry-run` → `wrangler deploy --keep-vars` | 관리자 결제 상세에 "미사용 뽑기 부분 환불"·"포인트 주문 환불" 패널이 조건에 맞게 표시 |
@@ -62,7 +66,7 @@ Cron을 켜면 결제 대사, 15분 미결제 주문·배송비 신청 자동 �
 - **네이버**: 제공 정보에서 이름·성별·생일·전화번호를 빼고 이메일을 선택으로 바꾼다. 테스터로 동의 화면을 캡처한 뒤 검수를 요청한다(체크리스트 7-1).
 - **구글**: OAuth 동의 화면을 게시하고 필요하면 검증을 받는다. 범위는 `openid`·`email`·`profile`만.
 - **카카오**: 비즈 앱으로 전환하고 검수를 받는다. 이메일 권한은 요청하지 않는다.
-- **휴대폰 로그인**: 첫 출시는 끄는 것을 권한다. 켜려면 Twilio를 설정하고 개인정보처리방침에 국외 이전을 적는다.
+- **휴대폰 로그인**: 2026-10-07 결정으로 제공하지 않는다. `PHONE`을 켜지 않으며 Twilio 설정도 하지 않는다.
 - 끝난 기준: 실제 고객 계정으로 4종 모두 신규 로그인·재로그인·로그아웃이 된다.
 
 ## 5. 법률·정책 — 친구(자문은 선택)
@@ -77,8 +81,8 @@ Cron을 켜면 결제 대사, 15분 미결제 주문·배송비 신청 자동 �
    - 정책 버전 `2026-10-07` 마이그레이션 `0090`(기존 회원 재동의)
    - 맞춤 추천 토글 제거(앱·API)와 기존 동의 철회 마이그레이션 `0091`
    - 워커 세션 기록 보관 30일 → 90일
-   - 보존기간 정책 승인은 운영 절차로 남음(관리자 화면은 아직 없음)
-   - 권장: 가입 동의 화면에 "만 14세 이상" 확인 추가
+   - 보존기간 정책 승인: 2026-10-07 운영 DB에서 완료(`ops/database/commerce-retention-approval.sql`의 `approve` 단계)
+   - 가입 동의 화면의 "만 14세 이상" 확인 추가(2026-10-07)
 5. **Google Play 정책 문의**: 친구 Play Console에서 [`google-play-paid-draw-inquiry.md`](google-play-paid-draw-inquiry.md)의 본문을 제출하고 서면 회신을 받는다. Play 출시 가능 여부가 걸려 있다.
 
 ## 6. 결제 — KG이니시스 승인 후, 운영자·개발
@@ -128,6 +132,7 @@ Cron을 켜면 결제 대사, 15분 미결제 주문·배송비 신청 자동 �
   - 판매판 약관·개인정보처리방침 게시와 새 정책 버전
   - 전환 직전 백업과 `verify`
   - 상품 `ON_SALE`, Cron 동작
+  - 전환 성공 직후 Pages 변수 `VITE_DABBOBA_COMMERCE_MODE=LIVE`로 첫 화면 문구 전환(런북 "공개 사이트 문구 전환")
 - 명령: `node scripts/deploy-supabase-live-edge.mjs --confirm=LIVE:rconfxsykttfvznakile`
 - 실패하면 자동으로 PRELAUNCH로 돌아간다. 되돌리기는 `--rollback --confirm=PRELAUNCH:rconfxsykttfvznakile`이다.
 
@@ -136,7 +141,7 @@ Cron을 켜면 결제 대사, 15분 미결제 주문·배송비 신청 자동 �
 | 항목 | 결정 | 할 일 |
 |---|---|---|
 | 보관기한 알림·만료 보류 운영 | 판매 시작 후 60일 안에 정한다 | 첫 LIVE 판매일 + 60일 전에 운영 여부를 결정한다. 켜기로 하면 고객 안내 문구와 약관 문장을 반영한 뒤 Edge 설정 `WORKER_INVENTORY_STORAGE_EXPIRY_MODE=ENABLED`만 추가한다(전달 연결은 해 두었다). 그 전까지는 꺼져 있고 만료 상품을 자동 폐기하지 않는다. |
-| 거래기록 보존기간 승인 | 법률 문서와 함께 승인 | 질문지 B7의 기간(거래 5년, 불만 3년, 광고 6개월, 동의 기록 탈퇴 후 5년)으로 LIVE 직전에 승인한다. 관리자 화면은 아직 없으니 `docs/commerce-retention-components.md`의 운영 절차를 따른다. 그 전까지 자동 파기는 돌지 않는다. |
+| 거래기록 보존기간 승인 | 2026-10-07 승인 완료 | 배송지 60개월·문의 36개월 정책이 운영 DB의 현재 승인 정책이다. 실행(파기)은 분쟁 목록 반영과 `review` 단계 뒤 별도 검토로만 하고, 그 전까지 자동 파기는 돌지 않는다. |
 | 탈퇴 시 남은 보관 상품 | 첫 출시는 가챠만이라 출시 후 결정 | 지금 규칙을 유지한다(보관·교환 예약·배송 중 상품은 배송이나 포인트 환급으로 정리해야 탈퇴). 쿠지 판매 전에 다시 정한다. |
 | 관리자 2단계 인증 | Cloudflare Access | 7-1과 체크리스트 4-1. LIVE 전환 명령이 직접 확인한다. |
 | 글 필터 연락처 차단 범위 | 지금대로 유지 | 교환·신청방 글의 링크·전화번호·메신저 아이디 요청을 계속 막는다. 오탐 신고가 오면 조정한다. |

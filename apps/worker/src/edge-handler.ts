@@ -2,8 +2,10 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import { Buffer } from "node:buffer";
 import {
   assertProductionRuntimeDatabaseRole,
+  createDatabasePool,
   WORKER_DATABASE_ROLE,
 } from "@dabboba/db";
+import { runCommerceRetentionBatch, type CommerceRetentionResult } from "./commerce-retention.js";
 import { loadWorkerConfig, type WorkerConfig } from "./config.js";
 import { createLogger, errorFields, type Logger } from "./logger.js";
 import { createSupabaseOnlyMediaStore } from "./media-supabase.js";
@@ -19,6 +21,7 @@ export type EdgeWorkerHandlerDependencies = {
   readEnvironment(): EdgeWorkerEnvironment;
   loadConfig?: (env: EdgeWorkerEnvironment) => WorkerConfig;
   runWorker?: (config: WorkerConfig, logger: Logger) => Promise<WorkerRunSummary>;
+  runCommerceRetention?: (config: WorkerConfig, logger: Logger) => Promise<CommerceRetentionResult>;
   createLogger?: (level: WorkerConfig["logLevel"]) => Logger;
 };
 
@@ -44,6 +47,12 @@ const PASSTHROUGH_WORKER_KEYS = [
   // Storage-expiry reminders and holds stay DISABLED unless the owner turns
   // them on (decision due within 60 days of the first LIVE sale).
   "WORKER_INVENTORY_STORAGE_EXPIRY_MODE",
+  // Commerce retention stays DISABLED until the operator approves the policy
+  // (docs/commerce-retention-components.md); PREVIEW then EXECUTE are set only
+  // for an approved run and removed afterwards. EXECUTE applies only to an
+  // explicit one-shot request (see requestsCommerceRetentionExecute).
+  "WORKER_COMMERCE_RETENTION_MODE",
+  "WORKER_COMMERCE_RETENTION_BATCH_SIZE",
   "DATABASE_POOL_MAX",
   "NOTIFICATION_DELIVERY_URL",
   "NOTIFICATION_DELIVERY_TOKEN",
@@ -131,8 +140,27 @@ function authorized(request: Request, secret: string): boolean {
   return timingSafeEqual(expected, actual);
 }
 
+// The Cron invokes this function every minute, and a configured EXECUTE would
+// dispose another retention batch on each of those runs. EXECUTE therefore
+// takes effect only for an authenticated request whose body asks for it
+// ({"commerceRetention":"EXECUTE"}): that request runs the retention batch
+// alone, so no other job's failure is reported for it, and every other
+// invocation, including the Cron, sees PREVIEW.
+async function requestsCommerceRetentionExecute(request: Request): Promise<boolean> {
+  try {
+    const text = await request.text();
+    if (!text || text.length > 4_096) return false;
+    const body: unknown = JSON.parse(text);
+    return typeof body === "object" && body !== null
+      && (body as Record<string, unknown>).commerceRetention === "EXECUTE";
+  } catch {
+    return false;
+  }
+}
+
 export function normalizeSupabaseEdgeWorkerEnvironment(
   source: EdgeWorkerEnvironment,
+  options: { commerceRetentionExecuteRequested?: boolean } = {},
 ): EdgeWorkerEnvironment {
   if (source.NODE_ENV && source.NODE_ENV !== "production") {
     throw new Error("Supabase Edge worker requires production runtime semantics");
@@ -157,6 +185,10 @@ export function normalizeSupabaseEdgeWorkerEnvironment(
     SUPABASE_URL: source.SUPABASE_URL,
   };
   for (const key of PASSTHROUGH_WORKER_KEYS) normalized[key] = source[key];
+  if (normalized.WORKER_COMMERCE_RETENTION_MODE?.trim() === "EXECUTE"
+    && options.commerceRetentionExecuteRequested !== true) {
+    normalized.WORKER_COMMERCE_RETENTION_MODE = "PREVIEW";
+  }
   for (const [edgeKey, workerKey] of Object.entries(EDGE_STORAGE_MAPPING)) {
     normalized[workerKey] = source[edgeKey];
   }
@@ -196,11 +228,29 @@ function defaultRunWorker(config: WorkerConfig, logger: Logger): Promise<WorkerR
   return runWorkerOnceCore(config, { createMediaStore: createSupabaseOnlyMediaStore }, logger);
 }
 
+async function defaultRunCommerceRetention(config: WorkerConfig, logger: Logger): Promise<CommerceRetentionResult> {
+  const pool = createDatabasePool(config.databaseUrl, "dabboba-worker-commerce-retention", {
+    expectedRole: WORKER_DATABASE_ROLE,
+    max: 1,
+    onIdleClientError: (fault) => logger.error(fault, "Idle worker database client failed and was removed"),
+    queryTimeoutMs: config.databaseOperationTimeoutMs,
+    statementTimeoutMs: config.databaseOperationTimeoutMs,
+  });
+  try {
+    return await runCommerceRetentionBatch(pool, config.commerceRetention, logger);
+  } finally {
+    // The batch has already committed or rolled back; closing the pool must
+    // not turn a committed batch into an error the operator would retry.
+    await pool.end().catch((error: unknown) => logger.error(errorFields(error), "Commerce retention pool close failed"));
+  }
+}
+
 export function createSupabaseEdgeWorkerHandler(
   dependencies: EdgeWorkerHandlerDependencies,
 ): (request: Request) => Promise<Response> {
   const loadConfig = dependencies.loadConfig ?? loadWorkerConfig;
   const runWorker = dependencies.runWorker ?? defaultRunWorker;
+  const runCommerceRetention = dependencies.runCommerceRetention ?? defaultRunCommerceRetention;
   const loggerFactory = dependencies.createLogger ?? createLogger;
 
   return async (request: Request): Promise<Response> => {
@@ -221,6 +271,8 @@ export function createSupabaseEdgeWorkerHandler(
       return jsonResponse(401, { ok: false, code: "UNAUTHORIZED" });
     }
 
+    const commerceRetentionExecuteRequested = await requestsCommerceRetentionExecute(request);
+
     let source: EdgeWorkerEnvironment;
     try {
       source = dependencies.readEnvironment();
@@ -230,9 +282,28 @@ export function createSupabaseEdgeWorkerHandler(
 
     let logger: Logger | null = null;
     try {
-      const config = loadConfig(normalizeSupabaseEdgeWorkerEnvironment(source));
+      const config = loadConfig(normalizeSupabaseEdgeWorkerEnvironment(source, { commerceRetentionExecuteRequested }));
       assertSupabaseEdgeWorkerConfig(config);
       logger = loggerFactory(config.logLevel);
+      if (commerceRetentionExecuteRequested) {
+        if (config.commerceRetention?.mode !== "EXECUTE") {
+          return jsonResponse(409, { ok: false, code: "COMMERCE_RETENTION_EXECUTE_NOT_CONFIGURED" });
+        }
+        // A success reports the committed count. Any failure is indeterminate:
+        // the database may have committed before the acknowledgement was lost,
+        // so the operator checks commerce_retention_disposals before retrying.
+        let retention: CommerceRetentionResult;
+        try {
+          retention = await runCommerceRetention(config, logger);
+        } catch (error) {
+          logger.error(errorFields(error), "Commerce retention execution outcome is unknown");
+          return jsonResponse(500, { ok: false, code: "COMMERCE_RETENTION_OUTCOME_UNKNOWN" });
+        }
+        return jsonResponse(200, {
+          ok: true,
+          commerceRetention: { mode: retention.mode, disposed: retention.disposed },
+        });
+      }
       const summary = await runWorker(config, logger);
       return jsonResponse(200, {
         ok: true,

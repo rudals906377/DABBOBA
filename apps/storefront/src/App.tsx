@@ -8,6 +8,7 @@ import {
   MagnifyingGlassIcon,
 } from "@radix-ui/react-icons";
 import { useEffect, useMemo, useState } from "react";
+import { launchCopy } from "./launch-copy";
 
 type SectionId = "hero" | "experience" | "favorites" | "storage" | "kuji" | "prelaunch";
 
@@ -23,7 +24,7 @@ const sections: readonly SectionMeta[] = [
   { id: "experience", label: "가챠샵", nextId: "favorites", nextLabel: "관심 상품 기능 보기" },
   { id: "favorites", label: "관심 상품", nextId: "storage", nextLabel: "보관·배송 안내 보기" },
   { id: "storage", label: "보관·배송", nextId: "kuji", nextLabel: "쿠지샵 안내 보기" },
-  { id: "kuji", label: "쿠지샵", nextId: "prelaunch", nextLabel: "사전 오픈 안내" },
+  { id: "kuji", label: "쿠지샵", nextId: "prelaunch", nextLabel: launchCopy.finalNavLabel },
   { id: "prelaunch", label: "이용 안내" },
 ] as const;
 
@@ -130,7 +131,7 @@ function HeroSection() {
         <div className="story-copy story-copy--hero">
           <h1 id="hero-title">원하는 거 다 뽀바</h1>
           <p>가챠부터 쿠지까지, 설레는 순간을 한곳에서.</p>
-          <span className="status-line"><span aria-hidden="true" />사전 오픈 준비 중</span>
+          <span className="status-line"><span aria-hidden="true" />{launchCopy.heroStatus}</span>
         </div>
         <div className="hero-machine" aria-hidden="true">
           <PixelSpark className="pixel-spark--one" />
@@ -183,8 +184,8 @@ function AppPreview() {
         </div>
         <div className="phone-preview__section-heading"><strong>지금, 이런 뽑기는 어때요?</strong><span>전체보기</span></div>
         <div className="preview-products">
-          <PreviewProduct image="/assets/gacha/capsule.png" title="캡슐 컬렉션" />
-          <PreviewProduct image="/assets/kuji/ticket-icon.png" title="랜덤 티켓 시리즈" />
+          <PreviewProduct image="/assets/gacha/capsule.png" title="캡슐 컬렉션" status={launchCopy.gachaPreviewStatus} />
+          <PreviewProduct image="/assets/kuji/ticket-icon.png" title="랜덤 티켓 시리즈" status={launchCopy.kujiPreviewStatus} />
         </div>
         <div className="phone-preview__nav">
           {navItems.map(([image, label], index) => (
@@ -198,12 +199,12 @@ function AppPreview() {
   );
 }
 
-function PreviewProduct({ image, title }: { image: string; title: string }) {
+function PreviewProduct({ image, title, status }: { image: string; title: string; status: string }) {
   return (
     <div className="preview-product">
       <div className="preview-product__media"><img src={image} alt="" loading="lazy" decoding="async" /></div>
       <div className="preview-product__title"><strong>{title}</strong><BookmarkIcon /></div>
-      <span>오픈 준비 중</span>
+      <span>{status}</span>
     </div>
   );
 }
@@ -279,7 +280,7 @@ function StorageBoard() {
   return (
     <div className="storage-board">
       <div className="storage-board__icon"><CalendarIcon aria-hidden="true" /></div>
-      <div className="storage-board__intro"><span>정식 오픈 후 적용 예정</span><strong>획득일부터 60일 보관</strong></div>
+      <div className="storage-board__intro"><span>{launchCopy.storageIntro}</span><strong>획득일부터 60일 보관</strong></div>
       <dl>
         <div><dt>가챠만 포함</dt><dd>24,900원 이상 무료 배송</dd></div>
         <div><dt>쿠지 포함</dt><dd>54,900원 이상 무료 배송</dd></div>
@@ -344,15 +345,15 @@ function PrelaunchSection() {
       <div className="prelaunch-content">
         <Brand onDark />
         <div className="prelaunch-copy">
-          <h2 id="prelaunch-title">곧, 앱에서 만나요</h2>
-          <p>상품 탐색과 관심 상품 저장부터 차근차근 시작할게요.</p>
+          <h2 id="prelaunch-title">{launchCopy.closingTitle}</h2>
+          <p>{launchCopy.closingBody}</p>
         </div>
         <div className="prelaunch-art" aria-hidden="true">
           <img className="prelaunch-art__capsule prelaunch-art__capsule--one" src="/assets/gacha/capsule.png" alt="" width={256} height={256} loading="lazy" decoding="async" />
           <img className="prelaunch-art__capsule prelaunch-art__capsule--two" src="/assets/gacha/capsule.png" alt="" width={256} height={256} loading="lazy" decoding="async" />
           <img className="prelaunch-art__ticket" src="/assets/kuji/ticket-icon.png" alt="" width={128} height={128} loading="lazy" decoding="async" />
         </div>
-        <span className="prelaunch-status"><span aria-hidden="true" />PRELAUNCH</span>
+        <span className="prelaunch-status"><span aria-hidden="true" />{launchCopy.closingStatus}</span>
         <a className="prelaunch-action" href="/support">고객지원 보기<ChevronRightIcon aria-hidden="true" /></a>
         <footer className="site-footer">
           <nav aria-label="정책과 고객지원">

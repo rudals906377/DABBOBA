@@ -46,7 +46,7 @@ test('release source accepts a clean Git commit containing every reviewed releas
   try {
     const report = checkDatabaseReleaseSource({ repositoryRoot: directory });
     assert.equal(report.status, 'pass', JSON.stringify(report));
-    assert.equal(report.latestMigration, '0091_personalized_recommendation_consent_withdrawal.sql');
+    assert.equal(report.latestMigration, '0092_set_updated_at_search_path.sql');
     assert.deepEqual(report.blockers, []);
     assert.match(report.head, /^[0-9a-f]{40,64}$/);
     assert.equal(report.worktreeClean, true);
@@ -158,7 +158,7 @@ test('release source rejects a release missing the draft snapshot media rebase m
   try {
     const report = checkDatabaseReleaseSource({ repositoryRoot: directory });
     assert.equal(report.status, 'blocked');
-    assert.equal(report.latestMigration, '0091_personalized_recommendation_consent_withdrawal.sql');
+    assert.equal(report.latestMigration, '0092_set_updated_at_search_path.sql');
     assert.ok(report.blockers.includes('required_migration_not_committed:0081_draft_draw_snapshot_media_rebase.sql'));
     assert.ok(report.blockers.includes('committed_migration_sequence_incomplete:0081'));
   } finally {
@@ -183,6 +183,7 @@ test('release source registers every migration from 0078 without a gap', () => {
     '0089_supabase_auth_orphan_cleanups.sql',
     '0090_legal_policy_live_2026_10_07.sql',
     '0091_personalized_recommendation_consent_withdrawal.sql',
+    '0092_set_updated_at_search_path.sql',
   ]);
   const versions = files.map((file) => Number(file.slice(0, 4)));
   for (let index = 1; index < versions.length; index += 1) {

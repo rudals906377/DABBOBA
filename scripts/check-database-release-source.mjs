@@ -222,6 +222,11 @@ export const DATABASE_RELEASE_MIGRATIONS = Object.freeze([
     path: 'packages/db/migrations/0091_personalized_recommendation_consent_withdrawal.sql',
     sha256: '6453fb3cb7ecab1a08c7171adb9c371aebcae2136b31d64e656cb8ba5060c1a5',
   }),
+  Object.freeze({
+    file: '0092_set_updated_at_search_path.sql',
+    path: 'packages/db/migrations/0092_set_updated_at_search_path.sql',
+    sha256: '560dd4229a991e660fb1690d6fa52a294ee4ae4db073e2a6e0558880e4146afd',
+  }),
 ]);
 
 export const MINIMUM_DATABASE_RELEASE_VERSION =

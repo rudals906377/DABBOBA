@@ -812,8 +812,10 @@ test("legacy legal landing retains the full prelaunch limitation notice", async 
 });
 
 test("public storefront stays prelaunch-only and links every required policy surface", async () => {
-  const source = await readFile(new URL("../apps/storefront/src/App.tsx", import.meta.url), "utf8");
-  assert.match(source, /PRELAUNCH/);
+  const source = await readFile(new URL("../apps/storefront/src/App.tsx", import.meta.url), "utf8")
+    + await readFile(new URL("../apps/storefront/src/launch-copy.ts", import.meta.url), "utf8");
+  // The default build is prelaunch; only VITE_DABBOBA_COMMERCE_MODE=LIVE switches the copy.
+  assert.match(source, /closingStatus: "PRELAUNCH"/);
   assert.match(source, /OPENING SOON/);
   assert.match(source, /정식 오픈 후 적용 예정/);
   for (const href of ["/privacy", "/terms", "/support", "/account-deletion"]) {

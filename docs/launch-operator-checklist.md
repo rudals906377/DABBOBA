@@ -16,20 +16,17 @@ corepack pnpm run build:all
 corepack pnpm run db:release-source:check      # 확인: "blockers": []
 ```
 
-## 2. 운영 DB 백업 → 마이그레이션 0083~0087
+## 2. 운영 DB 백업과 릴리스 확인 (마이그레이션은 0092까지 적용됨)
 
 ```
 node ops/database/backup.mjs backup /절대경로/archive.dbbenc /절대경로/key-file
 node ops/database/backup.mjs verify /절대경로/archive.dbbenc /절대경로/key-file   # 확인: archive-authenticated
-corepack pnpm run db:migrate     # 확인: Applied 5 migration(s).
 corepack pnpm run db:migrate     # 확인: Database schema is current.
 corepack pnpm --filter @dabboba/db check:release   # 확인: "blockers": [] — 출력의 targetHash를 기록
 ```
 
-- 0083은 기록 정리 평가 함수만 바꾼다. 0084는 `payments`에 결제 채널 기록 컬럼·불변 트리거를, 0085는 `sessions`에 심사 마감 컬럼을 추가한다.
-- 0086은 `account_deletion_requests`에 포인트 소멸 동의 금액 컬럼을, 탈퇴 회원의 배송지·문의 내용을 따로 두는 소유자 전용 테이블과 분리 함수를 추가한다. 이 테이블은 API·관리자·워커 어느 역할도 읽을 수 없다.
-- 0087은 미사용 뽑기 부분 환불 요청·계획 테이블(`partial_unused_draw_refunds`)을 추가한다.
-- 다섯 마이그레이션 모두 기존 데이터를 바꾸지 않는다. API·워커가 0084~0087을 사용하므로 반드시 이 단계 다음에 배포한다.
+- 2026-10-07에 `0088`~`0092`를 운영 DB에 적용했다(오너 승인, Supabase 커넥터, 실행기와 같은 잠금·체크섬). 그때 전체 백업은 받지 못했으니 이 단계의 백업을 꼭 받는다.
+- `0083`~`0087`은 그 전에 적용됐다. API·워커가 `0084` 이후를 사용하므로 Edge 배포는 반드시 이 단계 다음이다.
 
 ## 3. 서버(Edge) 배포 — PRELAUNCH 유지
 
@@ -82,7 +79,7 @@ corepack pnpm run supabase:worker:schedule <2단계 check:release의 targetHash>
 
 - 1분마다 `dabboba-worker`를 호출하는 `dabboba-worker-every-minute` 작업과 Vault 비밀값을 설정한다.
 - 확인: Supabase 대시보드 → Cron 작업 실행 기록이 성공으로 쌓이는지, 워커 로그에 탈퇴 처리·대사·만료 정리가 도는지.
-- 기록 정리(retention)는 `WORKER_COMMERCE_RETENTION_MODE` 기본값 `DISABLED`로 계속 꺼져 있다. 보존기간 정책은 판매판 법률 문서와 함께 질문지 B7의 기간으로 승인한다. 관리자 화면은 아직 없으니 `docs/commerce-retention-components.md`의 운영 절차를 따른다. 승인 전에는 켜지 않는다.
+- 기록 정리(retention)는 `WORKER_COMMERCE_RETENTION_MODE` 기본값 `DISABLED`로 계속 꺼져 있다. 보존기간 정책은 2026-10-07에 승인했다(배송지 60개월, 문의 36개월). 실행은 분쟁 목록 반영과 `review` 단계를 거친 별도 검토 때만 한다(`docs/commerce-retention-components.md`).
 - 보관기한 알림·만료 보류·만료 교환 정리도 `WORKER_INVENTORY_STORAGE_EXPIRY_MODE` 기본값 `DISABLED`로 꺼져 있다. Edge 워커는 이 값을 전달하지만 설정하지 않았으므로 Cron을 켜도 돌지 않는다. 운영 여부는 첫 LIVE 판매일부터 60일 안에 소유자가 정한다(2026-10-06 결정). 켜기로 하면 안내 문구·약관을 반영한 뒤 Edge 설정에 `WORKER_INVENTORY_STORAGE_EXPIRY_MODE=ENABLED`만 추가한다.
 - Cron이 켜져야 15분 넘게 결제하지 않은 주문·배송비 신청이 자동 취소되고 재고·포인트·보관함이 돌아온다. LIVE 전에 반드시 켠다.
 
@@ -122,11 +119,11 @@ corepack pnpm run supabase:worker:schedule <2단계 check:release의 targetHash>
 
 - 판매판 약관·개인정보처리방침·내부관리계획은 업계 표준 기준으로 확정했다(2026-10-06 결정, 자문은 선택).
 - `{{…}}` 값 4개(시행일, 택배사 상호, 지원 메일 수신 서비스, Supabase 저장 리전)는 2026-10-07에 모두 채웠다. 근거는 `docs/legal-drafts/review-questionnaire.md`에 있다.
-- LIVE 전환 직전에 한 배포로 게시한다. 코드는 2026-10-07에 모두 준비됐고, 게시 순서는 `docs/live-cutover-runbook.md`의 "법적 문서 게시 번들" 절을 따른다.
+- 게시 순서는 `docs/live-cutover-runbook.md`의 "법적 문서 게시 번들" 절을 따른다. 2026-10-07 PR #37 병합으로 공개 HTML은 새 판이고(해시 확인), 같은 날 운영 DB에 `0090`·`0091`(및 `0088`·`0089`·`0092`)을 적용했다. 남은 것은 Edge 배포다.
   - `public/legal/terms`·`privacy`가 2026-10-07 판이고 마이그레이션 `0090`이 정책 버전을 발행한다(기존 회원 재동의).
   - 맞춤 추천 토글은 앱·API에서 제거됐고 마이그레이션 `0091`이 기존 동의를 철회한다.
   - 워커 세션 기록 보관 기간은 기본 90일이다.
-- 같은 날 `docs/commerce-retention-components.md`의 운영 절차로 보존기간 정책을 승인하고, 대표가 내부관리계획을 승인한다.
+- 같은 날 `ops/database/commerce-retention-approval.sql`(`step=approve`)로 보존기간 정책을 승인하고, 대표가 내부관리계획을 승인한다. 절차는 `docs/commerce-retention-components.md`. 보존기간 정책 승인은 2026-10-07에 완료했다(배송지 60개월, 문의 36개월).
 
 ## 9-1. KG이니시스 테스트 채널 검증 (LIVE 전)
 
@@ -144,6 +141,7 @@ corepack pnpm run supabase:worker:schedule <2단계 check:release의 targetHash>
 `docs/live-cutover-runbook.md`: LIVE 프로필 작성 → `supabase:edge:live:check` →
 `node scripts/deploy-supabase-live-edge.mjs --confirm=LIVE:rconfxsykttfvznakile`.
 전환 명령은 4-1의 관리자 Access 검사를 먼저 통과해야 진행한다. 실패하면 자동으로 PRELAUNCH로 되돌아간다.
+성공하면 Cloudflare Pages Production 변수 `VITE_DABBOBA_COMMERCE_MODE=LIVE`를 넣고 배포를 다시 실행해 첫 화면을 판매판 문구로 바꾼다(되돌릴 때는 변수를 지우고 다시 배포).
 
 전환한 날짜를 기록한다. 그날부터 60일 안에 보관기한 알림·만료 보류 운영 여부를 정한다.
 

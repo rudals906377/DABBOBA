@@ -54,6 +54,21 @@ test("native login offers phone OTP and Kakao, Naver, Google, with Apple only on
   assert.match(screen, /accessibilityRole="checkbox"/);
 });
 
+test("native login requires the 만 14세 이상 confirmation with both policy consents", () => {
+  const screen = read("apps/mobile/src/features/auth/LoginScreen.tsx");
+  // Terms 3조 bars members under 14; the confirmation is a required checkbox
+  // without a document link and gates every login path and the disabled state.
+  assert.match(screen, /label="\[필수\] 만 14세 이상입니다"\s*checked=\{ageConfirmed\}/);
+  assert.equal(
+    (screen.match(/if \(!requiredPolicyVersions \|\| !termsAccepted \|\| !privacyAccepted \|\| !ageConfirmed\)/g) ?? []).length,
+    3,
+  );
+  assert.match(screen, /\|\| !privacyAccepted\s*\|\| !ageConfirmed;/);
+  assert.match(screen, /onOpen\?: \(\) => void;/);
+  assert.match(screen, /\{onOpen \? \(/);
+  assert.match(screen, /필수 항목을 모두 확인하고 동의해 주세요\./);
+});
+
 test("native login renders only server-enabled methods and offers retry when none are ready", () => {
   const screen = read("apps/mobile/src/features/auth/LoginScreen.tsx");
   for (const provider of ["KAKAO", "NAVER", "GOOGLE", "APPLE"]) {
@@ -390,7 +405,7 @@ test("the app-store reviewer login appears only while the server reports an acti
   assert.match(screen, /\{storeReviewEnabled \? \(\s*<View style=\{styles\.storeReview\}>/);
   assert.match(screen, /앱 심사용 계정으로 로그인/);
   assert.match(screen, /secureTextEntry/);
-  assert.match(screen, /const loginReviewer = async \(\) => \{\s*if \(!requiredPolicyVersions \|\| !termsAccepted \|\| !privacyAccepted\)/);
+  assert.match(screen, /const loginReviewer = async \(\) => \{\s*if \(!requiredPolicyVersions \|\| !termsAccepted \|\| !privacyAccepted \|\| !ageConfirmed\)/);
   assert.match(screen, /disabled=\{unavailable \|\| !reviewEmail\.trim\(\) \|\| !reviewPassword\}/);
   // No reviewer credential is bundled into the app.
   for (const source of [screen, api]) assert.doesNotMatch(source, /store-review@|STORE_REVIEW_LOGIN/);
