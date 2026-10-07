@@ -7,7 +7,7 @@
 > 게시할 때 채울 값(사업자·콘솔만 아는 사실)
 > - 시행일 2026-10-07, 택배사 표기(전담 계약 없이 건별 이용)는 2026-10-07 소유자 답변으로 채웠다. 택배사와 전담 계약을 맺으면 그 상호로 새 버전을 낸다.
 > - 지원 메일 수신 서비스는 2026-10-07에 Cloudflare Email Routing의 인증된 전달 대상 주소(네이버 메일)로 확인해 네이버 주식회사로 채웠다. 전달 대상을 바꾸면 4항 표를 갱신한다.
-> - Supabase 저장 리전은 2026-10-07에 대한민국(서울)로 채웠다. 근거: 프로젝트 `rconfxsykttfvznakile`의 데이터베이스 호스트가 AWS `ap-northeast-2`(서울) 대역으로 해석되고, 서버 설정의 풀러 호스트도 `aws-0-ap-northeast-2`다. 대시보드 Project Settings → General의 Region 값으로 한 번 더 대조한다.
+> - Supabase 저장 리전은 2026-10-07에 대한민국(서울)로 채웠다. 근거: Supabase 프로젝트 기록(`dabboba-production`, `rconfxsykttfvznakile`)의 region이 `ap-northeast-2`이고, 데이터베이스 호스트의 AWS 대역과 서버 설정의 풀러 호스트 `aws-0-ap-northeast-2`도 같은 리전이다.
 > - 2026-10-07 소유자 결정으로 휴대폰 문자 로그인은 제공하지 않는다. 휴대폰 로그인 행과 Twilio 행은 이 판에서 뺐다.
 >
 > 게시 전에 콘솔에서 확인할 것

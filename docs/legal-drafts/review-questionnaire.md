@@ -15,7 +15,7 @@
 | 시행일 | 2026-10-07로 채움(정책 버전도 같은 날짜) |
 | 택배사 | 전담 계약 없이 편의점 택배·우체국택배 등을 건별 이용. 방침에 일반 표기로 채웠고, 계약 체결 시 상호로 새 버전 |
 | 지원 메일 수신 서비스 | 네이버 주식회사(네이버 메일)로 채움. Cloudflare Email Routing의 인증된 전달 대상이 네이버 메일 주소이고 `dabboba.net` MX가 Cloudflare 라우팅으로 확인됨(2026-10-07) |
-| Supabase 저장 리전 | 대한민국(서울)로 채움. 데이터베이스 호스트 `db.rconfxsykttfvznakile.supabase.co`가 AWS `ap-northeast-2` 대역으로 해석되고 서버 풀러 호스트가 `aws-0-ap-northeast-2`(2026-10-07). 대시보드 Region 값으로 재대조 |
+| Supabase 저장 리전 | 대한민국(서울)로 채움. Supabase 프로젝트 기록(`dabboba-production`)의 region `ap-northeast-2`로 확인(2026-10-07). 데이터베이스 호스트의 AWS 대역과 서버 풀러 호스트 `aws-0-ap-northeast-2`도 일치 |
 
 ## A. 운영 사실
 
@@ -55,7 +55,7 @@
 | # | 확인할 것 | 어디서 |
 |---|---|---|
 | C1 | 네이버 제공 정보를 고유 식별값과 이메일(선택)로 줄였는지 | 네이버 개발자센터 → API 설정(`docs/customer-auth-setup.md` 4절) |
-| C2 | Supabase 저장 리전 → 대한민국(서울)로 채움(DNS·AWS 대역 확인). 대시보드 Region 값으로 재대조 | Supabase 대시보드 → Project Settings |
+| C2 | Supabase 저장 리전 → 대한민국(서울)로 채움(프로젝트 기록 region `ap-northeast-2` 확인, 2026-10-07) | Supabase 프로젝트 설정 |
 | C3 | 지원 메일 전달 대상 → 네이버 메일(인증된 전달 주소 확인, 2026-10-07). `support@dabboba.net` 라우팅 규칙이 그 주소를 향하는지 확인 | Cloudflare → Email Routing |
 | C4 | 택배 계약 → 전담 계약 없음(건별 이용). 계약 체결 시 방침 새 버전 | 2026-10-07 소유자 답변 |
 
