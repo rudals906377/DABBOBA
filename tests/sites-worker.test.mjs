@@ -67,7 +67,6 @@ test("serves the public storefront root and every policy URL with security heade
     ["/", "/"],
     ["/index.html", "/index.html"],
     ["/privacy", "/legal/privacy/"],
-    ["/privacy/", "/legal/privacy/"],
     ["/terms", "/legal/terms/"],
     ["/support", "/legal/support/"],
     ["/account-deletion", "/legal/account-deletion/"],
@@ -101,6 +100,67 @@ test("serves the public storefront root and every policy URL with security heade
     assert.equal(response.headers.get("referrer-policy"), "strict-origin-when-cross-origin");
     assert.match(response.headers.get("content-security-policy") ?? "", /frame-ancestors 'none'/);
     assert.match(response.headers.get("content-security-policy") ?? "", /connect-src 'self'/);
+  }
+});
+
+test("policy pages have one canonical URL: the slash form redirects and the page names itself", async () => {
+  const noAssets = { ASSETS: { fetch: async () => assert.fail("a redirect must not read an asset") } };
+  for (const path of ["/terms", "/privacy", "/support", "/account-deletion", "/community-operations"]) {
+    const redirect = await worker.fetch(new Request(`https://dabboba.net${path}/?source=store`), noAssets);
+    assert.equal(redirect.status, 308);
+    assert.equal(redirect.headers.get("location"), `https://dabboba.net${path}?source=store`);
+    assert.equal(redirect.headers.get("x-content-type-options"), "nosniff");
+
+    const page = await worker.fetch(new Request(`https://dabboba.net${path}`), {
+      ASSETS: { fetch: async () => new Response("policy", { headers: { "content-type": "text/html; charset=UTF-8" } }) },
+    });
+    assert.equal(page.status, 200);
+    assert.equal(page.headers.get("link"), `<https://dabboba.net${path}>; rel="canonical"`);
+  }
+
+  // A missing asset is never advertised as the canonical page.
+  const missing = await worker.fetch(new Request("https://dabboba.net/terms"), {
+    ASSETS: { fetch: async () => new Response("missing", { status: 404 }) },
+  });
+  assert.equal(missing.headers.get("link"), null);
+
+  // Writes and unrelated slash paths keep their existing handling.
+  const post = await worker.fetch(new Request("https://dabboba.net/terms/", { method: "POST" }), {
+    ASSETS: { fetch: async () => new Response("nope", { status: 404 }) },
+  });
+  assert.notEqual(post.status, 308);
+  const callback = await worker.fetch(new Request("https://dabboba.net/account-deletion/auth/social/callback?code=x"), {
+    ASSETS: { fetch: async (request) => new Response(new URL(request.url).pathname + new URL(request.url).search, { headers: { "content-type": "text/html" } }) },
+  });
+  assert.equal(callback.status, 200);
+  assert.equal(await callback.text(), "/legal/account-deletion/social-callback?code=x");
+});
+
+test("public hosts publish a sitemap of the canonical pages and point robots.txt at it", async () => {
+  const noAssets = { ASSETS: { fetch: async () => assert.fail("sitemap and robots are generated") } };
+  for (const host of ["dabboba.net", "release-id.dabboba.pages.dev"]) {
+    const sitemap = await worker.fetch(new Request(`https://${host}/sitemap.xml`), noAssets);
+    assert.equal(sitemap.status, 200);
+    assert.match(sitemap.headers.get("content-type") ?? "", /^application\/xml/);
+    const xml = await sitemap.text();
+    const locs = [...xml.matchAll(/<loc>([^<]+)<\/loc>/g)].map((match) => match[1]);
+    assert.deepEqual(locs, [
+      "https://dabboba.net/",
+      "https://dabboba.net/terms",
+      "https://dabboba.net/privacy",
+      "https://dabboba.net/support",
+      "https://dabboba.net/account-deletion",
+      "https://dabboba.net/community-operations",
+    ]);
+    assert.ok(!xml.includes("/review"));
+
+    const robots = await worker.fetch(new Request(`https://${host}/robots.txt`), noAssets);
+    assert.equal(robots.status, 200);
+    assert.match(await robots.text(), /^Sitemap: https:\/\/dabboba\.net\/sitemap\.xml$/m);
+
+    const head = await worker.fetch(new Request(`https://${host}/sitemap.xml`, { method: "HEAD" }), noAssets);
+    assert.equal(head.status, 200);
+    assert.equal(await head.text(), "");
   }
 });
 
