@@ -10,12 +10,14 @@
   - 출시 전 돈·탈퇴 경로 점검 19건 모두 수정(PR #35·#36). 점검 기록은 [`pre-launch-money-review-2026-10-06.md`](pre-launch-money-review-2026-10-06.md).
   - 판매판 약관·개인정보처리방침과 게시 번들(PR #37): 정책 버전 `2026-10-07` 마이그레이션 `0090`, 맞춤 추천 동의 철회 `0091`, 세션 기록 90일.
   - 그 밖에 탈퇴 기록 분리 보관, 포인트 소멸 동의 탈퇴, 미사용 뽑기 부분 환불, LIVE 전환·되돌리기 명령, 스토어 심사자 로그인.
-- **이번 작업 브랜치(병합 전)**: 로그인 동의에 "만 14세 이상" 확인 추가, 첫 화면 문구를 Pages 변수로 판매판 전환, 보존기간 승인 스크립트(`ops/database/commerce-retention-approval.sql`), Edge 워커의 보존 실행 설정 전달.
-- **운영 서버(2026-10-07 읽기 전용 확인)**:
-  - DB는 `0087`까지 적용(88개). 남은 마이그레이션은 `0088`~`0091` 4개이고, `0090`·`0091`의 사전 조건(현재 2026-09-30 문서 해시, 제약 이름)과 일치한다. 저장된 맞춤 추천 동의는 0건이다.
-  - 공개 설정은 PRELAUNCH, 요구 정책 버전은 아직 2026-09-30이다. Edge·관리자 웹은 이전 배포이고 Cron은 꺼져 있다.
-  - 보존기간 정책·검토·보류·파기 기록은 모두 0건이다. ACTIVE 관리자는 1명이다.
-  - **주의**: PR #37 병합으로 `dabboba.net/terms`·`/privacy`는 이미 2026-10-07 판이다(해시 확인). DB는 아직 이전 판이라 앱 동의 화면의 버전과 공개 문서가 어긋나 있다. 운영 반영(1단계)에서 `0090`·`0091`을 빨리 적용해야 한다.
+- **PR #38**: 로그인 동의에 "만 14세 이상" 확인 추가, 첫 화면 문구를 Pages 변수로 판매판 전환, 보존기간 승인 스크립트(`ops/database/commerce-retention-approval.sql`), Edge 워커의 보존 실행 설정 전달, `0092`(아래).
+- **운영 DB(2026-10-07 오너 승인으로 반영)**:
+  - Supabase 커넥터로 `0088`~`0092`를 적용했다. 저장소 마이그레이션 실행기와 같은 방식(같은 advisory lock, `lock_timeout` 5초, 마이그레이션마다 한 트랜잭션, 직전 버전 확인, 파일 sha256을 `schema_migrations`에 기록)이고 지금 93개, 최신 `0092`다.
+  - `0092`는 `0088`이 `CREATE OR REPLACE`로 지운 `set_updated_at()`의 `search_path` 고정을 되돌린다. 적용 후 Supabase 보안 점검의 `function_search_path_mutable` 경고가 없다.
+  - 공개 설정·로그인 공급자 응답 모두 약관·개인정보 `2026-10-07`을 요구한다(공개 문서 해시와 일치). 판매 모드는 PRELAUNCH, 로그인은 카카오·네이버·구글·Apple.
+  - 보존기간 정책 승인 완료: 배송지 60개월, 문의 36개월(정책 버전 2026-10-07, 승인자 ACTIVE 관리자 1명). 파기 미리보기 대상 0건. 검토(review) 단계와 실행은 하지 않았고 `WORKER_COMMERCE_RETENTION_MODE`는 꺼진 그대로다.
+  - **백업**: 이 세션에는 DB 접속 비밀값이 없어 `ops/database/backup.mjs` 전체 암호화 백업은 하지 못했다. 대신 바뀌는 객체만 적용 직전 상태를 기록하고 되돌리기 SQL을 만들어 두었다. 다음 운영자 작업 때 전체 백업을 한 번 받아 둔다.
+- **아직 이전 배포인 것**: Edge 함수 3개(10월 4일 배포), 관리자 웹(10월 1일 배포, Cloudflare Access 없음). Cron은 꺼져 있다(pg_cron·pg_net·Vault 비밀값 없음). 모두 운영자 컴퓨터의 Supabase·Cloudflare 토큰과 Edge 비밀 프로필이 있어야 해서 아래 1-5~1-7로 남는다.
 - **외부**: KG이니시스는 PortOne 입점 심사 중. Apple 친구 팀 준비 완료. Google Play 앱 레코드 없음.
 
 ## 1. 운영 반영 — 개발·운영자, 운영자 컴퓨터, 1~2일
@@ -23,8 +25,8 @@
 | 단계 | 어떻게 | 끝난 기준 |
 |---|---|---|
 | 1-1 | `git pull` → `corepack pnpm install --frozen-lockfile` → `build:all` → `db:release-source:check` | `"blockers": []` |
-| 1-2 | `node ops/database/backup.mjs backup …` → `verify` | `archive-authenticated` |
-| 1-3 | `corepack pnpm run db:migrate` 두 번 | 첫 번째 `Applied 4 migration(s).`(0088~0091), 두 번째 `Database schema is current.` 적용 직후 공개 설정의 정책 버전이 `2026-10-07`이 된다 |
+| 1-2 | `node ops/database/backup.mjs backup …` → `verify` | `archive-authenticated` (2026-10-07 마이그레이션 때 못 받은 전체 백업) |
+| 1-3 | `corepack pnpm run db:migrate` | 2026-10-07에 `0088`~`0092` 적용 완료. 지금은 `Database schema is current.`만 나와야 한다 |
 | 1-4 | `corepack pnpm --filter @dabboba/db check:release` | `"blockers": []`, `targetHash` 기록 |
 | 1-5 | `corepack pnpm run supabase:edge:deploy` → `supabase:edge:public:verify` → `release:edge:worker:verify` | 공개 설정 PRELAUNCH, 워커 GET 405·익명 POST 401 |
 | 1-6 | `apps/admin`에서 `build:cloudflare` → `wrangler deploy --dry-run` → `wrangler deploy --keep-vars` | 관리자 결제 상세에 "미사용 뽑기 부분 환불"·"포인트 주문 환불" 패널이 조건에 맞게 표시 |
@@ -79,7 +81,7 @@ Cron을 켜면 결제 대사, 15분 미결제 주문·배송비 신청 자동 �
    - 정책 버전 `2026-10-07` 마이그레이션 `0090`(기존 회원 재동의)
    - 맞춤 추천 토글 제거(앱·API)와 기존 동의 철회 마이그레이션 `0091`
    - 워커 세션 기록 보관 30일 → 90일
-   - 보존기간 정책 승인은 운영 절차로 남음. 실행용 스크립트 `ops/database/commerce-retention-approval.sql`(관리자 화면은 아직 없음)
+   - 보존기간 정책 승인: 2026-10-07 운영 DB에서 완료(`ops/database/commerce-retention-approval.sql`의 `approve` 단계)
    - 가입 동의 화면의 "만 14세 이상" 확인 추가(2026-10-07)
 5. **Google Play 정책 문의**: 친구 Play Console에서 [`google-play-paid-draw-inquiry.md`](google-play-paid-draw-inquiry.md)의 본문을 제출하고 서면 회신을 받는다. Play 출시 가능 여부가 걸려 있다.
 
@@ -139,7 +141,7 @@ Cron을 켜면 결제 대사, 15분 미결제 주문·배송비 신청 자동 �
 | 항목 | 결정 | 할 일 |
 |---|---|---|
 | 보관기한 알림·만료 보류 운영 | 판매 시작 후 60일 안에 정한다 | 첫 LIVE 판매일 + 60일 전에 운영 여부를 결정한다. 켜기로 하면 고객 안내 문구와 약관 문장을 반영한 뒤 Edge 설정 `WORKER_INVENTORY_STORAGE_EXPIRY_MODE=ENABLED`만 추가한다(전달 연결은 해 두었다). 그 전까지는 꺼져 있고 만료 상품을 자동 폐기하지 않는다. |
-| 거래기록 보존기간 승인 | 법률 문서와 함께 승인 | 질문지 B7의 기간(거래 5년, 불만 3년, 광고 6개월, 동의 기록 탈퇴 후 5년)으로 LIVE 직전에 승인한다. 관리자 화면은 아직 없으니 `docs/commerce-retention-components.md`의 운영 절차를 따른다. 그 전까지 자동 파기는 돌지 않는다. |
+| 거래기록 보존기간 승인 | 2026-10-07 승인 완료 | 배송지 60개월·문의 36개월 정책이 운영 DB의 현재 승인 정책이다. 실행(파기)은 분쟁 목록 반영과 `review` 단계 뒤 별도 검토로만 하고, 그 전까지 자동 파기는 돌지 않는다. |
 | 탈퇴 시 남은 보관 상품 | 첫 출시는 가챠만이라 출시 후 결정 | 지금 규칙을 유지한다(보관·교환 예약·배송 중 상품은 배송이나 포인트 환급으로 정리해야 탈퇴). 쿠지 판매 전에 다시 정한다. |
 | 관리자 2단계 인증 | Cloudflare Access | 7-1과 체크리스트 4-1. LIVE 전환 명령이 직접 확인한다. |
 | 글 필터 연락처 차단 범위 | 지금대로 유지 | 교환·신청방 글의 링크·전화번호·메신저 아이디 요청을 계속 막는다. 오탐 신고가 오면 조정한다. |

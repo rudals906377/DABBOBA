@@ -71,6 +71,7 @@ psql "$DATABASE_MIGRATION_URL" -v step=preview -f ops/database/commerce-retentio
 - `copies_status=CLEARED`는 외부 사본 검토 근거가 실제로 있을 때만 쓴다. `UNVERIFIED`이면 미리보기와 실행 모두 `EXTERNAL_COPIES_UNVERIFIED`로 막힌다.
 - 승인은 다시 실행해도 같은 결과다. 다른 버전의 승인 정책이 이미 현재 정책이면 멈춘다.
 - 실행은 별도 검토 후 Edge 워커 설정 `WORKER_COMMERCE_RETENTION_MODE=EXECUTE`(필요하면 `WORKER_COMMERCE_RETENTION_BATCH_SIZE`)로 한 번 돌리고 설정을 지운다. 2026-10-07부터 Edge 워커가 이 두 값을 전달한다. 설정하지 않으면 계속 `DISABLED`다.
+- 2026-10-07 운영 DB에서 `approve` 단계를 실행했다(오너 승인, ACTIVE 관리자 1명이 승인자). 두 정책이 현재 승인 정책이고 읽기 전용 미리보기 대상은 0건이다. `review` 단계는 분쟁 목록을 holds에 넣은 뒤 실행 직전에 따로 한다.
 - 2026-10-07 로컬 disposable DB에서 단계별 동작을 확인했다: 인자 누락·비관리자·잘못된 사본 상태 거부, 승인 재실행, 검토 전 `HOLD_REVIEW_REQUIRED`, 검토 후 `EXTERNAL_COPIES_UNVERIFIED`, 파기 0건.
 
 예를 들어 운영 등록은 다음 매개변수 계약을 따른다. 실제 실행을 승인하거나 값/근거를 만들어주는 예시는 아니다.
