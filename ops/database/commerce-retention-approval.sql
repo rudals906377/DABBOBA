@@ -12,6 +12,9 @@
 --        -v holds_reviewed=yes -v copies_status=UNVERIFIED|CLEARED -f ...
 --   psql ... -v step=preview -f ...
 --
+-- A missing or invalid argument raises an SQL error, so psql exits non-zero
+-- (ON_ERROR_STOP) instead of reporting success after doing nothing.
+--
 -- This script never executes disposal. EXECUTE stays a separate, reviewed worker
 -- run (WORKER_COMMERCE_RETENTION_MODE=EXECUTE, then back to DISABLED).
 -- Never put customer content, secrets or real case details in -v evidence;
@@ -21,26 +24,34 @@
 \if :{?step}
 \else
   \echo 'Pass -v step=approve|review|preview'
-  \quit
+  DO $$ BEGIN RAISE EXCEPTION 'commerce-retention-approval: step is missing' USING ERRCODE = '22023'; END $$;
 \endif
 
 SELECT :'step' = 'approve' AS step_approve,
        :'step' = 'review' AS step_review,
-       :'step' = 'preview' AS step_preview \gset
+       :'step' = 'preview' AS step_preview,
+       :'step' IN ('approve','review','preview') AS step_known \gset
+
+\if :step_known
+\else
+  \echo 'step must be approve, review or preview'
+  DO $$ BEGIN RAISE EXCEPTION 'commerce-retention-approval: unknown step' USING ERRCODE = '22023'; END $$;
+\endif
 
 \if :step_approve
   \if :{?admin_id}
   \else
     \echo 'approve needs -v admin_id=<ACTIVE ADMIN or SUPER_ADMIN user id>'
-    \quit
+    DO $$ BEGIN RAISE EXCEPTION 'commerce-retention-approval: admin_id is missing' USING ERRCODE = '22023'; END $$;
   \endif
   \if :{?evidence}
   \else
     \echo 'approve needs -v evidence=<private evidence code, 3-200 chars>'
-    \quit
+    DO $$ BEGIN RAISE EXCEPTION 'commerce-retention-approval: evidence is missing' USING ERRCODE = '22023'; END $$;
   \endif
   BEGIN;
-  SELECT set_config('dabboba.retention_admin', :'admin_id', true) AS retention_admin \gset
+  SELECT set_config('dabboba.retention_admin', :'admin_id', true) AS retention_admin,
+         set_config('dabboba.retention_evidence', :'evidence', true) AS retention_evidence \gset
   DO $$
   BEGIN
     IF NOT EXISTS (
@@ -65,6 +76,28 @@ SELECT :'step' = 'approve' AS step_approve,
     ('SHIPPING_ADDRESS', DATE '2026-10-07', 60, :'evidence'),
     ('INQUIRY_CONTENT',  DATE '2026-10-07', 36, :'evidence')
   ON CONFLICT (record_kind, policy_version) DO NOTHING;
+  -- ON CONFLICT keeps a row that already existed. Approve only rows that are
+  -- exactly the owner-approved policy: an older draft with another period or
+  -- evidence, or a retired row, stops the run before anything is approved.
+  DO $$
+  BEGIN
+    IF (
+      SELECT count(*) FROM public.commerce_retention_policies
+       WHERE policy_version = DATE '2026-10-07'
+         AND retired_at IS NULL
+         AND anchor_rule = 'LATEST_RELEVANT_ACTIVITY'
+         AND retention_months = CASE record_kind
+                                  WHEN 'SHIPPING_ADDRESS' THEN 60
+                                  WHEN 'INQUIRY_CONTENT' THEN 36
+                                END
+         AND (approved_at IS NOT NULL
+              OR evidence_reference = current_setting('dabboba.retention_evidence'))
+    ) <> 2 THEN
+      RAISE EXCEPTION 'An existing 2026-10-07 retention row differs from the approved 60/36-month policy or this evidence; review it before approving'
+        USING ERRCODE = '55000';
+    END IF;
+  END;
+  $$;
   UPDATE public.commerce_retention_policies
      SET approved_at = now(), approved_by_admin_id = :'admin_id'::uuid
    WHERE policy_version = DATE '2026-10-07' AND approved_at IS NULL;
@@ -79,34 +112,34 @@ SELECT :'step' = 'approve' AS step_approve,
   \if :{?admin_id}
   \else
     \echo 'review needs -v admin_id=<reviewer: ACTIVE ADMIN or SUPER_ADMIN user id>'
-    \quit
+    DO $$ BEGIN RAISE EXCEPTION 'commerce-retention-approval: admin_id is missing' USING ERRCODE = '22023'; END $$;
   \endif
   \if :{?evidence}
   \else
     \echo 'review needs -v evidence=<private reviewed-scope evidence code>'
-    \quit
+    DO $$ BEGIN RAISE EXCEPTION 'commerce-retention-approval: evidence is missing' USING ERRCODE = '22023'; END $$;
   \endif
   \if :{?holds_reviewed}
   \else
     \echo 'review needs -v holds_reviewed=yes after the full dispute list is in commerce_retention_holds'
-    \quit
+    DO $$ BEGIN RAISE EXCEPTION 'commerce-retention-approval: holds_reviewed is missing' USING ERRCODE = '22023'; END $$;
   \endif
   \if :{?copies_status}
   \else
     \echo 'review needs -v copies_status=UNVERIFIED or CLEARED (CLEARED only with actual copy-review evidence)'
-    \quit
+    DO $$ BEGIN RAISE EXCEPTION 'commerce-retention-approval: copies_status is missing' USING ERRCODE = '22023'; END $$;
   \endif
   SELECT :'holds_reviewed' = 'yes' AS holds_ok,
          :'copies_status' IN ('UNVERIFIED','CLEARED') AS copies_ok \gset
   \if :holds_ok
   \else
     \echo 'holds_reviewed must be exactly yes'
-    \quit
+    DO $$ BEGIN RAISE EXCEPTION 'commerce-retention-approval: holds_reviewed must be yes' USING ERRCODE = '22023'; END $$;
   \endif
   \if :copies_ok
   \else
     \echo 'copies_status must be UNVERIFIED or CLEARED'
-    \quit
+    DO $$ BEGIN RAISE EXCEPTION 'commerce-retention-approval: invalid copies_status' USING ERRCODE = '22023'; END $$;
   \endif
   BEGIN;
   -- A review is valid for 24 hours and only the newest row counts; add a new
