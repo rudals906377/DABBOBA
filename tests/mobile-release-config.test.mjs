@@ -177,7 +177,7 @@ test("production mobile release gate accepts a payment-disabled public prelaunch
   );
 });
 
-test("production mobile release gate accepts the wired PortOne boundary but blocks stale prelaunch legal copy", () => {
+test("production mobile release gate accepts the wired PortOne boundary and the LIVE legal documents", () => {
   const report = inspectMobileReleaseConfig({
     rootDir,
     environment: productionPublicEnvironment,
@@ -192,7 +192,8 @@ test("production mobile release gate accepts the wired PortOne boundary but bloc
   assert.equal(codes.has("SERVER_COMMERCE_LIVE_REQUIRED"), false);
   assert.equal(codes.has("MOBILE_COMMERCE_LIVE_REQUIRED"), false);
   assert.equal(codes.has("PG_REVIEW_BUSINESS_PHONE_MOBILE"), false);
-  assert.equal(codes.has("LIVE_LEGAL_DOCUMENTS_PRELAUNCH_COPY"), true);
+  assert.equal(codes.has("LIVE_LEGAL_DOCUMENTS_PRELAUNCH_COPY"), false);
+  assert.equal(codes.has("LEGAL_BUSINESS_PHONE_MISMATCH"), false);
 });
 
 test("production mobile release gate rejects local URLs and privileged Supabase keys", () => {

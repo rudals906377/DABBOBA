@@ -52,7 +52,6 @@ export function createGuestSnapshot(
       marketingSms: false,
       marketingEmail: false,
       marketingPush: false,
-      personalizedRecommendations: false,
       version: 0,
       updatedAt: fetchedAt,
     },

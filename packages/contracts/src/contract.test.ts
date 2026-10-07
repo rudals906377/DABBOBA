@@ -693,7 +693,6 @@ test("generated notification preference contract keeps required alerts immutable
     marketingSms: false,
     marketingEmail: false,
     marketingPush: false,
-    personalizedRecommendations: false,
     version: 1,
     updatedAt: "2026-08-25T03:00:00.000Z",
   } satisfies components["schemas"]["NotificationPreferences"];
@@ -704,13 +703,18 @@ test("generated notification preference contract keeps required alerts immutable
     marketingSms: false,
     marketingEmail: false,
     marketingPush: true,
-    personalizedRecommendations: true,
     expectedVersion: 1,
   } satisfies components["schemas"]["UpdateNotificationPreferencesInput"];
 
   assert.equal(preferences.orderUpdates, true);
   assert.equal(Object.hasOwn(update, "orderUpdates"), false);
-  assert.equal(Object.keys(update).length, 8);
+  // Six optional consents plus expectedVersion: the personalized-recommendation
+  // consent was withdrawn with the 2026-10-07 privacy policy and is no longer
+  // part of the response; older builds may still send it and it is ignored.
+  assert.equal(Object.keys(update).length, 7);
+  assert.equal(Object.hasOwn(preferences, "personalizedRecommendations"), false);
+  const legacyUpdate = { ...update, personalizedRecommendations: false } satisfies components["schemas"]["UpdateNotificationPreferencesInput"];
+  assert.equal(Object.keys(legacyUpdate).length, 8);
 });
 
 test("generated account draw entitlement contract preserves resumable paid-ticket fields", () => {

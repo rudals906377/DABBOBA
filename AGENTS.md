@@ -415,6 +415,14 @@ When any text-entry control loses focus, dismiss the simulated keyboard. If the 
   - Publish just before LIVE in one deployment with: the new policy version, removal of the 맞춤 추천 toggle with withdrawal of stored consents, the 90-day session-record retention, and the operator's retention-policy approval.
   - A later counsel opinion overrides these texts.
 
+## Owner Launch Decisions — 2026-10-07
+
+- Customer login is Kakao, Naver, Google and Apple (iPhone only). Phone OTP is not offered: never put `PHONE` in `CUSTOMER_AUTH_ENABLED_PROVIDERS`, keep `DABBOBA_PHONE_LOGIN_READY=false`, and skip the Twilio/Phone provider setup. This supersedes the phone-OTP part of the 2026-09-25 decision; legacy PHONE and EMAIL identities and their data stay preserved, and email OTP remains unavailable as a login.
+- The LIVE terms, privacy policy and internal management plan take effect on 2026-10-07 (policy version `2026-10-07`). The internal plan's approving representative is 김정미.
+- Shipping uses convenience-store or individual parcel services per shipment; there is no contracted courier yet. The privacy policy names the courier generically and gets a new version naming the company once a contract exists.
+- The last two privacy-policy fields were filled on 2026-10-07: `support@dabboba.net` is forwarded by Cloudflare Email Routing to a verified Naver Mail address (processor: 네이버 주식회사), and the Supabase project `rconfxsykttfvznakile` stores data in AWS `ap-northeast-2` (대한민국(서울); confirmed from the Supabase project record `dabboba-production`, region `ap-northeast-2`, and consistent with the database host's AWS address range and the `aws-0-ap-northeast-2` pooler host). No `{{…}}` field remains in the legal drafts.
+- The LIVE legal publication bundle is in code: `public/legal/terms` and `privacy` carry the 2026-10-07 text, migration 0090 publishes policy version `2026-10-07` (every member re-consents once), migration 0091 withdraws every stored 맞춤 추천 consent with `SYSTEM_WITHDRAWN` evidence while the app and API no longer expose that consent (the legacy input field is accepted and ignored), and the worker keeps session records for 90 days after expiry. Publish in this order and never reverse it: merge so Cloudflare Pages serves the HTML, verify the served bytes equal the 0090 hashes, apply 0090 and 0091, then deploy the Edge functions. Correct a published document only with a new version, never by rolling the HTML back (`docs/live-cutover-runbook.md`, 법적 문서 게시 번들).
+
 ## First Launch Scope And Product Gallery — 2026-10-01
 
 - First launch contains the eight operator-confirmed gacha products only. Kuji is deferred: preserve its code, history and empty/coming-soon shop, but do not require a sellable Kuji product in launch verification or activate Kuji sales. Do not infer an exemption from any gacha payment, legal, authentication or inventory gate.

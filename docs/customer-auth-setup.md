@@ -2,7 +2,7 @@
 
 ## 최신 승인 방향 · 2026-09-25
 
-첫 공개판의 고객 로그인 선택지는 **휴대폰 문자 인증, 카카오, 네이버, 구글**이며 **iPhone에는 Apple 로그인도 추가**한다. 이메일 OTP는 새 로그인 화면에서 제외한다. 기존 EMAIL/PHONE identity와 연결된 계정·거래 기록은 삭제하거나 임의 병합하지 않는다. 휴대폰 번호는 한국 010 형식을 E.164로 정규화하고 Supabase Auth의 실제 인증 완료 시각을 확인한다. 문자 인증은 CI/DI 본인확인이 아니다.
+첫 공개판의 고객 로그인 선택지는 **카카오, 네이버, 구글**이며(2026-10-07 소유자 결정으로 휴대폰 문자 인증은 제공하지 않는다) **iPhone에는 Apple 로그인도 추가**한다. 이메일 OTP는 새 로그인 화면에서 제외한다. 기존 EMAIL/PHONE identity와 연결된 계정·거래 기록은 삭제하거나 임의 병합하지 않는다. 휴대폰 번호는 한국 010 형식을 E.164로 정규화하고 Supabase Auth의 실제 인증 완료 시각을 확인한다. 문자 인증은 CI/DI 본인확인이 아니다.
 
 서버 환경 `CUSTOMER_AUTH_ENABLED_PROVIDERS`에는 운영 콘솔 설정과 실제 기기 검증을 통과한 방식만 넣는다. 현재 운영 프로젝트에서 공개 provider 목록이 비어 있으면 앱은 로그인 선택지를 숨긴다. SMS 공급자, Kakao/Naver/Google 개발자 앱, Apple 설정, 탈퇴 worker가 준비되지 않은 상태를 코드 테스트만으로 완료 처리하지 않는다. PRELAUNCH에서 결제·뽑기는 계속 차단한다.
 
@@ -156,7 +156,9 @@ Expo Go는 실제 custom-scheme OAuth 출시 증거로 사용하지 않는다. p
 2. OAuth client 유형을 **Web application**으로 만들고 승인된 리디렉션 URI에 `https://rconfxsykttfvznakile.supabase.co/auth/v1/callback`을 등록한다. 웹 탈퇴 로그인에 쓸 승인된 JavaScript origin은 `https://dabboba.net`이다. 모바일 `dabboba://auth/callback`은 Google Cloud가 아니라 Supabase Auth의 Redirect URLs 허용 목록에 등록한다.
 3. 발급된 Client ID와 Client Secret을 친구 명의 Supabase 프로젝트의 **Authentication → Providers → Google**에 직접 입력한다. 비밀값을 채팅·Git·Expo 앱에 넣지 않는다. 설정과 Google 심사/게시 상태를 확인한 뒤 실제 고객 소유 계정으로 로그인·앱 재실행·로그아웃·재로그인을 검증한다. 검증 전 API의 공개 `GOOGLE` 플래그는 켜지 않는다.
 
-### 6. 휴대폰번호 로그인
+### 6. 휴대폰번호 로그인 (2026-10-07 결정으로 제공하지 않음)
+
+2026-10-07 소유자 결정: 고객 로그인은 카카오·네이버·구글·Apple(iPhone)만 운영한다. 아래 Twilio·Phone 설정은 하지 않고, `CUSTOMER_AUTH_ENABLED_PROVIDERS`에 PHONE을 넣지 않는다. 과거 PHONE identity와 데이터는 보존한다.
 
 Twilio 입력란은 현재 비어 있다. 친구 명의 문자 발송 서비스 계정, 대한민국 수신 가능 여부, 발신 수단과 요금을 확인한 뒤 Supabase Phone 설정에 연결한다. 실제 번호로 OTP 발송·만료·재전송·로그아웃 후 복구를 확인하기 전 Phone 로그인과 공개 API 플래그는 켜지 않는다. 문자 인증을 CI/DI 본인확인으로 표시하지 않는다.
 
@@ -170,7 +172,7 @@ Twilio 입력란은 현재 비어 있다. 친구 명의 문자 발송 서비스 
 
 ## 연결 뒤 확인할 완료 기준
 
-- 휴대폰 문자·카카오·네이버·구글, 그리고 iPhone의 Apple 로그인으로 신규 가입과 재로그인이 성공한다. 이메일 OTP는 새 로그인 선택지에 없고 기존 계정 데이터는 보존된다.
+- 카카오·네이버·구글, 그리고 iPhone의 Apple 로그인으로 신규 가입과 재로그인이 성공한다. 이메일 OTP는 새 로그인 선택지에 없고 기존 계정 데이터는 보존된다.
 - 외부 access token은 API에서만 검증되고, 앱에는 DABBOBA session만 남는다.
 - 잘못된 issuer/audience/signature, 만료 token, 익명 계정, 지원하지 않는 provider 및 broker 조회의 주체 불일치는 거부된다. Supabase가 같은 주체로 인증한 허용 다중 identity는 같은 계정을 사용한다.
 - 정지·탈퇴 계정은 로그인할 수 없고, 만료된 DABBOBA session은 앱에서 제거된다.

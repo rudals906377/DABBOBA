@@ -407,7 +407,6 @@ function NotificationsForm({
         marketingSms: preferences.marketingSms,
         marketingEmail: preferences.marketingEmail,
         marketingPush: preferences.marketingPush,
-        personalizedRecommendations: preferences.personalizedRecommendations,
         expectedVersion: preferences.version,
       });
       setPreferences(updated);
@@ -465,12 +464,11 @@ function NotificationsForm({
         <ToggleRow label="신청방" body="같이 원해요와 반영 소식" value={preferences.requestUpdates} onChange={(value) => update("requestUpdates", value)} />
         <ToggleRow label="재입고" body="찜한 상품 판매 재개" value={preferences.restockUpdates} onChange={(value) => update("restockUpdates", value)} last />
       </InfoCard>
-      <Text style={styles.groupTitle}>마케팅·추천</Text>
+      <Text style={styles.groupTitle}>마케팅</Text>
       <InfoCard>
         <ToggleRow label="앱 푸시" body="혜택과 이벤트 소식" value={preferences.marketingPush} onChange={(value) => update("marketingPush", value)} />
         <ToggleRow label="이메일" body="이메일 혜택 안내" value={preferences.marketingEmail} onChange={(value) => update("marketingEmail", value)} />
-        <ToggleRow label="문자" body="문자 혜택 안내" value={preferences.marketingSms} onChange={(value) => update("marketingSms", value)} />
-        <ToggleRow label="맞춤 추천" body="관심 작품 기반 상품 추천" value={preferences.personalizedRecommendations} onChange={(value) => update("personalizedRecommendations", value)} last />
+        <ToggleRow label="문자" body="문자 혜택 안내" value={preferences.marketingSms} onChange={(value) => update("marketingSms", value)} last />
       </InfoCard>
       <ActionButton label={saving ? "저장 중" : "알림 설정 저장"} disabled={saving} onPress={() => void save()} />
     </>
@@ -504,8 +502,7 @@ function Consents({ profileState }: { profileState: ReturnType<typeof useProfile
         <ConsentRow title="서비스 이용약관" status={policyAcceptanceLabel(terms, policyError)} />
         <ConsentRow title="개인정보처리방침" status={policyAcceptanceLabel(privacy, policyError)} />
         <ConsentRow title="주문·배송 정보 처리" status="계약 이행 시 처리" />
-        <ConsentRow title="마케팅 정보 수신" status={!preferences ? "불러오지 못했어요" : preferences.marketingPush || preferences.marketingEmail || preferences.marketingSms ? "일부 동의" : "미동의"} />
-        <ConsentRow title="맞춤 추천" status={!preferences ? "불러오지 못했어요" : preferences.personalizedRecommendations ? "동의" : "미동의"} last />
+        <ConsentRow title="마케팅 정보 수신" status={!preferences ? "불러오지 못했어요" : preferences.marketingPush || preferences.marketingEmail || preferences.marketingSms ? "일부 동의" : "미동의"} last />
       </InfoCard>
       <ActionButton label="선택 동의 변경" onPress={() => router.push("/profile/member/notifications" as Href)} />
       <Text style={styles.disclosure}>수집 항목·이용 목적·보관 기간·처리 위탁은 개인정보처리방침에서 확인할 수 있어요.</Text>

@@ -77,7 +77,6 @@ test(
       "marketingPush",
       "marketingSms",
       "orderUpdates",
-      "personalizedRecommendations",
       "requestUpdates",
       "restockUpdates",
       "updatedAt",
@@ -91,7 +90,6 @@ test(
       marketingSms: false,
       marketingEmail: false,
       marketingPush: false,
-      personalizedRecommendations: false,
       version: 1,
       updatedAt: "checked-separately",
     });
@@ -126,6 +124,7 @@ test(
       marketingSms: true,
       marketingEmail: false,
       marketingPush: true,
+      // Withdrawn consent sent by an older app build: ignored by the API.
       personalizedRecommendations: true,
       expectedVersion: 1,
     };
@@ -146,7 +145,6 @@ test(
       marketingSms: true,
       marketingEmail: false,
       marketingPush: true,
-      personalizedRecommendations: true,
       version: 2,
       updatedAt: "checked-separately",
     });
