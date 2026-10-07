@@ -1,6 +1,8 @@
 # 거래정보 보관 종료: 로컬 준비와 운영 경계
 
-이 기능은 **배송 주소 스냅샷과 종결된 문의 내용의 제한된 파기**를 준비한다. 전체 거래 기록·법정 보존 종료·분리보관·외부 사본 삭제가 완료됐다는 뜻은 아니다. 정책이나 운영 근거를 migration에서 승인하지 않으며, 기본 설정은 `DISABLED`다. 운영 DB 적용·정책 승인·실행·Cron 활성화는 수행하지 않았다.
+이 기능은 **배송 주소 스냅샷과 종결된 문의 내용의 제한된 파기**를 준비한다. 전체 거래 기록·법정 보존 종료·분리보관·외부 사본 삭제가 완료됐다는 뜻은 아니다. 정책이나 운영 근거를 migration에서 승인하지 않으며, 기본 설정은 `DISABLED`다.
+
+현재 운영 상태(2026-10-07): 관련 마이그레이션은 운영 DB에 적용됐고, 배송 주소 60개월·문의 36개월 정책을 승인했다(읽기 전용 미리보기 대상 0건). 검토(`review`) 단계, 실행(EXECUTE), 워커 Cron은 아직 하지 않았다.
 
 ## 구현된 범위
 
@@ -74,7 +76,7 @@ psql "$DATABASE_MIGRATION_URL" -v step=preview -f ops/database/commerce-retentio
 - 인자가 빠지거나 `step` 값이 틀리면 SQL 오류로 끝나 psql이 0이 아닌 종료 코드를 낸다. 종료 코드 0만 성공으로 본다.
 - `review`는 현재 승인 정책이 정확히 2026-10-07 판 60/36개월 두 행일 때만 그 두 행에 검토 기록을 남긴다. 승인 전이거나 다른 버전이 현재 정책이면 아무것도 남기지 않고 멈춘다. 검토자도 ACTIVE 관리자여야 한다.
 - 실행은 별도 검토 후 Edge 워커 설정 `WORKER_COMMERCE_RETENTION_MODE=EXECUTE`(필요하면 `WORKER_COMMERCE_RETENTION_BATCH_SIZE`)로 한 번 돌리고 설정을 지운다. 2026-10-07부터 Edge 워커가 이 두 값을 전달한다. 설정하지 않으면 계속 `DISABLED`다.
-- Edge 워커는 1분마다 Cron으로 호출되므로, 설정이 `EXECUTE`여도 Cron 호출은 `PREVIEW`로만 돈다. 실제 파기 한 배치는 운영자가 워커 호출 비밀값으로 본문 `{"source":"operator","commerceRetention":"EXECUTE"}`을 담아 `dabboba-worker`를 한 번 POST할 때만 돈다. 호출 한 번이 배치 한 번이고, 끝나면 설정을 지운다.
+- Edge 워커는 1분마다 Cron으로 호출되므로, 설정이 `EXECUTE`여도 Cron 호출은 `PREVIEW`로만 돈다. 실제 파기 한 배치는 운영자가 워커 호출 비밀값으로 본문 `{"source":"operator","commerceRetention":"EXECUTE"}`을 담아 `dabboba-worker`를 한 번 POST할 때만 돈다. 이 호출은 다른 워커 작업 없이 파기 배치만 실행하고 `{"ok":true,"commerceRetention":{"mode":"EXECUTE","disposed":N}}`를 돌려준다. 설정이 `EXECUTE`가 아니면 409로 거절한다. 500은 배치가 커밋되지 않았다는 뜻이다. 응답을 받지 못했으면 다시 호출하기 전에 `commerce_retention_disposals`에서 커밋 여부를 확인한다. 끝나면 설정을 지운다.
 - 2026-10-07 운영 DB에서 `approve` 단계를 실행했다(오너 승인, ACTIVE 관리자 1명이 승인자). 두 정책이 현재 승인 정책이고 읽기 전용 미리보기 대상은 0건이다. `review` 단계는 분쟁 목록을 holds에 넣은 뒤 실행 직전에 따로 한다.
 - 2026-10-07 로컬 disposable DB에서 단계별 동작을 확인했다: 인자 누락·비관리자·잘못된 사본 상태 거부, 승인 재실행, 검토 전 `HOLD_REVIEW_REQUIRED`, 검토 후 `EXTERNAL_COPIES_UNVERIFIED`, 파기 0건. 같은 날 추가 확인: 누락·오타 인자는 종료 코드 3, 120개월 초안이나 다른 근거 코드의 초안이 있으면 승인 없이 종료 코드 3, 같은 근거 코드의 60/36개월 초안은 승인.
 

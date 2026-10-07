@@ -2,8 +2,10 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import { Buffer } from "node:buffer";
 import {
   assertProductionRuntimeDatabaseRole,
+  createDatabasePool,
   WORKER_DATABASE_ROLE,
 } from "@dabboba/db";
+import { runCommerceRetentionBatch, type CommerceRetentionResult } from "./commerce-retention.js";
 import { loadWorkerConfig, type WorkerConfig } from "./config.js";
 import { createLogger, errorFields, type Logger } from "./logger.js";
 import { createSupabaseOnlyMediaStore } from "./media-supabase.js";
@@ -19,6 +21,7 @@ export type EdgeWorkerHandlerDependencies = {
   readEnvironment(): EdgeWorkerEnvironment;
   loadConfig?: (env: EdgeWorkerEnvironment) => WorkerConfig;
   runWorker?: (config: WorkerConfig, logger: Logger) => Promise<WorkerRunSummary>;
+  runCommerceRetention?: (config: WorkerConfig, logger: Logger) => Promise<CommerceRetentionResult>;
   createLogger?: (level: WorkerConfig["logLevel"]) => Logger;
 };
 
@@ -140,8 +143,9 @@ function authorized(request: Request, secret: string): boolean {
 // The Cron invokes this function every minute, and a configured EXECUTE would
 // dispose another retention batch on each of those runs. EXECUTE therefore
 // takes effect only for an authenticated request whose body asks for it
-// ({"commerceRetention":"EXECUTE"}): one operator call runs one batch, and
-// every other invocation, including the Cron, sees PREVIEW instead.
+// ({"commerceRetention":"EXECUTE"}): that request runs the retention batch
+// alone, so a failure elsewhere cannot report an error after the batch has
+// committed, and every other invocation, including the Cron, sees PREVIEW.
 async function requestsCommerceRetentionExecute(request: Request): Promise<boolean> {
   try {
     const text = await request.text();
@@ -224,11 +228,29 @@ function defaultRunWorker(config: WorkerConfig, logger: Logger): Promise<WorkerR
   return runWorkerOnceCore(config, { createMediaStore: createSupabaseOnlyMediaStore }, logger);
 }
 
+async function defaultRunCommerceRetention(config: WorkerConfig, logger: Logger): Promise<CommerceRetentionResult> {
+  const pool = createDatabasePool(config.databaseUrl, "dabboba-worker-commerce-retention", {
+    expectedRole: WORKER_DATABASE_ROLE,
+    max: 1,
+    onIdleClientError: (fault) => logger.error(fault, "Idle worker database client failed and was removed"),
+    queryTimeoutMs: config.databaseOperationTimeoutMs,
+    statementTimeoutMs: config.databaseOperationTimeoutMs,
+  });
+  try {
+    return await runCommerceRetentionBatch(pool, config.commerceRetention, logger);
+  } finally {
+    // The batch has already committed or rolled back; closing the pool must
+    // not turn a committed batch into an error the operator would retry.
+    await pool.end().catch((error: unknown) => logger.error(errorFields(error), "Commerce retention pool close failed"));
+  }
+}
+
 export function createSupabaseEdgeWorkerHandler(
   dependencies: EdgeWorkerHandlerDependencies,
 ): (request: Request) => Promise<Response> {
   const loadConfig = dependencies.loadConfig ?? loadWorkerConfig;
   const runWorker = dependencies.runWorker ?? defaultRunWorker;
+  const runCommerceRetention = dependencies.runCommerceRetention ?? defaultRunCommerceRetention;
   const loggerFactory = dependencies.createLogger ?? createLogger;
 
   return async (request: Request): Promise<Response> => {
@@ -263,6 +285,19 @@ export function createSupabaseEdgeWorkerHandler(
       const config = loadConfig(normalizeSupabaseEdgeWorkerEnvironment(source, { commerceRetentionExecuteRequested }));
       assertSupabaseEdgeWorkerConfig(config);
       logger = loggerFactory(config.logLevel);
+      if (commerceRetentionExecuteRequested) {
+        if (config.commerceRetention?.mode !== "EXECUTE") {
+          return jsonResponse(409, { ok: false, code: "COMMERCE_RETENTION_EXECUTE_NOT_CONFIGURED" });
+        }
+        // An error here means the batch rolled back. A success reports the
+        // committed count; check commerce_retention_disposals before retrying
+        // a request whose response was lost.
+        const retention = await runCommerceRetention(config, logger);
+        return jsonResponse(200, {
+          ok: true,
+          commerceRetention: { mode: retention.mode, disposed: retention.disposed },
+        });
+      }
       const summary = await runWorker(config, logger);
       return jsonResponse(200, {
         ok: true,

@@ -233,14 +233,22 @@ test("Edge normalization keeps a configured EXECUTE to an explicit one-shot requ
   }
 });
 
-test("scheduled Edge runs preview retention while one operator request executes one batch", async () => {
-  const modes: string[] = [];
+test("scheduled Edge runs preview retention while one operator request executes one batch alone", async () => {
+  let configuredMode: string | undefined = "EXECUTE";
+  const workerModes: string[] = [];
+  const retentionModes: string[] = [];
+  let retentionFailure: Error | null = null;
   const handler = createSupabaseEdgeWorkerHandler({
     readInvokeSecret: () => invokeSecret,
-    readEnvironment: () => sourceEnvironment({ WORKER_COMMERCE_RETENTION_MODE: "EXECUTE" }),
+    readEnvironment: () => sourceEnvironment({ WORKER_COMMERCE_RETENTION_MODE: configuredMode }),
     async runWorker(config) {
-      modes.push(config.commerceRetention?.mode ?? "unset");
+      workerModes.push(config.commerceRetention?.mode ?? "unset");
       return summary();
+    },
+    async runCommerceRetention(config) {
+      retentionModes.push(config.commerceRetention?.mode ?? "unset");
+      if (retentionFailure) throw retentionFailure;
+      return { mode: "EXECUTE", examined: 3, eligible: 3, disposed: 3, blocked: {} };
     },
   });
   const post = (body?: string) => handler(new Request("https://example.test/functions/v1/dabboba-worker", {
@@ -248,13 +256,38 @@ test("scheduled Edge runs preview retention while one operator request executes 
     headers: { authorization: `Bearer ${invokeSecret}`, "content-type": "application/json" },
     ...(body === undefined ? {} : { body }),
   }));
+  const executeBody = JSON.stringify({ source: "operator", commerceRetention: "EXECUTE" });
 
   assert.equal((await post(JSON.stringify({ source: "supabase-cron" }))).status, 200);
   assert.equal((await post()).status, 200);
   assert.equal((await post("not json")).status, 200);
   assert.equal((await post(JSON.stringify({ commerceRetention: "execute" }))).status, 200);
-  assert.equal((await post(JSON.stringify({ source: "operator", commerceRetention: "EXECUTE" }))).status, 200);
-  assert.deepEqual(modes, ["PREVIEW", "PREVIEW", "PREVIEW", "PREVIEW", "EXECUTE"]);
+  assert.deepEqual(workerModes, ["PREVIEW", "PREVIEW", "PREVIEW", "PREVIEW"]);
+  assert.deepEqual(retentionModes, []);
+
+  // The explicit request runs only the retention batch and reports its count.
+  const executed = await post(executeBody);
+  assert.equal(executed.status, 200);
+  assert.deepEqual(await executed.json(), { ok: true, commerceRetention: { mode: "EXECUTE", disposed: 3 } });
+  assert.deepEqual(retentionModes, ["EXECUTE"]);
+  assert.equal(workerModes.length, 4);
+
+  // A failed batch rolled back and is reported without running anything else.
+  retentionFailure = new Error("private failure detail");
+  const failed = await post(executeBody);
+  assert.equal(failed.status, 500);
+  assert.deepEqual(await failed.json(), { ok: false, code: "WORKER_EXECUTION_FAILED" });
+  assert.equal(workerModes.length, 4);
+
+  // Without a configured EXECUTE the request is refused and nothing runs.
+  for (const mode of [undefined, "DISABLED", "PREVIEW"]) {
+    configuredMode = mode;
+    const refused = await post(executeBody);
+    assert.equal(refused.status, 409);
+    assert.deepEqual(await refused.json(), { ok: false, code: "COMMERCE_RETENTION_EXECUTE_NOT_CONFIGURED" });
+  }
+  assert.equal(retentionModes.length, 2);
+  assert.equal(workerModes.length, 4);
 });
 
 test("Edge worker reuses the managed Supabase service role key without leaking it before auth", () => {
