@@ -3,6 +3,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { withTransaction, type DatabaseClient, type Queryable } from "@dabboba/db";
 import { writeOutbox } from "../lib/audit.js";
 import { AppError, badRequest, conflict, notFound } from "../lib/errors.js";
+import { assertInventorySourceOrdersSettled, INVENTORY_SOURCE_ORDER_SETTLED_SQL } from "../lib/inventory-source-order.js";
 import { requireLiveCommerce } from "../lib/commerce-mode.js";
 import { assertPublicContentAllowed } from "../lib/content-filter.js";
 import {
@@ -401,11 +402,41 @@ function mapDeletionBlockers(row: AccountDeletionBlockerRow): AccountDeletionBlo
   };
 }
 
+const DELETION_BLOCKER_KEYS = [
+  "pointBalance",
+  "activeOrderCount",
+  "activePaymentCount",
+  "availableDrawEntitlementCount",
+  "activeInventoryCount",
+  "activeShippingRequestCount",
+  "activeExchangeListingCount",
+  "activeExchangeOfferCount",
+] as const satisfies ReadonlyArray<keyof AccountDeletionBlockers>;
+
+/**
+ * Every stored snapshot renders as the complete blocker shape, with the
+ * worker's explanatory flags kept beside the counts. The app, the web status
+ * page and the admin console therefore never see a partial object.
+ */
+function normalizeDeletionBlockers(value: unknown): AccountDeletionBlockers & Record<string, number | boolean> {
+  const source = value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+  const counts = Object.fromEntries(DELETION_BLOCKER_KEYS.map((key) => {
+    const raw = Number(source[key] ?? 0);
+    return [key, Number.isSafeInteger(raw) && raw >= 0 ? raw : 0];
+  })) as AccountDeletionBlockers;
+  const flags = Object.fromEntries(Object.entries(source)
+    .filter(([key, flag]) => /^[a-z][A-Za-z]{0,60}$/.test(key) && typeof flag === "boolean"
+      && !(DELETION_BLOCKER_KEYS as readonly string[]).includes(key)));
+  return { ...flags, ...counts };
+}
+
 function mapDeletionRequest(row: AccountDeletionRequestRow) {
   return {
     id: row.id,
     status: row.status,
-    blockers: row.blocker_snapshot,
+    blockers: normalizeDeletionBlockers(row.blocker_snapshot),
     requestCount: row.request_count,
     hardDeletePerformed: false,
     policy: "AUTOMATED_SERVER_DELETION" as const,
@@ -1528,10 +1559,11 @@ export async function registerAccountRoutes(app: FastifyInstance, context: ApiCo
           throw conflict("포인트 환급 상품 기록을 저장하지 못했습니다.");
         }
         const transitioned = await client.query<{ id: string }>(
-          `UPDATE inventory_units SET status='POINT_RETURNED'
-           WHERE id=ANY($1::uuid[]) AND owner_id=$2 AND status='OWNED'
-             AND storage_expires_at>now()
-           RETURNING id`,
+          `UPDATE inventory_units iu SET status='POINT_RETURNED'
+           WHERE iu.id=ANY($1::uuid[]) AND iu.owner_id=$2 AND iu.status='OWNED'
+             AND iu.storage_expires_at>now()
+             AND ${INVENTORY_SOURCE_ORDER_SETTLED_SQL}
+           RETURNING iu.id`,
           [inventoryUnitIds, actorId],
         );
         if (transitioned.rowCount !== inventoryUnitIds.length) {
@@ -1756,6 +1788,7 @@ export async function registerAccountRoutes(app: FastifyInstance, context: ApiCo
         [actorId],
       );
       if (!address.rowCount) throw conflict("배송 견적을 만들기 전에 기본 배송지를 등록해 주세요.");
+      await assertInventorySourceOrdersSettled(client, inventoryUnitIds);
       const inventory = await client.query<AccountShippingInventoryRow>(
         `SELECT iu.id,iu.source_type,p.price
          FROM inventory_units iu
@@ -1854,6 +1887,7 @@ export async function registerAccountRoutes(app: FastifyInstance, context: ApiCo
           throw new AppError(409, "SHIPPING_ADDRESS_CHANGED", "배송지가 변경되었습니다. 새 견적을 확인해 주세요.");
         }
         const inventoryUnitIds = quote.inventory_unit_ids;
+        await assertInventorySourceOrdersSettled(client, inventoryUnitIds);
         const lockedInventory = await client.query<AccountShippingInventoryRow>(
           `SELECT iu.id,iu.source_type,p.price
            FROM inventory_units iu
@@ -1931,10 +1965,11 @@ export async function registerAccountRoutes(app: FastifyInstance, context: ApiCo
           throw conflict("상품 정보를 배송 신청에 저장하지 못했습니다.");
         }
         const transitioned = await client.query<{ id: string }>(
-          `UPDATE inventory_units SET status='SHIPPING'
-           WHERE id=ANY($1::uuid[]) AND owner_id=$2 AND status='OWNED'
-             AND storage_expires_at>now()
-           RETURNING id`,
+          `UPDATE inventory_units iu SET status='SHIPPING'
+           WHERE iu.id=ANY($1::uuid[]) AND iu.owner_id=$2 AND iu.status='OWNED'
+             AND iu.storage_expires_at>now()
+             AND ${INVENTORY_SOURCE_ORDER_SETTLED_SQL}
+           RETURNING iu.id`,
           [inventoryUnitIds, actorId],
         );
         if (transitioned.rowCount !== inventoryUnitIds.length) {
@@ -2223,6 +2258,21 @@ export async function registerAccountRoutes(app: FastifyInstance, context: ApiCo
       let revokedSessionCount = 0;
       let supabaseAuthUserId: string | null = null;
       if (assessedStatus === "PROCESSING") {
+        // Apple requires the stored refresh token to revoke the link. Without
+        // it the worker could never finish, so ask for one more Apple sign-in
+        // now instead of accepting a request that would stall in PROCESSING.
+        const appleCredential = await client.query<{ has_credential: boolean }>(
+          `SELECT EXISTS(SELECT 1 FROM apple_auth_credentials WHERE user_id=$1) AS has_credential
+             FROM auth_identities WHERE user_id=$1 AND provider='APPLE' LIMIT 1`,
+          [actorId],
+        );
+        if (appleCredential.rowCount && !appleCredential.rows[0]!.has_credential) {
+          throw new AppError(
+            409,
+            "APPLE_REAUTHORIZATION_REQUIRED",
+            "Apple 계정 연결 해제를 위해 Apple 로그인을 다시 완료한 뒤 탈퇴를 요청해 주세요.",
+          );
+        }
         const brokerIdentities = await client.query<{ provider_subject: string }>(
           `SELECT DISTINCT provider_subject
              FROM auth_identities

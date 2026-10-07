@@ -12,7 +12,10 @@ const RESPONSE_LIMIT = 8 * 1_024;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const LOCAL_STATUSES = new Set(["PENDING", "AUTHORIZED", "PAID", "FAILED", "CANCELLED", "REFUND_REVIEW", "REFUNDED"]);
 const PROVIDER_STATUSES = new Set(["READY", "PAY_PENDING", "VIRTUAL_ACCOUNT_ISSUED", "PAID", "FAILED", "CANCELLED", "PARTIAL_CANCELLED"]);
-const CANONICAL_OUTCOMES = new Set(["processed", "duplicate", "review", "ignored", "pending", "already_settled", "provider_not_found"]);
+// contract_mismatch: PortOne holds money for a record that does not match our
+// channel/store/amount contract. The API already raised the operator alert;
+// the recorded settled observation keeps the reservation sweep away.
+const CANONICAL_OUTCOMES = new Set(["processed", "duplicate", "review", "ignored", "pending", "already_settled", "provider_not_found", "contract_mismatch"]);
 
 export class PortOneApiRequeryError extends Error {
   constructor(message: string) {

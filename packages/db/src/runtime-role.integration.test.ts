@@ -58,8 +58,8 @@ test("runtime database role can operate app data but cannot administer the schem
        ORDER BY relation.relname`,
       [RUNTIME_DATABASE_ROLE],
     );
-    assert.equal(tableAccess.rows.filter((row) => row.can_select).length, 82);
-    assert.equal(tableAccess.rows.filter((row) => row.can_insert).length, 82);
+    assert.equal(tableAccess.rows.filter((row) => row.can_select).length, 83);
+    assert.equal(tableAccess.rows.filter((row) => row.can_insert).length, 83);
     assert.equal(tableAccess.rows.filter((row) => row.can_update).length, 47);
     assert.equal(tableAccess.rows.filter((row) => row.can_delete).length, 8);
     for (const relname of ["portone_refund_cancellation_attempts", "partial_unused_draw_refunds"]) {

@@ -91,7 +91,7 @@ PostgreSQL만 다음 상태의 진실 공급원이다.
 - 역할은 `USER`, `ADMIN`, `SUPER_ADMIN`으로 분리한다.
 - 사용자 세션과 관리자 세션은 종류가 다르며, API가 모든 요청에서 상태와 권한을 다시 확인한다.
 - 고객은 저장된 session을 서버에서 검증하고 만료 전에 refresh한다. 401 또는 실제 만료는 session을 폐기하지만 일시적인 network/5xx 실패는 남은 만료 시간 안에서 다시 시도하며, stale generation 응답이 새 session을 덮어쓰지 못하게 한다.
-- 탈퇴 요청에 차단 항목이 없으면 API가 즉시 모든 세션을 폐기하고 자동 삭제 작업을 예약한다. worker는 사용자별 PostgreSQL advisory lock 안에서 차단 항목을 다시 계산하며, Supabase Auth 사용자 삭제가 성공하거나 404로 확인된 뒤에만 Storage 객체와 로컬 identity·PII를 정리한다. 외부 삭제 실패 시 로컬 identity·PII를 유지한 채 재시도한다.
+- 탈퇴 요청에 차단 항목이 없으면 API가 즉시 모든 세션을 폐기하고 자동 삭제 작업을 예약한다. worker는 차단 항목을 다시 계산하고, Apple 토큰 폐기와 Storage 객체 정리 뒤 로컬 identity·PII 정리 트랜잭션에서 차단 항목을 한 번 더 확인한다. 그 뒤에만 Supabase Auth 사용자 삭제(성공 또는 404)를 수행하므로, 늦게 생긴 차단 항목이나 없는 Apple 갱신 토큰은 고객이 다시 로그인할 수 있는 `BLOCKED` 상태로 돌아간다. 외부 삭제 실패 시 그 호출만 재시도한다.
 - 세션 원문은 발급 시 한 번만 반환하고 DB에는 pepper 기반 digest만 저장한다.
 - 관리자 브라우저는 API token을 JavaScript 저장소에 두지 않는다. Next.js same-origin 로그인 route가 `HttpOnly`, `Secure`, `SameSite=Strict` 쿠키에 넣고 서버 측 요청에만 사용한다.
 - 메뉴 숨김은 편의 기능일 뿐 권한 검사가 아니다. API의 role/permission 검사가 최종 권한 경계다.
@@ -105,7 +105,7 @@ PostgreSQL만 다음 상태의 진실 공급원이다.
 
 - 대시보드
 - 회원 상세와 상태 관리
-- 탈퇴 요청 목록·상세와 예외 반려. 정상 경로에는 관리자 승인이 없으며, 승인·수동 완료 API는 거부한다. 자동 worker는 차단 항목 재확인, 외부 Auth 삭제, Storage 정리, 로컬 개인정보 삭제·UGC 익명화를 순서대로 수행한다.
+- 탈퇴 요청 목록·상세와 예외 반려. 정상 경로에는 관리자 승인이 없으며, 승인·수동 완료 API는 거부한다. 자동 worker는 차단 항목 재확인, Apple 토큰 폐기, Storage 정리, 로컬 개인정보 삭제·UGC 익명화(차단 항목 최종 확인 포함), 외부 Auth 삭제를 순서대로 수행한다.
 - 관리자 생성·역할·상태 관리
 - 공지 작성·수정·게시
 - 문의 목록·상세·운영 답변
@@ -157,7 +157,7 @@ API는 업무 상태와 outbox event를 같은 PostgreSQL 트랜잭션에 기록
 | 관리자 화면과 API RBAC | 구현됨, 2단계 인증은 Cloudflare Access 토큰 검증(설정 시) | 실제 운영 계정, 부정 권한 테스트, Access 앱 설정 필요 |
 | PostgreSQL 마이그레이션 | 구현됨 | disposable PostgreSQL CI와 운영/복원 환경 검증 필요 |
 | 관리자·교환 PostgreSQL 통합 테스트 | 구현됨 | CI 또는 로컬 disposable DB 실행 증거 필요 |
-| 계정 탈퇴 | preview → request → receipt status, 차단 항목 재계산, 즉시 세션 폐기, 외부 Auth 삭제 선행, Storage·로컬 PII 정리, UGC 익명화, idempotent 재시도 구현 | 운영 Supabase/Storage 계정, 보존 기간·익명화 범위·재가입 정책과 장애 복구 runbook 검증 필요 |
+| 계정 탈퇴 | preview → request → receipt status, 차단 항목 재계산(최종 트랜잭션 포함), 즉시 세션 폐기, Storage·로컬 PII 정리, UGC 익명화, 외부 Auth 삭제 후행, idempotent 재시도 구현 | 운영 Supabase/Storage 계정, 보존 기간·익명화 범위·재가입 정책과 장애 복구 runbook 검증 필요 |
 | 주문·재고·포인트·추첨 원장 | 구현됨 | 실제 PG sandbox와 장애·환불 통합 테스트 필요 |
 | 고객 production 로그인 | 카카오·네이버·한국 휴대폰 OTP → Supabase Auth → Fastify 검증 → DABBOBA session 교환 구현 | 실제 provider 계정·redirect·SMS 연동, development build와 실기기 통합 검증 전 출시 불가 |
 | 결제 공급자 | KG이니시스 선정, generic webhook 유지 및 KG 거래조회 상태 대조 연결 | KG 결제창·승인 API·callback·취소/환불·실제 테스트 상점 검증 전 실결제 불가 |

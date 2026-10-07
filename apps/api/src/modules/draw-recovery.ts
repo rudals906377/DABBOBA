@@ -66,32 +66,51 @@ export type PaidGachaCompletionRow = {
     resultProductId: string | null;
     resultVersion: number | null;
     committedAt: string | null;
+    /** The entitlement was cancelled by an APPLIED partial refund of unused draws. */
+    partialRefundApplied?: boolean;
   }>;
 };
 
+function refundedUnusedDraw(item: PaidGachaCompletionRow["entitlements"][number]): boolean {
+  return item.status === "CANCELLED" && item.partialRefundApplied === true;
+}
+
+/**
+ * The whole-order proof the app uses to retire a paid purchase intent. Every
+ * original entitlement is either consumed with its immutable result or was
+ * cancelled by an applied partial refund of unused draws (owner rule
+ * 2026-10-06); the refunded ones are named so the app can account for them.
+ */
 export function paidGachaCompletionResponse(row: PaidGachaCompletionRow): PaidGachaDrawCompletion {
   const quantity = numberValue(row.quantity);
   const version = numberValue(row.probability_version);
+  const settled = row.entitlements.filter((item) => !refundedUnusedDraw(item));
+  const refunded = row.entitlements.filter(refundedUnusedDraw);
   if (
     !["PAID", "FULFILLED"].includes(row.order_status) || row.payment_status !== "PAID"
     || !Number.isSafeInteger(quantity) || quantity < 1 || quantity > 20
     || row.entitlements.length !== quantity
     || new Set(row.entitlements.map((item) => item.id)).size !== quantity
-    || new Set(row.entitlements.map((item) => item.resultId)).size !== quantity
+    || settled.length < 1
+    || new Set(settled.map((item) => item.resultId)).size !== settled.length
     || row.entitlements.some((item) => (
       item.userId !== row.user_id || item.productId !== row.product_id
       || item.probabilityVersionId !== row.probability_version_id
-      || item.status !== "CONSUMED" || !item.consumedAt || !Number.isFinite(Date.parse(item.consumedAt))
+    ))
+    || settled.some((item) => (
+      item.status !== "CONSUMED" || !item.consumedAt || !Number.isFinite(Date.parse(item.consumedAt))
       || !item.resultId || item.resultUserId !== row.user_id || item.resultProductId !== row.product_id
       || item.resultVersion !== version || !item.committedAt || !Number.isFinite(Date.parse(item.committedAt))
     ))
+    || refunded.some((item) => item.resultId !== null || item.consumedAt !== null)
   ) throw conflict("주문 전체의 결제 완료와 확정된 가챠 결과를 확인하지 못했습니다.");
   return {
     orderId: row.order_id, userId: row.user_id, productId: row.product_id,
     probabilityVersion: version, serverNow: iso(row.server_now),
-    results: row.entitlements.map((item) => ({
+    results: settled.map((item) => ({
       entitlementId: item.id, resultId: item.resultId!, committedAt: new Date(item.committedAt!).toISOString(),
     })),
+    ...(refunded.length ? { refundedEntitlementIds: refunded.map((item) => item.id) } : {}),
   };
 }
 
@@ -291,7 +310,12 @@ export async function registerDrawRecoveryRoutes(app: FastifyInstance, context: 
                   'probabilityVersionId',entitlement.probability_version_id,
                   'status',entitlement.status,'consumedAt',entitlement.consumed_at,
                   'resultId',draw.id,'resultUserId',draw.user_id,'resultProductId',draw.product_id,
-                  'resultVersion',draw.probability_version,'committedAt',draw.committed_at
+                  'resultVersion',draw.probability_version,'committedAt',draw.committed_at,
+                  'partialRefundApplied',EXISTS (
+                    SELECT 1 FROM partial_unused_draw_refunds refund
+                     WHERE refund.order_id=orders.id AND refund.status='APPLIED'
+                       AND entitlement.id=ANY(refund.entitlement_ids)
+                  )
                 ) ORDER BY entitlement.created_at,entitlement.id)
                   FROM draw_entitlements entitlement
                   LEFT JOIN draw_results draw ON draw.entitlement_id=entitlement.id

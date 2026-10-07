@@ -6634,7 +6634,7 @@ components:
           type: array
           minItems: 1
           maxItems: 20
-          description: Exactly one existing immutable result for every original paid-order entitlement, in original entitlement order.
+          description: Exactly one existing immutable result for every original paid-order entitlement that was not refunded, in original entitlement order.
           items:
             type: object
             additionalProperties: false
@@ -6643,6 +6643,12 @@ components:
               entitlementId: { type: string, format: uuid }
               resultId: { type: string, format: uuid }
               committedAt: { type: string, format: date-time }
+        refundedEntitlementIds:
+          type: array
+          minItems: 1
+          maxItems: 19
+          description: Original entitlements cancelled by an applied operator partial refund of unused draws. Present only when at least one draw was refunded; results plus these cover every original entitlement.
+          items: { type: string, format: uuid }
     PaidKujiDrawRecovery:
       type: object
       additionalProperties: false

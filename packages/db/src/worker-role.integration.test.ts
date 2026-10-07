@@ -191,6 +191,7 @@ test("API and worker database identities are isolated around pgmq", {
       ["worker_dead_letters", new Set(["insert"])],
       ["worker_payment_reconciliations", new Set(["select", "insert", "update"])],
       ["account_auth_deletion_jobs", new Set(["select", "update", "delete"])],
+      ["supabase_auth_orphan_cleanups", new Set(["select", "update", "delete"])],
       ["community_comments", new Set(["select"])],
       ["community_post_likes", new Set(["select", "delete"])],
       ["community_post_media", new Set(["select", "delete"])],

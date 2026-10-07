@@ -275,6 +275,7 @@ test("notification APIs are owner-scoped, paged, and expose an authoritative unr
       if (sql.includes("ORDER BY created_at DESC,id DESC LIMIT $2")) {
         return { rowCount: 2, rows: notificationRows };
       }
+      if (sql.includes("SELECT iu.id FROM inventory_units iu")) return { rowCount: 0, rows: [] };
       throw new Error(`Unexpected query: ${sql}`);
     },
   };
@@ -399,6 +400,7 @@ test("point return endpoint rejects an original OWNED KUJI draw without creditin
           }],
         };
       }
+      if (sql.includes("SELECT iu.id FROM inventory_units iu")) return { rowCount: 0, rows: [] };
       throw new Error(`Unexpected query: ${sql}`);
     },
     release() { /* no-op */ },
@@ -836,6 +838,7 @@ test("profile updates reject a stale owner version before changing the user row"
           updated_at: new Date("2026-08-24T10:00:00.000Z"),
         }] };
       }
+      if (sql.includes("SELECT iu.id FROM inventory_units iu")) return { rowCount: 0, rows: [] };
       throw new Error(`Unexpected query: ${sql}`);
     },
     release() { /* no-op */ },
@@ -927,6 +930,7 @@ test("account basic info updates reject a stale version before changing private 
           updated_at: new Date("2026-08-31T03:00:00.000Z"),
         }] };
       }
+      if (sql.includes("SELECT iu.id FROM inventory_units iu")) return { rowCount: 0, rows: [] };
       throw new Error(`Unexpected query: ${sql}`);
     },
     release() { /* no-op */ },
@@ -1006,6 +1010,7 @@ test("shipping quote snapshots the canonical selection, active address version, 
           shipping_request_id: null,
         }] };
       }
+      if (sql.includes("SELECT iu.id FROM inventory_units iu")) return { rowCount: 0, rows: [] };
       throw new Error(`Unexpected query: ${sql}`);
     },
     release() { /* no-op */ },
@@ -1040,7 +1045,11 @@ test("shipping quote snapshots the canonical selection, active address version, 
     createdAt: createdAt.toISOString(),
     expiresAt: expiresAt.toISOString(),
   });
-  assert.match(queries.find(({ sql }) => sql.includes("FROM inventory_units iu"))?.sql ?? "", /ORDER BY iu\.id FOR SHARE OF iu,p/);
+  assert.match(queries.find(({ sql }) => sql.includes("FOR SHARE OF iu,p"))?.sql ?? "", /ORDER BY iu\.id FOR SHARE OF iu,p/);
+  // The source-order gate runs before the selection is locked.
+  const gate = queries.findIndex(({ sql }) => sql.includes("SELECT iu.id FROM inventory_units iu"));
+  const lock = queries.findIndex(({ sql }) => sql.includes("FOR SHARE OF iu,p"));
+  assert.ok(gate >= 0 && gate < lock);
   assert.equal(queries.at(-1)?.sql, "COMMIT");
 });
 
@@ -1114,13 +1123,14 @@ test("shipping request locks owned inventory in canonical order and commits one 
         observedShippingItems = params[1];
         return { rowCount: 2, rows: [] };
       }
-      if (sql.includes("UPDATE inventory_units SET status='SHIPPING'")) {
+      if (sql.includes("UPDATE inventory_units iu SET status='SHIPPING'")) {
         observedInventoryParams.push(params);
         return { rowCount: 2, rows: [{ id: lowId }, { id: highId }] };
       }
       if (sql.includes("UPDATE shipping_quotes")) return { rowCount: 1, rows: [] };
       if (sql.includes("INSERT INTO outbox_events")) return { rowCount: 1, rows: [] };
       if (sql.includes("UPDATE idempotency_keys SET state='COMPLETED'")) return { rowCount: 1, rows: [] };
+      if (sql.includes("SELECT iu.id FROM inventory_units iu")) return { rowCount: 0, rows: [] };
       throw new Error(`Unexpected query: ${sql}`);
     },
     release() { /* no-op */ },
@@ -1152,7 +1162,7 @@ test("shipping request locks owned inventory in canonical order and commits one 
   assert.match(shippingLock || "", /iu\.source_type IN \('GACHA','KUJI'\)/);
   assert.match(shippingLock || "", /iu\.storage_expires_at>now\(\)/);
   assert.match(shippingLock || "", /ORDER BY iu\.id FOR UPDATE OF iu,p/);
-  assert.match(queries.find((sql) => sql.includes("UPDATE inventory_units SET status='SHIPPING'")) || "", /storage_expires_at>now\(\)/);
+  assert.match(queries.find((sql) => sql.includes("UPDATE inventory_units iu SET status='SHIPPING'")) || "", /storage_expires_at>now\(\)/);
   assert.equal(queries.includes("COMMIT"), true);
 });
 
@@ -1209,6 +1219,7 @@ test("shipping quote expiry, address changes, and duplicate consumption fail bef
             version: scenario.addressVersion,
           }] };
         }
+        if (sql.includes("SELECT iu.id FROM inventory_units iu")) return { rowCount: 0, rows: [] };
         throw new Error(`Unexpected query in ${scenario.name}: ${sql}`);
       },
       release() { /* no-op */ },
@@ -1297,7 +1308,7 @@ test("mixed Gacha and Kuji shipping persists the 54,900 won policy at the exact 
         return { rowCount: 1, rows: [{ id: shippingId, requested_at: requestedAt }] };
       }
       if (sql.includes("INSERT INTO shipping_request_items")) return { rowCount: 2, rows: [] };
-      if (sql.includes("UPDATE inventory_units SET status='SHIPPING'")) {
+      if (sql.includes("UPDATE inventory_units iu SET status='SHIPPING'")) {
         return { rowCount: 2, rows: [{ id: gachaId }, { id: kujiId }] };
       }
       if (sql.includes("UPDATE shipping_quotes")) return { rowCount: 1, rows: [] };
@@ -1305,6 +1316,7 @@ test("mixed Gacha and Kuji shipping persists the 54,900 won policy at the exact 
       if (sql.includes("UPDATE idempotency_keys SET state='COMPLETED'")) {
         return { rowCount: 1, rows: [] };
       }
+      if (sql.includes("SELECT iu.id FROM inventory_units iu")) return { rowCount: 0, rows: [] };
       throw new Error(`Unexpected query: ${sql}`);
     },
     release() { /* no-op */ },
@@ -1391,7 +1403,7 @@ test("shipping request below the free-shipping threshold creates a 3,000 won pay
         return { rowCount: 1, rows: [{ id: shippingId, requested_at: new Date("2026-09-14T01:00:00.000Z") }] };
       }
       if (sql.includes("INSERT INTO shipping_request_items")) return { rowCount: 1, rows: [] };
-      if (sql.includes("UPDATE inventory_units SET status='SHIPPING'")) return { rowCount: 1, rows: [{ id: inventoryId }] };
+      if (sql.includes("UPDATE inventory_units iu SET status='SHIPPING'")) return { rowCount: 1, rows: [{ id: inventoryId }] };
       if (sql.includes("INSERT INTO orders(")) {
         assert.deepEqual(params, [actorId, 3_000, shippingId]);
         return { rowCount: 1, rows: [{ id: orderId }] };
@@ -1403,6 +1415,7 @@ test("shipping request below the free-shipping threshold creates a 3,000 won pay
       if (sql.includes("UPDATE shipping_quotes")) return { rowCount: 1, rows: [] };
       if (sql.includes("INSERT INTO outbox_events")) return { rowCount: 1, rows: [] };
       if (sql.includes("UPDATE idempotency_keys SET state='COMPLETED'")) return { rowCount: 1, rows: [] };
+      if (sql.includes("SELECT iu.id FROM inventory_units iu")) return { rowCount: 0, rows: [] };
       throw new Error(`Unexpected query: ${sql}`);
     },
     release() { /* no-op */ },
@@ -1504,7 +1517,7 @@ test("mixed Gacha and Kuji shipping one won below 54,900 creates the same 3,000 
         return { rowCount: 1, rows: [{ id: shippingId, requested_at: new Date("2026-09-14T01:00:00.000Z") }] };
       }
       if (sql.includes("INSERT INTO shipping_request_items")) return { rowCount: 2, rows: [] };
-      if (sql.includes("UPDATE inventory_units SET status='SHIPPING'")) return { rowCount: 2, rows: [{ id: gachaId }, { id: kujiId }] };
+      if (sql.includes("UPDATE inventory_units iu SET status='SHIPPING'")) return { rowCount: 2, rows: [{ id: gachaId }, { id: kujiId }] };
       if (sql.includes("INSERT INTO orders(")) return { rowCount: 1, rows: [{ id: orderId }] };
       if (sql.includes("INSERT INTO payments")) {
         assert.deepEqual(params, [orderId, "TEST_PG", 3_000, null], "non-card rails carry no channel binding");
@@ -1513,6 +1526,7 @@ test("mixed Gacha and Kuji shipping one won below 54,900 creates the same 3,000 
       if (sql.includes("UPDATE shipping_quotes")) return { rowCount: 1, rows: [] };
       if (sql.includes("INSERT INTO outbox_events")) return { rowCount: 1, rows: [] };
       if (sql.includes("UPDATE idempotency_keys SET state='COMPLETED'")) return { rowCount: 1, rows: [] };
+      if (sql.includes("SELECT iu.id FROM inventory_units iu")) return { rowCount: 0, rows: [] };
       throw new Error(`Unexpected query: ${sql}`);
     },
     release() { /* no-op */ },
@@ -1601,7 +1615,7 @@ test("point return atomically locks original draw inventory, records immutable a
         return { rowCount: 1, rows: [{ id: pointReturnId, returned_at: returnedAt }] };
       }
       if (sql.includes("INSERT INTO inventory_point_return_items")) return { rowCount: 2, rows: [] };
-      if (sql.includes("UPDATE inventory_units SET status='POINT_RETURNED'")) {
+      if (sql.includes("UPDATE inventory_units iu SET status='POINT_RETURNED'")) {
         return { rowCount: 2, rows: [{ id: lowId }, { id: highId }] };
       }
       if (sql.includes("INSERT INTO point_accounts")) return { rowCount: 1, rows: [] };
@@ -1611,6 +1625,7 @@ test("point return atomically locks original draw inventory, records immutable a
       }
       if (sql.includes("INSERT INTO outbox_events")) return { rowCount: 1, rows: [] };
       if (sql.includes("UPDATE idempotency_keys SET state='COMPLETED'")) return { rowCount: 1, rows: [] };
+      if (sql.includes("SELECT iu.id FROM inventory_units iu")) return { rowCount: 0, rows: [] };
       throw new Error(`Unexpected query: ${sql}`);
     },
     release() { /* no-op */ },
@@ -1653,7 +1668,7 @@ test("point return atomically locks original draw inventory, records immutable a
   assert.deepEqual(pointBalanceUpdate?.params, [actorId, 1_000, MAX_POINT_BALANCE]);
   assert.match(inventoryLock?.sql || "", /p\.price AS reference_amount/);
   assert.match(
-    queries.find(({ sql }) => sql.includes("UPDATE inventory_units SET status='POINT_RETURNED'"))?.sql || "",
+    queries.find(({ sql }) => sql.includes("UPDATE inventory_units iu SET status='POINT_RETURNED'"))?.sql || "",
     /storage_expires_at>now\(\)/,
   );
   assert.equal(queries.some(({ sql }) => sql === "COMMIT"), true);

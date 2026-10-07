@@ -15,7 +15,7 @@ import { cleanupSupabaseAuthUsers } from "./supabase-auth-deletion.js";
 const migrationDatabaseUrl = process.env.DATABASE_MIGRATION_URL;
 const workerDatabaseUrl = process.env.DABBOBA_WORKER_TEST_DATABASE_URL;
 
-test("Auth deletion retries external failure without erasing identity, then finalizes once", {
+test("Auth deletion finalizes locally first, then retries the external deletion until it succeeds", {
   skip: !migrationDatabaseUrl || !workerDatabaseUrl,
   timeout: 60_000,
 }, async (t) => {
@@ -99,10 +99,12 @@ test("Auth deletion retries external failure without erasing identity, then fina
     mediaStore,
   );
   assert.deepEqual(first, { completed: 0, deferred: 1 });
+  // The local step is the point of no return and already ended: the account
+  // is anonymized while the broker identity deletion alone waits for a retry.
   const pending = await fixturePool.query<{
-    status: string; email: string; identity_count: number; job_status: string;
+    status: string; auth_deletion_status: string; email: string | null; identity_count: number; job_status: string;
   }>(
-    `SELECT d.status,u.email,
+    `SELECT d.status,d.auth_deletion_status,u.email,
             (SELECT count(*)::integer FROM auth_identities WHERE user_id=u.id) AS identity_count,
             j.status AS job_status
        FROM account_deletion_requests d
@@ -112,11 +114,13 @@ test("Auth deletion retries external failure without erasing identity, then fina
     [request.rows[0]!.id],
   );
   assert.deepEqual(pending.rows[0], {
-    status: "PROCESSING",
-    email: fixtureEmail,
-    identity_count: 1,
+    status: "COMPLETED",
+    auth_deletion_status: "PENDING",
+    email: null,
+    identity_count: 0,
     job_status: "PENDING",
   });
+  assert.notEqual(fixtureEmail, null);
 
   await fixturePool.query(
     `UPDATE account_auth_deletion_jobs
@@ -161,7 +165,7 @@ test("Auth deletion retries external failure without erasing identity, then fina
     `SELECT metadata ? 'appleTokenRevokedAt' AS has_marker,
             metadata->>'appleTokenRevokedAt' AS revoked_at
        FROM account_deletion_request_events
-      WHERE deletion_request_id=$1 AND status='COMPLETED'`,
+      WHERE deletion_request_id=$1 AND status='COMPLETED' AND metadata ? 'personalDataAnonymized'`,
     [request.rows[0]!.id],
   );
   // This fixture is PHONE, so finalization must not invent an Apple revocation.

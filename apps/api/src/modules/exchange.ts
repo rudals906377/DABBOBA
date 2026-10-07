@@ -6,6 +6,7 @@ import { adminMutationHeaders, writeAdminAudit, writeOutbox } from "../lib/audit
 import { requireLiveCommerce } from "../lib/commerce-mode.js";
 import { assertPublicContentAllowed } from "../lib/content-filter.js";
 import { AppError, badRequest, conflict, forbidden, notFound } from "../lib/errors.js";
+import { assertInventorySourceOrdersSettled, INVENTORY_SOURCE_ORDER_SETTLED_SQL } from "../lib/inventory-source-order.js";
 import {
   beginIdempotency,
   completeIdempotency,
@@ -637,11 +638,13 @@ async function reserveInventoryUnits(
   reservedStatus: "EXCHANGE_LISTED" | "EXCHANGE_OFFERED",
 ) {
   const ids = orderedInventoryIds(inventoryIds);
+  await assertInventorySourceOrdersSettled(client, ids);
   const reserved = await client.query(
-    `UPDATE inventory_units SET status=$3
-     WHERE id=ANY($1::uuid[]) AND owner_id=$2 AND status='OWNED'
-       AND storage_expires_at>now()
-     RETURNING id`,
+    `UPDATE inventory_units iu SET status=$3
+     WHERE iu.id=ANY($1::uuid[]) AND iu.owner_id=$2 AND iu.status='OWNED'
+       AND iu.storage_expires_at>now()
+       AND ${INVENTORY_SOURCE_ORDER_SETTLED_SQL}
+     RETURNING iu.id`,
     [ids, ownerId, reservedStatus],
   );
   if (reserved.rowCount !== ids.length) {
@@ -927,6 +930,7 @@ export async function registerExchangeRoutes(app: FastifyInstance, context: ApiC
             AND draw_result.entitlement_id=iu.source_id
             AND draw_result.prize_product_id=iu.product_id
         )`,
+        INVENTORY_SOURCE_ORDER_SETTLED_SQL,
         "p.is_active=true",
       ];
       if (search) {

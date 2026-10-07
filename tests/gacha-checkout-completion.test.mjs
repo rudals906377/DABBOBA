@@ -113,6 +113,45 @@ test("remaining-only recovery retires the original intent only with exact whole-
   assert.deepEqual(h.calls, ["actor", "order", "proof", "clear", "/product/gacha-a"]);
 });
 
+test("an applied partial refund of the other draw still retires the intent when the server names the refunded entitlement", async () => {
+  const h = harness();
+  h.scope.committedSequence.entitlementIds = [ids[1]];
+  h.scope.consumedSequenceRef.current.ids = new Set([ids[1]]);
+  h.scope.fetchPaidGachaDrawCompletion = async () => {
+    h.calls.push("proof");
+    const proof = completionProof();
+    proof.results = proof.results.slice(1);
+    proof.refundedEntitlementIds = [ids[0]];
+    return proof;
+  };
+  await h.run();
+  assert.deepEqual(h.calls, ["actor", "order", "proof", "clear", "/product/gacha-a"]);
+});
+
+test("a refunded entitlement never covers the ticket this route opened, an unknown id, or a result it also lists", async () => {
+  const changes = [
+    // The current route's own ticket cannot be the refunded one.
+    (proof) => { proof.results = proof.results.slice(0, 1); proof.refundedEntitlementIds = [ids[1]]; },
+    (proof) => { proof.results = proof.results.slice(1); proof.refundedEntitlementIds = [orderId]; },
+    (proof) => { proof.refundedEntitlementIds = [ids[0]]; },
+    (proof) => { proof.results = proof.results.slice(1); proof.refundedEntitlementIds = [ids[0], ids[0]]; },
+  ];
+  for (const change of changes) {
+    const h = harness();
+    h.scope.committedSequence.entitlementIds = [ids[1]];
+    h.scope.consumedSequenceRef.current.ids = new Set([ids[1]]);
+    h.scope.fetchPaidGachaDrawCompletion = async () => {
+      h.calls.push("proof");
+      const proof = completionProof();
+      change(proof);
+      return proof;
+    };
+    await h.run();
+    // Recovery is retained (no "clear"); the screen still returns to the product.
+    assert.deepEqual(h.calls, ["actor", "order", "proof", "alert", "/product/gacha-a"], String(change));
+  }
+});
+
 test("remaining-only URLs keep recovery on incomplete or mismatched immutable-result proof", async () => {
   const changes = [
     (proof) => { proof.orderId = ids[0]; },

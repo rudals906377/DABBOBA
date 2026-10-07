@@ -8,8 +8,7 @@ import type { MediaStore } from "./media.js";
 import {
   cleanupSupabaseAuthUsers,
   HttpAppleTokenRevocationClient,
-  HttpSupabaseAuthDeletionClient,
-} from "./supabase-auth-deletion.js";
+  HttpSupabaseAuthDeletionClient, cleanupOrphanSupabaseAuthUsers } from "./supabase-auth-deletion.js";
 
 const userId = "7aa68a27-b48f-4ad9-bfac-5cf8b1ae8077";
 const logger: Logger = {
@@ -388,6 +387,18 @@ test("failed Auth deletion releases the lease and retains only a bounded error i
       }
       return { rowCount: 0, rows: [] };
     },
+    async connect() {
+      return {
+        async query(sql: string) {
+          if (sql.includes("SELECT status,point_forfeiture_acknowledged FROM account_deletion_requests")) {
+            return { rowCount: 1, rows: [{ status: "PROCESSING" }] };
+          }
+          if (sql.includes("SELECT id AS media_id")) return { rowCount: 0, rows: [] };
+          return { rowCount: 1, rows: [] };
+        },
+        release() {},
+      };
+    },
   } as unknown as DatabasePool;
   const result = await cleanupSupabaseAuthUsers(
     pool,
@@ -398,13 +409,18 @@ test("failed Auth deletion releases the lease and retains only a bounded error i
     emptyMediaStore,
   );
   assert.deepEqual(result, { completed: 0, deferred: 1 });
-  assert.match(updates[0]!.sql, /status='PENDING'/);
-  assert.equal(updates[0]!.params[2], "Error");
-  assert.notEqual(updates[0]!.params[2], "secret response body");
+  const retry = updates.find((update) => /status='PENDING'/.test(update.sql));
+  assert.ok(retry);
+  assert.equal(retry.params[2], "Error");
+  assert.notEqual(retry.params[2], "secret response body");
+  // The failed external call is retried alone: the local step already ended
+  // and must not be marked as the broker deletion.
+  assert.equal(updates.some((update) => update.sql.includes("SET external_deleted_at=now()")), false);
 });
 
 test("a blocker discovered immediately before provider deletion returns the request to BLOCKED without deleting Auth", async () => {
   const transactionQueries: string[] = [];
+  const transactionParams: unknown[][] = [];
   const pool = {
     async query(sql: string) {
       if (sql.includes("WITH candidate")) {
@@ -427,8 +443,8 @@ test("a blocker discovered immediately before provider deletion returns the requ
     },
     async connect() {
       return {
-        async query(sql: string) {
-          if (sql !== "BEGIN" && sql !== "COMMIT") transactionQueries.push(sql);
+        async query(sql: string, params: unknown[] = []) {
+          if (sql !== "BEGIN" && sql !== "COMMIT") { transactionQueries.push(sql); transactionParams.push(params); }
           return { rowCount: 1, rows: [] };
         },
         release() {},
@@ -449,9 +465,16 @@ test("a blocker discovered immediately before provider deletion returns the requ
   assert.equal(transactionQueries.some((sql) => sql.includes("SET status='BLOCKED'")), true);
   assert.equal(transactionQueries.some((sql) => sql.includes("DELETE FROM account_auth_deletion_jobs")), true);
   assert.equal(transactionQueries.some((sql) => sql.includes("DELETE FROM auth_identities")), false);
+  // The customer sees the real counts, not an opaque reassessment marker.
+  const snapshot = JSON.parse(String(transactionParams.find((params) => typeof params[2] === "string" && String(params[2]).includes("pointBalance"))?.[2]));
+  assert.deepEqual(snapshot, {
+    pointBalance: 100, activeOrderCount: 0, activePaymentCount: 0, availableDrawEntitlementCount: 0,
+    activeInventoryCount: 0, activeShippingRequestCount: 0, activeExchangeListingCount: 0,
+    activeExchangeOfferCount: 0, reassessmentRequired: true,
+  });
 });
 
-test("local finalization retries after provider deletion without calling the provider twice", async () => {
+test("a transient local failure retries finalization and still calls the provider exactly once, after it", async () => {
   let externalDeleted = false;
   let claims = 0;
   let failLocalOnce = true;
@@ -540,11 +563,12 @@ test("authored Storage objects must be deleted before local identity and PII fin
             deletion_request_id: "request-media",
             user_id: "local-user-media",
             supabase_user_id: userId,
-            external_deleted_at: new Date(),
+            external_deleted_at: null,
             attempts: 1,
           }],
         };
       }
+      if (sql.includes("COALESCE((SELECT balance")) return { rowCount: 1, rows: [{ point_balance: 0 }] };
       if (sql.includes("FROM media_assets")) {
         return {
           rowCount: 1,
@@ -574,7 +598,7 @@ test("authored Storage objects must be deleted before local identity and PII fin
     { outboxBatchSize: 1, jobBackoffMs: 1_000 } as WorkerConfig,
     logger,
     () => true,
-    { async deleteUser() { throw new Error("provider must not be called twice"); } },
+    { async deleteUser() { throw new Error("provider must not be called before local finalization"); } },
     {
       async deleteObject(objectKey) {
         observed.push(`storage:${objectKey}`);
@@ -584,4 +608,173 @@ test("authored Storage objects must be deleted before local identity and PII fin
   );
   assert.deepEqual(result, { completed: 0, deferred: 1 });
   assert.deepEqual(observed.map((value) => value.startsWith("storage:") ? "storage" : value), ["storage", "retry"]);
+});
+
+test("an Apple identity without a stored refresh token returns the request to the customer for Apple re-authentication", async () => {
+  const transactionQueries: string[] = [];
+  const transactionParams: unknown[][] = [];
+  let claimed = false;
+  const pool = {
+    async query(sql: string) {
+      if (sql.includes("WITH candidate") && !claimed) {
+        claimed = true;
+        return { rowCount: 1, rows: [{
+          id: "job-apple-missing",
+          deletion_request_id: "request-apple-missing",
+          user_id: "local-user-apple-missing",
+          supabase_user_id: userId,
+          external_deleted_at: null,
+          apple_revoked_at: null,
+          has_apple_identity: true,
+          attempts: 1,
+        }] };
+      }
+      if (sql.includes("WITH candidate")) return { rowCount: 0, rows: [] };
+      if (sql.includes("COALESCE((SELECT balance")) return { rowCount: 1, rows: [{ point_balance: 0 }] };
+      if (sql.includes("FROM apple_auth_credentials")) return { rowCount: 0, rows: [] };
+      throw new Error(`Unexpected pool query: ${sql}`);
+    },
+    async connect() {
+      return {
+        async query(sql: string, params: unknown[] = []) {
+          if (sql !== "BEGIN" && sql !== "COMMIT") { transactionQueries.push(sql); transactionParams.push(params); }
+          return { rowCount: 1, rows: [] };
+        },
+        release() {},
+      };
+    },
+  } as unknown as DatabasePool;
+  let revokes = 0;
+  let providerDeletes = 0;
+  const result = await cleanupSupabaseAuthUsers(
+    pool,
+    {
+      outboxBatchSize: 1,
+      jobBackoffMs: 1_000,
+      appleRevocation: {
+        clientId: "com.dabboba.app",
+        clientSecret: "signed-client-secret-value-that-is-long-enough",
+        encryptionKey: Buffer.alloc(32, 7).toString("base64url"),
+        keyVersion: 1,
+      },
+    } as WorkerConfig,
+    logger,
+    () => true,
+    { async deleteUser() { providerDeletes += 1; } },
+    emptyMediaStore,
+    { async revokeRefreshToken() { revokes += 1; } },
+  );
+  // Not a retry: the job ends and the customer gets a BLOCKED request that
+  // names the Apple re-authentication instead of a silent PROCESSING stall.
+  assert.deepEqual(result, { completed: 0, deferred: 1 });
+  assert.equal(revokes, 0);
+  assert.equal(providerDeletes, 0);
+  assert.equal(transactionQueries.some((sql) => sql.includes("SET status='BLOCKED'")), true);
+  assert.equal(transactionQueries.some((sql) => sql.includes("DELETE FROM account_auth_deletion_jobs")), true);
+  assert.equal(transactionQueries.some((sql) => sql.includes("DELETE FROM auth_identities")), false);
+  const snapshot = JSON.parse(String(transactionParams.find((params) => typeof params[2] === "string" && String(params[2]).includes("pointBalance"))?.[2]));
+  assert.equal(snapshot.appleReauthorizationRequired, true);
+  assert.equal(snapshot.reassessmentRequired, true);
+});
+
+test("a blocker found at local finalization returns the request to the customer before the broker identity is deleted", async () => {
+  const transactionQueries: string[] = [];
+  let claimed = false;
+  const pool = {
+    async query(sql: string) {
+      if (sql.includes("WITH candidate") && !claimed) {
+        claimed = true;
+        return { rowCount: 1, rows: [{
+          id: "job-late-blocker",
+          deletion_request_id: "request-late-blocker",
+          user_id: "local-user-late-blocker",
+          supabase_user_id: userId,
+          external_deleted_at: null,
+          apple_revoked_at: null,
+          has_apple_identity: false,
+          attempts: 1,
+        }] };
+      }
+      if (sql.includes("WITH candidate")) return { rowCount: 0, rows: [] };
+      // The first check passes; the order arrives before finalization.
+      if (sql.includes("COALESCE((SELECT balance")) return { rowCount: 1, rows: [{ point_balance: 0 }] };
+      if (sql.includes("FROM media_assets")) return { rowCount: 0, rows: [] };
+      throw new Error(`Unexpected pool query: ${sql}`);
+    },
+    async connect() {
+      return {
+        async query(sql: string) {
+          if (sql !== "BEGIN" && sql !== "COMMIT") transactionQueries.push(sql);
+          if (sql.includes("SELECT status,point_forfeiture_acknowledged FROM account_deletion_requests")) {
+            return { rowCount: 1, rows: [{ status: "PROCESSING" }] };
+          }
+          if (sql.includes("COALESCE((SELECT balance")) {
+            return { rowCount: 1, rows: [{ point_balance: 0, active_order_count: 1 }] };
+          }
+          return { rowCount: 1, rows: [] };
+        },
+        release() {},
+      };
+    },
+  } as unknown as DatabasePool;
+  let providerDeletes = 0;
+  const result = await cleanupSupabaseAuthUsers(
+    pool,
+    { outboxBatchSize: 1, jobBackoffMs: 1_000 } as WorkerConfig,
+    logger,
+    () => true,
+    { async deleteUser() { providerDeletes += 1; } },
+    emptyMediaStore,
+  );
+  assert.deepEqual(result, { completed: 0, deferred: 1 });
+  assert.equal(providerDeletes, 0);
+  assert.equal(transactionQueries.some((sql) => sql.includes("SET status='BLOCKED'")), true);
+  assert.equal(transactionQueries.some((sql) => sql.includes("DELETE FROM account_auth_deletion_jobs")), true);
+  assert.equal(transactionQueries.some((sql) => sql.includes("DELETE FROM auth_identities")), false);
+  assert.equal(transactionQueries.some((sql) => sql.includes("SET status='COMPLETED'")), false);
+});
+
+test("orphaned broker users are deleted through the Admin endpoint only when no DABBOBA identity links to them", async () => {
+  const deleted: string[] = [];
+  const removedRows: string[] = [];
+  const retries: unknown[][] = [];
+  const rows = [
+    { id: "cleanup-1", supabase_user_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", attempts: 1, linked: false },
+    { id: "cleanup-2", supabase_user_id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", attempts: 1, linked: true },
+    { id: "cleanup-3", supabase_user_id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc", attempts: 2, linked: false },
+  ];
+  let next = 0;
+  const pool = {
+    async query(sql: string, params: unknown[] = []) {
+      if (sql.includes("UPDATE supabase_auth_orphan_cleanups cleanup")) {
+        const row = rows[next];
+        next += 1;
+        return row ? { rowCount: 1, rows: [row] } : { rowCount: 0, rows: [] };
+      }
+      if (sql.includes("FROM auth_identities WHERE provider_subject LIKE")) {
+        const row = rows.find((candidate) => candidate.supabase_user_id === params[0]);
+        return row?.linked ? { rowCount: 1, rows: [{}] } : { rowCount: 0, rows: [] };
+      }
+      if (sql.includes("DELETE FROM supabase_auth_orphan_cleanups")) { removedRows.push(String(params[0])); return { rowCount: 1, rows: [] }; }
+      if (sql.includes("SET status='PENDING'")) { retries.push(params); return { rowCount: 1, rows: [] }; }
+      throw new Error(`Unexpected pool query: ${sql}`);
+    },
+  } as unknown as DatabasePool;
+  const result = await cleanupOrphanSupabaseAuthUsers(
+    pool,
+    { outboxBatchSize: 5, jobBackoffMs: 1_000 } as WorkerConfig,
+    logger,
+    () => true,
+    { async deleteUser(id) {
+      if (id === "cccccccc-cccc-4ccc-8ccc-cccccccccccc") throw new Error("secret provider body");
+      deleted.push(id);
+    } },
+  );
+  assert.deepEqual(result, { completed: 2, deferred: 1 });
+  // The unlinked user is deleted; the linked one is only dropped from the queue.
+  assert.deepEqual(deleted, ["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"]);
+  assert.deepEqual(removedRows, ["cleanup-1", "cleanup-2"]);
+  assert.equal(retries.length, 1);
+  assert.equal(retries[0]?.[0], "cleanup-3");
+  assert.equal(retries[0]?.[2], "Error");
 });

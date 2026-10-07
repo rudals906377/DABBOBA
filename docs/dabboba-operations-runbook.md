@@ -104,7 +104,7 @@ CLI 오류는 DB 원문·SQL·비밀번호를 출력하지 않는다. 실패 뒤
 
 로컬 PostgreSQL 이미지는 pgmq를 포함하고 이전 PostgreSQL 16 volume과 다른 이름을 사용하므로 기존 로컬 데이터를 삭제하지 않는다. worker는 Redis/BullMQ 없이 한 batch를 처리하고 종료한다. Compose의 Redis는 `REDIS_URL`을 명시한 로컬 API의 선택적 공유 rate-limit 호환용일 뿐이며 Cloud Run API/worker에는 배포하지 않는다. `0027_supabase_worker_queue.sql`은 logged queue만 만들고 `pgmq_public`, `anon`, `authenticated`, `service_role`에 queue 접근을 주지 않는다.
 
-탈퇴 요청과 고객 변경 요청은 사용자별 advisory lock으로 직렬화된다. 차단 항목이 없으면 API가 활성 세션을 즉시 폐기하고 자동 삭제 작업을 예약하며, worker는 차단 항목을 다시 확인한 뒤 Supabase Auth 삭제 → Storage 정리 → 로컬 identity·PII 정리 순서로 처리한다. 외부 삭제나 Storage 정리에 실패하면 로컬 identity·PII를 지우지 않고 재시도한다. 정상 탈퇴에 관리자 승인을 사용하거나 DB에서 처리 상태를 직접 되돌리지 말고, 예외는 보존·재가입 정책에 따른 별도 운영 절차로 다룬다.
+탈퇴 요청과 고객 변경 요청은 사용자별 advisory lock으로 직렬화된다. 차단 항목이 없으면 API가 활성 세션을 즉시 폐기하고 자동 삭제 작업을 예약하며, worker는 차단 항목을 다시 확인한 뒤 Apple 토큰 폐기 → Storage 정리 → 로컬 identity·PII 정리(이 트랜잭션에서 차단 항목을 한 번 더 확인) → Supabase Auth 삭제 순서로 처리한다. Storage 정리에 실패하면 로컬 identity·PII를 지우지 않고 재시도하고, 마지막 확인에서 차단 항목이 생겼거나 Apple 갱신 토큰이 없으면 요청을 `BLOCKED`로 고객에게 돌려보낸다(이때 Supabase 계정은 남아 있어 고객이 다시 로그인해 정리한 뒤 재요청할 수 있다). Supabase Auth 삭제만 실패하면 완료된 로컬 상태를 유지한 채 그 호출만 재시도한다. 정상 탈퇴에 관리자 승인을 사용하거나 DB에서 처리 상태를 직접 되돌리지 말고, 예외는 보존·재가입 정책에 따른 별도 운영 절차로 다룬다.
 
 현재 bundled IP·상품 fixture는 모두 빈 배열이며 `db:seed`는 과거 개발 카탈로그를 복구하지 않는 호환 CLI다. 예제 상품을 다시 채워 고객 앱에 노출하지 않는다. 실제 상품은 아래 관리자 등록·공개 절차로 준비하고 재고 변경은 관리자 재고 조정 원장만 사용한다. 운영 seed는 기본 거부 상태를 유지하며, 별도 승인 없는 seed 플래그 설정·원격 초기화는 하지 않는다.
 

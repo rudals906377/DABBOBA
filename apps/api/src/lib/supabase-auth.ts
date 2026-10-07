@@ -22,6 +22,8 @@ export type VerifiedSupabaseCustomer = SupabaseCustomerClaims & {
   providers: CustomerAuthProvider[];
   email: string | null;
   phone?: string | null;
+  /** When the broker created this user, if the live record says so. */
+  createdAt?: Date | null;
 };
 
 export type SupabaseJwtVerificationOptions = {
@@ -199,7 +201,9 @@ async function fetchLiveCustomer(
     if (providers.includes("PHONE") && !phone) {
       throw unauthorized("휴대폰 인증 정보를 확인해 주세요.");
     }
-    return { ...claims, providers, email, phone };
+    const createdAtMs = typeof user.created_at === "string" ? Date.parse(user.created_at) : Number.NaN;
+    const createdAt = Number.isFinite(createdAtMs) ? new Date(createdAtMs) : null;
+    return { ...claims, providers, email, phone, createdAt };
   } catch (error) {
     if (error instanceof AppError) throw error;
     throw unauthorized("로그인 인증 정보를 확인하지 못했습니다.");

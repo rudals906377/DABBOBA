@@ -32,7 +32,32 @@ test("a provider-settled observation turns a would-be release into a reconciliat
     action: "reconcile",
     reason: "EXPIRED_ACTIVE_RESERVATION",
   });
-  assert.deepEqual([...PROVIDER_SETTLED_OBSERVATIONS], ["PAID", "AUTHORIZED"]);
+  assert.deepEqual([...PROVIDER_SETTLED_OBSERVATIONS], ["PAID", "AUTHORIZED", "REFUNDED"]);
+});
+
+test("an opened PortOne window waits for a verified no-charge read before its reservation is released", () => {
+  const now = new Date("2026-10-07T00:40:00.000Z");
+  const window = (minutesAgo: number, verifiedNoCharge: boolean) => ({
+    startedAt: new Date(now.getTime() - minutesAgo * 60_000), verifiedNoCharge, now,
+  });
+  // Inside the window validity the sweep leaves the order alone.
+  assert.deepEqual(guardedExpiryAction("PENDING_PAYMENT", "PENDING", true, false, window(10, false)), { action: "wait" });
+  // Past it, an unverified window becomes a durable alert, never a release.
+  assert.deepEqual(guardedExpiryAction("PENDING_PAYMENT", "PENDING", true, false, window(40, false)), {
+    action: "reconcile",
+    reason: "OPEN_PAYMENT_WINDOW_UNVERIFIED",
+  });
+  // The worker's RECONCILED read of this payment version proves no charge.
+  assert.deepEqual(guardedExpiryAction("PENDING_PAYMENT", "PENDING", true, false, window(10, true)), { action: "release" });
+  // A window that was never opened releases as before.
+  assert.deepEqual(guardedExpiryAction("PENDING_PAYMENT", "PENDING", true, false, { startedAt: null, verifiedNoCharge: false, now }), { action: "release" });
+  // A settled observation still wins over the window rule.
+  assert.deepEqual(guardedExpiryAction("PENDING_PAYMENT", "PENDING", true, true, window(10, false)), {
+    action: "reconcile",
+    reason: "PROVIDER_OBSERVED_SETTLED",
+  });
+  // A payment the provider already failed or cancelled never waits on the window.
+  assert.deepEqual(guardedExpiryAction("PENDING_PAYMENT", "FAILED", true, false, window(1, false)), { action: "release" });
 });
 
 test("the sweep candidate query narrows shipping-fee orders and skips already-alerted settled observations", async () => {
@@ -53,6 +78,6 @@ test("the sweep candidate query narrows shipping-fee orders and skips already-al
   );
   assert.match(
     sql,
-    /worker_payment_reconciliations r\s+WHERE r\.payment_id=p\.id AND r\.payment_version=p\.version\s+AND r\.last_observed_state IN \('PAID','AUTHORIZED'\)/,
+    /worker_payment_reconciliations r\s+WHERE r\.payment_id=p\.id AND r\.payment_version=p\.version\s+AND r\.last_observed_state IN \('PAID','AUTHORIZED','REFUNDED'\)/,
   );
 });

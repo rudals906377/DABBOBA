@@ -19,6 +19,10 @@ export function assertPaidGachaDrawCompletion(
   const currentIds = expected.currentEntitlementIds.map((id) => id.toLowerCase());
   const serverNow = Date.parse(proof.serverNow);
   const results = new Map(proof.results.map((result) => [result.entitlementId.toLowerCase(), result]));
+  // Draws an operator refunded as unused (owner rule 2026-10-06) hold no
+  // result; the server names them so the order still proves complete.
+  const refundedIds = (proof.refundedEntitlementIds ?? []).map((id) => id.toLowerCase());
+  const refundedSet = new Set(refundedIds);
   if (
     proof.orderId.toLowerCase() !== intent.orderId || proof.userId.toLowerCase() !== intent.actorId
     || proof.productId !== intent.payload.productId || proof.probabilityVersion !== intent.payload.expectedDrawVersion
@@ -26,9 +30,12 @@ export function assertPaidGachaDrawCompletion(
     || expectedIds.some((id) => !UUID_PATTERN.test(id))
     || currentIds.length < 1 || new Set(currentIds).size !== currentIds.length
     || currentIds.some((id) => !expectedSet.has(id))
-    || results.size !== expectedIds.length || proof.results.length !== expectedIds.length
-    || new Set(proof.results.map((result) => result.resultId.toLowerCase())).size !== expectedIds.length
-    || expectedIds.some((id) => !results.has(id)) || !Number.isFinite(serverNow)
+    || refundedSet.size !== refundedIds.length
+    || refundedIds.some((id) => !UUID_PATTERN.test(id) || !expectedSet.has(id) || results.has(id))
+    || currentIds.some((id) => refundedSet.has(id))
+    || results.size + refundedSet.size !== expectedIds.length || proof.results.length !== results.size
+    || new Set(proof.results.map((result) => result.resultId.toLowerCase())).size !== results.size
+    || expectedIds.some((id) => !results.has(id) && !refundedSet.has(id)) || !Number.isFinite(serverNow)
     || proof.results.some((result) => (
       !UUID_PATTERN.test(result.entitlementId) || !UUID_PATTERN.test(result.resultId)
       || !Number.isFinite(Date.parse(result.committedAt)) || Date.parse(result.committedAt) > serverNow

@@ -10,8 +10,10 @@ import {
   isPortOnePaymentNotFound,
   isPortOneUnsubmittedReady,
   isPortOneUnsubmittedFailure,
+  portOneMismatchShowsMoney,
   PortOneV2Error,
   type PortOneCardPayment,
+  type PortOneMismatchObservation,
 } from "../lib/portone-v2.js";
 import {
   PortOneWebhookError,
@@ -78,7 +80,7 @@ type RefundAttempt = {
 
 export function lateRefundBlocker(row: LateRefundCandidate): string | null {
   if (!isPortOneCardProvider(row.provider) || row.status !== "REFUND_REVIEW" || row.order_status !== "REFUND_REVIEW") return "결제와 주문이 모두 환불 검토 상태여야 합니다.";
-  if (!row.cancelled_at) return "결제 지연으로 취소된 주문만 처리할 수 있습니다.";
+  if (!row.cancelled_at) return "취소된 주문(결제 지연 취소 또는 운영자 배송 취소)만 처리할 수 있습니다.";
   if (row.order_kind === "PRODUCT") {
     if (numberValue(row.line_count) < 1 || row.shipping_request_id) return "미발급 상품 주문만 처리할 수 있습니다.";
   } else if (row.order_kind === "SHIPPING_FEE") {
@@ -183,6 +185,34 @@ async function lockRefundCandidate(client: DatabaseClient, paymentId: string) {
 }
 
 const PRECHECK_STALE_MS = 30_000;
+
+/** The reservation sweep cancels an unpaid shipping-fee order this long after creation. */
+const SHIPPING_FEE_RESERVATION_MS = 15 * 60_000;
+/**
+ * The least reservation time a customer needs to finish the PortOne window.
+ * The kuji lease is an absolute 180 seconds and cannot be extended, so its
+ * floor is lower; a gacha or shipping-fee order should be recreated instead.
+ */
+export const PAYMENT_WINDOW_MIN_REMAINING_MS = { gacha: 3 * 60_000, kuji: 60_000, shipping: 3 * 60_000 } as const;
+
+/**
+ * Refuses to open a payment window that the reservation sweep could cancel
+ * while the customer is still inside it. A late approval would otherwise
+ * leave a charge without an order.
+ */
+export function assertPaymentWindowFits(
+  reservationExpiresAt: Date | null,
+  now: Date,
+  kind: keyof typeof PAYMENT_WINDOW_MIN_REMAINING_MS,
+): void {
+  if (!reservationExpiresAt || reservationExpiresAt.getTime() - now.getTime() < PAYMENT_WINDOW_MIN_REMAINING_MS[kind]) {
+    throw new AppError(
+      409,
+      "PAYMENT_WINDOW_TOO_LATE",
+      "결제 가능 시간이 거의 끝나 결제창을 열 수 없어요. 주문을 다시 만들어 주세요.",
+    );
+  }
+}
 // Review codes where no provider cancellation can be in flight or have moved
 // money: the local state changed before CALLING, the provider state did not
 // match before CALLING, the provider itself reported the cancellation FAILED,
@@ -467,6 +497,38 @@ async function dispatchCanonicalEvent(
   );
 }
 
+/**
+ * A PortOne record that holds money but does not match our channel, store or
+ * amount contract cannot be processed, yet the order must not be swept away
+ * as unpaid either. One durable alert per payment puts it in front of an
+ * operator; the worker records the settled observation that stops the sweep.
+ */
+async function recordContractMismatchReview(
+  context: ApiContext,
+  correlationId: string,
+  localPayment: LocalPayment,
+  observation: PortOneMismatchObservation,
+): Promise<void> {
+  await context.pool.query(
+    `INSERT INTO outbox_events(aggregate_type,aggregate_id,event_type,payload,correlation_id)
+     SELECT 'PAYMENT',$1,'payment.contract_mismatch_requires_reconciliation',$2::jsonb,$3
+      WHERE NOT EXISTS (
+        SELECT 1 FROM outbox_events
+         WHERE aggregate_type='PAYMENT' AND aggregate_id=$1
+           AND event_type='payment.contract_mismatch_requires_reconciliation'
+      )`,
+    [
+      localPayment.id,
+      JSON.stringify({
+        paymentId: localPayment.id, orderId: localPayment.order_id,
+        providerStatus: observation.status, providerPaidAmount: observation.paid,
+        providerCancelledAmount: observation.cancelled, ledgerAmount: numberValue(localPayment.amount),
+      }),
+      correlationId,
+    ],
+  );
+}
+
 export async function reconcilePayment(
   context: ApiContext,
   correlationId: string,
@@ -475,7 +537,13 @@ export async function reconcilePayment(
     retryReviewedRefund = false,
     retryPartialRefund = false,
     reportMissingProviderPayment = false,
-  }: { retryReviewedRefund?: boolean; retryPartialRefund?: boolean; reportMissingProviderPayment?: boolean } = {},
+    recordContractMismatch = false,
+  }: {
+    retryReviewedRefund?: boolean;
+    retryPartialRefund?: boolean;
+    reportMissingProviderPayment?: boolean;
+    recordContractMismatch?: boolean;
+  } = {},
 ) {
   const config = configuredContext(context);
   const bound = await boundPaymentAdapterOptions(context.pool, context.config, localPayment.id);
@@ -491,6 +559,10 @@ export async function reconcilePayment(
     // it never changes local state here.
     if (reportMissingProviderPayment && isPortOnePaymentNotFound(error)) {
       return { providerStatus: null, outcome: "provider_not_found" as const };
+    }
+    if (recordContractMismatch && portOneMismatchShowsMoney(error)) {
+      await recordContractMismatchReview(context, correlationId, localPayment, error.observation);
+      return { providerStatus: error.observation.status, outcome: "contract_mismatch" as const };
     }
     throw providerError(error);
   }
@@ -556,7 +628,9 @@ export async function registerPortOnePaymentRoutes(
           providerStatus: null, outcome: "already_settled", localStatus: current.status,
         });
       }
-      const result = await reconcilePayment(context, request.id, current, { reportMissingProviderPayment: true });
+      const result = await reconcilePayment(context, request.id, current, {
+        reportMissingProviderPayment: true, recordContractMismatch: true,
+      });
       const updated = await context.pool.query<{ status: string }>("SELECT status FROM payments WHERE id=$1", [paymentId]);
       return reply.code(200).send({
         accepted: true, paymentId, orderId: current.order_id,
@@ -1013,10 +1087,10 @@ export async function registerPortOnePaymentRoutes(
         const rows = await client.query<{
           id: string; order_id: string; provider: string; status: string; amount: number;
           pg_attempt_started_at: Date | null; order_status: string; order_kind: string;
-          total: number; shipping_request_id: string | null;
+          total: number; shipping_request_id: string | null; order_created_at: Date;
         }>(
           `SELECT p.id,p.order_id,p.provider,p.status,p.amount,p.pg_attempt_started_at,
-                  o.status AS order_status,o.order_kind,o.total,o.shipping_request_id
+                  o.status AS order_status,o.order_kind,o.total,o.shipping_request_id,o.created_at AS order_created_at
              FROM payments p JOIN orders o ON o.id=p.order_id
             WHERE p.id=$1 AND o.user_id=$2 FOR UPDATE OF p,o`,
           [paymentId, actorId],
@@ -1034,10 +1108,12 @@ export async function registerPortOnePaymentRoutes(
         await boundPaymentAdapterOptions(client, context.config, paymentId);
         const now = (await client.query<{ server_now: Date }>("SELECT clock_timestamp() AS server_now")).rows[0]!.server_now;
         if (row.order_kind === "PRODUCT") {
-          const reservations = await client.query<{ line_count: string; active_count: string; kuji_count: string }>(
+          const reservations = await client.query<{ line_count: string; active_count: string; kuji_count: string; earliest_expiry: Date | null }>(
             `SELECT (SELECT count(*) FROM order_lines WHERE order_id=$1) AS line_count,
                     (SELECT count(*) FROM stock_reservations
                       WHERE order_id=$1 AND status='ACTIVE' AND expires_at>$2) AS active_count,
+                    (SELECT min(expires_at) FROM stock_reservations
+                      WHERE order_id=$1 AND status='ACTIVE') AS earliest_expiry,
                     (SELECT count(*) FROM order_lines
                       WHERE order_id=$1 AND category_snapshot='kuji') AS kuji_count`,
             [row.order_id, now],
@@ -1052,8 +1128,10 @@ export async function registerPortOnePaymentRoutes(
             || room.checkout_expires_at === null || now >= room.checkout_expires_at)) {
             throw conflict("쿠지 결제 대기 시간이 만료되었거나 결제방이 변경되었습니다.");
           }
+          assertPaymentWindowFits(stock.earliest_expiry, now, room ? "kuji" : "gacha");
         } else if (row.order_kind === "SHIPPING_FEE") {
           if (room || !row.shipping_request_id) throw conflict("배송비 결제 신청을 확인할 수 없습니다.");
+          assertPaymentWindowFits(new Date(row.order_created_at.getTime() + SHIPPING_FEE_RESERVATION_MS), now, "shipping");
           const shipping = await client.query<{ status: string; shipping_fee: number }>(
             "SELECT status,shipping_fee FROM shipping_requests WHERE id=$1 AND user_id=$2",
             [row.shipping_request_id, actorId],

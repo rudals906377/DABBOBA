@@ -143,8 +143,44 @@ function retryDelayMs(attempts: number, baseDelayMs: number): number {
   return Math.min(baseDelayMs * 2 ** Math.max(0, Math.min(attempts - 1, 20)), 15 * 60_000);
 }
 
-async function deletionHasBlockers(pool: DatabasePool, job: Pick<AuthDeletionJob, "user_id" | "deletion_request_id">): Promise<boolean> {
-  const result = await pool.query<Record<string, string | number>>(
+type DeletionBlockerSnapshot = {
+  pointBalance: number;
+  activeOrderCount: number;
+  activePaymentCount: number;
+  availableDrawEntitlementCount: number;
+  activeInventoryCount: number;
+  activeShippingRequestCount: number;
+  activeExchangeListingCount: number;
+  activeExchangeOfferCount: number;
+};
+
+type DeletionBlockerFlags = {
+  reassessmentRequired: true;
+  appleReauthorizationRequired?: true;
+};
+
+const DELETION_BLOCKER_COLUMNS: ReadonlyArray<[keyof DeletionBlockerSnapshot, string]> = [
+  ["pointBalance", "point_balance"],
+  ["activeOrderCount", "active_order_count"],
+  ["activePaymentCount", "active_payment_count"],
+  ["availableDrawEntitlementCount", "available_draw_entitlement_count"],
+  ["activeInventoryCount", "active_inventory_count"],
+  ["activeShippingRequestCount", "active_shipping_request_count"],
+  ["activeExchangeListingCount", "active_exchange_listing_count"],
+  ["activeExchangeOfferCount", "active_exchange_offer_count"],
+];
+
+/**
+ * The same blockers as the API's loadDeletionBlockers, with the point balance
+ * already reduced to zero when it equals the forfeiture the customer agreed
+ * to. The snapshot uses the API's camelCase keys so every status surface can
+ * render it without a second shape.
+ */
+async function loadDeletionBlockerSnapshot(
+  queryable: Pick<DatabasePool, "query">,
+  job: Pick<AuthDeletionJob, "user_id" | "deletion_request_id">,
+): Promise<DeletionBlockerSnapshot> {
+  const result = await queryable.query<Record<string, string | number>>(
     `SELECT
        -- A balance the customer explicitly agreed to forfeit is not a blocker;
        -- any other balance, including one changed after that agreement, is.
@@ -173,31 +209,64 @@ async function deletionHasBlockers(pool: DatabasePool, job: Pick<AuthDeletionJob
            AND (offer.status='PENDING' OR (offer.status='ACCEPTED' AND listing.status='MATCHED'))) AS active_exchange_offer_count`,
     [job.user_id, job.deletion_request_id],
   );
-  return Object.values(result.rows[0] ?? {}).some((value) => Number(value) > 0);
+  const row = result.rows[0] ?? {};
+  return Object.fromEntries(DELETION_BLOCKER_COLUMNS.map(([key, column]) => {
+    const value = Number(row[column] ?? 0);
+    return [key, Number.isFinite(value) && value > 0 ? value : 0];
+  })) as DeletionBlockerSnapshot;
 }
 
-async function returnBlockedDeletionToCustomer(pool: DatabasePool, job: AuthDeletionJob): Promise<void> {
-  await withTransaction(pool, async (transaction) => {
-    const transitioned = await transaction.query(
-      `UPDATE account_deletion_requests
-          SET status='BLOCKED',blocker_snapshot=jsonb_build_object('reassessmentRequired',true),
-              auth_deletion_status='NOT_REQUIRED',processing_started_at=NULL,version=version+1
-        WHERE id=$1 AND user_id=$2 AND status='PROCESSING'`,
-      [job.deletion_request_id, job.user_id],
+function deletionSnapshotHasBlockers(snapshot: DeletionBlockerSnapshot): boolean {
+  return Object.values(snapshot).some((value) => value > 0);
+}
+
+/**
+ * Hands a PROCESSING request back to the customer as BLOCKED. The snapshot
+ * carries the real counts plus the flags that explain the return, so the
+ * app, the web status page and the admin console all render one shape.
+ */
+async function returnDeletionToCustomer(
+  transaction: Pick<DatabasePool, "query">,
+  job: AuthDeletionJob,
+  snapshot: DeletionBlockerSnapshot,
+  flags: DeletionBlockerFlags,
+  metadata: Record<string, unknown>,
+): Promise<void> {
+  const blockerSnapshot = JSON.stringify({ ...snapshot, ...flags });
+  const transitioned = await transaction.query(
+    `UPDATE account_deletion_requests
+        SET status='BLOCKED',blocker_snapshot=$3::jsonb,
+            auth_deletion_status='NOT_REQUIRED',processing_started_at=NULL,version=version+1
+      WHERE id=$1 AND user_id=$2 AND status='PROCESSING'`,
+    [job.deletion_request_id, job.user_id, blockerSnapshot],
+  );
+  if (transitioned.rowCount) {
+    await transaction.query(
+      `INSERT INTO account_deletion_request_events
+        (deletion_request_id,user_id,event_type,status,blocker_snapshot,revoked_session_count,
+         correlation_id,idempotency_key,metadata,reason)
+       VALUES($1,$2,'STATUS_CHANGED','BLOCKED',$5::jsonb,0,
+              $3,$4,$6::jsonb,
+              'AUTOMATED_ACCOUNT_DELETION')
+       ON CONFLICT (deletion_request_id,idempotency_key) DO NOTHING`,
+      [
+        job.deletion_request_id, job.user_id, job.id, `worker:${job.id}:blocked`, blockerSnapshot,
+        JSON.stringify({ actor: "SYSTEM_WORKER", externalIdentityDeleted: false, ...metadata }),
+      ],
     );
-    if (transitioned.rowCount) {
-      await transaction.query(
-        `INSERT INTO account_deletion_request_events
-          (deletion_request_id,user_id,event_type,status,blocker_snapshot,revoked_session_count,
-           correlation_id,idempotency_key,metadata,reason)
-         VALUES($1,$2,'STATUS_CHANGED','BLOCKED',jsonb_build_object('reassessmentRequired',true),0,
-                $3,$4,jsonb_build_object('actor','SYSTEM_WORKER','externalIdentityDeleted',false),
-                'AUTOMATED_ACCOUNT_DELETION')
-         ON CONFLICT (deletion_request_id,idempotency_key) DO NOTHING`,
-        [job.deletion_request_id, job.user_id, job.id, `worker:${job.id}:blocked`],
-      );
-    }
-    await transaction.query("DELETE FROM account_auth_deletion_jobs WHERE id=$1", [job.id]);
+  }
+  await transaction.query("DELETE FROM account_auth_deletion_jobs WHERE id=$1", [job.id]);
+}
+
+async function returnBlockedDeletionToCustomer(
+  pool: DatabasePool,
+  job: AuthDeletionJob,
+  snapshot: DeletionBlockerSnapshot,
+  flags: DeletionBlockerFlags = { reassessmentRequired: true },
+  metadata: Record<string, unknown> = {},
+): Promise<void> {
+  await withTransaction(pool, async (transaction) => {
+    await returnDeletionToCustomer(transaction, job, snapshot, flags, metadata);
   });
 }
 
@@ -232,8 +301,22 @@ async function deleteAuthoredMediaObjects(
   }
 }
 
-async function finalizeLocalAccountDeletion(pool: DatabasePool, job: AuthDeletionJob): Promise<void> {
-  await withTransaction(pool, async (transaction) => {
+type LocalFinalizationOutcome = "completed" | "already_completed" | "blocked" | "missing";
+
+/**
+ * The irreversible local step. It runs before the broker identity is deleted,
+ * so a blocker that appeared after the first check hands the request back to
+ * the customer while they can still sign in, instead of leaving it stuck.
+ */
+async function finalizeLocalAccountDeletion(
+  pool: DatabasePool,
+  job: AuthDeletionJob,
+  { appleRevoked }: { appleRevoked: boolean },
+): Promise<LocalFinalizationOutcome> {
+  return withTransaction(pool, async (transaction) => {
+    // Anonymization is not customer activity (migration 0088): the rows keep
+    // their updated_at so commerce retention counts from the last real change.
+    await transaction.query("SET LOCAL dabboba.preserve_updated_at = 'on'");
     const request = await transaction.query<{ status: string; point_forfeiture_acknowledged: number | null }>(
       `SELECT status,point_forfeiture_acknowledged FROM account_deletion_requests
         WHERE id=$1 AND user_id=$2 FOR UPDATE`,
@@ -241,12 +324,9 @@ async function finalizeLocalAccountDeletion(pool: DatabasePool, job: AuthDeletio
     );
     if (!request.rowCount) {
       await transaction.query("DELETE FROM account_auth_deletion_jobs WHERE id=$1", [job.id]);
-      return;
+      return "missing";
     }
-    if (request.rows[0]!.status === "COMPLETED") {
-      await transaction.query("DELETE FROM account_auth_deletion_jobs WHERE id=$1", [job.id]);
-      return;
-    }
+    if (request.rows[0]!.status === "COMPLETED") return "already_completed";
     if (request.rows[0]!.status !== "PROCESSING" && request.rows[0]!.status !== "APPROVED") {
       throw new Error("Account deletion request is not ready for finalization");
     }
@@ -256,6 +336,24 @@ async function finalizeLocalAccountDeletion(pool: DatabasePool, job: AuthDeletio
       "SELECT balance FROM point_accounts WHERE user_id=$1 FOR UPDATE",
       [job.user_id],
     );
+    // Re-read every blocker under the request lock: an order, offer or balance
+    // change since the first check must not become a permanent failure.
+    const recheck = await loadDeletionBlockerSnapshot(transaction, job);
+    if (deletionSnapshotHasBlockers(recheck)) {
+      // An Apple token revoked earlier in this run cannot be revoked twice:
+      // the next request must capture a fresh one through Apple sign-in.
+      if (appleRevoked) {
+        await transaction.query("DELETE FROM apple_auth_credentials WHERE user_id=$1", [job.user_id]);
+      }
+      await returnDeletionToCustomer(
+        transaction, job, recheck,
+        appleRevoked
+          ? { reassessmentRequired: true, appleReauthorizationRequired: true }
+          : { reassessmentRequired: true },
+        { blockerFoundAtFinalization: true, ...(appleRevoked ? { appleReauthorizationRequired: true } : {}) },
+      );
+      return "blocked";
+    }
     const pointBalance = Number(points.rows[0]?.balance ?? 0);
     let pointsForfeited = 0;
     if (pointBalance > 0) {
@@ -396,15 +494,17 @@ async function finalizeLocalAccountDeletion(pool: DatabasePool, job: AuthDeletio
         WHERE id=$1`,
       [job.user_id],
     );
+    // The broker identity is deleted after this commit; its status stays
+    // PENDING until that external call succeeds.
     await transaction.query(
       `UPDATE account_deletion_requests
           SET status='COMPLETED',completed_at=COALESCE(completed_at,now()),
               decided_at=COALESCE(decided_at,now()),
               decided_by_admin_id=NULL,decision_reason='AUTOMATED_ACCOUNT_DELETION',
-              auth_deletion_status=$2,auth_deleted_at=CASE WHEN $2='COMPLETED' THEN now() ELSE NULL END,
+              auth_deletion_status=$2,auth_deleted_at=NULL,
               version=version+1
         WHERE id=$1 AND status IN ('PROCESSING','APPROVED')`,
-      [job.deletion_request_id, job.supabase_user_id ? "COMPLETED" : "NOT_REQUIRED"],
+      [job.deletion_request_id, job.supabase_user_id ? "PENDING" : "NOT_REQUIRED"],
     );
     await transaction.query(
       `INSERT INTO account_deletion_request_events
@@ -412,7 +512,7 @@ async function finalizeLocalAccountDeletion(pool: DatabasePool, job: AuthDeletio
          correlation_id,idempotency_key,metadata,reason)
        VALUES($1,$2,'STATUS_CHANGED','COMPLETED','{}'::jsonb,0,$3::text,$4,
               jsonb_build_object('actor','SYSTEM_WORKER','personalDataAnonymized',true,
-                'externalIdentityDeleted',$5::boolean,
+                'externalIdentityDeletionPending',$5::boolean,
                 'appleTokenRevokedAt',(SELECT apple_revoked_at FROM account_auth_deletion_jobs WHERE id=$3::uuid),
                 'retainedData','LEGAL_AND_TRANSACTION_RECORDS',
                 'retainedRecordsSeparated',$6::integer,
@@ -424,6 +524,31 @@ async function finalizeLocalAccountDeletion(pool: DatabasePool, job: AuthDeletio
         separatedRecords, pointsForfeited,
       ],
     );
+    return "completed";
+  });
+}
+
+/** Records the broker identity deletion on the completed request and ends the job. */
+async function completeExternalIdentityDeletion(pool: DatabasePool, job: AuthDeletionJob): Promise<void> {
+  await withTransaction(pool, async (transaction) => {
+    if (job.supabase_user_id) {
+      await transaction.query(
+        `UPDATE account_deletion_requests
+            SET auth_deletion_status='COMPLETED',auth_deleted_at=COALESCE(auth_deleted_at,now())
+          WHERE id=$1 AND user_id=$2 AND status='COMPLETED'`,
+        [job.deletion_request_id, job.user_id],
+      );
+      await transaction.query(
+        `INSERT INTO account_deletion_request_events
+          (deletion_request_id,user_id,event_type,status,blocker_snapshot,revoked_session_count,
+           correlation_id,idempotency_key,metadata,reason)
+         VALUES($1,$2,'STATUS_CHANGED','COMPLETED','{}'::jsonb,0,$3::text,$4,
+                jsonb_build_object('actor','SYSTEM_WORKER','externalIdentityDeleted',true),
+                'AUTOMATED_ACCOUNT_DELETION')
+         ON CONFLICT (deletion_request_id,idempotency_key) DO NOTHING`,
+        [job.deletion_request_id, job.user_id, job.id, `worker:${job.id}:auth-deleted`],
+      );
+    }
     await transaction.query("DELETE FROM account_auth_deletion_jobs WHERE id=$1", [job.id]);
   });
 }
@@ -469,14 +594,27 @@ export async function cleanupSupabaseAuthUsers(
 
     try {
       if (!job.external_deleted_at) {
-        if (await deletionHasBlockers(pool, job)) {
-          await returnBlockedDeletionToCustomer(pool, job);
+        const blockers = await loadDeletionBlockerSnapshot(pool, job);
+        if (deletionSnapshotHasBlockers(blockers)) {
+          // A token already revoked by an earlier attempt of this job cannot
+          // serve the next request; that request needs a fresh Apple sign-in.
+          await withTransaction(pool, async (transaction) => {
+            if (job.apple_revoked_at) {
+              await transaction.query("DELETE FROM apple_auth_credentials WHERE user_id=$1", [job.user_id]);
+            }
+            await returnDeletionToCustomer(
+              transaction, job, blockers,
+              job.apple_revoked_at
+                ? { reassessmentRequired: true, appleReauthorizationRequired: true }
+                : { reassessmentRequired: true },
+              job.apple_revoked_at ? { appleReauthorizationRequired: true } : {},
+            );
+          });
           result.deferred += 1;
           continue;
         }
-      }
-      if (!job.apple_revoked_at) {
-        if (job.has_apple_identity) {
+        let appleRevoked = Boolean(job.apple_revoked_at);
+        if (!job.apple_revoked_at && job.has_apple_identity) {
           if (!config.appleRevocation || !appleClient) {
             throw new Error("Apple token revocation is not configured");
           }
@@ -486,16 +624,37 @@ export async function cleanupSupabaseAuthUsers(
               WHERE user_id=$1 AND credential_kind='REFRESH_TOKEN'`,
             [job.user_id],
           );
-          if (!credential.rowCount) throw new Error("Apple token revocation credential is unavailable");
+          if (!credential.rowCount) {
+            // Apple requires the stored refresh token to revoke the link. A
+            // customer who signed in before that token was captured must sign
+            // in with Apple once more; retrying here would never succeed.
+            await returnBlockedDeletionToCustomer(
+              pool, job, blockers,
+              { reassessmentRequired: true, appleReauthorizationRequired: true },
+              { appleReauthorizationRequired: true },
+            );
+            result.deferred += 1;
+            continue;
+          }
           const refreshToken = decryptAppleRefreshToken(credential.rows[0]!, config.appleRevocation, job.user_id);
           await appleClient.revokeRefreshToken(refreshToken);
           await pool.query(
             "UPDATE account_auth_deletion_jobs SET apple_revoked_at=now(),updated_at=now() WHERE id=$1",
             [job.id],
           );
+          appleRevoked = true;
         }
-      }
-      if (!job.external_deleted_at) {
+        if (!mediaStore) throw new Error("Account deletion media storage cleanup is not configured");
+        await deleteAuthoredMediaObjects(pool, mediaStore, job.user_id, shouldContinue);
+        if (!shouldContinue()) throw new Error("Worker run deadline reached before account deletion finalization");
+        // Local finalization is the point of no return and runs before the
+        // broker identity is deleted, so a late blocker still hands the
+        // request back to a customer who can sign in.
+        const finalized = await finalizeLocalAccountDeletion(pool, job, { appleRevoked });
+        if (finalized === "blocked" || finalized === "missing") {
+          result.deferred += 1;
+          continue;
+        }
         if (job.supabase_user_id) {
           if (!client) throw new Error("Supabase Auth admin deletion is not configured");
           await client.deleteUser(job.supabase_user_id);
@@ -505,10 +664,7 @@ export async function cleanupSupabaseAuthUsers(
           [job.id],
         );
       }
-      if (!mediaStore) throw new Error("Account deletion media storage cleanup is not configured");
-      await deleteAuthoredMediaObjects(pool, mediaStore, job.user_id, shouldContinue);
-      if (!shouldContinue()) throw new Error("Worker run deadline reached before account deletion finalization");
-      await finalizeLocalAccountDeletion(pool, job);
+      await completeExternalIdentityDeletion(pool, job);
       result.completed += 1;
     } catch (error) {
       const retryAt = new Date(Date.now() + retryDelayMs(job.attempts, config.jobBackoffMs));
@@ -522,6 +678,73 @@ export async function cleanupSupabaseAuthUsers(
       logger.warn(
         { accountAuthDeletionJobId: job.id, attempts: job.attempts },
         "Account identity deletion was deferred for retry",
+      );
+    }
+  }
+  return result;
+}
+
+type OrphanCleanupRow = { id: string; supabase_user_id: string; attempts: number };
+
+/**
+ * Deletes broker users that a web account-deletion proof created for a person
+ * who has no DABBOBA account (migration 0089). The Admin endpoint treats an
+ * already absent user as done, so a retry after a lost response is safe.
+ */
+export async function cleanupOrphanSupabaseAuthUsers(
+  pool: DatabasePool,
+  config: WorkerConfig,
+  logger: Logger,
+  shouldContinue: () => boolean = () => true,
+  client: SupabaseAuthDeletionClient | null = config.supabaseAuthAdmin
+    ? new HttpSupabaseAuthDeletionClient(config.supabaseAuthAdmin.url, config.supabaseAuthAdmin.secretKey)
+    : null,
+): Promise<{ completed: number; deferred: number }> {
+  const result = { completed: 0, deferred: 0 };
+  for (let index = 0; index < config.outboxBatchSize && shouldContinue(); index += 1) {
+    const claimed = await pool.query<OrphanCleanupRow>(
+      `WITH candidate AS (
+         SELECT id
+           FROM supabase_auth_orphan_cleanups
+          WHERE available_at<=now()
+            AND (status='PENDING' OR (status='PROCESSING' AND lease_expires_at<=now()))
+          ORDER BY available_at,created_at,id
+          FOR UPDATE SKIP LOCKED
+          LIMIT 1
+       )
+       UPDATE supabase_auth_orphan_cleanups cleanup
+          SET status='PROCESSING',attempts=attempts+1,
+              lease_expires_at=now()+interval '5 minutes',updated_at=now(),last_error=NULL
+         FROM candidate
+        WHERE cleanup.id=candidate.id
+       RETURNING cleanup.id,cleanup.supabase_user_id,cleanup.attempts`,
+    );
+    const job = claimed.rows[0];
+    if (!job) break;
+    try {
+      // Never delete a broker user that a DABBOBA account links to after all.
+      const linked = await pool.query(
+        "SELECT 1 FROM auth_identities WHERE provider_subject LIKE '%#' || $1::text LIMIT 1",
+        [job.supabase_user_id],
+      );
+      if (!linked.rowCount) {
+        if (!client) throw new Error("Supabase Auth admin deletion is not configured");
+        await client.deleteUser(job.supabase_user_id);
+      }
+      await pool.query("DELETE FROM supabase_auth_orphan_cleanups WHERE id=$1", [job.id]);
+      result.completed += 1;
+    } catch (error) {
+      const retryAt = new Date(Date.now() + retryDelayMs(job.attempts, config.jobBackoffMs));
+      await pool.query(
+        `UPDATE supabase_auth_orphan_cleanups
+            SET status='PENDING',available_at=$2,lease_expires_at=NULL,last_error=$3,updated_at=now()
+          WHERE id=$1`,
+        [job.id, retryAt, persistedErrorIdentity(error)],
+      );
+      result.deferred += 1;
+      logger.warn(
+        { supabaseAuthOrphanCleanupId: job.id, attempts: job.attempts },
+        "Orphaned broker user deletion was deferred for retry",
       );
     }
   }
