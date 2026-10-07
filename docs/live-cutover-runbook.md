@@ -31,7 +31,7 @@
    `../.dabboba-launch/supabase-edge-live.env`로 복사하고 권한을 `0600`으로 둔다.
 2. 다음만 바꾸거나 추가한다:
    - `DABBOBA_API_COMMERCE_MODE=LIVE`, `DABBOBA_API_PAYMENT_PROVIDER=PORTONE_V2_INICIS`
-   - `DABBOBA_API_CUSTOMER_AUTH_ENABLED_PROVIDERS`(KAKAO·NAVER·GOOGLE·APPLE 필수, PHONE은 `DABBOBA_PHONE_LOGIN_READY=true`일 때만)
+   - `DABBOBA_API_CUSTOMER_AUTH_ENABLED_PROVIDERS`(KAKAO·NAVER·GOOGLE·APPLE. 2026-10-07 결정으로 PHONE은 넣지 않으며 `DABBOBA_PHONE_LOGIN_READY`는 false로 둔다)
    - PortOne LIVE 값과 결제·워커 비밀값, 워커 대사 설정(`PAYMENT_RECONCILIATION_PROVIDER=PORTONE_API` 등)
    - 선택: `DABBOBA_API_PORTONE_KCP_CHANNEL_KEY`, 로그 수준, Expo 푸시 토큰
 3. DB 주소·세션 pepper·워커 비밀값·저장소 키·Apple 키 등 나머지 값은 PRELAUNCH 프로필과

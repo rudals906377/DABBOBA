@@ -415,6 +415,13 @@ When any text-entry control loses focus, dismiss the simulated keyboard. If the 
   - Publish just before LIVE in one deployment with: the new policy version, removal of the 맞춤 추천 toggle with withdrawal of stored consents, the 90-day session-record retention, and the operator's retention-policy approval.
   - A later counsel opinion overrides these texts.
 
+## Owner Launch Decisions — 2026-10-07
+
+- Customer login is Kakao, Naver, Google and Apple (iPhone only). Phone OTP is not offered: never put `PHONE` in `CUSTOMER_AUTH_ENABLED_PROVIDERS`, keep `DABBOBA_PHONE_LOGIN_READY=false`, and skip the Twilio/Phone provider setup. This supersedes the phone-OTP part of the 2026-09-25 decision; legacy PHONE and EMAIL identities and their data stay preserved, and email OTP remains unavailable as a login.
+- The LIVE terms, privacy policy and internal management plan take effect on 2026-10-07 (policy version `2026-10-07`). The internal plan's approving representative is 김정미.
+- Shipping uses convenience-store or individual parcel services per shipment; there is no contracted courier yet. The privacy policy names the courier generically and gets a new version naming the company once a contract exists.
+- Still to be decided with the owner: the support-mail receiving service (`support@dabboba.net` forwarding target) and the Supabase storage region, the last two `{{…}}` fields in the privacy policy.
+
 ## First Launch Scope And Product Gallery — 2026-10-01
 
 - First launch contains the eight operator-confirmed gacha products only. Kuji is deferred: preserve its code, history and empty/coming-soon shop, but do not require a sellable Kuji product in launch verification or activate Kuji sales. Do not infer an exemption from any gacha payment, legal, authentication or inventory gate.
