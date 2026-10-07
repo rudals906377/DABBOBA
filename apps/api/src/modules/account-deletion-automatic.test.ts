@@ -34,18 +34,22 @@ test("account legal status stays scoped to login policies when other immutable p
   assert.match(source, /source: "MOBILE_RECONSENT"/);
 });
 
-test("worker verifies blockers and external deletion before local anonymization", async () => {
+test("worker verifies blockers, finalizes locally with a recheck, and deletes the broker identity last", async () => {
   const source = await workerSource;
-  const blockers = source.indexOf("await deletionHasBlockers");
+  const blockers = source.indexOf("await loadDeletionBlockerSnapshot(pool, job)");
   const appleRevoke = source.indexOf("await appleClient.revokeRefreshToken");
   const appleMarker = source.indexOf("SET apple_revoked_at=now()");
-  const externalDelete = source.indexOf("await client.deleteUser");
-  const externalMarker = source.indexOf("SET external_deleted_at=now()");
   const storageCleanup = source.indexOf("await deleteAuthoredMediaObjects");
   const localFinalize = source.indexOf("await finalizeLocalAccountDeletion");
-  assert.ok(blockers >= 0 && blockers < externalDelete);
-  assert.ok(blockers < appleRevoke && appleRevoke < appleMarker && appleMarker < externalDelete);
-  assert.ok(externalDelete < externalMarker && externalMarker < storageCleanup && storageCleanup < localFinalize);
+  const externalDelete = source.indexOf("await client.deleteUser");
+  const externalMarker = source.indexOf("SET external_deleted_at=now()");
+  assert.ok(blockers >= 0 && blockers < appleRevoke && appleRevoke < appleMarker);
+  assert.ok(appleMarker < storageCleanup && storageCleanup < localFinalize);
+  // The irreversible local step precedes the broker deletion, so a late
+  // blocker returns a request whose customer can still sign in.
+  assert.ok(localFinalize < externalDelete && externalDelete < externalMarker);
+  assert.match(source, /const recheck = await loadDeletionBlockerSnapshot\(transaction, job\)/);
+  assert.match(source, /appleReauthorizationRequired: true/);
   assert.match(source, /response\.ok \|\| response\.status === 404/);
   assert.match(source, /DELETE FROM auth_identities WHERE user_id=\$1/);
   assert.match(source, /"PROFILE",[\s\S]*"INQUIRY",[\s\S]*"EXCHANGE",[\s\S]*"CATALOG_REQUEST",[\s\S]*"WANTED_REQUEST"/);

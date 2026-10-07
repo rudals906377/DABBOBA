@@ -165,7 +165,7 @@ test("exchange mutations recheck listing and storage expiry at locked write boun
   assert.match(source, /iu\.storage_expires_at>now\(\) AS storage_active/);
   assert.match(
     source,
-    /WHERE id=ANY\(\$1::uuid\[\]\) AND owner_id=\$2 AND status='OWNED'\s+AND storage_expires_at>now\(\)/,
+    /WHERE iu\.id=ANY\(\$1::uuid\[\]\) AND iu\.owner_id=\$2 AND iu\.status='OWNED'\s+AND iu\.storage_expires_at>now\(\)/,
   );
   assert.match(source, /expires_at,expires_at<=now\(\) AS is_expired[\s\S]{0,160}FOR UPDATE/);
   assert.match(

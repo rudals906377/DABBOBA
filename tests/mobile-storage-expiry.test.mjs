@@ -75,11 +75,11 @@ test("expired inventory stays visible but is never actionable", () => {
   );
   assert.match(
     accountApiSource,
-    /UPDATE inventory_units SET status='SHIPPING'[\s\S]*?storage_expires_at>now\(\)/,
+    /UPDATE inventory_units iu SET status='SHIPPING'[\s\S]*?storage_expires_at>now\(\)/,
   );
   assert.match(
     accountApiSource,
-    /UPDATE inventory_units SET status='POINT_RETURNED'[\s\S]*?storage_expires_at>now\(\)/,
+    /UPDATE inventory_units iu SET status='POINT_RETURNED'[\s\S]*?storage_expires_at>now\(\)/,
   );
   assert.match(profileSectionSource, /item\.status === "OWNED" \|\| item\.status === "EXPIRED_HOLD"/);
   assert.match(profileSectionSource, /item\.status === "EXPIRED_HOLD"[\s\S]*?자동 폐기되지 않아요/);

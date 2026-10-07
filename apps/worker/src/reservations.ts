@@ -17,6 +17,10 @@ type OrderPaymentRow = {
   shipping_request_id: string | null;
   created_at: Date;
   provider_observed_settled: boolean;
+  /** Set once the customer opened the PortOne window for this payment. */
+  pg_attempt_started_at: Date | null;
+  /** A worker reconciliation of this payment version verified no charge. */
+  provider_verified_no_charge: boolean;
 };
 
 type ReservationRow = {
@@ -26,7 +30,24 @@ type ReservationRow = {
   expires_at: Date;
 };
 
-export type ReconciliationReason = "EXPIRED_ACTIVE_RESERVATION" | "PROVIDER_OBSERVED_SETTLED";
+export type ReconciliationReason =
+  | "EXPIRED_ACTIVE_RESERVATION"
+  | "PROVIDER_OBSERVED_SETTLED"
+  | "OPEN_PAYMENT_WINDOW_UNVERIFIED";
+
+/**
+ * How long a claimed PortOne window is left alone before the sweep demands a
+ * verified provider read: the worker's default window validity plus a margin
+ * for its own schedule.
+ */
+export const OPEN_PAYMENT_WINDOW_WAIT_MINUTES = 35;
+
+export type PaymentWindowState = {
+  startedAt: Date | null;
+  verifiedNoCharge: boolean;
+  now: Date;
+  waitMinutes?: number;
+};
 
 export type ExpiryOutcome =
   | { status: "missing" | "not_due" | "already_resolved"; released: 0 }
@@ -34,7 +55,7 @@ export type ExpiryOutcome =
   | { status: "expired"; released: number };
 
 /** Provider states that mean money may already have moved for this payment. */
-export const PROVIDER_SETTLED_OBSERVATIONS = ["PAID", "AUTHORIZED"] as const;
+export const PROVIDER_SETTLED_OBSERVATIONS = ["PAID", "AUTHORIZED", "REFUNDED"] as const;
 
 /**
  * Decide the expiry action for a locked order. A locally PENDING payment whose
@@ -48,11 +69,22 @@ export function guardedExpiryAction(
   paymentStatus: string,
   hasExpiredReservation: boolean,
   providerObservedSettled: boolean,
+  paymentWindow: PaymentWindowState | null = null,
 ): { action: "release" | "wait" } | { action: "reconcile"; reason: ReconciliationReason } {
   const action = reservationExpiryAction(orderStatus, paymentStatus, hasExpiredReservation);
   if (action === "reconcile") return { action, reason: "EXPIRED_ACTIVE_RESERVATION" };
   if (action === "release" && providerObservedSettled) {
     return { action: "reconcile", reason: "PROVIDER_OBSERVED_SETTLED" };
+  }
+  // A locally PENDING payment whose PortOne window was opened may still be
+  // approved after the reservation deadline. Cancelling it here would leave a
+  // charge without an order, so the release waits for the worker's verified
+  // no-charge read; past the window validity it raises the durable alert.
+  if (action === "release" && paymentStatus === "PENDING"
+    && paymentWindow?.startedAt && !paymentWindow.verifiedNoCharge) {
+    const waitMs = (paymentWindow.waitMinutes ?? OPEN_PAYMENT_WINDOW_WAIT_MINUTES) * 60_000;
+    if (paymentWindow.now.getTime() - paymentWindow.startedAt.getTime() < waitMs) return { action: "wait" };
+    return { action: "reconcile", reason: "OPEN_PAYMENT_WINDOW_UNVERIFIED" };
   }
   return { action };
 }
@@ -129,6 +161,7 @@ async function expireLockedOrder(
       order.payment_status,
       due,
       order.provider_observed_settled,
+      { startedAt: order.pg_attempt_started_at, verifiedNoCharge: order.provider_verified_no_charge, now },
     );
     if (decision.action === "wait") return { status: "not_due", released: 0 };
     if (decision.action === "reconcile") {
@@ -193,6 +226,7 @@ async function expireLockedOrder(
     order.payment_status,
     hasExpired,
     order.provider_observed_settled,
+    { startedAt: order.pg_attempt_started_at, verifiedNoCharge: order.provider_verified_no_charge, now },
   );
   if (decision.action === "wait") return { status: "not_due", released: 0 };
   if (decision.action === "reconcile") {
@@ -252,15 +286,18 @@ export async function expireOrderReservations(
     if (!shouldContinue()) throw new Error("Worker run deadline reached before reservation transaction");
     const linkedKujiRoom = await lockLinkedKujiRoomForOrder(client, orderId);
     if (!shouldContinue()) throw new Error("Worker run deadline reached after kuji room lock");
-    const payment = await client.query<{ id: string; status: string; version: number }>(
-      "SELECT id,status,version FROM payments WHERE order_id=$1 FOR UPDATE",
+    const payment = await client.query<{ id: string; status: string; version: number; pg_attempt_started_at: Date | null }>(
+      "SELECT id,status,version,pg_attempt_started_at FROM payments WHERE order_id=$1 FOR UPDATE",
       [orderId],
     );
     if (!payment.rowCount) return { status: "missing", released: 0 };
     // The payment row is locked, so its version cannot advance underneath this
     // check; a reconciliation recorded for an older version is stale evidence.
-    const observation = await client.query<{ settled: boolean }>(
-      `SELECT last_observed_state = ANY($3::text[]) AS settled
+    // RECONCILED on the current version is the worker's verified no-charge
+    // read of an opened window (expired or never submitted).
+    const observation = await client.query<{ settled: boolean; verified_no_charge: boolean }>(
+      `SELECT last_observed_state = ANY($3::text[]) AS settled,
+              last_outcome='RECONCILED' AS verified_no_charge
          FROM worker_payment_reconciliations
         WHERE payment_id=$1 AND payment_version=$2`,
       [payment.rows[0]!.id, payment.rows[0]!.version, [...PROVIDER_SETTLED_OBSERVATIONS]],
@@ -275,6 +312,8 @@ export async function expireOrderReservations(
       payment_id: payment.rows[0]!.id,
       payment_status: payment.rows[0]!.status,
       provider_observed_settled: observation.rows[0]?.settled === true,
+      pg_attempt_started_at: payment.rows[0]!.pg_attempt_started_at,
+      provider_verified_no_charge: observation.rows[0]?.verified_no_charge === true,
     }, now, shouldContinue);
     if (outcome.status === "expired" && linkedKujiRoom) {
       if (!shouldContinue()) throw new Error("Worker run deadline reached before kuji room release");
@@ -319,6 +358,26 @@ export async function expireReservationBatch(
         AND (
           (
             p.status IN ('PENDING','FAILED','CANCELLED')
+            -- A PENDING payment with an opened PortOne window is released only
+            -- after the worker verified no charge for this payment version.
+            -- Until then it waits; once alerted it stops being re-examined.
+            AND NOT (
+              p.status='PENDING' AND p.pg_attempt_started_at IS NOT NULL
+              AND NOT EXISTS (
+                SELECT 1 FROM worker_payment_reconciliations r
+                 WHERE r.payment_id=p.id AND r.payment_version=p.version
+                   AND r.last_outcome='RECONCILED'
+              )
+              AND (
+                p.pg_attempt_started_at > $1 - ($3::integer * interval '1 minute')
+                OR EXISTS (
+                  SELECT 1 FROM outbox_events event
+                   WHERE event.aggregate_type='PAYMENT'
+                     AND event.aggregate_id=p.id::text
+                     AND event.event_type='payment.reservation_expired_requires_reconciliation'
+                )
+              )
+            )
             -- A releasable row whose provider was already observed settled has
             -- been turned into one durable alert; stop re-examining it until
             -- the payment version changes.
@@ -326,7 +385,7 @@ export async function expireReservationBatch(
               EXISTS (
                 SELECT 1 FROM worker_payment_reconciliations r
                  WHERE r.payment_id=p.id AND r.payment_version=p.version
-                   AND r.last_observed_state IN ('PAID','AUTHORIZED')
+                   AND r.last_observed_state IN ('PAID','AUTHORIZED','REFUNDED')
               )
               AND EXISTS (
                 SELECT 1 FROM outbox_events event
@@ -350,7 +409,7 @@ export async function expireReservationBatch(
         CASE WHEN p.status IN ('PENDING','FAILED','CANCELLED') THEN 0 ELSE 1 END,
         o.id
       LIMIT $2`,
-    [now, batchSize],
+    [now, batchSize, OPEN_PAYMENT_WINDOW_WAIT_MINUTES],
   );
 
   const summary = { examined: 0, expired: 0, released: 0, reconciliation: 0 };

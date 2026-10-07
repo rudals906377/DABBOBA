@@ -49,6 +49,32 @@ test("whole-order gacha completion returns only every original entitlement's imm
   assert.deepEqual(snapshot, before);
 });
 
+test("an applied partial refund of unused draws settles the order: refunded entitlements are named, never required to hold a result", () => {
+  const snapshot = completionRow();
+  snapshot.entitlements[1] = {
+    ...snapshot.entitlements[1]!, status: "CANCELLED", consumedAt: null, resultId: null, resultUserId: null,
+    resultProductId: null, resultVersion: null, committedAt: null, partialRefundApplied: true,
+  };
+  const result = paidGachaCompletionResponse(snapshot);
+  assert.deepEqual(result, {
+    orderId, userId, productId: "paid-gacha", probabilityVersion: 7,
+    serverNow: "2026-09-06T00:00:05.000Z",
+    results: [{ entitlementId: firstId, resultId: roomId, committedAt: "2026-09-06T00:00:04.000Z" }],
+    refundedEntitlementIds: [secondId],
+  });
+  // A refunded entitlement that somehow still carries a result is not a clean proof.
+  const contradictory = completionRow();
+  contradictory.entitlements[1] = { ...contradictory.entitlements[1]!, status: "CANCELLED", partialRefundApplied: true };
+  assert.throws(() => paidGachaCompletionResponse(contradictory), (error: unknown) => error instanceof AppError && error.statusCode === 409);
+  // An order whose every draw was refunded is a full refund, not a completion.
+  const allRefunded = completionRow();
+  allRefunded.entitlements = allRefunded.entitlements.map((item) => ({
+    ...item, status: "CANCELLED", consumedAt: null, resultId: null, resultUserId: null,
+    resultProductId: null, resultVersion: null, committedAt: null, partialRefundApplied: true,
+  }));
+  assert.throws(() => paidGachaCompletionResponse(allRefunded), (error: unknown) => error instanceof AppError && error.statusCode === 409);
+});
+
 test("partial, unbacked, foreign, mismatched, cancelled and unpaid completion snapshots fail closed", () => {
   const changes: Array<(snapshot: PaidGachaCompletionRow) => void> = [
     (snapshot) => { snapshot.quantity = 3; },

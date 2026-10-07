@@ -40,11 +40,19 @@ export type PortOneV2ErrorCode =
   | "PAYMENT_CONTRACT_MISMATCH"
   | "CANCELLATION_INDETERMINATE";
 
+/** What PortOne reported for a payment whose contract did not match ours. */
+export type PortOneMismatchObservation = {
+  status: PortOnePaymentStatus;
+  paid: number;
+  cancelled: number;
+};
+
 export class PortOneV2Error extends Error {
   readonly code: PortOneV2ErrorCode;
   readonly indeterminate: boolean;
   readonly httpStatus: number | null;
   readonly providerErrorType: string | null;
+  readonly observation: PortOneMismatchObservation | null;
 
   constructor(
     code: PortOneV2ErrorCode,
@@ -53,6 +61,7 @@ export class PortOneV2Error extends Error {
       indeterminate?: boolean;
       httpStatus?: number;
       providerErrorType?: string | undefined;
+      observation?: PortOneMismatchObservation;
     } = {},
   ) {
     super(message);
@@ -62,7 +71,20 @@ export class PortOneV2Error extends Error {
     this.indeterminate = options.indeterminate ?? false;
     this.httpStatus = options.httpStatus ?? null;
     this.providerErrorType = options.providerErrorType ?? null;
+    this.observation = options.observation ?? null;
   }
+}
+
+/**
+ * True when a mismatching PortOne payment still shows money: the record must
+ * be reviewed by an operator and never swept away as an unpaid order.
+ */
+export function portOneMismatchShowsMoney(error: unknown): error is PortOneV2Error & { observation: PortOneMismatchObservation } {
+  return error instanceof PortOneV2Error
+    && error.code === "PAYMENT_CONTRACT_MISMATCH"
+    && error.observation !== null
+    && (error.observation.paid > 0 || error.observation.cancelled > 0
+      || error.observation.status === "PAID" || error.observation.status === "PARTIAL_CANCELLED");
 }
 
 /**
@@ -399,6 +421,7 @@ function normalizePayment(
     throw new PortOneV2Error(
       "PAYMENT_CONTRACT_MISMATCH",
       "The PortOne payment does not match the expected V2 card channel contract.",
+      { observation: { status, paid, cancelled } },
     );
   }
 

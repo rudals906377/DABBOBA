@@ -3,7 +3,7 @@ import { isDeepStrictEqual } from "node:util";
 import type { WorkerConfig } from "./config.js";
 import type { Logger } from "./logger.js";
 import { cleanupMediaBatch, type MediaStore } from "./media.js";
-import { cleanupSupabaseAuthUsers } from "./supabase-auth-deletion.js";
+import { cleanupOrphanSupabaseAuthUsers, cleanupSupabaseAuthUsers } from "./supabase-auth-deletion.js";
 import {
   ensureNotification,
   shouldDeliverNotificationExternally,
@@ -152,8 +152,8 @@ export async function processWorkerJob(dependencies: JobDependencies, raw: unkno
         new Date(),
         dependencies.shouldContinue,
       );
-    case "account-auth.cleanup":
-      return cleanupSupabaseAuthUsers(
+    case "account-auth.cleanup": {
+      const deletions = await cleanupSupabaseAuthUsers(
         dependencies.pool,
         dependencies.config,
         dependencies.logger,
@@ -161,6 +161,14 @@ export async function processWorkerJob(dependencies: JobDependencies, raw: unkno
         undefined,
         dependencies.mediaStore,
       );
+      const orphans = await cleanupOrphanSupabaseAuthUsers(
+        dependencies.pool,
+        dependencies.config,
+        dependencies.logger,
+        dependencies.shouldContinue,
+      );
+      return { ...deletions, orphans };
+    }
     case "media.cleanup":
       return cleanupMediaBatch(
         dependencies.pool,

@@ -730,10 +730,16 @@ export async function registerAdminCommerceRoutes(app: FastifyInstance, context:
       if (!idem.fresh) return { replay: true, statusCode: idem.statusCode, body: idem.body };
       // Lock a linked shipping-fee order before its request, in the same order as the
       // payment webhook, so a refund review observed concurrently cannot be bypassed.
-      const feeOrder = await client.query<{ status: string }>(
-        "SELECT status FROM orders WHERE shipping_request_id=$1 AND order_kind='SHIPPING_FEE' FOR UPDATE",
+      const feeOrder = await client.query<{ id: string; status: string; user_id: string }>(
+        "SELECT id,status,user_id FROM orders WHERE shipping_request_id=$1 AND order_kind='SHIPPING_FEE' FOR UPDATE",
         [shippingRequestId],
       );
+      const feePayment = feeOrder.rowCount
+        ? await client.query<{ id: string; status: string }>(
+          "SELECT id,status FROM payments WHERE order_id=$1 FOR UPDATE",
+          [feeOrder.rows[0]!.id],
+        )
+        : null;
       const locked = await client.query<{
         id: string; user_id: string; status: ShippingStatus; tracking_carrier: string | null; tracking_number: string | null;
         shipped_at: Date | null; version: number; updated_at: Date;
@@ -763,6 +769,28 @@ export async function registerAdminCommerceRoutes(app: FastifyInstance, context:
         ]);
         if (transitioned.rowCount !== inventory.rowCount) throw conflict("배송 종료 처리 중 상품 상태가 변경되었습니다.");
       }
+      // An operator cancellation returns the paid delivery fee: the fee order is
+      // frozen for the admin refund flow (the late-refund path accepts a
+      // cancelled shipping request) instead of silently keeping the money.
+      let feeRefundReviewOpened = false;
+      const paidFee = feeOrder.rows[0];
+      const paidFeePayment = feePayment?.rows[0];
+      if (status === "CANCELLED" && paidFee && paidFeePayment && paidFee.status === "PAID" && paidFeePayment.status === "PAID") {
+        const frozenPayment = await client.query(
+          "UPDATE payments SET status='REFUND_REVIEW',version=version+1 WHERE id=$1 AND status='PAID'",
+          [paidFeePayment.id],
+        );
+        const frozenOrder = await client.query(
+          "UPDATE orders SET status='REFUND_REVIEW',cancelled_at=COALESCE(cancelled_at,now()),version=version+1 WHERE id=$1 AND status='PAID'",
+          [paidFee.id],
+        );
+        if (frozenPayment.rowCount !== 1 || frozenOrder.rowCount !== 1) throw conflict("배송비 결제 상태가 변경되어 취소를 완료하지 못했습니다.");
+        await writeOutbox(client, request.id, {
+          aggregateType: "PAYMENT", aggregateId: paidFeePayment.id, eventType: "payment.shipping_fee_refund_required",
+          payload: { paymentId: paidFeePayment.id, orderId: paidFee.id, shippingRequestId, userId: paidFee.user_id, reason: "OPERATOR_CANCELLED_SHIPPING" },
+        });
+        feeRefundReviewOpened = true;
+      }
       const nextCarrier = status === "SHIPPED" ? trackingCarrier : status === "DELIVERED" ? before.tracking_carrier : null;
       const nextTracking = status === "SHIPPED" ? trackingNumber : status === "DELIVERED" ? before.tracking_number : null;
       const nextShippedAt = status === "SHIPPED" ? new Date() : status === "DELIVERED" ? before.shipped_at : null;
@@ -788,7 +816,7 @@ export async function registerAdminCommerceRoutes(app: FastifyInstance, context:
         action: "SHIPPING_STATUS_CHANGED", targetType: "SHIPPING_REQUEST", targetId: shippingRequestId, reason,
         before: { status: before.status, trackingCarrier: before.tracking_carrier, trackingNumber: before.tracking_number, version: before.version },
         after: { status: after.status, trackingCarrier: after.tracking_carrier, trackingNumber: after.tracking_number, version: after.version },
-        metadata: { eventId: event.rows[0]!.id, inventoryUnitCount: inventory.rowCount },
+        metadata: { eventId: event.rows[0]!.id, inventoryUnitCount: inventory.rowCount, feeRefundReviewOpened },
       });
       await writeOutbox(client, request.id, {
         aggregateType: "SHIPPING_REQUEST", aggregateId: shippingRequestId, eventType: `shipping.${status.toLocaleLowerCase("en-US")}`,

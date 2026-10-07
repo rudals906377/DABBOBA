@@ -4564,7 +4564,7 @@ export interface components {
             probabilityVersion: number;
             /** Format: date-time */
             serverNow: string;
-            /** @description Exactly one existing immutable result for every original paid-order entitlement, in original entitlement order. */
+            /** @description Exactly one existing immutable result for every original paid-order entitlement that was not refunded, in original entitlement order. */
             results: {
                 /** Format: uuid */
                 entitlementId: string;
@@ -4573,6 +4573,8 @@ export interface components {
                 /** Format: date-time */
                 committedAt: string;
             }[];
+            /** @description Original entitlements cancelled by an applied operator partial refund of unused draws. Present only when at least one draw was refunded; results plus these cover every original entitlement. */
+            refundedEntitlementIds?: string[];
         };
         PaidKujiDrawRecovery: {
             /** Format: uuid */

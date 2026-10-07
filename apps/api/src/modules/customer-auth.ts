@@ -153,6 +153,38 @@ async function applyVerifiedContactClaims(
   }
 }
 
+/**
+ * A deletion proof is never allowed to create or link a DABBOBA identity, so
+ * a broker user the OAuth/OTP step just created for an unknown person would
+ * otherwise live on in Supabase Auth. Record it for the worker's Admin
+ * deletion. Only a user created minutes ago with no DABBOBA link qualifies;
+ * an existing broker user is never touched.
+ */
+const ORPHANED_BROKER_USER_WINDOW_MS = 15 * 60_000;
+
+async function recordOrphanedBrokerUser(
+  context: ApiContext,
+  claims: VerifiedSupabaseCustomer,
+  error: unknown,
+  log: { warn(details: Record<string, unknown>, message: string): void },
+): Promise<void> {
+  if (!(error instanceof AppError) || error.statusCode !== 401) return;
+  if (!claims.createdAt || Date.now() - claims.createdAt.getTime() > ORPHANED_BROKER_USER_WINDOW_MS) return;
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(claims.subject)) return;
+  try {
+    await context.pool.query(
+      `INSERT INTO supabase_auth_orphan_cleanups(supabase_user_id,reason)
+       SELECT $1::uuid,'ACCOUNT_DELETION_PROOF_UNLINKED'
+        WHERE NOT EXISTS (SELECT 1 FROM auth_identities WHERE provider_subject=$2)
+       ON CONFLICT (supabase_user_id) DO NOTHING`,
+      [claims.subject, claims.canonicalSubject],
+    );
+  } catch (recordError) {
+    // The proof already failed; losing the cleanup record must not change the answer.
+    log.warn({ err: recordError }, "Could not record an orphaned broker user for cleanup");
+  }
+}
+
 async function storeAppleRefreshCredential(
   client: DatabaseClient,
   context: ApiContext,
@@ -567,7 +599,11 @@ export async function registerCustomerAuthRoutes(
         && context.config.customerLoginProviders?.includes(loginProvider) === true;
       const requestUserAgent = userAgent(request.headers["user-agent"]);
       const { user, session } = await withTransaction(context.pool, async (client) => {
-        const user = await existingBrokeredCustomerForDeletion(client, claims, loginProvider, providerEnabled);
+        const user = await existingBrokeredCustomerForDeletion(client, claims, loginProvider, providerEnabled)
+          .catch(async (error: unknown) => {
+            await recordOrphanedBrokerUser(context, claims, error, request.log);
+            throw error;
+          });
         if (loginProvider === "APPLE") {
           if (rawAppleRefreshToken) {
             await storeAppleRefreshCredential(client, context, user.id, rawAppleRefreshToken);
