@@ -19,16 +19,22 @@ import {
 } from "./exchange.js";
 
 test("stale open exchanges close atomically and release both sides", async () => {
-  let capturedSql = "";
+  const statements: string[] = [];
   const queryable = {
     async query(sql: string) {
-      capturedSql = sql;
+      statements.push(sql);
       return { rowCount: 2, rows: [{ id: "one" }, { id: "two" }] };
     },
   } as unknown as Parameters<typeof expireStaleExchangeListings>[0];
   const expired = await expireStaleExchangeListings(queryable);
 
   assert.equal(expired, 2);
+  assert.equal(statements.length, 2);
+  const capturedSql = statements[0]!;
+  // A second statement, with a fresh snapshot, frees offers left pending on
+  // any closed listing, including one committed while the first waited.
+  assert.match(statements[1]!, /offer\.status='PENDING'[\s\S]*listing\.status IN \('CANCELLED','COMPLETED','HIDDEN'\)/);
+  assert.match(statements[1]!, /inventory\.status='EXCHANGE_OFFERED'/);
   assert.match(capturedSql, /listing\.status='OPEN'[\s\S]*listing\.expires_at<=now\(\)/);
   assert.match(capturedSql, /inventory\.storage_expires_at<=now\(\)/);
   assert.match(capturedSql, /cancel_reason='AUTO_EXPIRED'/);
@@ -367,7 +373,8 @@ test("public exchange reads share one expiry sweep per 30 seconds per process", 
   let release: (() => void) | null = null;
   const queryable = {
     async query(sql: string) {
-      assert.match(sql, /cancel_reason='AUTO_EXPIRED'/);
+      // Each sweep runs the expiry statement and then the stranded-offer cleanup.
+      if (!/cancel_reason='AUTO_EXPIRED'/.test(sql)) return { rowCount: 0, rows: [] };
       sweeps += 1;
       await new Promise<void>((resolve) => { release = resolve; });
       return { rowCount: 0, rows: [] };
@@ -398,7 +405,8 @@ test("public exchange reads share one expiry sweep per 30 seconds per process", 
 test("a failed throttled sweep is retried on the next read", async () => {
   let calls = 0;
   const queryable = {
-    async query() {
+    async query(sql: string) {
+      if (!/cancel_reason='AUTO_EXPIRED'/.test(sql)) return { rowCount: 0, rows: [] };
       calls += 1;
       if (calls === 1) throw new Error("transient");
       return { rowCount: 0, rows: [] };

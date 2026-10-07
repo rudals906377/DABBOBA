@@ -82,8 +82,8 @@ corepack pnpm run supabase:worker:schedule <2단계 check:release의 targetHash>
 
 - 1분마다 `dabboba-worker`를 호출하는 `dabboba-worker-every-minute` 작업과 Vault 비밀값을 설정한다.
 - 확인: Supabase 대시보드 → Cron 작업 실행 기록이 성공으로 쌓이는지, 워커 로그에 탈퇴 처리·대사·만료 정리가 도는지.
-- 기록 정리(retention)는 `WORKER_COMMERCE_RETENTION_MODE` 기본값 `DISABLED`로 계속 꺼져 있다. 보존기간 정책은 법률 검토 답변(질문지 B7)과 함께 관리자 화면에서 승인한다. 승인 전에는 켜지 않는다.
-- 보관기한 알림·만료 보류·만료 교환 정리도 `WORKER_INVENTORY_STORAGE_EXPIRY_MODE` 기본값 `DISABLED`로 꺼져 있다. Edge 워커는 이 값을 전달하지 않으므로 Cron을 켜도 돌지 않는다. 운영 여부는 첫 LIVE 판매일부터 60일 안에 소유자가 정한다(2026-10-06 결정). 켜기로 하면 코드 변경(전달 키 추가)과 안내 문구·약관 반영으로만 켠다.
+- 기록 정리(retention)는 `WORKER_COMMERCE_RETENTION_MODE` 기본값 `DISABLED`로 계속 꺼져 있다. 보존기간 정책은 판매판 법률 문서와 함께 질문지 B7의 기간으로 승인한다. 관리자 화면은 아직 없으니 `docs/commerce-retention-components.md`의 운영 절차를 따른다. 승인 전에는 켜지 않는다.
+- 보관기한 알림·만료 보류·만료 교환 정리도 `WORKER_INVENTORY_STORAGE_EXPIRY_MODE` 기본값 `DISABLED`로 꺼져 있다. Edge 워커는 이 값을 전달하지만 설정하지 않았으므로 Cron을 켜도 돌지 않는다. 운영 여부는 첫 LIVE 판매일부터 60일 안에 소유자가 정한다(2026-10-06 결정). 켜기로 하면 안내 문구·약관을 반영한 뒤 Edge 설정에 `WORKER_INVENTORY_STORAGE_EXPIRY_MODE=ENABLED`만 추가한다.
 - Cron이 켜져야 15분 넘게 결제하지 않은 주문·배송비 신청이 자동 취소되고 재고·포인트·보관함이 돌아온다. LIVE 전에 반드시 켠다.
 
 ## 6. 판매 준비 (관리자 화면)
@@ -120,9 +120,13 @@ corepack pnpm run supabase:worker:schedule <2단계 check:release의 targetHash>
 
 ## 9. 법률·정책 (`docs/legal-drafts/`)
 
-- 정식 판매용 약관·개인정보처리방침 초안의 `[확인 필요]` 항목을 채우고 법률 검토를 받는다.
-- 검토본을 `public/legal/terms`·`privacy`에 반영하고 새 정책 버전 마이그레이션을 추가하면 기존 회원에게
-  재동의가 표시된다. 이 단계는 LIVE 전환 직전에 한다(현재 공개 문서는 사전오픈판 문구 때문에 LIVE 검사에 걸린다).
+- 판매판 약관·개인정보처리방침·내부관리계획은 업계 표준 기준으로 확정했다(2026-10-06 결정, 자문은 선택).
+- 게시 전에 `{{…}}` 값 4개를 채운다: 시행일, 택배사 상호, 지원 메일 수신 서비스, Supabase 저장 리전. 확인 위치는 `docs/legal-drafts/review-questionnaire.md`에 있다.
+- LIVE 전환 직전에 한 배포로 반영한다(현재 공개 문서는 사전오픈판 문구 때문에 LIVE 검사에 걸린다).
+  - 문서를 `public/legal/terms`·`privacy`에 반영하고 새 정책 버전 마이그레이션을 추가한다(기존 회원 재동의).
+  - 맞춤 추천 토글을 제거하고 기존 동의를 철회한다.
+  - 세션 기록 보관 기간을 90일로 바꾼다.
+- 같은 날 `docs/commerce-retention-components.md`의 운영 절차로 보존기간 정책을 승인하고, 대표가 내부관리계획을 승인한다.
 
 ## 9-1. KG이니시스 테스트 채널 검증 (LIVE 전)
 

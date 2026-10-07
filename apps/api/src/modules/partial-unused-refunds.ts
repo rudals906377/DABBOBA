@@ -20,6 +20,7 @@ import {
   configuredContext,
   drawRefundOrderBlocker,
   portOnePaymentFullyCancellable,
+  REFUND_CANCEL_SETTLE_MS,
   providerError,
   reconcilePayment,
   REFUND_CANDIDATE_LOOKUP_SQL,
@@ -345,8 +346,13 @@ export async function registerPartialUnusedRefundRoutes(app: FastifyInstance, co
         const cancellationPending = providerPayment.status === "PAID" && providerPayment.amount.cancelled === 0
           && providerPayment.cancellations.some((cancellation) => cancellation.outcome === "PENDING");
         if (portOnePaymentFullyCancellable(providerPayment, numberValue(plan.paid_card_amount))) {
-          // The provider still holds the whole payment with no cancellation in flight.
-          row = await releaseFrozenPlan(client, paymentId, plan.order_id, "PROVIDER_NOT_CANCELLED", providerPayment.status);
+          // The provider still holds the whole payment with no cancellation in
+          // flight. A cancel that timed out can still land shortly after, and a
+          // released plan can no longer apply it, so release only once the
+          // settle window has passed; until then the plan stays frozen.
+          if (Date.now() - row.updated_at.getTime() >= REFUND_CANCEL_SETTLE_MS) {
+            row = await releaseFrozenPlan(client, paymentId, plan.order_id, "PROVIDER_NOT_CANCELLED", providerPayment.status);
+          }
         } else if (cancellationPending) {
           const pending = await client.query<PartialUnusedRefundRow>(
             "UPDATE partial_unused_draw_refunds SET status='PROVIDER_PENDING',provider_status=$2 WHERE payment_id=$1 RETURNING *",

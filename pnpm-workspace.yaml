@@ -79,11 +79,15 @@ overrides:
   # GHSA-fxqj-rqcc-2cmp, GHSA-r28c-9q8g-f849, GHSA-6g55-p6wh-862q, GHSA-qx2v-qp2m-jg93
   # (PostCSS source-map file read / path traversal / stringify XSS).
   postcss@<=8.5.22: 8.5.26
-  # GHSA-rgj7-g3m4-5g8c (sharp bundled libheif vulnerabilities).
-  sharp@>=0.35.0 <0.35.4: 0.35.4
+  # GHSA-rgj7-g3m4-5g8c (sharp bundled libheif vulnerabilities) and
+  # GHSA-wq5f-xc86-pv6w (sharp bundled librsvg vulnerability).
+  sharp@>=0.35.0 <0.35.5: 0.35.5
   # GHSA-w5hq-g745-h8pq (uuid v3/v5/v6 missing buffer bounds check).
   uuid@<11.1.1: 11.1.1
   # GHSA-68fv-2mgg-jv7q (source-map-js indexed source-map section offset event-loop DoS).
   source-map-js@>=1.0.0 <1.2.2: 1.2.2
   # GHSA-vc2v-76pw-4v95 (compression memory leak on premature response close).
   compression@<1.8.2: 1.8.2
+  # GHSA-pqg4-j6r4-53mv (shell-quote quote() command injection via a line terminator),
+  # reached only through react-devtools-core in the Expo/React Native toolchain.
+  shell-quote@>=1.8.4 <1.11.0: 1.11.0

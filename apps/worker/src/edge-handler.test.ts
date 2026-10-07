@@ -172,6 +172,7 @@ test("Edge normalization maps only DABBOBA storage/database secrets after auth",
   assert.equal(normalized.PAYMENT_RECONCILIATION_WORKER_SECRET, "worker-requery-secret-for-tests");
   assert.equal(normalized.DABBOBA_WORKER_INVOKE_SECRET, undefined);
   assert.equal(normalized.SUPABASE_DB_URL, undefined);
+  assert.equal(normalized.WORKER_INVENTORY_STORAGE_EXPIRY_MODE, undefined);
 
   for (const poisoned of [
     { WORKER_DATABASE_URL: workerDatabaseUrl },
@@ -189,6 +190,12 @@ test("Edge normalization maps only DABBOBA storage/database secrets after auth",
         && !error.message.includes("forbidden-reserved-prefix-secret"),
     );
   }
+});
+
+test("Edge normalization passes the storage-expiry mode only when the owner sets it", () => {
+  assert.equal(normalizeSupabaseEdgeWorkerEnvironment(sourceEnvironment()).WORKER_INVENTORY_STORAGE_EXPIRY_MODE, undefined);
+  const enabled = normalizeSupabaseEdgeWorkerEnvironment(sourceEnvironment({ WORKER_INVENTORY_STORAGE_EXPIRY_MODE: "ENABLED" }));
+  assert.equal(enabled.WORKER_INVENTORY_STORAGE_EXPIRY_MODE, "ENABLED");
 });
 
 test("Edge worker reuses the managed Supabase service role key without leaking it before auth", () => {
