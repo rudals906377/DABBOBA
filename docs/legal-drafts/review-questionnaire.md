@@ -8,14 +8,14 @@
 
 법률 자문은 선택이다. 받으면 그 의견을 우선해 고친다.
 
-사업자나 콘솔만 아는 사실 4가지 중 2026-10-07에 둘을 채웠고 둘이 남았다(문서 머리말의 `{{…}}`).
+사업자나 콘솔만 아는 사실 4가지를 2026-10-07에 모두 채웠다. 문서 본문에 `{{…}}`는 남아 있지 않다.
 
 | 채울 값 | 상태 |
 |---|---|
 | 시행일 | 2026-10-07로 채움(정책 버전도 같은 날짜) |
 | 택배사 | 전담 계약 없이 편의점 택배·우체국택배 등을 건별 이용. 방침에 일반 표기로 채웠고, 계약 체결 시 상호로 새 버전 |
-| `{{지원 메일 수신 서비스}}` | 남음. Cloudflare → Email Routing의 전달 대상 주소(예: Gmail이면 Google LLC) |
-| `{{Supabase 저장 리전}}` | 남음. Supabase 대시보드 → Project Settings → General → Region |
+| 지원 메일 수신 서비스 | 네이버 주식회사(네이버 메일)로 채움. Cloudflare Email Routing의 인증된 전달 대상이 네이버 메일 주소이고 `dabboba.net` MX가 Cloudflare 라우팅으로 확인됨(2026-10-07) |
+| Supabase 저장 리전 | 대한민국(서울)로 채움. 데이터베이스 호스트 `db.rconfxsykttfvznakile.supabase.co`가 AWS `ap-northeast-2` 대역으로 해석되고 서버 풀러 호스트가 `aws-0-ap-northeast-2`(2026-10-07). 대시보드 Region 값으로 재대조 |
 
 ## A. 운영 사실
 
@@ -55,13 +55,13 @@
 | # | 확인할 것 | 어디서 |
 |---|---|---|
 | C1 | 네이버 제공 정보를 고유 식별값과 이메일(선택)로 줄였는지 | 네이버 개발자센터 → API 설정(`docs/customer-auth-setup.md` 4절) |
-| C2 | Supabase 저장 리전 → `{{Supabase 저장 리전}}` | Supabase 대시보드 → Project Settings |
-| C3 | 지원 메일 전달 대상 → `{{지원 메일 수신 서비스}}` | Cloudflare → Email Routing |
+| C2 | Supabase 저장 리전 → 대한민국(서울)로 채움(DNS·AWS 대역 확인). 대시보드 Region 값으로 재대조 | Supabase 대시보드 → Project Settings |
+| C3 | 지원 메일 전달 대상 → 네이버 메일(인증된 전달 주소 확인, 2026-10-07). `support@dabboba.net` 라우팅 규칙이 그 주소를 향하는지 확인 | Cloudflare → Email Routing |
 | C4 | 택배 계약 → 전담 계약 없음(건별 이용). 계약 체결 시 방침 새 버전 | 2026-10-07 소유자 답변 |
 
 ## 게시 순서 (LIVE 직전, 한 배포)
 
-1. 남은 `{{…}}` 2개(지원 메일 수신 서비스, Supabase 저장 리전)를 채우고 `[확인 필요]`가 0개인지 확인한다.
+1. `{{…}}`와 `[확인 필요]`가 0개인지 확인한다(2026-10-07에 모두 채움).
 2. `public/legal/terms`·`privacy` HTML에 반영한다. 대표전화 링크는 `tel:0319479996`이고, PRELAUNCH 표식 문구는 넣지 않는다.
 3. 새 정책 버전 마이그레이션을 추가한다. 기존 회원에게 재동의를 받는다.
 4. 같은 배포에 아래를 함께 넣는다.

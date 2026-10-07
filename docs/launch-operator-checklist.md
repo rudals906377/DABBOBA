@@ -121,7 +121,7 @@ corepack pnpm run supabase:worker:schedule <2단계 check:release의 targetHash>
 ## 9. 법률·정책 (`docs/legal-drafts/`)
 
 - 판매판 약관·개인정보처리방침·내부관리계획은 업계 표준 기준으로 확정했다(2026-10-06 결정, 자문은 선택).
-- 게시 전에 `{{…}}` 값 4개를 채운다: 시행일, 택배사 상호, 지원 메일 수신 서비스, Supabase 저장 리전. 확인 위치는 `docs/legal-drafts/review-questionnaire.md`에 있다.
+- `{{…}}` 값 4개(시행일, 택배사 상호, 지원 메일 수신 서비스, Supabase 저장 리전)는 2026-10-07에 모두 채웠다. 근거는 `docs/legal-drafts/review-questionnaire.md`에 있다.
 - LIVE 전환 직전에 한 배포로 반영한다(현재 공개 문서는 사전오픈판 문구 때문에 LIVE 검사에 걸린다).
   - 문서를 `public/legal/terms`·`privacy`에 반영하고 새 정책 버전 마이그레이션을 추가한다(기존 회원 재동의).
   - 맞춤 추천 토글을 제거하고 기존 동의를 철회한다.
