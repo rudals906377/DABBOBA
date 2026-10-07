@@ -11,12 +11,18 @@ const completeInput = {
   marketingSms: false,
   marketingEmail: false,
   marketingPush: false,
-  personalizedRecommendations: false,
   expectedVersion: 1,
 };
 
-test("notification preference updates require the exact seven optional-consent booleans and expected version", () => {
+test("notification preference updates require the exact six optional-consent booleans and expected version", () => {
   assert.deepEqual(notificationPreferenceInput(completeInput), completeInput);
+  // App builds before the 2026-10-07 privacy policy still send the withdrawn
+  // personalized-recommendation consent: it is validated and then ignored.
+  assert.deepEqual(notificationPreferenceInput({ ...completeInput, personalizedRecommendations: true }), completeInput);
+  assert.throws(
+    () => notificationPreferenceInput({ ...completeInput, personalizedRecommendations: "true" }),
+    (error: unknown) => error instanceof AppError && error.statusCode === 400,
+  );
   assert.throws(
     () => notificationPreferenceInput({ ...completeInput, orderUpdates: false }),
     (error: unknown) => error instanceof AppError && error.statusCode === 400,

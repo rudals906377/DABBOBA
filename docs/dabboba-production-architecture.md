@@ -84,7 +84,7 @@ PostgreSQL만 다음 상태의 진실 공급원이다.
 
 인증 사용자의 배송 신청 목록·상세 API는 소유권 범위에서 상태/version, 마스킹된 수령 정보, 출고 시각과 송장 정보를 반환한다. 고객 API adapter, 로그인 snapshot, 배송 이력/상세 화면과 신청 성공 후 목록 재조회까지 연결되어 로컬 회귀를 통과했다. `CANCELLED` 신청만 남은 보관 상품은 다시 신청 가능 상태로 복구하되 다른 활성 신청이 있거나 `DELIVERED`인 상품은 신청 대상에서 계속 제외한다. 실제 물류 원장과 실기기 검증은 남아 있다.
 
-알림 수신 설정은 신규 사용자 생성과 기존 사용자 backfill에서 기본 행을 만들며, 필수 거래 알림 `orderUpdates`는 항상 `true`다. 나머지 7개 선택 항목은 `expectedVersion`, 사용자 scope idempotency, 요청 해시로 갱신하고 변경 전후를 append-only consent event와 outbox에 같은 트랜잭션으로 기록한다. worker는 인앱 알림을 먼저 idempotent하게 기록하고 교환·신청·재입고·마케팅·맞춤 추천의 선택 해제를 외부 전달에만 적용한다. remote 고객 화면은 snapshot/GET, version PUT과 409 뒤 최신 GET 재동기화를 연결해 로컬 회귀를 통과했지만 APNs/FCM 공급자는 구성되지 않았다.
+알림 수신 설정은 신규 사용자 생성과 기존 사용자 backfill에서 기본 행을 만들며, 필수 거래 알림 `orderUpdates`는 항상 `true`다. 나머지 6개 선택 항목은(맞춤 추천 동의는 2026-10-07 방침으로 철회·제거) `expectedVersion`, 사용자 scope idempotency, 요청 해시로 갱신하고 변경 전후를 append-only consent event와 outbox에 같은 트랜잭션으로 기록한다. worker는 인앱 알림을 먼저 idempotent하게 기록하고 교환·신청·재입고·마케팅의 선택 해제를 외부 전달에만 적용한다. remote 고객 화면은 snapshot/GET, version PUT과 409 뒤 최신 GET 재동기화를 연결해 로컬 회귀를 통과했지만 APNs/FCM 공급자는 구성되지 않았다.
 
 ## 인증, 권한, 감사
 

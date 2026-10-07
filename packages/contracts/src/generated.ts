@@ -3275,6 +3275,7 @@ export interface components {
             /** Format: date-time */
             returnedAt: string;
         };
+        /** @description Optional-consent state. The personalized-recommendation consent was withdrawn for every customer with the 2026-10-07 privacy policy and is no longer exposed. */
         NotificationPreferences: {
             /** @constant */
             orderUpdates: true;
@@ -3284,7 +3285,6 @@ export interface components {
             marketingSms: boolean;
             marketingEmail: boolean;
             marketingPush: boolean;
-            personalizedRecommendations: boolean;
             version: number;
             /** Format: date-time */
             updatedAt: string;
@@ -3296,7 +3296,11 @@ export interface components {
             marketingSms: boolean;
             marketingEmail: boolean;
             marketingPush: boolean;
-            personalizedRecommendations: boolean;
+            /**
+             * @deprecated
+             * @description Ignored. Sent by app builds before the 2026-10-07 privacy policy; the stored consent stays withdrawn (false).
+             */
+            personalizedRecommendations?: boolean;
             expectedVersion: number;
         };
         AccountNotification: {

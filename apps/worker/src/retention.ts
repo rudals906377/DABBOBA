@@ -75,7 +75,7 @@ export function normalizeRetentionConfig(
   }
   return {
     outboxPublishedDays: days(resolved.outboxPublishedDays, 30, "outbox window"),
-    sessionDays: days(resolved.sessionDays, 30, "session window"),
+    sessionDays: days(resolved.sessionDays, 90, "session window"),
     homeClickRollupDays: days(resolved.homeClickRollupDays, MIN_HOME_CLICK_ROLLUP_DAYS, "Home click window"),
     batchSize: resolved.batchSize,
   };

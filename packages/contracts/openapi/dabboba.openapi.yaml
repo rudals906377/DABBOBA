@@ -4910,7 +4910,8 @@ components:
     NotificationPreferences:
       type: object
       additionalProperties: false
-      required: [orderUpdates, exchangeUpdates, requestUpdates, restockUpdates, marketingSms, marketingEmail, marketingPush, personalizedRecommendations, version, updatedAt]
+      description: Optional-consent state. The personalized-recommendation consent was withdrawn for every customer with the 2026-10-07 privacy policy and is no longer exposed.
+      required: [orderUpdates, exchangeUpdates, requestUpdates, restockUpdates, marketingSms, marketingEmail, marketingPush, version, updatedAt]
       properties:
         orderUpdates: { type: boolean, const: true }
         exchangeUpdates: { type: boolean }
@@ -4919,13 +4920,12 @@ components:
         marketingSms: { type: boolean }
         marketingEmail: { type: boolean }
         marketingPush: { type: boolean }
-        personalizedRecommendations: { type: boolean }
         version: { type: integer, minimum: 1 }
         updatedAt: { type: string, format: date-time }
     UpdateNotificationPreferencesInput:
       type: object
       additionalProperties: false
-      required: [exchangeUpdates, requestUpdates, restockUpdates, marketingSms, marketingEmail, marketingPush, personalizedRecommendations, expectedVersion]
+      required: [exchangeUpdates, requestUpdates, restockUpdates, marketingSms, marketingEmail, marketingPush, expectedVersion]
       properties:
         exchangeUpdates: { type: boolean }
         requestUpdates: { type: boolean }
@@ -4933,7 +4933,10 @@ components:
         marketingSms: { type: boolean }
         marketingEmail: { type: boolean }
         marketingPush: { type: boolean }
-        personalizedRecommendations: { type: boolean }
+        personalizedRecommendations:
+          type: boolean
+          deprecated: true
+          description: Ignored. Sent by app builds before the 2026-10-07 privacy policy; the stored consent stays withdrawn (false).
         expectedVersion: { type: integer, minimum: 1 }
     AccountNotification:
       type: object

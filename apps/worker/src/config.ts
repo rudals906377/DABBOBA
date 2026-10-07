@@ -38,7 +38,11 @@ export const MIN_HOME_CLICK_ROLLUP_DAYS = HOME_CLICK_POPULARITY_WINDOW_DAYS + 1;
 export type WorkerRetentionConfig = {
   /** Published outbox events older than this many days are deleted. */
   outboxPublishedDays: number;
-  /** Revoked or expired sessions older than this many days are deleted. */
+  /**
+   * Revoked or expired sessions older than this many days are deleted. The
+   * privacy policy (2026-10-07) keeps login session records for three months
+   * after expiry, so the default and the floor are 90 days.
+   */
   sessionDays: number;
   /** Raw Home click events older than this many days are rolled up daily. */
   homeClickRollupDays: number;
@@ -48,7 +52,7 @@ export type WorkerRetentionConfig = {
 
 export const DEFAULT_WORKER_RETENTION: WorkerRetentionConfig = Object.freeze({
   outboxPublishedDays: 30,
-  sessionDays: 30,
+  sessionDays: 90,
   homeClickRollupDays: 35,
   batchSize: 500,
 });
@@ -390,7 +394,7 @@ export function loadWorkerConfig(env: Environment = process.env): WorkerConfig {
         env,
         "WORKER_RETENTION_SESSION_DAYS",
         DEFAULT_WORKER_RETENTION.sessionDays,
-        30,
+        90,
         3_650,
       ),
       homeClickRollupDays: integer(

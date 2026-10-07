@@ -693,7 +693,6 @@ test("generated notification preference contract keeps required alerts immutable
     marketingSms: false,
     marketingEmail: false,
     marketingPush: false,
-    personalizedRecommendations: false,
     version: 1,
     updatedAt: "2026-08-25T03:00:00.000Z",
   } satisfies components["schemas"]["NotificationPreferences"];
@@ -704,7 +703,6 @@ test("generated notification preference contract keeps required alerts immutable
     marketingSms: false,
     marketingEmail: false,
     marketingPush: true,
-    personalizedRecommendations: true,
     expectedVersion: 1,
   } satisfies components["schemas"]["UpdateNotificationPreferencesInput"];
 

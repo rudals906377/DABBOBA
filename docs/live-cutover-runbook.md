@@ -20,10 +20,37 @@
 
 - KG이니시스 LIVE 승인, LIVE MID·채널키·웹훅·API secret 발급, 정산계좌 명의 확인.
 - 실제 결제가 가능한 LIVE 앱 빌드의 스토어 승인. 서버만 LIVE로 바꿔도 PRELAUNCH 앱에서는 결제할 수 없다.
-- LIVE용 약관·개인정보처리방침과 새 정책 버전 마이그레이션 적용.
+- 법적 문서 게시 번들 완료(아래 "법적 문서 게시 번들" 절: 게시 바이트 해시 확인, 마이그레이션 `0090`·`0091` 적용).
 - 운영 DB 암호화 백업과 `backup.mjs verify` 통과(전환 직전).
 - 운영자가 판매할 가챠를 `ON_SALE`로 열고 ACTIVE 확률표와 재고를 검수함. LIVE 검증은 구매 가능한 가챠가 1개 이상이고 판매 중인 쿠지가 0개일 때만 통과한다.
 - 결제 대사 워커와 Cron 운영 구성. 이 명령은 Cron을 켜지 않는다.
+
+## 법적 문서 게시 번들 (LIVE 직전, 한 배포)
+
+2026-10-07 판 약관·개인정보처리방침은 코드에 들어 있다: `public/legal/terms`·`privacy`의 HTML, 정책 버전
+`2026-10-07`을 발행하는 마이그레이션 `0090`, 저장된 맞춤 추천 동의를 모두 철회하는 `0091`, 워커의 세션 기록
+보관 90일(`apps/worker/src/config.ts`). 아래 순서를 바꾸지 않는다. 고객이 재동의 화면에서 여는 문서와 DB에
+기록된 문서 해시가 같아야 하기 때문이다.
+
+1. `main`에 병합한다. Cloudflare Pages가 `main`을 빌드해 `https://dabboba.net/terms`·`/privacy`를 바로 교체한다.
+2. 게시된 바이트가 `0090`의 해시와 같은지 확인한다. 같을 때까지 3단계로 가지 않는다(Pages 배포 완료 대기 또는 캐시 비우기).
+   ```
+   curl -sS https://dabboba.net/terms | sha256sum    # 54e45f9237ea45f6063337976a3ce6beee14fa898916c9bfb59fa814ac7b52d2
+   curl -sS https://dabboba.net/privacy | sha256sum  # a7684326c9d246a7bc2f649c33cc623e7e0eb6f06fb0683decd014c6e501ae06
+   ```
+3. 운영 DB를 백업하고 `backup.mjs verify`를 통과한 뒤 마이그레이션을 적용한다(`corepack pnpm run db:migrate`,
+   운영 마이그레이션 URL). `0090`은 현재 2026-09-30 판 두 행이 있을 때만 적용되며, 적용 즉시 `/v1/public/config`와
+   `/v1/auth/providers`가 `2026-10-07`을 요구하고 기존 회원은 다음 요청에서 재동의 화면을 본다. `0091`은 맞춤 추천
+   동의를 철회하고 `SYSTEM_WITHDRAWN` 증거 행을 남긴다.
+4. Edge 함수를 배포한다(PRELAUNCH 중이면 `supabase:edge:deploy`, LIVE 전환과 함께라면 위 LIVE 전환 명령). API는
+   DB의 버전을 그대로 읽고, 워커는 세션 기록을 만료·폐기 후 90일 뒤에 지운다.
+5. `corepack pnpm run supabase:edge:public:verify`로 두 공개 엔드포인트의 버전이 같은지 보고, 앱에서 재동의 화면이
+   새 문서 링크를 여는지 확인한다.
+6. 같은 날 운영자가 `docs/commerce-retention-components.md`의 절차로 보존기간 정책을 등록·승인한다(관리자 화면 없음,
+   `WORKER_COMMERCE_RETENTION_MODE`는 DISABLED 유지). 대표가 내부관리계획을 승인한다.
+
+되돌리기: HTML만 이전 판으로 되돌리면 DB 해시와 어긋나 재동의가 실패한다. 문서를 고쳐야 하면 새 버전(새 시행일,
+새 마이그레이션)으로 다시 발행하고, `0090`·`0091`은 취소하지 않는다.
 
 ## LIVE 프로필 준비
 

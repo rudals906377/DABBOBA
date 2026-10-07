@@ -1,6 +1,6 @@
 > **정식 판매판(LIVE) 게시본 — LIVE 전환 직전에 게시**
 >
-> 이 문서는 정식 판매판용 **다뽀바 개인정보처리방침**입니다. 현재 공개 중인 PRELAUNCH 방침(`public/legal/privacy/index.html`)을 LIVE 전환 직전에 대체합니다.
+> 이 문서는 정식 판매판용 **다뽀바 개인정보처리방침**입니다. 2026-10-07에 `public/legal/privacy/index.html`에 반영했고, 마이그레이션 `0090`이 정책 버전 `2026-10-07`로 발행합니다(게시 순서는 `docs/live-cutover-runbook.md`의 "법적 문서 게시 번들"). 운영 게시 전까지는 코드 안의 게시본입니다.
 >
 > 작성 기준(2026-10-06 소유자 결정): 법률 자문을 기다리지 않고 개인정보보호위원회 「개인정보 처리방침 작성지침」과 같은 업종 앱의 일반적인 기준으로 확정했습니다. 본문은 지금 코드가 실제로 하는 일과 맞췄습니다. 이후 법률 자문을 받으면 그 의견을 우선합니다.
 >
@@ -13,11 +13,11 @@
 > 게시 전에 콘솔에서 확인할 것
 > - 네이버 개발자센터 제공 정보를 고유 식별값과 이메일(선택)로 줄였는지(`docs/customer-auth-setup.md` 4절). 줄이지 않았으면 4항 "외부 로그인" 문장이 사실이 아니다
 >
-> 게시와 같은 배포에 포함할 것
-> - HTML 반영: 대표전화 링크는 `tel:0319479996`, PRELAUNCH 표식 문구를 넣지 않음
-> - 새 정책 버전 마이그레이션과 회원 재동의
-> - 앱의 맞춤 추천 토글과 동의 현황 행 제거, 기존 맞춤 추천 동의 값을 일괄 철회(미동의)로 변경(맞춤 추천 기능이 없어 이 방침에서 뺐다)
-> - 워커의 로그인 세션 기록 보관 기간 기본값을 30일에서 90일로 변경(`apps/worker/src/config.ts`의 `sessionDays`, 2항의 3개월 보관과 맞춤)
+> 게시와 같은 배포에 포함할 것(코드 항목은 2026-10-07 반영 완료)
+> - HTML 반영: 대표전화 링크는 `tel:0319479996`, PRELAUNCH 표식 문구 없음 → `public/legal/privacy/index.html`
+> - 새 정책 버전 마이그레이션과 회원 재동의 → `packages/db/migrations/0090_legal_policy_live_2026_10_07.sql`
+> - 앱의 맞춤 추천 토글과 동의 현황 행 제거, 기존 맞춤 추천 동의 값을 일괄 철회(미동의)로 변경(맞춤 추천 기능이 없어 이 방침에서 뺐다) → 앱·API·계약에서 제거, `packages/db/migrations/0091_personalized_recommendation_consent_withdrawal.sql`
+> - 워커의 로그인 세션 기록 보관 기간 기본값을 30일에서 90일로 변경(`apps/worker/src/config.ts`의 `sessionDays`, 2항의 3개월 보관과 맞춤) → 반영
 > - 거래기록 보존기간 정책 승인(`docs/commerce-retention-components.md`의 운영 절차. 2항의 파기 문장은 승인 후에 실행된다)
 > - 개인정보 내부관리계획(`docs/legal-drafts/internal-management-plan.md`)을 대표가 승인하고 시행일을 적음
 
@@ -166,7 +166,7 @@
 ## 근거
 
 - 작성 기준: 개인정보보호위원회 「개인정보 처리방침 작성지침」, 개인정보 보호법 제22조의2(아동)·제28조의8(국외 이전)·제30조(처리방침), 전자상거래법 시행령 제6조(거래기록 보존), 통신비밀보호법 시행령 제41조(로그기록 3개월)
-- 국외 수탁자 법인명·연락처(2026-10-06 각 사 공개 문서 확인): Supabase 이용약관·개인정보처리방침(Supabase Pte. Ltd., privacy@supabase.com), Cloudflare 개인정보처리방침(Cloudflare, Inc., privacyquestions@cloudflare.com), Expo 개인정보처리방침(650 Industries, Inc., expo.dev/contact), Twilio 개인정보처리방침(privacy@twilio.com)
+- 국외 수탁자 법인명·연락처(2026-10-06 각 사 공개 문서 확인): Supabase 이용약관·개인정보처리방침(Supabase Pte. Ltd., privacy@supabase.com), Cloudflare 개인정보처리방침(Cloudflare, Inc., privacyquestions@cloudflare.com), Expo 개인정보처리방침(650 Industries, Inc., expo.dev/contact)
 - 현재 공개 문서: `public/legal/privacy/index.html`, `public/legal/terms/index.html`, `public/legal/support/index.html`, `public/legal/account-deletion/index.html`(및 `app.js`의 브라우저 저장소 사용)
 - 사업자 정보: `apps/mobile/src/features/profile/business-information.ts`, `scripts/check-mobile-release-config.mjs`
 - `AGENTS.md`: 로그인 수단(2026-09-25), Review Follow-up Decisions — 2026-09-30, First Launch Scope — 2026-10-01, Owner Launch Decisions — 2026-10-06, DABBOBA Scalable Production Architecture Rule

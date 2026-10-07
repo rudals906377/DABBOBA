@@ -102,7 +102,6 @@ test("authenticated snapshot includes recovery data and durable notification pre
     marketingSms: false,
     marketingEmail: false,
     marketingPush: true,
-    personalizedRecommendations: true,
     version: 4,
     updatedAt: "2026-08-25T00:00:00.000Z",
   };
@@ -140,7 +139,6 @@ test("notification preferences use GET plus versioned idempotent PUT without sen
     marketingSms: true,
     marketingEmail: false,
     marketingPush: true,
-    personalizedRecommendations: false,
     version: 6,
     updatedAt: "2026-08-25T00:00:00.000Z",
   };
@@ -160,7 +158,6 @@ test("notification preferences use GET plus versioned idempotent PUT without sen
     marketingSms: true,
     marketingEmail: false,
     marketingPush: true,
-    personalizedRecommendations: false,
     expectedVersion: 5,
   }, "notification-preferences-stable-key"), response);
 
@@ -175,7 +172,6 @@ test("notification preferences use GET plus versioned idempotent PUT without sen
     marketingSms: true,
     marketingEmail: false,
     marketingPush: true,
-    personalizedRecommendations: false,
     expectedVersion: 5,
   });
 });

@@ -23,10 +23,10 @@ test("app legal summaries show the published policy effective date", () => {
   const privacy = read("public/legal/privacy/index.html");
 
   for (const document of [terms, privacy]) {
-    assert.match(document, /시행일 2026년 9월 30일/);
+    assert.match(document, /시행일 2026년 10월 7일/);
   }
-  assert.match(policies, /id: "terms",[\s\S]*?updatedAt: "2026\.09\.30"/);
-  assert.match(policies, /id: "privacy",[\s\S]*?updatedAt: "2026\.09\.30"/);
+  assert.match(policies, /id: "terms",[\s\S]*?updatedAt: "2026\.10\.07"/);
+  assert.match(policies, /id: "privacy",[\s\S]*?updatedAt: "2026\.10\.07"/);
   assert.match(detail, /공개 문서 시행일/);
   assert.match(detail, /\{policy\.updatedAt\}/);
   assert.match(detail, /핵심 안내/);

@@ -202,6 +202,26 @@ export const DATABASE_RELEASE_MIGRATIONS = Object.freeze([
     path: 'packages/db/migrations/0087_partial_unused_draw_refunds.sql',
     sha256: '1c5c8e4bb8b10b1893793f44decd20cba1ce925f93fa0aac09c7a7a42ca4caca',
   }),
+  Object.freeze({
+    file: '0088_deletion_preserves_retention_clock.sql',
+    path: 'packages/db/migrations/0088_deletion_preserves_retention_clock.sql',
+    sha256: 'a92299cc3606dfaa42c74acafd7c3a1e0b19bbb06b7a000a5e1ed319541343bd',
+  }),
+  Object.freeze({
+    file: '0089_supabase_auth_orphan_cleanups.sql',
+    path: 'packages/db/migrations/0089_supabase_auth_orphan_cleanups.sql',
+    sha256: '7ab13632e1555dfcdddb9161b30ab66721d7163838f40102b178d34a3e7619a0',
+  }),
+  Object.freeze({
+    file: '0090_legal_policy_live_2026_10_07.sql',
+    path: 'packages/db/migrations/0090_legal_policy_live_2026_10_07.sql',
+    sha256: 'aba6c638a466969a72a7115d0f70211fea726c0caf387202760b4d31ec422772',
+  }),
+  Object.freeze({
+    file: '0091_personalized_recommendation_consent_withdrawal.sql',
+    path: 'packages/db/migrations/0091_personalized_recommendation_consent_withdrawal.sql',
+    sha256: '6453fb3cb7ecab1a08c7171adb9c371aebcae2136b31d64e656cb8ba5060c1a5',
+  }),
 ]);
 
 export const MINIMUM_DATABASE_RELEASE_VERSION =

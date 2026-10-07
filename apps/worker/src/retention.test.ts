@@ -14,7 +14,7 @@ import { parseWorkerJob } from "./types.js";
 
 const logger = { debug() {}, info() {}, warn() {}, error() {} } as Logger;
 
-test("retention config defaults keep 30-day windows and outlive the Home popularity window", () => {
+test("retention config defaults keep the 30-day outbox window, the 90-day session window and outlive the Home popularity window", () => {
   const config = loadWorkerConfig({
     NODE_ENV: "test",
     WORKER_DATABASE_URL: "postgresql://worker:secret@127.0.0.1:5432/dabboba",
@@ -96,7 +96,7 @@ test("retention batch runs each bounded step and flags only the Home rollup tran
   )), ["pool", "pool", "pool", "BEGIN", "flag", "client", "COMMIT"]);
   assert.deepEqual(calls[0]?.params, [30, 50, ["payment.reservation_expired_requires_reconciliation"]]);
   assert.deepEqual(calls[1]?.params, [50, ["CREATE_ORDER"]]);
-  assert.deepEqual(calls[2]?.params, [30, 50]);
+  assert.deepEqual(calls[2]?.params, [90, 50]);
   assert.match(calls[4]?.sql ?? "", /set_config\('dabboba\.home_click_rollup','on',true\)/);
   assert.deepEqual(calls[5]?.params, [35, 50, "Asia/Seoul"]);
 });

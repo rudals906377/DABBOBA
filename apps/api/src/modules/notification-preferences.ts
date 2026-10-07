@@ -19,9 +19,14 @@ const UPDATE_KEYS = [
   "marketingSms",
   "marketingEmail",
   "marketingPush",
-  "personalizedRecommendations",
   "expectedVersion",
 ] as const;
+
+// The 2026-10-07 privacy policy removed the personalized-recommendation
+// (맞춤 추천) consent because the feature was never built. Older app builds
+// still send the field: it must be a boolean, is otherwise ignored, and the
+// stored column stays false (migration 0091 withdrew every earlier consent).
+const LEGACY_IGNORED_KEYS = ["personalizedRecommendations"] as const;
 
 type NotificationPreferenceRow = {
   user_id: string;
@@ -31,6 +36,7 @@ type NotificationPreferenceRow = {
   marketing_sms: boolean;
   marketing_email: boolean;
   marketing_push: boolean;
+  /** Withdrawn for every customer by migration 0091; always false and never exposed. */
   personalized_recommendations: boolean;
   version: number;
   updated_at: Date;
@@ -43,14 +49,17 @@ export type NotificationPreferenceInput = {
   marketingSms: boolean;
   marketingEmail: boolean;
   marketingPush: boolean;
-  personalizedRecommendations: boolean;
   expectedVersion: number;
 };
 
 export function notificationPreferenceInput(body: unknown): NotificationPreferenceInput {
   const input = objectInput(body);
-  const unknown = Object.keys(input).find((key) => !UPDATE_KEYS.includes(key as (typeof UPDATE_KEYS)[number]));
+  const unknown = Object.keys(input).find((key) => (
+    !UPDATE_KEYS.includes(key as (typeof UPDATE_KEYS)[number])
+    && !LEGACY_IGNORED_KEYS.includes(key as (typeof LEGACY_IGNORED_KEYS)[number])
+  ));
   if (unknown) throw badRequest(`지원하지 않는 입력 항목입니다: ${unknown}`);
+  for (const key of LEGACY_IGNORED_KEYS) booleanInput(input, key, true);
   return {
     exchangeUpdates: booleanInput(input, "exchangeUpdates")!,
     requestUpdates: booleanInput(input, "requestUpdates")!,
@@ -58,7 +67,6 @@ export function notificationPreferenceInput(body: unknown): NotificationPreferen
     marketingSms: booleanInput(input, "marketingSms")!,
     marketingEmail: booleanInput(input, "marketingEmail")!,
     marketingPush: booleanInput(input, "marketingPush")!,
-    personalizedRecommendations: booleanInput(input, "personalizedRecommendations")!,
     expectedVersion: integerInput(input, "expectedVersion", { min: 1 })!,
   };
 }
@@ -71,7 +79,6 @@ const mapNotificationPreferences = (row: NotificationPreferenceRow) => ({
   marketingSms: row.marketing_sms,
   marketingEmail: row.marketing_email,
   marketingPush: row.marketing_push,
-  personalizedRecommendations: row.personalized_recommendations,
   version: row.version,
   updatedAt: iso(row.updated_at),
 });
@@ -85,7 +92,6 @@ function consentState(value: ReturnType<typeof mapNotificationPreferences>) {
     marketingSms: value.marketingSms,
     marketingEmail: value.marketingEmail,
     marketingPush: value.marketingPush,
-    personalizedRecommendations: value.personalizedRecommendations,
     version: value.version,
   };
 }
@@ -132,8 +138,8 @@ export async function registerNotificationPreferenceRoutes(app: FastifyInstance,
         `UPDATE notification_preferences SET
           exchange_updates=$2,request_updates=$3,restock_updates=$4,
           marketing_sms=$5,marketing_email=$6,marketing_push=$7,
-          personalized_recommendations=$8,version=version+1
-         WHERE user_id=$1 AND version=$9
+          personalized_recommendations=false,version=version+1
+         WHERE user_id=$1 AND version=$8
          RETURNING *`,
         [
           actorId,
@@ -143,7 +149,6 @@ export async function registerNotificationPreferenceRoutes(app: FastifyInstance,
           input.marketingSms,
           input.marketingEmail,
           input.marketingPush,
-          input.personalizedRecommendations,
           input.expectedVersion,
         ],
       );

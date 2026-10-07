@@ -11,7 +11,7 @@ const email = "review@example.invalid";
 const subject = "00000000-0000-4000-8000-000000000001";
 const issuer = "https://lyzcyrdiazorjaqlgblr.supabase.co/auth/v1";
 const customer = { id: "00000000-0000-4000-8000-000000000002", email, nickname: "심사 회원", role: "USER", status: "ACTIVE", phone_e164: null };
-const policies = { terms: "2026-09-30", privacy: "2026-09-30" };
+const policies = { terms: "2026-10-07", privacy: "2026-10-07" };
 const proxySecret = "synthetic-review-proxy-secret-with-32-bytes-or-more";
 
 async function setup(production = false, wrongPassword = false) {
