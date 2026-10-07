@@ -46,7 +46,8 @@ const PASSTHROUGH_WORKER_KEYS = [
   "WORKER_INVENTORY_STORAGE_EXPIRY_MODE",
   // Commerce retention stays DISABLED until the operator approves the policy
   // (docs/commerce-retention-components.md); PREVIEW then EXECUTE are set only
-  // for an approved run and removed afterwards.
+  // for an approved run and removed afterwards. EXECUTE applies only to an
+  // explicit one-shot request (see requestsCommerceRetentionExecute).
   "WORKER_COMMERCE_RETENTION_MODE",
   "WORKER_COMMERCE_RETENTION_BATCH_SIZE",
   "DATABASE_POOL_MAX",
@@ -136,8 +137,26 @@ function authorized(request: Request, secret: string): boolean {
   return timingSafeEqual(expected, actual);
 }
 
+// The Cron invokes this function every minute, and a configured EXECUTE would
+// dispose another retention batch on each of those runs. EXECUTE therefore
+// takes effect only for an authenticated request whose body asks for it
+// ({"commerceRetention":"EXECUTE"}): one operator call runs one batch, and
+// every other invocation, including the Cron, sees PREVIEW instead.
+async function requestsCommerceRetentionExecute(request: Request): Promise<boolean> {
+  try {
+    const text = await request.text();
+    if (!text || text.length > 4_096) return false;
+    const body: unknown = JSON.parse(text);
+    return typeof body === "object" && body !== null
+      && (body as Record<string, unknown>).commerceRetention === "EXECUTE";
+  } catch {
+    return false;
+  }
+}
+
 export function normalizeSupabaseEdgeWorkerEnvironment(
   source: EdgeWorkerEnvironment,
+  options: { commerceRetentionExecuteRequested?: boolean } = {},
 ): EdgeWorkerEnvironment {
   if (source.NODE_ENV && source.NODE_ENV !== "production") {
     throw new Error("Supabase Edge worker requires production runtime semantics");
@@ -162,6 +181,10 @@ export function normalizeSupabaseEdgeWorkerEnvironment(
     SUPABASE_URL: source.SUPABASE_URL,
   };
   for (const key of PASSTHROUGH_WORKER_KEYS) normalized[key] = source[key];
+  if (normalized.WORKER_COMMERCE_RETENTION_MODE?.trim() === "EXECUTE"
+    && options.commerceRetentionExecuteRequested !== true) {
+    normalized.WORKER_COMMERCE_RETENTION_MODE = "PREVIEW";
+  }
   for (const [edgeKey, workerKey] of Object.entries(EDGE_STORAGE_MAPPING)) {
     normalized[workerKey] = source[edgeKey];
   }
@@ -226,6 +249,8 @@ export function createSupabaseEdgeWorkerHandler(
       return jsonResponse(401, { ok: false, code: "UNAUTHORIZED" });
     }
 
+    const commerceRetentionExecuteRequested = await requestsCommerceRetentionExecute(request);
+
     let source: EdgeWorkerEnvironment;
     try {
       source = dependencies.readEnvironment();
@@ -235,7 +260,7 @@ export function createSupabaseEdgeWorkerHandler(
 
     let logger: Logger | null = null;
     try {
-      const config = loadConfig(normalizeSupabaseEdgeWorkerEnvironment(source));
+      const config = loadConfig(normalizeSupabaseEdgeWorkerEnvironment(source, { commerceRetentionExecuteRequested }));
       assertSupabaseEdgeWorkerConfig(config);
       logger = loggerFactory(config.logLevel);
       const summary = await runWorker(config, logger);

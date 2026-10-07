@@ -212,6 +212,51 @@ test("Edge normalization passes the commerce-retention mode only when the operat
   assert.equal(preview.WORKER_COMMERCE_RETENTION_BATCH_SIZE, "10");
 });
 
+test("Edge normalization keeps a configured EXECUTE to an explicit one-shot request", () => {
+  const execute = sourceEnvironment({ WORKER_COMMERCE_RETENTION_MODE: "EXECUTE" });
+  assert.equal(normalizeSupabaseEdgeWorkerEnvironment(execute).WORKER_COMMERCE_RETENTION_MODE, "PREVIEW");
+  assert.equal(
+    normalizeSupabaseEdgeWorkerEnvironment(execute, { commerceRetentionExecuteRequested: false }).WORKER_COMMERCE_RETENTION_MODE,
+    "PREVIEW",
+  );
+  assert.equal(
+    normalizeSupabaseEdgeWorkerEnvironment(execute, { commerceRetentionExecuteRequested: true }).WORKER_COMMERCE_RETENTION_MODE,
+    "EXECUTE",
+  );
+  // A request never raises the configured mode.
+  for (const mode of [undefined, "DISABLED", "PREVIEW"]) {
+    const normalized = normalizeSupabaseEdgeWorkerEnvironment(
+      sourceEnvironment({ WORKER_COMMERCE_RETENTION_MODE: mode }),
+      { commerceRetentionExecuteRequested: true },
+    );
+    assert.equal(normalized.WORKER_COMMERCE_RETENTION_MODE, mode);
+  }
+});
+
+test("scheduled Edge runs preview retention while one operator request executes one batch", async () => {
+  const modes: string[] = [];
+  const handler = createSupabaseEdgeWorkerHandler({
+    readInvokeSecret: () => invokeSecret,
+    readEnvironment: () => sourceEnvironment({ WORKER_COMMERCE_RETENTION_MODE: "EXECUTE" }),
+    async runWorker(config) {
+      modes.push(config.commerceRetention?.mode ?? "unset");
+      return summary();
+    },
+  });
+  const post = (body?: string) => handler(new Request("https://example.test/functions/v1/dabboba-worker", {
+    method: "POST",
+    headers: { authorization: `Bearer ${invokeSecret}`, "content-type": "application/json" },
+    ...(body === undefined ? {} : { body }),
+  }));
+
+  assert.equal((await post(JSON.stringify({ source: "supabase-cron" }))).status, 200);
+  assert.equal((await post()).status, 200);
+  assert.equal((await post("not json")).status, 200);
+  assert.equal((await post(JSON.stringify({ commerceRetention: "execute" }))).status, 200);
+  assert.equal((await post(JSON.stringify({ source: "operator", commerceRetention: "EXECUTE" }))).status, 200);
+  assert.deepEqual(modes, ["PREVIEW", "PREVIEW", "PREVIEW", "PREVIEW", "EXECUTE"]);
+});
+
 test("Edge worker reuses the managed Supabase service role key without leaking it before auth", () => {
   const normalized = normalizeSupabaseEdgeWorkerEnvironment(sourceEnvironment({
     DABBOBA_STORAGE_SERVICE_KEY: undefined,
