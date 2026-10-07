@@ -272,11 +272,12 @@ test("scheduled Edge runs preview retention while one operator request executes 
   assert.deepEqual(retentionModes, ["EXECUTE"]);
   assert.equal(workerModes.length, 4);
 
-  // A failed batch rolled back and is reported without running anything else.
+  // A failure may follow a commit whose acknowledgement was lost, so it is
+  // reported as an unknown outcome and nothing else runs.
   retentionFailure = new Error("private failure detail");
   const failed = await post(executeBody);
   assert.equal(failed.status, 500);
-  assert.deepEqual(await failed.json(), { ok: false, code: "WORKER_EXECUTION_FAILED" });
+  assert.deepEqual(await failed.json(), { ok: false, code: "COMMERCE_RETENTION_OUTCOME_UNKNOWN" });
   assert.equal(workerModes.length, 4);
 
   // Without a configured EXECUTE the request is refused and nothing runs.

@@ -144,8 +144,8 @@ function authorized(request: Request, secret: string): boolean {
 // dispose another retention batch on each of those runs. EXECUTE therefore
 // takes effect only for an authenticated request whose body asks for it
 // ({"commerceRetention":"EXECUTE"}): that request runs the retention batch
-// alone, so a failure elsewhere cannot report an error after the batch has
-// committed, and every other invocation, including the Cron, sees PREVIEW.
+// alone, so no other job's failure is reported for it, and every other
+// invocation, including the Cron, sees PREVIEW.
 async function requestsCommerceRetentionExecute(request: Request): Promise<boolean> {
   try {
     const text = await request.text();
@@ -289,10 +289,16 @@ export function createSupabaseEdgeWorkerHandler(
         if (config.commerceRetention?.mode !== "EXECUTE") {
           return jsonResponse(409, { ok: false, code: "COMMERCE_RETENTION_EXECUTE_NOT_CONFIGURED" });
         }
-        // An error here means the batch rolled back. A success reports the
-        // committed count; check commerce_retention_disposals before retrying
-        // a request whose response was lost.
-        const retention = await runCommerceRetention(config, logger);
+        // A success reports the committed count. Any failure is indeterminate:
+        // the database may have committed before the acknowledgement was lost,
+        // so the operator checks commerce_retention_disposals before retrying.
+        let retention: CommerceRetentionResult;
+        try {
+          retention = await runCommerceRetention(config, logger);
+        } catch (error) {
+          logger.error(errorFields(error), "Commerce retention execution outcome is unknown");
+          return jsonResponse(500, { ok: false, code: "COMMERCE_RETENTION_OUTCOME_UNKNOWN" });
+        }
         return jsonResponse(200, {
           ok: true,
           commerceRetention: { mode: retention.mode, disposed: retention.disposed },
