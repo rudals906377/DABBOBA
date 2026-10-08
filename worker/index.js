@@ -13,33 +13,45 @@ export default {
     const accountDeletionResponse = await handleAccountDeletionService(request, env);
     if (accountDeletionResponse) return accountDeletionResponse;
 
+    const isRead = ["GET", "HEAD"].includes(request.method);
+    // Each policy page has one canonical URL without a trailing slash (the
+    // published legal URLs). The slash form, which the pages' relative links
+    // produce, redirects there so search engines see one page, not two.
+    const canonicalPolicyPath = CANONICAL_POLICY_PAGES.has(requestUrl.pathname.replace(/\/$/, ""))
+      ? requestUrl.pathname.replace(/\/$/, "")
+      : null;
+    if (canonicalPolicyPath && requestUrl.pathname !== canonicalPolicyPath && isRead) {
+      const canonicalUrl = new URL(request.url);
+      canonicalUrl.pathname = canonicalPolicyPath;
+      return withPublicPageHeaders(Response.redirect(canonicalUrl.toString(), 308));
+    }
+    if (isRead && isPublicSiteHost(requestUrl.hostname)) {
+      if (requestUrl.pathname === "/sitemap.xml") return publicSitemapResponse(request.method);
+      if (requestUrl.pathname === "/robots.txt") return publicRobotsResponse(request.method);
+    }
+
     const policyRoutes = new Map([
       // Pages serves the root index directly and canonicalizes /index.html back
       // to /. Rewriting / to /index.html would therefore create a 308 loop.
       ["/", { assetPath: "/" }],
       ["/index.html", { assetPath: "/index.html" }],
-      ["/privacy", { assetPath: "/legal/privacy/" }],
-      ["/privacy/", { assetPath: "/legal/privacy/" }],
-      ["/terms", { assetPath: "/legal/terms/" }],
-      ["/terms/", { assetPath: "/legal/terms/" }],
-      ["/support", { assetPath: "/legal/support/" }],
-      ["/support/", { assetPath: "/legal/support/" }],
-      ["/account-deletion", { assetPath: "/legal/account-deletion/" }],
-      ["/account-deletion/", { assetPath: "/legal/account-deletion/" }],
+      ...[...CANONICAL_POLICY_PAGES].map((path) => [path, { assetPath: `/legal${path}/`, canonical: true }]),
       [
         "/account-deletion/auth/social/callback",
         { assetPath: "/legal/account-deletion/social-callback", preserveSearch: true },
       ],
-      ["/community-operations", { assetPath: "/legal/community-operations/" }],
-      ["/community-operations/", { assetPath: "/legal/community-operations/" }],
     ]);
     const policyAsset = policyRoutes.get(requestUrl.pathname);
-    if (policyAsset && ["GET", "HEAD"].includes(request.method)) {
+    if (policyAsset && isRead) {
       const assetUrl = new URL(request.url);
       assetUrl.pathname = policyAsset.assetPath;
       if (!policyAsset.preserveSearch) assetUrl.search = "";
       const assetResponse = await env.ASSETS.fetch(new Request(assetUrl, request));
-      return withPublicPageHeaders(assetResponse);
+      const pageResponse = withPublicPageHeaders(assetResponse);
+      if (policyAsset.canonical && assetResponse.ok) {
+        pageResponse.headers.set("link", `<${PUBLIC_SITE_ORIGIN}${requestUrl.pathname}>; rel="canonical"`);
+      }
+      return pageResponse;
     }
 
     if (isPublicSiteHost(requestUrl.hostname)) {
@@ -79,6 +91,34 @@ export default {
 function isPublicSiteHost(hostname) {
   return hostname === "dabboba.net"
     || hostname.endsWith(".pages.dev");
+}
+
+const PUBLIC_SITE_ORIGIN = "https://dabboba.net";
+const CANONICAL_POLICY_PAGES = new Set([
+  "/terms",
+  "/privacy",
+  "/support",
+  "/account-deletion",
+  "/community-operations",
+]);
+
+function publicSitemapResponse(method) {
+  const urls = ["/", ...CANONICAL_POLICY_PAGES]
+    .map((path) => `  <url><loc>${PUBLIC_SITE_ORIGIN}${path}</loc></url>`)
+    .join("\n");
+  const body = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls}\n</urlset>\n`;
+  return withPublicPageHeaders(new Response(method === "HEAD" ? null : body, {
+    status: 200,
+    headers: { "content-type": "application/xml; charset=UTF-8", "cache-control": "public, max-age=3600" },
+  }));
+}
+
+function publicRobotsResponse(method) {
+  const body = `User-agent: *\nAllow: /\n\nSitemap: ${PUBLIC_SITE_ORIGIN}/sitemap.xml\n`;
+  return withPublicPageHeaders(new Response(method === "HEAD" ? null : body, {
+    status: 200,
+    headers: { "content-type": "text/plain; charset=UTF-8", "cache-control": "public, max-age=3600" },
+  }));
 }
 
 const PG_REVIEW_API = "https://lyzcyrdiazorjaqlgblr.supabase.co/functions/v1/dabboba-api";
