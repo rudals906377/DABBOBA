@@ -147,6 +147,6 @@ corepack pnpm run supabase:worker:schedule <2단계 check:release의 targetHash>
 
 ## 이 문서가 다루지 않는 것
 
-친구 명의 계정 이전(Expo/EAS·GitHub·푸시 키·Supabase·Cloudflare·도메인·메일 소유 확인),
+친구 명의 계정 이전(Expo/EAS·푸시 키·Supabase·Cloudflare·도메인·메일 소유 확인),
 SNS 콘솔 검수(네이버 공개 전환, 구글·카카오 검수), 오류 추적·알림 도구 선정, 백업 외부 보관·PITR.
 각 항목의 현재 상태는 `docs/friend-owned-release-accounts.md`와 `docs/dabboba-operations-runbook.md`를 따른다.

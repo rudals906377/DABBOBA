@@ -54,7 +54,7 @@ Cron을 켜면 결제 대사, 15분 미결제 주문·배송비 신청 자동 �
 | Apple | 완료(Team `MCZ4884P7F`, 앱 ID 6815146511, TestFlight 1.0.0(1) 검증) | TestFlight 내부 테스터 초대 |
 | Google Play | 앱 레코드 없음 | 앱 생성(`com.dabboba.mobile`), 신원·결제 프로필, 개발자 초대 |
 | Expo/EAS | 개발자가 Owner | 친구를 Owner·결제 주체로, 개발자 권한 축소 |
-| GitHub | 개발자 개인 저장소 | 친구 계정·조직으로 이전, 브랜치 보호·Actions 설정 확인 |
+| GitHub | 개발자 개인 계정의 공개 저장소(2026-10-08) | 이전하지 않음(오너 결정). 비밀값·실제 개인정보 커밋 금지 |
 | Supabase·Cloudflare·도메인 | 소유자 미확인 | Owner·결제·복구 주체 확인 |
 | 지원 메일 | 수신만 확인 | 발신 설정, DKIM·DMARC |
 | 로그인 앱(카카오·네이버·구글) | 친구 소유 증거 없음 | 친구 사업자 계정에서 앱 확인 또는 재생성, redirect 설정 |
