@@ -13,7 +13,7 @@
 | Apple Developer / App Store Connect | 친구 명의 Team `MCZ4884P7F`에 `com.dabboba.mobile`과 App Store Connect 앱 ID `6815146511` 등록. PRELAUNCH `1.0.0 (1)` TestFlight 빌드가 Apple에서 검증되어 내부 테스트 가능 | Apple 앱·서명·업로드 확인 | 내부 테스터 초대와 실기기 회귀 테스트, 스토어 심사 자료 확인 |
 | Google Play Console | 친구 명의 앱 레코드·소유권·제출 계정 증거 없음 | 차단 | 친구 명의 계정에서 앱 생성, 계약·신원·결제 프로필 확인, 개발자를 최소 권한 사용자로 초대 |
 | Expo / EAS | `@dabboba-team/dabboba-mobile` 연결됨. 현재 개발자 계정 `kyoungminoh`가 Owner 권한을 보유 | 미확인 | 친구 계정을 조직 Owner와 복구·MFA·billing 주체로 확인한 뒤 개발자 권한 축소 |
-| GitHub | private 저장소 `rudals906377/DABBOBA`; 현재 확인된 collaborator는 개발자 개인 계정 하나 | 사용 금지 | 친구 계정 또는 친구 소유 조직으로 저장소를 안전하게 이전하고 branch protection·Actions·환경값 재검증 |
+| GitHub | 공개 저장소 `rudals906377/DABBOBA`(2026-10-08 공개 전환). 오너 결정으로 친구 명의로 이전하지 않음 | 결정됨 | 이전 없음. 저장소에 비밀값·실제 개인정보를 커밋하지 않고, 저작권 신고가 오면 과거 기록에서 해당 파일을 지움 |
 | Cloudflare Pages / DNS | `dabboba.net`·`www`·Pages 배포와 Email Routing 동작은 확인. 운영 계정은 단독 Super Admin이지만 지정 친구의 계정인지와 2FA 상태는 미확인이고 로컬 Wrangler는 다른 계정임 | 미확인 | Account Super Administrator, 복구 이메일, 2FA, 도메인 갱신·결제 주체가 친구임을 계정 화면에서 확인; 그 전에는 로컬 Wrangler로 운영 배포 금지 |
 | 도메인 등록기관 | `dabboba.net` 구매·DNS 연결됨 | 미확인 | registrant와 갱신 결제·만료 알림 소유자가 친구 또는 친구가 대표·통제하는 사업자인지 확인 |
 | Supabase | 저장소 설정과 일치하는 프로젝트·조직은 존재하지만 친구의 조직 Owner 증거 없음 | 미확인 | 친구를 조직 Owner·billing/recovery 주체로 확인하고 개발자·런타임 권한을 최소화 |
@@ -54,7 +54,7 @@
 
 1. 친구의 법적 사업자 주체와 공개 사업자 정보 일치 확인
 2. Apple Developer와 Google Play 소유 계정 확보
-3. GitHub와 Expo/EAS 소유권 이전
+3. Expo/EAS 소유권 이전(GitHub는 2026-10-08 결정으로 이전하지 않음)
 4. Cloudflare·도메인·지원 메일과 Supabase 소유권 확인 또는 이전
 5. 로그인·푸시 공급자 전환
 6. 친구 계정으로 PRELAUNCH 서명 빌드와 실기기 검수
