@@ -85,8 +85,8 @@ corepack pnpm run supabase:worker:schedule <2단계 check:release의 targetHash>
 
 ## 6. 판매 준비 (관리자 화면)
 
-1. 가챠 8개 각각: 경품 구성·수량 검수 → 확률표 초안 게시(ACTIVE) → 재고 확인.
-2. 먼작귀·산리오 구성 명칭 확인(`docs/prelaunch-five-track-readiness-2026-09-30.md`).
+1. 먼작귀 7종·산리오 5종 경품 이름(`N번 구성`)을 먼저 실제 이름으로 고친다. 확률표를 만든 뒤 이름을 바꾸면 공개가 막힌다.
+2. 가챠 8개 각각: 경품 구성·수량 검수 → 확률표 초안 → 공개(ACTIVE) → 재고 확인. 상품별 SKU·수량 시트와 확인 SQL은 `docs/launch-products-2026-10-11.md`.
 3. PRELAUNCH 동안에도 `ON_SALE`로 열어 둘 수 있지만 결제는 LIVE 전까지 막혀 있다. LIVE 검증은 구매 가능한 가챠 1개 이상, 판매 중 쿠지 0개를 요구한다.
 
 ## 7. 스토어 심사자 로그인 열기 (`docs/store-review-login.md`)
