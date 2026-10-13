@@ -23,7 +23,7 @@ test("product detail shows included products without presenting illustrative odd
   assert.match(detailSource, /snapshot\.product\.category === "kuji"/);
   assert.match(detailSource, /봉인된 번호별 정확한 상품을 열기 전까지 알 수 없습니다/);
   assert.match(detailSource, /includedProductOpenQuantityLabel\(snapshot\.product, included\.length\)/);
-  assert.match(detailSource, /!\(isDrawCategory\(product\.category\) && !isDirectPurchase\(product\)\) && shouldShowCatalogInventory\(product, commerceEnabled\)/);
+  assert.match(detailSource, /!isDrawCategory\(product\.category\) && shouldShowCatalogInventory\(product, commerceEnabled\)/);
   assert.match(quantitySource, /\$\{totalQuantity\.toLocaleString\("ko-KR"\)\}개 중 \$\{openedQuantity\.toLocaleString\("ko-KR"\)\}개 오픈/);
   assert.doesNotMatch(detailSource, /계산 예시|50\/202/);
   assert.doesNotMatch(detailSource, /현재 확률 \{entry\.probabilityPercent/);

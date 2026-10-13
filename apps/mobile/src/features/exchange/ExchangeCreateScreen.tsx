@@ -238,7 +238,7 @@ export function ExchangeCreateScreen() {
               <KoreanPixelTitle variant="section">등록 가능한 상품이 없어요</KoreanPixelTitle>
               <BalancedParagraphText
                 paragraphs={[
-                  "직접 구매해 보관 중인 적격 상품만 가능해요.",
+                  "본인이 구매해 획득한 적격 보관 상품만 가능해요.",
                   "배송을 신청했거나 이미 받은 상품, 다른 교환에 사용 중인 상품은 표시되지 않아요.",
                 ]}
                 style={styles.stateText}
@@ -378,7 +378,7 @@ function InventoryChoice({
 
 function inventorySourceLabel(source: InventoryUnit["sourceType"]): string {
   if (source === "PURCHASE") return "직접 구매";
-  if (source === "GACHA") return "기존 구매 상품";
+  if (source === "GACHA") return "획득 상품";
   if (source === "KUJI") return "쿠지에서 뽑음";
   return "보관함 등록";
 }

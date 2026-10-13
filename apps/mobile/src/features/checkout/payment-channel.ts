@@ -2,7 +2,7 @@ import type { components } from "@dabboba/contracts";
 
 type Binding = components["schemas"]["PortOneCardChannelBinding"];
 const pgByProvider: Record<Binding["provider"], Binding["pgProvider"]> = {
-  PORTONE_V2_INICIS: "INICIS_V2", PORTONE_V2_KCP: "KCP_V2", PORTONE_V2_NICE: "NICE_V2",
+  PORTONE_V2_INICIS: "INICIS_V2", PORTONE_V2_KCP: "KCP_V2", PORTONE_V2_NICE: "NICE_V2", PORTONE_V2_KICC: "KICC_V2",
 };
 
 /** A server-bound order always wins over a mutable build-wide channel. */

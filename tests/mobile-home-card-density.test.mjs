@@ -84,7 +84,7 @@ test("Home kuji cards use a wider rail card and landscape discovery media", () =
 });
 
 test("Home renders only ordered operator sections below the event and recent-draw slots", () => {
-  assert.match(homeSource, /buildConfiguredHomeCollections\(snapshot\.homeSections\.items\.filter/);
+  assert.match(homeSource, /buildConfiguredHomeCollections\(snapshot\.homeSections\.items\.filter[\s\S]*?\.map/);
   assert.match(homeSource, /homeCollections\.map\(\(collection\) => \([\s\S]*?<OperatorHomeSection/);
   assert.doesNotMatch(homeSource, /HomePopularIpSection|HomeFeaturedProductsSection|TodayDrawGroup/);
 });

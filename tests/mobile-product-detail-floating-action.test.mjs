@@ -38,13 +38,13 @@ test("native Product Detail keeps its commerce action in a floating content over
   );
   assert.doesNotMatch(source, /footerLayer|footer:\s*\{[^}]*borderTopWidth/);
   assert.match(source, /quantityButton:\s*\{ width: seed\.size\.touchTarget/);
-  assert.match(source, /commerceEnabled && !\(isDrawCategory\(product\.category\) && !isDirectPurchase\(product\)\) \? \(/);
+  assert.match(source, /commerceEnabled && !isDrawCategory\(product\.category\) \? \(/);
   // The draw action owns one full-width line; the wishlist lives in the header.
   assert.doesNotMatch(source, /wishlistButton|wishlistLabel/);
   assert.match(source, /<DetailPageHeaderAction\s+label=\{!snapshot\?\.wishlistLoaded \? "찜 상태 다시 불러오기" : snapshot\.wishedByViewer \? "찜 해제" : "찜하기"\}\s+disabled=\{wishlistPending \|\| !snapshot\}/);
   assert.match(source, /disabled=\{!commerceEnabled \|\| drawUnavailable\}/);
-  assert.match(source, /!commerceEnabled\s*\? "구매 오픈 준비 중"/);
-  assert.match(source, /isDrawCategory\(product\.category\) && !isDirectPurchase\(product\)\) \? "뽑으러 가기" : "구매하기"/);
+  assert.match(source, /!commerceEnabled\s*\? "뽑기 오픈 준비 중"/);
+  assert.match(source, /isDrawCategory\(product\.category\) \? "뽑으러 가기" : "구매 준비"/);
   assert.match(source, /primaryButtonCentered:\s*\{ justifyContent: "center" \}/);
   assert.match(source, /styles\.quantityButton, pressed && styles\.pressed/);
   assert.match(source, /pressedTranslateY/);

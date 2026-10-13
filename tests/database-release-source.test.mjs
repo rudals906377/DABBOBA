@@ -46,7 +46,7 @@ test('release source accepts a clean Git commit containing every reviewed releas
   try {
     const report = checkDatabaseReleaseSource({ repositoryRoot: directory });
     assert.equal(report.status, 'pass', JSON.stringify(report));
-    assert.equal(report.latestMigration, '0099_legal_direct_purchase_2026_10_13.sql');
+    assert.equal(report.latestMigration, '0100_included_products_portone_review.sql');
     assert.deepEqual(report.blockers, []);
     assert.match(report.head, /^[0-9a-f]{40,64}$/);
     assert.equal(report.worktreeClean, true);
@@ -158,7 +158,7 @@ test('release source rejects a release missing the draft snapshot media rebase m
   try {
     const report = checkDatabaseReleaseSource({ repositoryRoot: directory });
     assert.equal(report.status, 'blocked');
-    assert.equal(report.latestMigration, '0099_legal_direct_purchase_2026_10_13.sql');
+    assert.equal(report.latestMigration, '0100_included_products_portone_review.sql');
     assert.ok(report.blockers.includes('required_migration_not_committed:0081_draft_draw_snapshot_media_rebase.sql'));
     assert.ok(report.blockers.includes('committed_migration_sequence_incomplete:0081'));
   } finally {
@@ -191,6 +191,7 @@ test('release source registers every migration from 0078 without a gap', () => {
     '0097_portone_nice_card_channel.sql',
     '0098_direct_product_purchase.sql',
     '0099_legal_direct_purchase_2026_10_13.sql',
+    '0100_included_products_portone_review.sql',
   ]);
   const versions = files.map((file) => Number(file.slice(0, 4)));
   for (let index = 1; index < versions.length; index += 1) {

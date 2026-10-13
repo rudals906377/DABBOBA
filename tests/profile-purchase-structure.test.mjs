@@ -249,7 +249,7 @@ test("checkout confirms payment before an explicit draw or catalog action", () =
 
   assert.match(
     checkoutFooter,
-    /const drawMode\s*=\s*\(isRandomDrawCategory\(product\.categoryId\) && product\.purchaseMode !== "DIRECT"/,
+    /const drawMode\s*=\s*isRandomDrawCategory\(product\.categoryId\)/,
   );
   assert.match(
     checkoutFooter,

@@ -20,25 +20,25 @@ test('cross site POST and unauthorized orders never reach upstream',async()=>{
  assert.equal((await handlePgReviewService(request('/admin/users'),{},deny)).status,404);
  assert.equal((await handlePgReviewService(request('/login',null),{},deny)).status,400);
 });
-test('only exact review products are listed and orderable',async()=>{
- const result=await handlePgReviewService(request('/products'),{},async()=>json({items:[{id:'direct-stg-death-note-rich-prize-01',purchasable:true,metadata:{purchaseMode:'DIRECT'}},{id:'other',purchasable:true}]}));
+test('only included-product review series are listed and orderable',async()=>{
+ const result=await handlePgReviewService(request('/products'),{},async()=>json({items:[{id:'stg-death-note-rich',purchasable:true,metadata:{}},{id:'other',purchasable:true}]}));
  assert.equal((await result.json()).items.length,1);
- const bad=await handlePgReviewService(request('/orders',{items:[{productId:'production-product',quantity:1}],pointAmount:0},{cookie:'__Secure-dabboba-pg-review='+token}),{},()=>{throw new Error('no upstream');});assert.equal(bad.status,400);
+ const bad=await handlePgReviewService(request('/orders',{items:[{productId:'production-product',quantity:1,expectedDrawVersion:1}],pointAmount:0},{cookie:'__Secure-dabboba-pg-review='+token}),{},()=>{throw new Error('no upstream');});assert.equal(bad.status,400);
 });
 test('tokens are forwarded from cookie only; logout clears cookie',async()=>{
  let auth;await handlePgReviewService(request('/me',undefined,{cookie:'__Secure-dabboba-pg-review='+token,authorization:'Bearer attacker'}),{},async(_url,opts)=>{auth=opts.headers.authorization;return json({actor:{role:'USER'}});});assert.equal(auth,'Bearer '+token);
  const loggedOut=await handlePgReviewService(request('/logout',{}),{},()=>{throw new Error('no upstream');});assert.equal(loggedOut.status,200);assert.match(loggedOut.headers.get('set-cookie'),/Max-Age=0/);
 });
-test('review static app permits NICE and Toss only within isolated payment protections',async()=>{
+test('review static app permits EasyPay and NICE only within isolated payment protections',async()=>{
  const response=await handlePgReviewService(new Request('https://dabboba.net/review/'),{ASSETS:{fetch:async()=>new Response('app')}});
  assert.equal(response.headers.get('x-robots-tag'),'noindex, nofollow');
  assert.equal(response.headers.get('referrer-policy'),'no-referrer');
  const csp=response.headers.get('content-security-policy');
  const directives=new Map(csp.split(';').map(d=>d.trim().split(/\s+/)).map(([name,...sources])=>[name,sources]));
- assert.deepEqual(directives.get('script-src'),["'self'",'https://js.tosspayments.com','https://cdn.portone.io']);
- assert.deepEqual(directives.get('connect-src'),["'self'",'https://*.tosspayments.com','https://checkout-service.prod.iamport.co','https://coretelemetry.prod.iamport.co','https://tx-gateway-service.prod.iamport.co','https://payment-bridge.prod.iamport.co','https://service.iamport.kr','https://*.nicepay.co.kr']);
- assert.deepEqual(directives.get('frame-src'),['https://*.tosspayments.com','https://checkout-service.prod.iamport.co','https://payment-bridge.prod.iamport.co','https://service.iamport.kr','https://*.nicepay.co.kr']);
- assert.deepEqual(directives.get('form-action'),["'self'",'https://*.tosspayments.com','https://*.nicepay.co.kr','https://service.iamport.kr']);
+ assert.deepEqual(directives.get('script-src'),["'self'",'https://cdn.portone.io']);
+ assert.deepEqual(directives.get('connect-src'),["'self'",'https://*.easypay.co.kr','https://checkout-service.prod.iamport.co','https://coretelemetry.prod.iamport.co','https://tx-gateway-service.prod.iamport.co','https://payment-bridge.prod.iamport.co','https://service.iamport.kr','https://*.nicepay.co.kr']);
+ assert.deepEqual(directives.get('frame-src'),['https://*.easypay.co.kr','https://checkout-service.prod.iamport.co','https://payment-bridge.prod.iamport.co','https://service.iamport.kr','https://*.nicepay.co.kr']);
+ assert.deepEqual(directives.get('form-action'),["'self'",'https://*.easypay.co.kr','https://*.nicepay.co.kr','https://service.iamport.kr']);
  assert.deepEqual(directives.get('style-src'),["'self'"]);
  assert.deepEqual(directives.get('base-uri'),["'none'"]);
  assert.deepEqual(directives.get('frame-ancestors'),["'none'"]);
@@ -47,7 +47,7 @@ test('review static app permits NICE and Toss only within isolated payment prote
  assert.equal(response.headers.get('x-content-type-options'),'nosniff');
  assert.equal((await handlePgReviewService(new Request('https://unrelated.pages.dev/review/'),{})).status,404);
 });
-test('Toss CSP allowance never leaks into the storefront or policy pages',async()=>{
+test('Payment CSP allowance never leaks into the storefront or policy pages',async()=>{
  for(const path of ['/','/terms','/privacy','/support','/account-deletion']){
   const response=await worker.fetch(new Request('https://dabboba.net'+path),{ASSETS:{fetch:async()=>new Response('page',{headers:{'content-type':'text/html'}})}});
   assert.equal(response.status,200);
@@ -83,8 +83,8 @@ test('shared proxy pins NICE and Toss actions to their own endpoints and refuses
   let target;const r=await handlePgReviewService(request(`/${family}/${paymentId}/confirm`,{},{cookie}),{},async url=>{target=url;return json({status:'PENDING'});});
   assert.equal(r.status,200);assert.equal(target,`https://lyzcyrdiazorjaqlgblr.supabase.co/functions/v1/dabboba-api${upstream}${paymentId}/confirm`);
  }
- const body={items:[{productId:'direct-stg-death-note-rich-prize-01',quantity:1}],pointAmount:0};
- for(const selection of [{reviewPaymentProvider:'PORTONE_V2_NICE',cardPg:'NICE'},{reviewPaymentProvider:'TOSSPAYMENTS_DIRECT'}]) {
+ const body={items:[{productId:'stg-death-note-rich',quantity:1,expectedDrawVersion:1}],pointAmount:0};
+ for(const selection of [{reviewPaymentProvider:'PORTONE_V2_NICE',cardPg:'NICE'},{reviewPaymentProvider:'PORTONE_V2_KICC',cardPg:'KICC'}]) {
   let sent;const r=await handlePgReviewService(request('/orders',{...body,...selection},{cookie}),{},async(_url,init)=>{sent=JSON.parse(init.body);return json({id:paymentId});});
   assert.equal(r.status,200);assert.equal(sent.reviewPaymentProvider,selection.reviewPaymentProvider);
  }

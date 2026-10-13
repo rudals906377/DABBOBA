@@ -8,13 +8,13 @@ import { issueSession } from "../plugins/auth.js";
 import { acceptRequiredPoliciesForIntegrationTest } from "../integration-test-fixtures.js";
 
 const databaseUrl = process.env.DABBOBA_TEST_DATABASE_URL;
-test("shared NICE and Toss review commits selected products once, releases uncharged stock and holds uncertain confirmations", { skip: !databaseUrl, timeout: 60000 }, async (t) => {
+test("shared NICE and Toss review issues included-product draw rights once, releases uncharged stock and holds uncertain confirmations", { skip: !databaseUrl, timeout: 60000 }, async (t) => {
   const pool = createDatabasePool(databaseUrl!, "dabboba-toss-review-test");
   const config = { environment: "test", environmentTier: "STAGING", surface: "all", host: "127.0.0.1", port: 8788,
     databaseUrl: databaseUrl!, redisUrl: null, webOrigins: [], adminOrigins: [], sessionTokenPepper: "synthetic-toss-test-pepper",
     adminProxyIdentitySecret: null, sessionTtlDays: 1, commerceMode: "LIVE", paymentProvider: "PORTONE_V2_NICE",
     paymentWebhookSecret: "synthetic-shared-payment-hook",
-    portOne:{apiSecret:"synthetic-portone-secret",webhookSecret:"synthetic-portone-webhook",merchantId:"merchant-synthetic",storeId:"store-synthetic",channelKey:"channel-key-nice",channelEnvironment:"TEST"}, tossPayments: { clientKey: "test_ck_synthetic_value_12345", secretKey: "test_sk_synthetic_value_12345",
+    portOne:{apiSecret:"synthetic-portone-secret",webhookSecret:"synthetic-portone-webhook",merchantId:"merchant-synthetic",storeId:"store-synthetic",channelKey:"channel-key-nice",kiccChannelKey:"channel-key-kicc",channelEnvironment:"TEST"}, tossPayments: { clientKey: "test_ck_synthetic_value_12345", secretKey: "test_sk_synthetic_value_12345",
       merchantId: "test_mid", environment: "TEST" }, gcsBucket: null, gcsProjectId: null, logLevel: "silent" } as ApiConfig;
   const { app } = await buildApp({ config, pool, redis: null });
   const realFetch = globalThis.fetch;
@@ -27,7 +27,7 @@ test("shared NICE and Toss review commits selected products once, releases uncha
   const headers = { authorization: `Bearer ${session.token}` };
   const ip = `toss-ip-${suffix}`, product = `toss-gacha-${suffix}`, prize = `toss-prize-${suffix}`;
   await pool.query("INSERT INTO catalog_ips(id,slug,name_ko,name_en) VALUES($1::text,$1::text,'토스 시험','Toss test')", [ip]);
-  await pool.query("INSERT INTO catalog_products(id,sku,ip_id,category,name,price,metadata) VALUES($1::text,$1::text,$2,'gacha','토스 시험',7000,$3::jsonb)", [product, ip,JSON.stringify({purchaseMode:'DIRECT'})]);
+  await pool.query("INSERT INTO catalog_products(id,sku,ip_id,category,name,price,metadata) VALUES($1::text,$1::text,$2,'gacha','토스 시험',7000,$3::jsonb)", [product, ip,JSON.stringify({})]);
   await pool.query("INSERT INTO product_stock(product_id,on_hand) VALUES($1,6)", [product]);
   await pool.query("INSERT INTO catalog_products(id,sku,ip_id,category,name,price,is_prize_only) VALUES($1::text,$1::text,$2,'figure','경품',7000,true)", [prize, ip]);
   const version = (await pool.query<{ id: string }>("INSERT INTO draw_probability_versions(product_id,version) VALUES($1,1) RETURNING id", [product])).rows[0]!;
@@ -35,15 +35,15 @@ test("shared NICE and Toss review commits selected products once, releases uncha
     VALUES($1,$2::text,'경품',$2::text,$3,'figure','A',1,6,6)`, [version.id, prize, ip]);
   await pool.query("UPDATE draw_probability_versions SET status='ACTIVE',published_by=$2,published_at=now() WHERE id=$1", [version.id, user.id]);
   await pool.query("UPDATE catalog_products SET image_url='https://cdn.example.test/toss.png',sale_status='ON_SALE' WHERE id=$1", [product]);
-  let nicePaidId: string | null=null; const niceLookups:string[]=[];
+  let nicePaidId: string | null=null; let kiccPaidId:string|null=null; const niceLookups:string[]=[];
   const paid = new Map<string, Record<string, unknown>>(); let confirmCalls = 0; let loseResponse = false;
   globalThis.fetch = async (input, init) => {
     const url = new URL(String(input));
     if(url.origin==="https://api.portone.io") {
       const paymentId=url.pathname.split('/').at(-1)!;niceLookups.push(paymentId);
-      if(paymentId!==nicePaidId)return Response.json({type:"PAYMENT_NOT_FOUND",message:"fixture not submitted"},{status:404});
-      const now=new Date().toISOString();return Response.json({status:"PAID",id:paymentId,transactionId:`nice-shared-${suffix}`,pgTxId:`nice-pg-${suffix}`,
-        merchantId:"merchant-synthetic",storeId:"store-synthetic",version:"V2",channel:{key:"channel-key-nice",type:"TEST",pgProvider:"NICE_V2",pgMerchantId:"synthetic-mid"},
+      if(paymentId!==nicePaidId && paymentId!==kiccPaidId)return Response.json({type:"PAYMENT_NOT_FOUND",message:"fixture not submitted"},{status:404});
+      const now=new Date().toISOString();return Response.json({status:"PAID",id:paymentId,transactionId:`portone-shared-${paymentId}`,pgTxId:`portone-pg-${paymentId}`,
+        merchantId:"merchant-synthetic",storeId:"store-synthetic",version:"V2",channel:{key:paymentId===kiccPaidId?"channel-key-kicc":"channel-key-nice",type:"TEST",pgProvider:paymentId===kiccPaidId?"KICC_V2":"NICE_V2",pgMerchantId:"synthetic-mid"},
         method:{type:"PaymentMethodCard",card:{number:"fixture"}},amount:{total:7000,paid:7000,cancelled:0,taxFree:0,discount:0,cancelledTaxFree:0},currency:"KRW",requestedAt:now,updatedAt:now,statusChangedAt:now,paidAt:now});
     }
     assert.equal(url.origin, "https://api.tosspayments.com");
@@ -63,7 +63,7 @@ test("shared NICE and Toss review commits selected products once, releases uncha
   };
   const create = async () => {
     const r = await app.inject({ method: "POST", url: "/v1/orders", headers: { ...headers, "idempotency-key": randomUUID() },
-      payload: { items: [{ productId: product, quantity: 1 }], pointAmount: 0,reviewPaymentProvider:"TOSSPAYMENTS_DIRECT" } });
+      payload: { items: [{ productId: product, quantity: 1,expectedDrawVersion:1 }], pointAmount: 0,reviewPaymentProvider:"TOSSPAYMENTS_DIRECT" } });
     assert.equal(r.statusCode, 201, r.body); return r.json() as { id: string; paymentId: string };
   };
   const post = (id: string, action: string, payload = {}) => app.inject({ method: "POST", url: `/v1/review/toss-payments/${id}/${action}`, headers, payload });
@@ -71,7 +71,7 @@ test("shared NICE and Toss review commits selected products once, releases uncha
   assert.equal(publicConfig.json().cardPaymentOptions[0].provider,"PORTONE_V2_NICE");
   assert.equal(publicConfig.json().tossPayment.provider,"TOSSPAYMENTS_DIRECT");
   const niceKey=randomUUID();
-  const nicePayload={items:[{productId:product,quantity:1}],pointAmount:0,reviewPaymentProvider:"PORTONE_V2_NICE",cardPg:"NICE"};
+  const nicePayload={items:[{productId:product,quantity:1,expectedDrawVersion:1}],pointAmount:0,reviewPaymentProvider:"PORTONE_V2_NICE",cardPg:"NICE"};
   const nice=await app.inject({method:"POST",url:"/v1/orders",headers:{...headers,"idempotency-key":niceKey},payload:nicePayload});
   assert.equal(nice.statusCode,201,nice.body);
   assert.equal(nice.json().paymentProvider,"PORTONE_V2_NICE");
@@ -101,7 +101,7 @@ test("shared NICE and Toss review commits selected products once, releases uncha
   const response = await post(first.paymentId, "confirm", { orderId: first.paymentId, paymentKey: firstKey, amount: 7000 });
   assert.equal(response.statusCode, 200, response.body); assert.equal(response.json().status, "PAID");
   assert.equal((await post(first.paymentId, "confirm")).statusCode, 200); assert.equal(confirmCalls, 1);
-  assert.equal((await pool.query("SELECT count(*)::integer AS n FROM inventory_units WHERE owner_id=$1 AND source_type='PURCHASE'", [user.id])).rows[0].n, 1);
+  assert.equal((await pool.query("SELECT count(*)::integer AS n FROM draw_entitlements WHERE user_id=$1", [user.id])).rows[0].n, 1);
   const second = await create(); await post(second.paymentId, "attempt");
   const closed = await post(second.paymentId, "abandon"); assert.equal(closed.statusCode, 200, closed.body);
   assert.equal((await pool.query("SELECT status FROM orders WHERE id=$1", [second.id])).rows[0].status, "CANCELLED");
@@ -111,7 +111,7 @@ test("shared NICE and Toss review commits selected products once, releases uncha
   assert.equal((await post(third.paymentId, "abandon")).statusCode, 409);
   const recovered = await post(third.paymentId, "confirm"); assert.equal(recovered.statusCode, 200, recovered.body);
   assert.equal(recovered.json().status, "PAID"); assert.equal(confirmCalls, 2);
-  assert.equal((await pool.query("SELECT count(*)::integer AS n FROM inventory_units WHERE owner_id=$1 AND source_type='PURCHASE'", [user.id])).rows[0].n, 2);
+  assert.equal((await pool.query("SELECT count(*)::integer AS n FROM draw_entitlements WHERE user_id=$1", [user.id])).rows[0].n, 2);
   assert.equal((await pool.query("SELECT reserved FROM product_stock WHERE product_id=$1", [product])).rows[0].reserved, 0);
   await assert.rejects(pool.query("DELETE FROM toss_review_confirm_attempts WHERE payment_id=$1", [third.paymentId]), /append-only/);
   const nicePaid=await app.inject({method:"POST",url:"/v1/orders",headers:{...headers,"idempotency-key":randomUUID()},payload:nicePayload});
@@ -121,9 +121,25 @@ test("shared NICE and Toss review commits selected products once, releases uncha
   assert.equal(niceConfirmed.statusCode,200,niceConfirmed.body);
   const niceLookup=await app.inject({method:"GET",url:`/v1/orders/${nicePaid.json().id}`,headers});
   assert.equal(niceLookup.json().status,"PAID");assert.equal(niceLookup.json().paymentProvider,"PORTONE_V2_NICE");
-  assert.equal((await pool.query("SELECT count(*)::int AS n FROM inventory_units WHERE owner_id=$1 AND source_type='PURCHASE'",[user.id])).rows[0].n,3);
-  assert.equal((await pool.query("SELECT count(*)::int AS n FROM draw_entitlements WHERE user_id=$1",[user.id])).rows[0].n,0);
+  assert.equal((await pool.query("SELECT count(*)::int AS n FROM draw_entitlements WHERE user_id=$1",[user.id])).rows[0].n,3);
+  assert.equal((await pool.query("SELECT count(*)::int AS n FROM inventory_units WHERE owner_id=$1 AND source_type='PURCHASE'",[user.id])).rows[0].n,0);
 
+  const kiccPayload={...nicePayload,reviewPaymentProvider:"PORTONE_V2_KICC",cardPg:"KICC"};
+  const kicc=await app.inject({method:"POST",url:"/v1/orders",headers:{...headers,"idempotency-key":randomUUID()},payload:kiccPayload});
+  assert.equal(kicc.statusCode,201,kicc.body);kiccPaidId=kicc.json().paymentId;
+  assert.equal(kicc.json().cardPayment.pgProvider,"KICC_V2");
+  assert.equal((await app.inject({method:"POST",url:`/v1/payments/${kiccPaidId}/attempt`,headers,payload:{}})).statusCode,200);
+  const kiccConfirmed=await app.inject({method:"POST",url:`/v1/payments/${kiccPaidId}/confirm`,headers,payload:{}});
+  assert.equal(kiccConfirmed.statusCode,200,kiccConfirmed.body);
+  const kiccOrder=await app.inject({method:"GET",url:`/v1/orders/${kicc.json().id}`,headers});
+  assert.equal(kiccOrder.json().drawEntitlementIds.length,1);
+  const entitlementId=kiccOrder.json().drawEntitlementIds[0];
+  const consume=()=>app.inject({method:"POST",url:`/v1/draws/${entitlementId}/consume`,headers:{...headers,"idempotency-key":`included-consume-${suffix}`},payload:{}});
+  const opened=await consume();assert.equal(opened.statusCode,200,opened.body);
+  assert.equal(opened.json().prizeProductId,prize);
+  const replay=await consume();assert.equal(replay.statusCode,200,replay.body);assert.equal(replay.json().id,opened.json().id);
+  const inventory=await pool.query("SELECT product_id,source_type FROM inventory_units WHERE owner_id=$1",[user.id]);
+  assert.deepEqual(inventory.rows,[{product_id:prize,source_type:"GACHA"}]);
   const grants = (await pool.query(`SELECT
     has_table_privilege('anon','toss_review_confirm_attempts','SELECT') AS anon_read,
     has_table_privilege('authenticated','toss_review_confirm_attempts','SELECT') AS client_read,

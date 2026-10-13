@@ -50,7 +50,6 @@ import {
   fetchProductRecentDraws,
   fetchShopWishlistProductIds,
   isDrawCategory,
-  isDirectPurchase,
   productMetadataText,
   setProductWishlist,
   type ProductDetailSnapshot,
@@ -151,7 +150,7 @@ export function ProductDetailScreen() {
   }, [load]));
 
   useEffect(() => {
-    if (!snapshot || !commerceEnabled || snapshot.ownedCollectible || snapshot.exchangeReference || (!isDrawCategory(snapshot.product.category) || isDirectPurchase(snapshot.product))) {
+    if (!snapshot || !commerceEnabled || snapshot.ownedCollectible || snapshot.exchangeReference || !isDrawCategory(snapshot.product.category)) {
       setRecentDrawState(null);
       return;
     }
@@ -176,7 +175,7 @@ export function ProductDetailScreen() {
   const drawUnavailable = Boolean(
     product
       && !readOnlyReference
-      && (isDrawCategory(product.category) && !isDirectPurchase(product))
+      && isDrawCategory(product.category)
       && (
         !productPurchasable
         || product.availableQuantity <= 0
@@ -240,22 +239,16 @@ export function ProductDetailScreen() {
       );
       return;
     }
-    if (isDirectPurchase(product)) {
-      const destination = `/checkout/direct/${encodeURIComponent(product.id)}?quantity=${quantity}`;
-      if (!accessToken) { openCustomerLogin("구매 내역은 로그인한 계정에 저장돼요.", destination); return; }
-      router.push(destination as Href);
-      return;
-    }
     if (!accessToken) {
       openCustomerLogin(
         "주문과 추첨 결과는 로그인한 계정에 저장돼요.",
-        (isDrawCategory(product.category) && !isDirectPurchase(product)) && product.category === "kuji"
+        isDrawCategory(product.category) && product.category === "kuji"
           ? buildKujiRoomGatePath(product.id)
           : `/checkout/${encodeURIComponent(product.id)}`,
       );
       return;
     }
-    if ((isDrawCategory(product.category) && !isDirectPurchase(product))) {
+    if (isDrawCategory(product.category)) {
       if (drawUnavailable) {
         Alert.alert(
           "지금은 뽑을 수 없어요",
@@ -337,7 +330,7 @@ export function ProductDetailScreen() {
               <Text style={styles.price}>{productPriceLabel(product, commerceEnabled)}</Text>
               {readOnlyReference ? (
                 <Text style={styles.stock}>{ownedCollectible ? "내 보관 상품" : "교환 등록 상품"}</Text>
-              ) : !(isDrawCategory(product.category) && !isDirectPurchase(product)) && shouldShowCatalogInventory(product, commerceEnabled) ? (
+              ) : !isDrawCategory(product.category) && shouldShowCatalogInventory(product, commerceEnabled) ? (
                 <View style={styles.inventoryRow}>
                   <RemainingInventoryMeter
                     category={product.category}
@@ -352,10 +345,10 @@ export function ProductDetailScreen() {
             {readOnlyReference ? (
               <View style={styles.section}>
                 <KoreanPixelTitle variant="section" style={styles.sectionTitle}>{ownedCollectible ? "보유 상품 안내" : "교환 상품 안내"}</KoreanPixelTitle>
-                <InfoRow label="상품 구분" value={isDirectPurchase(product) ? "직접 구매 상품" : "기존 뽑기 결과 상품"} />
+                <InfoRow label="상품 구분" value="뽑기 결과 상품" />
                 <InfoRow label="확인 위치" value={ownedCollectible ? "보관함·배송·교환 내역" : "교환 글"} />
               </View>
-            ) : (isDrawCategory(product.category) && !isDirectPurchase(product)) ? (
+            ) : isDrawCategory(product.category) ? (
               <>
                 <DrawHighlights category={product.category} prelaunch={!commerceEnabled} />
                 <OddsSection snapshot={snapshot} onRetry={() => { void load(); }} />
@@ -366,20 +359,17 @@ export function ProductDetailScreen() {
                 <DrawProductNotices category={product.category} prelaunch={!commerceEnabled} />
               </>
             ) : (
-              <>
               <View style={styles.section}>
                 <KoreanPixelTitle variant="section" style={styles.sectionTitle}>구매 안내</KoreanPixelTitle>
                 <InfoRow label="판매 방식" value="일반 상품 직접 구매" />
                 <InfoRow label="제조사" value={product.manufacturer ?? "상품 상세 고지 예정"} />
                 <InfoRow label="출시일" value={product.releaseDate ?? "상품 상세 고지 예정"} />
               </View>
-              <DrawProductNotices category="direct" prelaunch={!commerceEnabled} />
-              </>
             )}
           </ScrollView>
 
           {!readOnlyReference ? <FloatingBottomActionPanel panelStyle={styles.footer}>
-            {commerceEnabled && !(isDrawCategory(product.category) && !isDirectPurchase(product)) ? (
+            {commerceEnabled && !isDrawCategory(product.category) ? (
               <View style={styles.quantityBox}>
                 <Pressable accessibilityRole="button" accessibilityLabel="수량 줄이기" accessibilityState={{ disabled: quantity <= 1 }} disabled={quantity <= 1} onPress={() => setQuantity((current) => Math.max(1, current - 1))} style={({ pressed }) => [styles.quantityButton, pressed && styles.pressed]}>
                   <DecorativeIonicon name="remove" size={20} color={quantity <= 1 ? colors.line : colors.ink} />
@@ -393,23 +383,23 @@ export function ProductDetailScreen() {
             <Pressable
               accessibilityRole="button"
               accessibilityLabel={!commerceEnabled
-                ? "구매 오픈 준비 중"
-                : (isDrawCategory(product.category) && !isDirectPurchase(product)) ? "뽑으러 가기" : `${quantity}개 구매하기`}
+                ? "뽑기 오픈 준비 중"
+                : isDrawCategory(product.category) ? "뽑으러 가기" : `${quantity}개 구매 준비`}
               accessibilityState={{ disabled: !commerceEnabled || drawUnavailable }}
               disabled={!commerceEnabled || drawUnavailable}
               onPress={continueCommerce}
               style={({ pressed }) => [
                 styles.primaryButton,
-                (!commerceEnabled || (isDrawCategory(product.category) && !isDirectPurchase(product))) && styles.primaryButtonCentered,
+                (!commerceEnabled || isDrawCategory(product.category)) && styles.primaryButtonCentered,
                 pressed && styles.pressed,
                 !commerceEnabled ? styles.prelaunchButton : drawUnavailable && styles.disabled,
               ]}
             >
-              {!commerceEnabled || (isDrawCategory(product.category) && !isDirectPurchase(product)) ? null : <Text style={styles.primaryButtonMeta}>{total.toLocaleString("ko-KR")}원</Text>}
+              {!commerceEnabled || isDrawCategory(product.category) ? null : <Text style={styles.primaryButtonMeta}>{total.toLocaleString("ko-KR")}원</Text>}
               <Text style={styles.primaryButtonLabel}>
                 {!commerceEnabled
-                  ? "구매 오픈 준비 중"
-                  : (isDrawCategory(product.category) && !isDirectPurchase(product)) ? "뽑으러 가기" : "구매하기"}
+                  ? "뽑기 오픈 준비 중"
+                  : isDrawCategory(product.category) ? "뽑으러 가기" : "구매 준비"}
               </Text>
             </Pressable>
           </FloatingBottomActionPanel> : null}
@@ -632,7 +622,7 @@ function DrawProductInformation({ snapshot }: { snapshot: ProductDetailSnapshot 
   );
 }
 
-function DrawProductNotices({ category, prelaunch }: { category: "gacha" | "kuji" | "direct"; prelaunch: boolean }) {
+function DrawProductNotices({ category, prelaunch }: { category: "gacha" | "kuji"; prelaunch: boolean }) {
   const sections = checkoutNoticeSections(category);
   return (
     <View style={styles.noticeSection}>

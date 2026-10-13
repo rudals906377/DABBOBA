@@ -302,6 +302,7 @@ export function HomeScreen() {
         <HomeIntroBanner />
 
 
+        <RecentDrawActivityPanel activity={recentDrawActivity} assetBaseUrl={runtime.assetBaseUrl} imageRequestKey={imageRequestKey} />
 
         {homeCollections.map((collection) => (
           <OperatorHomeSection

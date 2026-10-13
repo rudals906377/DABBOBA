@@ -299,7 +299,7 @@ test("Home settles catalog and recent activity independently", () => {
   assert.match(homeSource, /fetchHomeRecentDrawActivity\(runtime\.apiBaseUrl\)/);
   assert.match(homeSource, /recentResult\.status === "fulfilled"/);
   assert.doesNotMatch(homeSource, /cached\?\.recentDrawActivity \?\? null/);
-  assert.doesNotMatch(homeSource, /<RecentDrawActivityPanel/);
+  assert.match(homeSource, /<RecentDrawActivityPanel[\s\S]*?activity=\{recentDrawActivity\}/);
 });
 
 test("Home isolates section request failure and renders truthful operator-feed recovery states", () => {

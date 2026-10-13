@@ -1,7 +1,6 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { withTransaction, type DatabaseClient } from "@dabboba/db";
 import {
-  isDirectPurchaseProduct,
   PRODUCT_CATEGORIES,
   PRODUCT_SALE_STATUSES,
   REQUEST_STATUSES,
@@ -130,7 +129,6 @@ const mapIp = (row: IpRow) => ({
 });
 
 function productBlockedReason(row: ProductRow, commerceMode: CommerceLaunchMode) {
-  if (!isDirectPurchaseProduct(row)) return "COMING_SOON" as const;
   if (row.sale_status === "DRAFT") return "DRAFT" as const;
   if (row.sale_status === "COMING_SOON") return "COMING_SOON" as const;
   if (row.sale_status === "PAUSED") return "PAUSED" as const;
@@ -290,7 +288,6 @@ async function assertProductSaleStatusReady(
     isActive: boolean;
     isPrizeOnly: boolean;
     saleStatus: ProductSaleStatus;
-    metadata?: Record<string, unknown>;
   },
 ) {
   if (input.saleStatus !== "ON_SALE") return;
@@ -298,8 +295,7 @@ async function assertProductSaleStatusReady(
   if (input.price <= 0) throw conflict("판매중 상품은 0원보다 큰 가격이 필요합니다.");
   if (!input.imageUrl && !input.storefrontImageUrl) throw conflict("판매중 상품은 공개 이미지가 필요합니다.");
   if (input.availableQuantity <= 0) throw conflict("판매중 전환 시 사용 가능한 재고가 필요합니다.");
-  if (!isDirectPurchaseProduct(input)) throw conflict("신규 판매는 종류가 확정된 직접 선택 상품만 등록할 수 있습니다.");
-  if (!isDirectPurchaseProduct(input) && (input.category === "gacha" || input.category === "kuji")) {
+  if (input.category === "gacha" || input.category === "kuji") {
     const active = await client.query(
       `SELECT 1
          FROM draw_probability_versions AS version
@@ -435,11 +431,10 @@ export async function registerCatalogRoutes(app: FastifyInstance, context: ApiCo
     const filters = [
       "p.is_active = true",
       "p.is_prize_only = false",
-      "p.category <> 'kuji'",
-      "p.metadata->>'purchaseMode'='DIRECT'",
+      "COALESCE(p.metadata->>'purchaseMode','') <> 'DIRECT'",
       "p.sale_status IN ('COMING_SOON','ON_SALE')",
       "i.is_active = true",
-      `(p.sale_status <> 'ON_SALE' OR p.category NOT IN ('gacha','kuji') OR p.metadata->>'purchaseMode'='DIRECT' OR EXISTS (
+      `(p.sale_status <> 'ON_SALE' OR p.category NOT IN ('gacha','kuji') OR EXISTS (
         SELECT 1 FROM draw_probability_versions active_version
          WHERE active_version.product_id=p.id AND active_version.status='ACTIVE'
       ))`,
@@ -545,12 +540,11 @@ export async function registerCatalogRoutes(app: FastifyInstance, context: ApiCo
        JOIN catalog_ips i ON i.id=p.ip_id
        LEFT JOIN product_stock s ON s.product_id=p.id
        WHERE p.id=$1 AND p.is_active=true
-         AND p.category <> 'kuji'
-         AND p.metadata->>'purchaseMode'='DIRECT'
          AND p.is_prize_only=false
+         AND COALESCE(p.metadata->>'purchaseMode','') <> 'DIRECT'
          AND p.sale_status IN ('COMING_SOON','ON_SALE')
          AND i.is_active=true
-         AND (p.sale_status <> 'ON_SALE' OR p.category NOT IN ('gacha','kuji') OR p.metadata->>'purchaseMode'='DIRECT' OR EXISTS (
+         AND (p.sale_status <> 'ON_SALE' OR p.category NOT IN ('gacha','kuji') OR EXISTS (
            SELECT 1 FROM draw_probability_versions active_version
             WHERE active_version.product_id=p.id AND active_version.status='ACTIVE'
          ))`,
@@ -569,6 +563,7 @@ export async function registerCatalogRoutes(app: FastifyInstance, context: ApiCo
     const parent = await context.pool.query<{ id: string; sale_status: ProductSaleStatus }>(
       `SELECT p.id,p.sale_status FROM catalog_products p JOIN catalog_ips i ON i.id=p.ip_id
        WHERE p.id=$1 AND p.is_active=true AND p.is_prize_only=false
+         AND COALESCE(p.metadata->>'purchaseMode','') <> 'DIRECT'
          AND p.category IN ('gacha','kuji') AND p.sale_status IN ('COMING_SOON','ON_SALE')
          AND i.is_active=true
          AND (p.sale_status <> 'ON_SALE' OR EXISTS (
@@ -752,7 +747,7 @@ export async function registerCatalogRoutes(app: FastifyInstance, context: ApiCo
 
   app.post("/v1/admin/products", { preHandler: context.auth.requirePermission("catalog.write") }, async (request, reply) => {
     const input = productInput(request.body); const id = input.id || input.sku.toLocaleLowerCase("en-US").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
-    const metadata = preserveProductGalleryMetadata({ ...input.metadata, ...(!input.isPrizeOnly ? { purchaseMode: "DIRECT" } : {}) });
+    const metadata = preserveProductGalleryMetadata(input.metadata);
     if (!id) throw badRequest("상품 id를 생성할 수 없습니다.");
     const mutation = await adminIdempotentMutation(context, request, { target: { type: "PRODUCT", id }, work: async (client) => {
       await assertCharactersBelongToIp(client, input.ipId, input.characterIds || []);
@@ -773,7 +768,6 @@ export async function registerCatalogRoutes(app: FastifyInstance, context: ApiCo
         isActive: input.isActive,
         isPrizeOnly: input.isPrizeOnly ?? false,
         saleStatus: requestedSaleStatus,
-        metadata,
       });
       const result = requestedSaleStatus === "DRAFT"
         ? created
@@ -806,7 +800,6 @@ export async function registerCatalogRoutes(app: FastifyInstance, context: ApiCo
       );
       if (!before.rowCount) throw notFound();
       const metadata = preserveProductGalleryMetadata(input.metadata, before.rows[0]!.metadata);
-      if (isDirectPurchaseProduct(before.rows[0]!) !== isDirectPurchaseProduct({metadata})) throw conflict("구매 방식은 생성 후 변경할 수 없습니다. 별도 판매 SKU를 등록해 주세요.");
       if (input.category !== before.rows[0]!.category) {
         throw conflict("판매·추첨 자산의 의미를 보존하기 위해 상품 카테고리는 생성 후 변경할 수 없습니다. 새 SKU를 등록해 주세요.");
       }
@@ -820,7 +813,7 @@ export async function registerCatalogRoutes(app: FastifyInstance, context: ApiCo
         throw conflict("상품 수정에서는 재고를 변경할 수 없습니다. 재고 운영의 불변 조정 원장을 사용해 주세요.");
       }
       const requestedSaleStatus = input.saleStatus ?? before.rows[0]!.sale_status;
-      if (!isDirectPurchaseProduct({metadata}) && ["gacha","kuji"].includes(input.category)) {
+      if (["gacha","kuji"].includes(input.category)) {
         const activeVersion = await client.query<{ id: string }>("SELECT id FROM draw_probability_versions WHERE product_id=$1 AND status='ACTIVE' FOR UPDATE", [id]);
         if (activeVersion.rowCount) await assertDrawCapacity(client, {
           probabilityVersionId: activeVersion.rows[0]!.id,
@@ -839,7 +832,6 @@ export async function registerCatalogRoutes(app: FastifyInstance, context: ApiCo
         isActive: input.isActive,
         isPrizeOnly: before.rows[0]!.is_prize_only,
         saleStatus: requestedSaleStatus,
-        metadata,
       });
       const updated = await client.query<ProductRow>(
         `UPDATE catalog_products SET sku=$2,ip_id=$3,category=$4,name=$5,manufacturer=$6,release_date=$7,price=$8,image_url=$9,metadata=$10,is_active=$11,sale_status=$12,version=version+1

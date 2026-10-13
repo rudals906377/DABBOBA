@@ -123,11 +123,6 @@ function publicRobotsResponse(method) {
 
 const PG_REVIEW_API = "https://lyzcyrdiazorjaqlgblr.supabase.co/functions/v1/dabboba-api";
 const PG_REVIEW_PRODUCTS = new Set(["stg-death-note-rich", "stg-sanrio-can-figures", "stg-hatsune-miku-petadol-piapro"]);
-function isPgReviewDirectProduct(id) {
-  if (typeof id !== "string") return false;
-  const match = /^direct-(stg-[a-z0-9-]+)-prize-(0[1-9]|[1-9][0-9])$/.exec(id);
-  return Boolean(match && PG_REVIEW_PRODUCTS.has(match[1]));
-}
 const PG_REVIEW_COOKIE = "__Secure-dabboba-pg-review";
 const PG_REVIEW_EXPIRY = Date.parse("2026-10-31T14:59:00Z");
 
@@ -183,7 +178,7 @@ export async function handlePgReviewService(request, env, externalFetch = global
     const headers = new Headers(response.headers);
     headers.set("cache-control", "no-store"); headers.set("x-robots-tag", "noindex, nofollow");
     headers.set("x-content-type-options", "nosniff"); headers.set("referrer-policy", "no-referrer");
-    headers.set("content-security-policy", "default-src 'self'; script-src 'self' https://js.tosspayments.com https://cdn.portone.io; style-src 'self'; img-src 'self' https://rconfxsykttfvznakile.supabase.co https://rconfxsykttfvznakile.storage.supabase.co data:; connect-src 'self' https://*.tosspayments.com https://checkout-service.prod.iamport.co https://coretelemetry.prod.iamport.co https://tx-gateway-service.prod.iamport.co https://payment-bridge.prod.iamport.co https://service.iamport.kr https://*.nicepay.co.kr; frame-src https://*.tosspayments.com https://checkout-service.prod.iamport.co https://payment-bridge.prod.iamport.co https://service.iamport.kr https://*.nicepay.co.kr; base-uri 'none'; form-action 'self' https://*.tosspayments.com https://*.nicepay.co.kr https://service.iamport.kr; frame-ancestors 'none'");
+    headers.set("content-security-policy", "default-src 'self'; script-src 'self' https://cdn.portone.io; style-src 'self'; img-src 'self' https://rconfxsykttfvznakile.supabase.co https://rconfxsykttfvznakile.storage.supabase.co data:; connect-src 'self' https://*.easypay.co.kr https://checkout-service.prod.iamport.co https://coretelemetry.prod.iamport.co https://tx-gateway-service.prod.iamport.co https://payment-bridge.prod.iamport.co https://service.iamport.kr https://*.nicepay.co.kr; frame-src https://*.easypay.co.kr https://checkout-service.prod.iamport.co https://payment-bridge.prod.iamport.co https://service.iamport.kr https://*.nicepay.co.kr; base-uri 'none'; form-action 'self' https://*.easypay.co.kr https://*.nicepay.co.kr https://service.iamport.kr; frame-ancestors 'none'");
     return new Response(response.body, { status: response.status, headers });
   }
   if (Date.now() >= PG_REVIEW_EXPIRY) return pgReviewFailure("심사 계정 이용기간이 끝났어요.", 403);
@@ -191,7 +186,7 @@ export async function handlePgReviewService(request, env, externalFetch = global
   const getRoutes = new Map([["/config", "/v1/public/config"], ["/login", "/v1/auth/payment-review"], ["/me", "/v1/auth/me"]]);
   let upstream = getRoutes.get(route);
   const productMatch = /^\/products\/([a-z0-9-]+)(\/draw-odds)?$/.exec(route);
-  if (productMatch && isPgReviewDirectProduct(productMatch[1])) upstream = `/v1/catalog/products/${productMatch[1]}${productMatch[2] || ""}`;
+  if (productMatch && PG_REVIEW_PRODUCTS.has(productMatch[1])) upstream = `/v1/catalog/products/${productMatch[1]}${productMatch[2] || ""}`;
   if (route === "/products") upstream = "/v1/catalog/products?limit=100";
   const uuid = "[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}";
   const orderMatch = new RegExp(`^/orders/(${uuid})$`).exec(route);
@@ -217,9 +212,9 @@ export async function handlePgReviewService(request, env, externalFetch = global
     const raw = await request.text(); if (raw.length > 8192) return pgReviewFailure("입력 내용이 너무 길어요.", 413);
     try { body = JSON.parse(raw || "{}"); } catch { return pgReviewFailure("입력 내용을 확인해 주세요."); }
     if (!body || typeof body !== "object" || Array.isArray(body)) return pgReviewFailure("입력 내용을 확인해 주세요.");
-    if (route === "/orders" && (!["PORTONE_V2_NICE","TOSSPAYMENTS_DIRECT"].includes(body.reviewPaymentProvider) || (body.reviewPaymentProvider === "PORTONE_V2_NICE" ? body.cardPg !== "NICE" : body.cardPg !== undefined))) return pgReviewFailure("선택한 심사 결제사를 확인해 주세요.");
+    if (route === "/orders" && (!["PORTONE_V2_NICE","PORTONE_V2_KICC"].includes(body.reviewPaymentProvider) || body.cardPg !== (body.reviewPaymentProvider === "PORTONE_V2_NICE" ? "NICE" : "KICC"))) return pgReviewFailure("선택한 심사 결제사를 확인해 주세요.");
     if (isLogin && body.email !== "pg") return pgReviewFailure("심사 아이디 또는 비밀번호를 확인해 주세요.", 401);
-    if (route === "/orders" && (!Array.isArray(body.items) || body.items.length !== 1 || !isPgReviewDirectProduct(body.items[0]?.productId) || !Number.isInteger(body.items[0]?.quantity) || body.items[0].quantity < 1 || body.items[0].quantity > 10 || body.pointAmount !== 0 || body.couponCode || body.kujiRoomEntryId || body.items[0].expectedDrawVersion !== undefined)) return pgReviewFailure("심사 상품과 수량을 확인해 주세요.");
+    if (route === "/orders" && (!Array.isArray(body.items) || body.items.length !== 1 || !PG_REVIEW_PRODUCTS.has(body.items[0]?.productId) || !Number.isInteger(body.items[0]?.quantity) || body.items[0].quantity < 1 || body.items[0].quantity > 10 || body.pointAmount !== 0 || body.couponCode || body.kujiRoomEntryId || (!Number.isInteger(body.items[0].expectedDrawVersion) || body.items[0].expectedDrawVersion < 1))) return pgReviewFailure("심사 상품과 수량을 확인해 주세요.");
   }
   if (route === "/logout" && !token) return pgReviewJson({ loggedOut: true }, 200, { "set-cookie": pgReviewCookie() });
   try {
@@ -233,7 +228,7 @@ export async function handlePgReviewService(request, env, externalFetch = global
       const maxAge = Math.max(0, Math.min(86400, Math.floor((Date.parse(data.expiresAt) - Date.now()) / 1000), Math.floor((PG_REVIEW_EXPIRY - Date.now()) / 1000)));
       return pgReviewJson({ loggedIn: true, expiresAt: data.expiresAt }, 200, { "set-cookie": pgReviewCookie(data.token, maxAge) });
     }
-    if (route === "/products" && response.ok) data.items = (data.items || []).filter(p => isPgReviewDirectProduct(p.id) && p.metadata?.purchaseMode === "DIRECT" && p.purchasable);
+    if (route === "/products" && response.ok) data.items = (data.items || []).filter(p => PG_REVIEW_PRODUCTS.has(p.id) && p.metadata?.purchaseMode !== "DIRECT" && p.purchasable);
     if (!response.ok) return pgReviewFailure(data.error?.message || "요청을 처리하지 못했어요.", response.status);
     return pgReviewJson(data);
   } catch (error) {
@@ -966,7 +961,7 @@ function readSocialOAuthCookie(rawCookie) {
 function requiredPolicyVersions(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   if (Object.keys(value).length !== 2) return null;
-  const version = /^\d{4}-\d{2}-\d{2}$/;
+  const version = /^\d{4}-\d{2}-\d{2}(-r[1-9][0-9]*)?$/;
   return typeof value.terms === "string"
     && typeof value.privacy === "string"
     && version.test(value.terms)

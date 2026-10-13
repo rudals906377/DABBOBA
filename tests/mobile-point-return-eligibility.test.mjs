@@ -66,6 +66,6 @@ test("storage includes selected purchases and exchange while point returns stay 
   assert.doesNotMatch(profileSectionSource, /<StorageModeTab label="포인트 환급"/);
   assert.match(profileSectionSource, /<ExchangeOrShipping[^>]*items=\{exchangeOrShippingItems\}/);
   assert.match(profileSectionSource, /<StorageModeTab label="교환 또는 배송 중인 상품"/);
-  assert.match(profilePolicySource, /직접 구매해 현재 보관 중인 적격 상품은 교환방에서 교환/);
+  assert.match(profilePolicySource, /본인이 구매해 획득하고 현재 보관 중인 적격 상품은 교환방에서 교환/);
   assert.match(profilePolicySource, /포인트로 전환하지 않습니다/);
 });

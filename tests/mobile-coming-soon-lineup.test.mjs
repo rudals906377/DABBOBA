@@ -30,7 +30,7 @@ function apiHarness({ saleStatus = "COMING_SOON", included, lineup, odds, oddsEr
       if (specifier === "@/lib/mobile-api-client") return {
         createMobileDabbobaClient: () => ({ async GET(route, options) {
           calls.push({ route, options });
-          if (route === "/v1/catalog/products/{productId}") return { data: { id: "sylvanian", category: "gacha", saleStatus, ipId: "ip", metadata: {} } };
+          if (route === "/v1/catalog/products/{productId}") return { data: { id: "sylvanian", category: "gacha", saleStatus, ipId: "ip" } };
           if (route === "/v1/catalog/ips") return { data: { items: [{ id: "ip" }] } };
           if (route.endsWith("/draw-odds")) return odds ? { data: odds } : { error: { error: { code: oddsErrorCode } } };
           if (route.endsWith("/prize-lineup")) return lineup ? { data: lineup } : { error: { error: { code: "NOT_FOUND" } } };

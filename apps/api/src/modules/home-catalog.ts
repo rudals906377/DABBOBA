@@ -529,7 +529,7 @@ export async function registerHomeCatalogRoutes(app: FastifyInstance, context: A
          WHERE p.is_active = true
            AND p.is_prize_only = false
            AND p.category <> 'kuji'
-           AND p.metadata->>'purchaseMode'='DIRECT'
+           AND COALESCE(p.metadata->>'purchaseMode','') <> 'DIRECT'
            AND p.sale_status IN ('COMING_SOON','ON_SALE')
            AND (section_target.ip_id IS NULL OR p.ip_id=section_target.ip_id)
            AND (
@@ -539,7 +539,7 @@ export async function registerHomeCatalogRoutes(app: FastifyInstance, context: A
            )
            AND category_setting.availability='active'
            AND category_setting.show_on_home=true
-           AND (p.sale_status <> 'ON_SALE' OR p.metadata->>'purchaseMode'='DIRECT' OR EXISTS (
+           AND (p.sale_status <> 'ON_SALE' OR EXISTS (
              SELECT 1 FROM draw_probability_versions active_version
               WHERE active_version.product_id=p.id AND active_version.status='ACTIVE'
            ))

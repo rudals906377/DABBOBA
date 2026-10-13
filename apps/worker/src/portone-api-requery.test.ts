@@ -99,3 +99,8 @@ test("worker rejects an API response for another order without accepting a resul
   } });
   await assert.rejects(provider.observe(payment), /invalid canonical response/i);
 });
+
+test("EasyPay requery uses the same signed PortOne reconciliation and never downgrades to unknown provider",async()=>{
+ const result=await providerReturning({providerStatus:"PAID",outcome:"processed",localStatus:"PAID"}).observe({...payment,provider:"PORTONE_V2_KICC"});
+ assert.equal(result.state,"PAID");assert.equal(result.canonicalStatus,"PAID");
+});

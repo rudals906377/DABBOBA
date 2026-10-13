@@ -492,3 +492,11 @@ When any text-entry control loses focus, dismiss the simulated keyboard. If the 
 
 - Hide Kuji sales and coming-soon promotion on customer app navigation, home/shop discovery, public introduction and PG review. Keep internal category IDs, assets and historical orders, inventory and recovery records. No new Kuji purchase is allowed; existing record access is not a sales entry. Remote category settings must not re-expose the hidden shop in the new app.
 - This supersedes prior Kuji OPENING SOON display instructions. Apply to the existing direct-purchase Preview; production and signed-device rollout remain separate.
+
+## Included Product Purchase Restored — 2026-10-13 Latest Owner Decision
+
+- Restore new gacha purchases to the original server-verified payment → purchased entitlement → explicit capsule open → included product fulfillment flow. This supersedes direct selection for new purchases; preserve existing DIRECT records, stock, pending-order recovery, historical migrations and payment bindings. Do not reset inventory or activate sales.
+- Customer copy uses “포함된 상품 중 1개” rather than “랜덤 상품”. Clearly state that the exact included item cannot be specified before payment, the server determines it on opening, and duplicates can occur. Keep included products, actual disclosed probabilities/quantities, refund rights and server verification visible.
+- Kuji is visible as “준비 중”, with sales closed even if remote category settings say active. This supersedes Kuji hiding. Exchange Room stays available and new point returns/automatic expiry conversion stay closed.
+- Both current PG applications are through PortOne: EasyPay/KICC V2 and NICE V2. Replace the active direct-Toss review choice with EasyPay. Preserve historical Toss/INICIS/KCP records and recovery code; no unverified channel, actual charge, approval or LIVE activation.
+- Revise already-published legal documents with a new policy version and preserve 2026-10-13 direct-selection HTML as historical evidence.

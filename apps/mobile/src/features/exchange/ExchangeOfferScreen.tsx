@@ -262,7 +262,7 @@ export function ExchangeOfferScreen() {
             <KoreanPixelTitle variant="section">신청할 상품이 없어요</KoreanPixelTitle>
             <BalancedParagraphText
               paragraphs={[
-                "직접 구매해 보관 중인 적격 상품만 가능해요.",
+                "본인이 구매해 획득한 적격 보관 상품만 가능해요.",
                 "배송을 신청했거나 이미 받은 상품, 다른 교환에 사용 중인 상품은 표시되지 않아요.",
               ]}
               style={styles.stateText}
@@ -388,7 +388,7 @@ function InventoryChoice({
       <View style={styles.productInfo}>
         <Text numberOfLines={1} style={styles.ipName}>{ipName ?? "작품 정보 없음"}</Text>
         <Text numberOfLines={2} style={styles.productName}>{productSubjectTitle(item.product.name, ipName)}</Text>
-        <Text style={styles.meta}>{categoryLabel(item.product.category)} · {item.sourceType === "PURCHASE" ? "직접 구매" : "기존 구매 상품"}</Text>
+        <Text style={styles.meta}>{categoryLabel(item.product.category)} · {item.sourceType === "PURCHASE" ? "직접 구매" : "획득 상품"}</Text>
         <ProductInfoDivider style={styles.productFieldDivider} />
         <Text style={styles.price}>{catalogPriceLabel(item.product.price)}</Text>
       </View>

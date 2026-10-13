@@ -550,7 +550,6 @@ function mapApiProduct(item: ApiCatalogProduct): Product {
     id: item.id,
     ipId: item.ipId,
     categoryId: item.category,
-    ...(item.metadata.purchaseMode === "DIRECT" ? {purchaseMode: "DIRECT" as const} : {}),
     category: categoryLabel(item.category) as ProductCategoryLabel,
     line: metadataText(item.metadata, "line", item.manufacturer ?? item.name),
     title: item.name,
@@ -915,7 +914,6 @@ function prizeGuideFor(categoryId: ProductCategoryId) {
 }
 
 function commerceCopyFor(product: Product) {
-  if (product.purchaseMode === "DIRECT") return { action: "구매하기", quantityTitle: "구매 수량", quantityDescription: "선택한 상품의 구매 수량을 확인해 주세요.", unit: "개" } as const;
   if (product.categoryId === "gacha") {
     return { action: "가챠 뽑기", quantityTitle: "뽑기 횟수", quantityDescription: "진행할 횟수를 선택해 주세요.", unit: "회" } as const;
   }
@@ -3139,7 +3137,7 @@ function createLoginScreen(): FlowScreen {
 function createShopScreen(): FlowScreen {
   return {
     id: "root-shop",
-    header: () => <RootTabHeader title="뽀바" subtitle="원하는 상품을 직접 선택해요" showPoints />,
+    header: () => <RootTabHeader title="뽀바" subtitle="가챠 · 피규어 · 쿠지" showPoints />,
     headerHeight: 58,
     footer: (flow) => <RootTabFooter flow={flow} />,
     footerHeight: 70,
@@ -3589,7 +3587,7 @@ function createPurchaseCompleteScreen(
   orderId: string,
   drawEntitlementIds: string[] = [],
 ): FlowScreen {
-  const drawMode = (isRandomDrawCategory(product.categoryId) && product.purchaseMode !== "DIRECT");
+  const drawMode = isRandomDrawCategory(product.categoryId);
 
   return {
     id: `purchase-complete-${product.id}`,
@@ -4924,7 +4922,7 @@ function ShopPage({ flow }: { flow: FlowControls }) {
   const [query, setQuery] = useState("");
   const keyboard = useKeyboard();
   const screenFocusRef = useScreenEntryFocus();
-  const isFigureComingSoon = filter === "피규어";
+  const isFigureComingSoon = filter === "피규어" || filter === "쿠지";
   const normalizedQuery = normalizeCatalogSearch(query);
   const productSearchIndex = useMemo(() => new Map(catalogProducts.map((product) => {
     const ip = catalogIps.find((candidate) => candidate.id === product.ipId);
@@ -4950,7 +4948,7 @@ function ShopPage({ flow }: { flow: FlowControls }) {
       <main ref={screenFocusRef} tabIndex={-1} className="root-tab-page shop-page" aria-label="DABBOBA 뽀바">
         <section className="shop-lead" aria-labelledby="shop-lead-title">
           <h1 id="shop-lead-title">원하는 방식으로 골라보세요.</h1>
-          <p>원하는 캐릭터 상품을 찾아보세요.</p>
+          <p>포함된 상품 중 1개를 만나요. 쿠지는 준비 중이에요.</p>
         </section>
         <div className="shop-search-box ip-search-box">
           <IconMagnifyingglassLine size={21} aria-hidden="true" />
@@ -5001,7 +4999,7 @@ function ShopPage({ flow }: { flow: FlowControls }) {
             <div className="ip-empty-state shop-empty-state" role="status">
               <IconMagnifyingglassLine size={30} aria-hidden="true" />
               <strong>{isFigureComingSoon ? "준비중입니다." : "찾는 상품이 없어요"}</strong>
-              <span>{isFigureComingSoon ? "피규어 상품은 준비가 끝나는 대로 공개할게요." : "검색어나 카테고리를 바꿔보세요."}</span>
+              <span>{isFigureComingSoon ? `${filter} 상품은 준비가 끝나는 대로 공개할게요.` : "검색어나 카테고리를 바꿔보세요."}</span>
             </div>
           )}
         </section>
@@ -8803,7 +8801,7 @@ function CatalogPage({ flow }: { flow: FlowControls }) {
   const { catalogProducts, apiMode, apiSyncState, apiSyncMessage } = useDabboba();
   const [filter, setFilter] = useState<CategoryFilter>("전체");
   const screenFocusRef = useScreenEntryFocus();
-  const isFigureComingSoon = filter === "피규어";
+  const isFigureComingSoon = filter === "피규어" || filter === "쿠지";
   const customerBrowsableProducts = catalogProducts.filter((product) => (
     isCustomerBrowsableProductCategory(product.categoryId)
   ));
@@ -8860,7 +8858,7 @@ function CatalogPage({ flow }: { flow: FlowControls }) {
           {visibleProducts.length === 0 ? (
             <div className="ip-empty-state" role="status">
               <strong>{isFigureComingSoon ? "준비중입니다." : "등록된 상품이 없어요"}</strong>
-              <span>{isFigureComingSoon ? "피규어 상품은 준비가 끝나는 대로 공개할게요." : "운영 카탈로그가 준비되면 여기에 표시됩니다."}</span>
+              <span>{isFigureComingSoon ? `${filter} 상품은 준비가 끝나는 대로 공개할게요.` : "운영 카탈로그가 준비되면 여기에 표시됩니다."}</span>
             </div>
           ) : null}
         </section>
@@ -9222,7 +9220,7 @@ function IpTabContent({ flow, ip, tab }: { flow: FlowControls; ip: IpRecord; tab
 function ProductDetail({ product }: { product: Product }) {
   const { apiMode, drawOddsByProductId, drawOddsStateByProductId, loadDrawOdds, loadCatalogIncludedProducts } = useDabboba();
   const screenFocusRef = useScreenEntryFocus();
-  const drawMode = (isRandomDrawCategory(product.categoryId) && product.purchaseMode !== "DIRECT");
+  const drawMode = isRandomDrawCategory(product.categoryId);
   const purchaseGuide = purchaseGuideFor(product);
   const drawOdds = drawOddsByProductId[product.id];
   const drawOddsState = drawOddsStateByProductId[product.id];
@@ -9361,6 +9359,11 @@ function ProductDetail({ product }: { product: Product }) {
 }
 
 function DetailFooter({ flow, product }: { flow: FlowControls; product: Product }) {
+  if (!isCustomerBrowsableProductCategory(product.categoryId)) return <div className="detail-footer" role="status" aria-label={`${product.category} 준비 중`}><ActionButton variant="brandSolid" size="large" disabled>준비중입니다.</ActionButton></div>;
+  return <ActiveDetailFooter flow={flow} product={product} />;
+}
+
+function ActiveDetailFooter({ flow, product }: { flow: FlowControls; product: Product }) {
   const {
     apiMode,
     prepareCheckout,
@@ -9379,7 +9382,7 @@ function DetailFooter({ flow, product }: { flow: FlowControls; product: Product 
   const [oddsRefreshing, setOddsRefreshing] = useState(false);
   const [oddsRefreshStatus, setOddsRefreshStatus] = useState("");
   const commerceCopy = commerceCopyFor(product);
-  const drawMode = (isRandomDrawCategory(product.categoryId) && product.purchaseMode !== "DIRECT");
+  const drawMode = isRandomDrawCategory(product.categoryId);
   const drawOdds = drawOddsByProductId[product.id];
   const drawOddsState = drawOddsStateByProductId[product.id];
   const drawDisclosureReady = apiMode !== "remote" || !drawMode || Boolean(drawOdds);
@@ -9575,7 +9578,7 @@ function CheckoutPage({ product, quantity }: { product: Product; quantity: numbe
             </div>
           </section>
 
-          {apiMode === "remote" && (isRandomDrawCategory(product.categoryId) && product.purchaseMode !== "DIRECT") ? (
+          {apiMode === "remote" && isRandomDrawCategory(product.categoryId) ? (
             <section className="checkout-section" aria-labelledby="checkout-draw-odds-title">
               <h2 id="checkout-draw-odds-title">확인한 경품·확률</h2>
               {drawOdds ? (
@@ -9719,7 +9722,7 @@ function CheckoutFooter({
   const pendingOrderRef = useRef<{ fingerprint: string; key: string; serverOrderId?: string } | null>(null);
   const [checkoutStatus, setCheckoutStatus] = useState("");
   const [remoteOrderId, setRemoteOrderId] = useState("");
-  const drawMode = (isRandomDrawCategory(product.categoryId) && product.purchaseMode !== "DIRECT");
+  const drawMode = isRandomDrawCategory(product.categoryId);
   const drawOdds = drawOddsByProductId[product.id];
   const total = Math.max(0, product.price * quantity - couponDiscount - points);
 
@@ -9877,7 +9880,7 @@ function PurchaseCompletePage({
   const { apiMode } = useDabboba();
   const screenFocusRef = useScreenEntryFocus();
   const unit = commerceUnit(product);
-  const drawMode = (isRandomDrawCategory(product.categoryId) && product.purchaseMode !== "DIRECT");
+  const drawMode = isRandomDrawCategory(product.categoryId);
   const drawActionLabel = product.categoryId === "gacha" ? "가챠하러 가기" : "쿠지 추첨하러 가기";
 
   return (
@@ -9948,7 +9951,7 @@ function PurchaseCompleteFooter({
   orderId: string;
   drawEntitlementIds: string[];
 }) {
-  const drawMode = (isRandomDrawCategory(product.categoryId) && product.purchaseMode !== "DIRECT");
+  const drawMode = isRandomDrawCategory(product.categoryId);
   const drawActionLabel = product.categoryId === "gacha" ? "가챠하러 가기" : "쿠지 추첨하러 가기";
 
   return (

@@ -112,6 +112,8 @@ export type ApiConfig = {
     kcpChannelKey?: string;
     /** Historical INICIS channel retained for lookup only after a NICE cutover. */
     inicisChannelKey?: string;
+    kiccChannelKey?: string;
+    niceChannelKey?: string;
   } | null;
   gcsBucket: string | null;
   gcsProjectId: string | null;
@@ -371,20 +373,27 @@ function paymentConfig(
   const portOneComplete = Object.values(portOneValues).every(Boolean);
   const kcpChannelKey = optional(env, "PORTONE_KCP_CHANNEL_KEY");
   const inicisChannelKey = optional(env, "PORTONE_INICIS_CHANNEL_KEY");
-  const portOneProvider = paymentProvider === "PORTONE_V2_INICIS" || paymentProvider === "PORTONE_V2_NICE";
+  const portOneProvider = ["PORTONE_V2_INICIS", "PORTONE_V2_NICE", "PORTONE_V2_KICC"].includes(paymentProvider);
+  const kiccChannelKey = optional(env, "PORTONE_KICC_CHANNEL_KEY");
+  const niceChannelKey = optional(env, "PORTONE_NICE_CHANNEL_KEY");
+  const modernReview = ["PORTONE_V2_NICE", "PORTONE_V2_KICC"].includes(paymentProvider);
+  const extraChannels = [kiccChannelKey, niceChannelKey, kcpChannelKey, inicisChannelKey].filter((key): key is string => Boolean(key));
+  if ((kiccChannelKey || niceChannelKey) && (!modernReview || !portOneComplete
+    || extraChannels.some(key => !/^channel-key-[A-Za-z0-9-]{1,160}$/.test(key) || key === portOneValues.channelKey)
+    || new Set(extraChannels).size !== extraChannels.length)) throw new Error("Additional PortOne review channels require complete distinct TEST configuration");
   if (kcpChannelKey && (!portOneComplete || !portOneProvider
     || kcpChannelKey === portOneValues.channelKey || !/^channel-key-[A-Za-z0-9-]{1,160}$/.test(kcpChannelKey))) {
     throw new Error("PORTONE_KCP_CHANNEL_KEY requires a complete PortOne rail and a distinct valid channel key");
   }
-  if (inicisChannelKey && (!portOneComplete || paymentProvider !== "PORTONE_V2_NICE"
+  if (inicisChannelKey && (!portOneComplete || !modernReview
     || !/^channel-key-[A-Za-z0-9-]{1,160}$/.test(inicisChannelKey)
     || inicisChannelKey === portOneValues.channelKey || inicisChannelKey === kcpChannelKey)) {
     throw new Error("PORTONE_INICIS_CHANNEL_KEY requires a NICE rail and a distinct historical channel");
   }
-  if (paymentProvider === "PORTONE_V2_NICE"
+  if (modernReview
     && (env.DABBOBA_ENVIRONMENT_TIER !== "STAGING" || env.DABBOBA_RELEASE_ENVIRONMENT_TIER !== "STAGING"
       || portOneValues.channelEnvironment !== "TEST")) {
-    throw new Error("NICE currently requires explicit STAGING tiers and a TEST channel; LIVE approval is not verified");
+    throw new Error("NICE/EasyPay currently requires explicit STAGING tiers and a TEST channel; LIVE approval is not verified");
   }
   const explicitSupabaseDemoTestRail = (
     env.DABBOBA_BACKEND_PROFILE?.trim() === "supabase-demo"
@@ -432,7 +441,7 @@ function paymentConfig(
     throw new Error(`PAYMENT_PROVIDER=${paymentProvider} requires a complete PortOne configuration`);
   }
   if (!portOneProvider && portOneConfigured) {
-    throw new Error("PortOne credentials require PAYMENT_PROVIDER=PORTONE_V2_INICIS or PORTONE_V2_NICE");
+    throw new Error("PortOne credentials require PAYMENT_PROVIDER=PORTONE_V2_INICIS or PORTONE_V2_NICE or PORTONE_V2_KICC");
   }
   if (
     runtime === "production"
@@ -469,6 +478,8 @@ function paymentConfig(
           webhookSecret: portOneValues.webhookSecret!,
           ...(kcpChannelKey ? { kcpChannelKey } : {}),
           ...(inicisChannelKey ? { inicisChannelKey } : {}),
+          ...(kiccChannelKey ? { kiccChannelKey } : {}),
+          ...(niceChannelKey ? { niceChannelKey } : {}),
         }
       : null,
   };
@@ -689,7 +700,7 @@ export function loadApiConfig(env: Environment = process.env): ApiConfig {
     }
   }
   const payment = paymentConfig(env, runtime, pepper, proxyIdentitySecret);
-  if (payment.paymentProvider === "PORTONE_V2_NICE") assertPaymentReviewBoundary({
+  if (["PORTONE_V2_NICE", "PORTONE_V2_KICC"].includes(payment.paymentProvider)) assertPaymentReviewBoundary({
     environmentTier, databaseUrl: required(env, "DATABASE_URL"), supabaseUrl: optional(env, "SUPABASE_URL"),
     portOne: payment.portOne ?? null, tossPayments: null,
   });
@@ -716,12 +727,12 @@ export function loadApiConfig(env: Environment = process.env): ApiConfig {
       || paymentReconciliationWorkerSecret === payment.portOne?.webhookSecret) {
       throw new Error("PAYMENT_RECONCILIATION_WORKER_SECRET must be a distinct 32-512 byte server-only secret");
     }
-    if (!["PORTONE_V2_INICIS", "PORTONE_V2_NICE"].includes(payment.paymentProvider) || commerceMode !== "LIVE") {
+    if (!["PORTONE_V2_INICIS", "PORTONE_V2_NICE", "PORTONE_V2_KICC"].includes(payment.paymentProvider) || commerceMode !== "LIVE") {
       throw new Error("PAYMENT_RECONCILIATION_WORKER_SECRET requires LIVE PortOne commerce");
     }
   }
   if (runtime === "production" && commerceMode === "LIVE"
-    && ["PORTONE_V2_INICIS", "PORTONE_V2_NICE"].includes(payment.paymentProvider)
+    && ["PORTONE_V2_INICIS", "PORTONE_V2_NICE", "PORTONE_V2_KICC"].includes(payment.paymentProvider)
     && !paymentReconciliationWorkerSecret) {
     throw new Error("LIVE PortOne commerce requires PAYMENT_RECONCILIATION_WORKER_SECRET");
   }

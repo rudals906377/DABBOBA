@@ -236,7 +236,7 @@ export async function fetchProductDetail(
   let drawOdds: PublicDrawOdds | null = null;
   let prizeLineup: PublicPrizeLineup | null = null;
   let registeredIncludedProducts: components["schemas"]["CatalogIncludedProduct"][] | null = null;
-  if (!ownedCollectible && !exchangeReference && !isDirectPurchase(product) && isDrawCategory(product.category)) {
+  if (!ownedCollectible && !exchangeReference && isDrawCategory(product.category)) {
     const oddsResult = await client.GET("/v1/catalog/products/{productId}/draw-odds", {
       params: { path: { productId } },
       signal: context.signal,
@@ -328,6 +328,5 @@ function drawOddsWithheld(error: unknown): boolean {
   return envelope.error?.code === "COMMERCE_NOT_AVAILABLE";
 }
 
-export function isDirectPurchase(product: { metadata: Record<string, unknown> }): boolean {
-  return product.metadata.purchaseMode === "DIRECT";
-}
+/** Used only by preserved direct-order screens; discovery no longer sells these SKUs. */
+export function isDirectPurchase(product: {metadata: Record<string, unknown>}): boolean { return product.metadata.purchaseMode === "DIRECT"; }

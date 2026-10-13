@@ -44,7 +44,7 @@ test("gacha opens checkout while kuji claims its one-person room before checkout
   ]);
 
   assert.match(productDetail, /product\.category === "kuji"[\s\S]*?buildKujiRoomGatePath\(product\.id\)[\s\S]*?`\/checkout\/\$\{encodeURIComponent\(product\.id\)\}`/);
-  assert.match(productDetail, /isDrawCategory\(product\.category\) && !isDirectPurchase\(product\)\) \? "뽑으러 가기" : "구매하기"/);
+  assert.match(productDetail, /isDrawCategory\(product\.category\) \? "뽑으러 가기" : "구매 준비"/);
   assert.match(productDetail, /const drawUnavailable = Boolean/);
   assert.match(productDetail, /snapshot\?\.includedProductsLoaded !== true/);
   assert.match(productDetail, /\(commerceEnabled && !snapshot\.drawOdds\?\.entries\.length\)/);

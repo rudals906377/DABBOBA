@@ -53,6 +53,13 @@ test("NICE starts only on pinned payment STAGING TEST and preserves historical c
     PORTONE_CHANNEL_KEY: "channel-key-nice", PORTONE_INICIS_CHANNEL_KEY: "channel-key-old-inicis", PORTONE_KCP_CHANNEL_KEY: "channel-key-old-kcp" };
   const config = loadApiConfig(base);
   assert.equal(config.paymentProvider, "PORTONE_V2_NICE");
+  const both=loadApiConfig({...base,PORTONE_KICC_CHANNEL_KEY:"channel-key-kicc"});
+  assert.equal(both.portOne?.kiccChannelKey,"channel-key-kicc");
+  const kicc=loadApiConfig({...base,PAYMENT_PROVIDER:"PORTONE_V2_KICC",PORTONE_CHANNEL_KEY:"channel-key-kicc",PORTONE_NICE_CHANNEL_KEY:"channel-key-nice"});
+  assert.equal(kicc.paymentProvider,"PORTONE_V2_KICC");
+  assert.throws(()=>loadApiConfig({...base,PORTONE_KICC_CHANNEL_KEY:base.PORTONE_CHANNEL_KEY}));
+  assert.throws(()=>loadApiConfig({...base,PORTONE_KICC_CHANNEL_KEY:"channel-key-kicc",PORTONE_CHANNEL_ENVIRONMENT:"LIVE"}));
+
   assert.equal(config.portOne?.inicisChannelKey, "channel-key-old-inicis");
   const shared = {...base,TOSS_PAYMENTS_CLIENT_KEY:"test_ck_synthetic_shared_12345",TOSS_PAYMENTS_SECRET_KEY:"test_sk_synthetic_shared_12345",TOSS_PAYMENTS_MERCHANT_ID:"test_mid"};
   assert.equal(loadApiConfig(shared).tossPayments?.environment,"TEST");

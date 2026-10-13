@@ -1,5 +1,5 @@
-import { Redirect } from "expo-router";
+import { ShopScreen } from "@/features/shop/ShopScreen";
 
 export default function KujiShopRoute() {
-  return <Redirect href="/(tabs)/gacha" />;
+  return <ShopScreen category="kuji" />;
 }

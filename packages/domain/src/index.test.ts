@@ -19,7 +19,7 @@ test("commerce categories preserve the approved purchase and draw split", () => 
 
 test("launch category policy is enforced independently of client visibility", () => {
   assert.equal(customerCategoryAvailability("gacha"), "active");
-  assert.equal(customerCategoryAvailability("kuji"), "hidden");
+  assert.equal(customerCategoryAvailability("kuji"), "coming-soon");
   assert.equal(customerCategoryAvailability("figure"), "coming-soon");
   assert.equal(customerCategoryAvailability("tcg"), "hidden");
   assert.equal(isCustomerPurchasableCategory("gacha"), true);

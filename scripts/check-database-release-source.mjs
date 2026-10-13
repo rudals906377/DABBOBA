@@ -262,6 +262,11 @@ export const DATABASE_RELEASE_MIGRATIONS = Object.freeze([
     path: 'packages/db/migrations/0099_legal_direct_purchase_2026_10_13.sql',
     sha256: '61c38b2a912f7ff4ccc580243427782d0948466b2520055e4f2bfbbceaa0e819',
   }),
+  Object.freeze({
+    file: '0100_included_products_portone_review.sql',
+    path: 'packages/db/migrations/0100_included_products_portone_review.sql',
+    sha256: '29b862128954acc3209e2b327086fd44a7116160f59cb34531e27c024334ba2e',
+  }),
 ]);
 
 export const MINIMUM_DATABASE_RELEASE_VERSION =

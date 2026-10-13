@@ -1,6 +1,2 @@
-import { DirectPurchaseCheckoutScreen } from "@/features/checkout/DirectPurchaseCheckoutScreen";
-import { CommerceRouteGate } from "@/features/commerce/CommerceRouteGate";
-
-export default function DirectPurchaseCheckoutRoute() {
-  return <CommerceRouteGate fallback="/(tabs)/gacha"><DirectPurchaseCheckoutScreen /></CommerceRouteGate>;
-}
+import { Redirect } from "expo-router";
+export default function RetiredDirectCheckoutRoute() { return <Redirect href="/(tabs)/gacha" />; }

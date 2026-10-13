@@ -52,7 +52,7 @@ test("profile keeps hidden categories out of shopping and states exchange exclus
 
   assert.doesNotMatch(profileSectionSource, /피규어·카드|쿠지·피규어·카드/);
   assert.match(profilePolicySource, /쿠지·피규어·카드 상품은 제외/);
-  assert.match(customerProductCopy, /직접 선택 구매/);
+  assert.match(customerProductCopy, /포함 상품 구매/);
   assert.match(customerProductCopy, /쿠지 없는 배송 신청은 합계 24,900원 이상 무료배송/);
   assert.match(customerProductCopy, /미달 시 배송비 3,000원/);
 });

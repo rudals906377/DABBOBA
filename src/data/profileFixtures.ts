@@ -34,7 +34,7 @@ export const PROFILE_POINT_HISTORY: readonly ProfilePointHistoryItem[] = [];
 export const PROFILE_CUSTOMER_FAQS = [
   {
     question: "구매한 상품은 언제 보관함에 들어오나요?",
-    answer: "상품과 수량을 직접 선택해 결제하고 서버가 결제를 확인하면, 선택한 상품이 보관함에 등록됩니다.",
+    answer: "포함 상품과 공개된 확률을 확인하고 구매 횟수를 선택해 결제합니다. 캡슐을 열면 서버가 포함된 상품 중 1개를 확정해 보관함에 기록합니다. 개별 상품을 지정할 수 없고 같은 상품이 중복될 수 있습니다.",
   },
   {
     question: "여러 상품을 한 번에 배송받을 수 있나요?",

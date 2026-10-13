@@ -108,8 +108,8 @@ test("Home keeps the fixed editorial order before every operator section", () =>
 
   assert.ok(announcementIndex >= 0);
   assert.ok(eventIndex > announcementIndex);
-  assert.equal(recentDrawIndex, -1);
-  assert.ok(operatorSectionsIndex > eventIndex);
+  assert.ok(recentDrawIndex > eventIndex);
+  assert.ok(operatorSectionsIndex > recentDrawIndex);
   assert.match(source, /<HomeIntroBanner \/>/);
   assert.match(source, /새 소식을 준비하고 있어요/);
   assert.match(source, /homeCollections\.map\(\(collection\) => \([\s\S]*?<OperatorHomeSection/);

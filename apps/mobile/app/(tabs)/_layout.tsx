@@ -2,6 +2,7 @@ import { Tabs } from "expo-router";
 import { useEffect, useState } from "react";
 import { AccessibilityInfo } from "react-native";
 import { GachaCapsuleIcon } from "@/components/GachaCapsuleIcon";
+import { KujiTicketIcon } from "@/components/KujiTicketIcon";
 import {
   HomeTabIcon,
   ProfileTabIcon,
@@ -12,6 +13,7 @@ import {
   RootNavigationMotionProvider,
 } from "@/components/RootFloatingTabBar";
 import { seed } from "@/design-system/seed";
+import { colors } from "@/theme";
 
 export default function RootTabs() {
   const [reduceMotion, setReduceMotion] = useState(false);
@@ -46,7 +48,14 @@ export default function RootTabs() {
           name="gacha"
           options={{ title: "가챠샵", tabBarIcon: GachaCapsuleIcon }}
         />
-        <Tabs.Screen name="kuji" options={{ href: null }} />
+        <Tabs.Screen
+          name="kuji"
+          options={{
+            title: "쿠지샵",
+            tabBarIcon: KujiTicketIcon,
+            tabBarActiveTintColor: colors.kujiOrangeDark,
+          }}
+        />
         <Tabs.Screen
           name="index"
           options={{ title: "홈", tabBarIcon: HomeTabIcon }}

@@ -19,7 +19,7 @@ export type CustomerCategoryAvailability = "active" | "coming-soon" | "hidden";
  */
 export const CUSTOMER_CATEGORY_AVAILABILITY = Object.freeze({
   gacha: "active",
-  kuji: "hidden",
+  kuji: "coming-soon",
   figure: "coming-soon",
   tcg: "hidden",
 } as const satisfies Readonly<Record<ProductCategoryId, CustomerCategoryAvailability>>);
@@ -115,7 +115,7 @@ export function assertNever(value: never, message = "Unexpected domain value"): 
   throw new Error(`${message}: ${String(value)}`);
 }
 
-/** Categories describe merchandise; only explicit DIRECT SKUs may enter new checkout.
+/** Recognizes preserved DIRECT records; new gacha checkout uses included-product draws.
  * Historical orders retain their immutable probability-version binding. */
 export function isDirectPurchaseProduct(product: { metadata?: Record<string, unknown> }): boolean {
   return product.metadata?.purchaseMode === "DIRECT";

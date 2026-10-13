@@ -22,8 +22,8 @@ export type StorefrontCategoryPresentation = Pick<
 >;
 
 const DEFAULT_STORE_CATEGORY_SETTINGS: readonly StorefrontCategoryPresentation[] = [
-  { category: "gacha", label: "가챠", sortOrder: 10, availability: "active", showOnHome: true, showOnCatalog: true, showOnExchange: true, showOnWanted: true, description: "원하는 상품과 수량을 직접 선택해요.", imageUrl: null, iconKey: "capsule", version: 1 },
-  { category: "kuji", label: "쿠지", sortOrder: 20, availability: "hidden", showOnHome: false, showOnCatalog: false, showOnExchange: false, showOnWanted: false, description: "", imageUrl: null, iconKey: "ticket", version: 1 },
+  { category: "gacha", label: "가챠", sortOrder: 10, availability: "active", showOnHome: true, showOnCatalog: true, showOnExchange: true, showOnWanted: true, description: "포함된 상품 중 1개를 확인해요.", imageUrl: null, iconKey: "capsule", version: 1 },
+  { category: "kuji", label: "쿠지", sortOrder: 20, availability: "coming-soon", showOnHome: true, showOnCatalog: true, showOnExchange: false, showOnWanted: false, description: "쿠지 상품은 준비 중이에요.", imageUrl: null, iconKey: "ticket", version: 1 },
   { category: "figure", label: "피규어", sortOrder: 30, availability: "hidden", showOnHome: false, showOnCatalog: false, showOnExchange: false, showOnWanted: false, description: "피규어 상품은 추후 운영 설정에서 다시 공개할 수 있어요.", imageUrl: null, iconKey: "figure", version: 1 },
   { category: "tcg", label: "카드", sortOrder: 40, availability: "hidden", showOnHome: false, showOnCatalog: false, showOnExchange: false, showOnWanted: false, description: "카드 상품을 준비하고 있어요.", imageUrl: null, iconKey: "cards", version: 1 },
 ] as const;
@@ -55,9 +55,9 @@ export function applyStorefrontCategorySettings(items: readonly StorefrontCatego
       category: item.category,
       label: item.label,
       sortOrder: item.sortOrder,
-      availability: item.availability,
+      availability: item.category === "kuji" ? "coming-soon" : item.availability,
       showOnHome: item.showOnHome,
-      showOnCatalog: item.showOnCatalog,
+      showOnCatalog: item.category === "kuji" ? true : item.showOnCatalog,
       showOnExchange: item.showOnExchange,
       showOnWanted: item.showOnWanted,
       description: item.description,
@@ -138,5 +138,5 @@ export function productCategoryDescription(category: ProductCategory): string {
 }
 
 function isSupportedCustomerCategory(category: ProductCategory): category is CustomerVisibleProductCategory {
-  return category === "gacha";
+  return category === "gacha" || category === "kuji";
 }

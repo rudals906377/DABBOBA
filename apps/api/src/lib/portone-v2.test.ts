@@ -637,3 +637,11 @@ test("cancel validates the expected balance before sending", async () => {
   );
   assert.equal(calls, 0);
 });
+
+test("EasyPay KICC V2 verifies the server-bound channel and cannot accept NICE evidence", async()=>{
+  const response=payment({channel:{...payment().channel,pgProvider:"KICC_V2"}});
+  const adapter=createPortOneV2Adapter({...contract,pgProvider:"KICC_V2",fetchImpl:async()=>jsonResponse(response)});
+  assert.equal((await adapter.getPayment({paymentId:"payment-test",expectedTotalAmount:12000})).channel?.pgProvider,"KICC_V2");
+  const mixed=createPortOneV2Adapter({...contract,pgProvider:"KICC_V2",fetchImpl:async()=>jsonResponse(payment({channel:{...payment().channel,pgProvider:"NICE_V2"}}))});
+  await assert.rejects(mixed.getPayment({paymentId:"payment-test",expectedTotalAmount:12000}));
+});

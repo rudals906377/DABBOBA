@@ -37,8 +37,7 @@ test("card choice is server-configured, immutable, idempotent and reservation-bo
     VALUES($1,$2::text,'Card prize',$2::text,$3,'figure','A',1,6,6)`, [version.id, prize, ip]);
   await pool.query("UPDATE draw_probability_versions SET status='ACTIVE',published_by=$2,published_at=now() WHERE id=$1", [version.id, publisher.id]);
   await pool.query("UPDATE catalog_products SET image_url='https://cdn.example.test/card-choice.png',sale_status='ON_SALE' WHERE id=$1", [product]);
-  await pool.query("UPDATE catalog_products SET metadata=$2::jsonb WHERE id=$1", [product,JSON.stringify({purchaseMode:"DIRECT"})]);
-  const payload = { items: [{ productId: product, quantity: 1 }] };
+  const payload = { items: [{ productId: product, quantity: 1, expectedDrawVersion:1 }] };
   for (const cardPg of ["INICIS", "KCP"] as const) {
     const key = randomUUID();
     const body = { ...payload, cardPg, channelKey: "untrusted-client-channel" };
@@ -96,4 +95,14 @@ test("card choice is server-configured, immutable, idempotent and reservation-bo
   await assert.rejects(pool.query("INSERT INTO payments(order_id,provider,amount) VALUES($1,'PORTONE_V2_NICE',6000)", [order.id]), /constraint/);
   await assert.rejects(pool.query("INSERT INTO payments(order_id,provider,amount,portone_channel_binding) VALUES($1,'PORTONE_V2_NICE',6000,$2)",
     [order.id, JSON.stringify({ ...selectCardChannel(config), pgProvider: "INICIS_V2" })]), /constraint/);
+  config.portOne.kiccChannelKey="channel-key-kicc";
+  const kiccUser=(await pool.query("INSERT INTO users(email,nickname) VALUES($1,'KICC reviewer') RETURNING id",[`kicc-${suffix}@example.test`])).rows[0];
+  await acceptRequiredPoliciesForIntegrationTest(pool,kiccUser.id);
+  const kiccSession=await issueSession(pool,config,{userId:kiccUser.id,kind:"USER",ip:"127.0.0.1",userAgent:"KICC test"});
+  const kicc=await app.inject({method:"POST",url:"/v1/orders",headers:{authorization:`Bearer ${kiccSession.token}`,"idempotency-key":randomUUID()},payload:{...payload,cardPg:"KICC"}});
+  assert.equal(kicc.statusCode,201,kicc.body);
+  assert.equal(kicc.json().cardPayment.pgProvider,"KICC_V2");
+  await assert.rejects(pool.query("INSERT INTO payments(order_id,provider,amount) VALUES($1,'PORTONE_V2_KICC',6000)",[order.id]),/constraint/);
+  const chosen=selectCardChannel(config,"KICC");
+  await assert.rejects(pool.query("INSERT INTO payments(order_id,provider,amount,portone_channel_binding) VALUES($1,'PORTONE_V2_KICC',6000,$2)",[order.id,JSON.stringify({...chosen,pgProvider:"NICE_V2"})]),/constraint/);
 });

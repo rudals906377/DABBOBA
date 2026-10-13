@@ -280,7 +280,7 @@ test("prelaunch customer catalog conceals unconfirmed stock while admin retains 
   assert.equal(admin.openedQuantity, 15);
 });
 
-test("legacy draw history stays readable without enabling new random purchases", async () => {
+test("live public product detail exposes committed opens separately from remaining stock", async () => {
   const { app, routes } = routeHarness();
   let capturedSql = "";
   const row = productRow({
@@ -306,8 +306,7 @@ test("legacy draw history stays readable without enabling new random purchases",
   assert.match(capturedSql, /FROM draw_results result/);
   assert.match(capturedSql, /version\.status='ACTIVE'/);
   assert.match(capturedSql, /version\.version=result\.probability_version/);
-  assert.equal(detail.purchasable, false);
-  assert.equal(detail.blockedReason, "COMING_SOON");
+  assert.equal(detail.purchasable, true);
   assert.equal("prizeQuantity" in detail, false);
   assert.equal("probabilityPercent" in detail, false);
 });
@@ -519,7 +518,7 @@ test("admin products filter both prize-only states and support a single-product 
   );
 });
 
-test("admin product creation defaults to a directly purchasable SKU role", async () => {
+test("admin product creation defaults omitted isPrizeOnly to false", async () => {
   const { app, routes } = routeHarness();
   let insertedPrizeOnly: unknown;
   const pool = transactionPool(async (sql, values = []) => {
@@ -587,7 +586,7 @@ test("admin product creation defaults to a directly purchasable SKU role", async
       availableQuantity: 0,
       totalQuantity: null,
       openedQuantity: null,
-      metadata: {purchaseMode: "DIRECT"},
+      metadata: {},
       imageUrl: null,
       storefrontImageUrl: null,
       isActive: true,

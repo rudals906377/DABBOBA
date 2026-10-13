@@ -35,7 +35,7 @@ binary rather than later LIVE commerce plans.
 - Subtitle: `원하는 캐릭터 상품을 한곳에서`
 - Primary category: Shopping
 - Secondary category: Entertainment
-- Promotional text: `좋아하는 작품의 캐릭터 상품을 둘러보고, 직접 구매할 관심 상품과 새로운 소식을 확인해 보세요.`
+- Promotional text: `좋아하는 작품의 캐릭터 상품을 둘러보고, 관심 상품의 포함 구성과 새로운 소식을 확인해 보세요.`
 - Keywords: `캐릭터,애니메이션,굿즈,컬렉션,쇼핑`
 - Support URL: `https://dabboba.net/support`
 - Privacy policy URL: `https://dabboba.net/privacy`
@@ -57,7 +57,7 @@ verified friend-controlled business before this source is entered in a console.
 - App or game: App
 - Free or paid: Free
 - Category: Shopping
-- Short description: `직접 고를 캐릭터 상품을 미리 둘러보고 관심 상품을 저장하는 다뽀바 사전오픈판`
+- Short description: `캐릭터 상품의 포함 구성을 미리 둘러보고 관심 상품을 저장하는 다뽀바 사전오픈판`
 - Support email: `support@dabboba.net`
 - Support phone: unresolved; enter only the account owner's verified business contact
 - Website: `https://dabboba.net/support`
@@ -71,7 +71,7 @@ must not advertise payment or draw behavior that is absent from PRELAUNCH.
 
 ## Short description
 
-직접 고를 캐릭터 상품을 미리 둘러보고 관심 상품을 저장하는 다뽀바 사전오픈판
+캐릭터 상품의 포함 구성을 미리 둘러보고 관심 상품을 저장하는 다뽀바 사전오픈판
 
 ## Full description
 

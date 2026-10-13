@@ -2923,9 +2923,9 @@ export interface components {
         };
         PortOneCardChannelBinding: {
             /** @enum {string} */
-            provider: "PORTONE_V2_INICIS" | "PORTONE_V2_KCP" | "PORTONE_V2_NICE";
+            provider: "PORTONE_V2_INICIS" | "PORTONE_V2_KCP" | "PORTONE_V2_NICE" | "PORTONE_V2_KICC";
             /** @enum {string} */
-            pgProvider: "INICIS_V2" | "KCP_V2" | "NICE_V2";
+            pgProvider: "INICIS_V2" | "KCP_V2" | "NICE_V2" | "KICC_V2";
             merchantId: string;
             storeId: string;
             channelKey: string;
@@ -4224,12 +4224,12 @@ export interface components {
              * @description Explicit TEST provider for isolated payment review orders only. Production rejects this field.
              * @enum {string}
              */
-            reviewPaymentProvider?: "PORTONE_V2_NICE" | "TOSSPAYMENTS_DIRECT";
+            reviewPaymentProvider?: "PORTONE_V2_NICE" | "PORTONE_V2_KICC" | "TOSSPAYMENTS_DIRECT";
             /**
              * @description Optional explicit configured card rail. Omission uses the current server default. Historical channels may be query-only after a cutover.
              * @enum {string}
              */
-            cardPg?: "INICIS" | "KCP" | "NICE";
+            cardPg?: "INICIS" | "KCP" | "NICE" | "KICC";
             items: {
                 productId: string;
                 quantity: number;

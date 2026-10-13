@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { createDatabasePool } from "@dabboba/db";
+import { historicalOrderFixture } from "../legacy-order.integration-fixtures.js";
 import type { ApiConfig } from "@dabboba/config";
 import { buildApp } from "../app.js";
 import { acceptRequiredPoliciesForIntegrationTest, acceptUgcOperationsPolicyForIntegrationTest } from "../integration-test-fixtures.js";
@@ -10,7 +11,7 @@ import { applyCanonicalPaymentEventInTransaction, parseCanonicalPaymentEvent } f
 
 type SessionForExchange = {token:string;actor:{userId:string}};
 const databaseUrl = process.env.DABBOBA_TEST_DATABASE_URL;
-test("exact product purchase reserves the chosen SKU, issues no draws, replays safely, and refunds its own stock", {skip: !databaseUrl, timeout: 60_000}, async t => {
+test("historical DIRECT orders recover, refund and exchange without reopening new exact-item sales", {skip: !databaseUrl, timeout: 60_000}, async t => {
   const pool = createDatabasePool(databaseUrl!, "dabboba-direct-purchase-test");
   const config: ApiConfig = {
     environment: "test", host: "127.0.0.1", port: 8788, databaseUrl: databaseUrl!,
@@ -47,9 +48,10 @@ test("exact product purchase reserves the chosen SKU, issues no draws, replays s
   const legacy = await create(oldRandom, `direct-legacy-${suffix}`);
   assert.equal(legacy.statusCode, 409, legacy.body);
   const odds = await create(chosen, `direct-odds-${suffix}`, 1, 100, {expectedDrawVersion: 1});
-  assert.equal(odds.statusCode, 400, odds.body);
+  assert.equal(odds.statusCode, 409, odds.body);
   const key = `direct-chosen-${suffix}`;
-  const paid = await create(chosen, key, 2);
+  const oldCreate = (productId:string, key:string, quantity=1, pointAmount=quantity*100) => historicalOrderFixture(app,pool,config,{headers:{authorization:`Bearer ${session.token}`,"idempotency-key":key},payload:{items:[{productId,quantity}],pointAmount}});
+  const paid = await oldCreate(chosen, key, 2);
   assert.equal(paid.statusCode, 201, paid.body);
   const order = paid.json();
   assert.equal(order.status, "PAID");
@@ -81,8 +83,9 @@ test("exact product purchase reserves the chosen SKU, issues no draws, replays s
   assert.equal((await pool.query("SELECT balance FROM point_accounts WHERE user_id=$1", [session.actor.userId])).rows[0].balance, 10000);
   // Concurrent purchases of the final unit cannot create two units of inventory.
   const last = await product("last", true, 1);
+  await oldCreate(last,`historical-last-${suffix}`);
   const concurrent = await Promise.all([create(last, `direct-last-a-${suffix}`), create(last, `direct-last-b-${suffix}`)]);
-  assert.deepEqual(concurrent.map(result => result.statusCode).sort(), [201, 409]);
+  assert.deepEqual(concurrent.map(result => result.statusCode).sort(), [409, 409]);
   assert.equal((await pool.query("SELECT count(*)::int AS count FROM inventory_units WHERE product_id=$1", [last])).rows[0].count, 1);
   await acceptUgcOperationsPolicyForIntegrationTest(pool, session.actor.userId);
   const buyerResponse = await app.inject({method:"POST",url:"/v1/auth/dev-session",payload:{email:`other-${suffix}@example.test`}});
@@ -91,7 +94,7 @@ test("exact product purchase reserves the chosen SKU, issues no draws, replays s
   await acceptRequiredPoliciesForIntegrationTest(pool,buyer.actor.userId);
   await acceptUgcOperationsPolicyForIntegrationTest(pool,buyer.actor.userId);
   await pool.query("INSERT INTO point_accounts(user_id,balance) VALUES($1,10000) ON CONFLICT(user_id) DO UPDATE SET balance=10000",[buyer.actor.userId]);
-  const buyerOrder=await app.inject({method:"POST",url:"/v1/orders",headers:{authorization:`Bearer ${buyer.token}`,"idempotency-key":`direct-buyer-${suffix}`},payload:{items:[{productId:other,quantity:1}],pointAmount:100}});
+  const buyerOrder=await historicalOrderFixture(app,pool,config,{headers:{authorization:`Bearer ${buyer.token}`,"idempotency-key":`direct-buyer-${suffix}`},payload:{items:[{productId:other,quantity:1}],pointAmount:100}});
   assert.equal(buyerOrder.statusCode,201,buyerOrder.body);
   const ownInventory=(await pool.query("SELECT id FROM inventory_units WHERE product_id=$1 AND owner_id=$2 AND status='OWNED'",[last,session.actor.userId])).rows[0].id;
   const otherInventory=(await pool.query("SELECT id FROM inventory_units WHERE product_id=$1 AND owner_id=$2 AND status='OWNED'",[other,buyer.actor.userId])).rows[0].id;
@@ -121,7 +124,7 @@ test("exact product purchase reserves the chosen SKU, issues no draws, replays s
   assert.equal(pointReturn.statusCode,503,pointReturn.body);
   assert.equal(pointReturn.json().error.code,"FEATURE_UNAVAILABLE");
   const cardProduct=await product("card");
-  const cardOrder=await create(cardProduct,`direct-card-${suffix}`,1,0);
+  const cardOrder=await oldCreate(cardProduct,`direct-card-${suffix}`,1,0);
   assert.equal(cardOrder.statusCode,201,cardOrder.body);
   assert.equal(cardOrder.json().status,"PENDING_PAYMENT");
   const cardEvent=parseCanonicalPaymentEvent("TEST_PG",{eventId:`direct-card-paid-${suffix}`,eventType:"PAYMENT_SUCCEEDED",paymentId:cardOrder.json().paymentId,providerPaymentId:`simulated-direct-card-${suffix}`,amount:100,occurredAt:new Date().toISOString()},"fixture-verified-provider");
