@@ -18,5 +18,9 @@
 - PR: https://github.com/rudals906377/DABBOBA/pull/42 . 브랜치 `feat/direct-purchase-shared-pg-review`.
 - 공개 Preview: https://direct-purchase-20261013.dabboba-2o6.pages.dev/ . 소스 커밋과 후속 검증 수정을 push하고 최신 Preview를 갱신한다. 운영 웹·DB·API·서명 앱과 실제 PG 검증은 별도이며 완료로 표시하지 않는다.
 - DBB 전체 작업 폴더, 비공개 배포 자료, Codex worktrees, 사용자 Documents/config와 사용자 폴더에서 운영 Edge 프로필을 검색했다. `supabase-edge-production.env`는 없으며 발견한 `supabase-edge.env`는 실제 주소도 은퇴한 QA 프로젝트여서 운영에 사용할 수 없다.
-- 운영 worker 자격 증명과 Apple 자료는 있으나 검증된 운영 API/Storage S3/인증 설정 전체를 대신하지 못한다. 값을 추정하거나 재발급하지 않았다. 배포 스크립트가 요구하는 검증된 운영 프로필을 복구하기 전에는 정책 HTML과 DB 버전을 따로 변경하지 않는다.
-- 운영 공개 설정을 다시 읽어 PRELAUNCH 및 TERMS/PRIVACY 2026-10-07을 확인했다. 기존 상태를 유지한다.
+- 운영 worker 자격 증명과 Apple 자료는 있으나 검증된 운영 API/Storage S3/인증 설정 전체를 대신하지 못한다. 값을 추정하거나 재발급하지 않았다. 이 제한은 운영 Edge 배포에 해당하며 공개 웹의 배포 설정과는 별개다.
+- 후속 사용자 요청으로 실제 `https://dabboba.net/review/`를 포함한 공개 웹을 Production 배포했다. Cloudflare 프로젝트 `dabboba`, 배포 `22fc7feb`, 배포 소스 `6e099bb0f375a7a7b8e41e7e85ffb2b003796292`다. 앱 소개·심사 화면·직접 선택 이용 안내와 2026-10-13 약관/개인정보처리방침/교환방 정책을 게시했다. 정책 HTML을 먼저 게시하는 기존 순서를 따른 것이며 원격 DB/API 반영까지 완료한 것은 아니다.
+- 실제 도메인의 심사 HTML/스크립트/안내, 홈페이지, 세 정책 문서 총 9개 파일이 빌드 원본과 일치한다. 세 정책 해시는 0099의 게시 해시와 일치하며 심사 경로의 두 SDK CSP와 no-referrer를 확인했다. 심사 관련 로컬 회귀 48개, 보호 런타임 무결성 및 공개 웹 빌드가 통과했다.
+- 연결된 심사 서버는 아직 이전 구성이다. 실제 심사 상품 응답은 0개, NICE/Toss TEST 설정은 미연결, 필수 정책은 2026-09-30이다. 운영 서버는 PRELAUNCH 및 TERMS/PRIVACY 2026-10-07을 유지한다. 새 46종 재고·원격 마이그레이션·정책 동의 버전·API/결제 설정 연결 및 실제 TEST 결제는 미완료다. 화면 배포를 심사 절차 전체 사용 가능 상태로 보고하지 않는다.
+- GitHub 실행 `38396443591`에서 Workspace/Cloud Run/Cloudflare는 통과했으나 PostgreSQL 단계의 관리자 통합 시험 하나가 실패했다. 신규 DIRECT 상품의 구매 방식을 누락한 기존 수정 fixture가 409를 반환하는 사례이며, 심사 웹 회귀와 구분한다. CI 전체 통과로 표시하지 않는다.
+- 비공개 게시 전후 해시/응답과 화면 증거: `.dabboba-launch/evidence/review-production-20261013/`. 비밀값·회원정보를 저장소에 추가하지 않았다.

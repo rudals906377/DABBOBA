@@ -34,3 +34,9 @@
 - 배포된 약관·개인정보처리방침·교환방 운영정책과 review/app.js·payment-channel.js의 bytes가 로컬 원본과 일치한다. 새 CSP와 no-referrer도 응답에서 확인했다.
 - 실제 HTTPS 미리보기에서 PortOne.requestPayment와 TossPayments가 각각 function으로 로드됨을 브라우저 진단으로 확인했다. 화면은 현재 서버 연결 상태에 맞춰 ‘결제 연결은 준비 중’으로 표시하며, 실제 TEST 채널 연결 완료를 주장하지 않는다. 카드 입력·청구 요청은 실행하지 않았다.
 - 화면 캡처: 작업공간 외 비공개 증거 폴더 `.dabboba-launch/shared-payment-review-preview-20261013.png`. API Edge 번들 생성도 통과했으나 원격 Edge에는 배포하지 않았다.
+
+## 실제 심사 주소 게시 — 후속 사용자 요청
+
+- `https://dabboba.net/review/`에 Production 배포 `22fc7feb`로 소스 `6e099bb`의 공통 심사 웹을 게시했다. 공개 소개와 직접 선택 정책 문서도 같은 공개 웹 번들에 포함된다.
+- 실제 주소에서 직접 선택 앱 소개와 나이스·토스 준비 상태를 브라우저로 확인했다. 심사 파일과 세 정책 HTML의 게시 bytes가 원본과 일치하며 CSP의 두 공식 SDK 및 no-referrer를 확인했다.
+- 연결된 시험 서버의 상품은 아직 0개이며 NICE/Toss 설정과 새 정책 동의 버전은 미반영이다. 현재 화면 게시 완료와 실제 상품 주문·TEST 결제 가능 상태를 구분한다. 운영 DB/API, 일반 판매와 실제 PG 승인·카드 청구는 변경하거나 확인하지 않았다.
