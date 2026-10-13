@@ -57,7 +57,7 @@ test("Home uses open canvas rhythm for the server-ordered operator feed", () => 
   assert.doesNotMatch(source, /sectionHeader:\s*\{[^}]*minHeight/);
   assert.doesNotMatch(source, /sectionHeader:\s*\{[^}]*border(?:Top|Bottom)Width/);
   assert.doesNotMatch(source, /sectionHeader:\s*\{[^}]*backgroundColor/);
-  assert.match(source, /buildConfiguredHomeCollections\(snapshot\.homeSections\.items\.map/);
+  assert.match(source, /buildConfiguredHomeCollections\(snapshot\.homeSections\.items\.filter/);
   assert.match(source, /homeCollections\.map\(\(collection\) => \([\s\S]*?<OperatorHomeSection/);
   assert.doesNotMatch(source, /seenProductIds|todayDrawGroups|homeCollectionCandidates/);
   assert.doesNotMatch(source, /productCardBody:\s*\{[^}]*minHeight/);

@@ -11,6 +11,21 @@ import {
   verifyAdminProxyIdentity,
 } from "./index.js";
 
+test("direct Toss review requires explicit STAGING TEST keys and cannot activate production", () => {
+  const base = { NODE_ENV: "production", DABBOBA_ENVIRONMENT_TIER: "STAGING", DABBOBA_RELEASE_ENVIRONMENT_TIER: "STAGING",
+    DATABASE_URL: "postgresql://dabboba_runtime:synthetic@db.lyzcyrdiazorjaqlgblr.supabase.co/postgres",
+    SESSION_TOKEN_PEPPER: "synthetic-toss-review-session-pepper-0123456789", PAYMENT_PROVIDER: "TOSSPAYMENTS_DIRECT",
+    WEB_ORIGINS: "https://dabboba.net", SUPABASE_URL: "https://lyzcyrdiazorjaqlgblr.supabase.co", DABBOBA_COMMERCE_MODE: "LIVE",
+    TOSS_PAYMENTS_CLIENT_KEY: "test_ck_synthetic_value_12345", TOSS_PAYMENTS_SECRET_KEY: "test_sk_synthetic_value_12345",
+    TOSS_PAYMENTS_MERCHANT_ID: "test_mid" };
+  assert.equal(loadApiConfig(base).tossPayments?.environment, "TEST");
+  for (const override of [{ DABBOBA_ENVIRONMENT_TIER: "PRODUCTION" }, { TOSS_PAYMENTS_CLIENT_KEY: "live_ck_not_allowed" },
+    { TOSS_PAYMENTS_SECRET_KEY: "live_sk_not_allowed" }, { TOSS_PAYMENTS_SECRET_KEY: "" }]) {
+    assert.throws(() => loadApiConfig({ ...base, ...override }), /STAGING|TEST/);
+  }
+  assert.throws(() => loadApiConfig({ ...base, DATABASE_URL: "postgresql://dabboba_runtime:synthetic@db.rconfxsykttfvznakile.supabase.co/postgres" }), /pinned STAGING/);
+});
+
 test("migration config uses its dedicated URL without requiring API secrets", () => {
   const config = loadMigrationConfig({
     NODE_ENV: "production",
@@ -24,6 +39,28 @@ test("migration config uses its dedicated URL without requiring API secrets", ()
     config.databaseUrl,
     "postgresql://postgres.abcdefghijklmnopqrst:migration-secret@aws-0-ap-northeast-2.pooler.supabase.com:5432/postgres",
   );
+});
+
+test("NICE starts only on pinned payment STAGING TEST and preserves historical channel identities", () => {
+  const base = { NODE_ENV: "production", DABBOBA_ENVIRONMENT_TIER: "STAGING", DABBOBA_RELEASE_ENVIRONMENT_TIER: "STAGING",
+    DATABASE_URL: "postgresql://dabboba_runtime:synthetic@db.lyzcyrdiazorjaqlgblr.supabase.co/postgres",
+    SUPABASE_URL: "https://lyzcyrdiazorjaqlgblr.supabase.co", WEB_ORIGINS: "https://dabboba.net",
+    SESSION_TOKEN_PEPPER: "nice-synthetic-session-pepper-01234567890123456789", PAYMENT_PROVIDER: "PORTONE_V2_NICE", DABBOBA_COMMERCE_MODE: "LIVE",
+    PAYMENT_WEBHOOK_SECRET: "nice-synthetic-normalized-secret-01234567890123456789",
+    PAYMENT_RECONCILIATION_WORKER_SECRET: "nice-synthetic-worker-secret-01234567890123456789",
+    PORTONE_API_SECRET: "nice-synthetic-api-secret-0123456789", PORTONE_WEBHOOK_SECRET: "nice-synthetic-webhook-secret-0123456789",
+    PORTONE_MERCHANT_ID: "synthetic-merchant", PORTONE_STORE_ID: "synthetic-store", PORTONE_CHANNEL_ENVIRONMENT: "TEST",
+    PORTONE_CHANNEL_KEY: "channel-key-nice", PORTONE_INICIS_CHANNEL_KEY: "channel-key-old-inicis", PORTONE_KCP_CHANNEL_KEY: "channel-key-old-kcp" };
+  const config = loadApiConfig(base);
+  assert.equal(config.paymentProvider, "PORTONE_V2_NICE");
+  assert.equal(config.portOne?.inicisChannelKey, "channel-key-old-inicis");
+  const shared = {...base,TOSS_PAYMENTS_CLIENT_KEY:"test_ck_synthetic_shared_12345",TOSS_PAYMENTS_SECRET_KEY:"test_sk_synthetic_shared_12345",TOSS_PAYMENTS_MERCHANT_ID:"test_mid"};
+  assert.equal(loadApiConfig(shared).tossPayments?.environment,"TEST");
+  assert.equal(loadApiConfig(shared).paymentProvider,"PORTONE_V2_NICE");
+  for(const override of [{TOSS_PAYMENTS_SECRET_KEY:""},{TOSS_PAYMENTS_CLIENT_KEY:"live_ck_invalid"},{DABBOBA_ENVIRONMENT_TIER:"PRODUCTION"},{PAYMENT_PROVIDER:"PORTONE_V2_INICIS"}]) assert.throws(()=>loadApiConfig({...shared,...override}));
+  for (const override of [{ PORTONE_CHANNEL_ENVIRONMENT: "LIVE" }, { DABBOBA_ENVIRONMENT_TIER: "PRODUCTION", DABBOBA_RELEASE_ENVIRONMENT_TIER: "PRODUCTION" },
+    { DATABASE_URL: "postgresql://dabboba_runtime:synthetic@db.rconfxsykttfvznakile.supabase.co/postgres" },
+    { PORTONE_INICIS_CHANNEL_KEY: "channel-key-nice" }, { PAYMENT_RECONCILIATION_WORKER_SECRET: "" }]) assert.throws(() => loadApiConfig({ ...base, ...override }));
 });
 
 test("migration config allows the legacy URL only outside production", () => {

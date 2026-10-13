@@ -96,7 +96,7 @@ export function ExchangeListingDetailScreen() {
     const tokens = await readAuthTokens();
     if (!tokens) {
       openCustomerLogin(
-        "교환 신청은 로그인 후 내가 가챠로 직접 뽑아 보관 중인 상품으로만 할 수 있어요.",
+        "교환 신청은 로그인 후 내가 가챠로 구매해 보관 중인 상품으로만 할 수 있어요.",
         `/exchange/${listingId}/offer`,
       );
       return;

@@ -227,6 +227,41 @@ export const DATABASE_RELEASE_MIGRATIONS = Object.freeze([
     path: 'packages/db/migrations/0092_set_updated_at_search_path.sql',
     sha256: '560dd4229a991e660fb1690d6fa52a294ee4ae4db073e2a6e0558880e4146afd',
   }),
+  Object.freeze({
+    file: '0093_inventory_storage_point_returns.sql',
+    path: 'packages/db/migrations/0093_inventory_storage_point_returns.sql',
+    sha256: '10355d9197651c30d2c864268d9007742599dab0197e23373f78f50423583e97',
+  }),
+  Object.freeze({
+    file: '0094_legal_policy_storage_2026_10_12.sql',
+    path: 'packages/db/migrations/0094_legal_policy_storage_2026_10_12.sql',
+    sha256: '59daec59db3ad3ac2e121922ee1506e4ae018202bf7c9a032530ff160abec1d6',
+  }),
+  Object.freeze({
+    file: '0095_launch_numeric_prize_names.sql',
+    path: 'packages/db/migrations/0095_launch_numeric_prize_names.sql',
+    sha256: '51428e5049b1f32d5fd1d8d11702e4fda74e19e03d3761d312f12f06eade9421',
+  }),
+  Object.freeze({
+    file: '0096_toss_review_confirm_attempts.sql',
+    path: 'packages/db/migrations/0096_toss_review_confirm_attempts.sql',
+    sha256: '72480d5cbfcbcd65f09662be9319428bd496ce4282949883508c44f76e336896',
+  }),
+  Object.freeze({
+    file: '0097_portone_nice_card_channel.sql',
+    path: 'packages/db/migrations/0097_portone_nice_card_channel.sql',
+    sha256: '5d953ce224b78f37d5c0a0b120b6940754e87e6d66276eb64d56835efbfe3411',
+  }),
+  Object.freeze({
+    file: '0098_direct_product_purchase.sql',
+    path: 'packages/db/migrations/0098_direct_product_purchase.sql',
+    sha256: '73b309aee800421b77d9ac769fd335a965c7722081c796d5777bcf08cc9a0cba',
+  }),
+  Object.freeze({
+    file: '0099_legal_direct_purchase_2026_10_13.sql',
+    path: 'packages/db/migrations/0099_legal_direct_purchase_2026_10_13.sql',
+    sha256: '61c38b2a912f7ff4ccc580243427782d0948466b2520055e4f2bfbbceaa0e819',
+  }),
 ]);
 
 export const MINIMUM_DATABASE_RELEASE_VERSION =

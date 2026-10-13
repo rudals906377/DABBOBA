@@ -14,7 +14,6 @@ export type LaunchCopy = {
   heroStatus: string;
   finalNavLabel: string;
   gachaPreviewStatus: string;
-  kujiPreviewStatus: string;
   storageIntro: string;
   closingTitle: string;
   closingBody: string;
@@ -26,21 +25,19 @@ export const LAUNCH_COPY: Readonly<Record<StorefrontCommerceMode, LaunchCopy>> =
     heroStatus: "사전 오픈 준비 중",
     finalNavLabel: "사전 오픈 안내",
     gachaPreviewStatus: "오픈 준비 중",
-    kujiPreviewStatus: "오픈 준비 중",
     storageIntro: "정식 오픈 후 적용 예정",
     closingTitle: "곧, 앱에서 만나요",
-    closingBody: "상품 탐색과 관심 상품 저장부터 차근차근 시작할게요.",
+    closingBody: "원하는 상품과 수량을 직접 고르고 구매하는 서비스를 준비하고 있어요.",
     closingStatus: "PRELAUNCH",
   },
-  // First launch sells gacha only; kuji stays "opening soon" until its own decision.
+  // First launch presents the confirmed direct-sale collection only.
   LIVE: {
-    heroStatus: "가챠 정식 오픈",
+    heroStatus: "캐릭터 상품 정식 오픈",
     finalNavLabel: "이용 안내",
     gachaPreviewStatus: "앱에서 만나요",
-    kujiPreviewStatus: "오픈 준비 중",
     storageIntro: "보관·배송 기준",
     closingTitle: "지금, 앱에서 만나요",
-    closingBody: "가챠를 뽑고 보관함에 모아 한 번에 받아요.",
+    closingBody: "원하는 상품을 고르고, 구매한 상품을 모아 한 번에 받아요.",
     closingStatus: "NOW OPEN",
   },
 });

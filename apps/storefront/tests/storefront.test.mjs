@@ -10,7 +10,7 @@ const viteSource = await readFile(new URL("../vite.config.ts", import.meta.url),
 const policySource = appSource + copySource;
 
 test("keeps the storefront story in its approved order", () => {
-  const sectionIds = ["hero", "experience", "favorites", "storage", "kuji", "prelaunch"];
+  const sectionIds = ["hero", "experience", "favorites", "storage", "prelaunch"];
   let previousIndex = -1;
 
   for (const sectionId of sectionIds) {
@@ -29,9 +29,8 @@ test("publishes every required public policy and support route", () => {
 test("shows the agreed storage and delivery rules as future live policies", () => {
   for (const copy of [
     "정식 오픈 후 적용 예정",
-    "획득일부터 60일 보관",
+    "구매일부터 60일 보관",
     "24,900원 이상 무료 배송",
-    "54,900원 이상 무료 배송",
     "배송비 3,000원",
   ]) {
     assert.ok(policySource.includes(copy), `missing policy copy: ${copy}`);
@@ -43,26 +42,26 @@ test("prelaunch storefront does not expose commerce actions or a zero price", ()
     assert.equal(policySource.includes(forbidden), false, `forbidden storefront copy: ${forbidden}`);
   }
   assert.match(copySource, /closingStatus: "PRELAUNCH"/);
-  assert.match(appSource, /OPENING SOON/);
+  assert.doesNotMatch(appSource, /쿠지|kuji|OPENING SOON/);
 });
 
 test("storefront copy switches to LIVE only for the exact build variable and keeps kuji closed", () => {
   assert.match(copySource, /export function storefrontCommerceMode\(value: unknown\): StorefrontCommerceMode \{\s*return value === "LIVE" \? "LIVE" : "PRELAUNCH";/);
   assert.match(copySource, /storefrontCommerceMode\(import\.meta\.env\.VITE_DABBOBA_COMMERCE_MODE\)/);
   // Every mode-dependent string comes from the copy table, not from App.tsx.
-  for (const key of ["heroStatus", "finalNavLabel", "gachaPreviewStatus", "kujiPreviewStatus", "storageIntro", "closingTitle", "closingBody", "closingStatus"]) {
+  for (const key of ["heroStatus", "finalNavLabel", "gachaPreviewStatus", "storageIntro", "closingTitle", "closingBody", "closingStatus"]) {
     assert.match(appSource, new RegExp(`launchCopy\\.${key}`), `App.tsx must render launchCopy.${key}`);
   }
   for (const prelaunchOnly of ["사전 오픈 준비 중", "정식 오픈 후 적용 예정", "곧, 앱에서 만나요"]) {
     assert.equal(appSource.includes(prelaunchOnly), false, `${prelaunchOnly} must come from launch-copy.ts`);
   }
   const live = copySource.slice(copySource.indexOf("LIVE: {"));
-  assert.match(live, /kujiPreviewStatus: "오픈 준비 중"/);
+  assert.doesNotMatch(live, /kujiPreviewStatus/);
   assert.doesNotMatch(live, /사전 오픈|PRELAUNCH|정식 오픈 후/);
   // The static <head> follows the same exact-value rule and fails the build if its anchors drift.
   assert.match(viteSource, /\(process\.env\.VITE_DABBOBA_COMMERCE_MODE \?\? env\.VITE_DABBOBA_COMMERCE_MODE\) === "LIVE"/);
   assert.match(viteSource, /Storefront prelaunch metadata changed/);
-  for (const anchor of ["다뽀바의 사전 오픈 안내를 확인하세요.", "다뽀바 사전 오픈을 준비하고 있습니다."]) {
+  for (const anchor of ["사전 오픈 안내를 확인하세요.", "상품 종류와 가격을 확인하고 직접 고른 상품을 구매하는 다뽀바를 준비하고 있습니다."]) {
     assert.ok(indexSource.includes(anchor) && viteSource.includes(anchor), `metadata anchor drifted: ${anchor}`);
   }
 });

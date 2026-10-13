@@ -1336,7 +1336,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** @description Atomically claims the first native PortOne payment window for an owned, payable order. A later call from this or another device must re-query the existing payment instead of opening another window. The claim is never payment approval. */
+        /** @description Atomically claims the first payment window for an owned, payable order. A later call must re-query the existing payment instead of opening another window. The claim is never payment approval. The isolated direct Toss TEST review rail returns claimed instead of the legacy PortOne accepted/startedAt fields. */
         post: operations["claimOwnPortOnePaymentAttempt"];
         delete?: never;
         options?: never;
@@ -1353,7 +1353,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** @description Re-queries PortOne with the authenticated owner's payment ID and applies only the provider-authoritative state to the order. A client redirect or callback is never accepted as proof of payment. Limited to six calls per minute per client. An already settled local payment (PAID, FAILED, REFUNDED, or CANCELLED before any PG window claim) returns outcome already_settled without a provider call; providerStatus is then the provider-equivalent of that settled state and localStatus is included. */
+        /** @description Re-queries the authenticated owner's payment and applies only provider-authoritative state. A redirect is never payment proof. PortOne is limited to six calls per minute and returns already_settled for locally settled payments. The isolated direct Toss TEST review rail optionally accepts authentication callback fields, journals the attempt before server-side approval using the database amount, and re-queries Toss for uncertain outcomes. Without callback fields it only queries, never initiates approval. Toss LIVE is unavailable. */
         post: operations["confirmOwnPortOnePayment"];
         delete?: never;
         options?: never;
@@ -1372,6 +1372,57 @@ export interface paths {
         put?: never;
         /** @description Owner-only release of an unpaid PortOne payment window. A fresh authenticated PortOne lookup must establish no submitted payment before reservations, room entry, coupons, and points can be released. READY with zero money or PAYMENT_NOT_FOUND qualify. The adapter also recognizes the narrowly validated KG unsubmitted-window shape whose paid field projects the requested total, with a verified channel and no card method, PG transaction, approval, or cancellation. For FAILED this additionally requires PG user-close code 01 and a failure timestamp. Terminal no-charge FAILED/CANCELLED states use the canonical provider path. Other payment evidence or uncertain reads never release the order. Same-key replays return the original result without another provider call. */
         post: operations["abandonOwnPortOnePaymentWindow"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/review/toss-payments/{paymentId}/attempt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description Claims one payment window for an owned direct Toss TEST order in the pinned payment STAGING project. Also available beside the NICE PortOne rail; an immutable provider mismatch is rejected. */
+        post: operations["claimOwnSharedReviewTossAttempt"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/review/toss-payments/{paymentId}/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description Queries Toss using the server order amount and verifies provider state before fulfillment. Callback fields can initiate approval only for the recorded attempt; a redirect alone is never payment proof. Unknown outcomes retain the order for recovery. NICE payment IDs are rejected. */
+        post: operations["confirmOwnSharedReviewTossPayment"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/review/toss-payments/{paymentId}/abandon": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description Releases an owned unpaid Toss TEST order only after a provider read establishes no approval and no recorded approval attempt. Unknown outcomes remain reserved. NICE payment IDs are rejected. */
+        post: operations["abandonOwnSharedReviewTossPayment"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1597,6 +1648,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /** @description Temporarily unavailable by owner decision; returns FEATURE_UNAVAILABLE without changing inventory or balances. Historical point-return records remain preserved. */
         post: operations["createAccountPointReturn"];
         delete?: never;
         options?: never;
@@ -2861,12 +2913,19 @@ export interface components {
             commerceMode: components["schemas"]["CommerceLaunchMode"];
             requiredPolicyVersions: components["schemas"]["RequiredPolicyVersions"];
             cardPaymentOptions?: components["schemas"]["PortOneCardChannelBinding"][];
+            tossPayment?: {
+                /** @constant */
+                provider: "TOSSPAYMENTS_DIRECT";
+                /** @constant */
+                environment: "TEST";
+                clientKey: string;
+            };
         };
         PortOneCardChannelBinding: {
             /** @enum {string} */
-            provider: "PORTONE_V2_INICIS" | "PORTONE_V2_KCP";
+            provider: "PORTONE_V2_INICIS" | "PORTONE_V2_KCP" | "PORTONE_V2_NICE";
             /** @enum {string} */
-            pgProvider: "INICIS_V2" | "KCP_V2";
+            pgProvider: "INICIS_V2" | "KCP_V2" | "NICE_V2";
             merchantId: string;
             storeId: string;
             channelKey: string;
@@ -4132,6 +4191,8 @@ export interface components {
              * @description First server-claimed PortOne window time, or null before any attempt. A non-null value requires provider reconciliation, not another window.
              */
             paymentAttemptStartedAt?: string | null;
+            /** @description Immutable provider recorded for this order. */
+            paymentProvider?: string;
             /** @description Immutable server-selected channel snapshot; never choose a different PG for an existing payment. */
             cardPayment?: components["schemas"]["PortOneCardChannelBinding"] | null;
             /** @enum {string} */
@@ -4160,14 +4221,19 @@ export interface components {
         };
         CreateOrderInput: {
             /**
-             * @description Optional explicit configured card rail. Omission retains the existing default.
+             * @description Explicit TEST provider for isolated payment review orders only. Production rejects this field.
              * @enum {string}
              */
-            cardPg?: "INICIS" | "KCP";
+            reviewPaymentProvider?: "PORTONE_V2_NICE" | "TOSSPAYMENTS_DIRECT";
+            /**
+             * @description Optional explicit configured card rail. Omission uses the current server default. Historical channels may be query-only after a cutover.
+             * @enum {string}
+             */
+            cardPg?: "INICIS" | "KCP" | "NICE";
             items: {
                 productId: string;
                 quantity: number;
-                /** @description Required for gacha and kuji products; rejected for direct-purchase products. */
+                /** @description Legacy field retained for historical clients; rejected for all new direct-purchase orders. */
                 expectedDrawVersion?: number;
             }[];
             couponCode?: string | null;
@@ -4175,7 +4241,7 @@ export interface components {
             pointAmount: number;
             /**
              * Format: uuid
-             * @description Required for a kuji-only order and rejected for non-kuji orders.
+             * @description Legacy room binding; direct-purchase orders do not use a draw room.
              */
             kujiRoomEntryId?: string;
         };
@@ -4195,6 +4261,30 @@ export interface components {
                 paidAmount: number;
                 cancelledAmount: number;
             };
+        };
+        TossReviewPaymentAttempt: {
+            /** Format: uuid */
+            paymentId: string;
+            /** Format: uuid */
+            orderId: string;
+            /** @constant */
+            claimed: true;
+        };
+        TossReviewPaymentConfirmation: {
+            /** Format: uuid */
+            paymentId: string;
+            /** Format: uuid */
+            orderId: string;
+            status: string;
+            outcome: string;
+        };
+        TossReviewPaymentAbandonment: {
+            /** Format: uuid */
+            paymentId: string;
+            /** Format: uuid */
+            orderId: string;
+            /** @constant */
+            abandoned: true;
         };
         PortOnePaymentConfirmation: {
             /** @constant */
@@ -8177,7 +8267,7 @@ export interface operations {
                         orderId: string;
                         /** Format: date-time */
                         startedAt: string;
-                    };
+                    } | components["schemas"]["TossReviewPaymentAttempt"];
                 };
             };
             401: components["responses"]["Unauthorized"];
@@ -8204,7 +8294,19 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": {
+                    paymentKey?: string;
+                    /**
+                     * Format: uuid
+                     * @description Toss orderId equals the server payment ID, not the commerce order ID.
+                     */
+                    orderId?: string;
+                    amount?: number;
+                };
+            };
+        };
         responses: {
             /** @description Fresh provider state was reconciled, the payment is still pending, or it was already settled. */
             200: {
@@ -8213,7 +8315,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["PortOnePaymentConfirmation"];
+                    "application/json": components["schemas"]["PortOnePaymentConfirmation"] | components["schemas"]["TossReviewPaymentConfirmation"];
                 };
             };
             401: components["responses"]["Unauthorized"];
@@ -8261,7 +8363,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["PortOnePaymentAbandonment"];
+                    "application/json": components["schemas"]["PortOnePaymentAbandonment"] | components["schemas"]["TossReviewPaymentAbandonment"];
                 };
             };
             401: components["responses"]["Unauthorized"];
@@ -8279,6 +8381,159 @@ export interface operations {
                 };
             };
             /** @description Commerce is unavailable in PRELAUNCH, or the PortOne channel is not configured. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    claimOwnSharedReviewTossAttempt: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                paymentId: components["parameters"]["PaymentId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Server-verified Toss TEST result. */
+            200: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TossReviewPaymentAttempt"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            428: components["responses"]["LegalAcceptanceRequired"];
+            429: components["responses"]["RateLimited"];
+            /** @description Provider response unavailable or invalid; no client success is trusted. */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The isolated Toss TEST review rail is not configured or commerce is unavailable. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    confirmOwnSharedReviewTossPayment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                paymentId: components["parameters"]["PaymentId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    paymentKey?: string;
+                    /**
+                     * Format: uuid
+                     * @description Server payment ID
+                     */
+                    orderId?: string;
+                    amount?: number;
+                };
+            };
+        };
+        responses: {
+            /** @description Server-verified Toss TEST result. */
+            200: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TossReviewPaymentConfirmation"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            428: components["responses"]["LegalAcceptanceRequired"];
+            429: components["responses"]["RateLimited"];
+            /** @description Provider response unavailable or invalid; no client success is trusted. */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The isolated Toss TEST review rail is not configured or commerce is unavailable. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    abandonOwnSharedReviewTossPayment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                paymentId: components["parameters"]["PaymentId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Server-verified Toss TEST result. */
+            200: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TossReviewPaymentAbandonment"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            428: components["responses"]["LegalAcceptanceRequired"];
+            429: components["responses"]["RateLimited"];
+            /** @description Provider response unavailable or invalid; no client success is trusted. */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The isolated Toss TEST review rail is not configured or commerce is unavailable. */
             503: {
                 headers: {
                     [name: string]: unknown;

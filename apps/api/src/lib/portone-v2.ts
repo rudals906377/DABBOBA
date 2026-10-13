@@ -22,7 +22,7 @@ const PAYMENT_STATUSES = [
 
 export type PortOnePaymentStatus = (typeof PAYMENT_STATUSES)[number];
 export type PortOneChannelEnvironment = "LIVE" | "TEST";
-export type PortOneCardPgProvider = "INICIS_V2" | "KCP_V2";
+export type PortOneCardPgProvider = "INICIS_V2" | "KCP_V2" | "NICE_V2";
 export type PortOneCancelRequester = "CUSTOMER" | "ADMIN";
 export type PortOneCancellationOutcome = "SUCCEEDED" | "PENDING" | "FAILED";
 
@@ -496,7 +496,7 @@ function validateOptions(options: PortOneV2AdapterOptions) {
     throw new PortOneV2Error("INVALID_CONFIGURATION", "channelEnvironment is invalid.");
   }
   const pgProvider = options.pgProvider === undefined ? "INICIS_V2" : options.pgProvider;
-  if (pgProvider !== "INICIS_V2" && pgProvider !== "KCP_V2") {
+  if (pgProvider !== "INICIS_V2" && pgProvider !== "KCP_V2" && pgProvider !== "NICE_V2") {
     throw new PortOneV2Error("INVALID_CONFIGURATION", "pgProvider is invalid.");
   }
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;

@@ -36,6 +36,7 @@ import {
   isPortOneUserCancelError,
 } from "@/features/checkout/payment-abandon";
 import { normalizedPaymentCustomerName } from "@/features/checkout/payment-customer";
+import { checkoutPaymentChannel } from "@/features/checkout/payment-channel";
 import {
   assertKujiPaymentLease,
   KujiPaymentLeaseExpiredError,
@@ -102,6 +103,12 @@ export function PortOnePaymentScreen() {
         if (!paidOrder.shippingRequestId) throw new Error("결제한 배송 신청 정보를 찾지 못했어요.");
         completedRef.current = true;
         router.replace(`/profile/shipping/${encodeURIComponent(paidOrder.shippingRequestId)}` as Href);
+        return;
+      }
+      if ((paidOrder.drawEntitlementIds?.length ?? 0) === 0 && paidOrder.lines.length > 0) {
+        if (!["PAID", "FULFILLED"].includes(paidOrder.status)) throw new Error("결제 완료를 확인하지 못했어요.");
+        completedRef.current = true;
+        router.replace(`/profile/orders/${encodeURIComponent(paidOrder.id)}` as Href);
         return;
       }
       const draw = paidProductDrawFromOrder(paidOrder, orderId);
@@ -227,7 +234,7 @@ export function PortOnePaymentScreen() {
 
   const assertPayableKujiOrder = useCallback(async (paymentOrder: CheckoutOrder, accessToken: string) => {
     const kujiLine = paymentOrder.lines.find((line) => line.category === "kuji");
-    if (!kujiLine) return;
+    if (!kujiLine || !paymentOrder.kujiRoomEntryId) return;
     if (paymentOrder.lines.length !== 1 || !paymentOrder.kujiRoomEntryId) {
       throw new KujiPaymentLeaseMismatchError();
     }
@@ -366,11 +373,7 @@ export function PortOnePaymentScreen() {
         await confirmPayment(nextOrder);
         return;
       }
-      if (!storeId || !channelKey) {
-        setPhase("failed");
-        setMessage("결제 채널이 설치 빌드에 구성되지 않았어요.");
-        return;
-      }
+      checkoutPaymentChannel(nextOrder, { storeId, channelKey });
       await assertPayableKujiOrder(nextOrder, tokens.accessToken);
       if (localAttemptState === "preparing") {
         // The server has no PG-window claim, so reusing this order cannot create
@@ -416,8 +419,7 @@ export function PortOnePaymentScreen() {
         ? order.lines[0]!.productName
         : `${order.lines[0]?.productName ?? "다뽀바 상품"} 외 ${Math.max(0, order.lines.length - 1)}건`;
     return {
-      storeId,
-      channelKey,
+      ...checkoutPaymentChannel(order, { storeId, channelKey }),
       paymentId: order.paymentId,
       orderName: orderName.slice(0, 100),
       totalAmount: order.total,
@@ -440,7 +442,7 @@ export function PortOnePaymentScreen() {
           style={styles.state}
         >
           <Text style={styles.stateTitle}>결제자 이름을 입력해 주세요</Text>
-          <Text style={styles.stateBody}>KG이니시스 카드 결제에 사용하며, 본인확인을 대신하지 않아요.</Text>
+          <Text style={styles.stateBody}>신용카드 결제에 사용하며, 본인확인을 대신하지 않아요.</Text>
           {message ? <Text style={styles.stateBody}>{message}</Text> : null}
           <SeedInputShell style={styles.nameInputShell}>
             <TextInput

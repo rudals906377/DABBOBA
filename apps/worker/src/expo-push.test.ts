@@ -8,10 +8,10 @@ import type { Notification } from "./notifications.js";
 const notification: Notification = {
   id: "10000000-0000-4000-8000-000000000001",
   userId: "20000000-0000-4000-8000-000000000001",
-  kind: "ORDER_PAID",
-  title: "결제가 완료됐어요",
-  body: "구매 내역에서 주문 상태를 확인해 주세요.",
-  data: { orderId: "should-not-reach-push" },
+  kind: "STORAGE_EXPIRY_REMINDER",
+  title: "보관 만료 7일 전이에요",
+  body: "보관함에서 만료일을 확인해 주세요.",
+  data: { remainingDays: 7, storageExpiresAt: "2026-09-27T12:00:00.000Z", orderId: "should-not-reach-push" },
   createdAt: "2026-09-20T12:00:00.000Z",
 };
 
@@ -172,3 +172,25 @@ function scriptedPool(
     async connect() { return client; },
   } as unknown as DatabasePool;
 }
+
+test("Expo direct delivery rejects order events and retries invalidate out-of-scope jobs", async () => {
+  const queries: string[] = [];
+  let requests = 0;
+  const pool = scriptedPool(async (sql) => {
+    queries.push(sql);
+    return { rowCount: 0, rows: [] };
+  });
+  const delivery = new ExpoPushNotificationDelivery(pool, "test-token", silentLogger([]), {
+    fetch: async () => { requests += 1; return Response.json({ data: [] }); },
+    now: () => new Date("2026-09-20T12:00:00.000Z"),
+  });
+  await delivery.deliver({ ...notification, kind: "ORDER_PAID", data: { orderId: notification.id } });
+  assert.equal(queries.length, 0);
+  assert.equal(requests, 0);
+  await delivery.reconcile();
+  assert.ok(queries.some((sql) => sql.includes("OUTSIDE_STORAGE_REMINDER_SCOPE")));
+  const claim = queries.find((sql) => sql.includes("JOIN notifications notification") && sql.includes("FOR UPDATE"));
+  assert.match(claim ?? "", /STORAGE_EXPIRY_REMINDER/);
+  assert.match(claim ?? "", /remainingDays/);
+  assert.equal(requests, 0);
+});

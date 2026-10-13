@@ -129,7 +129,7 @@ test("checkout notices open independently and distinguish gacha from sealed kuji
   assert.match(checkoutSource, /<CheckoutNoticeSections category=\{product\.category\} \/>/);
 });
 
-test("checkout follows the compact reference hierarchy and exposes only the configured KG INICIS card method", () => {
+test("checkout follows the compact reference hierarchy and exposes only the configured server-selected card method", () => {
   for (const label of [
     "구매 상품",
     "쿠폰 사용",
@@ -138,7 +138,7 @@ test("checkout follows the compact reference hierarchy and exposes only the conf
     "결제 금액",
     "주문내용 확인 및 결제 동의",
     "신용/체크카드",
-    "KG이니시스 카드 결제",
+    "신용카드 결제",
   ]) {
     assert.match(checkoutSource, new RegExp(label));
   }

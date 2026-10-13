@@ -550,6 +550,7 @@ function mapApiProduct(item: ApiCatalogProduct): Product {
     id: item.id,
     ipId: item.ipId,
     categoryId: item.category,
+    ...(item.metadata.purchaseMode === "DIRECT" ? {purchaseMode: "DIRECT" as const} : {}),
     category: categoryLabel(item.category) as ProductCategoryLabel,
     line: metadataText(item.metadata, "line", item.manufacturer ?? item.name),
     title: item.name,
@@ -914,6 +915,7 @@ function prizeGuideFor(categoryId: ProductCategoryId) {
 }
 
 function commerceCopyFor(product: Product) {
+  if (product.purchaseMode === "DIRECT") return { action: "구매하기", quantityTitle: "구매 수량", quantityDescription: "선택한 상품의 구매 수량을 확인해 주세요.", unit: "개" } as const;
   if (product.categoryId === "gacha") {
     return { action: "가챠 뽑기", quantityTitle: "뽑기 횟수", quantityDescription: "진행할 횟수를 선택해 주세요.", unit: "회" } as const;
   }
@@ -3137,7 +3139,7 @@ function createLoginScreen(): FlowScreen {
 function createShopScreen(): FlowScreen {
   return {
     id: "root-shop",
-    header: () => <RootTabHeader title="뽀바" subtitle="가챠 · 피규어 · 쿠지" showPoints />,
+    header: () => <RootTabHeader title="뽀바" subtitle="원하는 상품을 직접 선택해요" showPoints />,
     headerHeight: 58,
     footer: (flow) => <RootTabFooter flow={flow} />,
     footerHeight: 70,
@@ -3587,7 +3589,7 @@ function createPurchaseCompleteScreen(
   orderId: string,
   drawEntitlementIds: string[] = [],
 ): FlowScreen {
-  const drawMode = isRandomDrawCategory(product.categoryId);
+  const drawMode = (isRandomDrawCategory(product.categoryId) && product.purchaseMode !== "DIRECT");
 
   return {
     id: `purchase-complete-${product.id}`,
@@ -4948,7 +4950,7 @@ function ShopPage({ flow }: { flow: FlowControls }) {
       <main ref={screenFocusRef} tabIndex={-1} className="root-tab-page shop-page" aria-label="DABBOBA 뽀바">
         <section className="shop-lead" aria-labelledby="shop-lead-title">
           <h1 id="shop-lead-title">원하는 방식으로 골라보세요.</h1>
-          <p>가챠와 쿠지를 만나고, 준비 중인 피규어도 확인해 보세요.</p>
+          <p>원하는 캐릭터 상품을 찾아보세요.</p>
         </section>
         <div className="shop-search-box ip-search-box">
           <IconMagnifyingglassLine size={21} aria-hidden="true" />
@@ -9220,7 +9222,7 @@ function IpTabContent({ flow, ip, tab }: { flow: FlowControls; ip: IpRecord; tab
 function ProductDetail({ product }: { product: Product }) {
   const { apiMode, drawOddsByProductId, drawOddsStateByProductId, loadDrawOdds, loadCatalogIncludedProducts } = useDabboba();
   const screenFocusRef = useScreenEntryFocus();
-  const drawMode = isRandomDrawCategory(product.categoryId);
+  const drawMode = (isRandomDrawCategory(product.categoryId) && product.purchaseMode !== "DIRECT");
   const purchaseGuide = purchaseGuideFor(product);
   const drawOdds = drawOddsByProductId[product.id];
   const drawOddsState = drawOddsStateByProductId[product.id];
@@ -9377,7 +9379,7 @@ function DetailFooter({ flow, product }: { flow: FlowControls; product: Product 
   const [oddsRefreshing, setOddsRefreshing] = useState(false);
   const [oddsRefreshStatus, setOddsRefreshStatus] = useState("");
   const commerceCopy = commerceCopyFor(product);
-  const drawMode = isRandomDrawCategory(product.categoryId);
+  const drawMode = (isRandomDrawCategory(product.categoryId) && product.purchaseMode !== "DIRECT");
   const drawOdds = drawOddsByProductId[product.id];
   const drawOddsState = drawOddsStateByProductId[product.id];
   const drawDisclosureReady = apiMode !== "remote" || !drawMode || Boolean(drawOdds);
@@ -9573,7 +9575,7 @@ function CheckoutPage({ product, quantity }: { product: Product; quantity: numbe
             </div>
           </section>
 
-          {apiMode === "remote" && isRandomDrawCategory(product.categoryId) ? (
+          {apiMode === "remote" && (isRandomDrawCategory(product.categoryId) && product.purchaseMode !== "DIRECT") ? (
             <section className="checkout-section" aria-labelledby="checkout-draw-odds-title">
               <h2 id="checkout-draw-odds-title">확인한 경품·확률</h2>
               {drawOdds ? (
@@ -9717,7 +9719,7 @@ function CheckoutFooter({
   const pendingOrderRef = useRef<{ fingerprint: string; key: string; serverOrderId?: string } | null>(null);
   const [checkoutStatus, setCheckoutStatus] = useState("");
   const [remoteOrderId, setRemoteOrderId] = useState("");
-  const drawMode = isRandomDrawCategory(product.categoryId);
+  const drawMode = (isRandomDrawCategory(product.categoryId) && product.purchaseMode !== "DIRECT");
   const drawOdds = drawOddsByProductId[product.id];
   const total = Math.max(0, product.price * quantity - couponDiscount - points);
 
@@ -9875,7 +9877,7 @@ function PurchaseCompletePage({
   const { apiMode } = useDabboba();
   const screenFocusRef = useScreenEntryFocus();
   const unit = commerceUnit(product);
-  const drawMode = isRandomDrawCategory(product.categoryId);
+  const drawMode = (isRandomDrawCategory(product.categoryId) && product.purchaseMode !== "DIRECT");
   const drawActionLabel = product.categoryId === "gacha" ? "가챠하러 가기" : "쿠지 추첨하러 가기";
 
   return (
@@ -9946,7 +9948,7 @@ function PurchaseCompleteFooter({
   orderId: string;
   drawEntitlementIds: string[];
 }) {
-  const drawMode = isRandomDrawCategory(product.categoryId);
+  const drawMode = (isRandomDrawCategory(product.categoryId) && product.purchaseMode !== "DIRECT");
   const drawActionLabel = product.categoryId === "gacha" ? "가챠하러 가기" : "쿠지 추첨하러 가기";
 
   return (

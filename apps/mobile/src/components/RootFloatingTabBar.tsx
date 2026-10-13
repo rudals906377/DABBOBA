@@ -95,6 +95,7 @@ export function RootFloatingTabBar({ state, descriptors, navigation, insets }: B
       <View style={styles.bar}>
         {state.routes.map((route, index) => {
           const options = descriptors[route.key]?.options ?? {};
+          if (route.name === "kuji") return null;
           const selected = state.index === index;
           const activeColor = route.name === "kuji" ? colors.kujiOrangeDark : seed.color.foreground.brand;
           const color = selected ? activeColor : seed.color.foreground.muted;

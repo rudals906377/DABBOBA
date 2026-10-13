@@ -47,13 +47,14 @@ test("profile discovery hides card products without deleting owned or historical
   assert.match(profileApiSource, /return "카드"/);
 });
 
-test("current profile product copy omits the hidden card category", () => {
+test("profile keeps hidden categories out of shopping and states exchange exclusions", () => {
   const customerProductCopy = `${profileSectionSource}\n${profilePolicySource}`;
 
-  assert.doesNotMatch(customerProductCopy, /피규어·카드|쿠지·피규어·카드/);
-  assert.match(customerProductCopy, /쿠지 추첨 상품과 피규어 등 일반 구매 상품/);
-  assert.match(customerProductCopy, /쿠지 상품이 하나라도 포함되면 상품 합계 54,900원 이상/);
-  assert.match(customerProductCopy, /무료배송 기준 미달 시 배송비 3,000원/);
+  assert.doesNotMatch(profileSectionSource, /피규어·카드|쿠지·피규어·카드/);
+  assert.match(profilePolicySource, /쿠지·피규어·카드 상품은 제외/);
+  assert.match(customerProductCopy, /직접 선택 구매/);
+  assert.match(customerProductCopy, /쿠지 없는 배송 신청은 합계 24,900원 이상 무료배송/);
+  assert.match(customerProductCopy, /미달 시 배송비 3,000원/);
 });
 
 test("storage owns public exchange discovery while profile links only to my exchange activity", () => {

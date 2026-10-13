@@ -119,7 +119,7 @@ export function HomeScreen() {
   );
   const homeCollections = useMemo<ConfiguredHomeCollection[]>(() => {
     if (!snapshot?.homeSections?.configured) return [];
-    return buildConfiguredHomeCollections(snapshot.homeSections.items.map((section) => ({
+    return buildConfiguredHomeCollections(snapshot.homeSections.items.filter((section) => isCustomerProductCategoryEnabledOn(section.layoutKind, "home")).map((section) => ({
       ...section,
       products: section.products.filter((product) => (
         isCustomerProductCategoryEnabledOn(product.category, "home")
@@ -301,11 +301,7 @@ export function HomeScreen() {
 
         <HomeIntroBanner />
 
-        <RecentDrawActivityPanel
-          activity={recentDrawActivity}
-          assetBaseUrl={runtime.assetBaseUrl}
-          imageRequestKey={imageRequestKey}
-        />
+
 
         {homeCollections.map((collection) => (
           <OperatorHomeSection

@@ -1,7 +1,7 @@
 # DABBOBA 1.0.0 PRELAUNCH store submission source
 
 Scope note (2026-10-01): this is the payment-disabled catalog submission draft,
-not the planned first gacha-sales launch. The sales preparation is tracked in
+not the planned direct-product sales launch. The sales preparation is tracked in
 `docs/gacha-sales-store-preparation-2026-10-01.md`. Do not submit a LIVE binary
 using this PRELAUNCH description or treat this draft as a submitted/approved record.
 
@@ -32,11 +32,11 @@ binary rather than later LIVE commerce plans.
 - Primary language: Korean
 - Bundle ID: `com.dabboba.mobile`
 - SKU: `DABBOBA-IOS-001`
-- Subtitle: `가챠·쿠지 상품을 한곳에서`
+- Subtitle: `원하는 캐릭터 상품을 한곳에서`
 - Primary category: Shopping
 - Secondary category: Entertainment
-- Promotional text: `좋아하는 작품의 가챠·쿠지 상품을 둘러보고, 새로운 소식과 관심 상품을 한곳에서 확인해 보세요.`
-- Keywords: `가챠,쿠지,피규어,캐릭터,애니메이션,굿즈,컬렉션`
+- Promotional text: `좋아하는 작품의 캐릭터 상품을 둘러보고, 직접 구매할 관심 상품과 새로운 소식을 확인해 보세요.`
+- Keywords: `캐릭터,애니메이션,굿즈,컬렉션,쇼핑`
 - Support URL: `https://dabboba.net/support`
 - Privacy policy URL: `https://dabboba.net/privacy`
 - Marketing URL: leave empty for 1.0.0 unless a separate public product page is approved
@@ -57,7 +57,7 @@ verified friend-controlled business before this source is entered in a console.
 - App or game: App
 - Free or paid: Free
 - Category: Shopping
-- Short description: `가챠·쿠지 상품을 미리 둘러보고 관심 상품을 저장하는 다뽀바 사전오픈판`
+- Short description: `직접 고를 캐릭터 상품을 미리 둘러보고 관심 상품을 저장하는 다뽀바 사전오픈판`
 - Support email: `support@dabboba.net`
 - Support phone: unresolved; enter only the account owner's verified business contact
 - Website: `https://dabboba.net/support`
@@ -71,11 +71,11 @@ must not advertise payment or draw behavior that is absent from PRELAUNCH.
 
 ## Short description
 
-가챠·쿠지 상품을 미리 둘러보고 관심 상품을 저장하는 다뽀바 사전오픈판
+직접 고를 캐릭터 상품을 미리 둘러보고 관심 상품을 저장하는 다뽀바 사전오픈판
 
 ## Full description
 
-DABBOBA는 좋아하는 작품의 가챠·쿠지 상품을 한곳에서 찾고 정리할 수
+DABBOBA는 좋아하는 작품의 원하는 캐릭터 상품을 한곳에서 찾고 정리할 수
 있는 상품 카탈로그입니다. 작품과 상품을 검색하고, 새로운 상품과 운영
 소식을 확인하고, 관심 상품을 저장할 수 있습니다.
 

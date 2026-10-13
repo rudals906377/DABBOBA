@@ -51,7 +51,7 @@ test("storage uses the approved three visible customer tab labels", () => {
 
   assert.match(storage, /<StorageModeTab label="보관 중"/);
   assert.match(storage, /<StorageModeTab label="교환 또는 배송 중인 상품"/);
-  assert.match(storage, /<StorageModeTab label="포인트 환급"/);
+  assert.doesNotMatch(storage, /<StorageModeTab label="포인트 환급"/);
   assert.doesNotMatch(storage, /<StorageModeTab label="교환·배송 중"/);
 });
 

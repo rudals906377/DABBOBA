@@ -207,7 +207,7 @@ async function homeRecentDrawActivity(client: Pick<DatabaseClient, "query">, dem
        JOIN storefront_category_settings category_setting ON category_setting.category=draw_product.category
       WHERE draw_product.is_active=true
         AND draw_product.is_prize_only=false
-        AND draw_product.category IN ('gacha','kuji')
+        AND draw_product.category='gacha'
         AND ip.is_active=true
         AND category_setting.availability='active'
         AND category_setting.show_on_home=true
@@ -240,7 +240,7 @@ async function productRecentDrawActivity(
         AND draw_product.is_active=true
         AND draw_product.is_prize_only=false
         AND draw_product.sale_status IN ('ON_SALE','PAUSED')
-        AND draw_product.category IN ('gacha','kuji')
+        AND draw_product.category='gacha'
         AND ip.is_active=true
         AND category_setting.availability='active'
         AND ($2::text IS NULL OR (
@@ -263,7 +263,7 @@ async function homeProductBadgeState(client: DatabaseClient, demo: boolean) {
       WHERE product.is_active=true
         AND product.is_prize_only=false
         AND product.sale_status IN ('COMING_SOON','ON_SALE')
-        AND product.category IN ('gacha','kuji')
+        AND product.category='gacha'
         AND ip.is_active=true
         AND category_setting.availability='active'
         AND category_setting.show_on_home=true
@@ -477,7 +477,7 @@ export async function registerHomeCatalogRoutes(app: FastifyInstance, context: A
          LEFT JOIN catalog_ips i ON i.id=s.ip_id
          WHERE s.is_active = true
            AND (s.ip_id IS NULL OR i.is_active = true)
-           AND s.layout_kind IS NOT NULL
+           AND s.layout_kind = 'gacha'
            AND (s.source_kind <> 'IP' OR s.ip_id IS NOT NULL)
            AND ($1::text IS NULL OR s.ip_id=$1)
          ORDER BY s.sort_order ASC, s.id ASC`,
@@ -528,6 +528,8 @@ export async function registerHomeCatalogRoutes(app: FastifyInstance, context: A
           AND manual_product.product_id=p.id
          WHERE p.is_active = true
            AND p.is_prize_only = false
+           AND p.category <> 'kuji'
+           AND p.metadata->>'purchaseMode'='DIRECT'
            AND p.sale_status IN ('COMING_SOON','ON_SALE')
            AND (section_target.ip_id IS NULL OR p.ip_id=section_target.ip_id)
            AND (
@@ -537,7 +539,7 @@ export async function registerHomeCatalogRoutes(app: FastifyInstance, context: A
            )
            AND category_setting.availability='active'
            AND category_setting.show_on_home=true
-           AND (p.sale_status <> 'ON_SALE' OR EXISTS (
+           AND (p.sale_status <> 'ON_SALE' OR p.metadata->>'purchaseMode'='DIRECT' OR EXISTS (
              SELECT 1 FROM draw_probability_versions active_version
               WHERE active_version.product_id=p.id AND active_version.status='ACTIVE'
            ))
@@ -626,7 +628,7 @@ export async function registerHomeCatalogRoutes(app: FastifyInstance, context: A
             AND product.is_active=true
             AND product.is_prize_only=false
             AND product.sale_status IN ('COMING_SOON','ON_SALE')
-            AND product.category IN ('gacha','kuji')
+            AND product.category='gacha'
             AND ip.is_active=true
             AND category_setting.availability='active'
             AND category_setting.show_on_home=true

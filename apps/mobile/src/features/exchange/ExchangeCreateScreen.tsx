@@ -156,7 +156,7 @@ export function ExchangeCreateScreen() {
     const trimmedDetails = details.trim() || trimmedTitle;
     Alert.alert(
       `선택한 상품 ${selected.length}개를 올릴까요?`,
-      `${selected.map((item) => item.product.name).join("\n")}\n\n${availableRatioLabel}\n글이 열려 있는 동안 선택한 상품은 배송·환급·다른 교환에 사용할 수 없어요.`,
+      `${selected.map((item) => item.product.name).join("\n")}\n\n${availableRatioLabel}\n글이 열려 있는 동안 선택한 상품은 배송·다른 교환에 사용할 수 없어요.`,
       [
         { text: "취소", style: "cancel" },
         {
@@ -219,7 +219,7 @@ export function ExchangeCreateScreen() {
           {sessionStatus === "loading" ? <LoadingState /> : null}
 
           {sessionStatus === "guest" || sessionStatus === "expired" ? (
-            <ProfileSessionGate status={sessionStatus} returnTo="/exchange/new" guestBody="로그인하면 직접 뽑아 보관 중인 상품을 교환방에 올릴 수 있어요." />
+            <ProfileSessionGate status={sessionStatus} returnTo="/exchange/new" guestBody="로그인하면 구매해 보관 중인 상품을 교환방에 올릴 수 있어요." />
           ) : null}
 
           {sessionStatus === "error" && error ? (
@@ -238,8 +238,8 @@ export function ExchangeCreateScreen() {
               <KoreanPixelTitle variant="section">등록 가능한 상품이 없어요</KoreanPixelTitle>
               <BalancedParagraphText
                 paragraphs={[
-                  "가챠로 뽑은 상품만 가능해요.",
-                  "배송을 신청했거나 이미 받은 상품, 포인트 환급·다른 교환에 사용 중인 상품은 표시되지 않아요.",
+                  "직접 구매해 보관 중인 적격 상품만 가능해요.",
+                  "배송을 신청했거나 이미 받은 상품, 다른 교환에 사용 중인 상품은 표시되지 않아요.",
                 ]}
                 style={styles.stateText}
               />
@@ -377,9 +377,9 @@ function InventoryChoice({
 }
 
 function inventorySourceLabel(source: InventoryUnit["sourceType"]): string {
-  if (source === "GACHA") return "가챠에서 뽑음";
+  if (source === "PURCHASE") return "직접 구매";
+  if (source === "GACHA") return "기존 구매 상품";
   if (source === "KUJI") return "쿠지에서 뽑음";
-  if (source === "PURCHASE") return "앱에서 구매";
   return "보관함 등록";
 }
 

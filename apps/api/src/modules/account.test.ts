@@ -575,7 +575,7 @@ test("wishlist reads hide prize-only catalog items", async () => {
   assert.match(capturedSql, /p\.is_prize_only=false/);
 });
 
-test("account inventory returns the owner's stored, exchanging, or shipping GACHA and KUJI prizes", async () => {
+test("account inventory includes direct purchases and preserved draw or exchange inventory", async () => {
   const actorId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
   const inventoryId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
   const acquiredAt = new Date("2026-09-01T03:00:00.000Z");
@@ -667,11 +667,13 @@ test("account inventory returns the owner's stored, exchanging, or shipping GACH
   assert.doesNotMatch(capturedSql, /\(iu\.status IN \('SHIPPING','EXPIRED_HOLD'\) OR iu\.storage_expires_at>now\(\)\)/);
   assert.match(capturedSql, /point_purchase\.reference_amount >= 2/);
   assert.match(capturedSql, /SELECT p\.price AS reference_amount/);
-  assert.match(capturedSql, /iu\.source_type IN \('GACHA','KUJI'\)/);
+  assert.match(capturedSql, /iu\.source_type IN \('GACHA','KUJI','PURCHASE'\)/);
   assert.match(capturedSql, /draw_result\.prize_inventory_unit_id=iu\.id/);
   assert.match(capturedSql, /draw_result\.user_id=iu\.owner_id/);
   assert.match(capturedSql, /draw_result\.entitlement_id=iu\.source_id/);
   assert.match(capturedSql, /draw_result\.prize_product_id=iu\.product_id/);
+  assert.match(capturedSql, /purchase_line\.id=iu\.source_id/);
+  assert.match(capturedSql, /purchase_order\.user_id=iu\.owner_id/);
   assert.match(capturedSql, /p\.storefront_image_url/);
   assert.match(capturedSql, /inventory_ownership_transfers transfer/);
   assert.match(capturedSql, /completed_exchange\.status='COMPLETED'/);
@@ -689,7 +691,7 @@ test("account inventory returns the owner's stored, exchanging, or shipping GACH
   assert.equal(queryCount, 1);
 });
 
-test("owned product detail is scoped to the authenticated owner and direct draw provenance", async () => {
+test("owned product detail verifies the authenticated owner and acquisition provenance", async () => {
   const actorId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
   let capturedSql = "";
   let capturedParams: unknown[] = [];
@@ -740,7 +742,7 @@ test("owned product detail is scoped to the authenticated owner and direct draw 
 
   assert.deepEqual(capturedParams, [actorId, "inactive-kuji-prize"]);
   assert.match(capturedSql, /iu\.owner_id=\$1 AND iu\.product_id=\$2/);
-  assert.match(capturedSql, /iu\.source_type IN \('GACHA','KUJI'\)/);
+  assert.match(capturedSql, /iu\.source_type IN \('GACHA','KUJI','PURCHASE'\)/);
   assert.match(capturedSql, /draw_result\.prize_inventory_unit_id=iu\.id/);
   assert.match(capturedSql, /draw_result\.user_id=iu\.owner_id/);
   const detailWhere = capturedSql.slice(capturedSql.indexOf("WHERE iu.owner_id=$1"));
@@ -1159,7 +1161,7 @@ test("shipping request locks owned inventory in canonical order and commits one 
   assert.deepEqual(observedInventoryParams.map((params) => params[0]), [[lowId, highId], [lowId, highId]]);
   assert.deepEqual(observedShippingItems, [lowId, highId]);
   const shippingLock = queries.find((sql) => sql.includes("FROM inventory_units iu") && sql.includes("JOIN catalog_products p"));
-  assert.match(shippingLock || "", /iu\.source_type IN \('GACHA','KUJI'\)/);
+  assert.match(shippingLock || "", /iu\.source_type IN \('GACHA','KUJI','PURCHASE'\)/);
   assert.match(shippingLock || "", /iu\.storage_expires_at>now\(\)/);
   assert.match(shippingLock || "", /ORDER BY iu\.id FOR UPDATE OF iu,p/);
   assert.match(queries.find((sql) => sql.includes("UPDATE inventory_units iu SET status='SHIPPING'")) || "", /storage_expires_at>now\(\)/);

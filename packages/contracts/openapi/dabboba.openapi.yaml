@@ -1868,7 +1868,7 @@ paths:
     post:
       tags: [Commerce]
       operationId: claimOwnPortOnePaymentAttempt
-      description: Atomically claims the first native PortOne payment window for an owned, payable order. A later call from this or another device must re-query the existing payment instead of opening another window. The claim is never payment approval.
+      description: Atomically claims the first payment window for an owned, payable order. A later call must re-query the existing payment instead of opening another window. The claim is never payment approval. The isolated direct Toss TEST review rail returns claimed instead of the legacy PortOne accepted/startedAt fields.
       security: [{ bearerAuth: [] }]
       parameters:
         - $ref: "#/components/parameters/PaymentId"
@@ -1881,13 +1881,15 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                required: [accepted, paymentId, orderId, startedAt]
-                properties:
-                  accepted: { type: boolean, const: true }
-                  paymentId: { type: string, format: uuid }
-                  orderId: { type: string, format: uuid }
-                  startedAt: { type: string, format: date-time }
+                oneOf:
+                  - type: object
+                    required: [accepted, paymentId, orderId, startedAt]
+                    properties:
+                      accepted: { type: boolean, const: true }
+                      paymentId: { type: string, format: uuid }
+                      orderId: { type: string, format: uuid }
+                      startedAt: { type: string, format: date-time }
+                  - $ref: "#/components/schemas/TossReviewPaymentAttempt"
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
@@ -1901,10 +1903,26 @@ paths:
     post:
       tags: [Commerce]
       operationId: confirmOwnPortOnePayment
-      description: Re-queries PortOne with the authenticated owner's payment ID and applies only the provider-authoritative state to the order. A client redirect or callback is never accepted as proof of payment. Limited to six calls per minute per client. An already settled local payment (PAID, FAILED, REFUNDED, or CANCELLED before any PG window claim) returns outcome already_settled without a provider call; providerStatus is then the provider-equivalent of that settled state and localStatus is included.
+      description: Re-queries the authenticated owner's payment and applies only provider-authoritative state. A redirect is never payment proof. PortOne is limited to six calls per minute and returns already_settled for locally settled payments. The isolated direct Toss TEST review rail optionally accepts authentication callback fields, journals the attempt before server-side approval using the database amount, and re-queries Toss for uncertain outcomes. Without callback fields it only queries, never initiates approval. Toss LIVE is unavailable.
       security: [{ bearerAuth: [] }]
       parameters:
         - $ref: "#/components/parameters/PaymentId"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              dependentRequired:
+                paymentKey: [orderId, amount]
+              properties:
+                paymentKey: { type: string, pattern: '^[A-Za-z0-9_-]{6,200}$' }
+                orderId:
+                  type: string
+                  format: uuid
+                  description: Toss orderId equals the server payment ID, not the commerce order ID.
+                amount: { type: integer, minimum: 1 }
       responses:
         "200":
           description: Fresh provider state was reconciled, the payment is still pending, or it was already settled.
@@ -1913,7 +1931,10 @@ paths:
               schema: { type: string, const: no-store }
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/PortOnePaymentConfirmation" }
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/PortOnePaymentConfirmation"
+                  - $ref: "#/components/schemas/TossReviewPaymentConfirmation"
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
@@ -1946,7 +1967,10 @@ paths:
               schema: { type: string, const: no-store }
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/PortOnePaymentAbandonment" }
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/PortOnePaymentAbandonment"
+                  - $ref: "#/components/schemas/TossReviewPaymentAbandonment"
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
@@ -1959,6 +1983,118 @@ paths:
               schema: { $ref: "#/components/schemas/ErrorEnvelope" }
         "503":
           description: Commerce is unavailable in PRELAUNCH, or the PortOne channel is not configured.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+  /v1/review/toss-payments/{paymentId}/attempt:
+    post:
+      tags: [Commerce]
+      operationId: claimOwnSharedReviewTossAttempt
+      description: Claims one payment window for an owned direct Toss TEST order in the pinned payment STAGING project. Also available beside the NICE PortOne rail; an immutable provider mismatch is rejected.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PaymentId"
+      responses:
+        "200":
+          description: Server-verified Toss TEST result.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TossReviewPaymentAttempt" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "428": { $ref: "#/components/responses/LegalAcceptanceRequired" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "502":
+          description: Provider response unavailable or invalid; no client success is trusted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+        "503":
+          description: The isolated Toss TEST review rail is not configured or commerce is unavailable.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+  /v1/review/toss-payments/{paymentId}/confirm:
+    post:
+      tags: [Commerce]
+      operationId: confirmOwnSharedReviewTossPayment
+      description: Queries Toss using the server order amount and verifies provider state before fulfillment. Callback fields can initiate approval only for the recorded attempt; a redirect alone is never payment proof. Unknown outcomes retain the order for recovery. NICE payment IDs are rejected.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PaymentId"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              dependentRequired:
+                paymentKey: [orderId, amount]
+              properties:
+                paymentKey: { type: string, pattern: '^[A-Za-z0-9_-]{6,200}$' }
+                orderId: { type: string, format: uuid, description: Server payment ID }
+                amount: { type: integer, minimum: 1 }
+      responses:
+        "200":
+          description: Server-verified Toss TEST result.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TossReviewPaymentConfirmation" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "428": { $ref: "#/components/responses/LegalAcceptanceRequired" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "502":
+          description: Provider response unavailable or invalid; no client success is trusted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+        "503":
+          description: The isolated Toss TEST review rail is not configured or commerce is unavailable.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+  /v1/review/toss-payments/{paymentId}/abandon:
+    post:
+      tags: [Commerce]
+      operationId: abandonOwnSharedReviewTossPayment
+      description: Releases an owned unpaid Toss TEST order only after a provider read establishes no approval and no recorded approval attempt. Unknown outcomes remain reserved. NICE payment IDs are rejected.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PaymentId"
+      responses:
+        "200":
+          description: Server-verified Toss TEST result.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TossReviewPaymentAbandonment" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "428": { $ref: "#/components/responses/LegalAcceptanceRequired" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "502":
+          description: Provider response unavailable or invalid; no client success is trusted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+        "503":
+          description: The isolated Toss TEST review rail is not configured or commerce is unavailable.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ErrorEnvelope" }
@@ -2293,6 +2429,7 @@ paths:
     post:
       tags: [Account]
       operationId: createAccountPointReturn
+      description: Temporarily unavailable by owner decision; returns FEATURE_UNAVAILABLE without changing inventory or balances. Historical point-return records remain preserved.
       security: [{ bearerAuth: [] }]
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
@@ -4368,13 +4505,21 @@ components:
         cardPaymentOptions:
           type: array
           items: { $ref: "#/components/schemas/PortOneCardChannelBinding" }
+        tossPayment:
+          type: object
+          additionalProperties: false
+          required: [provider, environment, clientKey]
+          properties:
+            provider: { type: string, const: TOSSPAYMENTS_DIRECT }
+            environment: { type: string, const: TEST }
+            clientKey: { type: string, pattern: "^test_ck_[A-Za-z0-9_-]{10,200}$" }
     PortOneCardChannelBinding:
       type: object
       additionalProperties: false
       required: [provider, pgProvider, merchantId, storeId, channelKey, channelEnvironment]
       properties:
-        provider: { type: string, enum: [PORTONE_V2_INICIS, PORTONE_V2_KCP] }
-        pgProvider: { type: string, enum: [INICIS_V2, KCP_V2] }
+        provider: { type: string, enum: [PORTONE_V2_INICIS, PORTONE_V2_KCP, PORTONE_V2_NICE] }
+        pgProvider: { type: string, enum: [INICIS_V2, KCP_V2, NICE_V2] }
         merchantId: { type: string }
         storeId: { type: string }
         channelKey: { type: string }
@@ -6050,6 +6195,7 @@ components:
           type: [string, "null"]
           format: date-time
           description: First server-claimed PortOne window time, or null before any attempt. A non-null value requires provider reconciliation, not another window.
+        paymentProvider: { type: string, description: Immutable provider recorded for this order. }
         cardPayment:
           oneOf:
             - $ref: "#/components/schemas/PortOneCardChannelBinding"
@@ -6082,7 +6228,8 @@ components:
       additionalProperties: false
       required: [items]
       properties:
-        cardPg: { type: string, enum: [INICIS, KCP], description: Optional explicit configured card rail. Omission retains the existing default. }
+        reviewPaymentProvider: { type: string, enum: [PORTONE_V2_NICE, TOSSPAYMENTS_DIRECT], description: Explicit TEST provider for isolated payment review orders only. Production rejects this field. }
+        cardPg: { type: string, enum: [INICIS, KCP, NICE], description: Optional explicit configured card rail. Omission uses the current server default. Historical channels may be query-only after a cutover. }
         items:
           type: array
           minItems: 1
@@ -6098,13 +6245,13 @@ components:
                 type: integer
                 minimum: 1
                 maximum: 2147483647
-                description: Required for gacha and kuji products; rejected for direct-purchase products.
+                description: Legacy field retained for historical clients; rejected for all new direct-purchase orders.
         couponCode: { type: [string, "null"], maxLength: 60 }
         pointAmount: { type: integer, minimum: 0, maximum: 2147483647, default: 0 }
         kujiRoomEntryId:
           type: string
           format: uuid
-          description: Required for a kuji-only order and rejected for non-kuji orders.
+          description: Legacy room binding; direct-purchase orders do not use a draw room.
     PaymentWebhookInput:
       type: object
       additionalProperties: false
@@ -6124,6 +6271,31 @@ components:
             status: { type: string, enum: [READY, PAY_PENDING, VIRTUAL_ACCOUNT_ISSUED, PAID, FAILED, PARTIAL_CANCELLED, CANCELLED] }
             paidAmount: { type: integer, minimum: 0 }
             cancelledAmount: { type: integer, minimum: 0 }
+    TossReviewPaymentAttempt:
+      type: object
+      additionalProperties: false
+      required: [paymentId, orderId, claimed]
+      properties:
+        paymentId: { type: string, format: uuid }
+        orderId: { type: string, format: uuid }
+        claimed: { type: boolean, const: true }
+    TossReviewPaymentConfirmation:
+      type: object
+      additionalProperties: false
+      required: [paymentId, orderId, status, outcome]
+      properties:
+        paymentId: { type: string, format: uuid }
+        orderId: { type: string, format: uuid }
+        status: { type: string }
+        outcome: { type: string }
+    TossReviewPaymentAbandonment:
+      type: object
+      additionalProperties: false
+      required: [paymentId, orderId, abandoned]
+      properties:
+        paymentId: { type: string, format: uuid }
+        orderId: { type: string, format: uuid }
+        abandoned: { type: boolean, const: true }
     PortOnePaymentConfirmation:
       type: object
       additionalProperties: false

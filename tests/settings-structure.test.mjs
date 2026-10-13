@@ -70,7 +70,7 @@ test("support and legal flows use realistic local data with launch warnings", ()
     "배송·보관함 정책",
     "포인트·쿠폰 운영정책",
     "교환방·덕룸·신청방 운영정책",
-    "가챠·쿠지 정보 제공 정책",
+    "직접 선택 구매 정보 제공 정책",
     "오픈소스 라이선스",
   ]) assert.ok(settingsFixtures.includes(document), `missing ${document}`);
   assert.ok(settingsFixtures.includes("법률 전문가의 검토"));

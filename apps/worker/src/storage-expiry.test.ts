@@ -40,6 +40,9 @@ test("storage expiry sweep unwinds only stale open exchange work, then holds own
       if (sql.includes("inventory.storage_expiry_reminder")) {
         return { rowCount: 1, rows: [{ recorded_events: "4", outbox_events: "4" }] };
       }
+      if (sql.includes("FROM inventory_units inventory") && sql.includes("storage_return_reference_amount")) {
+        return { rowCount: 0, rows: [] };
+      }
       throw new Error(`Unexpected query: ${sql}`);
     },
     release() {},
@@ -60,15 +63,17 @@ test("storage expiry sweep unwinds only stale open exchange work, then holds own
     releasedExchangeInventory: 3,
     heldInventory: 2,
     reminders: 4,
+    pointReturnedInventory: 0,
   });
   assert.deepEqual(queries.map(({ sql }) => sql === "BEGIN" || sql === "COMMIT" ? sql : "work"), [
     "BEGIN",
     "work",
     "work",
     "work",
+    "work",
     "COMMIT",
   ]);
-  const [cleanup, hold, reminders] = queries.filter(({ sql }) => sql !== "BEGIN" && sql !== "COMMIT");
+  const [cleanup, hold, _returns, reminders] = queries.filter(({ sql }) => sql !== "BEGIN" && sql !== "COMMIT");
   assert.deepEqual(cleanup?.params, [25, now]);
   assert.match(cleanup?.sql ?? "", /listing\.status='OPEN'/);
   assert.match(cleanup?.sql ?? "", /offer\.status='PENDING'/);
@@ -82,9 +87,9 @@ test("storage expiry sweep unwinds only stale open exchange work, then holds own
   assert.match(hold?.sql ?? "", /event_kind,outbox_event_id[\s\S]*?'EXPIRED_HOLD'/);
   assert.match(hold?.sql ?? "", /ON CONFLICT \(inventory_unit_id,storage_expires_at,event_kind\) DO NOTHING/);
 
-  assert.deepEqual(reminders?.params, [25, now, [1, 3, 7, 14], 14]);
-  assert.deepEqual([...STORAGE_REMINDER_MILESTONE_DAYS], [1, 3, 7, 14]);
-  assert.equal(STORAGE_REMINDER_WINDOW_DAYS, 14);
+  assert.deepEqual(reminders?.params, [25, now, [3, 7], 7]);
+  assert.deepEqual([...STORAGE_REMINDER_MILESTONE_DAYS], [3, 7]);
+  assert.equal(STORAGE_REMINDER_WINDOW_DAYS, 7);
   assert.match(reminders?.sql ?? "", /unnest\(\$3::integer\[\]\) AS milestone\(days\)/);
   // The outer scan is bounded by the widest reminder window so it can use the
   // storage-expiry index range instead of visiting every stored unit.
@@ -147,6 +152,7 @@ test("storage expiry periodic job payload is finite and deadline stops before op
       releasedExchangeInventory: 0,
       heldInventory: 0,
       reminders: 0,
+      pointReturnedInventory: 0,
     },
   );
   assert.equal(connections, 0);
@@ -165,7 +171,7 @@ test("storage expiry stays off by default and a queued job cannot start it", asy
     pool: { async connect() { connected = true; throw new Error("must not access DB"); } } as unknown as DatabasePool,
   } as Parameters<typeof processWorkerJob>[0], { kind: "inventory.storage-expiry" });
   assert.deepEqual(result, {
-    cancelledListings: 0, rejectedOffers: 0, releasedExchangeInventory: 0, heldInventory: 0, reminders: 0,
+    cancelledListings: 0, rejectedOffers: 0, releasedExchangeInventory: 0, heldInventory: 0, reminders: 0, pointReturnedInventory: 0,
   });
   assert.equal(connected, false);
   assert.equal(normalizeInventoryStorageExpiryMode(" ENABLED "), "ENABLED");

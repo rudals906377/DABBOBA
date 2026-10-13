@@ -181,6 +181,11 @@ jobs:
       - name: Prove migration re-entry is a no-op
         run: pnpm run db:migrate
 
+      - name: Verify expiry credits before other disposable integration fixtures
+        env:
+          DABBOBA_STORAGE_POLICY_INTEGRATION: "1"
+        run: pnpm --filter @dabboba/worker exec tsx --test src/storage-point-returns.integration.test.ts
+
       - name: Provision the disposable runtime role login
         run: pnpm --filter @dabboba/db provision:runtime-role
 

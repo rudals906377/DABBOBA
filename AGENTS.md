@@ -436,3 +436,59 @@ When any text-entry control loses focus, dismiss the simulated keyboard. If the 
 - The owner selected the horizontal DABBOBA wordmark with capsule O and bright mint background. Use `design-assets/app-icons/dabboba-wordmark-capsule-horizontal-final-source.png`; white/ivory previews are not approved replacements.
 - iOS/default uses the opaque 1024px asset; Android uses the complete horizontal foreground inside its safe circle over `#78EF95`. Preserve Apple Sign In entitlements and existing team/project IDs.
 - Developer-console uploads use the opaque `dabboba-developer-icon-256.png`, including the mint background. Uploading the transparent adaptive foreground is incorrect.
+
+## Owner Operating Decisions — 2026-10-12
+
+- Temporary prize names are approved as numeric labels: Chiikawa `1`–`7`, Sanrio `1`–`5`. Do not keep real-name confirmation as a launch blocker or change inventory quantities. Reference prices equal each parent gacha's one-draw price.
+- The representative handles shipping and customer support, including misdelivery, damage and refund requests. Hours are Monday–Friday 09:00–17:00, weekends/public holidays closed.
+- Storage remains 60 days. Reminder milestones are D-7 and D-3 only. After expiry, automatically credit GACHA 50% / KUJI 15% of the frozen prize reference price, flooring per unit. KUJI remains outside first-launch sales. This supersedes the earlier hold-only policy decision, but does not authorize enabling an unverified deployment.
+- Snapshot the expiry basis only on newly acquired inventory after acceptance of the new storage policy. Never backfill or automatically convert former-policy inventory. Preserve exchange deadline guarantees and exclude shipping/matched exchanges; unresolved payment, price or balance cases stay on non-destructive hold.
+- Expiry credit must atomically journal the credit, balance, terminal inventory state and outbox, with immutable one-credit-per-unit evidence. The default worker expiry mode remains DISABLED until matching migrations, revised terms, push credentials and device/operating checks are deployed and verified.
+- External push is storage-expiry reminders only. Orders/payments/shipping remain available in app, not external push. Apply the allowlist to queued retries too; OS permission and registration are required, and arrival is not guaranteed.
+- Release as soon as review, payment and verification gates are satisfied. Do not bypass these gates or publish merely because code tests pass.
+- Prepared changes and remaining deployment order are recorded in `docs/owner-decisions-2026-10-12.md`.
+
+## Payment Provider Decision — 2026-10-13
+
+- KG Inicis declined the random-product business. The owner chose a direct Toss Payments application and direct integration, not a PortOne Toss channel. No Toss approval is evidenced yet.
+- The existing `/review/` site is being converted to the isolated `dabboba-payment-staging` Toss TEST rail. Never substitute demo success for provider approval or activate production payments from this work. Preserve historical Inicis/PortOne records and adapters until their reconciliation and retention obligations end.
+- The owner explicitly approved editing `worker/index.js` only for `/review/` payment CSP and referrer protection on 2026-10-13. Allow the Toss SDK host for scripts and Toss-owned HTTPS subdomains for payment connections/frames/forms, remove obsolete review-only PG allowances, and keep every non-review route and the mobile frame unchanged. Verify behavior before refreshing only the affected runtime lock hash. This is not authorization to deploy or enable production payments.
+- Direct Toss configuration currently permits only the pinned STAGING project and TEST keys. Production native checkout, worker/requery, webhook reconciliation, cancellation/refund operations and guarded LIVE activation remain a separate verified integration. Handoff: `docs/toss-direct-review-2026-10-13.md`.
+
+## NICE Via PortOne — 2026-10-13, Later Owner Decision
+
+- The owner reports applying for NICE through PortOne and now requests that integration. This supersedes the direct Toss implementation direction for the active task; preserve the uncommitted Toss preparation, historical payment records and channel bindings, but never mix them into a new NICE payment.
+- The verified PortOne account is the representative's DABBOBA account and the existing store matches the private payment-staging profile. The console showed no LIVE channels and no NICE TEST channel before preparation. Application is not approval.
+- Prepare `PORTONE_V2_NICE` / `NICE_V2` for the pinned payment STAGING project and TEST channels only until real NICE approval and LIVE verification exist. New NICE orders require immutable channel snapshots; optional historical INICIS/KCP channels are lookup-only, not new purchase options. Native SDK requests use the order's server binding, not an old globally installed channel.
+- The pending user question asks to save `DABBOBA_NICE_TEST` using PortOne's public general-payment TEST MID and connect only payment staging. Do not save credentials, deploy, alter remote migrations, charge cards or activate production by assuming that unanswered question was approved. Do not automatically change the Toss-prepared review page/CSP; confirm the NICE web-review scope before changing that protected runtime again.
+- Remaining external checks and evidence are in `docs/nice-portone-module-2026-10-13.md`.
+
+## Direct Product Purchase — 2026-10-13, Latest Owner Decision
+
+- All new customer purchases select the exact physical product/SKU and quantity before payment. This supersedes all earlier random-result/gacha-first purchase instructions. App introductions, PG review, checkout and store descriptions must describe the same direct purchase flow. No new paid random draws or hidden-item purchases.
+- Keep category IDs, brand/navigation and historical orders, payments, draws, entitlements and ledgers. New sellable SKUs explicitly carry `metadata.purchaseMode = DIRECT`; category alone no longer determines new order fulfillment. Historical line `probability_version_id` determines legacy draw fulfillment/refund.
+- Register separate direct-sale SKUs rather than rewriting prize-only identities or historical order lines. Use confirmed individual stock only; an earlier automatically allocated draw table is not proof of physical per-SKU counts. No inferred stock split or automatic sale activation.
+- Direct-sale inventory uses `PURCHASE`, contains exactly the ordered SKU, and never issues draw entitlements. Existing exchange/point-return eligibility does not silently expand to direct purchases. Preserve pending-payment recovery, server prices, row locks, idempotency, provider verification and PRELAUNCH gates.
+- This source change does not itself deploy, update a remote database, submit review or enable LIVE payments. Existing NICE/Toss preparation and historical channels remain isolated.
+
+## Exchange Retained, Point Returns Hidden — 2026-10-13 Owner Follow-up
+
+- Keep Exchange Room available for the current owner's own paid DIRECT gacha-category purchases still stored, together with eligible historical gacha draws. Verify source order, original purchaser, exact SKU, paid state, deadline and inventory lock; transferred purchases do not qualify as original purchases.
+- Hide manual point-return tabs/actions and stop new point-return requests and automatic expiry point conversion. Preserve balances, existing ledgers and historical records. Order cancellation restores used points normally. Shipping and exchange stay available.
+- All current legal, checkout, review and support copy follows this exact scope.
+
+## Direct Stock Confirmation — 2026-10-13 Owner Follow-up
+
+- The owner confirmed 20 units for each exact first-launch product choice. The 8 existing launch series contain 46 choices, so the direct-sale initial stock is 920 units total. Initialize only those new DIRECT SKUs from `ops/catalog/direct-launch-stock-2026-10-13.json`; preserve the previous parent/prize stock and historical transactions. This supersedes the earlier zero-stock preparation for those 46 choices only and does not activate sales.
+
+## Shared NICE And Toss Review Web — 2026-10-13 Latest Owner Decision
+
+- The owner explicitly requested one review web for PortOne NICE and direct Toss. This supersedes both the Toss-only web direction and the unanswered NICE-web-scope question above. The scoped `/review/` Worker CSP/proxy changes are authorized; non-review routes and the mobile runtime stay unchanged.
+- Show both methods, enabling each only from verified server TEST configuration. NICE-only, Toss-only and both-configured STAGING are supported. With both, use primary `PORTONE_V2_NICE` plus a fully validated optional Toss TEST configuration. Production/LIVE provider activation remains forbidden by these preparations.
+- Record an explicit provider in each new direct product order. Lock an unresolved order to that provider, SKU, quantity and amount. Never silently switch provider, open a second payment window or treat an SDK/redirect as approval. NICE and Toss use isolated confirm/attempt/abandon endpoints and provider-authoritative recovery.
+- Real channel creation/saving, remote DB/Edge changes, actual charges, PG approval and LIVE cutover remain separate from source and Preview proof. Handoff: `docs/shared-payment-review-2026-10-13.md`.
+
+## Kuji Sales Hidden — 2026-10-13 Latest Owner Follow-up
+
+- Hide Kuji sales and coming-soon promotion on customer app navigation, home/shop discovery, public introduction and PG review. Keep internal category IDs, assets and historical orders, inventory and recovery records. No new Kuji purchase is allowed; existing record access is not a sales entry. Remote category settings must not re-expose the hidden shop in the new app.
+- This supersedes prior Kuji OPENING SOON display instructions. Apply to the existing direct-purchase Preview; production and signed-device rollout remain separate.

@@ -618,7 +618,7 @@ main[data-active-section="6"] ~ .page-dots a[aria-current="step"]::before {
   left: 0;
   height: 78px;
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   align-items: center;
   border-top: 1px solid #e7e9e4;
   background: rgba(255, 254, 250, 0.97);

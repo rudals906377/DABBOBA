@@ -81,4 +81,18 @@ test("card choice is server-configured, immutable, idempotent and reservation-bo
   await assert.rejects(pool.query("INSERT INTO payments(order_id,provider,amount) VALUES($1,'PORTONE_V2_KCP',6000)", [order.id]), /constraint/);
   const malformed = { ...selectCardChannel(config), provider: "PORTONE_V2_KCP", pgProvider: "KCP_V2", channelKey: null };
   await assert.rejects(pool.query("INSERT INTO payments(order_id,provider,amount,portone_channel_binding) VALUES($1,'PORTONE_V2_KCP',6000,$2)", [order.id, JSON.stringify(malformed)]), /constraint/);
+  config.paymentProvider = "PORTONE_V2_NICE";
+  config.portOne = { ...config.portOne!, channelKey: "channel-key-nice", inicisChannelKey: config.portOne!.channelKey };
+  const blockedOldRail = await app.inject({ method: "POST", url: "/v1/orders", headers: { ...headers, "idempotency-key": randomUUID() }, payload: { ...payload, cardPg: "INICIS" } });
+  assert.equal(blockedOldRail.statusCode, 503, blockedOldRail.body);
+  const niceCreated = await app.inject({ method: "POST", url: "/v1/orders", headers: { ...headers, "idempotency-key": randomUUID() }, payload });
+  assert.equal(niceCreated.statusCode, 201, niceCreated.body);
+  assert.equal(niceCreated.json().cardPayment.provider, "PORTONE_V2_NICE");
+  assert.equal(niceCreated.json().cardPayment.pgProvider, "NICE_V2");
+  assert.equal((await app.inject({ method: "POST", url: `/v1/payments/${niceCreated.json().paymentId}/attempt`, headers })).statusCode, 200);
+  const visible = await app.inject({ method: "GET", url: "/v1/public/config" });
+  assert.deepEqual(visible.json().cardPaymentOptions, [selectCardChannel(config)]);
+  await assert.rejects(pool.query("INSERT INTO payments(order_id,provider,amount) VALUES($1,'PORTONE_V2_NICE',6000)", [order.id]), /constraint/);
+  await assert.rejects(pool.query("INSERT INTO payments(order_id,provider,amount,portone_channel_binding) VALUES($1,'PORTONE_V2_NICE',6000,$2)",
+    [order.id, JSON.stringify({ ...selectCardChannel(config), pgProvider: "INICIS_V2" })]), /constraint/);
 });

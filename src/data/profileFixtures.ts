@@ -33,16 +33,16 @@ export const PROFILE_POINT_HISTORY: readonly ProfilePointHistoryItem[] = [];
 
 export const PROFILE_CUSTOMER_FAQS = [
   {
-    question: "가챠·쿠지 결과는 언제 보관함에 들어오나요?",
-    answer: "결제 후 뽑기를 완료하면 결과 상품이 바로 보관함에 표시됩니다.",
+    question: "구매한 상품은 언제 보관함에 들어오나요?",
+    answer: "상품과 수량을 직접 선택해 결제하고 서버가 결제를 확인하면, 선택한 상품이 보관함에 등록됩니다.",
   },
   {
     question: "여러 상품을 한 번에 배송받을 수 있나요?",
     answer: "보관함에서 배송할 상품을 고른 뒤 배송 신청 화면에서 합배송을 선택할 수 있습니다.",
   },
   {
-    question: "피규어와 카드는 어떻게 구매하나요?",
-    answer: "피규어와 카드는 뽑기 없이 일반 상품처럼 수량을 고르고 바로 결제합니다.",
+    question: "원하는 상품 종류를 고를 수 있나요?",
+    answer: "상품 사진·이름·종류를 확인한 뒤 원하는 상품과 수량을 선택해 구매합니다. 결제 후 다른 종류로 배정하지 않습니다.",
   },
 ] as const;
 

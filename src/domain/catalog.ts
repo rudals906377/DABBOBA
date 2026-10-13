@@ -36,6 +36,7 @@ export type IpRecord = {
 };
 
 export type ProductRecord = {
+  purchaseMode?: "DIRECT";
   id: string;
   ipId: string;
   categoryId: ProductCategoryId;
@@ -57,25 +58,25 @@ export const PRODUCT_CATEGORY_LABELS = PRODUCT_CATEGORIES.map((category) => cate
 // Keep the complete category model above so TCG data can be restored without a
 // migration, while exposing only categories that are open to customers today.
 export const CUSTOMER_VISIBLE_PRODUCT_CATEGORIES = PRODUCT_CATEGORIES.filter(
-  (category): category is CustomerVisibleProductCategory => category.id !== "tcg",
+  (category): category is CustomerVisibleProductCategory => category.id !== "tcg" && category.id !== "kuji",
 );
 export const CUSTOMER_VISIBLE_PRODUCT_CATEGORY_LABELS = CUSTOMER_VISIBLE_PRODUCT_CATEGORIES.map(
   (category) => category.label,
 );
 export const CUSTOMER_BROWSABLE_PRODUCT_CATEGORIES = PRODUCT_CATEGORIES.filter(
-  (category): category is CustomerBrowsableProductCategory => category.id === "gacha" || category.id === "kuji",
+  (category): category is CustomerBrowsableProductCategory => category.id === "gacha",
 );
 
 export function isCustomerVisibleProductCategory(
   categoryId: ProductCategoryId,
 ): categoryId is CustomerVisibleProductCategoryId {
-  return categoryId !== "tcg";
+  return categoryId !== "tcg" && categoryId !== "kuji";
 }
 
 export function isCustomerBrowsableProductCategory(
   categoryId: ProductCategoryId,
 ): categoryId is CustomerBrowsableProductCategoryId {
-  return categoryId === "gacha" || categoryId === "kuji";
+  return categoryId === "gacha";
 }
 
 export function categoryLabel(categoryId: ProductCategoryId) {

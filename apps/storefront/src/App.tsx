@@ -10,7 +10,7 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import { launchCopy } from "./launch-copy";
 
-type SectionId = "hero" | "experience" | "favorites" | "storage" | "kuji" | "prelaunch";
+type SectionId = "hero" | "experience" | "favorites" | "storage" | "prelaunch";
 
 type SectionMeta = {
   id: SectionId;
@@ -23,8 +23,7 @@ const sections: readonly SectionMeta[] = [
   { id: "hero", label: "처음", nextId: "experience", nextLabel: "앱 화면 미리보기" },
   { id: "experience", label: "가챠샵", nextId: "favorites", nextLabel: "관심 상품 기능 보기" },
   { id: "favorites", label: "관심 상품", nextId: "storage", nextLabel: "보관·배송 안내 보기" },
-  { id: "storage", label: "보관·배송", nextId: "kuji", nextLabel: "쿠지샵 안내 보기" },
-  { id: "kuji", label: "쿠지샵", nextId: "prelaunch", nextLabel: launchCopy.finalNavLabel },
+  { id: "storage", label: "보관·배송", nextId: "prelaunch", nextLabel: launchCopy.finalNavLabel },
   { id: "prelaunch", label: "이용 안내" },
 ] as const;
 
@@ -77,7 +76,6 @@ function SiteHeader() {
       <nav className="site-nav" aria-label="페이지 안내">
         <a href="#experience">앱 미리보기</a>
         <a href="#storage">보관·배송</a>
-        <a href="#kuji">쿠지샵</a>
         <a href="#prelaunch">이용 안내</a>
         <a href="/review/">심사용 웹앱</a>
       </nav>
@@ -113,7 +111,7 @@ function FloatingAction({ activeSection }: { activeSection: SectionId }) {
   const active = sections.find((section) => section.id === activeSection);
   if (!active?.nextId || !active.nextLabel) return null;
   return (
-    <a className={`floating-action ${activeSection === "kuji" ? "floating-action--kuji" : ""}`} href={`#${active.nextId}`}>
+    <a className="floating-action" href={`#${active.nextId}`}>
       <span>{active.nextLabel}</span>
       <ChevronRightIcon aria-hidden="true" />
     </a>
@@ -130,7 +128,7 @@ function HeroSection() {
       <div className="story-grid story-grid--hero">
         <div className="story-copy story-copy--hero">
           <h1 id="hero-title">원하는 거 다 뽀바</h1>
-          <p>가챠부터 쿠지까지, 설레는 순간을 한곳에서.</p>
+          <p>원하는 캐릭터 상품을 직접 고르고 구매해요.</p>
           <span className="status-line"><span aria-hidden="true" />{launchCopy.heroStatus}</span>
         </div>
         <div className="hero-machine" aria-hidden="true">
@@ -154,7 +152,6 @@ function HeroSection() {
 function AppPreview() {
   const navItems = [
     ["/assets/nav/gacha.png", "가챠샵"],
-    ["/assets/nav/kuji.png", "쿠지샵"],
     ["/assets/nav/home.png", "홈"],
     ["/assets/nav/storage.png", "보관함"],
     ["/assets/nav/profile.png", "내정보"],
@@ -182,10 +179,10 @@ function AppPreview() {
             decoding="async"
           />
         </div>
-        <div className="phone-preview__section-heading"><strong>지금, 이런 뽑기는 어때요?</strong><span>전체보기</span></div>
+        <div className="phone-preview__section-heading"><strong>마음에 드는 상품을 골라보세요</strong><span>전체보기</span></div>
         <div className="preview-products">
           <PreviewProduct image="/assets/gacha/capsule.png" title="캡슐 컬렉션" status={launchCopy.gachaPreviewStatus} />
-          <PreviewProduct image="/assets/kuji/ticket-icon.png" title="랜덤 티켓 시리즈" status={launchCopy.kujiPreviewStatus} />
+          <PreviewProduct image="/assets/gacha/capsule.png" title="캐릭터 컬렉션" status={launchCopy.gachaPreviewStatus} />
         </div>
         <div className="phone-preview__nav">
           {navItems.map(([image, label], index) => (
@@ -215,8 +212,8 @@ function ExperienceSection() {
       <div className="story-grid">
         <div className="story-copy">
           <span className="section-label section-label--gacha">가챠샵</span>
-          <h2 id="experience-title">취향에 맞는 뽑기를 한눈에</h2>
-          <p>작품과 상품을 천천히 둘러보고 관심 상품을 저장해요.</p>
+          <h2 id="experience-title">원하는 상품을 직접 선택해요</h2>
+          <p>상품의 사진과 종류, 가격을 확인하고 원하는 상품과 수량을 선택한 뒤 결제해요.</p>
         </div>
         <div className="story-media story-media--phone"><AppPreview /></div>
       </div>
@@ -226,8 +223,8 @@ function ExperienceSection() {
 }
 
 const favoriteRows = [
-  ["캡슐 컬렉션", "새로운 즐거움을 천천히 둘러봐요.", true],
-  ["랜덤 티켓 시리즈", "쿠지샵 오픈 소식을 기다려 주세요.", false],
+  ["캡슐 컬렉션", "원하는 종류를 골라 구매해요.", true],
+  ["캐릭터 컬렉션", "사진으로 원하는 종류를 확인해요.", false],
   ["새로 들어온 가챠", "관심 상품으로 저장해 다시 확인해요.", true],
 ] as const;
 
@@ -240,11 +237,11 @@ function FavoritesPanel() {
         <div className="favorites-panel__heading">
           <strong>관심 상품</strong><span>{favoriteRows.filter((row) => row[2]).length}개 저장</span>
         </div>
-        {favoriteRows.map(([title, description, selected], index) => (
+        {favoriteRows.map(([title, description, selected]) => (
           <div className="favorite-row" key={title}>
-            <div className={`favorite-row__thumb ${index === 1 ? "favorite-row__thumb--kuji" : ""}`}>
+            <div className="favorite-row__thumb">
               <img
-                src={index === 1 ? "/assets/kuji/ticket-icon.png" : "/assets/gacha/capsule.png"}
+                src="/assets/gacha/capsule.png"
                 alt=""
                 loading="lazy"
                 decoding="async"
@@ -267,7 +264,7 @@ function FavoritesSection() {
         <div className="story-copy">
           <span className="section-label section-label--gacha">관심 상품</span>
           <h2 id="favorites-title">마음에 든 상품은 한곳에</h2>
-          <p>저장해 둔 가챠와 새로운 오픈 소식을 다시 찾아봐요.</p>
+          <p>저장해 둔 상품을 다시 찾아보고 원하는 종류를 골라요.</p>
         </div>
         <div className="story-media"><FavoritesPanel /></div>
       </div>
@@ -280,10 +277,9 @@ function StorageBoard() {
   return (
     <div className="storage-board">
       <div className="storage-board__icon"><CalendarIcon aria-hidden="true" /></div>
-      <div className="storage-board__intro"><span>{launchCopy.storageIntro}</span><strong>획득일부터 60일 보관</strong></div>
+      <div className="storage-board__intro"><span>{launchCopy.storageIntro}</span><strong>구매일부터 60일 보관</strong></div>
       <dl>
-        <div><dt>가챠만 포함</dt><dd>24,900원 이상 무료 배송</dd></div>
-        <div><dt>쿠지 포함</dt><dd>54,900원 이상 무료 배송</dd></div>
+        <div><dt>상품 합계</dt><dd>24,900원 이상 무료 배송</dd></div>
         <div><dt>무료 기준 미달</dt><dd>배송비 3,000원</dd></div>
       </dl>
       <p>신청 전 보관 기간과 배송 금액을 다시 확인할 수 있어요.</p>
@@ -297,42 +293,10 @@ function StorageSection() {
       <div className="story-grid">
         <div className="story-copy">
           <span className="section-label section-label--gacha">보관·배송</span>
-          <h2 id="storage-title">뽑은 상품, 모아서 한 번에 받아요</h2>
+          <h2 id="storage-title">고른 상품, 모아서 한 번에 받아요</h2>
           <p>보관 기간과 배송 기준을 숨기지 않고 신청 전에 분명하게 알려드려요.</p>
         </div>
         <div className="story-media"><StorageBoard /></div>
-      </div>
-      <ScrollCue href="#kuji" />
-    </section>
-  );
-}
-
-function KujiSection() {
-  return (
-    <section className="story-section story-section--kuji" id="kuji" aria-labelledby="kuji-title">
-      <div className="story-grid story-grid--reverse">
-        <div className="story-copy">
-          <span className="section-label section-label--kuji">쿠지샵</span>
-          <h2 id="kuji-title">쿠지의 설렘도 준비하고 있어요</h2>
-          <p>상품 구성과 이용 방식을 꼼꼼히 확인한 뒤 선보일게요.</p>
-          <span className="opening-soon">OPENING SOON</span>
-        </div>
-        <div className="kuji-stage" aria-hidden="true">
-          <div className="kuji-stage__machine">
-            <img src="/assets/gacha/capsule-machine.png" alt="" width={941} height={1672} loading="lazy" decoding="async" />
-          </div>
-          <img
-            className="kuji-stage__ticket"
-            src="/assets/kuji/ticket-front.png"
-            alt=""
-            width={1517}
-            height={1037}
-            loading="lazy"
-            decoding="async"
-          />
-          <PixelSpark className="pixel-spark--kuji-one" />
-          <PixelSpark className="pixel-spark--kuji-two" />
-        </div>
       </div>
       <ScrollCue href="#prelaunch" />
     </section>
@@ -351,7 +315,6 @@ function PrelaunchSection() {
         <div className="prelaunch-art" aria-hidden="true">
           <img className="prelaunch-art__capsule prelaunch-art__capsule--one" src="/assets/gacha/capsule.png" alt="" width={256} height={256} loading="lazy" decoding="async" />
           <img className="prelaunch-art__capsule prelaunch-art__capsule--two" src="/assets/gacha/capsule.png" alt="" width={256} height={256} loading="lazy" decoding="async" />
-          <img className="prelaunch-art__ticket" src="/assets/kuji/ticket-icon.png" alt="" width={128} height={128} loading="lazy" decoding="async" />
         </div>
         <span className="prelaunch-status"><span aria-hidden="true" />{launchCopy.closingStatus}</span>
         <a className="prelaunch-action" href="/support">고객지원 보기<ChevronRightIcon aria-hidden="true" /></a>
@@ -384,7 +347,6 @@ export function App() {
         <ExperienceSection />
         <FavoritesSection />
         <StorageSection />
-        <KujiSection />
         <PrelaunchSection />
       </main>
       <PageDots activeSection={activeSection} />

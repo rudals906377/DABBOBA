@@ -22,7 +22,7 @@ rmSync(output, { recursive: true, force: true });
 cpSync(storefrontSource, output, { recursive: true });
 cpSync(legalSource, path.join(output, "legal"), { recursive: true });
 cpSync(path.join(root, "public", "review"), path.join(output, "review"), { recursive: true });
-writeFileSync(path.join(output, "review", "policies.json"), JSON.stringify(checkoutNoticeSections("gacha")));
+writeFileSync(path.join(output, "review", "policies.json"), JSON.stringify(checkoutNoticeSections("direct")));
 copyFileSync(workerSource, path.join(output, "_worker.js"));
 
 console.log("Prepared storefront and policy Pages build: dist/public-site");

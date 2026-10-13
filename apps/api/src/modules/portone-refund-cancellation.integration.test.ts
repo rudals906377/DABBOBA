@@ -10,7 +10,7 @@ import { acceptRequiredPoliciesForIntegrationTest } from "../integration-test-fi
 
 const databaseUrl = process.env.DABBOBA_TEST_DATABASE_URL;
 
-for (const cardPg of ["INICIS", "KCP"] as const) {
+for (const cardPg of ["INICIS", "KCP", "NICE"] as const) {
 test(`${cardPg}: late PortOne refund is full, durable, super-admin only, and never sent twice`, {
   skip: !databaseUrl,
   timeout: 60_000,
@@ -20,7 +20,7 @@ test(`${cardPg}: late PortOne refund is full, durable, super-admin only, and nev
     environment: "test", host: "127.0.0.1", port: 8788, databaseUrl: databaseUrl!, redisUrl: "redis://127.0.0.1:6379",
     webOrigins: ["http://127.0.0.1:4174"], adminOrigins: ["http://127.0.0.1:4180"],
     sessionTokenPepper: "portone-refund-integration-pepper", adminProxyIdentitySecret: null,
-    sessionTtlDays: 1, commerceMode: "LIVE", paymentProvider: "PORTONE_V2_INICIS",
+    sessionTtlDays: 1, commerceMode: "LIVE", paymentProvider: cardPg === "NICE" ? "PORTONE_V2_NICE" : "PORTONE_V2_INICIS",
     paymentWebhookSecret: "portone-refund-integration-webhook-secret",
     portOne: {
       apiSecret: "synthetic-secret", merchantId: "synthetic-merchant", storeId: "synthetic-store",
@@ -274,7 +274,7 @@ test(`${cardPg}: a paid unused gacha order freezes before one PortOne refund and
     environment: "test", host: "127.0.0.1", port: 8788, databaseUrl: databaseUrl!, redisUrl: "redis://127.0.0.1:6379",
     webOrigins: ["http://127.0.0.1:4174"], adminOrigins: ["http://127.0.0.1:4180"],
     sessionTokenPepper: "normal-refund-integration-pepper", adminProxyIdentitySecret: null,
-    sessionTtlDays: 1, commerceMode: "LIVE", paymentProvider: "PORTONE_V2_INICIS",
+    sessionTtlDays: 1, commerceMode: "LIVE", paymentProvider: cardPg === "NICE" ? "PORTONE_V2_NICE" : "PORTONE_V2_INICIS",
     paymentWebhookSecret: "normal-refund-integration-webhook-secret",
     portOne: {
       apiSecret: "synthetic-secret", merchantId: "synthetic-merchant", storeId: "synthetic-store",

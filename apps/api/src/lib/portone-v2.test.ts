@@ -142,6 +142,20 @@ test("unknown or malformed explicit PG binding is rejected before any network re
   }
 });
 
+test("NICE V2 accepts only its own bound channel and does not inherit KG unsubmitted exceptions", async () => {
+  const nice = { ...contract, pgProvider: "NICE_V2" as const, channelKey: "channel-key-nice" };
+  const raw = payment({ channel: { ...payment().channel, key: nice.channelKey, pgProvider: "NICE_V2" } });
+  const adapter = createPortOneV2Adapter({ ...nice, fetchImpl: async () => jsonResponse(raw) });
+  assert.equal((await adapter.getPayment({ paymentId: "payment-test", expectedTotalAmount: 12000 })).channel?.pgProvider, "NICE_V2");
+  for (const pgProvider of ["INICIS_V2", "KCP_V2", "NICE"]) {
+    const wrong = createPortOneV2Adapter({ ...nice, fetchImpl: async () => jsonResponse(payment({ channel: { ...raw.channel, pgProvider } })) });
+    await assert.rejects(wrong.getPayment({ paymentId: "payment-test", expectedTotalAmount: 12000 }), errorCode("PAYMENT_CONTRACT_MISMATCH"));
+  }
+  const kgReadyShape = { ...raw, status: "READY", method: undefined, paidAt: undefined, pgTxId: undefined, cancellations: [] };
+  const notKg = createPortOneV2Adapter({ ...nice, fetchImpl: async () => jsonResponse(kgReadyShape) });
+  await assert.rejects(notKg.getPayment({ paymentId: "payment-test", expectedTotalAmount: 12000 }));
+});
+
 test("an uncharged READY payment can omit the channel and method while awaiting the PG", async () => {
   const { channel: _channel, method: _method, paidAt: _paidAt, ...ready } = payment({
     status: "READY",

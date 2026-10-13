@@ -14,10 +14,9 @@ import {
 
 const EXPECTED_CATEGORY_OPTIONS = [
   { value: "gacha", label: "가챠", availability: "active" },
-  { value: "kuji", label: "쿠지", availability: "active" },
 ];
 
-test("the customer app exposes only the top-level gacha and kuji shops", () => {
+test("the customer app exposes only the current direct-sale shop", () => {
   assert.deepEqual(PRODUCT_CATEGORY_OPTIONS, EXPECTED_CATEGORY_OPTIONS);
   assert.deepEqual(PRODUCT_CATEGORY_VALUES, EXPECTED_CATEGORY_OPTIONS.map(({ value }) => value));
 
@@ -26,15 +25,15 @@ test("the customer app exposes only the top-level gacha and kuji shops", () => {
   }
 
   assert.equal(isCustomerVisibleProductCategory("gacha"), true);
-  assert.equal(isCustomerVisibleProductCategory("kuji"), true);
+  assert.equal(isCustomerVisibleProductCategory("kuji"), false);
   assert.equal(isCustomerVisibleProductCategory("figure"), false);
   assert.equal(isCustomerVisibleProductCategory("tcg"), false);
   assert.equal(isCustomerBrowsableCatalogCategory("gacha"), true);
-  assert.equal(isCustomerBrowsableCatalogCategory("kuji"), true);
+  assert.equal(isCustomerBrowsableCatalogCategory("kuji"), false);
   assert.equal(isCustomerBrowsableCatalogCategory("figure"), false);
   assert.equal(isCustomerBrowsableCatalogCategory("tcg"), false);
   assert.equal(customerProductCategoryAvailability("gacha"), "active");
-  assert.equal(customerProductCategoryAvailability("kuji"), "active");
+  assert.equal(customerProductCategoryAvailability("kuji"), "hidden");
   assert.equal(customerProductCategoryAvailability("figure"), "hidden");
   assert.equal(customerProductCategoryAvailability("tcg"), "hidden");
   assert.equal(isCustomerProductCategoryComingSoon("figure"), false);

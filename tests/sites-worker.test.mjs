@@ -876,7 +876,7 @@ test("public storefront stays prelaunch-only and links every required policy sur
     + await readFile(new URL("../apps/storefront/src/launch-copy.ts", import.meta.url), "utf8");
   // The default build is prelaunch; only VITE_DABBOBA_COMMERCE_MODE=LIVE switches the copy.
   assert.match(source, /closingStatus: "PRELAUNCH"/);
-  assert.match(source, /OPENING SOON/);
+  assert.doesNotMatch(source, /OPENING SOON|쿠지샵/);
   assert.match(source, /정식 오픈 후 적용 예정/);
   for (const href of ["/privacy", "/terms", "/support", "/account-deletion"]) {
     assert.match(source, new RegExp(`href=\"${href.replace("/", "\\/")}\"`));

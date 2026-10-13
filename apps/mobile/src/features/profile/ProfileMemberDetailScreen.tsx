@@ -36,7 +36,6 @@ import {
   formatDate,
   logoutAccount,
   logoutOtherAccountSessions,
-  updateNotificationPreferences,
 } from "@/features/profile/profile-api";
 import { profileSectionFailure } from "@/features/profile/profile-section-state";
 import { useProfileSnapshot } from "@/features/profile/use-profile-snapshot";
@@ -54,7 +53,6 @@ import { clearAccountDeviceState } from "@/features/profile/account-device-clean
 import { colors } from "@/theme";
 
 type Preferences = components["schemas"]["NotificationPreferences"];
-type ToggleKey = Exclude<keyof Preferences, "orderUpdates" | "version" | "updatedAt">;
 type UserRole = components["schemas"]["UserRole"];
 type UserStatus = components["schemas"]["UserStatus"];
 
@@ -363,7 +361,7 @@ function Notifications({ profileState }: { profileState: ReturnType<typeof usePr
   if (failure || !loaded) {
     return (
       <>
-        <Lead title="필수 알림과 선택 알림" body="주문·결제·배송처럼 꼭 필요한 안내는 끌 수 없어요." />
+        <Lead title="보관 만료 알림" body="푸시는 보관 만료 7일·3일 전 안내만 제공해요. 주문·배송 상태는 앱에서 확인해 주세요." />
         <ErrorState message={failure ?? "알림 설정을 불러오지 못했어요."} onRetry={profileState.reload} />
       </>
     );
@@ -379,11 +377,8 @@ function NotificationsForm({
   loaded: Preferences;
 }) {
   const snapshot = profileState.snapshot!;
-  const [preferences, setPreferences] = useState(loaded);
-  const [saving, setSaving] = useState(false);
   const [pushPermission, setPushPermission] = useState<boolean | null>(null);
   const [connectingPush, setConnectingPush] = useState(false);
-  useEffect(() => setPreferences(loaded), [loaded]);
   useEffect(() => {
     let active = true;
     void readPushPermissionGranted().then((granted) => {
@@ -391,33 +386,6 @@ function NotificationsForm({
     });
     return () => { active = false; };
   }, []);
-  const update = (key: ToggleKey, value: boolean) => setPreferences((current) => ({ ...current, [key]: value }));
-  const save = async () => {
-    if (snapshot.isExample || !profileState.accessToken) {
-      profileState.setSnapshot((current) => current ? { ...current, notificationPreferences: preferences } : current);
-      Alert.alert("로그인 후 저장할 수 있어요", "현재 변경은 앱을 다시 열면 초기화될 수 있어요.");
-      return;
-    }
-    try {
-      setSaving(true);
-      const updated = await updateNotificationPreferences(profileState.runtime.apiBaseUrl, profileState.accessToken, {
-        exchangeUpdates: preferences.exchangeUpdates,
-        requestUpdates: preferences.requestUpdates,
-        restockUpdates: preferences.restockUpdates,
-        marketingSms: preferences.marketingSms,
-        marketingEmail: preferences.marketingEmail,
-        marketingPush: preferences.marketingPush,
-        expectedVersion: preferences.version,
-      });
-      setPreferences(updated);
-      profileState.setSnapshot((current) => current ? { ...current, notificationPreferences: updated } : current);
-      Alert.alert("알림 설정을 저장했어요");
-    } catch (error) {
-      Alert.alert("설정을 저장하지 못했어요", error instanceof Error ? error.message : "잠시 후 다시 시도해 주세요.");
-    } finally {
-      setSaving(false);
-    }
-  };
   const connectPush = async () => {
     if (snapshot.isExample || !profileState.accessToken) {
       Alert.alert("로그인이 필요해요", "로그인하면 이 기기의 푸시 알림을 연결할 수 있어요.");
@@ -433,7 +401,7 @@ function NotificationsForm({
       const granted = result.status === "registered";
       setPushPermission(granted);
       if (result.status === "registered") {
-        Alert.alert("이 기기 알림을 연결했어요", "필수 계정 활동과 동의한 선택 알림을 받을 수 있어요.");
+        Alert.alert("이 기기 알림을 연결했어요", "보관 만료 7일·3일 전 알림을 받을 수 있어요. 기기·네트워크 상태에 따라 전달이 지연될 수 있으니 보관함의 만료일도 확인해 주세요.");
       } else if (result.status === "denied") {
         Alert.alert("기기 알림이 꺼져 있어요", "휴대폰 설정에서 DABBOBA 알림을 허용해 주세요.", [
           { text: "나중에", style: "cancel" },
@@ -452,25 +420,13 @@ function NotificationsForm({
   };
   return (
     <>
-      <Lead title="필수 알림과 선택 알림" body="주문·결제·배송처럼 꼭 필요한 안내는 끌 수 없어요." />
+      <Lead title="보관 만료 알림" body="푸시는 보관 만료 7일·3일 전 안내만 제공해요. 주문·배송 상태는 앱에서 확인해 주세요." />
       <Text style={styles.groupTitle}>이 기기</Text>
       <InfoCard><InfoRow label="푸시 알림 권한" value={pushPermission === null ? "확인 중" : pushPermission ? "허용됨" : "꺼짐"} last /></InfoCard>
       <ActionButton label={connectingPush ? "연결 중" : "이 기기 푸시 연결"} disabled={connectingPush} onPress={() => void connectPush()} />
-      <Text style={styles.groupTitle}>필수 안내</Text>
-      <InfoCard><ToggleRow label="주문·결제·배송" body="계약 이행과 상품 수령에 필요한 필수 알림" value disabled onChange={() => undefined} last /></InfoCard>
-      <Text style={styles.groupTitle}>활동 알림</Text>
-      <InfoCard>
-        <ToggleRow label="교환방" body="새 제안과 선택·거절 결과" value={preferences.exchangeUpdates} onChange={(value) => update("exchangeUpdates", value)} />
-        <ToggleRow label="신청방" body="같이 원해요와 반영 소식" value={preferences.requestUpdates} onChange={(value) => update("requestUpdates", value)} />
-        <ToggleRow label="재입고" body="찜한 상품 판매 재개" value={preferences.restockUpdates} onChange={(value) => update("restockUpdates", value)} last />
-      </InfoCard>
-      <Text style={styles.groupTitle}>마케팅</Text>
-      <InfoCard>
-        <ToggleRow label="앱 푸시" body="혜택과 이벤트 소식" value={preferences.marketingPush} onChange={(value) => update("marketingPush", value)} />
-        <ToggleRow label="이메일" body="이메일 혜택 안내" value={preferences.marketingEmail} onChange={(value) => update("marketingEmail", value)} />
-        <ToggleRow label="문자" body="문자 혜택 안내" value={preferences.marketingSms} onChange={(value) => update("marketingSms", value)} last />
-      </InfoCard>
-      <ActionButton label={saving ? "저장 중" : "알림 설정 저장"} disabled={saving} onPress={() => void save()} />
+      <Text style={styles.groupTitle}>앱에서 확인하는 안내</Text>
+      <InfoCard><InfoRow label="주문·결제·배송" value="구매·배송 내역에서 확인" last /></InfoCard>
+      <SeedInlineGuidance>보관 만료 알림은 선택 사항이에요. 휴대폰 설정에서 알림을 끌 수 있으며, 알림을 받지 못해도 보관기간은 연장되지 않으니 보관함의 만료일을 확인해 주세요.</SeedInlineGuidance>
     </>
   );
 }

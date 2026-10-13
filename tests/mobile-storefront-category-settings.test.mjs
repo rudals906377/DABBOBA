@@ -29,7 +29,7 @@ function setting(category, overrides = {}) {
 
 const defaults = () => [setting("gacha"), setting("kuji"), setting("figure"), setting("tcg")];
 
-test("operator settings can reorder customer shops without exposing internal figure records", () => {
+test("operator settings can reorder customer shops without exposing hidden kuji or internal figure records", () => {
   try {
     applyStorefrontCategorySettings([
       setting("gacha", { label: "캡슐", sortOrder: 30, showOnExchange: false, version: 2 }),
@@ -38,14 +38,16 @@ test("operator settings can reorder customer shops without exposing internal fig
       setting("tcg"),
     ]);
 
-    assert.deepEqual(storefrontCategoryOptions("catalog").map((item) => item.label), ["럭키 쿠지", "캡슐"]);
-    assert.deepEqual(storefrontCategoryOptions("exchange").map((item) => item.value), ["kuji"]);
+    assert.deepEqual(storefrontCategoryOptions("catalog").map((item) => item.label), ["캡슐"]);
+    assert.deepEqual(storefrontCategoryOptions("exchange").map((item) => item.value), []);
     assert.equal(productCategoryLabel("gacha"), "캡슐");
     assert.equal(productCategoryDescription("kuji"), "새 쿠지 안내");
     assert.equal(isCustomerProductCategoryComingSoon("figure"), false);
     assert.equal(isCustomerBrowsableCatalogCategory("figure"), false);
     assert.equal(isCustomerVisibleProductCategory("figure"), false);
     for (const surface of ["home", "catalog", "exchange", "wanted"]) {
+      assert.equal(isCustomerProductCategoryEnabledOn("kuji", surface), false);
+      assert.equal(storefrontCategoryOptions(surface).some((item) => item.value === "kuji"), false);
       assert.equal(isCustomerProductCategoryEnabledOn("figure", surface), false);
       assert.equal(storefrontCategoryOptions(surface).some((item) => item.value === "figure"), false);
     }
