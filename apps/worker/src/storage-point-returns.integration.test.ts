@@ -11,7 +11,7 @@ const logger: Logger = { debug() {}, info() {}, warn() {}, error() {} };
 
 // This forward-clock sweep must run before other integration fixtures, never
 // against a shared/preserved database. CI invokes it explicitly after migration.
-test("expiry financial lifecycle on disposable PostgreSQL is atomic, worker-authorized and exactly once", { skip: !url || process.env.DABBOBA_STORAGE_POLICY_INTEGRATION !== "1" }, async (t) => {
+test("automatic expiry conversion stays disabled while historical financial journaling remains atomic", { skip: !url || process.env.DABBOBA_STORAGE_POLICY_INTEGRATION !== "1" }, async (t) => {
   const pool = createMigrationDatabasePool(url!, "dabboba-storage-policy-integration");
   t.after(() => pool.end());
   // Use the actual worker grants without giving the fixture role to the API.
@@ -83,14 +83,18 @@ test("expiry financial lifecycle on disposable PostgreSQL is atomic, worker-auth
     processInventoryStorageExpiryBatch(workerPool, 100, logger, future),
     processInventoryStorageExpiryBatch(workerPool, 100, logger, future),
   ]);
-  assert.equal(results.reduce((sum, result) => sum + result.pointReturnedInventory, 0), 1);
+  assert.equal(results.reduce((sum, result) => sum + result.pointReturnedInventory, 0), 0);
   const states = await pool.query<{ id: string; status: string }>("SELECT id,status FROM inventory_units WHERE owner_id=$1", [owner]);
   const state = new Map(states.rows.map((row) => [row.id, row.status]));
-  assert.equal(state.get(eligible), "POINT_RETURNED");
+  assert.equal(state.get(eligible), "EXPIRED_HOLD");
   assert.equal(state.get(legacy), "EXPIRED_HOLD");
   assert.equal(state.get(review), "EXPIRED_HOLD");
   assert.equal(state.get(shipping), "SHIPPING");
   assert.equal(state.get(exchangeLocked), "EXCHANGE_LISTED");
+  assert.equal((await pool.query("SELECT count(*)::integer AS count FROM inventory_storage_point_returns WHERE owner_id=$1", [owner])).rows[0].count, 0);
+  // Exercise the retained journal primitive explicitly in this disposable test.
+  // The scheduled batch above never calls it under the current owner policy.
+  assert.equal(await withTransaction(workerPool, client => returnExpiredStoragePoints(client,100,future,()=>true)),1);
   assert.equal((await pool.query("SELECT balance FROM point_accounts WHERE user_id=$1", [owner])).rows[0].balance, 4999);
   assert.equal((await pool.query("SELECT count(*)::integer AS count FROM point_ledger_entries WHERE user_id=$1 AND reference_type='STORAGE_EXPIRY_RETURN'", [owner])).rows[0].count, 1);
   assert.equal((await processInventoryStorageExpiryBatch(workerPool, 100, logger, future)).pointReturnedInventory, 0);

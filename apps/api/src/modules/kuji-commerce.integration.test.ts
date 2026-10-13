@@ -1,3 +1,4 @@
+import { historicalOrderFixture } from "../legacy-order.integration-fixtures.js";
 import assert from "node:assert/strict";
 import { createHmac, randomUUID } from "node:crypto";
 import test from "node:test";
@@ -188,7 +189,7 @@ test(
       pointAmount?: number;
       couponCode?: string;
     }): Promise<OrderResponse> => {
-      const response = await app.inject({
+      const response = await historicalOrderFixture(app, pool, config, {
         method: "POST",
         url: "/v1/orders",
         headers: { ...auth(input.session), "idempotency-key": `kuji-order-${randomUUID()}` },

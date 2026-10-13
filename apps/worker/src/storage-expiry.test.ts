@@ -70,10 +70,10 @@ test("storage expiry sweep unwinds only stale open exchange work, then holds own
     "work",
     "work",
     "work",
-    "work",
     "COMMIT",
   ]);
-  const [cleanup, hold, _returns, reminders] = queries.filter(({ sql }) => sql !== "BEGIN" && sql !== "COMMIT");
+  assert.ok(queries.every(({sql}) => !sql.includes("storage_return_reference_amount")), "scheduled sweep cannot convert stored items to points");
+  const [cleanup, hold, reminders] = queries.filter(({ sql }) => sql !== "BEGIN" && sql !== "COMMIT");
   assert.deepEqual(cleanup?.params, [25, now]);
   assert.match(cleanup?.sql ?? "", /listing\.status='OPEN'/);
   assert.match(cleanup?.sql ?? "", /offer\.status='PENDING'/);

@@ -411,7 +411,7 @@ test(
         offeredInventoryUnitId: inventoryId,
       });
       assert.equal(ineligibleListing.statusCode, 409, ineligibleListing.body);
-      assert.match(ineligibleListing.body, /직접 뽑아 보관함에 보관 중인/);
+      assert.match(ineligibleListing.body, /본인이 구매해 보관 중인 적격/);
     }
 
     const eligibleInventory = await app.inject({
@@ -616,7 +616,7 @@ test(
       { offeredInventoryUnitId: await addDrawInventory(proposerOne.actor.userId, "GACHA") },
     );
     assert.equal(legacyOfferAttempt.statusCode, 409, legacyOfferAttempt.body);
-    assert.match(legacyOfferAttempt.body, /가챠로 직접 뽑아/);
+    assert.match(legacyOfferAttempt.body, /본인이 구매해 보관 중인 적격/);
     const legacyCancellation = await mutate(
       author.token,
       "POST",
@@ -711,7 +711,7 @@ test(
       { decision: "ACCEPTED" },
     );
     assert.equal(forgedAcceptance.statusCode, 409, forgedAcceptance.body);
-    assert.match(forgedAcceptance.body, /가챠로 직접 뽑아/);
+    assert.match(forgedAcceptance.body, /본인이 구매해 보관 중인 적격/);
     const forgedRejection = await mutate(
       author.token,
       "POST",
@@ -738,7 +738,7 @@ test(
       { decision: "ACCEPTED" },
     );
     assert.equal(legacyKujiAcceptance.statusCode, 409, legacyKujiAcceptance.body);
-    assert.match(legacyKujiAcceptance.body, /가챠로 직접 뽑아/);
+    assert.match(legacyKujiAcceptance.body, /본인이 구매해 보관 중인 적격/);
     const legacyKujiRejection = await mutate(
       author.token,
       "POST",
@@ -760,7 +760,7 @@ test(
       { offeredInventoryUnitId: purchasedInventory },
     );
     assert.equal(purchasedOffer.statusCode, 409, purchasedOffer.body);
-    assert.match(purchasedOffer.body, /직접 뽑아 보관함에 보관 중인/);
+    assert.match(purchasedOffer.body, /본인이 구매해 보관 중인 적격/);
 
     const rollbackOfferInventory = await addDrawInventory(proposerOne.actor.userId, "GACHA");
     const rejectedOfferBundle = await mutate(
@@ -809,7 +809,7 @@ test(
         { offeredInventoryUnitId: inventoryId },
       );
       assert.equal(ineligibleOffer.statusCode, 409, ineligibleOffer.body);
-      assert.match(ineligibleOffer.body, /직접 뽑아 보관함에 보관 중인/);
+      assert.match(ineligibleOffer.body, /본인이 구매해 보관 중인 적격/);
     }
 
     const offerOneResponse = await mutate(
@@ -978,7 +978,7 @@ test(
         },
       );
       assert.equal(transferredListing.statusCode, 409, transferredListing.body);
-      assert.match(transferredListing.body, /직접 뽑아 보관함에 보관 중인/);
+      assert.match(transferredListing.body, /본인이 구매해 보관 중인 적격/);
     }
 
     const transferGuardHost = await mutate(
@@ -999,7 +999,7 @@ test(
       { offeredInventoryUnitId: listingInventory },
     );
     assert.equal(transferredOffer.statusCode, 409, transferredOffer.body);
-    assert.match(transferredOffer.body, /직접 뽑아 보관함에 보관 중인/);
+    assert.match(transferredOffer.body, /본인이 구매해 보관 중인 적격/);
 
     await completeBundleExchange({
       label: "1:2",

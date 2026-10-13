@@ -1,3 +1,4 @@
+import { historicalOrderFixture } from "../legacy-order.integration-fixtures.js";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
@@ -90,7 +91,7 @@ test("a full refund of a paid kuji order releases its bound but unopened ticket 
   const room = await app.inject({ method: "POST", url: `/v1/kuji/rooms/${productId}/entries`, headers: auth });
   assert.ok([200, 201].includes(room.statusCode), room.body);
   const entryId = (room.json() as { viewer: { entryId: string } }).viewer.entryId;
-  const ordered = await app.inject({
+  const ordered = await historicalOrderFixture(app, pool, config, {
     method: "POST", url: "/v1/orders",
     headers: { ...auth, "idempotency-key": randomUUID() },
     payload: { items: [{ productId, quantity: 2, expectedDrawVersion: 1 }], pointAmount: 0, kujiRoomEntryId: entryId },

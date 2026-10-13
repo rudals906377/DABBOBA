@@ -620,7 +620,7 @@ const mapAccountInventory = (row: AccountInventoryRow) => ({
   sourceType: row.source_type,
   status: row.inventory_status,
   acquiredAt: iso(row.acquired_at),
-  pointReturnEligible: row.point_return_eligible,
+  pointReturnEligible: false,
   ...(row.point_return_eligible && row.point_return_reference_amount !== null
     ? { pointReturnAmount: pointReturnAmount(numberValue(row.point_return_reference_amount)) }
     : {}),

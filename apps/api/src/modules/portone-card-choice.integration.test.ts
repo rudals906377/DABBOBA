@@ -37,7 +37,8 @@ test("card choice is server-configured, immutable, idempotent and reservation-bo
     VALUES($1,$2::text,'Card prize',$2::text,$3,'figure','A',1,6,6)`, [version.id, prize, ip]);
   await pool.query("UPDATE draw_probability_versions SET status='ACTIVE',published_by=$2,published_at=now() WHERE id=$1", [version.id, publisher.id]);
   await pool.query("UPDATE catalog_products SET image_url='https://cdn.example.test/card-choice.png',sale_status='ON_SALE' WHERE id=$1", [product]);
-  const payload = { items: [{ productId: product, quantity: 1, expectedDrawVersion: 1 }] };
+  await pool.query("UPDATE catalog_products SET metadata=$2::jsonb WHERE id=$1", [product,JSON.stringify({purchaseMode:"DIRECT"})]);
+  const payload = { items: [{ productId: product, quantity: 1 }] };
   for (const cardPg of ["INICIS", "KCP"] as const) {
     const key = randomUUID();
     const body = { ...payload, cardPg, channelKey: "untrusted-client-channel" };

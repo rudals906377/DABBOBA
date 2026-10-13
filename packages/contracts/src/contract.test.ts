@@ -899,6 +899,7 @@ function normalizedRoute(method: string, path: string) {
 
 function fastifyRoutes(modulesDirectory: string) {
   const routes: string[] = [];
+  const conditionalRoutes: string[] = [];
   const visit = (directory: string) => {
     for (const entry of readdirSync(directory, { withFileTypes: true })) {
       const path = `${directory}/${entry.name}`;
@@ -920,11 +921,26 @@ function fastifyRoutes(modulesDirectory: string) {
         routeCalls.length,
         `${entry.name} contains a non-literal Fastify route path`,
       );
-      routes.push(...literalRoutes.map((match) => normalizedRoute(match[1]!, match[2]!)));
+      for (const match of literalRoutes) {
+        if (match[2]!.startsWith("${prefix}")) {
+          assert.equal(entry.name, "toss-review-payments.ts", "unknown dynamic route registration");
+          assert.match(source, /prefix = "\/v1\/payments"/);
+          const commerce = readFileSync(`${modulesDirectory}/commerce.ts`, "utf8");
+          assert.match(commerce, /registerTossReviewPaymentRoutes\(app,\s*context,\s*"\/v1\/review\/toss-payments"\)/);
+          // Default Toss and PortOne registrations are mutually exclusive.
+          // The dedicated review prefix can coexist with the PortOne paths.
+          for (const prefix of ["/v1/payments", "/v1/review/toss-payments"]) {
+            conditionalRoutes.push(normalizedRoute(match[1]!, match[2]!.replace("${prefix}", prefix)));
+          }
+        } else {
+          assert.ok(!match[2]!.includes("${"), "unresolved route interpolation");
+          routes.push(normalizedRoute(match[1]!, match[2]!));
+        }
+      }
     }
   };
   visit(modulesDirectory);
-  return routes;
+  return [...routes, ...conditionalRoutes.filter(route => !routes.includes(route))];
 }
 
 function openApiRoutes(document: string) {

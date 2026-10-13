@@ -12,14 +12,14 @@ const revisedDocuments = [
   {
     key: "TERMS",
     sha256: "54e45f9237ea45f6063337976a3ce6beee14fa898916c9bfb59fa814ac7b52d2",
-    path: new URL("../../../public/legal/terms/index.html", import.meta.url),
+    path: new URL("../../../docs/legal-history/terms-2026-10-12.html", import.meta.url),
     publicUrl: "https://dabboba.net/terms",
     previousSha256: "213e14a2499ed6a929c81455e736b5aa3d60f0e05f0d59fe5d9fc662e0782f23",
   },
   {
     key: "PRIVACY",
     sha256: "a7684326c9d246a7bc2f649c33cc623e7e0eb6f06fb0683decd014c6e501ae06",
-    path: new URL("../../../public/legal/privacy/index.html", import.meta.url),
+    path: new URL("../../../docs/legal-history/privacy-2026-10-12.html", import.meta.url),
     publicUrl: "https://dabboba.net/privacy",
     previousSha256: "6053eb3dd4c02cfe44fb30983910f4a9d7bade3a1f03d8f58a00a490119e89dd",
   },
@@ -27,7 +27,7 @@ const revisedDocuments = [
 
 const PRELAUNCH_LEGAL_MARKERS = /사전오픈판|결제(?:와|·주문·뽑기·배송 신청은).*제공하지 않습니다/;
 
-test("publishes the LIVE 2026-10-07 policy revision as a new version bound to the current HTML", async () => {
+test("publishes the LIVE 2026-10-07 policy revision with immutable evidence preserved across later revisions", async () => {
   const source = await migration;
 
   assert.match(source, /Unexpected current TERMS\/PRIVACY evidence before the LIVE 2026-10-07 revision/i);
@@ -54,7 +54,7 @@ test("publishes the LIVE 2026-10-07 policy revision as a new version bound to th
   }
 });
 
-test("the LIVE terms and privacy policy state the owner's launch decisions", async () => {
+test("the preserved predecessor terms and privacy policy state their historical decisions", async () => {
   const terms = await readFile(revisedDocuments[0].path, "utf8");
   const privacy = await readFile(revisedDocuments[1].path, "utf8");
 

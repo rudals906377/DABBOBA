@@ -1,3 +1,4 @@
+import { historicalOrderFixture } from "../legacy-order.integration-fixtures.js";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
@@ -209,7 +210,7 @@ test(
          VALUES($1,'EARN',$2,'TEST',$3,'Sealed kuji integration setup')`,
         [actor.id, pointAmount, `sealed-kuji-${randomUUID()}`],
       );
-      const order = await app.inject({
+      const order = await historicalOrderFixture(app, pool, config, {
         method: "POST",
         url: "/v1/orders",
         headers: {
@@ -440,7 +441,7 @@ test(
        VALUES($1,'EARN',1000,'TEST',$2,'Sealed kuji recovery setup')`,
       [recoveryUser.id, `sealed-kuji-recovery-${randomUUID()}`],
     );
-    const recoveryOrderResponse = await app.inject({
+    const recoveryOrderResponse = await historicalOrderFixture(app, pool, config, {
       method: "POST", url: "/v1/orders",
       headers: { ...auth(recoveryUser.token), "idempotency-key": `selection-order-${randomUUID()}` },
       payload: {

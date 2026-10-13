@@ -61,6 +61,11 @@ async function collect(storage: SupabaseMediaStorage): Promise<Buffer> {
 }
 
 test("Storage reads support numeric Web/Edge timer handles and still clear the deadline", async (t) => {
+  // Node lazily initializes its fetch transport. Initialize it with real timers
+  // before the Edge timer shim, so transport internals cannot retain mocked timers.
+  await fixture((_req,res) => json(res,info()),async storage => {
+    assert.equal((await storage.stat(key)).version,version);
+  });
   const numericHandle = 987654321;
   let cleared = false;
   t.mock.method(globalThis, "setTimeout", (_callback: unknown, delay: number) => {
