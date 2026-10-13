@@ -217,9 +217,10 @@ test("runtime database role can operate app data but cannot administer the schem
        ORDER BY function.proname`,
       [RUNTIME_DATABASE_ROLE],
     );
-    assert.deepEqual(functionAccess.rows, [{
-      function_name: "default_notification_preference_state",
-    }]);
+    assert.deepEqual(functionAccess.rows, [
+      { function_name: "default_notification_preference_state" },
+      { function_name: "snapshot_inventory_storage_return" },
+    ]);
 
     const extensionFunctionAccess = await migrationPool.query<{
       can_compare_citext: boolean;
