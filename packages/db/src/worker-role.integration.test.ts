@@ -394,11 +394,13 @@ test("API and worker database identities are isolated around pgmq", {
     // 0083's shared assessment stays owner-only behind them. 0086 adds the
     // account-deletion record separation, which the worker calls but whose
     // separated table it cannot read.
+    // 0093 also grants the invoker-only immutable storage snapshot trigger.
     // Exact names/signatures retain the failure on any extra callable routine.
     assert.deepEqual(publicCallable.rows, [
       { schema_name: "public", routine_name: "execute_commerce_retention", argument_types: "integer" },
       { schema_name: "public", routine_name: "preview_commerce_retention", argument_types: "integer" },
       { schema_name: "public", routine_name: "separate_deleted_account_records", argument_types: "uuid, uuid" },
+      { schema_name: "public", routine_name: "snapshot_inventory_storage_return", argument_types: "" },
     ]);
     const setVtDependency = await migrationPool.query<{
       timestamp_overload_exists: boolean;

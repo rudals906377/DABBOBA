@@ -58,8 +58,8 @@ test("runtime database role can operate app data but cannot administer the schem
        ORDER BY relation.relname`,
       [RUNTIME_DATABASE_ROLE],
     );
-    assert.equal(tableAccess.rows.filter((row) => row.can_select).length, 83);
-    assert.equal(tableAccess.rows.filter((row) => row.can_insert).length, 83);
+    assert.equal(tableAccess.rows.filter((row) => row.can_select).length, 84);
+    assert.equal(tableAccess.rows.filter((row) => row.can_insert).length, 84);
     assert.equal(tableAccess.rows.filter((row) => row.can_update).length, 47);
     assert.equal(tableAccess.rows.filter((row) => row.can_delete).length, 8);
     for (const relname of ["portone_refund_cancellation_attempts", "partial_unused_draw_refunds"]) {
@@ -71,6 +71,10 @@ test("runtime database role can operate app data but cannot administer the schem
         can_delete: false,
       });
     }
+    // 0096 adds only append-only Toss confirm intent; no mutation/deletion grant.
+    assert.deepEqual(tableAccess.rows.find(row=>row.relname==='toss_review_confirm_attempts'),{
+      relname:'toss_review_confirm_attempts',can_select:true,can_insert:true,can_update:false,can_delete:false,
+    });
     // 0086's separated deletion records are owner-only.
     assert.deepEqual(tableAccess.rows.find((row) => row.relname === "deleted_account_retained_records"), {
       relname: "deleted_account_retained_records",
