@@ -16,7 +16,9 @@ async function api(path, body, key) {
   const response = await fetch('/review/api' + path, { credentials: 'same-origin', cache: 'no-store',
     method: body === undefined ? 'GET' : 'POST', headers: { 'content-type': 'application/json', ...(key ? {'idempotency-key':key} : {}) },
     ...(body === undefined ? {} : {body: JSON.stringify(body)}), signal: AbortSignal.timeout(25000) });
-  const data = await response.json();
+  let data;
+  try { data = await response.json(); }
+  catch { const error = new Error('서버 응답을 확인하지 못했어요. 추가 결제하지 말고 이전 주문 확인을 눌러 주세요.'); error.status = response.status; throw error; }
   if (!response.ok) { const error = new Error(data.error?.message || '요청을 처리하지 못했어요.'); error.status = response.status; throw error; }
   return data;
 }

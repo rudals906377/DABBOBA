@@ -133,7 +133,7 @@ export type PortOneCardPayment = {
   paidAt: string | null;
   failedAt: string | null;
   /** Allowlisted PG failure code only; never retain provider free-text messages. */
-  failureCode?: "01" | undefined;
+  failureCode?: "01" | "I009" | undefined;
   cancelledAt: string | null;
   cancellations: PortOneCancellation[];
 };
@@ -160,16 +160,16 @@ export function isPortOneUnsubmittedReady(payment: PortOneCardPayment): boolean 
 }
 
 /**
- * Observed authenticated KG Inicis response after closing the unsubmitted
- * window: FAILED / pgCode 01 (user cancelled), still carrying the requested
- * amount. Any approval, card method, PG transaction, refund, other failure or
- * non-INICIS channel keeps the existing fail-closed handling. Do not infer
- * this from a client callback.
+ * Authenticated unsubmitted-window responses can retain the requested amount:
+ * KG Inicis FAILED/01 and the observed NICE FAILED/I009 user cancellation.
+ * Each code belongs only to its own PG. Any approval, card method, PG
+ * transaction, refund or other failure stays fail-closed. A client callback
+ * never supplies this evidence.
  */
 export function isPortOneUnsubmittedFailure(payment: PortOneCardPayment): boolean {
   return payment.status === "FAILED"
-    && payment.failureCode === "01"
-    && payment.channel?.pgProvider === "INICIS_V2"
+    && ((payment.channel?.pgProvider === "INICIS_V2" && payment.failureCode === "01")
+      || (payment.channel?.pgProvider === "NICE_V2" && payment.failureCode === "I009"))
     && payment.method === null
     && payment.pgTransactionId === null
     && payment.paidAt === null
@@ -451,6 +451,8 @@ function normalizePayment(
     paidAt: optionalTimestamp(raw.paidAt, "payment.paidAt"),
     failedAt: optionalTimestamp(raw.failedAt, "payment.failedAt"),
     ...(status === "FAILED" && record(raw.failure)?.pgCode === "01" ? { failureCode: "01" as const } : {}),
+    ...(status === "FAILED" && expected.pgProvider === "NICE_V2" && record(raw.failure)?.pgCode === "I009"
+      ? { failureCode: "I009" as const } : {}),
     cancelledAt: optionalTimestamp(raw.cancelledAt, "payment.cancelledAt"),
     cancellations: cancellationList(rawCancellations),
   };
