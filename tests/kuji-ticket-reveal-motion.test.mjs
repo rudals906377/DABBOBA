@@ -135,7 +135,7 @@ test("the paper sampler keeps the prize fixed while the cover peels and its whit
   assert.ok(wideFold.foldScaleX > firstFold.foldScaleX);
   assert.ok(wideFold.foldShadowOpacity > 0);
   assert.equal(opened.peelBoundaryRatio, 1);
-  assert.equal(opened.foldOpacity, 0);
+  assert.equal(opened.foldOpacity, 1);
 
   assert.ok(
     sampleKujiPeelPaperMotion(0.5, true).edgeLightOpacity
@@ -168,6 +168,9 @@ test("paper peel samples stay finite, clamped, and spatially still under Reduced
     foldRotateYDeg: 0,
     foldLiftRatio: 0,
     foldSkewYDeg: 0,
+    foldFlightXRatio: 0,
+    foldFlightYRatio: 0,
+    foldRotateZDeg: 0,
   });
   assert.deepEqual(sampleKujiPeelPaperMotion(1, true, true), {
     peelBoundaryRatio: 1,
@@ -178,6 +181,9 @@ test("paper peel samples stay finite, clamped, and spatially still under Reduced
     foldRotateYDeg: 0,
     foldLiftRatio: 0,
     foldSkewYDeg: 0,
+    foldFlightXRatio: 0,
+    foldFlightYRatio: 0,
+    foldRotateZDeg: 0,
   });
 });
 
@@ -290,7 +296,7 @@ test("the cover peels across the full width without leaving a right end piece", 
   assert.doesNotMatch(componentSource, /rightEdgeWidth|kuji-fixed-right-edge|ticketFixedRightEdge|ticketRightPerforation/);
   assert.match(componentSource, /<View style=\{styles\.ticketPeelTravelClip\}>/);
   assert.equal(sampleKujiPeelPaperMotion(1).peelBoundaryRatio, 1);
-  assert.equal(sampleKujiPeelPaperMotion(1).foldScaleX, 0);
+  assert.ok(sampleKujiPeelPaperMotion(1).foldScaleX > 0);
 });
 
 
@@ -302,13 +308,50 @@ test("the printed cover stays still and only its mask and paper curl advance", (
 });
 
 
-test("visible paper stays opaque and finishes by collapsing rather than fading", () => {
+test("visible paper stays opaque through detachment and flies outside the ticket", () => {
   for (let step = 1; step < 1000; step += 1) {
     const frame = sampleKujiPeelPaperMotion(step / 1000);
     assert.equal(frame.foldOpacity, 1, `paper became translucent at ${step}/1000`);
     assert.ok(frame.foldScaleX > 0);
   }
   assert.equal(sampleKujiPeelPaperMotion(0).foldOpacity, 0);
-  assert.equal(sampleKujiPeelPaperMotion(1).foldOpacity, 0);
+  const edge = sampleKujiPeelPaperMotion(1, false, false, 0);
+  const flight = sampleKujiPeelPaperMotion(1, false, false, 0.5);
+  const departed = sampleKujiPeelPaperMotion(1, false, false, 1);
+  assert.equal(edge.foldOpacity, 1);
+  assert.ok(edge.foldScaleX > 0.5, "the curl must detach without vanishing at the edge");
+  assert.equal(flight.foldOpacity, 1);
+  assert.ok(flight.foldFlightXRatio > 0);
+  assert.ok(flight.foldFlightYRatio < 0);
+  assert.ok(flight.foldRotateZDeg > 0);
+  assert.ok(departed.foldFlightXRatio >= 1, "paper must leave the ticket completely");
+  assert.equal(departed.foldOpacity, 0);
+  assert.equal(sampleKujiPeelPaperMotion(0.9, false, false, 0.5).foldFlightXRatio, 0);
+  assert.equal(sampleKujiPeelPaperMotion(1, false, true, 0.5).foldFlightXRatio, 0);
   assert.ok(sampleKujiPeelPaperMotion(0.99).foldScaleX < sampleKujiPeelPaperMotion(0.9).foldScaleX);
+});
+
+
+test("paper detaches continuously and invalid flight inputs cannot escape bounds", () => {
+  const before = sampleKujiPeelPaperMotion(1 - 1e-6);
+  const edge = sampleKujiPeelPaperMotion(1, false, false, 0);
+  for (const key of Object.keys(edge)) {
+    assert.ok(Math.abs(before[key] - edge[key]) < 0.001, `${key} jumped at detachment`);
+  }
+  for (const progress of [NaN, -Infinity, Infinity, -1, 0, 0.1, 0.5, 1, 4]) {
+    const frame = sampleKujiPeelPaperMotion(1, false, false, progress);
+    assert.ok(Object.values(frame).every(Number.isFinite));
+    assert.ok(frame.foldFlightXRatio >= 0 && frame.foldFlightXRatio <= 1.2);
+    assert.ok(frame.foldFlightYRatio <= 0 && frame.foldFlightYRatio >= -0.56);
+  }
+});
+
+test("the same curl escapes the ticket clip and its flight is cancelled with the reveal", () => {
+  const shellStart = componentSource.indexOf('<Animated.View collapsable={false} pointerEvents="none" style={[styles.ticketSurface, ticketRevealStyle]}>');
+  const flightLayer = componentSource.indexOf('<View pointerEvents="none" style={styles.paperFlightLayer}>');
+  const curl = componentSource.indexOf('testID="kuji-paper-curl"');
+  assert.ok(shellStart < flightLayer && flightLayer < curl);
+  assert.equal(componentSource.match(/testID="kuji-paper-curl"/g).length, 1);
+  assert.match(componentSource, /paperFlightLayer: \{[\s\S]*?overflow: "visible"/);
+  assert.ok(componentSource.match(/cancelAnimation\(paperFlightProgress\)/g).length >= 5);
 });

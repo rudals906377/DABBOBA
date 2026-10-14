@@ -81,6 +81,7 @@ export function KujiPeelTicket({
   const [phase, setPhase] = useState<KujiOpenMotionPhase>("sealed");
   const dragProgress = useSharedValue(0);
   const impactProgress = useSharedValue(0);
+  const paperFlightProgress = useSharedValue(0);
   const entryProgress = useSharedValue(reduceMotion ? 1 : 0);
   const pressed = useSharedValue(0);
   const dragging = useSharedValue(0);
@@ -122,12 +123,20 @@ export function KujiPeelTicket({
       const generation = runGenerationRef.current + 1;
       runGenerationRef.current = generation;
       const travel = resolveKujiTravelSegments(dragProgress.value);
+      cancelAnimation(paperFlightProgress);
+      paperFlightProgress.value = 0;
       requestOpenRef.current();
       const finishTravel = withTiming(
         1,
         { duration: travel.fastTearMs, easing: fastTearEasing },
         (finished) => {
           "worklet";
+          if (finished && !reduceMotion) {
+            paperFlightProgress.value = withTiming(1, {
+              duration: 460,
+              easing: Easing.in(Easing.quad),
+            });
+          }
           scheduleOnRN(handleTravelSettled, generation, Boolean(finished));
         },
       );
@@ -148,6 +157,8 @@ export function KujiPeelTicket({
 
     if (transition.effect === "request-and-wait") {
       runGenerationRef.current += 1;
+      cancelAnimation(paperFlightProgress);
+      paperFlightProgress.value = 1;
       dragProgress.value = 1;
       requestOpenRef.current();
       return;
@@ -181,17 +192,23 @@ export function KujiPeelTicket({
       runGenerationRef.current += 1;
       cancelAnimation(dragProgress);
       cancelAnimation(impactProgress);
+      cancelAnimation(paperFlightProgress);
+      paperFlightProgress.value = 0;
       dragging.value = 0;
       dragProgress.value = withTiming(0, { duration: 180, easing: returnEasing });
       impactProgress.value = 0;
     }
-  }, [dragProgress, dragging, handleImpactSettled, handleTravelSettled, impactProgress]);
+  }, [dragProgress, dragging, handleImpactSettled, handleTravelSettled, impactProgress, paperFlightProgress, reduceMotion]);
 
   dispatchRef.current = dispatchMotion;
 
   useEffect(() => {
+    if (reduceMotion) {
+      cancelAnimation(paperFlightProgress);
+      paperFlightProgress.value = 1;
+    }
     dispatchRef.current({ type: "reduce-motion", enabled: reduceMotion });
-  }, [reduceMotion]);
+  }, [paperFlightProgress, reduceMotion]);
 
   useEffect(() => {
     if (resultReady) dispatchRef.current({ type: "result-ready" });
@@ -205,10 +222,12 @@ export function KujiPeelTicket({
     setPhase("sealed");
     cancelAnimation(dragProgress);
     cancelAnimation(impactProgress);
+    cancelAnimation(paperFlightProgress);
+    paperFlightProgress.value = 0;
     dragging.value = 0;
     dragProgress.value = 0;
     impactProgress.value = 0;
-  }, [dragProgress, dragging, impactProgress, reduceMotion, resetSignal]);
+  }, [dragProgress, dragging, impactProgress, paperFlightProgress, reduceMotion, resetSignal]);
 
   useEffect(() => {
     cancelAnimation(entryProgress);
@@ -228,11 +247,13 @@ export function KujiPeelTicket({
     runGenerationRef.current += 1;
     cancelAnimation(dragProgress);
     cancelAnimation(impactProgress);
+    cancelAnimation(paperFlightProgress);
+    paperFlightProgress.value = 0;
     cancelAnimation(cuePulse);
     cancelAnimation(entryProgress);
     dragging.value = 0;
     dragActiveChangeRef.current?.(false);
-  }, [cuePulse, dragProgress, dragging, entryProgress, impactProgress]);
+  }, [cuePulse, dragProgress, dragging, entryProgress, impactProgress, paperFlightProgress]);
 
   useEffect(() => {
     cancelAnimation(cuePulse);
@@ -368,13 +389,15 @@ export function KujiPeelTicket({
       dragProgress.value,
       dragging.value >= 0.5,
       reduceMotion,
+      paperFlightProgress.value,
     );
     return {
       opacity: frame.foldOpacity,
       transform: [
-        { translateX: frame.peelBoundaryRatio * peelTravelWidth - ((1 - frame.foldScaleX) * paperFoldWidth) / 2 },
-        { translateY: -frame.foldLiftRatio * paperFoldHeight },
+        { translateX: (frame.peelBoundaryRatio + frame.foldFlightXRatio) * peelTravelWidth - ((1 - frame.foldScaleX) * paperFoldWidth) / 2 },
+        { translateY: (frame.foldFlightYRatio - frame.foldLiftRatio) * paperFoldHeight },
         { perspective: Math.max(320, ticketWidth * 2.6) },
+        { rotateZ: `${frame.foldRotateZDeg}deg` },
         { rotateY: `${frame.foldRotateYDeg}deg` },
         { scaleX: frame.foldScaleX },
         { skewY: `${frame.foldSkewYDeg}deg` },
@@ -386,6 +409,7 @@ export function KujiPeelTicket({
       dragProgress.value,
       dragging.value >= 0.5,
       reduceMotion,
+      paperFlightProgress.value,
     ).foldShadowOpacity,
   }));
   const pullArrowStyle = useAnimatedStyle(() => ({
@@ -548,46 +572,48 @@ export function KujiPeelTicket({
                         </View>
                       </View>
                     </Animated.View>
-                    <Animated.View
-                      testID="kuji-paper-curl"
-                      style={[
-                        styles.paperFold,
-                        { width: paperFoldWidth },
-                        paperFoldStyle,
-                      ]}
-                    >
-                      <Animated.View style={[styles.paperFoldShadow, paperFoldShadowStyle]}>
-                        <Svg width="100%" height="100%" viewBox="0 0 100 200" preserveAspectRatio="none">
-                          <Defs>
-                            <LinearGradient id="kuji-curl-shadow" x1="0" y1="0" x2="1" y2="0">
-                              <Stop offset="0" stopColor="#060906" stopOpacity="0" />
-                              <Stop offset="0.28" stopColor="#060906" stopOpacity="0.72" />
-                              <Stop offset="0.64" stopColor="#060906" stopOpacity="0.28" />
-                              <Stop offset="1" stopColor="#060906" stopOpacity="0" />
-                            </LinearGradient>
-                          </Defs>
-                          <Path d="M 4 8 Q 50 -4 84 12 C 104 48 104 152 84 188 Q 48 204 4 192 Z" fill="url(#kuji-curl-shadow)" />
-                        </Svg>
-                      </Animated.View>
-                      <Svg width="100%" height="100%" viewBox="0 0 100 200" preserveAspectRatio="none">
-                        <Defs>
-                          <LinearGradient id="kuji-paper-curl" x1="0" y1="0" x2="1" y2="0">
-                            <Stop offset="0" stopColor="#92998D" />
-                            <Stop offset="0.16" stopColor="#D0D3C7" />
-                            <Stop offset="0.42" stopColor="#FFFDF7" />
-                            <Stop offset="0.64" stopColor="#FFFFFC" />
-                            <Stop offset="0.86" stopColor="#E3E6DA" />
-                            <Stop offset="1" stopColor="#BBC1B1" />
-                          </LinearGradient>
-                        </Defs>
-                        <Path d="M 4 8 Q 50 -4 84 12 C 104 48 104 152 84 188 Q 48 204 4 192 C 23 144 23 56 4 8 Z" fill="url(#kuji-paper-curl)" />
-                        <Path d="M 4 8 C 23 56 23 144 4 192" fill="none" stroke="#737D6B" strokeWidth="1" strokeOpacity="0.36" />
-                      </Svg>
-                    </Animated.View>
                   </View>
                 </View>
               </View>
             </Animated.View>
+            <View pointerEvents="none" style={styles.paperFlightLayer}>
+              <Animated.View
+                testID="kuji-paper-curl"
+                style={[
+                  styles.paperFold,
+                  { width: paperFoldWidth },
+                  paperFoldStyle,
+                ]}
+              >
+                <Animated.View style={[styles.paperFoldShadow, paperFoldShadowStyle]}>
+                  <Svg width="100%" height="100%" viewBox="0 0 100 200" preserveAspectRatio="none">
+                    <Defs>
+                      <LinearGradient id="kuji-curl-shadow" x1="0" y1="0" x2="1" y2="0">
+                        <Stop offset="0" stopColor="#060906" stopOpacity="0" />
+                        <Stop offset="0.28" stopColor="#060906" stopOpacity="0.72" />
+                        <Stop offset="0.64" stopColor="#060906" stopOpacity="0.28" />
+                        <Stop offset="1" stopColor="#060906" stopOpacity="0" />
+                      </LinearGradient>
+                    </Defs>
+                    <Path d="M 4 8 Q 50 -4 84 12 C 104 48 104 152 84 188 Q 48 204 4 192 Z" fill="url(#kuji-curl-shadow)" />
+                  </Svg>
+                </Animated.View>
+                <Svg width="100%" height="100%" viewBox="0 0 100 200" preserveAspectRatio="none">
+                  <Defs>
+                    <LinearGradient id="kuji-paper-curl" x1="0" y1="0" x2="1" y2="0">
+                      <Stop offset="0" stopColor="#92998D" />
+                      <Stop offset="0.16" stopColor="#D0D3C7" />
+                      <Stop offset="0.42" stopColor="#FFFDF7" />
+                      <Stop offset="0.64" stopColor="#FFFFFC" />
+                      <Stop offset="0.86" stopColor="#E3E6DA" />
+                      <Stop offset="1" stopColor="#BBC1B1" />
+                    </LinearGradient>
+                  </Defs>
+                  <Path d="M 4 8 Q 50 -4 84 12 C 104 48 104 152 84 188 Q 48 204 4 192 C 23 144 23 56 4 8 Z" fill="url(#kuji-paper-curl)" />
+                  <Path d="M 4 8 C 23 56 23 144 4 192" fill="none" stroke="#737D6B" strokeWidth="1" strokeOpacity="0.36" />
+                </Svg>
+              </Animated.View>
+            </View>
           </View>
         </Animated.View>
       </GestureDetector>
@@ -784,6 +810,12 @@ const styles = StyleSheet.create({
     bottom: 0,
     right: 0,
     overflow: "hidden",
+  },
+  paperFlightLayer: {
+    ...StyleSheet.absoluteFill,
+    margin: 8,
+    overflow: "visible",
+    zIndex: 7,
   },
   paperFold: {
     position: "absolute",

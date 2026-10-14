@@ -7,6 +7,9 @@ export type KujiPeelPaperMotion = {
   foldRotateYDeg: number;
   foldLiftRatio: number;
   foldSkewYDeg: number;
+  foldFlightXRatio: number;
+  foldFlightYRatio: number;
+  foldRotateZDeg: number;
 };
 
 function clampProgress(progress: number) {
@@ -28,6 +31,7 @@ export function sampleKujiPeelPaperMotion(
   progress: number,
   activelyDragging = false,
   reduceMotion = false,
+  flightProgress = 0,
 ): KujiPeelPaperMotion {
   "worklet";
   const p = clampProgress(progress);
@@ -41,9 +45,14 @@ export function sampleKujiPeelPaperMotion(
       foldRotateYDeg: 0,
       foldLiftRatio: 0,
       foldSkewYDeg: 0,
+      foldFlightXRatio: 0,
+      foldFlightYRatio: 0,
+      foldRotateZDeg: 0,
     };
   }
 
+  // A detached curl continues from the exact edge pose on its own UI-thread clock.
+  const flight = p >= 1 ? clampProgress(flightProgress) : 0;
   const foldIn = Math.max(
     activelyDragging ? 0.2 : 0,
     smootherStep(0, 0.55, p),
@@ -57,14 +66,16 @@ export function sampleKujiPeelPaperMotion(
 
   return {
     peelBoundaryRatio: p,
-    // Paper is opaque material: grow and collapse the curl geometrically
-    // instead of fading its surface over the printed content underneath.
-    foldScaleX: (0.06 + 0.94 * foldIn) * (1 - foldNarrowing),
-    foldOpacity: (p > 0 || activelyDragging) && p < 1 ? 1 : 0,
+    // Keep a substantial, opaque curl at the edge, then carry that same paper away.
+    foldScaleX: (0.06 + 0.94 * foldIn) * (1 - 0.32 * foldNarrowing),
+    foldOpacity: (p > 0 || activelyDragging) && flight < 1 ? 1 : 0,
     foldShadowOpacity: 0.3 * foldIn * (1 - foldExit),
     edgeLightOpacity: (activelyDragging ? 0.5 : 0.38) * Math.min(edgePresence, edgeOut),
-    foldRotateYDeg: -12 - 24 * bend,
+    foldRotateYDeg: -12 - 24 * bend + 36 * flight,
     foldLiftRatio: 0.025 * bend,
     foldSkewYDeg: -3.8 * bend,
+    foldFlightXRatio: 1.2 * flight,
+    foldFlightYRatio: -0.8 * flight + 0.24 * flight * flight,
+    foldRotateZDeg: 70 * flight,
   };
 }
