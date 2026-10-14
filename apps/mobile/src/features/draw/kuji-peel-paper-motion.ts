@@ -10,6 +10,7 @@ export type KujiPeelPaperMotion = {
   foldFlightXRatio: number;
   foldFlightYRatio: number;
   foldRotateZDeg: number;
+  coverClipInsetRatio: number;
 };
 
 function clampProgress(progress: number) {
@@ -48,6 +49,7 @@ export function sampleKujiPeelPaperMotion(
       foldFlightXRatio: 0,
       foldFlightYRatio: 0,
       foldRotateZDeg: 0,
+      coverClipInsetRatio: 0,
     };
   }
 
@@ -63,11 +65,12 @@ export function sampleKujiPeelPaperMotion(
   const edgeOut = 1 - smootherStep(0.9, 1, p);
   const edgePresence = Math.max(edgeIn, activelyDragging ? 0.55 : 0);
   const bend = Math.sin(Math.PI * p);
+  const foldScaleX = (0.06 + 0.94 * foldIn) * (1 - 0.32 * foldNarrowing);
 
   return {
     peelBoundaryRatio: p,
     // Keep a substantial, opaque curl at the edge, then carry that same paper away.
-    foldScaleX: (0.06 + 0.94 * foldIn) * (1 - 0.32 * foldNarrowing),
+    foldScaleX,
     foldOpacity: (p > 0 || activelyDragging) && flight < 1 ? 1 : 0,
     foldShadowOpacity: 0.3 * foldIn * (1 - foldExit),
     edgeLightOpacity: (activelyDragging ? 0.5 : 0.38) * Math.min(edgePresence, edgeOut),
@@ -77,5 +80,8 @@ export function sampleKujiPeelPaperMotion(
     foldFlightXRatio: 1.2 * flight,
     foldFlightYRatio: -0.8 * flight + 0.24 * flight * flight,
     foldRotateZDeg: 70 * flight,
+    // The SVG's left contour bows inward. Hide the flat cover underneath the
+    // solid curl center so that contour/projection cannot expose a printed sliver.
+    coverClipInsetRatio: 0.42 * foldScaleX * Math.min(1, foldIn * 5),
   };
 }

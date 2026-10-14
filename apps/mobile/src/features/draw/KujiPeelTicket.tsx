@@ -338,6 +338,8 @@ export function KujiPeelTicket({
     ],
   }));
 
+  const paperFoldWidth = Math.max(36, ticketWidth * 0.14);
+  const paperFoldHeight = ticketWidth / 1.46 * 0.92;
   const peelMaskStyle = useAnimatedStyle(() => {
     const frame = sampleKujiPeelPaperMotion(
       dragProgress.value,
@@ -345,7 +347,10 @@ export function KujiPeelTicket({
       reduceMotion,
     );
     return {
-      left: frame.peelBoundaryRatio * peelTravelWidth,
+      left: Math.min(
+        peelTravelWidth,
+        frame.peelBoundaryRatio * peelTravelWidth + frame.coverClipInsetRatio * paperFoldWidth,
+      ),
     };
   });
   const resultGateOpen = isKujiResultGateOpen(phase, resultReady, settled);
@@ -382,8 +387,6 @@ export function KujiPeelTicket({
       transform: [{ translateX: frame.peelBoundaryRatio * peelTravelWidth - 10 }],
     };
   });
-  const paperFoldWidth = Math.max(36, ticketWidth * 0.14);
-  const paperFoldHeight = ticketWidth / 1.46 * 0.92;
   const paperFoldStyle = useAnimatedStyle(() => {
     const frame = sampleKujiPeelPaperMotion(
       dragProgress.value,

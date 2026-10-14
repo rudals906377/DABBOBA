@@ -171,6 +171,7 @@ test("paper peel samples stay finite, clamped, and spatially still under Reduced
     foldFlightXRatio: 0,
     foldFlightYRatio: 0,
     foldRotateZDeg: 0,
+    coverClipInsetRatio: 0,
   });
   assert.deepEqual(sampleKujiPeelPaperMotion(1, true, true), {
     peelBoundaryRatio: 1,
@@ -184,6 +185,7 @@ test("paper peel samples stay finite, clamped, and spatially still under Reduced
     foldFlightXRatio: 0,
     foldFlightYRatio: 0,
     foldRotateZDeg: 0,
+    coverClipInsetRatio: 0,
   });
 });
 
@@ -302,7 +304,7 @@ test("the cover peels across the full width without leaving a right end piece", 
 
 test("the printed cover stays still and only its mask and paper curl advance", () => {
   assert.match(componentSource, /<View\s+testID="kuji-stationary-cover"/);
-  assert.match(componentSource, /left: frame\.peelBoundaryRatio \* peelTravelWidth/);
+  assert.match(componentSource, /frame\.peelBoundaryRatio \* peelTravelWidth \+ frame\.coverClipInsetRatio \* paperFoldWidth/);
   assert.match(componentSource, /width: peelSurfaceSize\.width \|\| "100%"/);
   assert.doesNotMatch(componentSource, /peelLayerStyle|coverRotationDeg|coverOpacity/);
 });
@@ -354,4 +356,15 @@ test("the same curl escapes the ticket clip and its flight is cancelled with the
   assert.equal(componentSource.match(/testID="kuji-paper-curl"/g).length, 1);
   assert.match(componentSource, /paperFlightLayer: \{[\s\S]*?overflow: "visible"/);
   assert.ok(componentSource.match(/cancelAnimation\(paperFlightProgress\)/g).length >= 5);
+});
+
+
+test("the printed cover starts inside the opaque curl instead of behind its concave edge", () => {
+  assert.equal(sampleKujiPeelPaperMotion(0).coverClipInsetRatio, 0);
+  for (const progress of [0.25, 0.5, 0.75, 0.9]) {
+    const frame = sampleKujiPeelPaperMotion(progress);
+    assert.ok(frame.coverClipInsetRatio / frame.foldScaleX >= 0.4,
+      "the cover boundary must overlap the solid center of the paper, beyond the curved left contour");
+  }
+  assert.equal(sampleKujiPeelPaperMotion(0.5, true, true).coverClipInsetRatio, 0);
 });
