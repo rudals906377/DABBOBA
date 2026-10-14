@@ -16,6 +16,10 @@ if (prelaunch || packagedBuild) {
   ]);
   if (packagedBuild) {
     isolatedModules.set(
+      "@/features/draw/DrawAnimationCheckScreen",
+      path.join(__dirname, "src/features/draw/production-animation-check.tsx"),
+    );
+    isolatedModules.set(
       "@/features/demo/development-payment-copy",
       path.join(__dirname, "src/features/demo/production-payment-copy.ts"),
     );
