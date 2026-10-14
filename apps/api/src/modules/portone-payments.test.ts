@@ -111,9 +111,10 @@ test("KG window-close FAILED is a terminal failure only without charge evidence"
   ]) assert.equal(portOnePaymentEvidence({ ...closed, ...change }), "PRESENT");
 });
 
-test("NICE I009 cancellation never issues settlement or refund evidence", () => {
+for (const [pgProvider, failureCode] of [["NICE_V2", "I009"], ["KICC_V2", "W002"]] as const) {
+test(`${pgProvider} ${failureCode} cancellation never issues settlement or refund evidence`, () => {
   const closed = { ...payment("FAILED"), method: null, pgTransactionId: null,
-    failureCode: "I009" as const, channel: { key: "nice", environment: "TEST" as const, pgProvider: "NICE_V2" as const } };
+    failureCode, channel: { key: "review", environment: "TEST" as const, pgProvider } };
   assert.equal(portOnePaymentEvidence(closed), "NONE");
   assert.equal(normalizedPortOneEventForPayment(closed)?.eventType, "PAYMENT_FAILED");
   for (const change of [
@@ -123,6 +124,7 @@ test("NICE I009 cancellation never issues settlement or refund evidence", () => 
     { amount: { total: 12000, paid: 12000, cancelled: 1 } },
   ]) assert.equal(portOnePaymentEvidence({ ...closed, ...change }), "PRESENT");
 });
+}
 
 test("zero money never hides an approval timestamp or PG transaction", () => {
   for (const status of ["READY", "PAY_PENDING", "VIRTUAL_ACCOUNT_ISSUED", "FAILED", "CANCELLED"] as const) {

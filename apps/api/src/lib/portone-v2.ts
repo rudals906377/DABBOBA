@@ -133,7 +133,7 @@ export type PortOneCardPayment = {
   paidAt: string | null;
   failedAt: string | null;
   /** Allowlisted PG failure code only; never retain provider free-text messages. */
-  failureCode?: "01" | "I009" | undefined;
+  failureCode?: "01" | "I009" | "W002" | undefined;
   cancelledAt: string | null;
   cancellations: PortOneCancellation[];
 };
@@ -161,7 +161,7 @@ export function isPortOneUnsubmittedReady(payment: PortOneCardPayment): boolean 
 
 /**
  * Authenticated unsubmitted-window responses can retain the requested amount:
- * KG Inicis FAILED/01 and the observed NICE FAILED/I009 user cancellation.
+ * KG Inicis FAILED/01, NICE FAILED/I009 and KICC FAILED/W002 user cancellation.
  * Each code belongs only to its own PG. Any approval, card method, PG
  * transaction, refund or other failure stays fail-closed. A client callback
  * never supplies this evidence.
@@ -169,7 +169,8 @@ export function isPortOneUnsubmittedReady(payment: PortOneCardPayment): boolean 
 export function isPortOneUnsubmittedFailure(payment: PortOneCardPayment): boolean {
   return payment.status === "FAILED"
     && ((payment.channel?.pgProvider === "INICIS_V2" && payment.failureCode === "01")
-      || (payment.channel?.pgProvider === "NICE_V2" && payment.failureCode === "I009"))
+      || (payment.channel?.pgProvider === "NICE_V2" && payment.failureCode === "I009")
+      || (payment.channel?.pgProvider === "KICC_V2" && payment.failureCode === "W002"))
     && payment.method === null
     && payment.pgTransactionId === null
     && payment.paidAt === null
@@ -453,6 +454,8 @@ function normalizePayment(
     ...(status === "FAILED" && record(raw.failure)?.pgCode === "01" ? { failureCode: "01" as const } : {}),
     ...(status === "FAILED" && expected.pgProvider === "NICE_V2" && record(raw.failure)?.pgCode === "I009"
       ? { failureCode: "I009" as const } : {}),
+    ...(status === "FAILED" && expected.pgProvider === "KICC_V2" && record(raw.failure)?.pgCode === "W002"
+      ? { failureCode: "W002" as const } : {}),
     cancelledAt: optionalTimestamp(raw.cancelledAt, "payment.cancelledAt"),
     cancellations: cancellationList(rawCancellations),
   };

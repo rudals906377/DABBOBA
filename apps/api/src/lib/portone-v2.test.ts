@@ -156,17 +156,18 @@ test("NICE V2 accepts only its own bound channel and does not inherit KG unsubmi
   await assert.rejects(notKg.getPayment({ paymentId: "payment-test", expectedTotalAmount: 12000 }));
 });
 
-test("observed NICE I009 window-close response is unpaid only without approval or card evidence", async () => {
-  const nice = { ...contract, pgProvider: "NICE_V2" as const, channelKey: "channel-key-nice" };
+for (const [pgProvider, failureCode] of [["NICE_V2", "I009"], ["KICC_V2", "W002"]] as const) {
+test(`observed ${pgProvider} ${failureCode} window-close response is unpaid only without approval or card evidence`, async () => {
+  const nice = { ...contract, pgProvider, channelKey: "channel-key-review" };
   const closed = payment({
-    status: "FAILED", channel: { ...payment().channel, key: nice.channelKey, pgProvider: "NICE_V2" },
+    status: "FAILED", channel: { ...payment().channel, key: nice.channelKey, pgProvider },
     method: undefined, pgTxId: undefined, paidAt: undefined,
-    failedAt: "2026-10-14T00:07:52.125748189Z", failure: { pgCode: "I009", reason: "must-not-escape" },
+    failedAt: "2026-10-14T00:07:52.125748189Z", failure: { pgCode: failureCode, reason: "must-not-escape" },
   });
   const lookup = (raw: unknown) => createPortOneV2Adapter({ ...nice, fetchImpl: async () => jsonResponse(raw) })
     .getPayment({ paymentId: "payment-test", expectedTotalAmount: 12000 });
   const result = await lookup(closed);
-  assert.equal(result.failureCode, "I009");
+  assert.equal(result.failureCode, failureCode);
   assert.equal(result.method, null);
   assert.equal(result.amount.paid, 12000);
   assert.equal(JSON.stringify(result).includes("must-not-escape"), false);
@@ -175,12 +176,14 @@ test("observed NICE I009 window-close response is unpaid only without approval o
     { pgTxId: "approved-pg-transaction" }, { paidAt: "2026-10-14T00:07:52Z" },
     { amount: { ...closed.amount, paid: 1 } }, { amount: { ...closed.amount, cancelled: 1 } },
   ]) await assert.rejects(lookup({ ...closed, ...change }), errorCode("UNEXPECTED_RESPONSE"));
-  for (const pgProvider of ["INICIS_V2", "KCP_V2", "KICC_V2"] as const) {
-    await assert.rejects(createPortOneV2Adapter({ ...nice, pgProvider, fetchImpl: async () => jsonResponse({
-      ...closed, channel: { ...closed.channel, pgProvider },
+  for (const otherProvider of ["INICIS_V2", "KCP_V2", "NICE_V2", "KICC_V2"] as const) {
+    if (otherProvider === pgProvider) continue;
+    await assert.rejects(createPortOneV2Adapter({ ...nice, pgProvider: otherProvider, fetchImpl: async () => jsonResponse({
+      ...closed, channel: { ...closed.channel, pgProvider: otherProvider },
     }) }).getPayment({ paymentId: "payment-test", expectedTotalAmount: 12000 }), errorCode("UNEXPECTED_RESPONSE"));
   }
 });
+}
 
 test("an uncharged READY payment can omit the channel and method while awaiting the PG", async () => {
   const { channel: _channel, method: _method, paidAt: _paidAt, ...ready } = payment({
