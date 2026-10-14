@@ -252,7 +252,7 @@ test("the peel claims early horizontal intent and tells the parent scroll when i
 });
 
 test("the stationary result underlay, orange cover, and curved paper fold keep stable stacking", () => {
-  const resultIndex = componentSource.indexOf('<View style={[styles.resultTicketLayer, { right: rightEdgeWidth }]}>');
+  const resultIndex = componentSource.indexOf('<View style={styles.resultTicketLayer}>');
   const outerIndex = componentSource.indexOf('<View pointerEvents="none" style={styles.ticketOuterLayer}>');
   const peelIndex = componentSource.indexOf('<Animated.View style={[styles.ticketPeelMask, peelMaskStyle]}>');
   assert.ok(resultIndex >= 0 && resultIndex < outerIndex && outerIndex < peelIndex);
@@ -285,19 +285,30 @@ test("the stationary result underlay, orange cover, and curved paper fold keep s
   assert.doesNotMatch(componentSource, /ticketPayoffGlow|KUJI_TICKET_GLOW/);
 });
 
-test("the right ticket end is a stationary sibling outside the clipped moving cover", () => {
-  assert.match(componentSource, /<View\s+testID="kuji-fixed-right-edge"/);
-  assert.match(componentSource, /styles\.ticketPeelTravelClip, \{ right: rightEdgeWidth \}/);
-  assert.match(componentSource, /styles\.resultTicketLayer, \{ right: rightEdgeWidth \}/);
-  assert.match(componentSource, /ticketFixedRightEdge: \{\s*position: "absolute",\s*right: 0,/);
-  assert.match(componentSource, /styles\.ticketRightEdgeImage, \{ width: peelSurfaceSize\.width \}/);
-  assert.doesNotMatch(componentSource, /styles\.ticketFixedRightEdge[^\n]*peelMaskStyle/);
+test("the cover peels across the full width without leaving a right end piece", () => {
+  assert.match(componentSource, /const peelTravelWidth = peelSurfaceSize\.width;/);
+  assert.doesNotMatch(componentSource, /rightEdgeWidth|kuji-fixed-right-edge|ticketFixedRightEdge|ticketRightPerforation/);
+  assert.match(componentSource, /<View style=\{styles\.ticketPeelTravelClip\}>/);
+  assert.equal(sampleKujiPeelPaperMotion(1).peelBoundaryRatio, 1);
+  assert.equal(sampleKujiPeelPaperMotion(1).foldScaleX, 0);
 });
 
 
 test("the printed cover stays still and only its mask and paper curl advance", () => {
   assert.match(componentSource, /<View\s+testID="kuji-stationary-cover"/);
   assert.match(componentSource, /left: frame\.peelBoundaryRatio \* peelTravelWidth/);
-  assert.match(componentSource, /width: peelSurfaceSize\.width \|\| "100%", right: -rightEdgeWidth/);
+  assert.match(componentSource, /width: peelSurfaceSize\.width \|\| "100%"/);
   assert.doesNotMatch(componentSource, /peelLayerStyle|coverRotationDeg|coverOpacity/);
+});
+
+
+test("visible paper stays opaque and finishes by collapsing rather than fading", () => {
+  for (let step = 1; step < 1000; step += 1) {
+    const frame = sampleKujiPeelPaperMotion(step / 1000);
+    assert.equal(frame.foldOpacity, 1, `paper became translucent at ${step}/1000`);
+    assert.ok(frame.foldScaleX > 0);
+  }
+  assert.equal(sampleKujiPeelPaperMotion(0).foldOpacity, 0);
+  assert.equal(sampleKujiPeelPaperMotion(1).foldOpacity, 0);
+  assert.ok(sampleKujiPeelPaperMotion(0.99).foldScaleX < sampleKujiPeelPaperMotion(0.9).foldScaleX);
 });

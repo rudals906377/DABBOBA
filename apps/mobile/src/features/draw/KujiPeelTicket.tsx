@@ -77,8 +77,7 @@ export function KujiPeelTicket({
 }: KujiPeelTicketProps) {
   const [ticketWidth, setTicketWidth] = useState(0);
   const [peelSurfaceSize, setPeelSurfaceSize] = useState({ width: 0, height: 0 });
-  const rightEdgeWidth = peelSurfaceSize.width * 0.14;
-  const peelTravelWidth = peelSurfaceSize.width - rightEdgeWidth;
+  const peelTravelWidth = peelSurfaceSize.width;
   const [phase, setPhase] = useState<KujiOpenMotionPhase>("sealed");
   const dragProgress = useSharedValue(0);
   const impactProgress = useSharedValue(0);
@@ -461,7 +460,7 @@ export function KujiPeelTicket({
             </View>
             <Animated.View collapsable={false} pointerEvents="none" style={[styles.ticketSurface, ticketRevealStyle]}>
               <View style={styles.ticketShell}>
-                <View style={[styles.resultTicketLayer, { right: rightEdgeWidth }]}>
+                <View style={styles.resultTicketLayer}>
                   <View style={styles.resultTicketBand}>
                     <View style={styles.resultTicketBrandLockup}>
                       <Image
@@ -516,11 +515,11 @@ export function KujiPeelTicket({
                       ? current : { width: layout.width, height: layout.height }
                   ))}
                 >
-                  <View style={[styles.ticketPeelTravelClip, { right: rightEdgeWidth }]}>
+                  <View style={styles.ticketPeelTravelClip}>
                     <Animated.View style={[styles.ticketPeelMask, peelMaskStyle]}>
                       <View
                         testID="kuji-stationary-cover"
-                        style={[styles.ticketPeelLayer, { width: peelSurfaceSize.width || "100%", right: -rightEdgeWidth }]}
+                        style={[styles.ticketPeelLayer, { width: peelSurfaceSize.width || "100%" }]}
                       >
                         <Image
                           accessibilityIgnoresInvertColors
@@ -550,6 +549,7 @@ export function KujiPeelTicket({
                       </View>
                     </Animated.View>
                     <Animated.View
+                      testID="kuji-paper-curl"
                       style={[
                         styles.paperFold,
                         { width: paperFoldWidth },
@@ -584,20 +584,6 @@ export function KujiPeelTicket({
                         <Path d="M 4 8 C 23 56 23 144 4 192" fill="none" stroke="#737D6B" strokeWidth="1" strokeOpacity="0.36" />
                       </Svg>
                     </Animated.View>
-                  </View>
-                  {/* The original artwork's right end stays attached while only the cover peels. */}
-                  <View
-                    testID="kuji-fixed-right-edge"
-                    pointerEvents="none"
-                    style={[styles.ticketFixedRightEdge, { width: rightEdgeWidth }]}
-                  >
-                    <Image
-                      accessibilityIgnoresInvertColors
-                      resizeMode="stretch"
-                      source={KUJI_TICKET_PEEL_LAYER}
-                      style={[styles.ticketRightEdgeImage, { width: peelSurfaceSize.width }]}
-                    />
-                    <View style={styles.ticketRightPerforation} />
                   </View>
                 </View>
               </View>
@@ -798,28 +784,6 @@ const styles = StyleSheet.create({
     bottom: 0,
     right: 0,
     overflow: "hidden",
-  },
-  ticketFixedRightEdge: {
-    position: "absolute",
-    right: 0,
-    top: 0,
-    bottom: 0,
-    overflow: "hidden",
-  },
-  ticketRightEdgeImage: {
-    position: "absolute",
-    right: 0,
-    top: 0,
-    height: "100%",
-  },
-  ticketRightPerforation: {
-    position: "absolute",
-    left: 0,
-    top: 4,
-    bottom: 4,
-    borderLeftWidth: StyleSheet.hairlineWidth,
-    borderLeftColor: "#FFF4DF",
-    borderStyle: "dashed",
   },
   paperFold: {
     position: "absolute",

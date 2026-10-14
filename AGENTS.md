@@ -503,4 +503,4 @@ When any text-entry control loses focus, dismiss the simulated keyboard. If the 
 
 ## Native Kuji Peel — 2026-10-14 Owner Feedback
 
-- Keep the ticket and its flat printed cover stationary during opening, including the original right end. Reveal from left to right by advancing a clipping boundary; translate only the curled paper at that boundary. Never slide, scale or rotate the flat cover or its printing. The completed ticket can still leave together during the existing transition to the committed result.
+- Keep the ticket and its flat printed cover stationary during opening. Reveal from left to right by advancing a clipping boundary; translate only the curled paper at that boundary. Never slide, scale or rotate the flat cover or its printing. The curl must remain opaque so underlying printing cannot show through it; finish by shrinking its geometry, not fading its material. The latest owner decision removes the previously retained right-hand strip: peel the cover across its full width with no leftover end piece. The completed ticket can still leave together during the existing transition to the committed result.

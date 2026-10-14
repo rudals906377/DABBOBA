@@ -57,8 +57,10 @@ export function sampleKujiPeelPaperMotion(
 
   return {
     peelBoundaryRatio: p,
-    foldScaleX: (0.06 + 0.94 * foldIn) * (1 - 0.44 * foldNarrowing),
-    foldOpacity: foldIn * (1 - foldExit),
+    // Paper is opaque material: grow and collapse the curl geometrically
+    // instead of fading its surface over the printed content underneath.
+    foldScaleX: (0.06 + 0.94 * foldIn) * (1 - foldNarrowing),
+    foldOpacity: (p > 0 || activelyDragging) && p < 1 ? 1 : 0,
     foldShadowOpacity: 0.3 * foldIn * (1 - foldExit),
     edgeLightOpacity: (activelyDragging ? 0.5 : 0.38) * Math.min(edgePresence, edgeOut),
     foldRotateYDeg: -12 - 24 * bend,
