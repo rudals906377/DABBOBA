@@ -171,6 +171,9 @@ test("paper peel samples stay finite, clamped, and spatially still under Reduced
     foldOpacity: 0,
     foldShadowOpacity: 0,
     edgeLightOpacity: 0,
+    foldRotateYDeg: 0,
+    foldLiftRatio: 0,
+    foldSkewYDeg: 0,
   });
   assert.deepEqual(sampleKujiPeelPaperMotion(1, true, true), {
     coverTravelRatio: 1.12,
@@ -180,7 +183,28 @@ test("paper peel samples stay finite, clamped, and spatially still under Reduced
     foldOpacity: 0,
     foldShadowOpacity: 0,
     edgeLightOpacity: 0,
+    foldRotateYDeg: 0,
+    foldLiftRatio: 0,
+    foldSkewYDeg: 0,
   });
+});
+
+test("the paper lifts and bends during the tear, then rests without a repeating curl", () => {
+  const middle = sampleKujiPeelPaperMotion(0.5);
+  assert.ok(middle.foldLiftRatio > 0 && middle.foldLiftRatio <= 0.03);
+  assert.ok(middle.foldRotateYDeg < -20 && middle.foldRotateYDeg >= -40);
+  assert.ok(middle.foldSkewYDeg < 0 && middle.foldSkewYDeg >= -4);
+  for (const progress of [0, 1]) {
+    const edge = sampleKujiPeelPaperMotion(progress);
+    assert.ok(Math.abs(edge.foldLiftRatio) < 1e-8);
+    assert.ok(Math.abs(edge.foldSkewYDeg) < 1e-8);
+  }
+  for (let step = 0; step <= 100; step += 1) {
+    const frame = sampleKujiPeelPaperMotion(step / 100, true, true);
+    assert.equal(frame.foldRotateYDeg, 0);
+    assert.equal(frame.foldLiftRatio, 0);
+    assert.equal(frame.foldSkewYDeg, 0);
+  }
 });
 
 test("reset and unmount invalidate stale travel and payoff callbacks", () => {
@@ -214,7 +238,7 @@ test("the restrained edge cue follows the paper boundary and stays clipped", () 
   );
   assert.match(
     componentSource,
-    /frame\.coverTravelRatio \* ticketWidth - 10/,
+    /frame\.coverTravelRatio \* peelTravelWidth - 10/,
   );
   assert.match(componentSource, /styles\.ticketPeelEdgeGlow,[\s\S]*?peelEdgeGlowStyle/);
   assert.match(
@@ -235,10 +259,10 @@ test("the peel claims early horizontal intent and tells the parent scroll when i
   assert.match(componentSource, /scheduleOnRN\(notifyDragActive, false\)/);
 });
 
-test("the stationary result underlay, orange cover, and three-tone paper fold keep stable stacking", () => {
+test("the stationary result underlay, orange cover, and curved paper fold keep stable stacking", () => {
   const resultIndex = componentSource.indexOf('<View style={styles.resultTicketLayer}>');
   const outerIndex = componentSource.indexOf('<View pointerEvents="none" style={styles.ticketOuterLayer}>');
-  const peelIndex = componentSource.indexOf('<Animated.View style={[styles.ticketPeelLayer, peelLayerStyle]}>');
+  const peelIndex = componentSource.indexOf('<Animated.View style={[styles.ticketPeelLayer, { width: peelSurfaceSize.width || "100%" }, peelLayerStyle]}>');
   assert.ok(resultIndex >= 0 && resultIndex < outerIndex && outerIndex < peelIndex);
   assert.match(
     componentSource,
@@ -254,8 +278,8 @@ test("the stationary result underlay, orange cover, and three-tone paper fold ke
   );
   assert.match(componentSource, /styles\.paperFold,[\s\S]*?paperFoldStyle/);
   assert.match(componentSource, /styles\.paperFoldShadow, paperFoldShadowStyle/);
-  assert.match(componentSource, /styles\.paperFoldMidtone/);
-  assert.match(componentSource, /styles\.paperFoldHighlight/);
+  assert.match(componentSource, /fill="url\(#kuji-paper-curl\)"/);
+  assert.match(componentSource, /fill="url\(#kuji-curl-shadow\)"/);
   assert.match(
     componentSource,
     /<View collapsable=\{false\} pointerEvents="none" style=\{styles\.ticketGlowClip\}>/,
@@ -267,4 +291,12 @@ test("the stationary result underlay, orange cover, and three-tone paper fold ke
   assert.match(componentSource, /ticketGlowClip: \{[\s\S]*?zIndex: 3,/);
   assert.match(componentSource, /ticketSurface: \{[\s\S]*?zIndex: 2,/);
   assert.doesNotMatch(componentSource, /ticketPayoffGlow|KUJI_TICKET_GLOW/);
+});
+
+test("the right ticket end is a stationary sibling outside the clipped moving cover", () => {
+  assert.match(componentSource, /<View\s+testID="kuji-fixed-right-edge"/);
+  assert.match(componentSource, /styles\.ticketPeelTravelClip, \{ right: rightEdgeWidth \}/);
+  assert.match(componentSource, /ticketFixedRightEdge: \{\s*position: "absolute",\s*right: 0,/);
+  assert.match(componentSource, /styles\.ticketRightEdgeImage, \{ width: peelSurfaceSize\.width \}/);
+  assert.doesNotMatch(componentSource, /styles\.ticketFixedRightEdge[^\n]*peelLayerStyle/);
 });

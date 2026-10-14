@@ -14,6 +14,7 @@ import Animated, {
   withTiming,
 } from "react-native-reanimated";
 import { scheduleOnRN } from "react-native-worklets";
+import Svg, { Defs, LinearGradient, Path, RadialGradient, Rect, Stop } from "react-native-svg";
 import { AppText as Text } from "@/components/Typography";
 import { seed } from "@/design-system/seed";
 import {
@@ -75,6 +76,9 @@ export function KujiPeelTicket({
   onRevealSettled,
 }: KujiPeelTicketProps) {
   const [ticketWidth, setTicketWidth] = useState(0);
+  const [peelSurfaceSize, setPeelSurfaceSize] = useState({ width: 0, height: 0 });
+  const rightEdgeWidth = peelSurfaceSize.width * 0.14;
+  const peelTravelWidth = peelSurfaceSize.width - rightEdgeWidth;
   const [phase, setPhase] = useState<KujiOpenMotionPhase>("sealed");
   const dragProgress = useSharedValue(0);
   const impactProgress = useSharedValue(0);
@@ -323,7 +327,7 @@ export function KujiPeelTicket({
     return {
       opacity: frame.coverOpacity,
       transform: [
-        { translateX: frame.coverTravelRatio * ticketWidth },
+        { translateX: frame.coverTravelRatio * peelTravelWidth },
         { rotate: `${frame.coverRotationDeg}deg` },
         { scale: interpolate(pressed.value, [0, 1], [1, 0.994]) },
       ],
@@ -360,10 +364,11 @@ export function KujiPeelTicket({
     );
     return {
       opacity: frame.edgeLightOpacity,
-      transform: [{ translateX: frame.coverTravelRatio * ticketWidth - 10 }],
+      transform: [{ translateX: frame.coverTravelRatio * peelTravelWidth - 10 }],
     };
   });
-  const paperFoldWidth = Math.max(50, ticketWidth * 0.2);
+  const paperFoldWidth = Math.max(36, ticketWidth * 0.14);
+  const paperFoldHeight = ticketWidth / 1.46 * 0.92;
   const paperFoldStyle = useAnimatedStyle(() => {
     const frame = sampleKujiPeelPaperMotion(
       dragProgress.value,
@@ -374,8 +379,11 @@ export function KujiPeelTicket({
       opacity: frame.foldOpacity,
       transform: [
         { translateX: -((1 - frame.foldScaleX) * paperFoldWidth) / 2 },
+        { translateY: -frame.foldLiftRatio * paperFoldHeight },
+        { perspective: Math.max(320, ticketWidth * 2.6) },
+        { rotateY: `${frame.foldRotateYDeg}deg` },
         { scaleX: frame.foldScaleX },
-        { skewY: `${interpolate(dragProgress.value, [0.43, 1], [-1.8, 0.4], Extrapolation.CLAMP)}deg` },
+        { skewY: `${frame.foldSkewYDeg}deg` },
       ],
     };
   });
@@ -443,7 +451,18 @@ export function KujiPeelTicket({
                   top: -ticketWidth / 1.46 * 0.05,
                   height: ticketWidth / 1.46 * 1.1,
                 }, peelEdgeGlowStyle]}
-              />
+              >
+                <Svg width="100%" height="100%" viewBox="0 0 20 200" preserveAspectRatio="none">
+                  <Defs>
+                    <RadialGradient id="kuji-paper-edge" cx="50%" cy="50%" r="50%">
+                      <Stop offset="0" stopColor="#FFFDF7" stopOpacity="0.7" />
+                      <Stop offset="0.4" stopColor="#FFF4DA" stopOpacity="0.28" />
+                      <Stop offset="1" stopColor="#FFF4DA" stopOpacity="0" />
+                    </RadialGradient>
+                  </Defs>
+                  <Rect width="20" height="200" fill="url(#kuji-paper-edge)" />
+                </Svg>
+              </Animated.View>
             </View>
             <Animated.View collapsable={false} pointerEvents="none" style={[styles.ticketSurface, ticketRevealStyle]}>
               <View style={styles.ticketShell}>
@@ -495,44 +514,92 @@ export function KujiPeelTicket({
                     ))}
                   </View>
                 </View>
-                <Animated.View style={[styles.ticketPeelLayer, peelLayerStyle]}>
-                  <Image
-                    accessibilityIgnoresInvertColors
-                    resizeMode="stretch"
-                    source={KUJI_TICKET_PEEL_LAYER}
-                    style={styles.ticketLayerImage}
-                  />
-                  <View style={styles.ticketCopy}>
-                    <Image
-                      accessibilityIgnoresInvertColors
-                      resizeMode="contain"
-                      source={DABBOBA_WORDMARK}
-                      style={styles.ticketWordmark}
-                    />
-                    <Text style={styles.ticketNumber}>{primaryLabel}</Text>
-                  </View>
-                  <View pointerEvents="none" style={styles.pullArrowWindow}>
-                    <View style={styles.pullArrowEraserShaft} />
-                    <View style={styles.pullArrowEraserHead} />
-                    <Animated.View style={[styles.pullArrowMotion, pullArrowStyle]}>
-                      <View style={styles.pullArrowShaftOutline} />
-                      <View style={styles.pullArrowHeadOutline} />
-                      <View style={styles.pullArrowShaftFill} />
-                      <View style={styles.pullArrowHeadFill} />
+                <View
+                  style={styles.ticketPeelViewport}
+                  onLayout={({ nativeEvent: { layout } }) => setPeelSurfaceSize((current) => (
+                    current.width === layout.width && current.height === layout.height
+                      ? current : { width: layout.width, height: layout.height }
+                  ))}
+                >
+                  <View style={[styles.ticketPeelTravelClip, { right: rightEdgeWidth }]}>
+                    <Animated.View style={[styles.ticketPeelLayer, { width: peelSurfaceSize.width || "100%" }, peelLayerStyle]}>
+                      <Image
+                        accessibilityIgnoresInvertColors
+                        resizeMode="stretch"
+                        source={KUJI_TICKET_PEEL_LAYER}
+                        style={styles.ticketLayerImage}
+                      />
+                      <View style={styles.ticketCopy}>
+                        <Image
+                          accessibilityIgnoresInvertColors
+                          resizeMode="contain"
+                          source={DABBOBA_WORDMARK}
+                          style={styles.ticketWordmark}
+                        />
+                        <Text style={styles.ticketNumber}>{primaryLabel}</Text>
+                      </View>
+                      <View pointerEvents="none" style={styles.pullArrowWindow}>
+                        <View style={styles.pullArrowEraserShaft} />
+                        <View style={styles.pullArrowEraserHead} />
+                        <Animated.View style={[styles.pullArrowMotion, pullArrowStyle]}>
+                          <View style={styles.pullArrowShaftOutline} />
+                          <View style={styles.pullArrowHeadOutline} />
+                          <View style={styles.pullArrowShaftFill} />
+                          <View style={styles.pullArrowHeadFill} />
+                        </Animated.View>
+                      </View>
+                      <Animated.View
+                        style={[
+                          styles.paperFold,
+                          { width: paperFoldWidth },
+                          paperFoldStyle,
+                        ]}
+                      >
+                        <Animated.View style={[styles.paperFoldShadow, paperFoldShadowStyle]}>
+                          <Svg width="100%" height="100%" viewBox="0 0 100 200" preserveAspectRatio="none">
+                            <Defs>
+                              <LinearGradient id="kuji-curl-shadow" x1="0" y1="0" x2="1" y2="0">
+                                <Stop offset="0" stopColor="#060906" stopOpacity="0" />
+                                <Stop offset="0.28" stopColor="#060906" stopOpacity="0.72" />
+                                <Stop offset="0.64" stopColor="#060906" stopOpacity="0.28" />
+                                <Stop offset="1" stopColor="#060906" stopOpacity="0" />
+                              </LinearGradient>
+                            </Defs>
+                            <Path d="M 4 8 Q 50 -4 84 12 C 104 48 104 152 84 188 Q 48 204 4 192 Z" fill="url(#kuji-curl-shadow)" />
+                          </Svg>
+                        </Animated.View>
+                        <Svg width="100%" height="100%" viewBox="0 0 100 200" preserveAspectRatio="none">
+                          <Defs>
+                            <LinearGradient id="kuji-paper-curl" x1="0" y1="0" x2="1" y2="0">
+                              <Stop offset="0" stopColor="#92998D" />
+                              <Stop offset="0.16" stopColor="#D0D3C7" />
+                              <Stop offset="0.42" stopColor="#FFFDF7" />
+                              <Stop offset="0.64" stopColor="#FFFFFC" />
+                              <Stop offset="0.86" stopColor="#E3E6DA" />
+                              <Stop offset="1" stopColor="#BBC1B1" />
+                            </LinearGradient>
+                          </Defs>
+                          <Path d="M 4 8 Q 50 -4 84 12 C 104 48 104 152 84 188 Q 48 204 4 192 C 23 144 23 56 4 8 Z" fill="url(#kuji-paper-curl)" />
+                          <Path d="M 4 8 C 23 56 23 144 4 192" fill="none" stroke="#737D6B" strokeWidth="1" strokeOpacity="0.36" />
+                        </Svg>
+                      </Animated.View>
                     </Animated.View>
                   </View>
-                  <Animated.View
-                    style={[
-                      styles.paperFold,
-                      { width: paperFoldWidth },
-                      paperFoldStyle,
-                    ]}
+                  {/* The original artwork's right end stays attached while only the cover peels. */}
+                  <View
+                    testID="kuji-fixed-right-edge"
+                    pointerEvents="none"
+                    style={[styles.ticketFixedRightEdge, { width: rightEdgeWidth }]}
                   >
-                    <Animated.View style={[styles.paperFoldShadow, paperFoldShadowStyle]} />
-                    <View style={styles.paperFoldMidtone} />
-                    <View style={styles.paperFoldHighlight} />
-                  </Animated.View>
-                </Animated.View>
+                    <Image
+                      accessibilityIgnoresInvertColors
+                      resizeMode="stretch"
+                      source={KUJI_TICKET_PEEL_LAYER}
+                      style={[styles.ticketRightEdgeImage, { width: peelSurfaceSize.width }]}
+                    />
+                    <View style={styles.ticketRightPerforation} />
+                  </View>
+                </View>
               </View>
             </Animated.View>
           </View>
@@ -602,11 +669,6 @@ const styles = StyleSheet.create({
     position: "absolute",
     left: 0,
     width: 20,
-    backgroundColor: "#FFF4DA",
-    shadowColor: seed.color.inverted.surface,
-    shadowOpacity: 0.2,
-    shadowRadius: 10,
-    shadowOffset: { width: 5, height: 0 },
   },
   ticketSurface: {
     ...StyleSheet.absoluteFill,
@@ -711,49 +773,61 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     zIndex: 6,
   },
-  ticketPeelLayer: {
+  ticketPeelViewport: {
     ...StyleSheet.absoluteFill,
     margin: 4,
     overflow: "hidden",
     borderRadius: seed.radius.r2,
-    alignItems: "center",
-    justifyContent: "center",
     zIndex: 7,
   },
-  paperFold: {
-    position: "absolute",
-    left: -2,
-    top: "7%",
-    bottom: "7%",
+  ticketPeelTravelClip: {
+    ...StyleSheet.absoluteFill,
     overflow: "hidden",
-    borderTopRightRadius: seed.radius.r2,
-    borderBottomRightRadius: seed.radius.r2,
-    backgroundColor: "#FFFDF7",
-    zIndex: 12,
   },
-  paperFoldShadow: {
+  ticketPeelLayer: {
     position: "absolute",
     left: 0,
     top: 0,
     bottom: 0,
-    width: "32%",
-    backgroundColor: "#BFC4BE",
+    alignItems: "center",
+    justifyContent: "center",
   },
-  paperFoldMidtone: {
-    position: "absolute",
-    left: "28%",
-    top: 0,
-    bottom: 0,
-    width: "34%",
-    backgroundColor: seed.color.stroke.muted,
-  },
-  paperFoldHighlight: {
+  ticketFixedRightEdge: {
     position: "absolute",
     right: 0,
     top: 0,
     bottom: 0,
-    width: "42%",
-    backgroundColor: "#FFFDF7",
+    overflow: "hidden",
+  },
+  ticketRightEdgeImage: {
+    position: "absolute",
+    right: 0,
+    top: 0,
+    height: "100%",
+  },
+  ticketRightPerforation: {
+    position: "absolute",
+    left: 0,
+    top: 4,
+    bottom: 4,
+    borderLeftWidth: StyleSheet.hairlineWidth,
+    borderLeftColor: "#FFF4DF",
+    borderStyle: "dashed",
+  },
+  paperFold: {
+    position: "absolute",
+    left: -2,
+    top: "4%",
+    bottom: "4%",
+    overflow: "visible",
+    zIndex: 12,
+  },
+  paperFoldShadow: {
+    position: "absolute",
+    left: "-24%",
+    top: "2%",
+    bottom: "-2%",
+    width: "160%",
   },
   ticketLayerImage: {
     ...StyleSheet.absoluteFill,

@@ -500,3 +500,7 @@ When any text-entry control loses focus, dismiss the simulated keyboard. If the 
 - Kuji is visible as “준비 중”, with sales closed even if remote category settings say active. This supersedes Kuji hiding. Exchange Room stays available and new point returns/automatic expiry conversion stay closed.
 - Both current PG applications are through PortOne: EasyPay/KICC V2 and NICE V2. Replace the active direct-Toss review choice with EasyPay. Preserve historical Toss/INICIS/KCP records and recovery code; no unverified channel, actual charge, approval or LIVE activation.
 - Revise already-published legal documents with a new policy version and preserve 2026-10-13 direct-selection HTML as historical evidence.
+
+## Native Kuji Peel — 2026-10-14 Owner Feedback
+
+- Keep the original ticket artwork's right end attached and stationary while the inner cover peels toward it. Clip the moving cover before this fixed end; do not translate or distort the fixed artwork with the cover. The completed ticket can still leave together during the existing transition to the committed result.

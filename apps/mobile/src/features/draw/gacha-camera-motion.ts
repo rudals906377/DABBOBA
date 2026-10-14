@@ -92,7 +92,9 @@ export function sampleGachaCameraMotion(progress: number, width: number, height:
     capsuleX: w / 2 + fixedX * scale + translateX,
     capsuleY: h / 2 + fixedY * scale + translateY,
     capsuleDiameter: baseDiameter * scale,
-    machineOpacity: 1 - ease(0.26, 0.40, p),
+    // Fade the low-resolution cabinet at a bounded magnification. The capsule
+    // keeps the same camera, world position and atlas through the transition.
+    machineOpacity: 1 - ease(1.45, 2.9, scale),
     // Hand off to the matching 3D shell while it is still small and resting in
     // the bay, before zoom starts. Never crossfade two large shell silhouettes.
     overlayOpacity: ease(0.001, 0.03, p),

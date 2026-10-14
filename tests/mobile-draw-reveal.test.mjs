@@ -582,7 +582,7 @@ test("the sealed kuji reveal keeps its outer background still while the complete
   assert.match(kujiTicket, /KUJI_TICKET_OUTER_LAYER = require\("\.\.\/\.\.\/\.\.\/assets\/draw\/kuji\/kuji-ticket-outer-layer\.png"\)/);
   assert.match(kujiTicket, /KUJI_TICKET_PEEL_LAYER = require\("\.\.\/\.\.\/\.\.\/assets\/draw\/kuji\/kuji-ticket-peel-layer\.png"\)/);
   assert.match(kujiTicket, /<View pointerEvents="none" style=\{styles\.ticketOuterLayer\}>[\s\S]*?source=\{KUJI_TICKET_OUTER_LAYER\}[\s\S]*?styles\.tearEdge/);
-  assert.match(kujiTicket, /<Animated\.View style=\{\[styles\.ticketPeelLayer, peelLayerStyle\]\}>[\s\S]*?source=\{KUJI_TICKET_PEEL_LAYER\}[\s\S]*?styles\.ticketCopy[\s\S]*?styles\.pullArrowWindow/);
+  assert.match(kujiTicket, /<Animated\.View style=\{\[styles\.ticketPeelLayer, \{ width: peelSurfaceSize\.width \|\| "100%" \}, peelLayerStyle\]\}>[\s\S]*?source=\{KUJI_TICKET_PEEL_LAYER\}[\s\S]*?styles\.ticketCopy[\s\S]*?styles\.pullArrowWindow/);
   assert.doesNotMatch(kujiTicket, /ticketOuterLayer, peelLayerStyle/);
   assert.match(agentGuide, /two-layer reveal composition[\s\S]*?outer orange background[\s\S]*?moving inner peel layer/);
 

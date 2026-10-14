@@ -29,6 +29,16 @@ test("the 3D handoff finishes at pickup scale before the camera magnifies the sh
   assert.ok(sampleGachaCameraMotion(0.07, 340, 624).scale > handoff.scale);
 });
 
+test("the low-resolution cabinet leaves before closeup magnification exposes its pixels", () => {
+  for (const [width, height] of [[280, 440], [390, 670], [430, 932], [768, 1024]]) {
+    for (let step = 0; step <= 200; step += 1) {
+      const frame = sampleGachaCameraMotion(step / 200, width, height);
+      if (frame.scale <= 1.4) assert.equal(frame.machineOpacity, 1);
+      if (frame.scale >= 3) assert.equal(frame.machineOpacity, 0);
+    }
+  }
+});
+
 test("the pickup capsule rests inside the source-image aperture behind its front lip", () => {
   // The actual source image maps its black aperture to x109..133, with the lip at y267.
   assert.equal(restingX, 121);
