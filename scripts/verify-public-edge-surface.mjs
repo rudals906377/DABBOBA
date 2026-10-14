@@ -31,7 +31,7 @@ const REQUIRED_LIVE_LOGIN_METHODS = Object.freeze(['KAKAO', 'NAVER', 'GOOGLE', '
 // App Store Review Guideline 4.8: offering a third-party social login requires
 // Sign in with Apple as an equivalent option, in every commerce mode.
 const THIRD_PARTY_LOGIN_METHODS = Object.freeze(['KAKAO', 'NAVER', 'GOOGLE']);
-const POLICY_VERSION = /^\d{4}-\d{2}-\d{2}$/;
+const POLICY_VERSION = /^\d{4}-\d{2}-\d{2}(?:-r[1-9][0-9]*)?$/;
 
 function isRecord(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);

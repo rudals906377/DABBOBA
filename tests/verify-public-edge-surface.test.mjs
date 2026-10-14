@@ -24,6 +24,18 @@ function fixtureFetch(overrides = {}) {
   return { calls, fetchImpl };
 }
 
+test('Edge release smoke accepts published policy revisions and rejects malformed revisions', async () => {
+  for (const version of ['2026-10-13-r2', '2026-10-14-r10', '2026-10-14-r0', '2026-10-14-r01', '2026-10-14-r']) {
+    const requiredPolicyVersions = { terms: version, privacy: version };
+    const fetchImpl = fixtureFetch({
+      '/v1/public/config': { ...responses['/v1/public/config'], requiredPolicyVersions },
+      '/v1/auth/providers': { ...responses['/v1/auth/providers'], requiredPolicyVersions },
+    }).fetchImpl;
+    if (version.endsWith('-r2') || version.endsWith('-r10')) await verifyPublicEdgeSurface({ fetchImpl });
+    else await assert.rejects(verifyPublicEdgeSurface({ fetchImpl }), /policy version contract/);
+  }
+});
+
 test('public Edge smoke verifies the four mobile Home/config/login contracts with GET only', async () => {
   const { calls, fetchImpl } = fixtureFetch();
   const result = await verifyPublicEdgeSurface({ fetchImpl });
