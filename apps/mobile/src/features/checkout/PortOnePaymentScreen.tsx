@@ -35,7 +35,7 @@ import {
   isPortOneUserCancel,
   isPortOneUserCancelError,
 } from "@/features/checkout/payment-abandon";
-import { normalizedPaymentCustomerName } from "@/features/checkout/payment-customer";
+import { normalizedPaymentCustomerName, normalizedPaymentOrderName, paymentCustomerNameByteLimit } from "@/features/checkout/payment-customer";
 import { checkoutPaymentChannel } from "@/features/checkout/payment-channel";
 import {
   assertKujiPaymentLease,
@@ -249,7 +249,7 @@ export function PortOnePaymentScreen() {
 
   const startPayment = useCallback(async (paymentOrder: CheckoutOrder) => {
     if (startingRef.current || completedRef.current) return;
-    const customerName = normalizedPaymentCustomerName(payerName);
+    const customerName = normalizedPaymentCustomerName(payerName, paymentOrder.cardPayment?.pgProvider);
     if (!customerName) return;
     startingRef.current = true;
     setPhase("loading");
@@ -411,7 +411,7 @@ export function PortOnePaymentScreen() {
 
   const paymentRequest = useMemo(() => {
     if (!order || phase !== "paying" || order.total <= 0) return null;
-    const customerName = normalizedPaymentCustomerName(payerName);
+    const customerName = normalizedPaymentCustomerName(payerName, order.cardPayment?.pgProvider);
     if (!customerName) return null;
     const orderName = order.orderKind === "SHIPPING_FEE"
       ? "다뽀바 배송비"
@@ -421,7 +421,7 @@ export function PortOnePaymentScreen() {
     return {
       ...checkoutPaymentChannel(order, { storeId, channelKey }),
       paymentId: order.paymentId,
-      orderName: orderName.slice(0, 100),
+      orderName: normalizedPaymentOrderName(orderName, order.cardPayment?.pgProvider),
       totalAmount: order.total,
       currency: "KRW" as const,
       payMethod: "CARD" as const,
@@ -457,12 +457,12 @@ export function PortOnePaymentScreen() {
               style={styles.nameInput}
             />
           </SeedInputShell>
-          {payerName.trim() && !normalizedPaymentCustomerName(payerName) ? (
-            <Text style={styles.stateBody}>결제자 이름은 한글 10자 이내(최대 30바이트)로 입력해 주세요.</Text>
+          {payerName.trim() && !normalizedPaymentCustomerName(payerName, order?.cardPayment?.pgProvider) ? (
+            <Text style={styles.stateBody}>결제자 이름의 길이와 특수문자를 확인해 주세요. 최대 {paymentCustomerNameByteLimit(order?.cardPayment?.pgProvider)}바이트까지 입력할 수 있어요.</Text>
           ) : null}
           <SeedActionButton
             label="카드 결제창 열기"
-            disabled={!normalizedPaymentCustomerName(payerName)}
+            disabled={!normalizedPaymentCustomerName(payerName, order?.cardPayment?.pgProvider)}
             onPress={() => { if (order) void startPayment(order); }}
           />
         </KeyboardAvoidingView>

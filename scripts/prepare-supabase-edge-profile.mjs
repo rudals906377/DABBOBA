@@ -48,13 +48,20 @@ const LIVE_PAYMENT_IDENTIFIERS = [
 // Optional second card channel (KCP) in the same LIVE store; see
 // docs/portone-multi-card-channel.md.
 export const PORTONE_KCP_CHANNEL_KEY = 'DABBOBA_API_PORTONE_KCP_CHANNEL_KEY';
+export const PORTONE_ADDITIONAL_CHANNEL_KEYS = Object.freeze([
+  PORTONE_KCP_CHANNEL_KEY,
+  'DABBOBA_API_PORTONE_INICIS_CHANNEL_KEY',
+  'DABBOBA_API_PORTONE_NICE_CHANNEL_KEY',
+  'DABBOBA_API_PORTONE_KICC_CHANNEL_KEY',
+]);
+const LIVE_PORTONE_PROVIDERS = ['PORTONE_V2_INICIS', 'PORTONE_V2_NICE', 'PORTONE_V2_KICC'];
 // Every LIVE payment setting the release validator reads. The serializer keeps
 // them so a reviewed LIVE profile never silently loses a channel on rewrite.
 export const LIVE_PAYMENT_PROFILE_KEYS = Object.freeze([
   ...LIVE_PAYMENT_SECRETS,
   ...LIVE_PAYMENT_IDENTIFIERS,
   'DABBOBA_API_PORTONE_CHANNEL_ENVIRONMENT',
-  PORTONE_KCP_CHANNEL_KEY,
+  ...PORTONE_ADDITIONAL_CHANNEL_KEYS,
   'PAYMENT_RECONCILIATION_PROVIDER',
   'PORTONE_RECONCILIATION_API_BASE_URL',
   'PAYMENT_RECONCILIATION_WORKER_SECRET',
@@ -285,13 +292,20 @@ function assertLivePaymentConfiguration(values, providers) {
   for (const key of ['KG_INICIS_ENVIRONMENT', 'KG_INICIS_MID', 'KG_INICIS_INIAPI_KEY', 'KG_INICIS_CLIENT_IP']) {
     if (values[key]?.trim()) throw new Error('LIVE Edge PortOne API requery cannot use the legacy KG INICIS inquiry rail.');
   }
-  const kcpChannelKey = values[PORTONE_KCP_CHANNEL_KEY];
-  if (kcpChannelKey !== undefined && kcpChannelKey !== '' && (
-    kcpChannelKey !== kcpChannelKey.trim()
-    || !/^channel-key-[A-Za-z0-9-]{1,160}$/.test(kcpChannelKey)
-    || kcpChannelKey === values.DABBOBA_API_PORTONE_CHANNEL_KEY
-  )) {
-    throw new Error(`LIVE Edge ${PORTONE_KCP_CHANNEL_KEY} must be a distinct valid channel key in the same store.`);
+  const channels = [values.DABBOBA_API_PORTONE_CHANNEL_KEY];
+  for (const key of PORTONE_ADDITIONAL_CHANNEL_KEYS) {
+    const channel = values[key];
+    if (channel === undefined || channel === '') continue;
+    if (channel !== channel.trim() || !/^channel-key-[A-Za-z0-9-]{1,160}$/.test(channel) || channels.includes(channel)) {
+      throw new Error(`LIVE Edge ${key} must be a distinct valid channel key in the same store.`);
+    }
+    channels.push(channel);
+  }
+  const primary = values.DABBOBA_API_PAYMENT_PROVIDER;
+  if ((primary === 'PORTONE_V2_NICE' && values.DABBOBA_API_PORTONE_NICE_CHANNEL_KEY)
+    || (primary === 'PORTONE_V2_KICC' && values.DABBOBA_API_PORTONE_KICC_CHANNEL_KEY)
+    || (primary === 'PORTONE_V2_INICIS' && PORTONE_ADDITIONAL_CHANNEL_KEYS.slice(1).some(key => values[key]?.trim()))) {
+    throw new Error('LIVE Edge additional channels must match the primary provider without overriding it.');
   }
 }
 
@@ -324,6 +338,9 @@ function assertNoPaymentReviewLogin(values) {
 
 export function assertSupabaseEdgeReleaseConfiguration(values, { expectedCommerceMode = 'PRELAUNCH' } = {}) {
   assertNoPaymentReviewLogin(values);
+  if (Object.entries(values).some(([key, value]) => /^(?:DABBOBA_API_)?TOSS_PAYMENTS_/.test(key) && value?.trim())) {
+    throw new Error('Production Edge profiles cannot contain the staging-only direct Toss credentials.');
+  }
   assertStoreReviewLoginProfile(values);
   for (const key of SUPABASE_EDGE_EXTERNAL_REQUIRED_KEYS) {
     if (!values?.[key]?.trim()) {
@@ -346,7 +363,7 @@ export function assertSupabaseEdgeReleaseConfiguration(values, { expectedCommerc
       ...LIVE_PAYMENT_SECRETS,
       ...LIVE_PAYMENT_IDENTIFIERS,
       'DABBOBA_API_PORTONE_CHANNEL_ENVIRONMENT',
-      PORTONE_KCP_CHANNEL_KEY,
+      ...PORTONE_ADDITIONAL_CHANNEL_KEYS,
       'PAYMENT_RECONCILIATION_PROVIDER',
       'PORTONE_RECONCILIATION_API_BASE_URL',
       'PAYMENT_RECONCILIATION_WORKER_SECRET',
@@ -354,8 +371,8 @@ export function assertSupabaseEdgeReleaseConfiguration(values, { expectedCommerc
       throw new Error('PRELAUNCH Edge profile must not contain LIVE payment or requery settings.');
     }
   } else if (values.DABBOBA_API_COMMERCE_MODE !== 'LIVE'
-    || values.DABBOBA_API_PAYMENT_PROVIDER !== 'PORTONE_V2_INICIS') {
-    throw new Error('LIVE Edge profile requires LIVE commerce and PORTONE_V2_INICIS.');
+    || !LIVE_PORTONE_PROVIDERS.includes(values.DABBOBA_API_PAYMENT_PROVIDER)) {
+    throw new Error('LIVE Edge profile requires LIVE commerce and an approved PortOne V2 card provider.');
   }
 
   const providers = parseCustomerAuthProviders(values.DABBOBA_API_CUSTOMER_AUTH_ENABLED_PROVIDERS);
@@ -450,7 +467,7 @@ function validate(values, expectedCommerceMode = 'PRELAUNCH') {
   }
   if (
     values.DABBOBA_ENVIRONMENT_TIER !== 'PRODUCTION'
-    || values.DABBOBA_API_PAYMENT_PROVIDER !== (expectedCommerceMode === 'LIVE' ? 'PORTONE_V2_INICIS' : 'UNCONFIGURED')
+    || !(expectedCommerceMode === 'LIVE' ? LIVE_PORTONE_PROVIDERS : ['UNCONFIGURED']).includes(values.DABBOBA_API_PAYMENT_PROVIDER)
     || values.DABBOBA_ENABLE_PRODUCTION_WORKER !== 'true'
     || values.DABBOBA_STORAGE_BUCKET !== 'dabboba-media'
     || values.DABBOBA_API_CATALOG_MEDIA_BASE_URL !== `https://${SUPABASE_INTEGRATION_PROJECT_REF}.supabase.co/functions/v1/dabboba-api`

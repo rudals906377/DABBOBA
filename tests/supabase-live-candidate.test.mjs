@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -10,6 +10,8 @@ test('LIVE candidate reader rejects public files and symlinks before parsing cre
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   const publicPath = join(directory, 'public.env');
   writeFileSync(publicPath, 'DABBOBA_ENVIRONMENT_TIER=PRODUCTION\n', { mode: 0o644 });
+  // A private operator umask must not turn this deliberately public fixture into 0600.
+  chmodSync(publicPath, 0o644);
   assert.throws(() => readSupabaseLiveCandidateProfile(publicPath), /private regular file/);
   const symlinkPath = join(directory, 'linked.env');
   symlinkSync(publicPath, symlinkPath);

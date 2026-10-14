@@ -96,6 +96,35 @@ test("migration config allows the legacy URL only outside production", () => {
   );
 });
 
+test("NICE and EasyPay LIVE candidates stay on the production project and reject review access", () => {
+  const base = {
+    NODE_ENV: "production", API_SURFACE: "customer",
+    DABBOBA_ENVIRONMENT_TIER: "PRODUCTION", DABBOBA_RELEASE_ENVIRONMENT_TIER: "PRODUCTION",
+    DATABASE_URL: "postgresql://dabboba_runtime:synthetic@db.rconfxsykttfvznakile.supabase.co/postgres",
+    SUPABASE_URL: "https://rconfxsykttfvznakile.supabase.co", WEB_ORIGINS: "https://dabboba.net",
+    SESSION_TOKEN_PEPPER: "live-synthetic-session-pepper-01234567890123456789",
+    DABBOBA_COMMERCE_MODE: "LIVE", PORTONE_CHANNEL_ENVIRONMENT: "LIVE",
+    PAYMENT_WEBHOOK_SECRET: "live-synthetic-normalized-secret-01234567890123456789",
+    PAYMENT_RECONCILIATION_WORKER_SECRET: "live-synthetic-worker-secret-01234567890123456789",
+    PORTONE_API_SECRET: "live-synthetic-api-secret-0123456789",
+    PORTONE_WEBHOOK_SECRET: "live-synthetic-webhook-secret-0123456789",
+    PORTONE_MERCHANT_ID: "synthetic-merchant", PORTONE_STORE_ID: "synthetic-store",
+  };
+  for (const pg of ["NICE", "KICC"]) {
+    const env = { ...base, PAYMENT_PROVIDER: `PORTONE_V2_${pg}`, PORTONE_CHANNEL_KEY: `channel-key-${pg.toLowerCase()}`,
+      [pg === "NICE" ? "PORTONE_KICC_CHANNEL_KEY" : "PORTONE_NICE_CHANNEL_KEY"]: "channel-key-secondary",
+      PORTONE_INICIS_CHANNEL_KEY: "channel-key-historical-inicis", PORTONE_KCP_CHANNEL_KEY: "channel-key-historical-kcp" };
+    assert.equal(loadApiConfig(env).portOne?.channelEnvironment, "LIVE");
+    for (const override of [
+      { PORTONE_CHANNEL_ENVIRONMENT: "TEST" }, { DABBOBA_RELEASE_ENVIRONMENT_TIER: "STAGING" },
+      { DATABASE_URL: "postgresql://dabboba_runtime:synthetic@db.lyzcyrdiazorjaqlgblr.supabase.co/postgres" },
+      { SUPABASE_URL: "https://lyzcyrdiazorjaqlgblr.supabase.co" },
+      { PAYMENT_REVIEW_LOGIN_ENABLED: "true" }, { PAYMENT_RECONCILIATION_WORKER_SECRET: "" },
+      { PORTONE_CHANNEL_KEY: "channel-key-secondary" }, { DABBOBA_COMMERCE_MODE: "PRELAUNCH" },
+    ]) assert.throws(() => loadApiConfig({ ...env, ...override }));
+  }
+});
+
 test("migration config rejects Supabase Transaction pooler URLs", () => {
   assert.throws(
     () => loadMigrationConfig({

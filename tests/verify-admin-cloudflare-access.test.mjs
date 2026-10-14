@@ -34,8 +34,10 @@ test('the committed console config keeps the Worker off workers.dev and preview 
   const committed = JSON.parse(readFileSync(ADMIN_WRANGLER_CONFIG, 'utf8'));
   assert.equal(committed.workers_dev, false);
   assert.equal(committed.preview_urls, false);
-  // Access is set up by the operator; until then the LIVE check refuses.
-  assert.throws(() => readAdminAccessSettings(readFileSync(ADMIN_WRANGLER_CONFIG, 'utf8')), /ADMIN_CLOUDFLARE_ACCESS_TEAM_DOMAIN/);
+  assert.deepEqual(readAdminAccessSettings(JSON.stringify(committed)), {
+    teamDomain: 'white-wood-63cd.cloudflareaccess.com',
+    audience: '54c5052c1aff54d306a0db06ae05bf3d20bd67bc6c61172ffd19f452e91f107e',
+  });
 });
 
 test('Access settings must be complete and the bypass hostnames off', () => {

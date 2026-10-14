@@ -60,6 +60,16 @@ const productionPublicEnvironment = {
   EXPO_PUBLIC_PORTONE_CHANNEL_KEY: "channel-key-dabboba-production",
 };
 
+test("mobile LIVE gate accepts NICE and EasyPay while rejecting TEST channels", () => {
+  for (const provider of ["PORTONE_V2_NICE", "PORTONE_V2_KICC"]) {
+    const environment = { ...productionPublicEnvironment, PAYMENT_PROVIDER: provider };
+    const report = inspectMobileReleaseConfig({ rootDir, environment });
+    assert.equal(report.errors.some(issue => issue.code === "PAYMENT_PROVIDER_NOT_READY"), false);
+    const testReport = inspectMobileReleaseConfig({ rootDir, environment: { ...environment, PORTONE_CHANNEL_ENVIRONMENT: "TEST" } });
+    assert.ok(testReport.errors.some(issue => issue.code === "PORTONE_LIVE_CHANNEL_REQUIRED"));
+  }
+});
+
 test("mobile release structure is store-shaped without external credentials", () => {
   const report = inspectMobileReleaseConfig({
     rootDir,

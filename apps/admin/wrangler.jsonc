@@ -1,6 +1,7 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "dabboba-admin",
+  "account_id": "e2e1645ee7006824232a8b657bd784f5",
   "main": ".open-next/worker.js",
   "compatibility_date": "2026-09-26",
   "compatibility_flags": ["nodejs_compat"],
@@ -17,6 +18,8 @@
     "DABBOBA_ENVIRONMENT_TIER": "PRODUCTION",
     "DABBOBA_API_URL": "https://rconfxsykttfvznakile.supabase.co/functions/v1/dabboba-admin-api",
     "ADMIN_EDGE_CLIENT_IP_HEADER": "cf-connecting-ip",
+    "ADMIN_CLOUDFLARE_ACCESS_TEAM_DOMAIN": "white-wood-63cd.cloudflareaccess.com",
+    "ADMIN_CLOUDFLARE_ACCESS_AUD": "54c5052c1aff54d306a0db06ae05bf3d20bd67bc6c61172ffd19f452e91f107e",
     "ADMIN_SESSION_COOKIE_NAME": "__Host-dabboba_admin_session"
   },
   "observability": { "enabled": true }

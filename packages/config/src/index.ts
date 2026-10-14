@@ -3,6 +3,7 @@ import { loadMediaStorageConfig, type MediaStorageConfiguration } from "./media-
 import {
   loadPaymentReviewLogin,
   assertPaymentReviewBoundary,
+  assertStoreReviewBoundary,
   loadPaymentReviewProxySecret,
   loadStoreReviewLogin,
   type PaymentReviewLogin,
@@ -380,7 +381,9 @@ function paymentConfig(
   const extraChannels = [kiccChannelKey, niceChannelKey, kcpChannelKey, inicisChannelKey].filter((key): key is string => Boolean(key));
   if ((kiccChannelKey || niceChannelKey) && (!modernReview || !portOneComplete
     || extraChannels.some(key => !/^channel-key-[A-Za-z0-9-]{1,160}$/.test(key) || key === portOneValues.channelKey)
-    || new Set(extraChannels).size !== extraChannels.length)) throw new Error("Additional PortOne review channels require complete distinct TEST configuration");
+    || new Set(extraChannels).size !== extraChannels.length
+    || (paymentProvider === "PORTONE_V2_NICE" && niceChannelKey)
+    || (paymentProvider === "PORTONE_V2_KICC" && kiccChannelKey))) throw new Error("Additional PortOne channels require complete distinct configuration and cannot replace the primary channel");
   if (kcpChannelKey && (!portOneComplete || !portOneProvider
     || kcpChannelKey === portOneValues.channelKey || !/^channel-key-[A-Za-z0-9-]{1,160}$/.test(kcpChannelKey))) {
     throw new Error("PORTONE_KCP_CHANNEL_KEY requires a complete PortOne rail and a distinct valid channel key");
@@ -390,10 +393,12 @@ function paymentConfig(
     || inicisChannelKey === portOneValues.channelKey || inicisChannelKey === kcpChannelKey)) {
     throw new Error("PORTONE_INICIS_CHANNEL_KEY requires a NICE rail and a distinct historical channel");
   }
-  if (modernReview
-    && (env.DABBOBA_ENVIRONMENT_TIER !== "STAGING" || env.DABBOBA_RELEASE_ENVIRONMENT_TIER !== "STAGING"
-      || portOneValues.channelEnvironment !== "TEST")) {
-    throw new Error("NICE/EasyPay currently requires explicit STAGING tiers and a TEST channel; LIVE approval is not verified");
+  if (modernReview) {
+    const staging = env.DABBOBA_ENVIRONMENT_TIER === "STAGING" && env.DABBOBA_RELEASE_ENVIRONMENT_TIER === "STAGING"
+      && portOneValues.channelEnvironment === "TEST";
+    const live = env.DABBOBA_ENVIRONMENT_TIER === "PRODUCTION" && env.DABBOBA_RELEASE_ENVIRONMENT_TIER === "PRODUCTION"
+      && portOneValues.channelEnvironment === "LIVE";
+    if (!staging && !live) throw new Error("NICE/EasyPay requires explicit matching STAGING TEST or PRODUCTION LIVE tiers");
   }
   const explicitSupabaseDemoTestRail = (
     env.DABBOBA_BACKEND_PROFILE?.trim() === "supabase-demo"
@@ -700,10 +705,12 @@ export function loadApiConfig(env: Environment = process.env): ApiConfig {
     }
   }
   const payment = paymentConfig(env, runtime, pepper, proxyIdentitySecret);
-  if (["PORTONE_V2_NICE", "PORTONE_V2_KICC"].includes(payment.paymentProvider)) assertPaymentReviewBoundary({
-    environmentTier, databaseUrl: required(env, "DATABASE_URL"), supabaseUrl: optional(env, "SUPABASE_URL"),
-    portOne: payment.portOne ?? null, tossPayments: null,
-  });
+  if (["PORTONE_V2_NICE", "PORTONE_V2_KICC"].includes(payment.paymentProvider)) {
+    const boundary = { environmentTier, databaseUrl: required(env, "DATABASE_URL"),
+      supabaseUrl: optional(env, "SUPABASE_URL"), portOne: payment.portOne ?? null, tossPayments: null };
+    if (payment.portOne?.channelEnvironment === "TEST") assertPaymentReviewBoundary(boundary);
+    else assertStoreReviewBoundary(boundary);
+  }
   const paymentReviewLogin = includesCustomer ? loadPaymentReviewLogin(env, {
     environmentTier, databaseUrl: required(env, "DATABASE_URL"),
     supabaseUrl: supabaseAuth.supabaseUrl ?? null, portOne: payment.portOne ?? null, tossPayments: payment.tossPayments ?? null,
