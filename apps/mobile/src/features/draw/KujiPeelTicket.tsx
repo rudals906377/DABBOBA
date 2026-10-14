@@ -466,7 +466,7 @@ export function KujiPeelTicket({
             </View>
             <Animated.View collapsable={false} pointerEvents="none" style={[styles.ticketSurface, ticketRevealStyle]}>
               <View style={styles.ticketShell}>
-                <View style={styles.resultTicketLayer}>
+                <View style={[styles.resultTicketLayer, { right: rightEdgeWidth }]}>
                   <View style={styles.resultTicketBand}>
                     <View style={styles.resultTicketBrandLockup}>
                       <Image

@@ -260,7 +260,7 @@ test("the peel claims early horizontal intent and tells the parent scroll when i
 });
 
 test("the stationary result underlay, orange cover, and curved paper fold keep stable stacking", () => {
-  const resultIndex = componentSource.indexOf('<View style={styles.resultTicketLayer}>');
+  const resultIndex = componentSource.indexOf('<View style={[styles.resultTicketLayer, { right: rightEdgeWidth }]}>');
   const outerIndex = componentSource.indexOf('<View pointerEvents="none" style={styles.ticketOuterLayer}>');
   const peelIndex = componentSource.indexOf('<Animated.View style={[styles.ticketPeelLayer, { width: peelSurfaceSize.width || "100%" }, peelLayerStyle]}>');
   assert.ok(resultIndex >= 0 && resultIndex < outerIndex && outerIndex < peelIndex);
@@ -296,6 +296,7 @@ test("the stationary result underlay, orange cover, and curved paper fold keep s
 test("the right ticket end is a stationary sibling outside the clipped moving cover", () => {
   assert.match(componentSource, /<View\s+testID="kuji-fixed-right-edge"/);
   assert.match(componentSource, /styles\.ticketPeelTravelClip, \{ right: rightEdgeWidth \}/);
+  assert.match(componentSource, /styles\.resultTicketLayer, \{ right: rightEdgeWidth \}/);
   assert.match(componentSource, /ticketFixedRightEdge: \{\s*position: "absolute",\s*right: 0,/);
   assert.match(componentSource, /styles\.ticketRightEdgeImage, \{ width: peelSurfaceSize\.width \}/);
   assert.doesNotMatch(componentSource, /styles\.ticketFixedRightEdge[^\n]*peelLayerStyle/);
