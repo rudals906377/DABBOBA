@@ -111,7 +111,7 @@ export function GachaCapsuleVisual({
         {split ? heroDetail ? (
           <>
             <View style={[styles.heroUpperCavity, { backgroundColor: palette.cavity }]} />
-            <View style={[styles.heroUpperInnerLip, { backgroundColor: palette.seam }]} />
+            <View style={[styles.heroUpperInnerLip, { backgroundColor: upperColor }]} />
           </>
         ) : (
           <>

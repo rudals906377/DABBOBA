@@ -3,7 +3,7 @@ import { createRequire } from "node:module";
 import { readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { chromium } from "playwright";
+import { chromium } from "@playwright/test";
 import {
   CAPSULE_3D_FRAGMENT_SHADER,
   CAPSULE_3D_VERTEX_SHADER,
@@ -306,7 +306,7 @@ if (rendered.visiblePixelCounts.at(-1) !== 0) {
 
 const atlas = Buffer.from(rendered.pngDataUrl.slice(pngPrefix.length), "base64");
 const require = createRequire(import.meta.url);
-const playwrightVersion = (require("playwright/package.json") as { version: string }).version;
+const playwrightVersion = (require("@playwright/test/package.json") as { version: string }).version;
 const manifest = {
   schemaVersion: 1,
   kind: "analytical-capsule-reveal",

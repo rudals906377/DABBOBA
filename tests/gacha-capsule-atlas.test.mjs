@@ -247,3 +247,19 @@ test("supersampled closed sphere has a smooth antialiased contour without enlarg
   assert.equal(manifest.frameHeight, 256);
   assert.equal(decoded.width * decoded.height * 4, 15 * 1024 * 1024);
 });
+
+test("the opened upper shell has no saturated green coupling line", () => {
+  // Pose 35 cleanly separates the white upper cap from the green lower bowl.
+  // Check opaque upper-cap pixels, excluding the translucent inner-light halo.
+  const decoded = decodeRgbaPng(atlasPng);
+  const frame = framePixels(decoded, 35);
+  let greenRimPixels = 0;
+  for (let y = 48; y <= 128; y += 1) {
+    for (let x = 32; x < 160; x += 1) {
+      const offset = (y * manifest.frameWidth + x) * 4;
+      const [r, g, b, a] = frame.subarray(offset, offset + 4);
+      if (a >= 245 && g - r > 18 && g - b > 18) greenRimPixels += 1;
+    }
+  }
+  assert.equal(greenRimPixels, 0, "the white upper lip must not inherit the green bowl material");
+});

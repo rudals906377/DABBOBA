@@ -109,10 +109,10 @@
     "webgl": "WebGL 1 / ANGLE SwiftShader"
   },
   "hashes": {
-    "atlasSha256": "313d06f8f236606fa03d028c6082b964e5b2a9bb571165e38b82043f0f93046f",
+    "atlasSha256": "9c82f2ada99952b1e873b69d1f881b031663f554465bfba6291a46c29a281c2c",
     "wordmarkSha256": "c88cddefd4b874c0e82c1efbfea49c58db1fa7ac31965aebe58b26d69c602355",
     "vertexShaderSha256": "52a7130a60fa8bc1c56d4157727ebd230a0d3af710410d9f9b9afe084a5c21aa",
-    "fragmentShaderSha256": "12db67bf15ce995ebe827ac48b0b5e5a76d92645e32e8931116b0d6294cafcaf",
+    "fragmentShaderSha256": "e41469e76085dd5172c5d7a0777ac53bc58c4313b83e7250e814bc916a7a83eb",
     "revealTimelineSha256": "b85097a13eeb4a50ecee31b6cafa9b5b1234f0d2060e9002998c5c25d46ef99f"
   }
 }
