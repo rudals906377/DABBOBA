@@ -16,7 +16,7 @@ import Animated, {
   withTiming,
 } from "react-native-reanimated";
 import { scheduleOnRN } from "react-native-worklets";
-import Svg, { Defs, Path, RadialGradient, Rect, Stop } from "react-native-svg";
+import Svg, { Defs, LinearGradient, Path, RadialGradient, Rect, Stop } from "react-native-svg";
 import { seed } from "@/design-system/seed";
 import {
   GACHA_AGITATION_DURATION_MS,
@@ -604,6 +604,18 @@ export const GachaLeverMachine = memo(function GachaLeverMachine({
           style={[styles.machine, machineMotionStyle, settled && { opacity: 0 }]}
         >
           <Image source={GACHA_MACHINE} resizeMode="contain" style={styles.machineArt} />
+          <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+            <Svg width="100%" height="100%" viewBox="0 0 190 338">
+              <Defs>
+                <LinearGradient id="cabinet-satin-finish" x1="0" y1="0" x2="1" y2="1">
+                  <Stop offset="0" stopColor="#E9F1EA" stopOpacity="0.12" />
+                  <Stop offset="0.4" stopColor="#D4E3D6" stopOpacity="0.025" />
+                  <Stop offset="1" stopColor="#040907" stopOpacity="0.12" />
+                </LinearGradient>
+              </Defs>
+              <Path d="M 46 49 H 144 V 76 H 46 Z M 45 202 H 145 V 282 H 45 Z M 109 239 H 133 V 268 H 109 Z" fillRule="evenodd" fill="url(#cabinet-satin-finish)" />
+            </Svg>
+          </View>
           <View pointerEvents="none" style={styles.machineMarquee}>
             <Image
               source={DABBOBA_WORDMARK}
@@ -1075,7 +1087,19 @@ const GachaChamber = memo(function GachaChamber({
         />
       ))}
       <View style={styles.chamberGlassTint} />
-      <View style={styles.chamberGlassReflection} />
+      <View style={styles.chamberGlassReflection}>
+        <Svg width="100%" height="100%" viewBox="0 0 100 100" preserveAspectRatio="none">
+          <Defs>
+            <LinearGradient id="chamber-soft-reflection" x1="0" y1="0" x2="1" y2="0">
+              <Stop offset="0" stopColor="#F4FFF5" stopOpacity="0" />
+              <Stop offset="0.42" stopColor="#F4FFF5" stopOpacity="0.09" />
+              <Stop offset="0.62" stopColor="#FFFFFF" stopOpacity="0.12" />
+              <Stop offset="1" stopColor="#F4FFF5" stopOpacity="0" />
+            </LinearGradient>
+          </Defs>
+          <Rect width="100" height="100" fill="url(#chamber-soft-reflection)" />
+        </Svg>
+      </View>
       <View style={styles.chamberGlassReflectionThin} />
       <View style={styles.chamberFrontLip} />
       <View style={styles.chamberInnerStroke} />
@@ -1248,7 +1272,7 @@ const GachaChamberCapsule = memo(function GachaChamberCapsule({
         motionStyle,
       ]}
     >
-      <GachaCapsuleVisual tone={capsule.tone} depth={capsule.depth} diameter={capsule.size} />
+      <GachaCapsuleVisual tone={capsule.tone} depth={capsule.depth} diameter={capsule.size} materialRotation={-capsule.restRotation} />
     </Animated.View>
   );
 });
@@ -1452,7 +1476,7 @@ const styles = StyleSheet.create({
   chamberGlassTint: {
     ...StyleSheet.absoluteFill,
     zIndex: 200,
-    backgroundColor: "rgba(16, 22, 18, 0.09)",
+    backgroundColor: "rgba(16, 22, 18, 0.055)",
   },
   chamberGlassReflection: {
     position: "absolute",
@@ -1462,7 +1486,6 @@ const styles = StyleSheet.create({
     width: 13,
     height: 132,
     borderRadius: seed.radius.r2,
-    backgroundColor: "rgba(255, 255, 255, 0.045)",
     transform: [{ rotate: "11deg" }],
   },
   chamberGlassReflectionThin: {

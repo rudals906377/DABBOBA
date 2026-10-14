@@ -344,7 +344,7 @@ test("paper detaches continuously and invalid flight inputs cannot escape bounds
     const frame = sampleKujiPeelPaperMotion(1, false, false, progress);
     assert.ok(Object.values(frame).every(Number.isFinite));
     assert.ok(frame.foldFlightXRatio >= 0 && frame.foldFlightXRatio <= 1.2);
-    assert.ok(frame.foldFlightYRatio <= 0 && frame.foldFlightYRatio >= -0.56);
+    assert.ok(frame.foldFlightYRatio <= 0.81 && frame.foldFlightYRatio >= -0.12);
   }
 });
 
@@ -367,4 +367,18 @@ test("the printed cover starts inside the opaque curl instead of behind its conc
       "the cover boundary must overlap the solid center of the paper, beyond the curved left contour");
   }
   assert.equal(sampleKujiPeelPaperMotion(0.5, true, true).coverClipInsetRatio, 0);
+});
+
+
+test("detached paper coasts with drag, falls under gravity and limits its residual rotation", () => {
+  const at = (f) => sampleKujiPeelPaperMotion(1, false, false, f);
+  assert.ok(at(0.2).foldFlightYRatio < 0, "release gives a small upward impulse");
+  assert.ok(at(0.7).foldFlightYRatio > 0, "gravity brings the paper below its release height");
+  const firstTravel = at(0.2).foldFlightXRatio - at(0.1).foldFlightXRatio;
+  const lastTravel = at(0.9).foldFlightXRatio - at(0.8).foldFlightXRatio;
+  assert.ok(lastTravel < firstTravel, "paper must coast rather than accelerate like a projectile");
+  for (let i=0; i<=100; i++) {
+    assert.ok(Math.abs(at(i/100).foldRotateZDeg) <= 60);
+    assert.equal(at(i/100).foldOpacity, i === 100 ? 0 : 1);
+  }
 });

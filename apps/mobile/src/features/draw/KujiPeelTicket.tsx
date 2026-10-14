@@ -133,8 +133,8 @@ export function KujiPeelTicket({
           "worklet";
           if (finished && !reduceMotion) {
             paperFlightProgress.value = withTiming(1, {
-              duration: 460,
-              easing: Easing.in(Easing.quad),
+              duration: 600,
+              easing: Easing.linear,
             });
           }
           scheduleOnRN(handleTravelSettled, generation, Boolean(finished));
