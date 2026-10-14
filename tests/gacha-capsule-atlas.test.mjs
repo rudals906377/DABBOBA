@@ -263,3 +263,27 @@ test("the opened upper shell has no saturated green coupling line", () => {
   }
   assert.equal(greenRimPixels, 0, "the white upper lip must not inherit the green bowl material");
 });
+
+test("the lower bowl's exposed mouth has no green speckles above its bright face", () => {
+  const frame = framePixels(decodeRgbaPng(atlasPng), 35);
+  let greenEdgePixels = 0;
+  let checked = 0;
+  for (let x = 55; x <= 140; x += 1) {
+    // Locate the rear lip after the transparent gap, separately in each column.
+    let edgeY = -1;
+    for (let y = 131; y < 160; y += 1) {
+      if (frame[(y * manifest.frameWidth + x) * 4 + 3] >= 245) { edgeY = y; break; }
+    }
+    assert.ok(edgeY >= 0);
+    for (let y = edgeY; y < edgeY + 2; y += 1) {
+      const offset = (y * manifest.frameWidth + x) * 4;
+      const [r, g, b, a] = frame.subarray(offset, offset + 4);
+      if (a >= 245 && g - r > 18 && g - b > 18) greenEdgePixels += 1;
+      checked += 1;
+    }
+  }
+  assert.equal(checked, 172);
+  assert.equal(greenEdgePixels, 0, "the exposed lower collar must blend into its bright mouth");
+  const bowl = (190 * manifest.frameWidth + 96) * 4;
+  assert.ok(frame[bowl + 1] - frame[bowl] > 25, "the actual bowl must remain green");
+});

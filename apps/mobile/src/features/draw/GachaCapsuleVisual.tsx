@@ -146,7 +146,7 @@ export function GachaCapsuleVisual({
         {split ? heroDetail ? (
           <>
             <View style={[styles.heroLowerCavity, { backgroundColor: palette.cavity }]} />
-            <View style={[styles.heroLowerInnerLip, { backgroundColor: palette.seam }]} />
+            <View style={[styles.heroLowerInnerLip, { backgroundColor: "#F0F5F0" }]} />
           </>
         ) : <View style={[styles.splitLowerSeam, { backgroundColor: palette.border }]} /> : null}
       </Animated.View>
