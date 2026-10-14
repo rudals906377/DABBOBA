@@ -132,18 +132,18 @@ export function KujiPeelTicket({
           scheduleOnRN(handleTravelSettled, generation, Boolean(finished));
         },
       );
-      dragProgress.value = travel.slowTearMs > 0
+      const tear = travel.slowTearMs > 0
         ? withSequence(
-            withDelay(
-              travel.holdMs,
-              withTiming(travel.splitProgress, {
-                duration: travel.slowTearMs,
-                easing: slowTearEasing,
-              }),
-            ),
+            withTiming(travel.splitProgress, {
+              duration: travel.slowTearMs,
+              easing: slowTearEasing,
+            }),
             finishTravel,
           )
         : finishTravel;
+      // Delay the entire tear: a delayed first sequence step can inherit the
+      // final step as its previous animation and briefly expose the end frame.
+      dragProgress.value = travel.holdMs > 0 ? withDelay(travel.holdMs, tear) : tear;
       return;
     }
 
@@ -318,19 +318,14 @@ export function KujiPeelTicket({
     ],
   }));
 
-  const peelLayerStyle = useAnimatedStyle(() => {
+  const peelMaskStyle = useAnimatedStyle(() => {
     const frame = sampleKujiPeelPaperMotion(
       dragProgress.value,
       dragging.value >= 0.5,
       reduceMotion,
     );
     return {
-      opacity: frame.coverOpacity,
-      transform: [
-        { translateX: frame.coverTravelRatio * peelTravelWidth },
-        { rotate: `${frame.coverRotationDeg}deg` },
-        { scale: interpolate(pressed.value, [0, 1], [1, 0.994]) },
-      ],
+      left: frame.peelBoundaryRatio * peelTravelWidth,
     };
   });
   const resultGateOpen = isKujiResultGateOpen(phase, resultReady, settled);
@@ -364,7 +359,7 @@ export function KujiPeelTicket({
     );
     return {
       opacity: frame.edgeLightOpacity,
-      transform: [{ translateX: frame.coverTravelRatio * peelTravelWidth - 10 }],
+      transform: [{ translateX: frame.peelBoundaryRatio * peelTravelWidth - 10 }],
     };
   });
   const paperFoldWidth = Math.max(36, ticketWidth * 0.14);
@@ -378,7 +373,7 @@ export function KujiPeelTicket({
     return {
       opacity: frame.foldOpacity,
       transform: [
-        { translateX: -((1 - frame.foldScaleX) * paperFoldWidth) / 2 },
+        { translateX: frame.peelBoundaryRatio * peelTravelWidth - ((1 - frame.foldScaleX) * paperFoldWidth) / 2 },
         { translateY: -frame.foldLiftRatio * paperFoldHeight },
         { perspective: Math.max(320, ticketWidth * 2.6) },
         { rotateY: `${frame.foldRotateYDeg}deg` },
@@ -522,67 +517,72 @@ export function KujiPeelTicket({
                   ))}
                 >
                   <View style={[styles.ticketPeelTravelClip, { right: rightEdgeWidth }]}>
-                    <Animated.View style={[styles.ticketPeelLayer, { width: peelSurfaceSize.width || "100%" }, peelLayerStyle]}>
-                      <Image
-                        accessibilityIgnoresInvertColors
-                        resizeMode="stretch"
-                        source={KUJI_TICKET_PEEL_LAYER}
-                        style={styles.ticketLayerImage}
-                      />
-                      <View style={styles.ticketCopy}>
+                    <Animated.View style={[styles.ticketPeelMask, peelMaskStyle]}>
+                      <View
+                        testID="kuji-stationary-cover"
+                        style={[styles.ticketPeelLayer, { width: peelSurfaceSize.width || "100%", right: -rightEdgeWidth }]}
+                      >
                         <Image
                           accessibilityIgnoresInvertColors
-                          resizeMode="contain"
-                          source={DABBOBA_WORDMARK}
-                          style={styles.ticketWordmark}
+                          resizeMode="stretch"
+                          source={KUJI_TICKET_PEEL_LAYER}
+                          style={styles.ticketLayerImage}
                         />
-                        <Text style={styles.ticketNumber}>{primaryLabel}</Text>
+                        <View style={styles.ticketCopy}>
+                          <Image
+                            accessibilityIgnoresInvertColors
+                            resizeMode="contain"
+                            source={DABBOBA_WORDMARK}
+                            style={styles.ticketWordmark}
+                          />
+                          <Text style={styles.ticketNumber}>{primaryLabel}</Text>
+                        </View>
+                        <View pointerEvents="none" style={styles.pullArrowWindow}>
+                          <View style={styles.pullArrowEraserShaft} />
+                          <View style={styles.pullArrowEraserHead} />
+                          <Animated.View style={[styles.pullArrowMotion, pullArrowStyle]}>
+                            <View style={styles.pullArrowShaftOutline} />
+                            <View style={styles.pullArrowHeadOutline} />
+                            <View style={styles.pullArrowShaftFill} />
+                            <View style={styles.pullArrowHeadFill} />
+                          </Animated.View>
+                        </View>
                       </View>
-                      <View pointerEvents="none" style={styles.pullArrowWindow}>
-                        <View style={styles.pullArrowEraserShaft} />
-                        <View style={styles.pullArrowEraserHead} />
-                        <Animated.View style={[styles.pullArrowMotion, pullArrowStyle]}>
-                          <View style={styles.pullArrowShaftOutline} />
-                          <View style={styles.pullArrowHeadOutline} />
-                          <View style={styles.pullArrowShaftFill} />
-                          <View style={styles.pullArrowHeadFill} />
-                        </Animated.View>
-                      </View>
-                      <Animated.View
-                        style={[
-                          styles.paperFold,
-                          { width: paperFoldWidth },
-                          paperFoldStyle,
-                        ]}
-                      >
-                        <Animated.View style={[styles.paperFoldShadow, paperFoldShadowStyle]}>
-                          <Svg width="100%" height="100%" viewBox="0 0 100 200" preserveAspectRatio="none">
-                            <Defs>
-                              <LinearGradient id="kuji-curl-shadow" x1="0" y1="0" x2="1" y2="0">
-                                <Stop offset="0" stopColor="#060906" stopOpacity="0" />
-                                <Stop offset="0.28" stopColor="#060906" stopOpacity="0.72" />
-                                <Stop offset="0.64" stopColor="#060906" stopOpacity="0.28" />
-                                <Stop offset="1" stopColor="#060906" stopOpacity="0" />
-                              </LinearGradient>
-                            </Defs>
-                            <Path d="M 4 8 Q 50 -4 84 12 C 104 48 104 152 84 188 Q 48 204 4 192 Z" fill="url(#kuji-curl-shadow)" />
-                          </Svg>
-                        </Animated.View>
+                    </Animated.View>
+                    <Animated.View
+                      style={[
+                        styles.paperFold,
+                        { width: paperFoldWidth },
+                        paperFoldStyle,
+                      ]}
+                    >
+                      <Animated.View style={[styles.paperFoldShadow, paperFoldShadowStyle]}>
                         <Svg width="100%" height="100%" viewBox="0 0 100 200" preserveAspectRatio="none">
                           <Defs>
-                            <LinearGradient id="kuji-paper-curl" x1="0" y1="0" x2="1" y2="0">
-                              <Stop offset="0" stopColor="#92998D" />
-                              <Stop offset="0.16" stopColor="#D0D3C7" />
-                              <Stop offset="0.42" stopColor="#FFFDF7" />
-                              <Stop offset="0.64" stopColor="#FFFFFC" />
-                              <Stop offset="0.86" stopColor="#E3E6DA" />
-                              <Stop offset="1" stopColor="#BBC1B1" />
+                            <LinearGradient id="kuji-curl-shadow" x1="0" y1="0" x2="1" y2="0">
+                              <Stop offset="0" stopColor="#060906" stopOpacity="0" />
+                              <Stop offset="0.28" stopColor="#060906" stopOpacity="0.72" />
+                              <Stop offset="0.64" stopColor="#060906" stopOpacity="0.28" />
+                              <Stop offset="1" stopColor="#060906" stopOpacity="0" />
                             </LinearGradient>
                           </Defs>
-                          <Path d="M 4 8 Q 50 -4 84 12 C 104 48 104 152 84 188 Q 48 204 4 192 C 23 144 23 56 4 8 Z" fill="url(#kuji-paper-curl)" />
-                          <Path d="M 4 8 C 23 56 23 144 4 192" fill="none" stroke="#737D6B" strokeWidth="1" strokeOpacity="0.36" />
+                          <Path d="M 4 8 Q 50 -4 84 12 C 104 48 104 152 84 188 Q 48 204 4 192 Z" fill="url(#kuji-curl-shadow)" />
                         </Svg>
                       </Animated.View>
+                      <Svg width="100%" height="100%" viewBox="0 0 100 200" preserveAspectRatio="none">
+                        <Defs>
+                          <LinearGradient id="kuji-paper-curl" x1="0" y1="0" x2="1" y2="0">
+                            <Stop offset="0" stopColor="#92998D" />
+                            <Stop offset="0.16" stopColor="#D0D3C7" />
+                            <Stop offset="0.42" stopColor="#FFFDF7" />
+                            <Stop offset="0.64" stopColor="#FFFFFC" />
+                            <Stop offset="0.86" stopColor="#E3E6DA" />
+                            <Stop offset="1" stopColor="#BBC1B1" />
+                          </LinearGradient>
+                        </Defs>
+                        <Path d="M 4 8 Q 50 -4 84 12 C 104 48 104 152 84 188 Q 48 204 4 192 C 23 144 23 56 4 8 Z" fill="url(#kuji-paper-curl)" />
+                        <Path d="M 4 8 C 23 56 23 144 4 192" fill="none" stroke="#737D6B" strokeWidth="1" strokeOpacity="0.36" />
+                      </Svg>
                     </Animated.View>
                   </View>
                   {/* The original artwork's right end stays attached while only the cover peels. */}
@@ -786,11 +786,18 @@ const styles = StyleSheet.create({
   },
   ticketPeelLayer: {
     position: "absolute",
-    left: 0,
+    right: 0,
     top: 0,
     bottom: 0,
     alignItems: "center",
     justifyContent: "center",
+  },
+  ticketPeelMask: {
+    position: "absolute",
+    top: 0,
+    bottom: 0,
+    right: 0,
+    overflow: "hidden",
   },
   ticketFixedRightEdge: {
     position: "absolute",

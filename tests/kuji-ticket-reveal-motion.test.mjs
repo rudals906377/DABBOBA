@@ -124,20 +124,18 @@ test("the paper sampler keeps the prize fixed while the cover peels and its whit
   const wideFold = sampleKujiPeelPaperMotion(0.75);
   const opened = sampleKujiPeelPaperMotion(1);
 
-  assert.equal(sealed.coverTravelRatio, 0);
+  assert.equal(sealed.peelBoundaryRatio, 0);
   assert.equal(sealed.foldOpacity, 0);
   assert.ok(dragStarted.foldOpacity > 0,
     "the paper curl must appear as soon as a horizontal drag becomes active");
   assert.ok(dragStarted.foldShadowOpacity > 0,
     "the immediate curl should include its depth shadow");
-  assert.ok(firstFold.coverTravelRatio > 0);
+  assert.ok(firstFold.peelBoundaryRatio > 0);
   assert.ok(firstFold.foldOpacity > 0);
   assert.ok(wideFold.foldScaleX > firstFold.foldScaleX);
   assert.ok(wideFold.foldShadowOpacity > 0);
-  assert.equal(opened.coverTravelRatio, 1.12);
-  assert.ok(Math.abs(opened.coverOpacity - 0.1) < Number.EPSILON * 4);
+  assert.equal(opened.peelBoundaryRatio, 1);
   assert.equal(opened.foldOpacity, 0);
-  assert.ok(opened.coverRotationDeg < 0 && opened.coverRotationDeg >= -0.8);
 
   assert.ok(
     sampleKujiPeelPaperMotion(0.5, true).edgeLightOpacity
@@ -152,9 +150,7 @@ test("paper peel samples stay finite, clamped, and spatially still under Reduced
     for (const [key, value] of Object.entries(frame)) {
       assert.ok(Number.isFinite(value), `${key} must remain finite at ${progress}`);
     }
-    assert.ok(frame.coverTravelRatio >= 0 && frame.coverTravelRatio <= 1.12);
-    assert.ok(frame.coverRotationDeg >= -0.8 && frame.coverRotationDeg <= 0);
-    assert.ok(frame.coverOpacity >= 0.1 - Number.EPSILON && frame.coverOpacity <= 1);
+    assert.ok(frame.peelBoundaryRatio >= 0 && frame.peelBoundaryRatio <= 1);
     assert.ok(frame.foldScaleX >= 0 && frame.foldScaleX <= 1);
     assert.ok(frame.foldOpacity >= 0 && frame.foldOpacity <= 1);
     assert.ok(frame.foldShadowOpacity >= 0 && frame.foldShadowOpacity <= 0.3);
@@ -164,9 +160,7 @@ test("paper peel samples stay finite, clamped, and spatially still under Reduced
   assert.deepEqual(sampleKujiPeelPaperMotion(-10), sampleKujiPeelPaperMotion(0));
   assert.deepEqual(sampleKujiPeelPaperMotion(10), sampleKujiPeelPaperMotion(1));
   assert.deepEqual(sampleKujiPeelPaperMotion(0.8, true, true), {
-    coverTravelRatio: 0,
-    coverRotationDeg: 0,
-    coverOpacity: 1,
+    peelBoundaryRatio: 0,
     foldScaleX: 0,
     foldOpacity: 0,
     foldShadowOpacity: 0,
@@ -176,9 +170,7 @@ test("paper peel samples stay finite, clamped, and spatially still under Reduced
     foldSkewYDeg: 0,
   });
   assert.deepEqual(sampleKujiPeelPaperMotion(1, true, true), {
-    coverTravelRatio: 1.12,
-    coverRotationDeg: 0,
-    coverOpacity: 0,
+    peelBoundaryRatio: 1,
     foldScaleX: 0,
     foldOpacity: 0,
     foldShadowOpacity: 0,
@@ -238,7 +230,7 @@ test("the restrained edge cue follows the paper boundary and stays clipped", () 
   );
   assert.match(
     componentSource,
-    /frame\.coverTravelRatio \* peelTravelWidth - 10/,
+    /frame\.peelBoundaryRatio \* peelTravelWidth - 10/,
   );
   assert.match(componentSource, /styles\.ticketPeelEdgeGlow,[\s\S]*?peelEdgeGlowStyle/);
   assert.match(
@@ -262,7 +254,7 @@ test("the peel claims early horizontal intent and tells the parent scroll when i
 test("the stationary result underlay, orange cover, and curved paper fold keep stable stacking", () => {
   const resultIndex = componentSource.indexOf('<View style={[styles.resultTicketLayer, { right: rightEdgeWidth }]}>');
   const outerIndex = componentSource.indexOf('<View pointerEvents="none" style={styles.ticketOuterLayer}>');
-  const peelIndex = componentSource.indexOf('<Animated.View style={[styles.ticketPeelLayer, { width: peelSurfaceSize.width || "100%" }, peelLayerStyle]}>');
+  const peelIndex = componentSource.indexOf('<Animated.View style={[styles.ticketPeelMask, peelMaskStyle]}>');
   assert.ok(resultIndex >= 0 && resultIndex < outerIndex && outerIndex < peelIndex);
   assert.match(
     componentSource,
@@ -299,5 +291,13 @@ test("the right ticket end is a stationary sibling outside the clipped moving co
   assert.match(componentSource, /styles\.resultTicketLayer, \{ right: rightEdgeWidth \}/);
   assert.match(componentSource, /ticketFixedRightEdge: \{\s*position: "absolute",\s*right: 0,/);
   assert.match(componentSource, /styles\.ticketRightEdgeImage, \{ width: peelSurfaceSize\.width \}/);
-  assert.doesNotMatch(componentSource, /styles\.ticketFixedRightEdge[^\n]*peelLayerStyle/);
+  assert.doesNotMatch(componentSource, /styles\.ticketFixedRightEdge[^\n]*peelMaskStyle/);
+});
+
+
+test("the printed cover stays still and only its mask and paper curl advance", () => {
+  assert.match(componentSource, /<View\s+testID="kuji-stationary-cover"/);
+  assert.match(componentSource, /left: frame\.peelBoundaryRatio \* peelTravelWidth/);
+  assert.match(componentSource, /width: peelSurfaceSize\.width \|\| "100%", right: -rightEdgeWidth/);
+  assert.doesNotMatch(componentSource, /peelLayerStyle|coverRotationDeg|coverOpacity/);
 });

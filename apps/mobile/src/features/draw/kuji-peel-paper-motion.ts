@@ -1,7 +1,5 @@
 export type KujiPeelPaperMotion = {
-  coverTravelRatio: number;
-  coverRotationDeg: number;
-  coverOpacity: number;
+  peelBoundaryRatio: number;
   foldScaleX: number;
   foldOpacity: number;
   foldShadowOpacity: number;
@@ -23,9 +21,8 @@ function smootherStep(start: number, end: number, value: number) {
 }
 
 /**
- * Keeps the result ticket fixed while only the cover and its folded paper back
- * travel from left to right. Values mirror the supplied 2.17 s reference clip
- * without coupling the visual motion to a particular prize or server result.
+ * The flat printed cover stays registered to the ticket. Only its clipping
+ * boundary and curled paper back advance from left to right.
  */
 export function sampleKujiPeelPaperMotion(
   progress: number,
@@ -36,9 +33,7 @@ export function sampleKujiPeelPaperMotion(
   const p = clampProgress(progress);
   if (reduceMotion) {
     return {
-      coverTravelRatio: p >= 1 ? 1.12 : 0,
-      coverRotationDeg: 0,
-      coverOpacity: p >= 1 ? 0 : 1,
+      peelBoundaryRatio: p >= 1 ? 1 : 0,
       foldScaleX: 0,
       foldOpacity: 0,
       foldShadowOpacity: 0,
@@ -61,9 +56,7 @@ export function sampleKujiPeelPaperMotion(
   const bend = Math.sin(Math.PI * p);
 
   return {
-    coverTravelRatio: p * 1.12,
-    coverRotationDeg: -0.8 * smootherStep(0.52, 1, p),
-    coverOpacity: 1 - 0.9 * foldExit,
+    peelBoundaryRatio: p,
     foldScaleX: (0.06 + 0.94 * foldIn) * (1 - 0.44 * foldNarrowing),
     foldOpacity: foldIn * (1 - foldExit),
     foldShadowOpacity: 0.3 * foldIn * (1 - foldExit),

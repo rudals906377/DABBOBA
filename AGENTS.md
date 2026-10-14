@@ -503,4 +503,4 @@ When any text-entry control loses focus, dismiss the simulated keyboard. If the 
 
 ## Native Kuji Peel — 2026-10-14 Owner Feedback
 
-- Keep the original ticket artwork's right end attached and stationary while the inner cover peels toward it. Clip the moving cover before this fixed end; do not translate or distort the fixed artwork with the cover. The completed ticket can still leave together during the existing transition to the committed result.
+- Keep the ticket and its flat printed cover stationary during opening, including the original right end. Reveal from left to right by advancing a clipping boundary; translate only the curled paper at that boundary. Never slide, scale or rotate the flat cover or its printing. The completed ticket can still leave together during the existing transition to the committed result.
