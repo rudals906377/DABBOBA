@@ -353,6 +353,9 @@ export function KujiPeelTicket({
       ),
     };
   });
+  const tearEdgeStyle = useAnimatedStyle(() => ({
+    opacity: dragProgress.value > 0 || dragging.value >= 0.5 ? 0 : 1,
+  }));
   const resultGateOpen = isKujiResultGateOpen(phase, resultReady, settled);
   const ticketRevealStyle = useAnimatedStyle(() => {
     const frame = sampleKujiTicketRevealMotion(
@@ -529,11 +532,11 @@ export function KujiPeelTicket({
                     source={KUJI_TICKET_OUTER_LAYER}
                     style={styles.ticketLayerImage}
                   />
-                  <View style={styles.tearEdge}>
+                  <Animated.View style={[styles.tearEdge, tearEdgeStyle]}>
                     {Array.from({ length: 10 }, (_, index) => (
                       <View key={index} style={styles.tearTooth} />
                     ))}
-                  </View>
+                  </Animated.View>
                 </View>
                 <View
                   style={styles.ticketPeelViewport}
