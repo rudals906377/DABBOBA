@@ -382,3 +382,32 @@ test("detached paper coasts with drag, falls under gravity and limits its residu
     assert.equal(at(i/100).foldOpacity, i === 100 ? 0 : 1);
   }
 });
+
+test("the released curl compresses once, rebounds and settles its small torsion", () => {
+  const at = (f) => sampleKujiPeelPaperMotion(1, false, false, f);
+  const edge = at(0);
+  assert.ok(at(0.1).foldScaleX < edge.foldScaleX * 0.98,
+    "the newly released curl should briefly tighten before springing open");
+  assert.ok(at(0.35).foldScaleX > edge.foldScaleX,
+    "the paper should recover its width after release");
+  assert.ok(at(0.1).foldSkewYDeg > 0 && at(0.35).foldSkewYDeg < 0,
+    "the released paper should flex back once instead of turning rigidly");
+  let earlyTorsion = 0;
+  let lateTorsion = 0;
+  let largestFrameTurn = 0;
+  for (let i = 0; i <= 60; i += 1) {
+    const frame = at(i / 60);
+    if (i <= 24) earlyTorsion = Math.max(earlyTorsion, Math.abs(frame.foldSkewYDeg));
+    if (i >= 42) lateTorsion = Math.max(lateTorsion, Math.abs(frame.foldSkewYDeg));
+    assert.ok(frame.foldScaleX > edge.foldScaleX * 0.9 && frame.foldScaleX < edge.foldScaleX * 1.12);
+    assert.ok(Math.abs(frame.foldSkewYDeg) < 2, "flutter stays subtle");
+    if (i > 0) {
+      const previous = at((i - 1) / 60);
+      largestFrameTurn = Math.max(largestFrameTurn, Math.abs(frame.foldRotateYDeg - previous.foldRotateYDeg));
+    }
+  }
+  assert.ok(lateTorsion < earlyTorsion * 0.15, "flutter must settle before departure");
+  assert.ok(largestFrameTurn < 2, "release must not snap between adjacent animation frames");
+  assert.deepEqual(sampleKujiPeelPaperMotion(0.9, false, false, 0.35), sampleKujiPeelPaperMotion(0.9),
+    "the flex must never disturb paper still attached to the ticket");
+});
