@@ -81,6 +81,25 @@ function renderLeverSound() {
   }, OUTPUT_DIR, false);
 }
 
+function renderRecordedEffect(name, sourceName, sha256, duration, targetRms) {
+  const source = readFileSync(resolve(OUTPUT_DIR, "source", sourceName));
+  if (createHash("sha256").update(source).digest("hex") !== sha256) {
+    throw new Error(`Recorded source differs from its reviewed provenance: ${sourceName}`);
+  }
+  const count = source.readUInt32LE(40) / 2;
+  const samples = Array.from({ length: count }, (_, i) => source.readInt16LE(44 + i * 2) / 32768);
+  const dc = samples.reduce((sum, value) => sum + value, 0) / count;
+  const centered = samples.map((value) => value - dc);
+  const rms = Math.sqrt(centered.reduce((sum, value) => sum + value * value, 0) / count);
+  const peak = centered.reduce((max, value) => Math.max(max, Math.abs(value)), 0);
+  const gain = Math.min(targetRms / rms, 0.7 / peak);
+  renderWav(name, duration, (time, frame) => {
+    const attack = smoothstep(time / 0.003);
+    const release = 1 - smoothstep((time - duration + 0.04) / 0.025);
+    return centered[frame] * gain * attack * release;
+  }, OUTPUT_DIR, false);
+}
+
 function renderDropSound() {
   const noise = createNoise(0x5eed_1105);
   let lowNoise = 0;
@@ -132,6 +151,10 @@ function renderOpenSound() {
 
 mkdirSync(OUTPUT_DIR, { recursive: true });
 renderLeverSound();
+renderRecordedEffect("gacha-coin-drop.wav", "gacha-coin-recording.wav",
+  "3016eab302b3e59d46ed3df27b6a8d4c79ef6d837a0e6af30866d33e403bb015", 0.28, 0.10);
+renderRecordedEffect("gacha-capsules-rattle.wav", "gacha-capsule-roll-recording.wav",
+  "7b892bf5a217faef20767003e2cf07514a2197449a58868e7427c4d786b4b824", 0.48, 0.12);
 renderDropSound();
 renderOpenSound();
 const KUJI_DIR = resolve(ROOT, "apps/mobile/assets/draw/kuji/sfx");
@@ -156,4 +179,4 @@ for (const [name, duration, seed, strength] of [
     return paper * strength * env * grain;
   }, KUJI_DIR);
 }
-console.log("Generated six deterministic gacha/kuji material sound effects");
+console.log("Generated eight deterministic gacha/kuji material sound effects");

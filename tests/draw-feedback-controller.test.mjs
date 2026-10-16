@@ -119,6 +119,27 @@ test("sound and haptic preferences can be disabled separately", async () => {
   assert.ok(events.includes("haptic:primary"));
 });
 
+test("one coin drop and two chamber beats mix independently with all six lever strokes", async () => {
+  const events = [];
+  const options = { sound: true, haptics: false, foreground: true };
+  const player = (name) => ({ seekTo: async () => {}, play: () => events.push(`play:${name}`), pause: () => events.push(`pause:${name}`) });
+  const controller = createDrawFeedbackController({ coin: player("coin"), chamber: player("chamber"), primary: player("lever") },
+    () => options, async () => {});
+  controller.begin(7);
+  for (let stroke = 1; stroke <= 6; stroke++) {
+    await controller.emit("coin", 7);
+    await controller.emit("primary", 7, stroke);
+    if (stroke === 1 || stroke === 4) await controller.emit("chamber", 7, stroke === 1 ? 1 : 2);
+  }
+  assert.equal(events.filter((e) => e === "play:coin").length, 1);
+  assert.equal(events.filter((e) => e === "play:chamber").length, 2);
+  assert.equal(events.filter((e) => e === "play:lever").length, 6);
+  events.length = 0; options.sound = false; controller.stopSound();
+  assert.deepEqual(events.sort(), ["pause:chamber", "pause:coin", "pause:lever"]);
+  await controller.emit("chamber", 7, 3);
+  assert.equal(events.length, 3);
+});
+
 test("failed or unavailable native feedback never rejects the presentation", async () => {
   const broken = createDrawFeedbackController({ primary: { seekTo: async () => { throw Error("missing"); },
     play: () => { throw Error("released"); }, pause: () => { throw Error("released"); } } },

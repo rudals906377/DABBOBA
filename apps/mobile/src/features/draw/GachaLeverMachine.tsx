@@ -148,6 +148,8 @@ export const GachaLeverMachine = memo(function GachaLeverMachine({
     cancelScheduled: cancelRevealSounds,
     playDropImpact: playDropImpactSound,
     playRebound: playReboundSound,
+    playCoin: playCoinSound,
+    playChamber: playChamberSound,
     playLever: playLeverSound,
     playSeamOpen: playSeamOpenSound,
     scheduleDispense: scheduleDispenseSounds,
@@ -280,6 +282,7 @@ export const GachaLeverMachine = memo(function GachaLeverMachine({
       // reverses; only an explicit reset or Reduced Motion clears the count.
       if (drive.pulseCount <= triggeredPulseCount.value) return;
       triggeredPulseCount.value = drive.pulseCount;
+      scheduleOnRN(playChamberSound, animationRun.value, drive.pulseCount);
       cancelAnimation(agitationProgress);
       agitationProgress.value = 0;
       agitationProgress.value = withTiming(1, {
@@ -287,7 +290,7 @@ export const GachaLeverMachine = memo(function GachaLeverMachine({
         easing: Easing.linear,
       });
     },
-    [reduceMotion],
+    [reduceMotion, playChamberSound],
   );
 
   // Observe the displayed handle, not touch-down or its immediately updated target.
@@ -420,6 +423,7 @@ export const GachaLeverMachine = memo(function GachaLeverMachine({
   const autoCompleteLever = useCallback(() => {
     if (disabled || motionStateRef.current.phase !== "ready" || gestureCompleted.value) return;
     const run = animationRun.value;
+    playCoinSound(run);
     cancelAnimation(clockwiseCueRotation);
     clockwiseCueOpacity.value = 0;
     gestureCompleted.value = 1;
@@ -436,7 +440,7 @@ export const GachaLeverMachine = memo(function GachaLeverMachine({
         if (finished) scheduleOnRN(beginOpen, run);
       },
     );
-  }, [animationRun, beginOpen, clockwiseCueOpacity, clockwiseCueRotation, disabled, gestureCompleted, interactionRadians, leverRadians, reduceMotion]);
+  }, [animationRun, beginOpen, clockwiseCueOpacity, clockwiseCueRotation, disabled, gestureCompleted, interactionRadians, leverRadians, playCoinSound, reduceMotion]);
 
   useEffect(() => {
     if (requestSignalRef.current === requestSignal) return;
@@ -478,6 +482,7 @@ export const GachaLeverMachine = memo(function GachaLeverMachine({
       gestureAccepted.value = 1;
       previousAngle.value = start.angle ?? Number.NaN;
       gestureCompleted.value = 0;
+      scheduleOnRN(playCoinSound, animationRun.value);
       manager.activate();
     })
     .onTouchesUp((_event, manager) => {
@@ -559,7 +564,7 @@ export const GachaLeverMachine = memo(function GachaLeverMachine({
       const unwind = withTiming(gestureStartRadians.value, { duration: 220, easing: smoothEasing });
       const impulseRemainingMs = Math.max(0, 1 - agitationProgress.value) * GACHA_AGITATION_DURATION_MS;
       leverRadians.value = impulseRemainingMs > 0 ? withDelay(impulseRemainingMs, unwind) : unwind;
-    }), [agitationProgress, animationRun, beginOpen, clockwiseCueOpacity, clockwiseCueRotation, disabled, gestureAccepted, gestureCompleted, gestureEnded, gestureStartRadians, gestureTravel, interactionRadians, leverRadians, phase, previousAngle, reduceMotion]);
+    }), [agitationProgress, animationRun, beginOpen, clockwiseCueOpacity, clockwiseCueRotation, disabled, gestureAccepted, gestureCompleted, gestureEnded, gestureStartRadians, gestureTravel, interactionRadians, leverRadians, phase, playCoinSound, previousAngle, reduceMotion]);
 
   const clockwiseCueStyle = useAnimatedStyle(() => ({
     opacity: clockwiseCueOpacity.value * 0.9,

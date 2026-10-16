@@ -1,4 +1,4 @@
-export type DrawFeedbackCue = "primary" | "secondary" | "tertiary" | "rebound";
+export type DrawFeedbackCue = "primary" | "secondary" | "tertiary" | "rebound" | "coin" | "chamber";
 export type DrawFeedbackPlayer = { seekTo: (seconds: number) => Promise<void>; play: () => void; pause: () => void };
 export type DrawFeedbackOptions = { sound: boolean; haptics: boolean; foreground: boolean };
 

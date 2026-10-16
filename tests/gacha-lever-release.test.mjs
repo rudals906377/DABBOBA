@@ -71,6 +71,7 @@ function releaseHarness(startRadians = 0, { reduceMotion = false, animationFinis
     },
     scheduleOnRN: (callback, run) => callback(run),
     playLeverSound: () => {},
+    playCoinSound: () => {},
     beginOpen: (run) => requests.push(run),
   };
   const down = runInNewContext(`(${downSource})`, scope);
@@ -217,8 +218,20 @@ test("an unfinished drag unwinds only after an already-fired chamber impulse set
 });
 
 test("unwinding the handle never clears a consumed chamber cam threshold", () => {
-  const reaction = machine.match(/useAnimatedReaction\(\s*\(\) => \(\{\s*radians: leverRadians\.value,[\s\S]*?\[reduceMotion\],\s*\);/)?.[0];
+  const reaction = machine.match(/useAnimatedReaction\(\s*\(\) => \(\{\s*radians: leverRadians\.value,[\s\S]*?\[reduceMotion, playChamberSound\],\s*\);/)?.[0];
   assert.ok(reaction, "the lever-driven chamber reaction must exist");
   assert.doesNotMatch(reaction, /triggeredPulseCount\.value = 0/);
   assert.match(reaction, /if \(drive\.pulseCount <= triggeredPulseCount\.value\) return;/);
+  const callback = reaction.match(/\(drive\) => \{[\s\S]*?\n    \}/)?.[0];
+  const sounds = [];
+  const scope = { reduceMotion: false, triggeredPulseCount: { value: 0 }, animationRun: { value: 9 },
+    agitationProgress: { value: 1 }, GACHA_AGITATION_DURATION_MS: 480,
+    cancelAnimation: () => {}, withTiming: (value) => value, Easing: { linear: undefined },
+    playChamberSound: (...args) => sounds.push(args), scheduleOnRN: (fn, ...args) => fn(...args) };
+  const stir = runInNewContext(`(${callback})`, scope);
+  for (const pulseCount of [0, 1, 1, 0, 1, 2, 2, 0]) stir({ pulseCount });
+  assert.deepEqual(sounds, [[9, 1], [9, 2]], "sound must share the two consumed physical cam impulses");
+  scope.reduceMotion = true; scope.triggeredPulseCount.value = 0;
+  stir({ pulseCount: 1 });
+  assert.equal(sounds.length, 2, "no chamber movement means no chamber rattle");
 });

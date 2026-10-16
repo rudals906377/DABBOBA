@@ -18,7 +18,9 @@ const SOURCES = {
   ],
 } as const;
 
-export function useDrawRevealFeedback(category: "gacha" | "kuji", sound: boolean, haptics: boolean) {
+export function useDrawRevealFeedback(category: "gacha" | "kuji", sound: boolean, haptics: boolean,
+  extras: Partial<Record<"coin" | "chamber", ReturnType<typeof useAudioPlayer>>> = {}) {
+  const { coin, chamber } = extras;
   const primary = useAudioPlayer(SOURCES[category][0], { downloadFirst: true, updateInterval: 1_000 });
   const secondary = useAudioPlayer(SOURCES[category][1], { downloadFirst: true, updateInterval: 1_000 });
   const tertiary = useAudioPlayer(SOURCES[category][2], { downloadFirst: true, updateInterval: 1_000 });
@@ -28,10 +30,11 @@ export function useDrawRevealFeedback(category: "gacha" | "kuji", sound: boolean
   const focused = useRef(false);
   const audioModeReady = useRef(false);
   const controller = useMemo(() => createDrawFeedbackController(
-    { primary, secondary, tertiary },
+    { primary, secondary, tertiary, coin, chamber },
     () => ({ ...preferences.current, sound: preferences.current.sound && audioModeReady.current,
       foreground: foreground.current && focused.current }),
     (cue: DrawFeedbackCue) => {
+      if (cue === "coin" || cue === "chamber") return Promise.resolve();
       if (Platform.OS === "android") {
         const contact = category === "gacha" ? cue === "secondary" : cue === "tertiary";
         return Haptics.performAndroidHapticsAsync(contact ? Haptics.AndroidHaptics.Context_Click : Haptics.AndroidHaptics.Segment_Frequent_Tick);
@@ -40,7 +43,7 @@ export function useDrawRevealFeedback(category: "gacha" | "kuji", sound: boolean
       const light = category === "gacha" ? cue === "secondary" : cue === "tertiary";
       return Haptics.impactAsync(light ? Haptics.ImpactFeedbackStyle.Light : Haptics.ImpactFeedbackStyle.Soft);
     },
-  ), [category, primary, secondary, tertiary]);
+  ), [category, primary, secondary, tertiary, coin, chamber]);
   useEffect(() => {
     void setAudioModeAsync({ allowsRecording: false, interruptionMode: "mixWithOthers", playsInSilentMode: false,
       shouldPlayInBackground: false, shouldRouteThroughEarpiece: false })
@@ -48,12 +51,13 @@ export function useDrawRevealFeedback(category: "gacha" | "kuji", sound: boolean
     return () => { audioModeReady.current = false; };
   }, []);
   useEffect(() => {
-    const volumes = category === "gacha" ? [0.5, 0.45, 0.5] : [0.5, 0.45, 0.28];
-    [primary, secondary, tertiary].forEach((player, index) => {
+    const volumes = category === "gacha" ? [0.5, 0.45, 0.5, 0.35, 0.22] : [0.5, 0.45, 0.28];
+    [primary, secondary, tertiary, coin, chamber].forEach((player, index) => {
+      if (!player) return;
       try { player.volume = volumes[index]!; player.muted = !sound; } catch { /* Optional native audio may already be released. */ }
     });
     if (!sound) controller.stopSound();
-  }, [category, controller, primary, secondary, sound, tertiary]);
+  }, [category, controller, primary, secondary, sound, tertiary, coin, chamber]);
   useFocusEffect(useCallback(() => {
     focused.current = true;
     return () => { focused.current = false; controller.cancel(); };
