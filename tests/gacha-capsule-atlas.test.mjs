@@ -226,19 +226,25 @@ test("the production atlas holds perfectly still before the seal opens", () => {
 });
 
 test("supersampled closed sphere has a smooth antialiased contour without enlarging the native texture", () => {
-  assert.equal(manifest.generator.supersample, 2);
   const decoded = decodeRgbaPng(atlasPng);
   const frame = framePixels(decoded, 0);
   let antialiased = 0;
+  const coverageLevels = new Set();
   const solid = [];
   for (let y = 0; y < manifest.frameHeight; y += 1) {
     for (let x = 0; x < manifest.frameWidth; x += 1) {
       const alpha = frame[(y * manifest.frameWidth + x) * 4 + 3];
-      if (alpha > 0 && alpha < 255) antialiased += 1;
+      if (alpha > 0 && alpha < 255) {
+        antialiased += 1;
+        coverageLevels.add(alpha);
+      }
       if (alpha >= 128) solid.push({ x, y });
     }
   }
-  assert.ok(antialiased >= 80, "the 2× offline render must produce genuine smooth coverage at the silhouette");
+  assert.ok(coverageLevels.size >= 40,
+    `magnification needs fine silhouette coverage instead of a few hard alpha steps; found ${coverageLevels.size}`);
+  assert.ok(antialiased >= 80, "offline rendering must produce genuine smooth coverage at the silhouette");
+  assert.equal(manifest.generator.supersample, 8);
   const width = Math.max(...solid.map((point) => point.x)) - Math.min(...solid.map((point) => point.x)) + 1;
   const height = Math.max(...solid.map((point) => point.y)) - Math.min(...solid.map((point) => point.y)) + 1;
   assert.ok(Math.abs(width - height) <= 2, "the closed silhouette must remain round");

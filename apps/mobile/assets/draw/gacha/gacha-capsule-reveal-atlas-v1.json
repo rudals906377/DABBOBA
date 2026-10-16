@@ -103,13 +103,14 @@
   "atlasHeight": 2560,
   "decodedBytes": 15728640,
   "generator": {
-    "supersample": 2,
+    "supersample": 8,
+    "coverageResolve": "premultiplied-area",
     "playwrightVersion": "1.61.1",
     "browserVersion": "149.0.7827.55",
     "webgl": "WebGL 1 / ANGLE SwiftShader"
   },
   "hashes": {
-    "atlasSha256": "2515481162ff054d0229b2b7f4f386165f9e019ca9568def3e521b30a28426e8",
+    "atlasSha256": "cad4f475b77e98421c5b57efca4300a5b9440786436c974827984a5cd67b1ac2",
     "wordmarkSha256": "c88cddefd4b874c0e82c1efbfea49c58db1fa7ac31965aebe58b26d69c602355",
     "vertexShaderSha256": "52a7130a60fa8bc1c56d4157727ebd230a0d3af710410d9f9b9afe084a5c21aa",
     "fragmentShaderSha256": "f4198ee4e8518b00a9688c363bd4347d41f133febeb0509a77d99f0c4270ae30",
