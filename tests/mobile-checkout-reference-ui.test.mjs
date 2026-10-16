@@ -90,7 +90,7 @@ test("checkout notices open independently and distinguish gacha from sealed kuji
     gachaSections.map(({ id, title }) => ({ id, title })),
     [
       { id: "payment-refund", title: "결제 및 결과 안내" },
-      { id: "shipping-exchange", title: "보관·배송·포인트 안내" },
+      { id: "shipping-exchange", title: "보관·배송·교환 안내" },
       { id: "post-shipping", title: "배송 후 문의 안내" },
     ],
   );
@@ -106,7 +106,7 @@ test("checkout notices open independently and distinguish gacha from sealed kuji
   const gachaCopy = JSON.stringify(gachaSections);
   const kujiCopy = JSON.stringify(kujiSections);
   const copy = gachaCopy + kujiCopy;
-  assert.match(gachaCopy, /결제 전에 포함 상품 목록과 전체·오픈 수량을 확인할 수 있습니다/);
+  assert.match(gachaCopy, /결제 전에 포함 상품 목록과 공개된 확률·수량을 확인합니다/);
   assert.match(gachaCopy, /각 캡슐을 직접 열 때 서버가 남은 구성에 따라 획득 상품을 확정/);
   assert.match(kujiCopy, /결제 전에 쿠지의 포함 상품과 등급별 남은 수량/);
   assert.match(kujiCopy, /선택한 티켓을 직접 열 때 서버가 획득 상품을 확정/);
@@ -120,7 +120,7 @@ test("checkout notices open independently and distinguish gacha from sealed kuji
   assert.match(copy, /54,900원/);
   assert.match(copy, /3,000원/);
   assert.match(copy, /60일/);
-  assert.match(copy, /50%/);
+  assert.doesNotMatch(copy, /50%|15%|자동 환급/);
   assert.doesNotMatch(copy, /결제 시 해당 상품군 내 여러 아이템 중 1종이 무작위로 지급|단순 변심.*환불은 불가능|영상 제출이 필수|쿠폰은 반환·재발급되지 않습니다/);
   assert.doesNotMatch(copy, /픽앤팝|팝페이/);
   assert.match(noticeSource, /accessibilityState=\{\{ expanded: open \}\}/);
@@ -138,7 +138,7 @@ test("checkout follows the compact reference hierarchy and exposes only the conf
     "결제 금액",
     "주문내용 확인 및 결제 동의",
     "신용/체크카드",
-    "KG이니시스 카드 결제",
+    "신용카드 결제",
   ]) {
     assert.match(checkoutSource, new RegExp(label));
   }

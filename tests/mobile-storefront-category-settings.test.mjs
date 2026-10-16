@@ -29,7 +29,7 @@ function setting(category, overrides = {}) {
 
 const defaults = () => [setting("gacha"), setting("kuji"), setting("figure"), setting("tcg")];
 
-test("operator settings can reorder customer shops without exposing internal figure records", () => {
+test("operator settings can reorder customer shops with Kuji fixed to preparing or internal figure records", () => {
   try {
     applyStorefrontCategorySettings([
       setting("gacha", { label: "캡슐", sortOrder: 30, showOnExchange: false, version: 2 }),
@@ -46,6 +46,8 @@ test("operator settings can reorder customer shops without exposing internal fig
     assert.equal(isCustomerBrowsableCatalogCategory("figure"), false);
     assert.equal(isCustomerVisibleProductCategory("figure"), false);
     for (const surface of ["home", "catalog", "exchange", "wanted"]) {
+      assert.equal(isCustomerProductCategoryEnabledOn("kuji", surface), false);
+      assert.equal(storefrontCategoryOptions(surface).some((item) => item.value === "kuji"), true);
       assert.equal(isCustomerProductCategoryEnabledOn("figure", surface), false);
       assert.equal(storefrontCategoryOptions(surface).some((item) => item.value === "figure"), false);
     }

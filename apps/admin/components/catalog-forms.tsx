@@ -81,7 +81,7 @@ export function ProductForm({ item, returnTo, initialName, initialIpId, initialP
           <option value="ON_SALE">판매 중</option>
           <option value="PAUSED">판매 중지</option>
         </select>
-        <small>판매 중은 양수 가격·공개 이미지·재고·가챠/쿠지 구성이 모두 준비된 경우만 저장됩니다.</small>
+        <small>판매 중은 선택할 상품 종류·양수 가격·공개 이미지·실제 개별 재고가 모두 준비된 경우만 저장됩니다.</small>
       </label>}
       {item ? <div className="span-2 immutable-field">
         <input type="hidden" name="isPrizeOnly" value={item.isPrizeOnly ? "on" : "off"} />
@@ -97,7 +97,7 @@ export function ProductForm({ item, returnTo, initialName, initialIpId, initialP
       <label>제조사<input name="manufacturer" defaultValue={item?.manufacturer || ""} maxLength={160} /></label><label>출시일<input type="date" name="releaseDate" defaultValue={item?.releaseDate || ""} /></label>
     </div></details>
     {!item ? <p className="muted">사진은 상품 등록 후 ‘사진 관리’에서 직접 잘라 올려주세요.</p> : null}
-    {!item ? <p className="muted">쿠지 판매 상품은 등록 후 이어지는 <strong>쿠지 상 구성</strong>에서 상 이름·노출 순서·수량을 설정하고 공개합니다.</p> : null}
+    {!item ? <p className="muted">판매 상품은 고객이 정확한 종류를 선택하는 개별 상품으로 등록합니다. 종류마다 사진·가격·실제 재고를 확인하세요.</p> : null}
     <ReasonField label={item ? "수정 사유" : "등록 사유"} /><div className="form-actions"><button className="primary">{item ? "상품 수정" : "상품 등록"}</button></div>
   </form>;
 }

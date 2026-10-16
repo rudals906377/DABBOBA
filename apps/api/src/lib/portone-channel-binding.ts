@@ -3,11 +3,11 @@ import type { Queryable } from "@dabboba/db";
 import { AppError, conflict, notFound } from "./errors.js";
 import type { PortOneV2AdapterOptions } from "./portone-v2.js";
 
-export const PORTONE_CARD_PROVIDERS = ["PORTONE_V2_INICIS", "PORTONE_V2_KCP"] as const;
-export type CardPg = "INICIS" | "KCP";
+export const PORTONE_CARD_PROVIDERS = ["PORTONE_V2_INICIS", "PORTONE_V2_KCP", "PORTONE_V2_NICE", "PORTONE_V2_KICC"] as const;
+export type CardPg = "INICIS" | "KCP" | "NICE" | "KICC";
 export type PortOneChannelBinding = {
   provider: typeof PORTONE_CARD_PROVIDERS[number];
-  pgProvider: "INICIS_V2" | "KCP_V2";
+  pgProvider: "INICIS_V2" | "KCP_V2" | "NICE_V2" | "KICC_V2";
   merchantId: string;
   storeId: string;
   channelKey: string;
@@ -17,17 +17,26 @@ export function isPortOneCardProvider(provider: string): boolean {
   return (PORTONE_CARD_PROVIDERS as readonly string[]).includes(provider);
 }
 export function configuredCardChannels(config: ApiConfig): PortOneChannelBinding[] {
-  if (config.paymentProvider !== "PORTONE_V2_INICIS" || !config.portOne || !config.paymentWebhookSecret) return [];
-  const { merchantId, storeId, channelKey, channelEnvironment, kcpChannelKey } = config.portOne;
+  if (!isPortOneCardProvider(config.paymentProvider) || !config.portOne || !config.paymentWebhookSecret) return [];
+  const { merchantId, storeId, channelKey, channelEnvironment, kcpChannelKey, inicisChannelKey, kiccChannelKey, niceChannelKey } = config.portOne;
   const shared = { merchantId, storeId, channelEnvironment };
-  return [
-    { ...shared, provider: "PORTONE_V2_INICIS", pgProvider: "INICIS_V2", channelKey },
-    ...(kcpChannelKey ? [{ ...shared, provider: "PORTONE_V2_KCP" as const, pgProvider: "KCP_V2" as const, channelKey: kcpChannelKey }] : []),
-  ];
+  const modern = ["PORTONE_V2_NICE", "PORTONE_V2_KICC"].includes(config.paymentProvider);
+  const primary = config.paymentProvider === "PORTONE_V2_KICC" ? "KICC" : config.paymentProvider === "PORTONE_V2_NICE" ? "NICE" : "INICIS";
+  const bindings: PortOneChannelBinding[] = [{...shared,provider:`PORTONE_V2_${primary}`,pgProvider:`${primary}_V2`,channelKey}];
+  for (const [pg,key] of [["INICIS",inicisChannelKey],["KCP",kcpChannelKey],["NICE",niceChannelKey],["KICC",kiccChannelKey]] as const) {
+    if(key && pg !== primary) bindings.push({...shared,provider:`PORTONE_V2_${pg}`,pgProvider:`${pg}_V2`,channelKey:key});
+  }
+  return modern ? bindings : bindings.filter(c=>c.provider === "PORTONE_V2_INICIS" || c.provider === "PORTONE_V2_KCP");
 }
-export function selectCardChannel(config: ApiConfig, pg: CardPg = "INICIS"): PortOneChannelBinding {
-  if (pg !== "INICIS" && pg !== "KCP") throw conflict("지원하지 않는 카드 결제사입니다.");
-  const channel = configuredCardChannels(config).find((item) => item.pgProvider === (pg === "KCP" ? "KCP_V2" : "INICIS_V2"));
+export function checkoutCardChannels(config: ApiConfig): PortOneChannelBinding[] {
+  const channels = configuredCardChannels(config);
+  return ["PORTONE_V2_NICE", "PORTONE_V2_KICC"].includes(config.paymentProvider)
+    ? channels.filter(channel=>["PORTONE_V2_NICE", "PORTONE_V2_KICC"].includes(channel.provider)) : channels;
+}
+export function selectCardChannel(config: ApiConfig, pg?: CardPg): PortOneChannelBinding {
+  const chosen = pg ?? (config.paymentProvider === "PORTONE_V2_KICC" ? "KICC" : config.paymentProvider === "PORTONE_V2_NICE" ? "NICE" : "INICIS");
+  if (!["INICIS", "KCP", "NICE", "KICC"].includes(chosen)) throw conflict("지원하지 않는 카드 결제사입니다.");
+  const channel = checkoutCardChannels(config).find((item) => item.pgProvider === `${chosen}_V2`);
   if (!channel) throw new AppError(503, "PAYMENT_NOT_CONFIGURED", "선택한 카드 결제사가 구성되지 않았습니다.");
   return channel;
 }
@@ -35,8 +44,9 @@ export function selectCardChannel(config: ApiConfig, pg: CardPg = "INICIS"): Por
 export function adapterOptionsForBinding(config: ApiConfig, provider: string, binding: unknown): PortOneV2AdapterOptions {
   const channels = configuredCardChannels(config);
   // Historical INICIS orders predate channel snapshots. Keep the old rail only;
-  // a new KCP order can never take this legacy fallback.
-  const expected = binding === null && provider === "PORTONE_V2_INICIS" ? channels[0] : binding;
+  // a new KCP or NICE order can never take this legacy fallback.
+  const expected = binding === null && provider === "PORTONE_V2_INICIS"
+    ? channels.find(channel=>channel.provider === "PORTONE_V2_INICIS") : binding;
   const candidate = expected && typeof expected === "object" && !Array.isArray(expected)
     ? expected as Partial<PortOneChannelBinding> : null;
   const channel = channels.find((item) => item.provider === provider

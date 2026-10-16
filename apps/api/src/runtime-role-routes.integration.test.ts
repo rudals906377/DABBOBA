@@ -1,3 +1,4 @@
+import { historicalOrderFixture } from "./legacy-order.integration-fixtures.js";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
@@ -371,7 +372,7 @@ test(
       },
       payload: gachaOrderPayload,
     });
-    const gachaOrderResponse = await createGachaOrder();
+    const gachaOrderResponse = await historicalOrderFixture(app,runtimePool,config,{headers:{authorization,"idempotency-key":gachaOrderKey},payload:gachaOrderPayload});
     assert.equal(gachaOrderResponse.statusCode, 201, gachaOrderResponse.body);
     const gachaOrder = gachaOrderResponse.json() as RuntimeOrderResponse;
     assert.equal(gachaOrder.status, "PAID");
@@ -720,7 +721,7 @@ test(
        VALUES($1,'EARN',2000,'TEST',$2,'Runtime completion integration setup')`,
       [primaryUser.userId, `runtime-completion-${suffix}`],
     );
-    const completionOrderResponse = await app.inject({
+    const completionOrderResponse = await historicalOrderFixture(app,runtimePool,config,{
       method: "POST", url: "/v1/orders",
       headers: { authorization, "idempotency-key": `runtime-completion-${randomUUID()}` },
       payload: { items: [{ productId: completionProductId, quantity: 2, expectedDrawVersion: 1 }], pointAmount: 2000 },
@@ -804,7 +805,7 @@ test(
       },
       payload: kujiOrderPayload,
     });
-    const kujiOrderResponse = await createKujiOrder();
+    const kujiOrderResponse = await historicalOrderFixture(app,runtimePool,config,{headers:{authorization:`Bearer ${kujiUser.token}`,"idempotency-key":kujiOrderKey},payload:kujiOrderPayload});
     assert.equal(kujiOrderResponse.statusCode, 201, kujiOrderResponse.body);
     const kujiOrder = kujiOrderResponse.json() as RuntimeOrderResponse;
     assert.equal(kujiOrder.status, "PAID");

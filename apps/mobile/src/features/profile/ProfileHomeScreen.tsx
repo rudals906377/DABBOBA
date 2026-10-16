@@ -47,9 +47,9 @@ type ProfileMenuItem = {
 };
 
 const COMMERCE_MENU: ReadonlyArray<ProfileMenuItem> = [
-  { section: "product-history", label: "상품 기록", caption: "최근 본·뽑은·찜한 상품" },
+  { section: "product-history", label: "상품 기록", caption: "최근 본·구매한·찜한 상품" },
   { section: "wishlist", label: "내 찜 목록" },
-  { section: "storage", label: "보관함", caption: "배송 신청 · 포인트 환급" },
+  { section: "storage", label: "보관함", caption: "교환 · 배송 신청" },
   { section: "exchange-activity", label: "내 교환 현황" },
   { section: "shipping", label: "배송 신청 내역" },
   { section: "orders", label: "구매 내역" },

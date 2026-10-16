@@ -24,7 +24,7 @@ const publishedDocuments = [
   },
   {
     key: "OPERATIONS",
-    path: new URL("../../../public/legal/community-operations/index.html", import.meta.url),
+    path: new URL("../../../docs/legal-history/community-operations-2026-09-22.html", import.meta.url),
     publicUrl: "https://dabboba.net/community-operations",
   },
 ] as const;

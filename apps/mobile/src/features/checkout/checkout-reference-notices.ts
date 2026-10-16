@@ -12,18 +12,26 @@ export type CheckoutNoticeSection = {
   groups: readonly CheckoutNoticeGroup[];
 };
 
-export type DrawCheckoutCategory = "gacha" | "kuji";
+export type DrawCheckoutCategory = "gacha" | "kuji" | "direct";
 
 export const deliveryPeriodNotice = "배송 신청 접수 후 배송 완료까지 영업일 기준 2~5일이 소요됩니다. 주말·공휴일은 제외하며, 택배사 사정 등으로 지연되는 경우 별도로 안내합니다.";
 
-export const cancellationRefundNotices = [
+export const legacyDrawCancellationRefundNotices = [
   { text: "취소·환불은 내정보의 고객센터에서 주문번호와 사유를 알려 접수할 수 있습니다. 결제, 뽑기 권리 사용 및 배송 상태를 확인한 뒤 처리 결과를 안내합니다." },
   { text: "뽑기 권리를 사용하지 않은 주문은 고객센터로 취소를 요청하면 전액 취소합니다. 일부 뽑기를 사용한 가챠 주문은 사용하지 않은 뽑기만 환불하며, 환불액은 결제 금액(카드 결제액과 사용 포인트의 합)을 뽑기 수로 나눈 금액에 사용하지 않은 뽑기 수를 곱해 원 단위 미만을 버린 금액입니다. 쿠폰 할인액은 돌려드리지 않습니다." },
   { text: "결과가 마음에 들지 않는다는 이유로 상품을 다시 뽑거나 다른 종류로 임의 변경하는 기능은 제공하지 않습니다. 법령상 청약철회·교환·환불 권리는 제한하지 않습니다." },
   { text: "환불 금액은 실제 결제 금액과 사용 포인트 등 주문 기록을 기준으로 산정합니다. 카드로 결제한 금액은 기존 결제 수단인 해당 카드의 결제를 취소해 환급하고, 주문에 사용한 포인트는 포인트로 되돌려 드립니다. 앱 포인트 환급으로 현금 환불을 대신하지 않습니다." },
-  { text: "법령상 청약철회가 가능한 경우 법정 기산일부터 7일 이내에 요청할 수 있습니다. 상품 상태와 법정 제한 사유에 따라 처리하며, 단순히 랜덤 상품이라는 이유만으로 환불을 일괄 거절하지 않습니다." },
+  { text: "법령상 청약철회가 가능한 경우 법정 기산일부터 7일 이내에 요청할 수 있습니다. 상품 상태와 법정 제한 사유에 따라 처리하며, 포함 상품 지급 방식 자체를 이유로 환불을 일괄 거절하지 않습니다." },
   { text: "법령에 따른 환급은 상품을 반환받은 날, 또는 상품을 공급하지 않았다면 청약철회한 날부터 3영업일 이내에 처리합니다. 카드사 등의 이용내역에 반영되는 시점은 결제 수단에 따라 다를 수 있습니다." },
 ] as const;
+
+export const directCancellationRefundNotices = [
+  {text: "취소·환불은 고객센터에 주문번호와 사유를 알려 접수합니다. 선택한 구매 상품과 결제·출고 상태를 확인한 뒤 안내합니다."},
+  {text: "취소·환불 금액은 실제 결제 금액과 사용 포인트 등 주문 기록으로 산정합니다. 카드 결제액은 원래 카드로 취소하고 사용한 포인트는 포인트로 반환합니다. 포인트 지급으로 현금 환불을 대신하지 않습니다."},
+  ...legacyDrawCancellationRefundNotices.slice(4).map(item => ({text: item.text.replace("포함 상품 지급 방식 자체를 이유로 환불을 일괄 거절하지 않습니다.", "법령상 청약철회 권리를 제한하지 않습니다.")})),
+] as const;
+
+export const cancellationRefundNotices = legacyDrawCancellationRefundNotices;
 
 export const postShippingNotices = [
   { text: "하자·파손·오배송은 고객센터에 주문번호와 상품 상태를 알려 접수해 주세요. 사진이나 개봉 영상은 확인에 도움이 되며, 영상이 없다는 이유만으로 접수나 법령상 권리를 제한하지 않습니다." },
@@ -33,8 +41,12 @@ export const postShippingNotices = [
 ] as const;
 
 const paymentNotices: Record<DrawCheckoutCategory, readonly string[]> = {
+  direct: [
+    "결제 전에 구매할 정확한 상품 종류, 수량, 단가와 최종 결제 금액을 확인합니다.",
+    "결제가 서버에서 확인되면 선택한 상품이 보관함에 등록됩니다. 주문한 종류와 수량대로 배송을 신청할 수 있습니다.",
+  ],
   gacha: [
-    "결제 전에 포함 상품 목록과 전체·오픈 수량을 확인할 수 있습니다. 받을 정확한 상품은 결제 전에 알 수 없습니다.",
+    "결제 전에 포함 상품 목록과 공개된 확률·수량을 확인합니다. 캡슐을 열면 포함된 상품 중 1개가 지급되며, 결제 전에 개별 상품을 지정할 수 없고 같은 상품이 중복될 수 있습니다.",
     "결제가 서버에서 확인되면 구매 수량만큼 뽑기 권리가 발급됩니다. 각 캡슐을 직접 열 때 서버가 남은 구성에 따라 획득 상품을 확정하고 결과 화면과 보관함에 기록합니다.",
   ],
   kuji: [
@@ -45,6 +57,21 @@ const paymentNotices: Record<DrawCheckoutCategory, readonly string[]> = {
 
 /** Customer copy describes DABBOBA's implemented flow, not a competitor's private rules. */
 export function checkoutNoticeSections(category: DrawCheckoutCategory): readonly CheckoutNoticeSection[] {
+  if (category === "direct") return [
+    { id: "payment-refund", title: "주문·결제·취소 안내", groups: [{ items: [
+      ...paymentNotices.direct.map(text => ({text})),
+      {text: "결제 중 앱을 닫거나 연결이 끊기면 다시 결제하지 말고 구매 내역에서 같은 주문의 상태를 확인해 주세요."},
+      ...directCancellationRefundNotices,
+    ]}] },
+    { id: "shipping-exchange", title: "보관·배송 안내", groups: [{ items: [
+      {text: "구매한 상품은 보관함에서 확인하고 배송을 신청할 수 있으며 기본 보관 기간은 결제 확인일부터 60일입니다."},
+      {text: "쿠지 상품이 없는 배송 신청은 합계 24,900원 이상 무료배송이며, 기준 미달 시 배송비는 3,000원입니다. 쿠지 판매는 아직 시작하지 않았습니다."},
+      {text: deliveryPeriodNotice},
+      {text: "배송 신청 취소는 고객센터에서 출고 여부를 확인한 뒤 안내합니다. 이미 출고된 상품은 배송 후 교환·반품 절차로 접수합니다."},
+      {text: "직접 구매해 보관 중인 적격 상품은 교환방에 등록하거나 제안할 수 있습니다. 교환 진행 중에는 배송과 다른 교환에 사용할 수 없습니다."},
+    ]}] },
+    { id: "post-shipping", title: "배송 후 문의 안내", groups: [{items: postShippingNotices}] },
+  ];
   return [
     {
       id: "payment-refund",
@@ -55,11 +82,11 @@ export function checkoutNoticeSections(category: DrawCheckoutCategory): readonly
           { text: "결과 확인 중 앱을 닫거나 연결이 끊겨도 다시 결제하지 마세요. 구매 내역에서 결제·뽑기 상태를 다시 확인할 수 있습니다." },
           { text: "결제 취소·환불은 결제, 뽑기 권리 사용 및 배송 상태를 확인해 관련 법령과 이용약관에 따라 처리합니다. 고객센터로 문의해 주세요." },
         ],
-      }, { title: "취소·환불 규정", items: cancellationRefundNotices }],
+      }, { title: "취소·환불 규정", items: legacyDrawCancellationRefundNotices }],
     },
     {
       id: "shipping-exchange",
-      title: "보관·배송·포인트 안내",
+      title: "보관·배송·교환 안내",
       groups: [
         {
           title: "보관 및 배송",
@@ -69,15 +96,15 @@ export function checkoutNoticeSections(category: DrawCheckoutCategory): readonly
             { text: "무료배송 기준 미달 시 배송비는 3,000원이며, 배송비 결제가 확인된 뒤 신청이 접수됩니다." },
             { text: deliveryPeriodNotice },
             { text: "배송 신청을 취소하려면 고객센터로 문의해 주세요. 출고 여부에 따라 취소 가능한지 확인하며, 이미 출고된 상품은 배송 후 교환·반품 절차로 안내합니다." },
-            { text: "기본 보관 기간은 획득일 기준 60일입니다. 기간이 지난 상품은 배송·교환·포인트 환급 대상에서 제외되며 자동 폐기하지 않습니다. 이후 처리는 고객센터에 문의해 주세요." },
+            { text: "기본 보관 기간은 획득일 기준 60일입니다. 만료 후 자동 폐기하거나 포인트로 전환하지 않으며 고객지원에서 확인합니다." },
+            { text: "주문·결제·배송 상태는 앱 내 구매·배송 내역에서 직접 확인해 주세요. 외부 푸시는 보관 만료 안내만 제공하며 기기 알림 허용과 푸시 연결이 필요합니다." },
           ],
         },
         {
-          title: "교환 및 포인트 환급",
+          title: "교환방 안내",
           items: [
-            { text: "본인이 직접 뽑아 현재 보관 중인 가챠 상품만 교환과 포인트 환급 대상입니다. 쿠지 상품은 대상이 아닙니다." },
-            { text: "포인트 환급은 본인이 직접 뽑아 보관 중인 가챠 경품 상품의 기준금액 50%를 상품별로 소수점 이하를 버려 앱 포인트로 지급하며, 현금 환불과는 다릅니다. 기준금액이 없는 상품은 대상이 아닙니다." },
-            { text: "배송을 신청했거나 이미 받은 상품, 다른 교환에 사용 중인 상품은 교환·포인트 환급을 신청할 수 없습니다." },
+            { text: "본인이 구매해 획득하고 현재 보관 중인 적격 가챠 상품은 교환방에서 교환할 수 있습니다. 쿠지는 준비 중이며 교환 대상이 아닙니다." },
+            { text: "배송을 신청했거나 이미 받은 상품, 다른 교환에 사용 중인 상품은 교환을 신청할 수 없습니다." },
           ],
         },
       ],

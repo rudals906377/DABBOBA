@@ -177,8 +177,8 @@ export async function handlePgReviewService(request, env, externalFetch = global
     const response = await env.ASSETS.fetch(new Request(assetUrl, request));
     const headers = new Headers(response.headers);
     headers.set("cache-control", "no-store"); headers.set("x-robots-tag", "noindex, nofollow");
-    headers.set("x-content-type-options", "nosniff"); headers.set("referrer-policy", "strict-origin-when-cross-origin");
-    headers.set("content-security-policy", "default-src 'self'; script-src 'self' https://cdn.portone.io; style-src 'self'; img-src 'self' https://rconfxsykttfvznakile.supabase.co https://rconfxsykttfvznakile.storage.supabase.co data:; connect-src 'self' https://*.portone.io https://checkout-service.prod.iamport.co https://payment-bridge.prod.iamport.co https://tx-gateway-service.prod.iamport.co; frame-src https://*.portone.io https://checkout-service.prod.iamport.co https://service.iamport.kr https://*.inicis.com https://*.kcp.co.kr; base-uri 'none'; form-action 'self' https://*.inicis.com https://*.kcp.co.kr; frame-ancestors 'none'");
+    headers.set("x-content-type-options", "nosniff"); headers.set("referrer-policy", "no-referrer");
+    headers.set("content-security-policy", "default-src 'self'; script-src 'self' https://cdn.portone.io; style-src 'self'; img-src 'self' https://rconfxsykttfvznakile.supabase.co https://rconfxsykttfvznakile.storage.supabase.co data:; connect-src 'self' https://*.easypay.co.kr https://checkout-service.prod.iamport.co https://coretelemetry.prod.iamport.co https://tx-gateway-service.prod.iamport.co https://payment-bridge.prod.iamport.co https://service.iamport.kr https://*.nicepay.co.kr; frame-src https://*.easypay.co.kr https://checkout-service.prod.iamport.co https://payment-bridge.prod.iamport.co https://service.iamport.kr https://*.nicepay.co.kr; base-uri 'none'; form-action 'self' https://*.easypay.co.kr https://*.nicepay.co.kr https://service.iamport.kr; frame-ancestors 'none'");
     return new Response(response.body, { status: response.status, headers });
   }
   if (Date.now() >= PG_REVIEW_EXPIRY) return pgReviewFailure("심사 계정 이용기간이 끝났어요.", 403);
@@ -190,9 +190,9 @@ export async function handlePgReviewService(request, env, externalFetch = global
   if (route === "/products") upstream = "/v1/catalog/products?limit=100";
   const uuid = "[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}";
   const orderMatch = new RegExp(`^/orders/(${uuid})$`).exec(route);
-  const paymentMatch = new RegExp(`^/payments/(${uuid})/(attempt|confirm|abandon)$`).exec(route);
+  const paymentMatch = new RegExp(`^/(payments|toss-payments)/(${uuid})/(attempt|confirm|abandon)$`).exec(route);
   if (orderMatch) upstream = `/v1/orders/${orderMatch[1]}`;
-  if (paymentMatch) upstream = `/v1/payments/${paymentMatch[1]}/${paymentMatch[2]}`;
+  if (paymentMatch) upstream = `${paymentMatch[1] === "toss-payments" ? "/v1/review/toss-payments" : "/v1/payments"}/${paymentMatch[2]}/${paymentMatch[3]}`;
   if (route === "/orders") upstream = "/v1/orders";
   if (route === "/logout") upstream = "/v1/auth/logout";
   const expectedMethod = route === "/login" ? request.method : route === "/logout" || route === "/orders" || paymentMatch ? "POST" : "GET";
@@ -212,9 +212,9 @@ export async function handlePgReviewService(request, env, externalFetch = global
     const raw = await request.text(); if (raw.length > 8192) return pgReviewFailure("입력 내용이 너무 길어요.", 413);
     try { body = JSON.parse(raw || "{}"); } catch { return pgReviewFailure("입력 내용을 확인해 주세요."); }
     if (!body || typeof body !== "object" || Array.isArray(body)) return pgReviewFailure("입력 내용을 확인해 주세요.");
-    if (route === "/orders" && body.cardPg !== undefined && !["INICIS", "KCP"].includes(body.cardPg)) return pgReviewFailure("결제대행사를 확인해 주세요.");
+    if (route === "/orders" && (!["PORTONE_V2_NICE","PORTONE_V2_KICC"].includes(body.reviewPaymentProvider) || body.cardPg !== (body.reviewPaymentProvider === "PORTONE_V2_NICE" ? "NICE" : "KICC"))) return pgReviewFailure("선택한 심사 결제사를 확인해 주세요.");
     if (isLogin && body.email !== "pg") return pgReviewFailure("심사 아이디 또는 비밀번호를 확인해 주세요.", 401);
-    if (route === "/orders" && (!Array.isArray(body.items) || body.items.length !== 1 || !PG_REVIEW_PRODUCTS.has(body.items[0]?.productId) || !Number.isInteger(body.items[0]?.quantity) || body.items[0].quantity < 1 || body.items[0].quantity > 10 || body.pointAmount !== 0 || body.couponCode || body.kujiRoomEntryId)) return pgReviewFailure("심사 상품과 수량을 확인해 주세요.");
+    if (route === "/orders" && (!Array.isArray(body.items) || body.items.length !== 1 || !PG_REVIEW_PRODUCTS.has(body.items[0]?.productId) || !Number.isInteger(body.items[0]?.quantity) || body.items[0].quantity < 1 || body.items[0].quantity > 10 || body.pointAmount !== 0 || body.couponCode || body.kujiRoomEntryId || (!Number.isInteger(body.items[0].expectedDrawVersion) || body.items[0].expectedDrawVersion < 1))) return pgReviewFailure("심사 상품과 수량을 확인해 주세요.");
   }
   if (route === "/logout" && !token) return pgReviewJson({ loggedOut: true }, 200, { "set-cookie": pgReviewCookie() });
   try {
@@ -228,7 +228,7 @@ export async function handlePgReviewService(request, env, externalFetch = global
       const maxAge = Math.max(0, Math.min(86400, Math.floor((Date.parse(data.expiresAt) - Date.now()) / 1000), Math.floor((PG_REVIEW_EXPIRY - Date.now()) / 1000)));
       return pgReviewJson({ loggedIn: true, expiresAt: data.expiresAt }, 200, { "set-cookie": pgReviewCookie(data.token, maxAge) });
     }
-    if (route === "/products" && response.ok) data.items = (data.items || []).filter(p => PG_REVIEW_PRODUCTS.has(p.id) && p.purchasable);
+    if (route === "/products" && response.ok) data.items = (data.items || []).filter(p => PG_REVIEW_PRODUCTS.has(p.id) && p.metadata?.purchaseMode !== "DIRECT" && p.purchasable);
     if (!response.ok) return pgReviewFailure(data.error?.message || "요청을 처리하지 못했어요.", response.status);
     return pgReviewJson(data);
   } catch (error) {
@@ -961,7 +961,7 @@ function readSocialOAuthCookie(rawCookie) {
 function requiredPolicyVersions(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   if (Object.keys(value).length !== 2) return null;
-  const version = /^\d{4}-\d{2}-\d{2}$/;
+  const version = /^\d{4}-\d{2}-\d{2}(-r[1-9][0-9]*)?$/;
   return typeof value.terms === "string"
     && typeof value.privacy === "string"
     && version.test(value.terms)

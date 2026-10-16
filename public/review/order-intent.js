@@ -26,7 +26,8 @@ export function reviewOrderIntent(storage, uuid, now = Date.now) {
       const existing = read();
       if (existing) {
         if (existing.body.items[0].productId !== body.items[0].productId || existing.body.items[0].quantity !== body.items[0].quantity
-          || (existing.body.cardPg || 'INICIS') !== (body.cardPg || 'INICIS')) {
+          || (existing.body.cardPg || 'INICIS') !== (body.cardPg || 'INICIS')
+          || (existing.body.reviewPaymentProvider || 'PORTONE') !== (body.reviewPaymentProvider || 'PORTONE')) {
           throw new Error('이전 주문 상태를 먼저 확인해 주세요.');
         }
         return existing;
@@ -53,7 +54,7 @@ export function reviewOrderIntent(storage, uuid, now = Date.now) {
       }
       const idPattern = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/;
       if (!idPattern.test(order?.id) || !idPattern.test(order?.paymentId)) throw new Error('주문 응답을 확인하지 못했어요. 같은 요청으로 다시 확인해 주세요.');
-      value.order = { id: order.id, paymentId: order.paymentId, total: order.total, ...(order.cardPayment ? {cardPayment:order.cardPayment} : {}) };
+      value.order = { id: order.id, paymentId: order.paymentId, total: order.total, ...(order.paymentProvider ? {paymentProvider:order.paymentProvider} : {}), ...(order.cardPayment ? {cardPayment:order.cardPayment} : {}) };
       storage.setItem(KEY, JSON.stringify(value));
       return value.order;
     },

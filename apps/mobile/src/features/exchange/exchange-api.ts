@@ -175,8 +175,8 @@ export async function fetchExchangeDetail(
 
   const listing = listingResult.data;
   const listingInventories = exchangeListingInventories(listing);
-  if (!listingInventories.every((inventory) => inventory.sourceType === "GACHA")) {
-    throw new Error("가챠로 뽑은 상품만 교환할 수 있어요.");
+  if (!listingInventories.every((inventory) => (inventory.sourceType === "GACHA" || (inventory.sourceType === "PURCHASE" && inventory.product.category === "gacha" && inventory.product.metadata.purchaseMode === "DIRECT")))) {
+    throw new Error("구매해 보관 중인 적격 상품만 교환할 수 있어요.");
   }
   if (!areCustomerVisibleExchangeProducts(listingInventories.map((inventory) => inventory.product))) {
     throw new Error("현재 참여할 수 없는 교환 상품이에요.");

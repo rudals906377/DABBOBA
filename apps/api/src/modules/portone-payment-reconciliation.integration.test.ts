@@ -10,7 +10,7 @@ import { selectCardChannel } from "../lib/portone-channel-binding.js";
 
 const databaseUrl = process.env.DABBOBA_TEST_DATABASE_URL;
 
-for (const cardPg of ["INICIS", "KCP"] as const) {
+for (const cardPg of ["INICIS", "KCP", "NICE"] as const) {
 test(`${cardPg}: verified PortOne requery recovers one paid order and its draw survives through storage without a second charge`, {
   skip: !databaseUrl,
   timeout: 60_000,
@@ -20,7 +20,7 @@ test(`${cardPg}: verified PortOne requery recovers one paid order and its draw s
     environment: "test", host: "127.0.0.1", port: 8788, databaseUrl: databaseUrl!, redisUrl: "redis://127.0.0.1:6379",
     webOrigins: ["http://127.0.0.1:4174"], adminOrigins: ["http://127.0.0.1:4180"],
     sessionTokenPepper: "payment-requery-integration-pepper", adminProxyIdentitySecret: null,
-    sessionTtlDays: 1, commerceMode: "LIVE", paymentProvider: "PORTONE_V2_INICIS",
+    sessionTtlDays: 1, commerceMode: "LIVE", paymentProvider: cardPg === "NICE" ? "PORTONE_V2_NICE" : "PORTONE_V2_INICIS",
     paymentWebhookSecret: "payment-requery-integration-webhook-secret",
     paymentReconciliationWorkerSecret: "payment-requery-worker-secret-for-tests",
     portOne: {

@@ -555,7 +555,7 @@ test("the motion model is seeded by configuration and contains no render-time ra
 
 test("the packed chamber keeps simple capsule faces and builds depth through opaque overlap", () => {
   const chamber = component.split("function GachaChamberCapsule(")[1]?.split("const styles = StyleSheet.create")[0] ?? "";
-  assert.match(chamber, /<GachaCapsuleVisual tone=\{capsule.tone\} depth=\{capsule.depth\} diameter=\{capsule.size\} \/>/);
+  assert.match(chamber, /<GachaCapsuleVisual tone=\{capsule.tone\} depth=\{capsule.depth\} diameter=\{capsule.size\} materialRotation=\{-capsule.restRotation\} \/>/);
   assert.doesNotMatch(chamber, /heroDetail|GachaCapsule3D|GachaCapsuleFrames|GachaChamberCapsuleVisual/);
   assert.match(chamber, /opacity: dispenseFrame.opacity,/);
   assert.doesNotMatch(chamber, /depthOpacity/);

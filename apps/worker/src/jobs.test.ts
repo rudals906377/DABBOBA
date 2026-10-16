@@ -119,7 +119,7 @@ test("optional opt-out skips external delivery only after the in-app notificatio
   });
   assert.deepEqual(insertedKinds, ["EXCHANGE_OFFER_CREATED"]);
   assert.deepEqual(deliveredKinds, []);
-  assert.equal(preferenceQueries, 1);
+  assert.equal(preferenceQueries, 0);
 
   await processWorkerJob(dependencies, {
     kind: "outbox.event",
@@ -134,8 +134,8 @@ test("optional opt-out skips external delivery only after the in-app notificatio
     },
   });
   assert.deepEqual(insertedKinds, ["EXCHANGE_OFFER_CREATED", "ORDER_PAID"]);
-  assert.deepEqual(deliveredKinds, ["ORDER_PAID"]);
-  assert.equal(preferenceQueries, 1);
+  assert.deepEqual(deliveredKinds, []);
+  assert.equal(preferenceQueries, 0);
 });
 
 test("forged outbox jobs without a canonical PostgreSQL row are rejected before processing", async () => {

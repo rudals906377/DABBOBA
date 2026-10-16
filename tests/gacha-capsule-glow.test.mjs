@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { inflateSync } from "node:zlib";
 import test from "node:test";
+import { runInNewContext } from "node:vm";
 import { getGachaCapsuleGlowAlpha, sampleGachaCapsuleGlow } from "../apps/mobile/src/features/draw/gacha-capsule-glow.ts";
 import { sampleGachaRevealLighting } from "../apps/mobile/src/features/draw/gacha-reveal-timeline.ts";
 
@@ -14,6 +15,26 @@ const generator = read("scripts/generate-gacha-capsule-glow.ts").toString("utf8"
 const component = read("apps/mobile/src/features/draw/GachaCapsuleGlow.tsx").toString("utf8");
 const machine = read("apps/mobile/src/features/draw/GachaLeverMachine.tsx").toString("utf8");
 const sample = (p, reduced = false) => sampleGachaCapsuleGlow(p, sampleGachaRevealLighting(p, reduced), reduced);
+
+test("the final lit result surface persists when the animation clock becomes inactive", () => {
+  const body = machine.match(/const lightWashStyle = useAnimatedStyle\(\(\) => \{([\s\S]*?)\n  \}\);/)?.[1];
+  assert.ok(body, "execute the actual native exposure worklet");
+  const render = (progress, active, settled, reduceMotion = false) => runInNewContext(`(() => {${body}})()`, {
+    revealProgress: { value: progress }, cameraProgress: { value: progress }, revealActive: { value: active },
+    settled, reduceMotion, stageSize: { width: 390, height: 844 }, sampleGachaRevealLighting,
+    sampleGachaCameraMotion: () => ({}), sampleGachaBowlProjection: () => ({ x: 195, y: 422 }),
+    interpolate: (value, input, output) => output[0] + value * (output[1] - output[0]),
+    Extrapolation: { CLAMP: "clamp" },
+  });
+  const end = render(1, 1, false);
+  const complete = render(1, 0, true);
+  assert.equal(end.opacity, 1);
+  assert.equal(complete.opacity, end.opacity, "completion must not cut the bright result surface to black");
+  assert.equal(JSON.stringify(complete.transform), JSON.stringify(end.transform));
+  assert.equal(render(0, 0, false).opacity, 0, "reset must restore the sealed machine");
+  assert.equal(render(1, 0, false).opacity, 0, "an inactive uncommitted presentation stays hidden");
+  assert.equal(render(1, 0, true, true).opacity, 0, "Reduced Motion still omits the light wash");
+});
 
 function decodePng(png) {
   assert.deepEqual(png.subarray(0, 8), Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
@@ -173,5 +194,7 @@ test("native halo and final exposure follow the same moving internal source behi
   assert.match(wash, /translateX: source.x - stageSize.width \/ 2/);
   assert.match(wash, /translateY: source.y - stageSize.height \/ 2/);
   assert.match(wash, /sampleGachaRevealLighting\(revealProgress.value, reduceMotion\)/);
-  assert.match(wash, /opacity: revealActive.value \* light.whiteout/);
+  assert.match(wash, /opacity: \(settled \? 1 : revealActive.value\) \* light.whiteout/);
+  assert.match(machine, /cinematicLayer: \{[^}]*overflow: "hidden"/,
+    "persistent light and dimming must stay inside the presentation instead of obscuring navigation");
 });

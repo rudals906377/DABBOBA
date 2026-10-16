@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { createHash, createHmac } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { once } from "node:events";
+import { spawnSync } from "node:child_process";
 import test from "node:test";
 import {
   MAX_MEDIA_BYTES, STORAGE_REQUEST_TIMEOUT_MS, MediaStorageError, SupabaseMediaStorage, type SupabaseMediaStorageConfig,
@@ -60,26 +61,23 @@ async function collect(storage: SupabaseMediaStorage): Promise<Buffer> {
   return Buffer.concat(chunks);
 }
 
-test("Storage reads support numeric Web/Edge timer handles and still clear the deadline", async (t) => {
-  const numericHandle = 987654321;
-  let cleared = false;
-  t.mock.method(globalThis, "setTimeout", (_callback: unknown, delay: number) => {
-    assert.equal(delay, STORAGE_REQUEST_TIMEOUT_MS);
-    return numericHandle as unknown as ReturnType<typeof setTimeout>;
-  });
-  t.mock.method(globalThis, "clearTimeout", (handle: Parameters<typeof clearTimeout>[0]) => {
-    assert.equal(handle, numericHandle);
-    cleared = true;
-  });
-  // Keep the numeric timer shim out of Node's fetch transport internals.
-  t.mock.method(globalThis, "fetch", async () => new Response(JSON.stringify(info()), {
-    headers: { "content-type": "application/json" },
-  }));
-  try {
-    const storage = new SupabaseMediaStorage(config("http://127.0.0.1:12345"));
-    assert.equal((await storage.stat(key)).version, version);
-    assert.equal(cleared, true);
-  } finally { t.mock.restoreAll(); }
+test("Storage reads support numeric Web/Edge timer handles and still clear the deadline", () => {
+  // A separate process keeps Edge timer mocks out of Node's cached fetch
+  // transport and every subsequent real-network deadline test.
+  const script = `
+    import assert from 'node:assert/strict';
+    import {SupabaseMediaStorage,STORAGE_REQUEST_TIMEOUT_MS} from ${JSON.stringify(new URL("./index.ts",import.meta.url).href)};
+    const handle=987654321;
+    let cleared=false;
+    globalThis.setTimeout=(_callback,delay)=>{assert.equal(delay,STORAGE_REQUEST_TIMEOUT_MS);return handle;};
+    globalThis.clearTimeout=(value)=>{assert.equal(value,handle);cleared=true;};
+    globalThis.fetch=async()=>new Response(JSON.stringify(${JSON.stringify(info())}),{headers:{'content-type':'application/json'}});
+    const storage=new SupabaseMediaStorage(${JSON.stringify(config("http://127.0.0.1:12345"))});
+    assert.equal((await storage.stat(${JSON.stringify(key)})).version,${JSON.stringify(version)});
+    assert.equal(cleared,true);
+  `;
+  const result=spawnSync(process.execPath,["--import","tsx","--input-type=module","--eval",script],{encoding:"utf8",timeout:10_000});
+  assert.equal(result.status,0,result.stderr);
 });
 
 test("configuration is restricted to matching HTTPS Supabase endpoints or explicit same-origin loopback", () => {

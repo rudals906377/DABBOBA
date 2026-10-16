@@ -16,7 +16,7 @@ import Animated, {
   withTiming,
 } from "react-native-reanimated";
 import { scheduleOnRN } from "react-native-worklets";
-import Svg, { Defs, Path, RadialGradient, Rect, Stop } from "react-native-svg";
+import Svg, { Defs, LinearGradient, Path, RadialGradient, Rect, Stop } from "react-native-svg";
 import { seed } from "@/design-system/seed";
 import {
   GACHA_AGITATION_DURATION_MS,
@@ -62,7 +62,7 @@ import {
   type GachaLeverMotionPhase,
 } from "@/features/draw/gacha-lever-motion";
 import { useGachaRevealAudio } from "@/features/draw/useGachaRevealAudio";
-import { resolveGachaRevealSoundStage } from "@/features/draw/gacha-reveal-sound";
+import { resolveGachaLeverSoundSegment, resolveGachaRevealSoundStage } from "@/features/draw/gacha-reveal-sound";
 import { colors } from "@/theme";
 
 type GachaLeverMachineProps = {
@@ -70,6 +70,7 @@ type GachaLeverMachineProps = {
   settled?: boolean;
   reduceMotion: boolean;
   soundEnabled: boolean;
+  hapticsEnabled?: boolean;
   resultReady: boolean;
   requestSignal?: number;
   resetSignal?: number;
@@ -111,6 +112,7 @@ export const GachaLeverMachine = memo(function GachaLeverMachine({
   settled = false,
   reduceMotion,
   soundEnabled,
+  hapticsEnabled = false,
   resultReady,
   requestSignal = 0,
   resetSignal = 0,
@@ -141,14 +143,17 @@ export const GachaLeverMachine = memo(function GachaLeverMachine({
   const triggeredPulseCount = useSharedValue(0);
   const clockwiseCueRotation = useSharedValue(0);
   const clockwiseCueOpacity = useSharedValue(1);
-  const leverSoundPlayed = useSharedValue(0);
+  const leverSoundSequence = useSharedValue(0);
   const {
     cancelScheduled: cancelRevealSounds,
     playDropImpact: playDropImpactSound,
+    playRebound: playReboundSound,
+    playCoin: playCoinSound,
+    playChamber: playChamberSound,
     playLever: playLeverSound,
     playSeamOpen: playSeamOpenSound,
     scheduleDispense: scheduleDispenseSounds,
-  } = useGachaRevealAudio(soundEnabled);
+  } = useGachaRevealAudio(soundEnabled, hapticsEnabled && !reduceMotion, animationRun);
   const motionStateRef = useRef(createGachaLeverMotionState(reduceMotion));
   const dispatchRef = useRef<(event: GachaLeverMotionEvent) => void>(() => undefined);
   const requestOpenRef = useRef(onRequestOpen);
@@ -177,7 +182,7 @@ export const GachaLeverMachine = memo(function GachaLeverMachine({
 
     if (transition.effect === "start-dispense") {
       const run = animationRun.value;
-      scheduleDispenseSounds();
+      scheduleDispenseSounds(run);
       cancelAnimation(waitingPulse);
       waitingPulse.value = 0;
       dispenseProgress.value = 0;
@@ -243,9 +248,9 @@ export const GachaLeverMachine = memo(function GachaLeverMachine({
       triggeredPulseCount.value = 0;
       clockwiseCueRotation.value = 0;
       clockwiseCueOpacity.value = 1;
-      leverSoundPlayed.value = 0;
+      leverSoundSequence.value = 0;
     }
-  }, [agitationProgress, animationRun, cancelRevealSounds, clockwiseCueOpacity, clockwiseCueRotation, dispenseProgress, gestureAccepted, gestureCompleted, gestureEnded, gestureStartRadians, gestureTravel, handleRevealSettled, interactionRadians, leverRadians, leverSoundPlayed, previousAngle, revealActive, revealProgress, scheduleDispenseSounds, triggeredPulseCount, waitingPulse]);
+  }, [agitationProgress, animationRun, cancelRevealSounds, clockwiseCueOpacity, clockwiseCueRotation, dispenseProgress, gestureAccepted, gestureCompleted, gestureEnded, gestureStartRadians, gestureTravel, handleRevealSettled, interactionRadians, leverRadians, leverSoundSequence, previousAngle, revealActive, revealProgress, scheduleDispenseSounds, triggeredPulseCount, waitingPulse]);
 
   dispatchRef.current = dispatchMotion;
 
@@ -277,6 +282,7 @@ export const GachaLeverMachine = memo(function GachaLeverMachine({
       // reverses; only an explicit reset or Reduced Motion clears the count.
       if (drive.pulseCount <= triggeredPulseCount.value) return;
       triggeredPulseCount.value = drive.pulseCount;
+      scheduleOnRN(playChamberSound, animationRun.value, drive.pulseCount);
       cancelAnimation(agitationProgress);
       agitationProgress.value = 0;
       agitationProgress.value = withTiming(1, {
@@ -284,21 +290,34 @@ export const GachaLeverMachine = memo(function GachaLeverMachine({
         easing: Easing.linear,
       });
     },
-    [reduceMotion],
+    [reduceMotion, playChamberSound],
+  );
+
+  // Observe the displayed handle, not touch-down or its immediately updated target.
+  // Reverse/unwind and stationary holds are silent; skipped sectors produce one cue.
+  useAnimatedReaction(
+    () => ({ segment: resolveGachaLeverSoundSegment(leverRadians.value), run: animationRun.value }),
+    ({ segment, run }, previous) => {
+      if (phase !== "ready" || !previous || previous.run !== run || segment <= previous.segment) return;
+      leverSoundSequence.value += 1;
+      scheduleOnRN(playLeverSound, run, leverSoundSequence.value);
+    },
+    [phase, playLeverSound],
   );
 
   // Contact and seam cues follow the same UI-thread clock as the visuals.
   // The JS side only plays a cue while the current dispense is armed, so a
   // reset, SKIP, settle or unmount still silences anything already in flight.
   useAnimatedReaction(
-    () => resolveGachaRevealSoundStage(revealActive.value, dispenseProgress.value, revealProgress.value),
-    (stage, previous) => {
-      const before = previous ?? 0;
+    () => ({ stage: resolveGachaRevealSoundStage(revealActive.value, dispenseProgress.value, revealProgress.value), run: animationRun.value }),
+    ({ stage, run }, previous) => {
+      const before = previous?.run === run ? previous.stage : 0;
       if (stage <= before) return;
-      if (before < 1 && stage >= 1) scheduleOnRN(playDropImpactSound);
-      if (before < 2 && stage >= 2) scheduleOnRN(playSeamOpenSound);
+      if (stage === 1) scheduleOnRN(playDropImpactSound, run);
+      if (stage === 2) scheduleOnRN(playReboundSound, run);
+      if (stage === 3) scheduleOnRN(playSeamOpenSound, run);
     },
-    [playDropImpactSound, playSeamOpenSound],
+    [playDropImpactSound, playReboundSound, playSeamOpenSound],
   );
 
   useEffect(() => {
@@ -350,9 +369,9 @@ export const GachaLeverMachine = memo(function GachaLeverMachine({
     triggeredPulseCount.value = 0;
     clockwiseCueRotation.value = 0;
     clockwiseCueOpacity.value = 1;
-    leverSoundPlayed.value = 0;
+    leverSoundSequence.value = 0;
     cancelRevealSounds();
-  }, [agitationProgress, animationRun, cancelRevealSounds, clockwiseCueOpacity, clockwiseCueRotation, dispenseProgress, gestureAccepted, gestureCompleted, gestureEnded, gestureStartRadians, gestureTravel, interactionRadians, leverRadians, leverSoundPlayed, previousAngle, reduceMotion, resetSignal, revealActive, revealProgress, triggeredPulseCount, waitingPulse]);
+  }, [agitationProgress, animationRun, cancelRevealSounds, clockwiseCueOpacity, clockwiseCueRotation, dispenseProgress, gestureAccepted, gestureCompleted, gestureEnded, gestureStartRadians, gestureTravel, interactionRadians, leverRadians, leverSoundSequence, previousAngle, reduceMotion, resetSignal, revealActive, revealProgress, triggeredPulseCount, waitingPulse]);
 
   useEffect(() => {
     cancelAnimation(clockwiseCueRotation);
@@ -404,10 +423,9 @@ export const GachaLeverMachine = memo(function GachaLeverMachine({
   const autoCompleteLever = useCallback(() => {
     if (disabled || motionStateRef.current.phase !== "ready" || gestureCompleted.value) return;
     const run = animationRun.value;
+    playCoinSound(run);
     cancelAnimation(clockwiseCueRotation);
     clockwiseCueOpacity.value = 0;
-    leverSoundPlayed.value = 1;
-    playLeverSound();
     gestureCompleted.value = 1;
     interactionRadians.value = GACHA_LEVER_TARGET_RADIANS;
     if (reduceMotion) {
@@ -422,7 +440,7 @@ export const GachaLeverMachine = memo(function GachaLeverMachine({
         if (finished) scheduleOnRN(beginOpen, run);
       },
     );
-  }, [animationRun, beginOpen, clockwiseCueOpacity, clockwiseCueRotation, disabled, gestureCompleted, interactionRadians, leverRadians, leverSoundPlayed, playLeverSound, reduceMotion]);
+  }, [animationRun, beginOpen, clockwiseCueOpacity, clockwiseCueRotation, disabled, gestureCompleted, interactionRadians, leverRadians, playCoinSound, reduceMotion]);
 
   useEffect(() => {
     if (requestSignalRef.current === requestSignal) return;
@@ -464,10 +482,7 @@ export const GachaLeverMachine = memo(function GachaLeverMachine({
       gestureAccepted.value = 1;
       previousAngle.value = start.angle ?? Number.NaN;
       gestureCompleted.value = 0;
-      if (leverSoundPlayed.value === 0) {
-        leverSoundPlayed.value = 1;
-        scheduleOnRN(playLeverSound);
-      }
+      scheduleOnRN(playCoinSound, animationRun.value);
       manager.activate();
     })
     .onTouchesUp((_event, manager) => {
@@ -549,7 +564,7 @@ export const GachaLeverMachine = memo(function GachaLeverMachine({
       const unwind = withTiming(gestureStartRadians.value, { duration: 220, easing: smoothEasing });
       const impulseRemainingMs = Math.max(0, 1 - agitationProgress.value) * GACHA_AGITATION_DURATION_MS;
       leverRadians.value = impulseRemainingMs > 0 ? withDelay(impulseRemainingMs, unwind) : unwind;
-    }), [agitationProgress, animationRun, beginOpen, clockwiseCueOpacity, clockwiseCueRotation, disabled, gestureAccepted, gestureCompleted, gestureEnded, gestureStartRadians, gestureTravel, interactionRadians, leverRadians, leverSoundPlayed, phase, playLeverSound, previousAngle, reduceMotion]);
+    }), [agitationProgress, animationRun, beginOpen, clockwiseCueOpacity, clockwiseCueRotation, disabled, gestureAccepted, gestureCompleted, gestureEnded, gestureStartRadians, gestureTravel, interactionRadians, leverRadians, phase, playCoinSound, previousAngle, reduceMotion]);
 
   const clockwiseCueStyle = useAnimatedStyle(() => ({
     opacity: clockwiseCueOpacity.value * 0.9,
@@ -604,6 +619,18 @@ export const GachaLeverMachine = memo(function GachaLeverMachine({
           style={[styles.machine, machineMotionStyle, settled && { opacity: 0 }]}
         >
           <Image source={GACHA_MACHINE} resizeMode="contain" style={styles.machineArt} />
+          <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+            <Svg width="100%" height="100%" viewBox="0 0 190 338">
+              <Defs>
+                <LinearGradient id="cabinet-satin-finish" x1="0" y1="0" x2="1" y2="1">
+                  <Stop offset="0" stopColor="#E9F1EA" stopOpacity="0.12" />
+                  <Stop offset="0.4" stopColor="#D4E3D6" stopOpacity="0.025" />
+                  <Stop offset="1" stopColor="#040907" stopOpacity="0.12" />
+                </LinearGradient>
+              </Defs>
+              <Path d="M 46 49 H 144 V 76 H 46 Z M 45 202 H 145 V 282 H 45 Z M 109 239 H 133 V 268 H 109 Z" fillRule="evenodd" fill="url(#cabinet-satin-finish)" />
+            </Svg>
+          </View>
           <View pointerEvents="none" style={styles.machineMarquee}>
             <Image
               source={DABBOBA_WORDMARK}
@@ -758,7 +785,7 @@ function GachaCapsuleCinematic({
     return () => { capsuleRendererReady.value = 0; };
   }, [capsuleRendererReady, reduceMotion]);
   const stageDimStyle = useAnimatedStyle(() => ({
-    opacity: reduceMotion ? 0 : revealActive.value * 0.84 * interpolate(
+    opacity: reduceMotion ? 0 : (settled ? 1 : revealActive.value) * 0.84 * interpolate(
       cameraProgress.value, [0, 0.2, 0.52, 1], [0, 0, 1, 1], Extrapolation.CLAMP,
     ),
   }));
@@ -811,7 +838,8 @@ function GachaCapsuleCinematic({
     const camera = sampleGachaCameraMotion(cameraProgress.value, stageSize.width, stageSize.height, reduceMotion);
     const source = sampleGachaBowlProjection(revealProgress.value, camera, false);
     return {
-      opacity: revealActive.value * light.whiteout,
+      // Completion stops animation/audio clocks, not the final lit surface.
+      opacity: (settled ? 1 : revealActive.value) * light.whiteout,
       transform: [
         { translateX: source.x - stageSize.width / 2 },
         { translateY: source.y - stageSize.height / 2 },
@@ -1075,7 +1103,19 @@ const GachaChamber = memo(function GachaChamber({
         />
       ))}
       <View style={styles.chamberGlassTint} />
-      <View style={styles.chamberGlassReflection} />
+      <View style={styles.chamberGlassReflection}>
+        <Svg width="100%" height="100%" viewBox="0 0 100 100" preserveAspectRatio="none">
+          <Defs>
+            <LinearGradient id="chamber-soft-reflection" x1="0" y1="0" x2="1" y2="0">
+              <Stop offset="0" stopColor="#F4FFF5" stopOpacity="0" />
+              <Stop offset="0.42" stopColor="#F4FFF5" stopOpacity="0.09" />
+              <Stop offset="0.62" stopColor="#FFFFFF" stopOpacity="0.12" />
+              <Stop offset="1" stopColor="#F4FFF5" stopOpacity="0" />
+            </LinearGradient>
+          </Defs>
+          <Rect width="100" height="100" fill="url(#chamber-soft-reflection)" />
+        </Svg>
+      </View>
       <View style={styles.chamberGlassReflectionThin} />
       <View style={styles.chamberFrontLip} />
       <View style={styles.chamberInnerStroke} />
@@ -1248,7 +1288,7 @@ const GachaChamberCapsule = memo(function GachaChamberCapsule({
         motionStyle,
       ]}
     >
-      <GachaCapsuleVisual tone={capsule.tone} depth={capsule.depth} diameter={capsule.size} />
+      <GachaCapsuleVisual tone={capsule.tone} depth={capsule.depth} diameter={capsule.size} materialRotation={-capsule.restRotation} />
     </Animated.View>
   );
 });
@@ -1452,7 +1492,7 @@ const styles = StyleSheet.create({
   chamberGlassTint: {
     ...StyleSheet.absoluteFill,
     zIndex: 200,
-    backgroundColor: "rgba(16, 22, 18, 0.09)",
+    backgroundColor: "rgba(16, 22, 18, 0.055)",
   },
   chamberGlassReflection: {
     position: "absolute",
@@ -1462,7 +1502,6 @@ const styles = StyleSheet.create({
     width: 13,
     height: 132,
     borderRadius: seed.radius.r2,
-    backgroundColor: "rgba(255, 255, 255, 0.045)",
     transform: [{ rotate: "11deg" }],
   },
   chamberGlassReflectionThin: {
@@ -1577,6 +1616,7 @@ const styles = StyleSheet.create({
   cinematicLayer: {
     ...StyleSheet.absoluteFill,
     zIndex: 30,
+    overflow: "hidden",
     alignItems: "center",
     justifyContent: "center",
   },

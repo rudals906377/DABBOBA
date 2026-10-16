@@ -4922,7 +4922,7 @@ function ShopPage({ flow }: { flow: FlowControls }) {
   const [query, setQuery] = useState("");
   const keyboard = useKeyboard();
   const screenFocusRef = useScreenEntryFocus();
-  const isFigureComingSoon = filter === "피규어";
+  const isFigureComingSoon = filter === "피규어" || filter === "쿠지";
   const normalizedQuery = normalizeCatalogSearch(query);
   const productSearchIndex = useMemo(() => new Map(catalogProducts.map((product) => {
     const ip = catalogIps.find((candidate) => candidate.id === product.ipId);
@@ -4948,7 +4948,7 @@ function ShopPage({ flow }: { flow: FlowControls }) {
       <main ref={screenFocusRef} tabIndex={-1} className="root-tab-page shop-page" aria-label="DABBOBA 뽀바">
         <section className="shop-lead" aria-labelledby="shop-lead-title">
           <h1 id="shop-lead-title">원하는 방식으로 골라보세요.</h1>
-          <p>가챠와 쿠지를 만나고, 준비 중인 피규어도 확인해 보세요.</p>
+          <p>포함된 상품 중 1개를 만나요. 쿠지는 준비 중이에요.</p>
         </section>
         <div className="shop-search-box ip-search-box">
           <IconMagnifyingglassLine size={21} aria-hidden="true" />
@@ -4999,7 +4999,7 @@ function ShopPage({ flow }: { flow: FlowControls }) {
             <div className="ip-empty-state shop-empty-state" role="status">
               <IconMagnifyingglassLine size={30} aria-hidden="true" />
               <strong>{isFigureComingSoon ? "준비중입니다." : "찾는 상품이 없어요"}</strong>
-              <span>{isFigureComingSoon ? "피규어 상품은 준비가 끝나는 대로 공개할게요." : "검색어나 카테고리를 바꿔보세요."}</span>
+              <span>{isFigureComingSoon ? `${filter} 상품은 준비가 끝나는 대로 공개할게요.` : "검색어나 카테고리를 바꿔보세요."}</span>
             </div>
           )}
         </section>
@@ -8801,7 +8801,7 @@ function CatalogPage({ flow }: { flow: FlowControls }) {
   const { catalogProducts, apiMode, apiSyncState, apiSyncMessage } = useDabboba();
   const [filter, setFilter] = useState<CategoryFilter>("전체");
   const screenFocusRef = useScreenEntryFocus();
-  const isFigureComingSoon = filter === "피규어";
+  const isFigureComingSoon = filter === "피규어" || filter === "쿠지";
   const customerBrowsableProducts = catalogProducts.filter((product) => (
     isCustomerBrowsableProductCategory(product.categoryId)
   ));
@@ -8858,7 +8858,7 @@ function CatalogPage({ flow }: { flow: FlowControls }) {
           {visibleProducts.length === 0 ? (
             <div className="ip-empty-state" role="status">
               <strong>{isFigureComingSoon ? "준비중입니다." : "등록된 상품이 없어요"}</strong>
-              <span>{isFigureComingSoon ? "피규어 상품은 준비가 끝나는 대로 공개할게요." : "운영 카탈로그가 준비되면 여기에 표시됩니다."}</span>
+              <span>{isFigureComingSoon ? `${filter} 상품은 준비가 끝나는 대로 공개할게요.` : "운영 카탈로그가 준비되면 여기에 표시됩니다."}</span>
             </div>
           ) : null}
         </section>
@@ -9359,6 +9359,11 @@ function ProductDetail({ product }: { product: Product }) {
 }
 
 function DetailFooter({ flow, product }: { flow: FlowControls; product: Product }) {
+  if (!isCustomerBrowsableProductCategory(product.categoryId)) return <div className="detail-footer" role="status" aria-label={`${product.category} 준비 중`}><ActionButton variant="brandSolid" size="large" disabled>준비중입니다.</ActionButton></div>;
+  return <ActiveDetailFooter flow={flow} product={product} />;
+}
+
+function ActiveDetailFooter({ flow, product }: { flow: FlowControls; product: Product }) {
   const {
     apiMode,
     prepareCheckout,

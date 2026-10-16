@@ -36,6 +36,13 @@ function ease(start: number, end: number, value: number) {
   return p * p * (3 - 2 * p);
 }
 
+function cameraEase(start: number, end: number, value: number) {
+  "worklet";
+  const t = unit((value - start) / (end - start));
+  // Match zero velocity and acceleration at pickup and at the close-up hold.
+  return t * t * t * (t * (t * 6 - 15) + 10);
+}
+
 function bounce(progress: number, start: number, end: number, height: number) {
   "worklet";
   const t = unit((progress - start) / (end - start));
@@ -79,8 +86,8 @@ export function sampleGachaCameraMotion(progress: number, width: number, height:
   const fixedY = (box.top + box.restTop + box.capsuleSize / 2 - box.machineHeight / 2) * presentationScale;
   const baseDiameter = box.capsuleSize * presentationScale;
   const finalDiameter = Math.max(baseDiameter, Math.min(w * 0.76, h * 0.53));
-  const zoom = ease(0.04, 0.46, p);
-  const pan = ease(0.015, 0.25, p);
+  const zoom = cameraEase(0.04, 0.46, p);
+  const pan = cameraEase(0.015, 0.25, p);
   const scale = Math.exp(Math.log(finalDiameter / baseDiameter) * zoom);
   const translateX = -fixedX * (scale - 1 + pan);
   const translateY = -fixedY * (scale - 1 + pan);
@@ -92,7 +99,9 @@ export function sampleGachaCameraMotion(progress: number, width: number, height:
     capsuleX: w / 2 + fixedX * scale + translateX,
     capsuleY: h / 2 + fixedY * scale + translateY,
     capsuleDiameter: baseDiameter * scale,
-    machineOpacity: 1 - ease(0.26, 0.40, p),
+    // Fade the low-resolution cabinet at a bounded magnification. The capsule
+    // keeps the same camera, world position and atlas through the transition.
+    machineOpacity: 1 - ease(1.45, 2.9, scale),
     // Hand off to the matching 3D shell while it is still small and resting in
     // the bay, before zoom starts. Never crossfade two large shell silhouettes.
     overlayOpacity: ease(0.001, 0.03, p),

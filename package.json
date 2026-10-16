@@ -50,6 +50,7 @@
     "mobile:auth:ios": "corepack pnpm --filter @dabboba/mobile auth:ios",
     "mobile:auth:android": "corepack pnpm --filter @dabboba/mobile auth:android",
     "release:mobile:check": "node scripts/check-mobile-release-config.mjs",
+    "release:catalog:check": "node scripts/check-gacha-launch-plan.mjs",
     "release:mobile:api:verify": "node scripts/verify-mobile-public-api.mjs",
     "release:ios:artifact:verify": "node scripts/verify-ios-artifact-team.mjs",
     "release:edge:worker:verify": "node scripts/verify-live-edge-worker-boundary.mjs",

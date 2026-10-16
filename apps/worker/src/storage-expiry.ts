@@ -1,6 +1,7 @@
 import type { DatabasePool } from "@dabboba/db";
 import { withTransaction } from "@dabboba/db";
 import type { Logger } from "./logger.js";
+import { returnExpiredStoragePoints } from "./storage-point-returns.js";
 
 type ExchangeCleanupRow = {
   cancelled_listings: number | string;
@@ -19,6 +20,7 @@ export type StorageExpiryBatchResult = {
   releasedExchangeInventory: number;
   heldInventory: number;
   reminders: number;
+  pointReturnedInventory: number;
 };
 
 const EMPTY_RESULT: StorageExpiryBatchResult = {
@@ -27,16 +29,15 @@ const EMPTY_RESULT: StorageExpiryBatchResult = {
   releasedExchangeInventory: 0,
   heldInventory: 0,
   reminders: 0,
+  pointReturnedInventory: 0,
 };
 
 export type InventoryStorageExpiryMode = "DISABLED" | "ENABLED";
 
 /**
- * Storage-deadline reminders, the EXPIRED_HOLD transition and the expired
- * exchange cleanup are not an approved operating policy yet (AGENTS.md: scheduled
- * reminders and automatic expiry handling remain unapproved). They stay off
- * unless an operator explicitly enables them, so turning on the every-minute
- * worker Cron does not start them.
+ * Policy approved 2026-10-12. Remains off until the matching migration, legal
+ * revision, push credentials and operating checks are deployed and verified.
+ * Enabling the general worker Cron alone must not start financial expiry work.
  */
 export const DEFAULT_INVENTORY_STORAGE_EXPIRY_MODE: InventoryStorageExpiryMode = "DISABLED";
 
@@ -51,7 +52,7 @@ export function normalizeInventoryStorageExpiryMode(value: string | undefined): 
 export const DISABLED_STORAGE_EXPIRY_RESULT: Readonly<StorageExpiryBatchResult> = Object.freeze({ ...EMPTY_RESULT });
 
 /** Reminder milestones, in days before the storage deadline. */
-export const STORAGE_REMINDER_MILESTONE_DAYS = Object.freeze([1, 3, 7, 14] as const);
+export const STORAGE_REMINDER_MILESTONE_DAYS = Object.freeze([3, 7] as const);
 /**
  * The widest reminder window. The outer WHERE is bounded by it so the planner
  * can use the storage-expiry index range instead of evaluating the lateral
@@ -222,6 +223,8 @@ export async function processInventoryStorageExpiryBatch(
       [limit, now],
     );
     const heldInventory = assertOutboxParity(held.rows[0], "Storage expiry hold");
+    // Owner suspended point returns on 2026-10-13. Never auto-convert stored goods.
+    const pointReturnedInventory = 0;
 
     if (!shouldContinue()) throw new Error("Worker run deadline reached before storage expiry reminders");
     const reminders = await client.query<StorageEventRow>(
@@ -307,6 +310,7 @@ export async function processInventoryStorageExpiryBatch(
       releasedExchangeInventory: count(cleanupRow?.released_inventory),
       heldInventory,
       reminders: reminderCount,
+      pointReturnedInventory,
     };
   });
 

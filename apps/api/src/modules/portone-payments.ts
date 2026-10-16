@@ -27,7 +27,6 @@ import type { ApiContext } from "../types.js";
 import { applyCanonicalPaymentEvent, parseCanonicalPaymentEvent } from "./commerce.js";
 import { boundPaymentAdapterOptions, isPortOneCardProvider, PORTONE_CARD_PROVIDERS } from "../lib/portone-channel-binding.js";
 
-const PORTONE_PROVIDER = "PORTONE_V2_INICIS";
 
 export type LocalPayment = {
   id: string;
@@ -63,6 +62,8 @@ export type NormalDrawRefundCandidate = LateRefundCandidate & {
   expected_draw_units: number | string;
   available_entitlement_count: number | string;
   draw_result_count: number | string;
+  expected_purchase_units?: number | string;
+  unsafe_purchase_units?: number | string;
 };
 
 type RefundAttempt = {
@@ -114,6 +115,13 @@ export function drawRefundOrderBlocker(row: Pick<NormalDrawRefundCandidate, "ord
 export function unusedDrawAssetsBlocker(row: NormalDrawRefundCandidate): string | null {
   const lineCount = numberValue(row.line_count);
   const expectedDrawUnits = numberValue(row.expected_draw_units);
+  if (lineCount > 0 && numberValue(row.draw_line_count) === 0 && row.expected_purchase_units !== undefined) {
+    if (numberValue(row.expected_purchase_units) > 0 && numberValue(row.inventory_count) === numberValue(row.expected_purchase_units)
+      && numberValue(row.unsafe_purchase_units ?? 1) === 0 && numberValue(row.entitlement_count) === 0
+      && numberValue(row.draw_result_count) === 0 && numberValue(row.active_reservation_count) === 0) return null;
+    return "선택 구매 상품이 이동했거나 주문 수량과 달라 자동 전액 환불할 수 없습니다.";
+  }
+
   if (lineCount < 1 || numberValue(row.draw_line_count) !== lineCount || expectedDrawUnits < 1) {
     return "가챠·쿠지만 포함된 주문을 전액 환불할 수 있습니다.";
   }
@@ -155,9 +163,11 @@ export const REFUND_CANDIDATE_LOOKUP_SQL = `SELECT p.id,p.order_id,p.provider,p.
   COALESCE((SELECT sum(l.amount) FROM payment_ledger_entries l WHERE l.payment_id=p.id AND l.entry_type='PAYMENT'),0) AS paid_ledger,
   COALESCE((SELECT sum(l.amount) FROM payment_ledger_entries l WHERE l.payment_id=p.id AND l.entry_type='REFUND'),0) AS refund_ledger,
   (SELECT count(*) FROM order_lines line WHERE line.order_id=o.id) AS line_count,
-  (SELECT count(*) FROM order_lines line WHERE line.order_id=o.id AND line.category_snapshot IN ('gacha','kuji')) AS draw_line_count,
-  COALESCE((SELECT sum(line.quantity) FROM order_lines line WHERE line.order_id=o.id AND line.category_snapshot IN ('gacha','kuji')),0) AS expected_draw_units,
+  (SELECT count(*) FROM order_lines line WHERE line.order_id=o.id AND line.probability_version_id IS NOT NULL) AS draw_line_count,
+  COALESCE((SELECT sum(line.quantity) FROM order_lines line WHERE line.order_id=o.id AND line.probability_version_id IS NOT NULL),0) AS expected_draw_units,
   (SELECT count(*) FROM inventory_units i JOIN order_lines line ON line.id=i.source_id WHERE line.order_id=o.id AND i.source_type='PURCHASE') AS inventory_count,
+  COALESCE((SELECT sum(line.quantity) FROM order_lines line WHERE line.order_id=o.id AND line.probability_version_id IS NULL),0) AS expected_purchase_units,
+  (SELECT count(*) FROM inventory_units i JOIN order_lines line ON line.id=i.source_id WHERE line.order_id=o.id AND i.source_type='PURCHASE' AND (i.owner_id<>o.user_id OR i.status<>'OWNED')) AS unsafe_purchase_units,
   (SELECT count(*) FROM draw_entitlements e JOIN order_lines line ON line.id=e.order_line_id WHERE line.order_id=o.id) AS entitlement_count,
   (SELECT count(*) FROM draw_entitlements e JOIN order_lines line ON line.id=e.order_line_id WHERE line.order_id=o.id AND e.status='AVAILABLE') AS available_entitlement_count,
   (SELECT count(*) FROM draw_results result JOIN draw_entitlements e ON e.id=result.entitlement_id JOIN order_lines line ON line.id=e.order_line_id WHERE line.order_id=o.id) AS draw_result_count,
@@ -364,7 +374,7 @@ export function portOnePaymentEvidence(payment: PortOneCardPayment): "NONE" | "P
 
 export function configuredContext(context: ApiContext) {
   if (
-    context.config.paymentProvider !== PORTONE_PROVIDER
+    !isPortOneCardProvider(context.config.paymentProvider)
     || !context.config.paymentWebhookSecret
     || !context.config.portOne
   ) {

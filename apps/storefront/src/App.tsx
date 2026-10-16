@@ -130,7 +130,7 @@ function HeroSection() {
       <div className="story-grid story-grid--hero">
         <div className="story-copy story-copy--hero">
           <h1 id="hero-title">원하는 거 다 뽀바</h1>
-          <p>가챠부터 쿠지까지, 설레는 순간을 한곳에서.</p>
+          <p>포함된 상품 중 1개를 만나는 설렘. 쿠지는 준비 중이에요.</p>
           <span className="status-line"><span aria-hidden="true" />{launchCopy.heroStatus}</span>
         </div>
         <div className="hero-machine" aria-hidden="true">
@@ -185,7 +185,7 @@ function AppPreview() {
         <div className="phone-preview__section-heading"><strong>지금, 이런 뽑기는 어때요?</strong><span>전체보기</span></div>
         <div className="preview-products">
           <PreviewProduct image="/assets/gacha/capsule.png" title="캡슐 컬렉션" status={launchCopy.gachaPreviewStatus} />
-          <PreviewProduct image="/assets/kuji/ticket-icon.png" title="랜덤 티켓 시리즈" status={launchCopy.kujiPreviewStatus} />
+          <PreviewProduct image="/assets/kuji/ticket-icon.png" title="쿠지 티켓 시리즈" status={launchCopy.kujiPreviewStatus} />
         </div>
         <div className="phone-preview__nav">
           {navItems.map(([image, label], index) => (
@@ -215,8 +215,8 @@ function ExperienceSection() {
       <div className="story-grid">
         <div className="story-copy">
           <span className="section-label section-label--gacha">가챠샵</span>
-          <h2 id="experience-title">취향에 맞는 뽑기를 한눈에</h2>
-          <p>작품과 상품을 천천히 둘러보고 관심 상품을 저장해요.</p>
+          <h2 id="experience-title">포함된 상품 중 1개를 만나요</h2>
+          <p>구매 전 포함 상품과 공개된 확률을 확인해요. 개별 상품을 지정할 수 없으며 같은 상품을 받을 수 있어요.</p>
         </div>
         <div className="story-media story-media--phone"><AppPreview /></div>
       </div>
@@ -227,7 +227,7 @@ function ExperienceSection() {
 
 const favoriteRows = [
   ["캡슐 컬렉션", "새로운 즐거움을 천천히 둘러봐요.", true],
-  ["랜덤 티켓 시리즈", "쿠지샵 오픈 소식을 기다려 주세요.", false],
+  ["쿠지 티켓 시리즈", "쿠지샵 오픈 소식을 기다려 주세요.", false],
   ["새로 들어온 가챠", "관심 상품으로 저장해 다시 확인해요.", true],
 ] as const;
 
@@ -315,7 +315,7 @@ function KujiSection() {
           <span className="section-label section-label--kuji">쿠지샵</span>
           <h2 id="kuji-title">쿠지의 설렘도 준비하고 있어요</h2>
           <p>상품 구성과 이용 방식을 꼼꼼히 확인한 뒤 선보일게요.</p>
-          <span className="opening-soon">OPENING SOON</span>
+          <span className="opening-soon">준비 중</span>
         </div>
         <div className="kuji-stage" aria-hidden="true">
           <div className="kuji-stage__machine">

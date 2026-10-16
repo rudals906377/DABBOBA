@@ -190,7 +190,7 @@ export function ExchangeRoomScreen() {
     const tokens = await readAuthTokens();
     if (!tokens) {
       openCustomerLogin(
-        "로그인 후 가챠로 직접 뽑아 현재 보관 중인 상품을 교환방에 올릴 수 있어요.",
+        "로그인 후 본인이 구매해 획득하고 현재 보관 중인 상품을 교환방에 올릴 수 있어요.",
         "/exchange/new",
       );
       return;
@@ -415,11 +415,10 @@ function ExchangeRulesModal({
             <Text style={styles.modalBadge}>입장 안내</Text>
           </View>
           <View style={styles.modalRuleList}>
-            <RuleLine>가챠로 직접 뽑아 현재 보관함에 있는 상품만 등록하거나 신청할 수 있어요.</RuleLine>
+            <RuleLine>본인이 구매해 획득하고 현재 보관함에 있는 상품만 등록하거나 신청할 수 있어요.</RuleLine>
             <RuleLine>등록글은 7일 동안 공개되며 성사되지 않으면 자동으로 종료돼요.</RuleLine>
             <RuleLine>교환 완료 시 남은 보관 기간이 14일보다 짧으면 14일로 연장돼요.</RuleLine>
-            <RuleLine>교환으로 받은 상품은 포인트 환급 대상이 아니며, 본인이 가챠에서 직접 뽑아 보관 중인 상품만 포인트로 환급할 수 있어요.</RuleLine>
-            <RuleLine>쿠지·피규어·카드 상품은 교환과 포인트 환급 대상이 아니에요.</RuleLine>
+            <RuleLine>쿠지·피규어·카드 상품은 교환 대상이 아니에요.</RuleLine>
             <RuleLine>교환 진행과 문의는 다뽀바 안에서 완료해 주세요.</RuleLine>
           </View>
           <Pressable

@@ -5,8 +5,9 @@ import { isCurrentHomeSectionList } from "../features/home/home-catalog-contract
 
 const DATABASE_VERSION = 4;
 const HOME_CATALOG_KEY = "home.catalog.v1";
-const EXCHANGE_RULES_DISMISSED_KEY = "exchange.rules.dismissed.v3";
+const EXCHANGE_RULES_DISMISSED_KEY = "exchange.rules.dismissed.v4";
 const DRAW_SOUND_ENABLED_KEY = "draw.sound.enabled.v1";
+const DRAW_HAPTICS_ENABLED_KEY = "draw.haptics.enabled.v1";
 
 export async function initializeLocalDatabase(db: SQLiteDatabase): Promise<void> {
   await db.execAsync("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;");
@@ -89,6 +90,22 @@ export async function readDrawSoundEnabled(db: SQLiteDatabase): Promise<boolean>
     DRAW_SOUND_ENABLED_KEY,
   );
   return row?.preference_value !== "disabled";
+}
+
+export async function readDrawHapticsEnabled(db: SQLiteDatabase): Promise<boolean> {
+  const row = await db.getFirstAsync<{ preference_value: string }>(
+    "SELECT preference_value FROM app_preferences WHERE preference_key = ?", DRAW_HAPTICS_ENABLED_KEY,
+  );
+  return row?.preference_value !== "disabled";
+}
+
+export async function writeDrawHapticsEnabled(db: SQLiteDatabase, enabled: boolean): Promise<void> {
+  await db.runAsync(
+    `INSERT INTO app_preferences (preference_key, preference_value, updated_at)
+     VALUES (?, ?, ?) ON CONFLICT (preference_key) DO UPDATE SET
+       preference_value=excluded.preference_value, updated_at=excluded.updated_at`,
+    DRAW_HAPTICS_ENABLED_KEY, enabled ? "enabled" : "disabled", new Date().toISOString(),
+  );
 }
 
 export async function writeDrawSoundEnabled(

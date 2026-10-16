@@ -142,6 +142,49 @@ test("unknown or malformed explicit PG binding is rejected before any network re
   }
 });
 
+test("NICE V2 accepts only its own bound channel and does not inherit KG unsubmitted exceptions", async () => {
+  const nice = { ...contract, pgProvider: "NICE_V2" as const, channelKey: "channel-key-nice" };
+  const raw = payment({ channel: { ...payment().channel, key: nice.channelKey, pgProvider: "NICE_V2" } });
+  const adapter = createPortOneV2Adapter({ ...nice, fetchImpl: async () => jsonResponse(raw) });
+  assert.equal((await adapter.getPayment({ paymentId: "payment-test", expectedTotalAmount: 12000 })).channel?.pgProvider, "NICE_V2");
+  for (const pgProvider of ["INICIS_V2", "KCP_V2", "NICE"]) {
+    const wrong = createPortOneV2Adapter({ ...nice, fetchImpl: async () => jsonResponse(payment({ channel: { ...raw.channel, pgProvider } })) });
+    await assert.rejects(wrong.getPayment({ paymentId: "payment-test", expectedTotalAmount: 12000 }), errorCode("PAYMENT_CONTRACT_MISMATCH"));
+  }
+  const kgReadyShape = { ...raw, status: "READY", method: undefined, paidAt: undefined, pgTxId: undefined, cancellations: [] };
+  const notKg = createPortOneV2Adapter({ ...nice, fetchImpl: async () => jsonResponse(kgReadyShape) });
+  await assert.rejects(notKg.getPayment({ paymentId: "payment-test", expectedTotalAmount: 12000 }));
+});
+
+for (const [pgProvider, failureCode] of [["NICE_V2", "I009"], ["KICC_V2", "W002"]] as const) {
+test(`observed ${pgProvider} ${failureCode} window-close response is unpaid only without approval or card evidence`, async () => {
+  const nice = { ...contract, pgProvider, channelKey: "channel-key-review" };
+  const closed = payment({
+    status: "FAILED", channel: { ...payment().channel, key: nice.channelKey, pgProvider },
+    method: undefined, pgTxId: undefined, paidAt: undefined,
+    failedAt: "2026-10-14T00:07:52.125748189Z", failure: { pgCode: failureCode, reason: "must-not-escape" },
+  });
+  const lookup = (raw: unknown) => createPortOneV2Adapter({ ...nice, fetchImpl: async () => jsonResponse(raw) })
+    .getPayment({ paymentId: "payment-test", expectedTotalAmount: 12000 });
+  const result = await lookup(closed);
+  assert.equal(result.failureCode, failureCode);
+  assert.equal(result.method, null);
+  assert.equal(result.amount.paid, 12000);
+  assert.equal(JSON.stringify(result).includes("must-not-escape"), false);
+  for (const change of [
+    { failure: { pgCode: "01" } }, { failure: { pgCode: "I008" } }, { failedAt: undefined },
+    { pgTxId: "approved-pg-transaction" }, { paidAt: "2026-10-14T00:07:52Z" },
+    { amount: { ...closed.amount, paid: 1 } }, { amount: { ...closed.amount, cancelled: 1 } },
+  ]) await assert.rejects(lookup({ ...closed, ...change }), errorCode("UNEXPECTED_RESPONSE"));
+  for (const otherProvider of ["INICIS_V2", "KCP_V2", "NICE_V2", "KICC_V2"] as const) {
+    if (otherProvider === pgProvider) continue;
+    await assert.rejects(createPortOneV2Adapter({ ...nice, pgProvider: otherProvider, fetchImpl: async () => jsonResponse({
+      ...closed, channel: { ...closed.channel, pgProvider: otherProvider },
+    }) }).getPayment({ paymentId: "payment-test", expectedTotalAmount: 12000 }), errorCode("UNEXPECTED_RESPONSE"));
+  }
+});
+}
+
 test("an uncharged READY payment can omit the channel and method while awaiting the PG", async () => {
   const { channel: _channel, method: _method, paidAt: _paidAt, ...ready } = payment({
     status: "READY",
@@ -622,4 +665,12 @@ test("cancel validates the expected balance before sending", async () => {
     errorCode("INVALID_REQUEST"),
   );
   assert.equal(calls, 0);
+});
+
+test("EasyPay KICC V2 verifies the server-bound channel and cannot accept NICE evidence", async()=>{
+  const response=payment({channel:{...payment().channel,pgProvider:"KICC_V2"}});
+  const adapter=createPortOneV2Adapter({...contract,pgProvider:"KICC_V2",fetchImpl:async()=>jsonResponse(response)});
+  assert.equal((await adapter.getPayment({paymentId:"payment-test",expectedTotalAmount:12000})).channel?.pgProvider,"KICC_V2");
+  const mixed=createPortOneV2Adapter({...contract,pgProvider:"KICC_V2",fetchImpl:async()=>jsonResponse(payment({channel:{...payment().channel,pgProvider:"NICE_V2"}}))});
+  await assert.rejects(mixed.getPayment({paymentId:"payment-test",expectedTotalAmount:12000}));
 });

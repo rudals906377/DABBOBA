@@ -68,7 +68,7 @@ export function notificationTemplate(event: OutboxEvent): NotificationTemplate |
       return { kind: "SHIPPING_CANCELLED", title: "배송 신청이 취소됐어요", body: "배송 신청 내역에서 처리 결과를 확인해 주세요." };
     case "inventory.storage_expiry_reminder": {
       const remainingDays = event.payload.remainingDays;
-      if (typeof remainingDays !== "number" || ![14, 7, 3, 1].includes(remainingDays)) return null;
+      if (typeof remainingDays !== "number" || ![7, 3].includes(remainingDays)) return null;
       return {
         kind: "STORAGE_EXPIRY_REMINDER",
         title: `보관 만료 ${remainingDays}일 전이에요`,
@@ -80,6 +80,12 @@ export function notificationTemplate(event: OutboxEvent): NotificationTemplate |
         kind: "STORAGE_EXPIRED_HOLD",
         title: "보관 기간이 만료되어 보류됐어요",
         body: "상품은 자동 폐기되지 않아요. 보관함에서 확인한 뒤 고객센터로 문의해 주세요.",
+      };
+    case "inventory.storage_point_returned":
+      return {
+        kind: "STORAGE_POINT_RETURNED",
+        title: "보관 만료 상품이 포인트로 환급됐어요",
+        body: "포인트 내역에서 환급 금액을 확인해 주세요. 현금 환불과는 달라요.",
       };
     case "inquiry.answered":
       return { kind: "INQUIRY_ANSWERED", title: "문의 답변이 도착했어요", body: "고객센터에서 운영자 답변을 확인해 주세요." };
@@ -116,18 +122,17 @@ export function externalPreferenceForNotification(kind: string): ExternalPrefere
 }
 
 export async function shouldDeliverNotificationExternally(
-  pool: DatabasePool,
-  notification: Pick<Notification, "userId" | "kind">,
+  _pool: DatabasePool,
+  notification: Pick<Notification, "userId" | "kind"> & { data?: Record<string, unknown> },
 ): Promise<boolean> {
-  const preference = externalPreferenceForNotification(notification.kind);
-  if (!preference) return true;
-  const result = await pool.query<ExternalPreferenceRow>(
-    `SELECT exchange_updates,request_updates,restock_updates,
-      marketing_sms,marketing_email,marketing_push,personalized_recommendations
-     FROM notification_preferences WHERE user_id=$1`,
-    [notification.userId],
-  );
-  return result.rows[0]?.[preference] === true;
+  // Launch scope: all events still enter the in-app inbox, but only D-7/D-3
+  // storage reminders may reach an external delivery provider.
+  return isStorageExpiryPush(notification);
+}
+
+export function isStorageExpiryPush(notification: { kind: string; data?: Record<string, unknown> }): boolean {
+  return notification.kind === "STORAGE_EXPIRY_REMINDER"
+    && [3, 7].includes(Number(notification.data?.remainingDays));
 }
 
 function notificationData(event: OutboxEvent): Record<string, unknown> {
@@ -225,6 +230,7 @@ export class HttpNotificationDelivery implements NotificationDelivery {
   constructor(private readonly url: string, private readonly token: string | null) {}
 
   async deliver(notification: Notification): Promise<void> {
+    if (!isStorageExpiryPush(notification)) return;
     const response = await fetch(this.url, {
       method: "POST",
       headers: {

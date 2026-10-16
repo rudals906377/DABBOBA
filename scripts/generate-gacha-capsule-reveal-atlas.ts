@@ -3,7 +3,7 @@ import { createRequire } from "node:module";
 import { readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { chromium } from "playwright";
+import { chromium } from "@playwright/test";
 import {
   CAPSULE_3D_FRAGMENT_SHADER,
   CAPSULE_3D_VERTEX_SHADER,
@@ -40,6 +40,9 @@ const REVEAL_PROGRESS_MAX = 0.92;
 const CAPSULE_DIAMETER = 130;
 const MAX_TEXTURE_DIMENSION = 4096;
 const MAX_DECODED_BYTES = 16 * 1024 * 1024;
+// Resolve 64 subpixel coverage samples per output pixel offline. The native
+// atlas keeps its existing dimensions, pose count and decoded-memory budget.
+const OFFLINE_SUPERSAMPLE = 8;
 
 type RenderedAtlas = {
   pngDataUrl: string;
@@ -142,8 +145,6 @@ try {
     const atlas = atlasCanvas.getContext("2d", { alpha: true });
     if (!gl || !atlas) throw new Error("Offline WebGL atlas renderer is unavailable");
     const webgl = gl;
-    atlas.imageSmoothingEnabled = true;
-    atlas.imageSmoothingQuality = "high";
     atlas.clearRect(0, 0, input.atlasWidth, input.atlasHeight);
 
     function compileShader(kind: number, source: string): WebGLShader {
@@ -228,6 +229,37 @@ try {
     gl.uniform1i(uniforms.wordmark, 0);
 
     const rgba = new Uint8Array(frameCanvas.width * frameCanvas.height * 4);
+    const resolved = new ImageData(input.frameWidth, input.frameHeight);
+    function resolveCoverage(): void {
+      // Canvas drawImage can take only a few bilinear taps when shrinking a
+      // WebGL canvas. Explicitly integrate every subpixel instead. Weight RGB
+      // by alpha so transparent black cannot introduce a dark magnified fringe.
+      const samples = input.supersample * input.supersample;
+      for (let y = 0; y < input.frameHeight; y += 1) {
+        for (let x = 0; x < input.frameWidth; x += 1) {
+          let alpha = 0;
+          let red = 0;
+          let green = 0;
+          let blue = 0;
+          for (let sy = 0; sy < input.supersample; sy += 1) {
+            const sourceY = frameCanvas.height - 1 - (y * input.supersample + sy);
+            for (let sx = 0; sx < input.supersample; sx += 1) {
+              const offset = (sourceY * frameCanvas.width + x * input.supersample + sx) * 4;
+              const a = rgba[offset + 3]!;
+              alpha += a;
+              red += rgba[offset]! * a;
+              green += rgba[offset + 1]! * a;
+              blue += rgba[offset + 2]! * a;
+            }
+          }
+          const target = (y * input.frameWidth + x) * 4;
+          resolved.data[target] = alpha > 0 ? red / alpha : 0;
+          resolved.data[target + 1] = alpha > 0 ? green / alpha : 0;
+          resolved.data[target + 2] = alpha > 0 ? blue / alpha : 0;
+          resolved.data[target + 3] = alpha / samples;
+        }
+      }
+    }
     const visiblePixelCounts: number[] = [];
     for (let index = 0; index < input.frames.length; index += 1) {
       const frame = input.frames[index]!;
@@ -244,12 +276,11 @@ try {
         if (rgba[offset]! > 0) visible += 1;
       }
       visiblePixelCounts.push(visible);
-      atlas.drawImage(
-        frameCanvas,
+      resolveCoverage();
+      atlas.putImageData(
+        resolved,
         (index % input.columns) * input.frameWidth,
         Math.floor(index / input.columns) * input.frameHeight,
-        input.frameWidth,
-        input.frameHeight,
       );
     }
 
@@ -267,7 +298,7 @@ try {
     fragmentShader: CAPSULE_3D_FRAGMENT_SHADER,
     frameHeight: FRAME_HEIGHT,
     frameWidth: FRAME_WIDTH,
-    supersample: 2,
+    supersample: OFFLINE_SUPERSAMPLE,
     frames: frameProgress.map((progress, index) => ({
       progress,
       seal: frameLighting[index]!.seal,
@@ -306,7 +337,7 @@ if (rendered.visiblePixelCounts.at(-1) !== 0) {
 
 const atlas = Buffer.from(rendered.pngDataUrl.slice(pngPrefix.length), "base64");
 const require = createRequire(import.meta.url);
-const playwrightVersion = (require("playwright/package.json") as { version: string }).version;
+const playwrightVersion = (require("@playwright/test/package.json") as { version: string }).version;
 const manifest = {
   schemaVersion: 1,
   kind: "analytical-capsule-reveal",
@@ -331,7 +362,8 @@ const manifest = {
   atlasHeight,
   decodedBytes,
   generator: {
-    supersample: 2,
+    supersample: OFFLINE_SUPERSAMPLE,
+    coverageResolve: "premultiplied-area",
     playwrightVersion,
     browserVersion,
     webgl: "WebGL 1 / ANGLE SwiftShader",

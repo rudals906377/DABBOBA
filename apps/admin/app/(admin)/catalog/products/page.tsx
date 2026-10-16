@@ -53,7 +53,7 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
           <span><small>{ips.find((ip) => ip.id === item.ipId)?.nameKo ?? "작품"} · {CATEGORY_LABELS[item.category]}</small><strong>{item.name}</strong></span>
         </Link>
         <div className="catalog-product-card__summary"><strong>{item.price === null ? "가격 미정" : `${item.price.toLocaleString("ko-KR")}원`}</strong><span>재고 {item.availableQuantity.toLocaleString("ko-KR")}개</span><StatusBadge value={item.isPrizeOnly ? "구성 상품" : SALE_STATUS_LABELS[item.saleStatus]} />{!item.isActive ? <StatusBadge value={false} /> : null}</div>
-        <div className="quick-links"><Link className="button-link" href={path}>상품 수정</Link><Link className="button-link" href={`${path}#photos`}>사진 관리</Link>{!item.isPrizeOnly && (item.category === "gacha" || item.category === "kuji") ? <Link className="button-link" href={`${path}/draws`}>{item.category === "kuji" ? "쿠지 상 구성" : "가챠 구성"}</Link> : null}</div>
+        <div className="quick-links"><Link className="button-link" href={path}>상품 수정</Link><Link className="button-link" href={`${path}#photos`}>사진 관리</Link>{!item.isPrizeOnly && item.metadata.purchaseMode !== "DIRECT" && (item.category === "gacha" || item.category === "kuji") ? <Link className="button-link" href={`${path}/draws`}>{item.category === "kuji" ? "쿠지 상 구성" : "가챠 구성"}</Link> : null}</div>
       </article>;
     })}</div>}
     <NextCursor pathname="/catalog/products" nextCursor={page.nextCursor} searchParams={query} />

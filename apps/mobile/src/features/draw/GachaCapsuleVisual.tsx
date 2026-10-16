@@ -1,5 +1,6 @@
 import { StyleSheet, View, type StyleProp, type ViewStyle } from "react-native";
 import Animated, { type AnimatedStyle } from "react-native-reanimated";
+import Svg, { Defs, Ellipse, RadialGradient, Rect, Stop } from "react-native-svg";
 import { seed } from "@/design-system/seed";
 import type { GachaCapsuleTone } from "@/features/draw/gacha-capsule-motion";
 import { getGachaCapsuleSilhouette } from "@/features/draw/gacha-capsule-silhouette";
@@ -11,6 +12,8 @@ type GachaCapsuleVisualProps = {
   heroDetail?: boolean;
   /** Untransformed layout size; no per-frame measurement is needed. */
   diameter?: number;
+  /** Keep the environment light aligned while the molded seam rests at an angle. */
+  materialRotation?: number;
   style?: StyleProp<ViewStyle>;
   upperStyle?: StyleProp<AnimatedStyle<ViewStyle>>;
   lowerStyle?: StyleProp<AnimatedStyle<ViewStyle>>;
@@ -21,8 +24,8 @@ const PALETTES = {
   lime: {
     upper: "rgba(224, 248, 225, 0.9)",
     lower: "#91E98E",
-    machineUpper: "#D1F1CE",
-    machineLower: "#72C971",
+    machineUpper: "#D5EFD3",
+    machineLower: "#88D784",
     seam: "rgba(107, 190, 106, 0.72)",
     border: "rgba(61, 105, 62, 0.42)",
     cavity: "#173018",
@@ -30,8 +33,8 @@ const PALETTES = {
   ivory: {
     upper: "rgba(252, 250, 243, 0.92)",
     lower: "#F4F0E6",
-    machineUpper: "#FBF7ED",
-    machineLower: "#DFD4BD",
+    machineUpper: "#F5F2E8",
+    machineLower: "#E5DDCA",
     seam: "rgba(192, 181, 158, 0.72)",
     border: "rgba(118, 107, 88, 0.34)",
     cavity: "#312C24",
@@ -39,8 +42,8 @@ const PALETTES = {
   orange: {
     upper: "rgba(255, 221, 207, 0.9)",
     lower: "#F36B2C",
-    machineUpper: "#FFB18A",
-    machineLower: "#E95E24",
+    machineUpper: "#F4AF88",
+    machineLower: "#DE783F",
     seam: "rgba(210, 76, 25, 0.72)",
     border: "rgba(128, 48, 17, 0.42)",
     cavity: "#3B190D",
@@ -53,6 +56,7 @@ export function GachaCapsuleVisual({
   split = false,
   heroDetail = false,
   diameter = 200,
+  materialRotation = 0,
   style,
   upperStyle,
   lowerStyle,
@@ -62,7 +66,7 @@ export function GachaCapsuleVisual({
   const upperColor = heroDetail ? palette.upper : palette.machineUpper;
   const lowerColor = heroDetail ? palette.lower : palette.machineLower;
   const depthShadeOpacity = depth >= 2 ? 0.01 : depth === 1 ? 0.05 : 0.13;
-  const highlightOpacity = depth >= 2 ? 0.9 : depth === 1 ? 0.72 : 0.5;
+  const highlightOpacity = depth >= 2 ? 0.52 : depth === 1 ? 0.42 : 0.3;
   // Every context shares one spherical shell; lighting and detail adapt by scale.
   const silhouette = getGachaCapsuleSilhouette(diameter, heroDetail);
   const upperRadius = silhouette.borderTopLeftRadius;
@@ -107,7 +111,7 @@ export function GachaCapsuleVisual({
         {split ? heroDetail ? (
           <>
             <View style={[styles.heroUpperCavity, { backgroundColor: palette.cavity }]} />
-            <View style={[styles.heroUpperInnerLip, { backgroundColor: palette.seam }]} />
+            <View style={[styles.heroUpperInnerLip, { backgroundColor: upperColor }]} />
           </>
         ) : (
           <>
@@ -142,7 +146,7 @@ export function GachaCapsuleVisual({
         {split ? heroDetail ? (
           <>
             <View style={[styles.heroLowerCavity, { backgroundColor: palette.cavity }]} />
-            <View style={[styles.heroLowerInnerLip, { backgroundColor: palette.seam }]} />
+            <View style={[styles.heroLowerInnerLip, { backgroundColor: "#F0F5F0" }]} />
           </>
         ) : <View style={[styles.splitLowerSeam, { backgroundColor: palette.border }]} /> : null}
       </Animated.View>
@@ -160,6 +164,25 @@ export function GachaCapsuleVisual({
             </>
           ) : null}
           <View style={[styles.innerRim, silhouette]} />
+          <View style={[styles.materialLight, { transform: [{ rotate: `${materialRotation}deg` }] }]}>
+            <Svg width="100%" height="100%" viewBox="0 0 100 100">
+              <Defs>
+                <RadialGradient id="capsule-satin-body" cx="30%" cy="22%" r="85%">
+                  <Stop offset="0" stopColor="#FFFFFF" stopOpacity="0.28" />
+                  <Stop offset="0.3" stopColor="#F4FFF3" stopOpacity="0.1" />
+                  <Stop offset="0.56" stopColor="#142219" stopOpacity="0.015" />
+                  <Stop offset="1" stopColor="#09150D" stopOpacity="0.3" />
+                </RadialGradient>
+                <RadialGradient id="capsule-softbox" cx="50%" cy="50%" r="50%">
+                  <Stop offset="0" stopColor="#FFFFFF" stopOpacity="0.38" />
+                  <Stop offset="0.55" stopColor="#FFFFFF" stopOpacity="0.16" />
+                  <Stop offset="1" stopColor="#FFFFFF" stopOpacity="0" />
+                </RadialGradient>
+              </Defs>
+              <Rect width="100" height="100" fill="url(#capsule-satin-body)" />
+              <Ellipse cx="30" cy="22" rx="23" ry="10" transform="rotate(-28 30 22)" fill="url(#capsule-softbox)" />
+            </Svg>
+          </View>
           <View style={[styles.depthShade, silhouette, { opacity: depthShadeOpacity }]} />
         </>
       ) : null}
@@ -320,7 +343,7 @@ const styles = StyleSheet.create({
     width: "22%",
     height: "16%",
     borderRadius: 1,
-    backgroundColor: "rgba(255, 255, 255, 0.56)",
+    backgroundColor: "rgba(255, 255, 255, 0.28)",
   },
   upperMaterialDepth: {
     position: "absolute",
@@ -389,7 +412,7 @@ const styles = StyleSheet.create({
     top: "8%",
     width: "24%",
     height: "84%",
-    backgroundColor: "rgba(12, 20, 13, 0.12)",
+    backgroundColor: "rgba(12, 20, 13, 0.035)",
     transform: [{ rotate: "6deg" }],
   },
   heroLowerCoreShade: {
@@ -510,6 +533,9 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFill,
     borderRadius: seed.radius.full,
     backgroundColor: "#08100B",
+  },
+  materialLight: {
+    ...StyleSheet.absoluteFill,
   },
   heroLightRim: {
     ...StyleSheet.absoluteFill,

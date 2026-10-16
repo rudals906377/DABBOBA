@@ -333,7 +333,7 @@ export async function registerAdminCommerceRoutes(app: FastifyInstance, context:
     const paymentRow = result.rows[0]!;
     const commerceLive = effectiveCommerceMode(context.config) === "LIVE";
     const refundConfigured = commerceLive
-      && context.config.paymentProvider === "PORTONE_V2_INICIS"
+      && isPortOneCardProvider(context.config.paymentProvider)
       && Boolean(context.config.paymentWebhookSecret && context.config.portOne);
     // A points-only order has no card payment to cancel: its full refund is the
     // local point-order refund, available whenever commerce is LIVE.
@@ -423,10 +423,10 @@ export async function registerAdminCommerceRoutes(app: FastifyInstance, context:
       expected_purchase_units: number | string; actual_purchase_units: number | string; unsafe_purchase_units: number | string;
       expected_draw_units: number | string; actual_draw_entitlements: number | string; consumed_draw_entitlements: number | string;
     }>(`SELECT
-      COALESCE((SELECT sum(l.quantity) FROM order_lines l WHERE l.order_id=o.id AND l.category_snapshot IN ('figure','tcg')),0) AS expected_purchase_units,
+      COALESCE((SELECT sum(l.quantity) FROM order_lines l WHERE l.order_id=o.id AND l.probability_version_id IS NULL),0) AS expected_purchase_units,
       (SELECT count(*) FROM inventory_units i JOIN order_lines l ON l.id=i.source_id WHERE l.order_id=o.id AND i.source_type='PURCHASE') AS actual_purchase_units,
       (SELECT count(*) FROM inventory_units i JOIN order_lines l ON l.id=i.source_id WHERE l.order_id=o.id AND i.source_type='PURCHASE' AND (i.owner_id<>o.user_id OR i.status<>'OWNED')) AS unsafe_purchase_units,
-      COALESCE((SELECT sum(l.quantity) FROM order_lines l WHERE l.order_id=o.id AND l.category_snapshot IN ('gacha','kuji')),0) AS expected_draw_units,
+      COALESCE((SELECT sum(l.quantity) FROM order_lines l WHERE l.order_id=o.id AND l.probability_version_id IS NOT NULL),0) AS expected_draw_units,
       (SELECT count(*) FROM draw_entitlements e JOIN order_lines l ON l.id=e.order_line_id WHERE l.order_id=o.id) AS actual_draw_entitlements,
       (SELECT count(*) FROM draw_entitlements e JOIN order_lines l ON l.id=e.order_line_id WHERE l.order_id=o.id AND e.status='CONSUMED') AS consumed_draw_entitlements
       FROM orders o WHERE o.id=$1`, [row.order_id]);
@@ -438,7 +438,7 @@ export async function registerAdminCommerceRoutes(app: FastifyInstance, context:
         FROM portone_refund_cancellation_attempts WHERE payment_id=$1`, [paymentId]);
     const attempt = cancellation.rows[0];
     const lateRefundConfigured = effectiveCommerceMode(context.config) === "LIVE"
-      && context.config.paymentProvider === "PORTONE_V2_INICIS"
+      && isPortOneCardProvider(context.config.paymentProvider)
       && Boolean(context.config.paymentWebhookSecret && context.config.portOne);
     const lateCandidate = lateRefundConfigured && !attempt
       && row.status === "REFUND_REVIEW" && row.order_status === "REFUND_REVIEW"
@@ -469,7 +469,7 @@ export async function registerAdminCommerceRoutes(app: FastifyInstance, context:
       providerReconciliationAvailable: Boolean(attempt)
         && row.status !== "REFUNDED"
         && effectiveCommerceMode(context.config) === "LIVE"
-        && context.config.paymentProvider === "PORTONE_V2_INICIS"
+        && isPortOneCardProvider(context.config.paymentProvider)
         && Boolean(context.config.paymentWebhookSecret && context.config.portOne),
     };
   });

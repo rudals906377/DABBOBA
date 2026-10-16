@@ -1270,7 +1270,7 @@ export function CheckoutScreen() {
                 />
               ) : livePaymentsEnabled && paymentTotal > 0 ? (
                 <Text style={styles.sectionCaption}>
-                  KG이니시스 카드 결제창에서 결제를 완료하면 서버 승인 확인 후 추첨권이 발급돼요.
+                  신용카드 결제창에서 결제를 완료하면 서버 승인 확인 후 추첨권이 발급돼요.
                 </Text>
               ) : (
                 <Text style={styles.sectionCaption}>
@@ -1290,7 +1290,7 @@ export function CheckoutScreen() {
                       ? developmentPaymentCopy.selectedCaption
                       : developmentPaymentCopy.availableCaption
                     : livePaymentsEnabled
-                      ? "KG이니시스 카드 결제"
+                      ? "신용카드 결제"
                       : method.unavailableCaption;
                   return (
                     <Pressable

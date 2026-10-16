@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ApiConfig } from "@dabboba/config";
-import { adapterOptionsForBinding, configuredCardChannels, selectCardChannel } from "./portone-channel-binding.js";
+import { adapterOptionsForBinding, checkoutCardChannels, configuredCardChannels, selectCardChannel } from "./portone-channel-binding.js";
 
 const config = {
   paymentProvider: "PORTONE_V2_INICIS", paymentWebhookSecret: "synthetic-webhook-secret",
@@ -32,4 +32,29 @@ test("adapter selection binds exact provider, store, merchant, channel and envir
   assert.equal(adapterOptionsForBinding(config, "PORTONE_V2_INICIS", null).pgProvider, "INICIS_V2");
   assert.throws(() => adapterOptionsForBinding(config, "PORTONE_V2_KCP", null), /채널/);
   assert.throws(() => adapterOptionsForBinding(config, "TEST_PG", null), /채널/);
+});
+
+test("NICE is the only new checkout rail while historical INICIS/KCP remain query-only", () => {
+  const nice = { ...config, paymentProvider: "PORTONE_V2_NICE", portOne: { ...config.portOne!,
+    channelKey: "channel-key-nice", inicisChannelKey: config.portOne!.channelKey } } as ApiConfig;
+  const selected = selectCardChannel(nice);
+  assert.equal(selected.provider, "PORTONE_V2_NICE");
+  assert.equal(selected.pgProvider, "NICE_V2");
+  assert.deepEqual(checkoutCardChannels(nice), [selected]);
+  for (const pg of ["INICIS", "KCP"] as const) assert.throws(() => selectCardChannel(nice, pg), /구성되지/);
+  for (const old of configuredCardChannels(config)) {
+    assert.equal(adapterOptionsForBinding(nice, old.provider, old).channelKey, old.channelKey);
+  }
+  assert.equal(adapterOptionsForBinding(nice, "PORTONE_V2_INICIS", null).channelKey, config.portOne!.channelKey);
+  assert.throws(() => adapterOptionsForBinding(nice, "PORTONE_V2_NICE", null), /채널/);
+  assert.throws(() => adapterOptionsForBinding(nice, "PORTONE_V2_NICE", { ...selected, pgProvider: "INICIS_V2" }), /채널/);
+});
+
+test("EasyPay and NICE checkout use independent immutable PortOne channels",()=>{
+ const modern={...config,paymentProvider:"PORTONE_V2_NICE",portOne:{...config.portOne!,channelKey:"channel-key-nice",kiccChannelKey:"channel-key-kicc",inicisChannelKey:config.portOne!.channelKey}} as ApiConfig;
+ assert.deepEqual(checkoutCardChannels(modern).map(c=>c.provider),["PORTONE_V2_NICE","PORTONE_V2_KICC"]);
+ const kicc=selectCardChannel(modern,"KICC");assert.equal(kicc.pgProvider,"KICC_V2");
+ assert.equal(adapterOptionsForBinding(modern,kicc.provider,kicc).channelKey,"channel-key-kicc");
+ assert.throws(()=>adapterOptionsForBinding(modern,kicc.provider,{...kicc,pgProvider:"NICE_V2"}));
+ assert.throws(()=>selectCardChannel(modern,"INICIS"));
 });

@@ -1,3 +1,4 @@
+import { historicalOrderFixture } from "../legacy-order.integration-fixtures.js";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
@@ -324,7 +325,7 @@ test("an abandoned PortOne window releases only an authoritatively unpaid order,
   assert.ok([200, 201].includes(waiting.statusCode), waiting.body);
   const waiterEntryId = (waiting.json() as { viewer: { entryId: string; state: string } }).viewer.entryId;
   assert.equal((waiting.json() as { viewer: { state: string } }).viewer.state, "WAITING");
-  const ordered = await app.inject({
+  const ordered = await historicalOrderFixture(app, pool, config, {
     method: "POST", url: "/v1/orders",
     headers: { ...auth(owner.token), "idempotency-key": randomUUID() },
     payload: { items: [{ productId: kujiId, quantity: 1, expectedDrawVersion: 1 }], pointAmount: 0, kujiRoomEntryId: entryId },
