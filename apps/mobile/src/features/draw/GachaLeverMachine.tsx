@@ -70,6 +70,7 @@ type GachaLeverMachineProps = {
   settled?: boolean;
   reduceMotion: boolean;
   soundEnabled: boolean;
+  hapticsEnabled?: boolean;
   resultReady: boolean;
   requestSignal?: number;
   resetSignal?: number;
@@ -111,6 +112,7 @@ export const GachaLeverMachine = memo(function GachaLeverMachine({
   settled = false,
   reduceMotion,
   soundEnabled,
+  hapticsEnabled = false,
   resultReady,
   requestSignal = 0,
   resetSignal = 0,
@@ -145,10 +147,11 @@ export const GachaLeverMachine = memo(function GachaLeverMachine({
   const {
     cancelScheduled: cancelRevealSounds,
     playDropImpact: playDropImpactSound,
+    playRebound: playReboundSound,
     playLever: playLeverSound,
     playSeamOpen: playSeamOpenSound,
     scheduleDispense: scheduleDispenseSounds,
-  } = useGachaRevealAudio(soundEnabled);
+  } = useGachaRevealAudio(soundEnabled, hapticsEnabled && !reduceMotion, animationRun);
   const motionStateRef = useRef(createGachaLeverMotionState(reduceMotion));
   const dispatchRef = useRef<(event: GachaLeverMotionEvent) => void>(() => undefined);
   const requestOpenRef = useRef(onRequestOpen);
@@ -177,7 +180,7 @@ export const GachaLeverMachine = memo(function GachaLeverMachine({
 
     if (transition.effect === "start-dispense") {
       const run = animationRun.value;
-      scheduleDispenseSounds();
+      scheduleDispenseSounds(run);
       cancelAnimation(waitingPulse);
       waitingPulse.value = 0;
       dispenseProgress.value = 0;
@@ -291,14 +294,15 @@ export const GachaLeverMachine = memo(function GachaLeverMachine({
   // The JS side only plays a cue while the current dispense is armed, so a
   // reset, SKIP, settle or unmount still silences anything already in flight.
   useAnimatedReaction(
-    () => resolveGachaRevealSoundStage(revealActive.value, dispenseProgress.value, revealProgress.value),
-    (stage, previous) => {
-      const before = previous ?? 0;
+    () => ({ stage: resolveGachaRevealSoundStage(revealActive.value, dispenseProgress.value, revealProgress.value), run: animationRun.value }),
+    ({ stage, run }, previous) => {
+      const before = previous?.run === run ? previous.stage : 0;
       if (stage <= before) return;
-      if (before < 1 && stage >= 1) scheduleOnRN(playDropImpactSound);
-      if (before < 2 && stage >= 2) scheduleOnRN(playSeamOpenSound);
+      if (stage === 1) scheduleOnRN(playDropImpactSound, run);
+      if (stage === 2) scheduleOnRN(playReboundSound, run);
+      if (stage === 3) scheduleOnRN(playSeamOpenSound, run);
     },
-    [playDropImpactSound, playSeamOpenSound],
+    [playDropImpactSound, playReboundSound, playSeamOpenSound],
   );
 
   useEffect(() => {
@@ -407,7 +411,7 @@ export const GachaLeverMachine = memo(function GachaLeverMachine({
     cancelAnimation(clockwiseCueRotation);
     clockwiseCueOpacity.value = 0;
     leverSoundPlayed.value = 1;
-    playLeverSound();
+    playLeverSound(run);
     gestureCompleted.value = 1;
     interactionRadians.value = GACHA_LEVER_TARGET_RADIANS;
     if (reduceMotion) {
@@ -466,7 +470,7 @@ export const GachaLeverMachine = memo(function GachaLeverMachine({
       gestureCompleted.value = 0;
       if (leverSoundPlayed.value === 0) {
         leverSoundPlayed.value = 1;
-        scheduleOnRN(playLeverSound);
+        scheduleOnRN(playLeverSound, animationRun.value);
       }
       manager.activate();
     })

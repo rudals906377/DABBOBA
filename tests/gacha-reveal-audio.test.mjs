@@ -1,88 +1,100 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { sampleGachaRevealLighting } from "../apps/mobile/src/features/draw/gacha-reveal-timeline.ts";
+import { resolveKujiFeedbackStage } from "../apps/mobile/src/features/draw/kuji-reveal-feedback.ts";
 
 const root = new URL("../", import.meta.url);
-const mobilePackage = JSON.parse(readFileSync(new URL("apps/mobile/package.json", root), "utf8"));
-const audioSource = readFileSync(new URL("apps/mobile/src/features/draw/useGachaRevealAudio.ts", root), "utf8");
-const machineSource = readFileSync(new URL("apps/mobile/src/features/draw/GachaLeverMachine.tsx", root), "utf8");
-const screenSource = readFileSync(new URL("apps/mobile/src/features/draw/DrawRevealScreen.tsx", root), "utf8");
-const databaseSource = readFileSync(new URL("apps/mobile/src/lib/local-database.ts", root), "utf8");
-const timingSource = readFileSync(new URL("apps/mobile/src/features/draw/gacha-reveal-sound.ts", root), "utf8");
+const read = (path) => readFileSync(new URL(path, root), "utf8");
+const mobilePackage = JSON.parse(read("apps/mobile/package.json"));
+const audioSource = read("apps/mobile/src/features/draw/useDrawRevealFeedback.ts");
+const machineSource = read("apps/mobile/src/features/draw/GachaLeverMachine.tsx");
+const kujiSource = read("apps/mobile/src/features/draw/KujiPeelTicket.tsx");
+const screenSource = read("apps/mobile/src/features/draw/DrawRevealScreen.tsx");
+const databaseSource = read("apps/mobile/src/lib/local-database.ts");
 
-const wavFiles = [
-  ["gacha-lever-ratchet.wav", 0.52],
-  ["gacha-capsule-drop.wav", 0.46],
-  ["gacha-capsule-open.wav", 1.34],
-];
-
-function inspectWav(fileName) {
-  const buffer = readFileSync(new URL(`apps/mobile/assets/draw/gacha/sfx/${fileName}`, root));
+function inspectWav(category, name) {
+  const buffer = readFileSync(new URL(`apps/mobile/assets/draw/${category}/sfx/${name}.wav`, root));
   assert.equal(buffer.toString("ascii", 0, 4), "RIFF");
   assert.equal(buffer.toString("ascii", 8, 12), "WAVE");
-  assert.equal(buffer.readUInt16LE(20), 1, "sound effect must be uncompressed PCM");
-  assert.equal(buffer.readUInt16LE(22), 1, "sound effect must remain mono");
+  assert.equal(buffer.readUInt16LE(20), 1);
+  assert.equal(buffer.readUInt16LE(22), 1);
   assert.equal(buffer.readUInt32LE(24), 44_100);
   assert.equal(buffer.readUInt16LE(34), 16);
-  const dataBytes = buffer.readUInt32LE(40);
-  return dataBytes / 2 / 44_100;
+  const count = buffer.readUInt32LE(40) / 2;
+  const samples = Array.from({ length: count }, (_, index) => buffer.readInt16LE(44 + index * 2) / 32768);
+  return { duration: count / 44100, samples };
 }
+const rms = (samples) => Math.sqrt(samples.reduce((sum, n) => sum + n*n, 0) / samples.length);
 
-test("gacha sound effects are short deterministic local PCM assets", () => {
-  for (const [fileName, expectedDuration] of wavFiles) {
-    assert.ok(Math.abs(inspectWav(fileName) - expectedDuration) < 0.002, fileName);
+test("draw effects use small local PCM assets with quiet tails and no clipping or DC offset", () => {
+  for (const [category, name, duration] of [
+    ["gacha", "gacha-lever-ratchet", .52], ["gacha", "gacha-capsule-drop", .46], ["gacha", "gacha-capsule-open", 1.34],
+    ["kuji", "kuji-paper-peel", .32], ["kuji", "kuji-paper-tear", .22], ["kuji", "kuji-paper-release", .16],
+  ]) {
+    const wav = inspectWav(category, name);
+    assert.ok(Math.abs(wav.duration - duration) < .002, name);
+    assert.ok(wav.samples.every((n) => Math.abs(n) < .9), `${name} clips`);
+    assert.ok(rms(wav.samples) > .003 && rms(wav.samples) < .2, `${name} has an unsuitable level`);
+    assert.ok(Math.abs(wav.samples.reduce((sum, n) => sum + n, 0) / wav.samples.length) < .005, `${name} has DC offset`);
+    assert.equal(wav.samples[0], 0);
+    assert.ok(rms(wav.samples.slice(-441)) < .001, `${name} has a hard ending`);
   }
+  const { samples } = inspectWav("gacha", "gacha-capsule-drop");
+  const energy = (start) => rms(samples.slice(Math.round(start * 44100), Math.round((start + .07) * 44100)));
+  assert.ok(energy(0) > energy(.17) && energy(.17) > energy(.306), "plastic bounce sounds must diminish with the physical bounce heights");
 });
 
-test("gacha audio respects Silent Mode and never takes exclusive audio focus", () => {
+test("native feedback respects Silent Mode, focus and backgrounding without exclusive audio", () => {
   assert.match(mobilePackage.dependencies["expo-audio"], /^~57\.0\.5$/);
-  assert.match(audioSource, /useAudioPlayer\(LEVER_SOUND, \{ downloadFirst: true/);
+  assert.match(mobilePackage.dependencies["expo-haptics"], /^~57\.0\.3$/);
+  assert.match(audioSource, /downloadFirst: true/);
   assert.match(audioSource, /playsInSilentMode: false/);
   assert.match(audioSource, /interruptionMode: "mixWithOthers"/);
   assert.match(audioSource, /shouldPlayInBackground: false/);
-  assert.match(audioSource, /Audio feedback must never block or fail a committed draw presentation/);
+  assert.match(audioSource, /sound: preferences.current.sound && audioModeReady.current/);
+  assert.match(audioSource, /useFocusEffect/);
+  assert.match(audioSource, /AppState.addEventListener\("change"/);
+  assert.match(audioSource, /controller.cancel\(\)/);
+  assert.match(audioSource, /performAndroidHapticsAsync/);
+  assert.doesNotMatch(audioSource, /setTimeout|setInterval|withRepeat/);
 });
 
-test("lever, first contact, and seam audio follow the existing reveal clock", async () => {
+test("material cues follow real native travel and carry run identity", async () => {
   const timing = await import("../apps/mobile/src/features/draw/gacha-reveal-sound.ts");
-  const { GACHA_CAPSULE_DISPENSE_DURATION_MS } = await import("../apps/mobile/src/features/draw/gacha-camera-motion.ts");
-  assert.equal(timing.GACHA_DROP_IMPACT_SOUND_PROGRESS, 0.65);
-  assert.equal(timing.GACHA_SEAM_OPEN_SOUND_PROGRESS, 0.14);
-  // Same wall-clock moments as the retired JS timers on the linear 1.7 s + 3 s clock.
-  assert.deepEqual({ ...timing.GACHA_REVEAL_SOUND_TIMING }, {
-    dropImpactMs: Math.round(GACHA_CAPSULE_DISPENSE_DURATION_MS * 0.65),
-    seamOpenMs: GACHA_CAPSULE_DISPENSE_DURATION_MS + Math.round(3_000 * 0.14),
-  });
   const stage = timing.resolveGachaRevealSoundStage;
-  assert.equal(stage(0, 1, 1), 0, "an inactive (settled or reset) reveal never cues sound");
-  assert.equal(stage(1, 0.649, 0), 0);
-  assert.equal(stage(1, 0.65, 0), 1);
-  assert.equal(stage(1, 1, 0.139), 1);
-  assert.equal(stage(1, 1, 0.14), 2);
-  assert.match(timingSource, /"worklet";/);
-  // Cues fire from the native timeline, once per stage crossing, never from JS timers.
-  assert.match(machineSource, /useAnimatedReaction\(\s*\(\) => resolveGachaRevealSoundStage\(revealActive\.value, dispenseProgress\.value, revealProgress\.value\),/);
-  assert.match(machineSource, /if \(before < 1 && stage >= 1\) scheduleOnRN\(playDropImpactSound\);/);
-  assert.match(machineSource, /if \(before < 2 && stage >= 2\) scheduleOnRN\(playSeamOpenSound\);/);
-  assert.doesNotMatch(audioSource, /setTimeout|clearTimeout/);
-  // Mute and cancel remain authoritative on the JS side.
-  assert.match(audioSource, /const scheduleDispense = useCallback\(\(\) => \{\s*cuesRef\.current = \{ armed: true, dropPlayed: false, openPlayed: false \};/);
-  assert.match(audioSource, /const cancelScheduled = useCallback\(\(\) => \{\s*cuesRef\.current = \{ armed: false, dropPlayed: false, openPlayed: false \};/);
-  assert.match(audioSource, /if \(!cues\.armed \|\| cues\.dropPlayed\) return;/);
-  assert.match(audioSource, /if \(!cues\.armed \|\| cues\.openPlayed\) return;/);
-  assert.match(audioSource, /if \(!enabledRef\.current\) return;/);
-  assert.match(audioSource, /useEffect\(\(\) => cancelScheduled, \[cancelScheduled\]\)/);
-  assert.match(machineSource, /leverSoundPlayed\.value === 0/);
-  assert.match(machineSource, /scheduleOnRN\(playLeverSound\)/);
-  assert.match(machineSource, /transition\.effect === "start-dispense"[\s\S]*?scheduleDispenseSounds\(\)/);
-  assert.match(machineSource, /transition\.effect === "reset"[\s\S]*?cancelRevealSounds\(\)/);
+  assert.equal(stage(0, 1, 1), 0);
+  assert.equal(stage(1, .649, 0), 0);
+  assert.equal(stage(1, .65, 0), 1);
+  assert.equal(stage(1, .75, 0), 2);
+  assert.equal(stage(1, 1, .179), 2);
+  assert.equal(stage(1, 1, .18), 3);
+  assert.equal(sampleGachaRevealLighting(.18).innerLight, 0);
+  assert.ok(sampleGachaRevealLighting(.181).innerLight > 0);
+  assert.deepEqual({ ...timing.GACHA_REVEAL_SOUND_TIMING }, { dropImpactMs: 1105, seamOpenMs: 2240 });
+  for (const n of [NaN, Infinity, -Infinity]) {
+    assert.equal(stage(1, n, 0), 0);
+    assert.equal(stage(1, 1, n), 0);
+    assert.equal(resolveKujiFeedbackStage(1, n), 0);
+  }
+  assert.match(machineSource, /run: animationRun.value/);
+  assert.match(machineSource, /scheduleOnRN\(playDropImpactSound, run\)/);
+  assert.match(machineSource, /scheduleOnRN\(playReboundSound, run\)/);
+  assert.match(machineSource, /scheduleOnRN\(playSeamOpenSound, run\)/);
+  assert.match(machineSource, /scheduleOnRN\(playLeverSound, animationRun.value\)/);
+  assert.match(kujiSource, /resolveKujiFeedbackStage\(dragProgress.value, paperFlightProgress.value\)/);
+  assert.match(kujiSource, /scheduleOnRN\(playFeedback, stage, run\)/);
+  assert.match(kujiSource, /scheduleOnRN\(cancelFeedback\)/);
 });
 
-test("draw sound has an accessible persistent local toggle", () => {
-  assert.match(databaseSource, /const DRAW_SOUND_ENABLED_KEY = "draw\.sound\.enabled\.v1"/);
-  assert.match(databaseSource, /return row\?\.preference_value !== "disabled"/);
-  assert.match(screenSource, /accessibilityRole="switch"/);
-  assert.match(screenSource, /accessibilityLabel="가챠 효과음"/);
+test("both categories have independent persistent sound and vibration controls", () => {
+  assert.match(databaseSource, /draw.sound.enabled.v1/);
+  assert.match(databaseSource, /draw.haptics.enabled.v1/);
+  assert.match(screenSource, /isDrawCategory && !drawSequenceFinished/);
+  assert.match(screenSource, /"가챠 효과음" : "쿠지 효과음"/);
+  assert.match(screenSource, /"가챠 진동" : "쿠지 진동"/);
+  assert.equal((screenSource.match(/soundEnabled=\{soundPreferenceReady && soundEnabled\}/g) ?? []).length, 2);
+  assert.equal((screenSource.match(/hapticsEnabled=\{hapticsPreferenceReady && hapticsEnabled\}/g) ?? []).length, 2);
   assert.match(screenSource, /writeDrawSoundEnabled\(db, next\)/);
-  assert.match(screenSource, /soundEnabled=\{soundPreferenceReady && soundEnabled\}/);
+  assert.match(screenSource, /writeDrawHapticsEnabled\(db, next\)/);
 });

@@ -20,6 +20,8 @@ export function DrawAnimationCheckScreen() {
   const [requestSignal, setRequestSignal] = useState(0);
   const [ready, setReady] = useState(false);
   const [settled, setSettled] = useState(false);
+  const [soundEnabled, setSoundEnabled] = useState(true);
+  const [hapticsEnabled, setHapticsEnabled] = useState(true);
   const reset = (nextCategory = category) => {
     setCategory(nextCategory);
     setRun((value) => value + 1);
@@ -39,12 +41,18 @@ export function DrawAnimationCheckScreen() {
         <SeedChip label="쿠지" selected={category === "kuji"} onPress={() => reset("kuji")} />
         <SeedChip label="가챠" selected={category === "gacha"} onPress={() => reset("gacha")} />
       </View>
+      <View style={styles.tabs}>
+        <SeedChip label={soundEnabled ? "소리 켬" : "소리 끔"} selected={soundEnabled} onPress={() => setSoundEnabled((value) => !value)} />
+        <SeedChip label={hapticsEnabled ? "진동 켬" : "진동 끔"} selected={hapticsEnabled} onPress={() => setHapticsEnabled((value) => !value)} />
+      </View>
       <View style={styles.stage}>
         {category === "kuji" ? (
           <KujiPeelTicket
             key={`kuji:${run}`}
             ticketNumber="17"
             reduceMotion={reduceMotion}
+            soundEnabled={soundEnabled}
+            hapticsEnabled={hapticsEnabled}
             resultReady={ready}
             requestSignal={requestSignal}
             settled={settled}
@@ -58,7 +66,8 @@ export function DrawAnimationCheckScreen() {
           <GachaLeverMachine
             key={`gacha:${run}`}
             reduceMotion={reduceMotion}
-            soundEnabled={false}
+            soundEnabled={soundEnabled}
+            hapticsEnabled={hapticsEnabled}
             resultReady={ready}
             requestSignal={requestSignal}
             settled={settled}

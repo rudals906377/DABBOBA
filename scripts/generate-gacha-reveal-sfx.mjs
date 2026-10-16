@@ -30,7 +30,7 @@ function softLimit(value) {
   return Math.tanh(value * 1.24) / Math.tanh(1.24);
 }
 
-function renderWav(name, durationSeconds, renderSample) {
+function renderWav(name, durationSeconds, renderSample, outputDir = OUTPUT_DIR) {
   const frameCount = Math.round(durationSeconds * SAMPLE_RATE);
   const pcmBytes = frameCount * 2;
   const buffer = Buffer.alloc(44 + pcmBytes);
@@ -55,7 +55,7 @@ function renderWav(name, durationSeconds, renderSample) {
     buffer.writeInt16LE(Math.round(Math.max(-1, Math.min(1, sample)) * 32_767), 44 + frame * 2);
   }
 
-  writeFileSync(resolve(OUTPUT_DIR, name), buffer);
+  writeFileSync(resolve(outputDir, name), buffer);
 }
 
 function renderLeverSound() {
@@ -86,9 +86,9 @@ function renderDropSound() {
   const noise = createNoise(0x5eed_1105);
   let lowNoise = 0;
   const impacts = [
-    { time: 0.015, gain: 1, frequency: 168 },
-    { time: 0.162, gain: 0.31, frequency: 194 },
-    { time: 0.284, gain: 0.12, frequency: 220 },
+    { time: 0.003, gain: 1, frequency: 238 },
+    { time: 0.173, gain: 0.28, frequency: 262 },
+    { time: 0.309, gain: 0.10, frequency: 285 },
   ];
   renderWav("gacha-capsule-drop.wav", 0.46, (time) => {
     const raw = noise();
@@ -100,9 +100,9 @@ function renderDropSound() {
       const transient = envelope(time, impact.time, 0.0015, 0.07);
       const body = envelope(time, impact.time, 0.003, 0.13);
       sample += impact.gain * (
-        texturedNoise * transient * 0.19
-        + Math.sin(Math.PI * 2 * impact.frequency * local) * body * 0.34
-        + Math.sin(Math.PI * 2 * impact.frequency * 2.26 * local) * body * 0.08
+        texturedNoise * transient * 0.14
+        + Math.sin(Math.PI * 2 * impact.frequency * local) * body * 0.24
+        + Math.sin(Math.PI * 2 * impact.frequency * 1.47 * local) * body * 0.07
       );
     }
     return sample;
@@ -119,15 +119,15 @@ function renderOpenSound() {
     const bodyEnvelope = rise * release;
     const raw = noise();
     air += (raw - air) * (0.025 + unit * 0.035);
-    const breath = (raw - air) * 0.05 * bodyEnvelope;
+    const breath = (raw - air) * 0.075 * bodyEnvelope;
     const sweepPhase = Math.PI * 2 * (182 * time + 96 * time * time);
     const warmPhase = Math.PI * 2 * (91 * time + 24 * time * time);
     const shimmerPhase = Math.PI * 2 * (364 * time + 142 * time * time);
     const seam = envelope(time, 0.08, 0.035, 0.42);
     return breath
-      + Math.sin(warmPhase) * bodyEnvelope * 0.09
-      + Math.sin(sweepPhase) * bodyEnvelope * 0.105
-      + Math.sin(shimmerPhase) * seam * 0.035;
+      + Math.sin(warmPhase) * bodyEnvelope * 0.025
+      + Math.sin(sweepPhase) * bodyEnvelope * 0.032
+      + Math.sin(shimmerPhase) * seam * 0.012;
   });
 }
 
@@ -135,4 +135,26 @@ mkdirSync(OUTPUT_DIR, { recursive: true });
 renderLeverSound();
 renderDropSound();
 renderOpenSound();
-console.log(`Generated three deterministic gacha sound effects in ${OUTPUT_DIR}`);
+const KUJI_DIR = resolve(ROOT, "apps/mobile/assets/draw/kuji/sfx");
+mkdirSync(KUJI_DIR, { recursive: true });
+for (const [name, duration, seed, strength] of [
+  ["kuji-paper-peel.wav", 0.32, 0x7011, 0.22],
+  ["kuji-paper-tear.wav", 0.22, 0x7022, 0.26],
+  ["kuji-paper-release.wav", 0.16, 0x7033, 0.12],
+]) {
+  const noise = createNoise(seed);
+  let low = 0;
+  let body = 0;
+  renderWav(name, duration, (time) => {
+    const raw = noise();
+    low += (raw - low) * 0.08;
+    body += (raw - body) * 0.55;
+    const paper = body - low;
+    const env = envelope(time, 0, 0.006, duration - 0.006);
+    const grain = name.includes("tear")
+      ? 0.55 + 0.45 * Math.sin(2 * Math.PI * 43 * time) ** 2
+      : 0.8 + 0.2 * Math.sin(2 * Math.PI * 19 * time) ** 2;
+    return paper * strength * env * grain;
+  }, KUJI_DIR);
+}
+console.log("Generated six deterministic gacha/kuji material sound effects");

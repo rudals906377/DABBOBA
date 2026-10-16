@@ -7,6 +7,7 @@ import Animated, {
   Extrapolation,
   interpolate,
   useAnimatedStyle,
+  useAnimatedReaction,
   useSharedValue,
   withDelay,
   withRepeat,
@@ -32,6 +33,8 @@ import {
   sampleKujiTicketRevealMotion,
 } from "@/features/draw/kuji-ticket-reveal-motion";
 import { sampleKujiPeelPaperMotion } from "@/features/draw/kuji-peel-paper-motion";
+import { resolveKujiFeedbackStage } from "@/features/draw/kuji-reveal-feedback";
+import { useDrawRevealFeedback } from "@/features/draw/useDrawRevealFeedback";
 import { colors } from "@/theme";
 
 type KujiPeelTicketProps = {
@@ -39,6 +42,8 @@ type KujiPeelTicketProps = {
   total?: number;
   disabled?: boolean;
   reduceMotion: boolean;
+  soundEnabled?: boolean;
+  hapticsEnabled?: boolean;
   resultReady: boolean;
   resultLabel?: string;
   resultTitle?: string;
@@ -64,6 +69,8 @@ export function KujiPeelTicket({
   total,
   disabled = false,
   reduceMotion,
+  soundEnabled = false,
+  hapticsEnabled = false,
   resultReady,
   resultLabel = "결과",
   resultTitle = "당첨 상품을 확인해 주세요",
@@ -87,6 +94,25 @@ export function KujiPeelTicket({
   const dragging = useSharedValue(0);
   const cuePulse = useSharedValue(0);
   const gestureEnded = useSharedValue(0);
+  const feedbackRun = useSharedValue(0);
+  const feedback = useDrawRevealFeedback("kuji", soundEnabled, hapticsEnabled && !reduceMotion);
+  const beginFeedback = useCallback((run: number) => {
+    if (run === feedbackRun.value) feedback.begin(run);
+  }, [feedback, feedbackRun]);
+  const cancelFeedback = useCallback(() => { feedback.cancel(); feedbackRun.value += 1; }, [feedback, feedbackRun]);
+  const playFeedback = useCallback((stage: number, run: number) => {
+    const cue = stage === 1 ? "primary" : stage === 2 ? "secondary" : "tertiary";
+    void feedback.emit(cue, run);
+  }, [feedback]);
+  useAnimatedReaction(
+    () => ({ stage: resolveKujiFeedbackStage(dragProgress.value, paperFlightProgress.value), run: feedbackRun.value }),
+    ({ stage, run }, previous) => {
+      const before = previous?.run === run ? previous.stage : 0;
+      if (stage <= before) return;
+      scheduleOnRN(playFeedback, stage, run);
+    },
+    [playFeedback],
+  );
   const motionStateRef = useRef(createKujiOpenMotionState(reduceMotion));
   const runGenerationRef = useRef(0);
   const dispatchRef = useRef<(event: KujiOpenMotionEvent) => void>(() => undefined);
@@ -120,6 +146,7 @@ export function KujiPeelTicket({
     setPhase(transition.state.phase);
 
     if (transition.effect === "request-and-animate") {
+      feedback.begin(feedbackRun.value);
       const generation = runGenerationRef.current + 1;
       runGenerationRef.current = generation;
       const travel = resolveKujiTravelSegments(dragProgress.value);
@@ -156,6 +183,7 @@ export function KujiPeelTicket({
     }
 
     if (transition.effect === "request-and-wait") {
+      cancelFeedback();
       runGenerationRef.current += 1;
       cancelAnimation(paperFlightProgress);
       paperFlightProgress.value = 1;
@@ -184,12 +212,14 @@ export function KujiPeelTicket({
     }
 
     if (transition.effect === "notify-settled") {
+      cancelFeedback();
       impactProgress.value = 1;
       revealSettledRef.current();
       return;
     }
 
     if (transition.effect === "reset") {
+      cancelFeedback();
       runGenerationRef.current += 1;
       cancelAnimation(dragProgress);
       cancelAnimation(impactProgress);
@@ -199,9 +229,11 @@ export function KujiPeelTicket({
       dragProgress.value = withTiming(0, { duration: 180, easing: returnEasing });
       impactProgress.value = 0;
     }
-  }, [dragProgress, dragging, handleImpactSettled, handleTravelSettled, impactProgress, paperFlightProgress, reduceMotion]);
+  }, [cancelFeedback, feedback, feedbackRun, dragProgress, dragging, handleImpactSettled, handleTravelSettled, impactProgress, paperFlightProgress, reduceMotion]);
 
   dispatchRef.current = dispatchMotion;
+
+  useEffect(() => { if (settled) cancelFeedback(); }, [cancelFeedback, settled]);
 
   useEffect(() => {
     if (reduceMotion) {
@@ -217,6 +249,7 @@ export function KujiPeelTicket({
 
   useEffect(() => {
     if (resetSignalRef.current === resetSignal) return;
+    cancelFeedback();
     resetSignalRef.current = resetSignal;
     runGenerationRef.current += 1;
     motionStateRef.current = createKujiOpenMotionState(reduceMotion);
@@ -228,7 +261,7 @@ export function KujiPeelTicket({
     dragging.value = 0;
     dragProgress.value = 0;
     impactProgress.value = 0;
-  }, [dragProgress, dragging, impactProgress, paperFlightProgress, reduceMotion, resetSignal]);
+  }, [cancelFeedback, dragProgress, dragging, impactProgress, paperFlightProgress, reduceMotion, resetSignal]);
 
   useEffect(() => {
     cancelAnimation(entryProgress);
@@ -245,6 +278,7 @@ export function KujiPeelTicket({
   }, [entryProgress, reduceMotion, resetSignal]);
 
   useEffect(() => () => {
+    cancelFeedback();
     runGenerationRef.current += 1;
     cancelAnimation(dragProgress);
     cancelAnimation(impactProgress);
@@ -254,7 +288,7 @@ export function KujiPeelTicket({
     cancelAnimation(entryProgress);
     dragging.value = 0;
     dragActiveChangeRef.current?.(false);
-  }, [cuePulse, dragProgress, dragging, entryProgress, impactProgress, paperFlightProgress]);
+  }, [cancelFeedback, cuePulse, dragProgress, dragging, entryProgress, impactProgress, paperFlightProgress]);
 
   useEffect(() => {
     cancelAnimation(cuePulse);
@@ -294,6 +328,7 @@ export function KujiPeelTicket({
       })
       .onStart(() => {
         dragging.value = 1;
+        scheduleOnRN(beginFeedback, feedbackRun.value);
         scheduleOnRN(notifyDragActive, true);
       })
       .onUpdate((event) => {
@@ -307,13 +342,17 @@ export function KujiPeelTicket({
           event.velocityX / 1000,
         );
         if (decision === "open") scheduleOnRN(beginOpen);
-        else dragProgress.value = withTiming(0, { duration: 180, easing: returnEasing });
+        else {
+          scheduleOnRN(cancelFeedback);
+          dragProgress.value = withTiming(0, { duration: 180, easing: returnEasing });
+        }
       })
       .onFinalize(() => {
         dragging.value = 0;
         scheduleOnRN(notifyDragActive, false);
         pressed.value = 0;
         if (!gestureEnded.value) {
+          scheduleOnRN(cancelFeedback);
           dragProgress.value = withTiming(0, { duration: 180, easing: returnEasing });
         }
       });
@@ -329,7 +368,7 @@ export function KujiPeelTicket({
         pressed.value = 0;
       });
     return Gesture.Race(pan, tap);
-  }, [beginOpen, disabled, dragProgress, dragging, gestureEnded, notifyDragActive, phase, pressed, ticketWidth]);
+  }, [beginFeedback, cancelFeedback, feedbackRun, beginOpen, disabled, dragProgress, dragging, gestureEnded, notifyDragActive, phase, pressed, ticketWidth]);
 
   const entryStyle = useAnimatedStyle(() => ({
     opacity: interpolate(entryProgress.value, [0, 0.22, 1], [0.62, 1, 1], Extrapolation.CLAMP),
