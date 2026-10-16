@@ -1,5 +1,13 @@
 import { GACHA_CAPSULE_DISPENSE_DURATION_MS } from "./gacha-camera-motion.ts";
 import { GACHA_CLOSEUP_DURATION_MS } from "./gacha-reveal-timeline.ts";
+import { GACHA_LEVER_TARGET_RADIANS } from "./gacha-lever-motion.ts";
+
+/** A short gear phrase per 60-degree forward sector, shared by taps, drags and auto motion. */
+export function resolveGachaLeverSoundSegment(radians: number) {
+  "worklet";
+  if (!Number.isFinite(radians) || radians <= 0.001) return 0;
+  return Math.min(6, Math.ceil(radians / GACHA_LEVER_TARGET_RADIANS * 6 - 0.00001));
+}
 
 /**
  * The first capsule contact happens at 65% of the contained dispense motion.

@@ -57,6 +57,30 @@ test("new runs reject both stale cues and old seek completions", async () => {
   assert.equal(events.filter((e) => e === "play").length, 1);
 });
 
+test("each new lever movement can sound within one run, but duplicate and stale occurrences cannot", async () => {
+  const { controller, events } = fixture();
+  controller.begin(1);
+  for (const occurrence of [1, 1, 2, 1, 3, NaN, -1, Infinity, .5]) {
+    await controller.emit("primary", 1, occurrence);
+  }
+  assert.equal(events.filter((e) => e === "play").length, 3);
+  assert.equal(events.filter((e) => e === "haptic:primary").length, 3);
+  controller.cancel();
+  await controller.emit("primary", 1, 4);
+  assert.equal(events.filter((e) => e === "play").length, 3);
+});
+
+test("a newer lever sector supersedes an older pending seek without a late audio restart", async () => {
+  const completions = [];
+  const { controller, events } = fixture(() => new Promise((resolve) => completions.push(resolve)));
+  controller.begin(1);
+  const old = controller.emit("primary", 1, 1);
+  const current = controller.emit("primary", 1, 2);
+  completions[1](); await current;
+  completions[0](); await old;
+  assert.equal(events.filter((e) => e === "play").length, 1);
+});
+
 test("muting an in-flight sound keeps haptics independent and prevents late playback after unmute", async () => {
   let complete;
   const { controller, options, events } = fixture(() => new Promise((resolve) => { complete = resolve; }));

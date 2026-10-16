@@ -1,4 +1,5 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -30,7 +31,7 @@ function softLimit(value) {
   return Math.tanh(value * 1.24) / Math.tanh(1.24);
 }
 
-function renderWav(name, durationSeconds, renderSample, outputDir = OUTPUT_DIR) {
+function renderWav(name, durationSeconds, renderSample, outputDir = OUTPUT_DIR, limit = true) {
   const frameCount = Math.round(durationSeconds * SAMPLE_RATE);
   const pcmBytes = frameCount * 2;
   const buffer = Buffer.alloc(44 + pcmBytes);
@@ -51,7 +52,8 @@ function renderWav(name, durationSeconds, renderSample, outputDir = OUTPUT_DIR) 
   for (let frame = 0; frame < frameCount; frame += 1) {
     const time = frame / SAMPLE_RATE;
     const fadeOut = 1 - smoothstep(Math.max(0, (time - durationSeconds + 0.025) / 0.025));
-    const sample = softLimit(renderSample(time, frame)) * fadeOut;
+    const raw = renderSample(time, frame);
+    const sample = (limit ? softLimit(raw) : raw) * fadeOut;
     buffer.writeInt16LE(Math.round(Math.max(-1, Math.min(1, sample)) * 32_767), 44 + frame * 2);
   }
 
@@ -59,27 +61,24 @@ function renderWav(name, durationSeconds, renderSample, outputDir = OUTPUT_DIR) 
 }
 
 function renderLeverSound() {
-  const noise = createNoise(0x0dab_b0ba);
-  let previousNoise = 0;
-  const clicks = [0.015, 0.125, 0.238, 0.354];
-  renderWav("gacha-lever-ratchet.wav", 0.52, (time) => {
-    const rawNoise = noise();
-    const softenedNoise = previousNoise * 0.76 + rawNoise * 0.24;
-    previousNoise = softenedNoise;
-    let sample = 0;
-    for (let index = 0; index < clicks.length; index += 1) {
-      const start = clicks[index];
-      const click = envelope(time, start, 0.0018, 0.047 + index * 0.004);
-      const local = Math.max(0, time - start);
-      sample += click * (
-        Math.sin(Math.PI * 2 * (1_520 - local * 1_650) * local) * 0.18
-        + softenedNoise * 0.12
-      );
-    }
-    const body = envelope(time, 0, 0.014, 0.45);
-    sample += body * Math.sin(Math.PI * 2 * 82 * time) * 0.025;
-    return sample;
-  });
+  // Author-permitted real capsule-machine recording, never the owner's reference Shorts.
+  const source = readFileSync(resolve(OUTPUT_DIR, "source/gacha-crank-recording.wav"));
+  if (createHash("sha256").update(source).digest("hex") !== "98d7d81d37f0eb83f33d01714e0c1797800c9801a8941b34e8ee574dddb65a06") {
+    throw new Error("Gacha crank source differs from its reviewed provenance.");
+  }
+  const count = source.readUInt32LE(40) / 2;
+  const samples = Array.from({ length: count }, (_, i) => source.readInt16LE(44 + i * 2) / 32768);
+  const dc = samples.reduce((sum, value) => sum + value, 0) / count;
+  const centered = samples.map((value) => value - dc);
+  const rms = Math.sqrt(centered.reduce((sum, value) => sum + value * value, 0) / count);
+  const peak = centered.reduce((max, value) => Math.max(max, Math.abs(value)), 0);
+  const gain = Math.min(0.12 / rms, 0.7 / peak);
+  // Preserve the irregular real teeth/housing texture; only level and soften the cut.
+  renderWav("gacha-lever-ratchet.wav", 0.2, (time, frame) => {
+    const attack = smoothstep(time / 0.003);
+    const release = 1 - smoothstep((time - 0.16) / 0.025);
+    return centered[frame] * gain * attack * release;
+  }, OUTPUT_DIR, false);
 }
 
 function renderDropSound() {

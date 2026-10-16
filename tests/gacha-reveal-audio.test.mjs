@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { runInNewContext } from "node:vm";
+import { resolveGachaLeverSoundSegment } from "../apps/mobile/src/features/draw/gacha-reveal-sound.ts";
+import { GACHA_LEVER_TARGET_RADIANS } from "../apps/mobile/src/features/draw/gacha-lever-motion.ts";
 import { sampleGachaRevealLighting } from "../apps/mobile/src/features/draw/gacha-reveal-timeline.ts";
 import { resolveKujiFeedbackStage } from "../apps/mobile/src/features/draw/kuji-reveal-feedback.ts";
 
@@ -27,9 +30,47 @@ function inspectWav(category, name) {
 }
 const rms = (samples) => Math.sqrt(samples.reduce((sum, n) => sum + n*n, 0) / samples.length);
 
+test("native lever sound follows six forward movements, with no touch-down, stationary or reverse cue", () => {
+  const source = machineSource.match(/\(\{ segment, run \}, previous\) => \{[\s\S]*?\n    \}/)?.[0];
+  assert.ok(source, "execute the real UI-thread sound reaction");
+  const events = [];
+  const scope = { phase: "ready", leverSoundSequence: { value: 0 },
+    playLeverSound: (run, occurrence) => events.push([run, occurrence]),
+    scheduleOnRN: (fn, ...args) => fn(...args) };
+  const react = runInNewContext(`(${source})`, scope);
+  let previous = { segment: 0, run: 5 };
+  const move = (radians, run = 5) => {
+    const next = { segment: resolveGachaLeverSoundSegment(radians), run };
+    react(next, previous); previous = next;
+  };
+  move(0); move(0);
+  assert.equal(events.length, 0);
+  for (let tap = 1; tap <= 6; tap++) {
+    move(GACHA_LEVER_TARGET_RADIANS * tap / 6);
+    move(GACHA_LEVER_TARGET_RADIANS * tap / 6);
+  }
+  assert.deepEqual(events, Array.from({ length: 6 }, (_, i) => [5, i + 1]));
+  move(0); // An unfinished gesture may unwind to its start.
+  assert.equal(events.length, 6);
+  move(GACHA_LEVER_TARGET_RADIANS / 6);
+  assert.deepEqual(events.at(-1), [5, 7], "a new forward gesture can sound at the same angle");
+  move(GACHA_LEVER_TARGET_RADIANS);
+  assert.equal(events.length, 8, "a jumped frame must not burst through skipped sectors");
+  move(GACHA_LEVER_TARGET_RADIANS, 6);
+  assert.equal(events.length, 8, "run changes must not sound an old pose");
+  scope.phase = "dispensing";
+  move(0, 6); move(1, 6);
+  assert.equal(events.length, 8);
+  const down = machineSource.match(/\.onTouchesDown\([\s\S]*?\.onTouchesUp/)?.[0];
+  assert.ok(down);
+  assert.doesNotMatch(down, /playLeverSound/);
+  assert.match(machineSource, /resolveGachaLeverSoundSegment\(leverRadians.value\)/);
+  for (const invalid of [NaN, Infinity, -Infinity, -1, 0]) assert.equal(resolveGachaLeverSoundSegment(invalid), 0);
+});
+
 test("draw effects use small local PCM assets with quiet tails and no clipping or DC offset", () => {
   for (const [category, name, duration] of [
-    ["gacha", "gacha-lever-ratchet", .52], ["gacha", "gacha-capsule-drop", .46], ["gacha", "gacha-capsule-open", 1.34],
+    ["gacha", "gacha-lever-ratchet", .2], ["gacha", "gacha-capsule-drop", .46], ["gacha", "gacha-capsule-open", 1.34],
     ["kuji", "kuji-paper-peel", .32], ["kuji", "kuji-paper-tear", .22], ["kuji", "kuji-paper-release", .16],
   ]) {
     const wav = inspectWav(category, name);
@@ -81,7 +122,7 @@ test("material cues follow real native travel and carry run identity", async () 
   assert.match(machineSource, /scheduleOnRN\(playDropImpactSound, run\)/);
   assert.match(machineSource, /scheduleOnRN\(playReboundSound, run\)/);
   assert.match(machineSource, /scheduleOnRN\(playSeamOpenSound, run\)/);
-  assert.match(machineSource, /scheduleOnRN\(playLeverSound, animationRun.value\)/);
+  assert.match(machineSource, /scheduleOnRN\(playLeverSound, run, leverSoundSequence.value\)/);
   assert.match(kujiSource, /resolveKujiFeedbackStage\(dragProgress.value, paperFlightProgress.value\)/);
   assert.match(kujiSource, /scheduleOnRN\(playFeedback, stage, run\)/);
   assert.match(kujiSource, /scheduleOnRN\(cancelFeedback\)/);

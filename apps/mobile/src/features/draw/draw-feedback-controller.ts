@@ -11,7 +11,8 @@ export function createDrawFeedbackController(
   let run: number | null = null;
   let generation = 0;
   let latestRun = -1;
-  const played = new Set<DrawFeedbackCue>();
+  const played = new Map<DrawFeedbackCue, number>();
+  const seeks = new Map<DrawFeedbackCue, number>();
   const stopSound = () => {
     generation += 1;
     for (const player of Object.values(players)) {
@@ -26,20 +27,24 @@ export function createDrawFeedbackController(
     latestRun = nextRun;
     run = nextRun;
   };
-  const emit = async (cue: DrawFeedbackCue, cueRun: number) => {
+  const emit = async (cue: DrawFeedbackCue, cueRun: number, occurrence = 0) => {
     const allowed = options();
-    if (!allowed.foreground || run !== cueRun || played.has(cue)) return;
-    played.add(cue);
+    if (!allowed.foreground || run !== cueRun || !Number.isSafeInteger(occurrence) || occurrence < 0
+      || occurrence <= (played.get(cue) ?? -1)) return;
+    played.set(cue, occurrence);
     if (allowed.haptics) {
       try { void haptic(cue).catch(() => undefined); } catch { /* Unsupported haptics are optional. */ }
     }
     const player = players[cue];
     if (!allowed.sound || !player) return;
     const ticket = generation;
+    const seek = (seeks.get(cue) ?? 0) + 1;
+    seeks.set(cue, seek);
     try {
+      player.pause();
       await player.seekTo(0);
       const current = options();
-      if (ticket === generation && run === cueRun && current.foreground && current.sound) player.play();
+      if (ticket === generation && seek === seeks.get(cue) && run === cueRun && current.foreground && current.sound) player.play();
     } catch { /* Audio feedback must never block or fail a committed draw presentation. */ }
   };
   return { begin, emit, cancel, stopSound };

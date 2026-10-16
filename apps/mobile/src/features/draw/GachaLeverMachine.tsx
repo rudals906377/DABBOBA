@@ -62,7 +62,7 @@ import {
   type GachaLeverMotionPhase,
 } from "@/features/draw/gacha-lever-motion";
 import { useGachaRevealAudio } from "@/features/draw/useGachaRevealAudio";
-import { resolveGachaRevealSoundStage } from "@/features/draw/gacha-reveal-sound";
+import { resolveGachaLeverSoundSegment, resolveGachaRevealSoundStage } from "@/features/draw/gacha-reveal-sound";
 import { colors } from "@/theme";
 
 type GachaLeverMachineProps = {
@@ -143,7 +143,7 @@ export const GachaLeverMachine = memo(function GachaLeverMachine({
   const triggeredPulseCount = useSharedValue(0);
   const clockwiseCueRotation = useSharedValue(0);
   const clockwiseCueOpacity = useSharedValue(1);
-  const leverSoundPlayed = useSharedValue(0);
+  const leverSoundSequence = useSharedValue(0);
   const {
     cancelScheduled: cancelRevealSounds,
     playDropImpact: playDropImpactSound,
@@ -246,9 +246,9 @@ export const GachaLeverMachine = memo(function GachaLeverMachine({
       triggeredPulseCount.value = 0;
       clockwiseCueRotation.value = 0;
       clockwiseCueOpacity.value = 1;
-      leverSoundPlayed.value = 0;
+      leverSoundSequence.value = 0;
     }
-  }, [agitationProgress, animationRun, cancelRevealSounds, clockwiseCueOpacity, clockwiseCueRotation, dispenseProgress, gestureAccepted, gestureCompleted, gestureEnded, gestureStartRadians, gestureTravel, handleRevealSettled, interactionRadians, leverRadians, leverSoundPlayed, previousAngle, revealActive, revealProgress, scheduleDispenseSounds, triggeredPulseCount, waitingPulse]);
+  }, [agitationProgress, animationRun, cancelRevealSounds, clockwiseCueOpacity, clockwiseCueRotation, dispenseProgress, gestureAccepted, gestureCompleted, gestureEnded, gestureStartRadians, gestureTravel, handleRevealSettled, interactionRadians, leverRadians, leverSoundSequence, previousAngle, revealActive, revealProgress, scheduleDispenseSounds, triggeredPulseCount, waitingPulse]);
 
   dispatchRef.current = dispatchMotion;
 
@@ -288,6 +288,18 @@ export const GachaLeverMachine = memo(function GachaLeverMachine({
       });
     },
     [reduceMotion],
+  );
+
+  // Observe the displayed handle, not touch-down or its immediately updated target.
+  // Reverse/unwind and stationary holds are silent; skipped sectors produce one cue.
+  useAnimatedReaction(
+    () => ({ segment: resolveGachaLeverSoundSegment(leverRadians.value), run: animationRun.value }),
+    ({ segment, run }, previous) => {
+      if (phase !== "ready" || !previous || previous.run !== run || segment <= previous.segment) return;
+      leverSoundSequence.value += 1;
+      scheduleOnRN(playLeverSound, run, leverSoundSequence.value);
+    },
+    [phase, playLeverSound],
   );
 
   // Contact and seam cues follow the same UI-thread clock as the visuals.
@@ -354,9 +366,9 @@ export const GachaLeverMachine = memo(function GachaLeverMachine({
     triggeredPulseCount.value = 0;
     clockwiseCueRotation.value = 0;
     clockwiseCueOpacity.value = 1;
-    leverSoundPlayed.value = 0;
+    leverSoundSequence.value = 0;
     cancelRevealSounds();
-  }, [agitationProgress, animationRun, cancelRevealSounds, clockwiseCueOpacity, clockwiseCueRotation, dispenseProgress, gestureAccepted, gestureCompleted, gestureEnded, gestureStartRadians, gestureTravel, interactionRadians, leverRadians, leverSoundPlayed, previousAngle, reduceMotion, resetSignal, revealActive, revealProgress, triggeredPulseCount, waitingPulse]);
+  }, [agitationProgress, animationRun, cancelRevealSounds, clockwiseCueOpacity, clockwiseCueRotation, dispenseProgress, gestureAccepted, gestureCompleted, gestureEnded, gestureStartRadians, gestureTravel, interactionRadians, leverRadians, leverSoundSequence, previousAngle, reduceMotion, resetSignal, revealActive, revealProgress, triggeredPulseCount, waitingPulse]);
 
   useEffect(() => {
     cancelAnimation(clockwiseCueRotation);
@@ -410,8 +422,6 @@ export const GachaLeverMachine = memo(function GachaLeverMachine({
     const run = animationRun.value;
     cancelAnimation(clockwiseCueRotation);
     clockwiseCueOpacity.value = 0;
-    leverSoundPlayed.value = 1;
-    playLeverSound(run);
     gestureCompleted.value = 1;
     interactionRadians.value = GACHA_LEVER_TARGET_RADIANS;
     if (reduceMotion) {
@@ -426,7 +436,7 @@ export const GachaLeverMachine = memo(function GachaLeverMachine({
         if (finished) scheduleOnRN(beginOpen, run);
       },
     );
-  }, [animationRun, beginOpen, clockwiseCueOpacity, clockwiseCueRotation, disabled, gestureCompleted, interactionRadians, leverRadians, leverSoundPlayed, playLeverSound, reduceMotion]);
+  }, [animationRun, beginOpen, clockwiseCueOpacity, clockwiseCueRotation, disabled, gestureCompleted, interactionRadians, leverRadians, reduceMotion]);
 
   useEffect(() => {
     if (requestSignalRef.current === requestSignal) return;
@@ -468,10 +478,6 @@ export const GachaLeverMachine = memo(function GachaLeverMachine({
       gestureAccepted.value = 1;
       previousAngle.value = start.angle ?? Number.NaN;
       gestureCompleted.value = 0;
-      if (leverSoundPlayed.value === 0) {
-        leverSoundPlayed.value = 1;
-        scheduleOnRN(playLeverSound, animationRun.value);
-      }
       manager.activate();
     })
     .onTouchesUp((_event, manager) => {
@@ -553,7 +559,7 @@ export const GachaLeverMachine = memo(function GachaLeverMachine({
       const unwind = withTiming(gestureStartRadians.value, { duration: 220, easing: smoothEasing });
       const impulseRemainingMs = Math.max(0, 1 - agitationProgress.value) * GACHA_AGITATION_DURATION_MS;
       leverRadians.value = impulseRemainingMs > 0 ? withDelay(impulseRemainingMs, unwind) : unwind;
-    }), [agitationProgress, animationRun, beginOpen, clockwiseCueOpacity, clockwiseCueRotation, disabled, gestureAccepted, gestureCompleted, gestureEnded, gestureStartRadians, gestureTravel, interactionRadians, leverRadians, leverSoundPlayed, phase, playLeverSound, previousAngle, reduceMotion]);
+    }), [agitationProgress, animationRun, beginOpen, clockwiseCueOpacity, clockwiseCueRotation, disabled, gestureAccepted, gestureCompleted, gestureEnded, gestureStartRadians, gestureTravel, interactionRadians, leverRadians, phase, previousAngle, reduceMotion]);
 
   const clockwiseCueStyle = useAnimatedStyle(() => ({
     opacity: clockwiseCueOpacity.value * 0.9,
