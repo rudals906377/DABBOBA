@@ -1,4 +1,4 @@
-export type DrawFeedbackCue = "primary" | "secondary" | "tertiary" | "rebound" | "coin" | "chamber";
+export type DrawFeedbackCue = "primary" | "secondary" | "tertiary" | "rebound" | "coin" | "chamber" | "flutter";
 export type DrawFeedbackPlayer = { seekTo: (seconds: number) => Promise<void>; play: () => void; pause: () => void };
 export type DrawFeedbackOptions = { sound: boolean; haptics: boolean; foreground: boolean };
 
@@ -6,7 +6,7 @@ export type DrawFeedbackOptions = { sound: boolean; haptics: boolean; foreground
 export function createDrawFeedbackController(
   players: Partial<Record<DrawFeedbackCue, DrawFeedbackPlayer>>,
   options: () => DrawFeedbackOptions,
-  haptic: (cue: DrawFeedbackCue) => Promise<void>,
+  haptic: (cue: DrawFeedbackCue, occurrence: number) => Promise<void>,
 ) {
   let run: number | null = null;
   let generation = 0;
@@ -33,7 +33,7 @@ export function createDrawFeedbackController(
       || occurrence <= (played.get(cue) ?? -1)) return;
     played.set(cue, occurrence);
     if (allowed.haptics) {
-      try { void haptic(cue).catch(() => undefined); } catch { /* Unsupported haptics are optional. */ }
+      try { void haptic(cue, occurrence).catch(() => undefined); } catch { /* Unsupported haptics are optional. */ }
     }
     const player = players[cue];
     if (!allowed.sound || !player) return;

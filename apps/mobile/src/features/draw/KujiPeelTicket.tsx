@@ -33,8 +33,8 @@ import {
   sampleKujiTicketRevealMotion,
 } from "@/features/draw/kuji-ticket-reveal-motion";
 import { sampleKujiPeelPaperMotion } from "@/features/draw/kuji-peel-paper-motion";
-import { resolveKujiFeedbackStage } from "@/features/draw/kuji-reveal-feedback";
-import { useDrawRevealFeedback } from "@/features/draw/useDrawRevealFeedback";
+import { resolveKujiFeedbackStage, resolveKujiPeelGrain } from "@/features/draw/kuji-reveal-feedback";
+import { useKujiRevealAudio } from "@/features/draw/useKujiRevealAudio";
 import { colors } from "@/theme";
 
 type KujiPeelTicketProps = {
@@ -95,23 +95,35 @@ export function KujiPeelTicket({
   const cuePulse = useSharedValue(0);
   const gestureEnded = useSharedValue(0);
   const feedbackRun = useSharedValue(0);
-  const feedback = useDrawRevealFeedback("kuji", soundEnabled, hapticsEnabled && !reduceMotion);
+  const feedbackGrainSequence = useSharedValue(0);
+  const feedback = useKujiRevealAudio(soundEnabled, hapticsEnabled && !reduceMotion);
   const beginFeedback = useCallback((run: number) => {
     if (run === feedbackRun.value) feedback.begin(run);
   }, [feedback, feedbackRun]);
-  const cancelFeedback = useCallback(() => { feedback.cancel(); feedbackRun.value += 1; }, [feedback, feedbackRun]);
+  const cancelFeedback = useCallback(() => {
+    feedback.cancel(); feedbackRun.value += 1; feedbackGrainSequence.value = 0;
+  }, [feedback, feedbackRun, feedbackGrainSequence]);
   const playFeedback = useCallback((stage: number, run: number) => {
-    const cue = stage === 1 ? "primary" : stage === 2 ? "secondary" : "tertiary";
+    if (run !== feedbackRun.value) return;
+    const cue = stage === 1 ? "primary" : stage === 2 ? "secondary" : stage === 3 ? "tertiary" : "flutter";
     void feedback.emit(cue, run);
-  }, [feedback]);
+  }, [feedback, feedbackRun]);
+  const playGrain = useCallback((stage: number, run: number, occurrence: number) => {
+    if (run !== feedbackRun.value) return;
+    void feedback.emit(stage === 1 ? "primary" : "secondary", run, occurrence);
+  }, [feedback, feedbackRun]);
   useAnimatedReaction(
-    () => ({ stage: resolveKujiFeedbackStage(dragProgress.value, paperFlightProgress.value), run: feedbackRun.value }),
-    ({ stage, run }, previous) => {
+    () => ({ stage: resolveKujiFeedbackStage(dragProgress.value, paperFlightProgress.value),
+      grain: resolveKujiPeelGrain(dragProgress.value), run: feedbackRun.value }),
+    ({ stage, grain, run }, previous) => {
       const before = previous?.run === run ? previous.stage : 0;
-      if (stage <= before) return;
-      scheduleOnRN(playFeedback, stage, run);
+      if (stage > before) scheduleOnRN(playFeedback, stage, run);
+      if (!previous || previous.run !== run || stage < 1 || stage > 2
+        || stage !== before || grain <= previous.grain) return;
+      feedbackGrainSequence.value += 1;
+      scheduleOnRN(playGrain, stage, run, feedbackGrainSequence.value);
     },
-    [playFeedback],
+    [playFeedback, playGrain],
   );
   const motionStateRef = useRef(createKujiOpenMotionState(reduceMotion));
   const runGenerationRef = useRef(0);

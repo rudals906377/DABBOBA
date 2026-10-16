@@ -72,7 +72,7 @@ test("draw effects use small local PCM assets with quiet tails and no clipping o
   for (const [category, name, duration] of [
     ["gacha", "gacha-lever-ratchet", .2], ["gacha", "gacha-capsule-drop", .46], ["gacha", "gacha-capsule-open", 1.34],
     ["gacha", "gacha-coin-drop", .28], ["gacha", "gacha-capsules-rattle", .48],
-    ["kuji", "kuji-paper-peel", .32], ["kuji", "kuji-paper-tear", .22], ["kuji", "kuji-paper-release", .16],
+    ["kuji", "kuji-paper-peel", .16], ["kuji", "kuji-paper-tear", .22], ["kuji", "kuji-paper-release", .12], ["kuji", "kuji-paper-flutter", .32],
   ]) {
     const wav = inspectWav(category, name);
     assert.ok(Math.abs(wav.duration - duration) < .002, name);
@@ -101,7 +101,7 @@ test("native feedback respects Silent Mode, focus and backgrounding without excl
   assert.match(audioSource, /performAndroidHapticsAsync/);
   assert.doesNotMatch(audioSource, /setTimeout|setInterval|withRepeat/);
   assert.match(audioSource, /cue === "coin" \|\| cue === "chamber"\) return Promise.resolve\(\)/);
-  assert.match(audioSource, /\[primary, secondary, tertiary, coin, chamber\]/);
+  assert.match(audioSource, /\[primary, secondary, tertiary, coin, chamber, flutter\]/);
   const gachaAudio = read("apps/mobile/src/features/draw/useGachaRevealAudio.ts");
   assert.match(gachaAudio, /gacha-coin-drop.wav/);
   assert.match(gachaAudio, /gacha-capsules-rattle.wav/);

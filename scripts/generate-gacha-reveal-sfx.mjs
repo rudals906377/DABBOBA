@@ -81,8 +81,8 @@ function renderLeverSound() {
   }, OUTPUT_DIR, false);
 }
 
-function renderRecordedEffect(name, sourceName, sha256, duration, targetRms) {
-  const source = readFileSync(resolve(OUTPUT_DIR, "source", sourceName));
+function renderRecordedEffect(name, sourceName, sha256, duration, targetRms, outputDir = OUTPUT_DIR) {
+  const source = readFileSync(resolve(outputDir, "source", sourceName));
   if (createHash("sha256").update(source).digest("hex") !== sha256) {
     throw new Error(`Recorded source differs from its reviewed provenance: ${sourceName}`);
   }
@@ -97,7 +97,7 @@ function renderRecordedEffect(name, sourceName, sha256, duration, targetRms) {
     const attack = smoothstep(time / 0.003);
     const release = 1 - smoothstep((time - duration + 0.04) / 0.025);
     return centered[frame] * gain * attack * release;
-  }, OUTPUT_DIR, false);
+  }, outputDir, false);
 }
 
 function renderDropSound() {
@@ -159,24 +159,10 @@ renderDropSound();
 renderOpenSound();
 const KUJI_DIR = resolve(ROOT, "apps/mobile/assets/draw/kuji/sfx");
 mkdirSync(KUJI_DIR, { recursive: true });
-for (const [name, duration, seed, strength] of [
-  ["kuji-paper-peel.wav", 0.32, 0x7011, 0.22],
-  ["kuji-paper-tear.wav", 0.22, 0x7022, 0.26],
-  ["kuji-paper-release.wav", 0.16, 0x7033, 0.12],
-]) {
-  const noise = createNoise(seed);
-  let low = 0;
-  let body = 0;
-  renderWav(name, duration, (time) => {
-    const raw = noise();
-    low += (raw - low) * 0.08;
-    body += (raw - body) * 0.55;
-    const paper = body - low;
-    const env = envelope(time, 0, 0.006, duration - 0.006);
-    const grain = name.includes("tear")
-      ? 0.55 + 0.45 * Math.sin(2 * Math.PI * 43 * time) ** 2
-      : 0.8 + 0.2 * Math.sin(2 * Math.PI * 19 * time) ** 2;
-    return paper * strength * env * grain;
-  }, KUJI_DIR);
-}
-console.log("Generated eight deterministic gacha/kuji material sound effects");
+for (const [name, source, sha256, duration, rms] of [
+  ["kuji-paper-peel.wav", "paper-peel-recording.wav", "6c5d3fffaf1abefff3110a47d2e461ce4df76b018c224e13e34f7f707a348401", 0.16, 0.085],
+  ["kuji-paper-tear.wav", "paper-tear-recording.wav", "38d1b6159796888fcab35a18f21bd8242ff5f81c9a526aab968219d0e9468ce6", 0.22, 0.12],
+  ["kuji-paper-release.wav", "paper-release-recording.wav", "65780afe29b240be5c137dbbb7f77c63a21a694689b7038b0f09bf62dd5d7b22", 0.12, 0.09],
+  ["kuji-paper-flutter.wav", "paper-flutter-recording.wav", "36ff63d8cbfd3aa1ec611073492136a6db5d892629a3c0c4ae12700cef7b6031", 0.32, 0.07],
+]) renderRecordedEffect(name, source, sha256, duration, rms, KUJI_DIR);
+console.log("Generated nine deterministic gacha/kuji material sound effects");
