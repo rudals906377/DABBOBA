@@ -243,7 +243,7 @@ test("the restrained edge cue follows the paper boundary and stays clipped", () 
   assert.match(componentSource, /styles\.ticketPeelEdgeGlow,[\s\S]*?peelEdgeGlowStyle/);
   assert.match(
     componentSource,
-    /withDelay\(\s*DRAW_MOTION\.kujiResultHoldMs,[\s\S]*?duration: DRAW_MOTION\.kujiImpactMs, easing: Easing\.out\(Easing\.cubic\)/,
+    /withDelay\(\s*DRAW_MOTION\.kujiResultHoldMs,[\s\S]*?duration: DRAW_MOTION\.kujiImpactMs, easing: Easing\.linear/,
   );
   assert.doesNotMatch(
     componentSource,

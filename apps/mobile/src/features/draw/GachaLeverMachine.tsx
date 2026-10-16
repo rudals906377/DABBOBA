@@ -770,7 +770,7 @@ function GachaCapsuleCinematic({
     return () => { capsuleRendererReady.value = 0; };
   }, [capsuleRendererReady, reduceMotion]);
   const stageDimStyle = useAnimatedStyle(() => ({
-    opacity: reduceMotion ? 0 : revealActive.value * 0.84 * interpolate(
+    opacity: reduceMotion ? 0 : (settled ? 1 : revealActive.value) * 0.84 * interpolate(
       cameraProgress.value, [0, 0.2, 0.52, 1], [0, 0, 1, 1], Extrapolation.CLAMP,
     ),
   }));
@@ -823,7 +823,8 @@ function GachaCapsuleCinematic({
     const camera = sampleGachaCameraMotion(cameraProgress.value, stageSize.width, stageSize.height, reduceMotion);
     const source = sampleGachaBowlProjection(revealProgress.value, camera, false);
     return {
-      opacity: revealActive.value * light.whiteout,
+      // Completion stops animation/audio clocks, not the final lit surface.
+      opacity: (settled ? 1 : revealActive.value) * light.whiteout,
       transform: [
         { translateX: source.x - stageSize.width / 2 },
         { translateY: source.y - stageSize.height / 2 },
@@ -1600,6 +1601,7 @@ const styles = StyleSheet.create({
   cinematicLayer: {
     ...StyleSheet.absoluteFill,
     zIndex: 30,
+    overflow: "hidden",
     alignItems: "center",
     justifyContent: "center",
   },

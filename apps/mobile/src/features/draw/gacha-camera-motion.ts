@@ -36,6 +36,13 @@ function ease(start: number, end: number, value: number) {
   return p * p * (3 - 2 * p);
 }
 
+function cameraEase(start: number, end: number, value: number) {
+  "worklet";
+  const t = unit((value - start) / (end - start));
+  // Match zero velocity and acceleration at pickup and at the close-up hold.
+  return t * t * t * (t * (t * 6 - 15) + 10);
+}
+
 function bounce(progress: number, start: number, end: number, height: number) {
   "worklet";
   const t = unit((progress - start) / (end - start));
@@ -79,8 +86,8 @@ export function sampleGachaCameraMotion(progress: number, width: number, height:
   const fixedY = (box.top + box.restTop + box.capsuleSize / 2 - box.machineHeight / 2) * presentationScale;
   const baseDiameter = box.capsuleSize * presentationScale;
   const finalDiameter = Math.max(baseDiameter, Math.min(w * 0.76, h * 0.53));
-  const zoom = ease(0.04, 0.46, p);
-  const pan = ease(0.015, 0.25, p);
+  const zoom = cameraEase(0.04, 0.46, p);
+  const pan = cameraEase(0.015, 0.25, p);
   const scale = Math.exp(Math.log(finalDiameter / baseDiameter) * zoom);
   const translateX = -fixedX * (scale - 1 + pan);
   const translateY = -fixedY * (scale - 1 + pan);

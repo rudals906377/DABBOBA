@@ -172,7 +172,8 @@ export function KujiPeelTicket({
         DRAW_MOTION.kujiResultHoldMs,
         withTiming(
           1,
-          { duration: DRAW_MOTION.kujiImpactMs, easing: Easing.out(Easing.cubic) },
+          // The reveal sampler owns its easing; keep its clock linear.
+          { duration: DRAW_MOTION.kujiImpactMs, easing: Easing.linear },
           (finished) => {
             "worklet";
             scheduleOnRN(handleImpactSettled, generation, Boolean(finished));

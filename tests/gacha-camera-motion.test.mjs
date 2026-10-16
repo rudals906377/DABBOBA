@@ -169,3 +169,16 @@ test("invalid inputs and Reduced Motion keep deterministic finite frames without
     assert.deepEqual(sampleGachaCameraMotion(progress, 390, 844, true), sampleGachaCameraMotion(0, 390, 844));
   }
 });
+
+test("camera push and centering settle with continuous acceleration", () => {
+  const h = 0.00001;
+  for (const [key, boundaries] of [["capsuleDiameter", [0.04, 0.46]], ["capsuleX", [0.015, 0.25]], ["capsuleY", [0.015, 0.25]]]) {
+    for (const boundary of boundaries) {
+      const a = sampleGachaCameraMotion(boundary - h, 390, 844)[key];
+      const b = sampleGachaCameraMotion(boundary, 390, 844)[key];
+      const c = sampleGachaCameraMotion(boundary + h, 390, 844)[key];
+      assert.ok(Math.abs((c - a) / (2 * h)) < 0.01, `${key} has a velocity catch at ${boundary}`);
+      assert.ok(Math.abs((c - 2 * b + a) / h ** 2) < 2, `${key} has an acceleration catch at ${boundary}`);
+    }
+  }
+});
