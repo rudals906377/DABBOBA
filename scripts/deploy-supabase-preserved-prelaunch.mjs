@@ -98,7 +98,8 @@ export async function deployPreservedPrelaunch({ apply = false } = {}) {
   // Recheck immediately before the first mutation; never invoke `secrets set`.
   assertUnchangedSecrets(before, secretDigests());
   for (const name of ['dabboba-api', 'dabboba-admin-api', 'dabboba-worker']) {
-    supabase('functions', 'deploy', name, '--no-verify-jwt', '--project-ref', PROJECT);
+    // Bundle on Supabase so a stopped local Docker daemon cannot stall deployment.
+    supabase('functions', 'deploy', name, '--use-api', '--no-verify-jwt', '--project-ref', PROJECT);
   }
   assertUnchangedSecrets(before, secretDigests());
   await verifyMobilePublicApiSurface({ apiBaseUrl, expectedCommerceMode: 'PRELAUNCH' });
