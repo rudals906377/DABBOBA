@@ -11,8 +11,8 @@ The owner chose NICE V2 through PortOne only, and explicitly approved a browsing
 
 ## Store boundary observed
 
-- Apple app `6815146511` belongs to JEUNGMI KIM / Team MCZ4884P7F. The browser session still shows Developer access, read-only metadata and the updated-program-agreement banner after a provider-team refresh, despite the owner's reported completion. An owner or effective App Manager session is needed to edit the listing.
-- The latest source is version 1.0.0 / iOS build 6. Previous TestFlight build 5 is not proof of the new source. New build/upload identifiers must be recorded after verification.
+- Apple app `6815146511` belongs to JEUNGMI KIM / Team MCZ4884P7F. The browser session still shows Developer access, read-only metadata and the updated-program-agreement banner after a provider-team refresh, despite the owner's reported completion. The existing EAS App Store Connect API key successfully saved the PRELAUNCH description, privacy/support URLs and SHOPPING category. An owner or effective App Manager browser session is still needed for the remaining console-only forms and screenshots.
+- The latest source is version 1.0.0 / iOS build 6. Previous TestFlight build 5 is not proof of the new source. Requested from application commit `f5b52a9`: iOS `699b0ded-c4a3-4263-90da-43f16e5a467a`, Android `7bb5a3d1-c5f3-42a2-9701-be77a6189515`. These are build requests, not verified uploads or approvals.
 - Google Play app `com.dabboba.mobile` is still a draft. The personal developer account currently requires twelve testers for fourteen continuous days and has zero participating testers. Organization conversion is a separate identity-verification flow, not completed by receiving a D-U-N-S number.
 - Production public config is PRELAUNCH with no card options. Store-review login is disabled. PG staging credentials are not valid production store-review credentials.
 
