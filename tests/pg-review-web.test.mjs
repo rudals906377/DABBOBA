@@ -29,20 +29,20 @@ test('tokens are forwarded from cookie only; logout clears cookie',async()=>{
  let auth;await handlePgReviewService(request('/me',undefined,{cookie:'__Secure-dabboba-pg-review='+token,authorization:'Bearer attacker'}),{},async(_url,opts)=>{auth=opts.headers.authorization;return json({actor:{role:'USER'}});});assert.equal(auth,'Bearer '+token);
  const loggedOut=await handlePgReviewService(request('/logout',{}),{},()=>{throw new Error('no upstream');});assert.equal(loggedOut.status,200);assert.match(loggedOut.headers.get('set-cookie'),/Max-Age=0/);
 });
-test('review static app permits EasyPay and NICE only within isolated payment protections',async()=>{
+test('review static app permits NICE only within isolated payment protections',async()=>{
  const response=await handlePgReviewService(new Request('https://dabboba.net/review/'),{ASSETS:{fetch:async()=>new Response('app')}});
  assert.equal(response.headers.get('x-robots-tag'),'noindex, nofollow');
  assert.equal(response.headers.get('referrer-policy'),'no-referrer');
  const csp=response.headers.get('content-security-policy');
  const directives=new Map(csp.split(';').map(d=>d.trim().split(/\s+/)).map(([name,...sources])=>[name,sources]));
  assert.deepEqual(directives.get('script-src'),["'self'",'https://cdn.portone.io']);
- assert.deepEqual(directives.get('connect-src'),["'self'",'https://*.easypay.co.kr','https://checkout-service.prod.iamport.co','https://coretelemetry.prod.iamport.co','https://tx-gateway-service.prod.iamport.co','https://payment-bridge.prod.iamport.co','https://service.iamport.kr','https://*.nicepay.co.kr']);
- assert.deepEqual(directives.get('frame-src'),['https://*.easypay.co.kr','https://checkout-service.prod.iamport.co','https://payment-bridge.prod.iamport.co','https://service.iamport.kr','https://*.nicepay.co.kr']);
- assert.deepEqual(directives.get('form-action'),["'self'",'https://*.easypay.co.kr','https://*.nicepay.co.kr','https://service.iamport.kr']);
+ assert.deepEqual(directives.get('connect-src'),["'self'",'https://checkout-service.prod.iamport.co','https://coretelemetry.prod.iamport.co','https://tx-gateway-service.prod.iamport.co','https://payment-bridge.prod.iamport.co','https://service.iamport.kr','https://*.nicepay.co.kr']);
+ assert.deepEqual(directives.get('frame-src'),['https://checkout-service.prod.iamport.co','https://payment-bridge.prod.iamport.co','https://service.iamport.kr','https://*.nicepay.co.kr']);
+ assert.deepEqual(directives.get('form-action'),["'self'",'https://*.nicepay.co.kr','https://service.iamport.kr']);
  assert.deepEqual(directives.get('style-src'),["'self'"]);
  assert.deepEqual(directives.get('base-uri'),["'none'"]);
  assert.deepEqual(directives.get('frame-ancestors'),["'none'"]);
- assert.doesNotMatch(csp,/inicis|kcp|unsafe-inline|unsafe-eval/);
+ assert.doesNotMatch(csp,/easypay|inicis|kcp|unsafe-inline|unsafe-eval/);
  assert.equal(response.headers.get('cache-control'),'no-store');
  assert.equal(response.headers.get('x-content-type-options'),'nosniff');
  assert.equal((await handlePgReviewService(new Request('https://unrelated.pages.dev/review/'),{})).status,404);
@@ -77,14 +77,16 @@ test('login forwards only a freshly signed Cloudflare visitor IP for per-reviewe
  assert.equal(meHeaders['x-dabboba-review-client-ip'],undefined,'only the login request carries the signed IP');
 });
 
-test('shared proxy pins NICE and Toss actions to their own endpoints and refuses mixed order selection',async()=>{
+test('NICE-only proxy preserves historical payment queries and refuses other new providers',async()=>{
  const paymentId='aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa';const cookie='__Secure-dabboba-pg-review='+token;
  for(const [family,upstream] of [['payments','/v1/payments/'],['toss-payments','/v1/review/toss-payments/']]){
   let target;const r=await handlePgReviewService(request(`/${family}/${paymentId}/confirm`,{},{cookie}),{},async url=>{target=url;return json({status:'PENDING'});});
   assert.equal(r.status,200);assert.equal(target,`https://lyzcyrdiazorjaqlgblr.supabase.co/functions/v1/dabboba-api${upstream}${paymentId}/confirm`);
  }
  const body={items:[{productId:'stg-death-note-rich',quantity:1,expectedDrawVersion:1}],pointAmount:0};
- for(const selection of [{reviewPaymentProvider:'PORTONE_V2_NICE',cardPg:'NICE'},{reviewPaymentProvider:'PORTONE_V2_KICC',cardPg:'KICC'}]) {
+ const legacy=await handlePgReviewService(request('/orders',{...body,reviewPaymentProvider:'PORTONE_V2_KICC',cardPg:'KICC'},{cookie}),{},()=>{throw new Error('no new EasyPay order');});
+ assert.equal(legacy.status,403,'preserve an unknown historical order intent rather than declaring no order exists');
+ for(const selection of [{reviewPaymentProvider:'PORTONE_V2_NICE',cardPg:'NICE'}]) {
   let sent;const r=await handlePgReviewService(request('/orders',{...body,...selection},{cookie}),{},async(_url,init)=>{sent=JSON.parse(init.body);return json({id:paymentId});});
   assert.equal(r.status,200);assert.equal(sent.reviewPaymentProvider,selection.reviewPaymentProvider);
  }

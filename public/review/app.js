@@ -29,7 +29,7 @@ const cards = () => state.products.length === 0 ? '<p>상품을 준비하고 있
 const notices = () => `<div class="policies">${state.policies.map(section => `<section><h2>${esc(section.title)}</h2>${section.groups.map(group => `${group.title ? `<h3>${esc(group.title)}</h3>` : ''}<ul>${group.items.map(item => `<li>${esc(item.text)}${item.children ? `<ul>${item.children.map(v=>`<li>${esc(v)}</li>`).join('')}</ul>` : ''}</li>`).join('')}</ul>`).join('')}</section>`).join('')}</div>`;
 const paymentNotice = () => {
   const ready=reviewPaymentOptions(state.config).map(option=>option.label);
-  return `이지페이와 나이스페이의 포트원 연동을 준비하는 공통 심사 웹입니다. ${ready.length ? ready.join(' · ')+' TEST 연결이 준비되어 있습니다.' : '결제 연결은 준비 중입니다.'} 계약·입점 승인 완료를 의미하지 않습니다.`;
+  return `포트원을 통한 나이스페이 연동을 준비하는 심사 웹입니다. ${ready.length ? '나이스페이 TEST 연결이 준비되어 있습니다.' : '나이스페이 결제 연결은 준비 중입니다.'} 계약·입점 승인 완료를 의미하지 않습니다.`;
 };
 const about = () => `<h1>다뽀바 앱 소개</h1><p>다뽀바는 캐릭터 실물 상품의 포함 구성을 확인하고 구매하는 모바일 서비스입니다.</p><ol><li>가격과 포함 상품, 공개된 구성·확률과 이용 규정을 확인합니다.</li><li>구매 횟수를 선택하고 결제합니다. 결제 전에 지급될 개별 상품을 지정할 수 없습니다.</li><li>결제가 확인되면 구매 횟수만큼 뽑기 권리가 발급됩니다. 캡슐을 열면 서버가 공개된 구성에 따라 포함된 상품 중 1개를 확정합니다. 같은 상품을 받을 수 있습니다.</li><li>획득한 상품은 보관함에서 확인하고 배송을 신청할 수 있습니다. 기본 보관 기간은 60일입니다.</li></ol><p>쿠지는 준비 중이며 아직 구매할 수 없습니다.</p><p>배송 신청 접수 후 배송 완료까지 영업일 기준 2~5일이 소요됩니다.</p><p class="muted">앱 스토어 공개 출시 전입니다. 심사 계정의 주문·재고는 운영 회원과 분리됩니다. ${esc(paymentNotice())}</p><div class="actions"><a class="button" href="#catalog">상품 둘러보기</a><a class="button secondary" href="#policies">서비스 이용 안내</a></div>`;
 async function render() {
@@ -74,7 +74,7 @@ function checkout(product, odds) {
   const savedIntent = intents.read();
   const available = reviewPaymentOptions(state.config);
   const initialProvider = savedIntent?.body?.reviewPaymentProvider || available[0]?.provider || 'PORTONE_V2_NICE';
-  const choices = [{provider:'PORTONE_V2_KICC',label:'포트원 이지페이'},{provider:'PORTONE_V2_NICE',label:'포트원 나이스페이'}];
+  const choices = [{provider:'PORTONE_V2_NICE',label:'포트원 나이스페이'}];
   app.innerHTML = `<h1>상품 주문·결제</h1><form id="checkout-form"><div class="summary"><h2>${esc(product.name)}</h2><p>상품 단가 ${money(product.price)} · 신용카드</p><p class="muted">선택한 결제사의 TEST 환경입니다. 일반 판매와 실제 청구는 시작하지 않았습니다.</p></div><fieldset><legend>심사 결제 방식</legend>${choices.map(c=>`<label><input type="radio" name="provider" value="${c.provider}" ${c.provider===initialProvider?'checked':''} ${!available.some(a=>a.provider===c.provider)||savedIntent?'disabled':''}>${c.label}${available.some(a=>a.provider===c.provider)?' · TEST':' · 연결 준비 중'}</label>`).join('')}</fieldset><label>구매 횟수<select name="quantity" ${savedIntent?'disabled':''}>${Array.from({length:Math.max(savedIntent?.body?.items?.[0]?.quantity || 1,Math.min(10,product.availableQuantity || 0))},(_,i)=>`<option ${i+1===(savedIntent?.body?.items?.[0]?.quantity || 1)?'selected':''}>${i+1}</option>`).join('')}</select></label><label>결제자 이름<input name="fullName" maxlength="30" autocomplete="name" required></label><label>휴대전화<input name="phoneNumber" type="tel" pattern="[0-9+ ]{9,16}|[0-9]{2,3}-[0-9]{3,4}-[0-9]{4}" autocomplete="tel" required></label><label>이메일<input name="customerEmail" type="email" autocomplete="email" required></label><p id="total" class="price">합계 ${money(product.price*(savedIntent?.body?.items?.[0]?.quantity || 1))}</p><label><input name="consent" type="checkbox" required>포함 상품·공개 확률·구매 횟수·금액·취소 및 환불 규정을 확인하고 결제에 동의합니다. (필수)</label><button id="purchase">선택한 결제창 열기</button><button type="button" id="check-payment" class="secondary">이전 주문 확인 / 닫기 복구</button></form>${notices()}`;
   const form = document.querySelector('#checkout-form'), button = document.querySelector('#purchase');
   let busy=false;
@@ -141,13 +141,13 @@ function checkout(product, odds) {
       state.config = await api('/config');
       const connection=reviewPaymentOptions(state.config).find(c=>c.provider===provider);
       if (!connection) throw new Error('선택한 TEST 결제사의 연결을 준비 중이에요.');
-      if (new TextEncoder().encode(form.fullName.value.trim()).length > (provider==='PORTONE_V2_KICC'?20:30)) throw new Error('결제자 이름은 30바이트 이내로 입력해 주세요.');
+      if (new TextEncoder().encode(form.fullName.value.trim()).length > 30) throw new Error('결제자 이름은 30바이트 이내로 입력해 주세요.');
       if (!window.PortOne?.requestPayment) throw new Error('결제창을 불러오지 못했어요. 페이지를 새로 열어 주세요.');
       if (pending || callback || intents.read()) throw new Error('이전 주문 확인을 먼저 눌러 주세요.');
       const currentProduct = await api(`/products/${product.id}`);
       const currentOdds=await api('/products/'+encodeURIComponent(product.id)+'/draw-odds');
       if (currentOdds.version!==odds.version || currentProduct.metadata?.purchaseMode === 'DIRECT' || !currentProduct.purchasable || currentProduct.price !== product.price) throw new Error('선택한 상품의 판매 상태를 다시 확인해 주세요.');
-      intents.prepare({items:[{productId:product.id,quantity:Number(form.quantity.value),expectedDrawVersion:odds.version}],pointAmount:0,reviewPaymentProvider:provider,cardPg:provider==='PORTONE_V2_KICC'?'KICC':'NICE'});
+      intents.prepare({items:[{productId:product.id,quantity:Number(form.quantity.value),expectedDrawVersion:odds.version}],pointAmount:0,reviewPaymentProvider:provider,cardPg:'NICE'});
       const order = await intents.resolve((body, key) => api('/orders', body, key));
       pending = {id:order.id,paymentId:order.paymentId}; sessionStorage.setItem('dabboba-review-order',JSON.stringify(pending));
       const currentOrder = await api('/orders/' + order.id);

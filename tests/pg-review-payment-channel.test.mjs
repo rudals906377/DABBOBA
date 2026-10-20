@@ -22,12 +22,13 @@ test('Toss requests use the server amount and payment id, not mutable product pr
  assert.equal(r.method,'CARD'); assert.doesNotMatch(JSON.stringify(r),/PortOne|channelKey/);
 });
 
-test('shared review lists PortOne EasyPay and NICE independently, rejects LIVE and never substitutes a provider',async()=>{
+test('NICE-only review rejects EasyPay-only and LIVE configuration without substituting a provider',async()=>{
  const {reviewPaymentOptions,nicePaymentRequest,reviewPaymentActionPath,assertReviewPaymentOrder}=await import('../public/review/payment-channel.js');
  const nice={provider:'PORTONE_V2_NICE',pgProvider:'NICE_V2',channelEnvironment:'TEST',storeId:'store-synthetic',merchantId:'merchant-synthetic',channelKey:'channel-key-nice-synthetic'};
  const kicc={...nice,provider:"PORTONE_V2_KICC",pgProvider:"KICC_V2",channelKey:"channel-key-kicc"};
  const config={cardPaymentOptions:[nice,kicc],tossPayment:connection};
- assert.deepEqual(reviewPaymentOptions(config).map(p=>p.provider),['PORTONE_V2_KICC','PORTONE_V2_NICE']);
+ assert.deepEqual(reviewPaymentOptions(config).map(p=>p.provider),['PORTONE_V2_NICE']);
+ assert.deepEqual(reviewPaymentOptions({cardPaymentOptions:[kicc]}),[]);
  assert.deepEqual(reviewPaymentOptions({cardPaymentOptions:[{...nice,channelEnvironment:'LIVE'}]}),[]);
  assert.deepEqual(reviewPaymentOptions({tossPayment:connection}).map(p=>p.provider),[]);
  const order={id:'order',paymentId:'payment',paymentProvider:'PORTONE_V2_NICE',cardPayment:nice,total:7000};

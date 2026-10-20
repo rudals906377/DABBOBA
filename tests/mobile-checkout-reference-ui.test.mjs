@@ -129,7 +129,7 @@ test("checkout notices open independently and distinguish gacha from sealed kuji
   assert.match(checkoutSource, /<CheckoutNoticeSections category=\{product\.category\} \/>/);
 });
 
-test("checkout follows the compact reference hierarchy and exposes only the configured KG INICIS card method", () => {
+test("checkout follows the compact reference hierarchy and exposes only the NICE-only card method", () => {
   for (const label of [
     "구매 상품",
     "쿠폰 사용",

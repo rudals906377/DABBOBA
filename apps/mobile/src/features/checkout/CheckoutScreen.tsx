@@ -109,7 +109,7 @@ const PAYMENT_METHODS: Array<{
   unavailableCaption: string;
   icon: DecorativeIoniconName;
 }> = [
-  { id: "card", label: "신용/체크카드", unavailableCaption: "결제 채널 미설정", icon: "card-outline" },
+  { id: "card", label: "신용/체크카드 · 나이스페이", unavailableCaption: "결제 채널 미설정", icon: "card-outline" },
 ];
 
 export function CheckoutScreen() {

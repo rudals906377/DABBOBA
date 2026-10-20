@@ -178,7 +178,7 @@ export async function handlePgReviewService(request, env, externalFetch = global
     const headers = new Headers(response.headers);
     headers.set("cache-control", "no-store"); headers.set("x-robots-tag", "noindex, nofollow");
     headers.set("x-content-type-options", "nosniff"); headers.set("referrer-policy", "no-referrer");
-    headers.set("content-security-policy", "default-src 'self'; script-src 'self' https://cdn.portone.io; style-src 'self'; img-src 'self' https://rconfxsykttfvznakile.supabase.co https://rconfxsykttfvznakile.storage.supabase.co data:; connect-src 'self' https://*.easypay.co.kr https://checkout-service.prod.iamport.co https://coretelemetry.prod.iamport.co https://tx-gateway-service.prod.iamport.co https://payment-bridge.prod.iamport.co https://service.iamport.kr https://*.nicepay.co.kr; frame-src https://*.easypay.co.kr https://checkout-service.prod.iamport.co https://payment-bridge.prod.iamport.co https://service.iamport.kr https://*.nicepay.co.kr; base-uri 'none'; form-action 'self' https://*.easypay.co.kr https://*.nicepay.co.kr https://service.iamport.kr; frame-ancestors 'none'");
+    headers.set("content-security-policy", "default-src 'self'; script-src 'self' https://cdn.portone.io; style-src 'self'; img-src 'self' https://rconfxsykttfvznakile.supabase.co https://rconfxsykttfvznakile.storage.supabase.co data:; connect-src 'self' https://checkout-service.prod.iamport.co https://coretelemetry.prod.iamport.co https://tx-gateway-service.prod.iamport.co https://payment-bridge.prod.iamport.co https://service.iamport.kr https://*.nicepay.co.kr; frame-src https://checkout-service.prod.iamport.co https://payment-bridge.prod.iamport.co https://service.iamport.kr https://*.nicepay.co.kr; base-uri 'none'; form-action 'self' https://*.nicepay.co.kr https://service.iamport.kr; frame-ancestors 'none'");
     return new Response(response.body, { status: response.status, headers });
   }
   if (Date.now() >= PG_REVIEW_EXPIRY) return pgReviewFailure("심사 계정 이용기간이 끝났어요.", 403);
@@ -212,7 +212,10 @@ export async function handlePgReviewService(request, env, externalFetch = global
     const raw = await request.text(); if (raw.length > 8192) return pgReviewFailure("입력 내용이 너무 길어요.", 413);
     try { body = JSON.parse(raw || "{}"); } catch { return pgReviewFailure("입력 내용을 확인해 주세요."); }
     if (!body || typeof body !== "object" || Array.isArray(body)) return pgReviewFailure("입력 내용을 확인해 주세요.");
-    if (route === "/orders" && (!["PORTONE_V2_NICE","PORTONE_V2_KICC"].includes(body.reviewPaymentProvider) || body.cardPg !== (body.reviewPaymentProvider === "PORTONE_V2_NICE" ? "NICE" : "KICC"))) return pgReviewFailure("선택한 심사 결제사를 확인해 주세요.");
+    // A pre-cutover unknown EasyPay request may already have created an order.
+    // 403 preserves its durable intent; never discard it as a definitive rejection.
+    if (route === "/orders" && body.reviewPaymentProvider === "PORTONE_V2_KICC" && body.cardPg === "KICC") return pgReviewFailure("신규 결제는 나이스페이만 지원합니다. 이전 이지페이 주문은 고객지원에서 확인해 주세요.", 403);
+    if (route === "/orders" && (body.reviewPaymentProvider !== "PORTONE_V2_NICE" || body.cardPg !== "NICE")) return pgReviewFailure("선택한 심사 결제사를 확인해 주세요.");
     if (isLogin && body.email !== "pg") return pgReviewFailure("심사 아이디 또는 비밀번호를 확인해 주세요.", 401);
     if (route === "/orders" && (!Array.isArray(body.items) || body.items.length !== 1 || !PG_REVIEW_PRODUCTS.has(body.items[0]?.productId) || !Number.isInteger(body.items[0]?.quantity) || body.items[0].quantity < 1 || body.items[0].quantity > 10 || body.pointAmount !== 0 || body.couponCode || body.kujiRoomEntryId || (!Number.isInteger(body.items[0].expectedDrawVersion) || body.items[0].expectedDrawVersion < 1))) return pgReviewFailure("심사 상품과 수량을 확인해 주세요.");
   }

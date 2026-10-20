@@ -43,7 +43,7 @@ export function reviewPortOneConnection(config, provider) {
 }
 export function reviewNiceConnection(config) { return reviewPortOneConnection(config,'PORTONE_V2_NICE'); }
 export function reviewPaymentOptions(config) {
-  return [{provider:'PORTONE_V2_KICC',label:'포트원 이지페이'},{provider:'PORTONE_V2_NICE',label:'포트원 나이스페이'}]
+  return [{provider:'PORTONE_V2_NICE',label:'포트원 나이스페이'}]
     .map(option => {const channel=reviewPortOneConnection(config,option.provider); return channel ? {...channel,label:option.label} : null;}).filter(Boolean);
 }
 export function assertReviewPaymentOrder(order, provider, config, checkConnection = true) {
