@@ -18,7 +18,7 @@ export function isCustomerVisibleExchangeBundle(
 ): boolean {
   return items.length > 0
     && items.every((item) => (
-      item.sourceType === "GACHA"
+      (item.sourceType === "GACHA" || (item.sourceType === "PURCHASE" && item.product.category === "gacha" && item.product.metadata.purchaseMode === "DIRECT"))
       && isCustomerProductCategoryEnabledOn(item.product.category, "exchange")
     ));
 }
@@ -27,6 +27,6 @@ export function isCustomerEligibleExchangeInventory(
   item: ExchangeInventorySelection,
 ): boolean {
   return item.status === "OWNED"
-    && item.sourceType === "GACHA"
+    && (item.sourceType === "GACHA" || (item.sourceType === "PURCHASE" && item.product.category === "gacha" && item.product.metadata.purchaseMode === "DIRECT"))
     && isCustomerProductCategoryEnabledOn(item.product.category, "exchange");
 }

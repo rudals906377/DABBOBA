@@ -56,7 +56,8 @@ test("gacha and kuji purchase notices explain cancellation and refund separately
     assert.match(copy, /법령상 청약철회/);
     assert.match(copy, /하자·파손·오배송/);
     assert.match(copy, /고객센터/);
-    assert.match(copy, /경품 상품의 기준금액/);
+    assert.doesNotMatch(copy, /50%|15%|자동 환급/);
+    assert.match(copy, /교환방 안내/);
     assert.doesNotMatch(copy, /구매 당시 1회 판매가 50%/);
   }
 });

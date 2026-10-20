@@ -9,7 +9,7 @@ import { acceptRequiredPoliciesForIntegrationTest } from "../integration-test-fi
 const databaseUrl = process.env.DABBOBA_TEST_DATABASE_URL;
 
 test(
-  "inventory point returns credit original stored GACHA draws exactly once and reject every other source or state",
+  "disabled point returns preserve legacy stored draws, balances and ledgers",
   { skip: !databaseUrl },
   async (t) => {
     const pool = createDatabasePool(databaseUrl!, "dabboba-point-return-integration");
@@ -233,230 +233,18 @@ test(
       payload: { inventoryUnitIds },
     });
 
-    const oddInventoryId = await addDrawInventory({
-      drawUserId: owner.actor.userId,
-      sourceType: "GACHA",
-      prizeProductId: prizeOddId,
-    });
-    const evenInventoryId = await addDrawInventory({
-      drawUserId: owner.actor.userId,
-      sourceType: "GACHA",
-      prizeProductId: prizeEvenId,
-    });
-    const inventoryBeforeReturn = await app.inject({
-      method: "GET",
-      url: "/v1/account/inventory?limit=50",
-      headers: { authorization: `Bearer ${owner.token}` },
-    });
-    assert.equal(inventoryBeforeReturn.statusCode, 200, inventoryBeforeReturn.body);
-    const storedDraws = (inventoryBeforeReturn.json() as {
-      items: Array<{ id: string; pointReturnEligible: boolean; pointReturnAmount?: number; product: { price: number } }>;
-    }).items;
-    // The amount is 50% of the drawn prize's reference price, rounded down per
-    // item; the 1,000 KRW gacha ticket price does not matter (2026-09-30 decision).
-    for (const [inventoryId, expectedPoints] of [[oddInventoryId, 4_999], [evenInventoryId, 1_000]] as const) {
-      const storedDraw = storedDraws.find((item) => item.id === inventoryId);
-      assert.equal(storedDraw?.pointReturnEligible, true);
-      assert.equal(storedDraw.pointReturnAmount, expectedPoints);
+    const oddInventoryId = await addDrawInventory({drawUserId:owner.actor.userId,sourceType:"GACHA",prizeProductId:prizeOddId});
+    const evenInventoryId = await addDrawInventory({drawUserId:owner.actor.userId,sourceType:"GACHA",prizeProductId:prizeEvenId});
+    const before = await pool.query("SELECT * FROM point_ledger_entries WHERE user_id=$1",[owner.actor.userId]);
+    const inventory = await app.inject({method:"GET",url:"/v1/account/inventory?limit=50",headers:{authorization:`Bearer ${owner.token}`}});
+    assert.equal(inventory.statusCode,200,inventory.body);
+    for(const item of inventory.json().items)assert.equal(item.pointReturnEligible,false);
+    for(const key of [randomUUID(),randomUUID()]) {
+      const response=await returnPoints(owner.token,[oddInventoryId,evenInventoryId],key);
+      assert.equal(response.statusCode,503,response.body);
+      assert.equal(response.json().error.code,"FEATURE_UNAVAILABLE");
     }
-    assert.equal(storedDraws.find((item) => item.id === oddInventoryId)?.product.price, 9_999);
-    const inventoryUnitIds = [oddInventoryId, evenInventoryId].sort((left, right) => left.localeCompare(right, "en-US"));
-    const idempotencyKey = `point-return-success-${randomUUID()}`;
-    const response = await returnPoints(owner.token, [oddInventoryId, evenInventoryId], idempotencyKey);
-    assert.equal(response.statusCode, 201, response.body);
-    const result = response.json() as {
-      id: string;
-      inventoryUnitIds: string[];
-      totalPointAmount: number;
-      balance: number;
-      returnedAt: string;
-    };
-    assert.deepEqual(result.inventoryUnitIds, inventoryUnitIds);
-    assert.equal(result.totalPointAmount, 5_999);
-    assert.equal(result.balance, 5_999);
-    assert.equal(Number.isNaN(Date.parse(result.returnedAt)), false);
-
-    const inventory = await pool.query<{ id: string; status: string }>(
-      "SELECT id,status FROM inventory_units WHERE id=ANY($1::uuid[]) ORDER BY id",
-      [inventoryUnitIds],
-    );
-    assert.deepEqual(inventory.rows, inventoryUnitIds.map((id) => ({ id, status: "POINT_RETURNED" })));
-    const header = await pool.query<{ user_id: string; total_point_amount: number }>(
-      "SELECT user_id,total_point_amount FROM inventory_point_returns WHERE id=$1",
-      [result.id],
-    );
-    assert.deepEqual(header.rows, [{ user_id: owner.actor.userId, total_point_amount: 5_999 }]);
-    const items = await pool.query<{
-      inventory_unit_id: string;
-      reference_amount: number;
-      point_amount: number;
-    }>(
-      `SELECT inventory_unit_id,reference_amount,point_amount
-       FROM inventory_point_return_items WHERE point_return_id=$1 ORDER BY inventory_unit_id`,
-      [result.id],
-    );
-    assert.deepEqual(
-      items.rows.map((item) => [item.inventory_unit_id, item.reference_amount, item.point_amount]),
-      inventoryUnitIds.map((id) => (id === oddInventoryId ? [id, 9_999, 4_999] : [id, 2_000, 1_000])),
-    );
-    const ledger = await pool.query<{ entry_type: string; amount: number; reference_type: string; reference_id: string }>(
-      `SELECT entry_type,amount,reference_type,reference_id FROM point_ledger_entries
-       WHERE user_id=$1 AND reference_type='INVENTORY_POINT_RETURN'`,
-      [owner.actor.userId],
-    );
-    assert.deepEqual(ledger.rows, [{
-      entry_type: "EARN",
-      amount: 5_999,
-      reference_type: "INVENTORY_POINT_RETURN",
-      reference_id: result.id,
-    }]);
-    const account = await pool.query<{ balance: number }>(
-      "SELECT balance FROM point_accounts WHERE user_id=$1",
-      [owner.actor.userId],
-    );
-    assert.deepEqual(account.rows, [{ balance: 5_999 }]);
-    const outbox = await pool.query<{ count: number }>(
-      `SELECT count(*)::integer AS count FROM outbox_events
-       WHERE aggregate_type='INVENTORY_POINT_RETURN' AND aggregate_id=$1 AND event_type='inventory.point_returned'`,
-      [result.id],
-    );
-    assert.equal(outbox.rows[0]!.count, 1);
-    const completedKey = await pool.query<{ state: string; resource_type: string; resource_id: string }>(
-      `SELECT state,resource_type,resource_id FROM idempotency_keys
-       WHERE actor_id=$1 AND scope='ACCOUNT_POINT_RETURN_CREATE' AND idempotency_key=$2`,
-      [owner.actor.userId, idempotencyKey],
-    );
-    assert.deepEqual(completedKey.rows, [{
-      state: "COMPLETED",
-      resource_type: "INVENTORY_POINT_RETURN",
-      resource_id: result.id,
-    }]);
-
-    const replay = await returnPoints(owner.token, [oddInventoryId, evenInventoryId], idempotencyKey);
-    assert.equal(replay.statusCode, 201, replay.body);
-    assert.equal(replay.headers["x-idempotent-replay"], "true");
-    assert.deepEqual(replay.json(), result);
-    const sideEffectsAfterReplay = await pool.query<{
-      return_count: number;
-      item_count: number;
-      ledger_count: number;
-      outbox_count: number;
-    }>(
-      `SELECT
-         (SELECT count(*)::integer FROM inventory_point_returns WHERE id=$1) AS return_count,
-         (SELECT count(*)::integer FROM inventory_point_return_items WHERE point_return_id=$1) AS item_count,
-         (SELECT count(*)::integer FROM point_ledger_entries
-           WHERE user_id=$2 AND reference_type='INVENTORY_POINT_RETURN' AND reference_id=$1::text) AS ledger_count,
-         (SELECT count(*)::integer FROM outbox_events
-           WHERE aggregate_type='INVENTORY_POINT_RETURN' AND aggregate_id=$1::text) AS outbox_count`,
-      [result.id, owner.actor.userId],
-    );
-    assert.deepEqual(sideEffectsAfterReplay.rows, [{
-      return_count: 1,
-      item_count: 2,
-      ledger_count: 1,
-      outbox_count: 1,
-    }]);
-    const secondRequest = await returnPoints(owner.token, inventoryUnitIds);
-    assert.equal(secondRequest.statusCode, 409, secondRequest.body);
-
-    const directKujiInventoryId = await addKujiInventory({
-      ownerId: owner.actor.userId,
-    });
-    const ineligibleInventoryIds = [
-      await addInventory(owner.actor.userId, prizeEvenId, "GACHA"),
-      await addInventory(owner.actor.userId, prizeEvenId, "KUJI"),
-      await addInventory(owner.actor.userId, prizeEvenId, "PURCHASE"),
-      await addInventory(owner.actor.userId, prizeEvenId, "ADMIN_ADJUSTMENT"),
-      directKujiInventoryId,
-      await addDrawInventory({ drawUserId: owner.actor.userId, sourceType: "GACHA", status: "EXCHANGE_LISTED" }),
-      await addDrawInventory({ drawUserId: owner.actor.userId, sourceType: "GACHA", status: "EXCHANGE_OFFERED" }),
-      await addKujiInventory({ ownerId: owner.actor.userId, status: "SHIPPING" }),
-      await addKujiInventory({ ownerId: owner.actor.userId, status: "DELIVERED" }),
-      await addDrawInventory({ drawUserId: owner.actor.userId, sourceType: "GACHA", status: "TRANSFERRED" }),
-      await addDrawInventory({ drawUserId: owner.actor.userId, sourceType: "GACHA", status: "REFUNDED" }),
-      await addKujiInventory({
-        ownerId: owner.actor.userId,
-        currentOwnerId: recipient.actor.userId,
-      }),
-    ];
-    for (const inventoryId of ineligibleInventoryIds.slice(0, -1)) {
-      const rejected = await returnPoints(owner.token, [inventoryId]);
-      assert.equal(rejected.statusCode, 409, rejected.body);
-    }
-    const kujiAfterRejection = await pool.query<{ status: string; return_count: number }>(
-      `SELECT inventory.status,
-         (SELECT count(*)::integer FROM inventory_point_return_items item
-          WHERE item.inventory_unit_id=inventory.id) AS return_count
-       FROM inventory_units inventory WHERE inventory.id=$1`,
-      [directKujiInventoryId],
-    );
-    assert.deepEqual(kujiAfterRejection.rows, [{ status: "OWNED", return_count: 0 }]);
-    const transferredOwnerRejected = await returnPoints(recipient.token, [ineligibleInventoryIds.at(-1)!]);
-    assert.equal(transferredOwnerRejected.statusCode, 409, transferredOwnerRejected.body);
-
-    const validRollbackInventoryId = await addDrawInventory({
-      drawUserId: owner.actor.userId,
-      sourceType: "GACHA",
-      prizeProductId: prizeEvenId,
-    });
-    const zeroInventoryId = await addDrawInventory({
-      drawUserId: owner.actor.userId,
-      sourceType: "GACHA",
-      prizeProductId: prizeZeroId,
-      unitPrice: 1,
-    });
-    const zeroPointBatch = await returnPoints(owner.token, [validRollbackInventoryId, zeroInventoryId]);
-    assert.equal(zeroPointBatch.statusCode, 409, zeroPointBatch.body);
-    assert.match(zeroPointBatch.body, /0P/);
-    const rolledBackInventory = await pool.query<{ id: string; status: string }>(
-      "SELECT id,status FROM inventory_units WHERE id=ANY($1::uuid[]) ORDER BY id",
-      [[validRollbackInventoryId, zeroInventoryId]],
-    );
-    assert.deepEqual(rolledBackInventory.rows.map((row) => row.status), ["OWNED", "OWNED"]);
-
-    const zeroPricedPrizeInventoryId = await addDrawInventory({
-      drawUserId: owner.actor.userId,
-      sourceType: "GACHA",
-      prizeProductId: prizeZeroId,
-    });
-    const zeroPricedPrizeInventory = await app.inject({
-      method: "GET",
-      url: "/v1/account/inventory?limit=50",
-      headers: { authorization: `Bearer ${owner.token}` },
-    });
-    assert.equal(zeroPricedPrizeInventory.statusCode, 200, zeroPricedPrizeInventory.body);
-    const zeroPricedPrizeItem = (zeroPricedPrizeInventory.json() as {
-      items: Array<{ id: string; pointReturnEligible: boolean; pointReturnAmount?: number; product: { price: number } }>;
-    }).items.find((item) => item.id === zeroPricedPrizeInventoryId);
-    // A prize registered without a reference price earns no points, whatever the ticket cost.
-    assert.equal(zeroPricedPrizeItem?.product.price, 0);
-    assert.equal(zeroPricedPrizeItem?.pointReturnEligible, false);
-    assert.equal(zeroPricedPrizeItem?.pointReturnAmount, undefined);
-    const zeroPricedPrizeReturn = await returnPoints(owner.token, [zeroPricedPrizeInventoryId]);
-    assert.equal(zeroPricedPrizeReturn.statusCode, 409, zeroPricedPrizeReturn.body);
-    assert.match(zeroPricedPrizeReturn.body, /0P/);
-
-    const overflowInventoryId = await addDrawInventory({
-      drawUserId: overflowOwner.actor.userId,
-      sourceType: "GACHA",
-      prizeProductId: prizeEvenId,
-    });
-    await pool.query(
-      "INSERT INTO point_accounts(user_id,balance) VALUES($1,2147483148)",
-      [overflowOwner.actor.userId],
-    );
-    const balanceOverflow = await returnPoints(overflowOwner.token, [overflowInventoryId]);
-    assert.equal(balanceOverflow.statusCode, 409, balanceOverflow.body);
-    assert.match(balanceOverflow.body, /보유 한도/);
-    const overflowState = await pool.query<{ status: string; balance: number; return_count: number }>(
-      `SELECT inventory.status,account.balance,
-         (SELECT count(*)::integer FROM inventory_point_return_items WHERE inventory_unit_id=inventory.id) AS return_count
-       FROM inventory_units inventory
-       JOIN point_accounts account ON account.user_id=inventory.owner_id
-       WHERE inventory.id=$1`,
-      [overflowInventoryId],
-    );
-    assert.deepEqual(overflowState.rows, [{ status: "OWNED", balance: 2_147_483_148, return_count: 0 }]);
+    assert.deepEqual((await pool.query("SELECT * FROM point_ledger_entries WHERE user_id=$1",[owner.actor.userId])).rows,before.rows);
+    assert.ok((await pool.query("SELECT status FROM inventory_units WHERE id=ANY($1::uuid[])",[[oddInventoryId,evenInventoryId]])).rows.every(row=>row.status==='OWNED'));
   },
 );

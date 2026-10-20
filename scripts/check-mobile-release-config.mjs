@@ -628,11 +628,11 @@ function validateProductionPaymentBoundary(rootDir, environment, errors) {
       "PAYMENT_PROVIDER_MISSING",
       "공개 production 후보에는 실제 서버의 PAYMENT_PROVIDER 상태가 필요합니다.",
     );
-  } else if (paymentProvider !== "PORTONE_V2_INICIS") {
+  } else if (paymentProvider !== "PORTONE_V2_NICE") {
     addIssue(
       errors,
       "PAYMENT_PROVIDER_NOT_READY",
-      "PortOne V2 → KG이니시스가 검증되기 전의 PAYMENT_PROVIDER는 공개 production 준비로 인정하지 않습니다.",
+      "공개 production 신규 결제는 포트원 나이스페이(PORTONE_V2_NICE)만 사용합니다.",
     );
   }
 

@@ -142,6 +142,7 @@ type InventoryLockRow = {
   draw_owner_id: string | null;
   draw_entitlement_id: string | null;
   draw_prize_product_id: string | null;
+  original_purchase_valid: boolean;
 };
 
 type Queryable = Pick<DatabaseClient, "query">;
@@ -180,7 +181,7 @@ export function isExchangeEligibleInventory(
   isStorageActive: boolean,
 ): boolean {
   return status === "OWNED"
-    && isDrawExchangeSource(sourceType)
+    && (isDrawExchangeSource(sourceType) || sourceType === "PURCHASE")
     && isOriginalDrawOwner
     && isStorageActive;
 }
@@ -254,6 +255,31 @@ const offerInventoryBundleSelect = `(SELECT COALESCE(
     ORDER BY offer_item.position
   ) bundle_inventory) AS offered_inventories`;
 
+// Purchase provenance is verified from immutable order lines and settled payment,
+// not from the caller or a current owner after an exchange.
+function originalExchangeProvenanceSql(inventory: string, owner: string): string {
+  return `((
+    ${inventory}.source_type='GACHA' AND EXISTS (
+      SELECT 1 FROM draw_results original_draw
+      WHERE original_draw.prize_inventory_unit_id=${inventory}.id
+        AND original_draw.user_id=${owner}
+        AND original_draw.entitlement_id=${inventory}.source_id
+        AND original_draw.prize_product_id=${inventory}.product_id
+    )
+  ) OR (
+    ${inventory}.source_type='PURCHASE' AND EXISTS (
+      SELECT 1 FROM order_lines original_line
+      JOIN orders original_order ON original_order.id=original_line.order_id
+      JOIN payments original_payment ON original_payment.order_id=original_order.id
+      WHERE original_line.id=${inventory}.source_id
+        AND original_line.product_id=${inventory}.product_id
+        AND original_line.category_snapshot='gacha' AND original_line.probability_version_id IS NULL
+        AND original_order.user_id=${owner} AND original_order.status IN ('PAID','FULFILLED')
+        AND original_payment.status='PAID'
+    )
+  ))`;
+}
+
 const listingBundleIsPubliclyEligible = `EXISTS (
     SELECT 1 FROM exchange_listing_items visible_listing_item
     WHERE visible_listing_item.listing_id=l.id
@@ -267,16 +293,10 @@ const listingBundleIsPubliclyEligible = `EXISTS (
     JOIN catalog_ips invalid_listing_ip ON invalid_listing_ip.id=invalid_listing_product.ip_id
     WHERE invalid_listing_item.listing_id=l.id
       AND (
-        invalid_listing_inventory.source_type<>'GACHA'
+        NOT ${originalExchangeProvenanceSql('invalid_listing_inventory','l.author_id')}
         OR invalid_listing_product.is_active=false
         OR invalid_listing_ip.is_active=false
-        OR NOT EXISTS (
-          SELECT 1 FROM draw_results listing_draw_result
-          WHERE listing_draw_result.prize_inventory_unit_id=invalid_listing_inventory.id
-            AND listing_draw_result.user_id=l.author_id
-            AND listing_draw_result.entitlement_id=invalid_listing_inventory.source_id
-            AND listing_draw_result.prize_product_id=invalid_listing_inventory.product_id
-        )
+
       )
   )`;
 
@@ -290,14 +310,7 @@ const offerBundleIsVisible = `EXISTS (
       ON invalid_offer_inventory.id=invalid_offer_item.inventory_unit_id
     WHERE invalid_offer_item.offer_id=o.id
       AND (
-        invalid_offer_inventory.source_type<>'GACHA'
-        OR NOT EXISTS (
-          SELECT 1 FROM draw_results offer_draw_result
-          WHERE offer_draw_result.prize_inventory_unit_id=invalid_offer_inventory.id
-            AND offer_draw_result.user_id=o.proposer_id
-            AND offer_draw_result.entitlement_id=invalid_offer_inventory.source_id
-            AND offer_draw_result.prize_product_id=invalid_offer_inventory.product_id
-        )
+        NOT ${originalExchangeProvenanceSql('invalid_offer_inventory','o.proposer_id')}
       )
   )`;
 
@@ -315,13 +328,7 @@ const listingSelect = `SELECT
        FROM exchange_offer_items counted_item
        JOIN inventory_units offer_inventory ON offer_inventory.id=counted_item.inventory_unit_id
        WHERE counted_item.offer_id=o.id
-         AND (offer_inventory.source_type<>'GACHA' OR NOT EXISTS (
-           SELECT 1 FROM draw_results offer_draw_result
-           WHERE offer_draw_result.prize_inventory_unit_id=offer_inventory.id
-             AND offer_draw_result.user_id=o.proposer_id
-             AND offer_draw_result.entitlement_id=offer_inventory.source_id
-             AND offer_draw_result.prize_product_id=offer_inventory.product_id
-         ))
+         AND NOT ${originalExchangeProvenanceSql('offer_inventory','o.proposer_id')}
      )) AS offer_count,
   ${listingInventoryBundleSelect},
   ${inventorySelect}
@@ -495,7 +502,8 @@ async function lockInventoryUnits(client: DatabaseClient, inventoryIds: readonly
        iu.storage_expires_at,iu.storage_expires_at>now() AS storage_active,
        draw_result.user_id AS draw_owner_id,
        draw_result.entitlement_id AS draw_entitlement_id,
-       draw_result.prize_product_id AS draw_prize_product_id
+       draw_result.prize_product_id AS draw_prize_product_id,
+       ${originalExchangeProvenanceSql("iu", "iu.owner_id")} AS original_purchase_valid
      FROM inventory_units iu
      LEFT JOIN draw_results draw_result ON draw_result.prize_inventory_unit_id=iu.id
      WHERE iu.id=ANY($1::uuid[]) ORDER BY iu.id FOR UPDATE OF iu`,
@@ -522,6 +530,7 @@ export function isOriginalGachaDrawProvenance(input: {
 }
 
 function hasOriginalGachaDrawProvenance(inventory: InventoryLockRow, ownerId: string): boolean {
+  if (inventory.source_type === "PURCHASE") return inventory.original_purchase_valid;
   return isOriginalGachaDrawProvenance({
     sourceType: inventory.source_type,
     inventorySourceId: inventory.source_id,
@@ -579,7 +588,7 @@ function requireExchangeEligibleInventory(
     hasOriginalGachaDrawProvenance(inventory, ownerId),
     inventory.storage_active,
   )) {
-    throw conflict("가챠로 직접 뽑아 보관함에 보관 중인 상품만 교환에 사용할 수 있습니다.");
+    throw conflict("본인이 구매해 보관 중인 적격 상품만 교환에 사용할 수 있습니다.");
   }
 }
 
@@ -591,7 +600,7 @@ function requireOriginalGachaDrawInventory(
   const inventory = locked.get(inventoryId);
   if (!inventory) throw notFound("교환 상품을 찾을 수 없습니다.");
   if (!hasOriginalGachaDrawProvenance(inventory, ownerId)) {
-    throw conflict("가챠로 직접 뽑아 보관함에 보관 중인 상품만 교환에 사용할 수 있습니다.");
+    throw conflict("본인이 구매해 보관 중인 적격 상품만 교환에 사용할 수 있습니다.");
   }
 }
 
@@ -921,15 +930,9 @@ export async function registerExchangeRoutes(app: FastifyInstance, context: ApiC
       const filters = [
         "iu.owner_id=$1",
         "iu.status='OWNED'",
-        "iu.source_type='GACHA'",
+        "iu.source_type IN ('GACHA','PURCHASE')",
         "iu.storage_expires_at>now()",
-        `EXISTS (
-          SELECT 1 FROM draw_results draw_result
-          WHERE draw_result.prize_inventory_unit_id=iu.id
-            AND draw_result.user_id=iu.owner_id
-            AND draw_result.entitlement_id=iu.source_id
-            AND draw_result.prize_product_id=iu.product_id
-        )`,
+        originalExchangeProvenanceSql("iu", "iu.owner_id"),
         INVENTORY_SOURCE_ORDER_SETTLED_SQL,
         "p.is_active=true",
       ];

@@ -47,11 +47,11 @@ test("legacy catalog preserves TCG internally while hiding it from the current c
   assert.deepEqual(PRODUCT_CATEGORIES.map((category) => category.id), ["gacha", "figure", "kuji", "tcg"]);
   assert.deepEqual(CUSTOMER_VISIBLE_PRODUCT_CATEGORIES.map((category) => category.id), ["gacha", "figure", "kuji"]);
   assert.deepEqual(CUSTOMER_VISIBLE_PRODUCT_CATEGORY_LABELS, ["가챠", "피규어", "쿠지"]);
-  assert.deepEqual(CUSTOMER_BROWSABLE_PRODUCT_CATEGORIES.map((category) => category.id), ["gacha", "kuji"]);
+  assert.deepEqual(CUSTOMER_BROWSABLE_PRODUCT_CATEGORIES.map((category) => category.id), ["gacha"]);
   assert.equal(isCustomerVisibleProductCategory("figure"), true);
   assert.equal(isCustomerVisibleProductCategory("tcg"), false);
   assert.equal(isCustomerBrowsableProductCategory("gacha"), true);
-  assert.equal(isCustomerBrowsableProductCategory("kuji"), true);
+  assert.equal(isCustomerBrowsableProductCategory("kuji"), false);
   assert.equal(isCustomerBrowsableProductCategory("figure"), false);
   assert.equal(isCustomerBrowsableProductCategory("tcg"), false);
 });

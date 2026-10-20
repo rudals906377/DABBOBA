@@ -123,16 +123,22 @@ vec3 shadeShell(vec3 localPoint, vec3 worldPoint, vec3 normal, vec3 viewDirectio
   vec3 upper = mix(vec3(0.878, 0.973, 0.882), vec3(0.988, 0.980, 0.953), uIvory);
   vec3 lower = mix(vec3(0.569, 0.914, 0.557), vec3(0.957, 0.941, 0.902), uIvory);
   vec3 seam = mix(vec3(0.467, 0.788, 0.475), vec3(0.812, 0.773, 0.698), uIvory);
+  // Keep the closed green seam, but the exposed lower collar must join the
+  // bright mouth without isolated green pixels along its supersampled edge.
+  float openLowerLip = side < 0.0 ? smoothstep(0.0, 0.18, opening) : 0.0;
+  vec3 mouthMaterial = vec3(0.94, 0.96, 0.94);
+  vec3 lipMaterial = side > 0.0 ? upper : mix(seam, mouthMaterial, openLowerLip);
+  vec3 collarBody = side > 0.0 ? upper : mix(lower, mouthMaterial, openLowerLip);
   vec3 base = side > 0.0 ? upper : lower;
   float y = abs(localPoint.y);
   float lip = 1.0 - smoothstep(COLLAR_HEIGHT, COLLAR_HEIGHT * 1.85, y);
-  base = mix(base, seam, lip * 0.48);
+  base = mix(base, lipMaterial, lip * mix(0.48, 1.0, openLowerLip));
   if (material > 1.5 && material < 2.5) base *= vec3(0.43, 0.46, 0.37);
-  if (material > 2.5 && material < 3.5) base = seam * 0.83;
+  if (material > 2.5 && material < 3.5) base = lipMaterial * 0.83;
   if (material > 3.5) {
     float channel = smoothstep(COLLAR_HEIGHT * 0.24, COLLAR_HEIGHT * 0.35, y)
       * (1.0 - smoothstep(COLLAR_HEIGHT * 0.59, COLLAR_HEIGHT * 0.70, y));
-    base = mix(seam * 0.9, lower * 0.32, channel * 0.65);
+    base = mix(lipMaterial * 0.9, collarBody * 0.32, channel * 0.65);
   }
   // The actual brand PNG is printed on the lower hemisphere. Longitude and
   // latitude wrap it around the real shell and keep it attached as it opens.
@@ -157,10 +163,11 @@ vec3 shadeShell(vec3 localPoint, vec3 worldPoint, vec3 normal, vec3 viewDirectio
   float rimLight = max(dot(normal, rim), 0.0);
   float nv = max(dot(normal, viewDirection), 0.0);
   float fresnel = pow(1.0 - nv, 4.0);
+  float neutralEdge = side > 0.0 ? 1.0 : openLowerLip * lip;
   float cavity = material > 1.5 && material < 2.5 ? 0.58 : 1.0;
   float seamOcclusion = mix(0.62 + smoothstep(0.02, 0.20, y) * 0.38, 1.0, opening);
   vec3 color = pow(base, vec3(2.2)) * (0.17 + 0.92 * diffuse + 0.24 * fillLight) * cavity * seamOcclusion;
-  color += pow(base, vec3(2.2)) * rimLight * vec3(0.13, 0.22, 0.12);
+  color += pow(base, vec3(2.2)) * rimLight * mix(vec3(0.13, 0.22, 0.12), vec3(0.17, 0.18, 0.17), neutralEdge);
 
   // Broad softboxes and restrained Fresnel preserve smooth plastic reflections.
   float keySpec = pow(max(dot(normal, normalize(key + viewDirection)), 0.0), 54.0);
@@ -168,7 +175,7 @@ vec3 shadeShell(vec3 localPoint, vec3 worldPoint, vec3 normal, vec3 viewDirectio
   float fillSpec = pow(max(dot(normal, normalize(fill + viewDirection)), 0.0), 86.0);
   color += vec3(1.0, 0.99, 0.95) * (keySpec * 0.34 + broadSpec * 0.20) * cavity * (1.0 - ink * 0.68);
   color += vec3(0.88, 0.97, 0.90) * fillSpec * 0.08 * (1.0 - ink * 0.68);
-  color += vec3(0.68, 0.86, 0.68) * fresnel * (0.08 + rimLight * 0.24);
+  color += mix(vec3(0.68, 0.86, 0.68), vec3(0.90, 0.94, 0.91), neutralEdge) * fresnel * (0.08 + rimLight * 0.24);
 
   vec3 toCore = emitterCenter - worldPoint;
   float coreFacing = max(dot(normal, normalize(toCore + vec3(0.0, 0.0, 0.10))), 0.0);

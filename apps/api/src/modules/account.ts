@@ -27,7 +27,7 @@ import {
   loadRequiredPolicyDocuments,
   recordRequiredPolicyAcceptanceEvents,
 } from "../lib/legal-policy.js";
-import { selectCardChannel } from "../lib/portone-channel-binding.js";
+import { isPortOneCardProvider, selectCardChannel } from "../lib/portone-channel-binding.js";
 import { CUSTOMER_SUBJECT_LOOKUP_PROVIDERS } from "../lib/supabase-auth.js";
 import { requiredPolicyAcceptance } from "./customer-auth.js";
 import type { ApiContext } from "../types.js";
@@ -81,7 +81,7 @@ type WishlistRow = {
   created_at: Date;
 };
 
-type AccountInventorySourceType = "GACHA" | "KUJI";
+type AccountInventorySourceType = "GACHA" | "KUJI" | "PURCHASE";
 
 type AccountShippingPolicyItem = {
   sourceType: AccountInventorySourceType;
@@ -620,7 +620,7 @@ const mapAccountInventory = (row: AccountInventoryRow) => ({
   sourceType: row.source_type,
   status: row.inventory_status,
   acquiredAt: iso(row.acquired_at),
-  pointReturnEligible: row.point_return_eligible,
+  pointReturnEligible: false,
   ...(row.point_return_eligible && row.point_return_reference_amount !== null
     ? { pointReturnAmount: pointReturnAmount(numberValue(row.point_return_reference_amount)) }
     : {}),
@@ -822,7 +822,7 @@ function profilePatch(body: unknown) {
 }
 
 export function normalizeBirthDate(value: unknown, today = new Date()): string {
-  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}(-r[1-9][0-9]*)?$/.test(value)) {
     throw badRequest("birthDate는 YYYY-MM-DD 형식이어야 합니다.");
   }
   const [year, month, day] = value.split("-").map(Number) as [number, number, number];
@@ -1077,14 +1077,25 @@ export async function registerAccountRoutes(app: FastifyInstance, context: ApiCo
     const productId = slugIdInput((request.params as Record<string, unknown>).productId, "productId");
     const result = await context.pool.query<AccountInventoryRow>(
       `${accountInventorySelect}
-       WHERE iu.owner_id=$1 AND iu.product_id=$2 AND iu.source_type IN ('GACHA','KUJI')
-         AND EXISTS (
+       WHERE iu.owner_id=$1 AND iu.product_id=$2 AND iu.source_type IN ('GACHA','KUJI','PURCHASE')
+         AND (EXISTS (
            SELECT 1 FROM draw_results draw_result
            WHERE draw_result.prize_inventory_unit_id=iu.id
              AND draw_result.user_id=iu.owner_id
              AND draw_result.entitlement_id=iu.source_id
              AND draw_result.prize_product_id=iu.product_id
-         )
+         ) OR (iu.source_type='PURCHASE' AND EXISTS (
+           SELECT 1 FROM order_lines purchase_line
+           JOIN orders purchase_order ON purchase_order.id=purchase_line.order_id
+           WHERE purchase_line.id=iu.source_id
+             AND purchase_line.product_id=iu.product_id
+             AND purchase_order.user_id=iu.owner_id
+         )) OR EXISTS (
+           SELECT 1 FROM inventory_ownership_transfers transfer
+           JOIN exchange_listings completed_exchange ON completed_exchange.id=transfer.exchange_listing_id
+             AND completed_exchange.status='COMPLETED'
+           WHERE transfer.inventory_unit_id=iu.id AND transfer.to_owner_id=iu.owner_id
+         ))
        ORDER BY iu.acquired_at DESC,iu.id DESC LIMIT 1`,
       [request.actor!.userId, productId],
     );
@@ -1304,14 +1315,20 @@ export async function registerAccountRoutes(app: FastifyInstance, context: ApiCo
       // Units past their storage deadline stay visible as non-actionable rows:
       // the automatic EXPIRED_HOLD transition is off until that policy is approved.
       "iu.status IN ('OWNED','EXCHANGE_LISTED','EXCHANGE_OFFERED','SHIPPING','EXPIRED_HOLD')",
-      "iu.source_type IN ('GACHA','KUJI')",
+      "iu.source_type IN ('GACHA','KUJI','PURCHASE')",
       `(EXISTS (
          SELECT 1 FROM draw_results draw_result
          WHERE draw_result.prize_inventory_unit_id=iu.id
            AND draw_result.user_id=iu.owner_id
            AND draw_result.entitlement_id=iu.source_id
            AND draw_result.prize_product_id=iu.product_id
-       ) OR EXISTS (
+       ) OR (iu.source_type='PURCHASE' AND EXISTS (
+         SELECT 1 FROM order_lines purchase_line
+         JOIN orders purchase_order ON purchase_order.id=purchase_line.order_id
+         WHERE purchase_line.id=iu.source_id
+           AND purchase_line.product_id=iu.product_id
+           AND purchase_order.user_id=iu.owner_id
+       )) OR EXISTS (
          SELECT 1
            FROM inventory_ownership_transfers transfer
            JOIN exchange_listings completed_exchange
@@ -1458,7 +1475,7 @@ export async function registerAccountRoutes(app: FastifyInstance, context: ApiCo
     });
   });
 
-  app.post("/v1/account/point-returns", { preHandler: [requireLiveCommerce(context), context.auth.requireUser] }, async (request, reply) => {
+  app.post("/v1/account/point-returns", { preHandler: [requireLiveCommerce(context), context.auth.requireUser, async () => { throw new AppError(503,"FEATURE_UNAVAILABLE","현재 포인트 환급은 제공하지 않습니다."); }] }, async (request, reply) => {
     const body = objectInput(request.body);
     assertOnlyKeys(body, ["inventoryUnitIds"]);
     const inventoryUnitIds = canonicalPointReturnInventoryIds(body.inventoryUnitIds);
@@ -1796,7 +1813,7 @@ export async function registerAccountRoutes(app: FastifyInstance, context: ApiCo
          WHERE iu.id=ANY($1::uuid[])
            AND iu.owner_id=$2
            AND iu.status='OWNED'
-           AND iu.source_type IN ('GACHA','KUJI')
+           AND iu.source_type IN ('GACHA','KUJI','PURCHASE')
            AND iu.storage_expires_at>now()
          ORDER BY iu.id FOR SHARE OF iu,p`,
         [inventoryUnitIds, actorId],
@@ -1895,7 +1912,7 @@ export async function registerAccountRoutes(app: FastifyInstance, context: ApiCo
            WHERE iu.id=ANY($1::uuid[])
              AND iu.owner_id=$2
              AND iu.status='OWNED'
-             AND iu.source_type IN ('GACHA','KUJI')
+             AND iu.source_type IN ('GACHA','KUJI','PURCHASE')
              AND iu.storage_expires_at>now()
            ORDER BY iu.id FOR UPDATE OF iu,p`,
           [inventoryUnitIds, actorId],
@@ -1989,8 +2006,8 @@ export async function registerAccountRoutes(app: FastifyInstance, context: ApiCo
           // Bind the shipping fee to the configured primary card channel now,
           // so later window, webhook and refund checks never fall back to a
           // mutable current channel (null stays reserved for legacy rows).
-          const cardChannel = context.config.paymentProvider === "PORTONE_V2_INICIS"
-            ? selectCardChannel(context.config, "INICIS")
+          const cardChannel = isPortOneCardProvider(context.config.paymentProvider)
+            ? selectCardChannel(context.config)
             : null;
           const payment = await client.query<{ id: string }>(
             `INSERT INTO payments(order_id,provider,amount,portone_channel_binding)

@@ -63,7 +63,7 @@ export const CUSTOMER_VISIBLE_PRODUCT_CATEGORY_LABELS = CUSTOMER_VISIBLE_PRODUCT
   (category) => category.label,
 );
 export const CUSTOMER_BROWSABLE_PRODUCT_CATEGORIES = PRODUCT_CATEGORIES.filter(
-  (category): category is CustomerBrowsableProductCategory => category.id === "gacha" || category.id === "kuji",
+  (category): category is CustomerBrowsableProductCategory => category.id === "gacha",
 );
 
 export function isCustomerVisibleProductCategory(
@@ -75,7 +75,7 @@ export function isCustomerVisibleProductCategory(
 export function isCustomerBrowsableProductCategory(
   categoryId: ProductCategoryId,
 ): categoryId is CustomerBrowsableProductCategoryId {
-  return categoryId === "gacha" || categoryId === "kuji";
+  return categoryId === "gacha";
 }
 
 export function categoryLabel(categoryId: ProductCategoryId) {

@@ -1,0 +1,32 @@
+{
+  "configVersion": 0,
+  "apple": {
+    "version": "1.0.0",
+    "release": {
+      "automaticRelease": false
+    },
+    "info": {
+      "ko": {
+        "keywords": [
+          "가챠",
+          "캐릭터",
+          "굿즈",
+          "피규어",
+          "애니메이션",
+          "컬렉션",
+          "상품정보"
+        ],
+        "marketingUrl": "https://dabboba.net",
+        "supportUrl": "https://dabboba.net/support",
+        "title": "DABBOBA",
+        "subtitle": "캐릭터 상품과 포함 구성을 한눈에",
+        "description": "다뽀바에서 캐릭터 상품과 포함 구성을 미리 둘러보세요.\n\n좋아하는 작품으로 상품을 검색하고 상품 사진, 상세 정보와 포함 구성을 확인할 수 있습니다. 관심 상품을 저장하고 운영 소식과 고객지원 안내도 확인해 보세요.\n\n현재 버전은 사전오픈판입니다. 상품 탐색을 먼저 제공하며 결제, 주문, 캡슐 오픈, 쿠지 구매, 교환 거래, 배송 신청은 준비 중입니다. 구매 기능을 열기 전에 별도로 안내합니다. 쿠지샵은 준비 중 화면으로 제공됩니다.\n\n다뽀바는 실물 캐릭터 상품을 위한 서비스입니다. 이후 판매를 시작하면 포함 구성과 공개 확률을 확인하고 구매 횟수를 결제한 뒤, 캡슐을 열 때 포함된 상품 중 1개가 지급됩니다. 결제 전에 개별 상품을 지정할 수 없으며 같은 상품이 중복될 수 있습니다. 신규 카드 결제는 포트원을 통한 나이스페이로 준비하고 있습니다. 현재 버전에서는 결제할 수 없습니다.\n\n고객지원: support@dabboba.net\n운영시간: 월~금 09:00~17:00, 주말·공휴일 휴무",
+        "privacyPolicyUrl": "https://dabboba.net/privacy"
+      }
+    },
+    "copyright": "2026 DABBOBA",
+    "categories": [
+      "SHOPPING"
+    ]
+  }
+}

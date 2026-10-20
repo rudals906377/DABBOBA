@@ -479,7 +479,7 @@ export async function createProduct(form: FormData) {
     redirect(feedback(destination, "error", actionError(error)));
   }
   revalidatePath(destination.split("?")[0] || "/");
-  const needsKujiConfiguration = created.category === "kuji" && !created.isPrizeOnly;
+  const needsKujiConfiguration = created.category === "kuji" && !created.isPrizeOnly && created.metadata.purchaseMode !== "DIRECT";
   const successDestination = needsKujiConfiguration
     ? `/catalog/products/${encodeURIComponent(created.id)}/draws`
     : form.get("simpleCatalog") === "on" && destination.split("?")[0] === "/catalog/products"
@@ -659,7 +659,7 @@ export async function requestPointOrderRefund(form: FormData) {
       headers: mutationHeaders(form),
       body: { reason: operationReason },
     });
-  }, "포인트 주문을 환불했습니다. 사용한 포인트를 회원에게 되돌리고 뽑기권을 취소했습니다.");
+  }, "포인트 주문을 환불했습니다. 사용한 포인트를 회원에게 되돌리고 해당 주문의 상품 또는 미사용 구매 권리를 회수했습니다.");
 }
 
 export async function requestPartialUnusedRefund(form: FormData) {

@@ -43,7 +43,7 @@ test("prelaunch storefront does not expose commerce actions or a zero price", ()
     assert.equal(policySource.includes(forbidden), false, `forbidden storefront copy: ${forbidden}`);
   }
   assert.match(copySource, /closingStatus: "PRELAUNCH"/);
-  assert.match(appSource, /OPENING SOON/);
+  assert.match(appSource, /준비 중/);
 });
 
 test("storefront copy switches to LIVE only for the exact build variable and keeps kuji closed", () => {
@@ -62,7 +62,7 @@ test("storefront copy switches to LIVE only for the exact build variable and kee
   // The static <head> follows the same exact-value rule and fails the build if its anchors drift.
   assert.match(viteSource, /\(process\.env\.VITE_DABBOBA_COMMERCE_MODE \?\? env\.VITE_DABBOBA_COMMERCE_MODE\) === "LIVE"/);
   assert.match(viteSource, /Storefront prelaunch metadata changed/);
-  for (const anchor of ["다뽀바의 사전 오픈 안내를 확인하세요.", "다뽀바 사전 오픈을 준비하고 있습니다."]) {
+  for (const anchor of ["사전 오픈 안내를 확인하세요.", "포함된 상품과 공개 구성을 확인하고, 캡슐을 열면 포함된 상품 중 1개를 받는 다뽀바를 준비하고 있습니다."]) {
     assert.ok(indexSource.includes(anchor) && viteSource.includes(anchor), `metadata anchor drifted: ${anchor}`);
   }
 });

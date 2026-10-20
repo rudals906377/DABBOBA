@@ -181,6 +181,16 @@ jobs:
       - name: Prove migration re-entry is a no-op
         run: pnpm run db:migrate
 
+      - name: Verify disabled expiry conversion and preserved historical journal
+        env:
+          DABBOBA_STORAGE_POLICY_INTEGRATION: "1"
+        run: |
+          pnpm --filter @dabboba/worker exec tsx --test \
+            --test-reporter=spec --test-reporter-destination=stdout \
+            --test-reporter=tap --test-reporter-destination="$RUNNER_TEMP/storage-policy.tap" \
+            src/storage-point-returns.integration.test.ts
+          node scripts/check-node-test-skips.mjs "$RUNNER_TEMP/storage-policy.tap"
+
       - name: Provision the disposable runtime role login
         run: pnpm --filter @dabboba/db provision:runtime-role
 
@@ -268,4 +278,7 @@ jobs:
             --test-reporter=spec --test-reporter-destination=stdout \
             --test-reporter=tap --test-reporter-destination="$RUNNER_TEMP/worker-tests.tap" \
             'src/*.test.ts'
-          node ../../scripts/check-node-test-skips.mjs "$RUNNER_TEMP/worker-tests.tap"
+          # This exact fresh-database suite already ran above with no skips.
+          # Its repeat is intentionally disabled once other suites populated DB.
+          node ../../scripts/check-node-test-skips.mjs "$RUNNER_TEMP/worker-tests.tap" \
+            --allow "automatic expiry conversion stays disabled while historical financial journaling remains atomic"

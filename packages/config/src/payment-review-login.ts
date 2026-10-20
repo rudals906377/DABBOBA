@@ -3,12 +3,12 @@ import type { ApiConfig } from "./index.js";
 export const PAYMENT_REVIEW_PROJECT_REF = "lyzcyrdiazorjaqlgblr";
 export type PaymentReviewLogin = { email: string; subject: string; expiresAt: string };
 
-export function assertPaymentReviewBoundary(config: Pick<ApiConfig, "environmentTier" | "databaseUrl" | "supabaseUrl" | "portOne">): void {
+export function assertPaymentReviewBoundary(config: Pick<ApiConfig, "environmentTier" | "databaseUrl" | "supabaseUrl" | "portOne" | "tossPayments">): void {
   const database = new URL(config.databaseUrl);
   const project = PAYMENT_REVIEW_PROJECT_REF;
   if (config.environmentTier !== "STAGING"
     || config.supabaseUrl !== `https://${project}.supabase.co`
-    || config.portOne?.channelEnvironment !== "TEST"
+    || !(config.portOne?.channelEnvironment === "TEST" || config.tossPayments?.environment === "TEST")
     || !(database.hostname === `db.${project}.supabase.co`
       || (database.hostname.endsWith(".pooler.supabase.com")
         && decodeURIComponent(database.username).endsWith(`.${project}`)))) {

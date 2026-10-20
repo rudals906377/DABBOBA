@@ -351,7 +351,7 @@ test("checkout keeps durable gacha intent and navigates only after refreshed pai
   assert.match(checkout, /onPress=\{\(\) => setSelectedPaymentMethod\(method\.id\)\}/);
   for (const label of [
     "신용/체크카드",
-    "KG이니시스 카드 결제",
+    "신용카드 결제",
   ]) {
     assert.match(checkout, new RegExp(label));
   }

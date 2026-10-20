@@ -58,42 +58,14 @@ test("point return admits only owned inventory whose source is a gacha draw", ()
 
 });
 
-test("storage keeps kuji for shipping while point return receives only the gacha subset", () => {
-  assert.match(
-    profileSectionSource,
-    /storedDrawItems = useMemo\([\s\S]*?inventory\?\.filter\(isStoredDrawInventory\)/,
-  );
-  assert.match(
-    profileSectionSource,
-    /pointReturnItems = useMemo\([\s\S]*?inventory\?\.filter\(isPointReturnEligibleInventory\)/,
-  );
-  assert.match(
-    profileSectionSource,
-    /<Shipping[^>]*items=\{storedDrawItems\}/,
-  );
-  assert.match(
-    profileSectionSource,
-    /<PointReturn[^>]*items=\{pointReturnItems\}/,
-  );
-  assert.match(profileSectionSource, /<StorageModeTab label="포인트 환급" count=\{pointReturnItems\?\.length \?\? null\}/);
+test("storage includes selected purchases and exchange while point returns stay hidden", () => {
+  assert.match(profileSectionSource, /storedDrawItems = useMemo\([\s\S]*?inventory\?\.filter\(isStoredDrawInventory\)/);
+  assert.match(profileSectionSource, /<Shipping[^>]*items=\{storedDrawItems\}/);
+  assert.match(profileSectionSource, /item\.sourceType === "PURCHASE"/);
+  assert.doesNotMatch(profileSectionSource, /<PointReturn[\s>]/);
+  assert.doesNotMatch(profileSectionSource, /<StorageModeTab label="포인트 환급"/);
   assert.match(profileSectionSource, /<ExchangeOrShipping[^>]*items=\{exchangeOrShippingItems\}/);
-  assert.match(profileSectionSource, /<StorageModeTab label="교환 또는 배송 중인 상품" count=\{exchangeOrShippingItems\?\.length \?\? null\}/);
-  assert.doesNotMatch(profileSectionSource, /AvailabilityPill|storageAvailabilityRow/);
-  assert.match(profileSectionSource, /<PointReturn[^>]*items=\{pointReturnItems\}/);
-  assert.match(
-    profileSectionSource,
-    /교환으로 받은 상품은 포인트 환급 대상이 아니며, 본인이 가챠에서 직접 뽑아 보관 중인 상품만 가능해요/,
-  );
-  assert.match(
-    profileSectionSource,
-    /createPointReturn\([\s\S]*?selectedInventoryUnitIds/,
-  );
-  assert.match(
-    profilePolicySource,
-    /교환으로 받은 상품은 포인트 환급 대상이 아니며, 포인트 환급은 본인이 가챠에서 직접 뽑아 현재 보관 중인 상품만 가능합니다\. 쿠지 추첨 상품과 피규어 등 일반 구매 상품도 대상이 아닙니다/,
-  );
-  assert.match(
-    profilePolicySource,
-    /교환 등록과 제안에는 본인이 가챠에서 직접 뽑아 현재 보관 중인 상품만 각각 한두 개까지 사용할 수 있습니다/,
-  );
+  assert.match(profileSectionSource, /<StorageModeTab label="교환 또는 배송 중인 상품"/);
+  assert.match(profilePolicySource, /본인이 구매해 획득하고 현재 보관 중인 적격 상품은 교환방에서 교환/);
+  assert.match(profilePolicySource, /포인트로 전환하지 않습니다/);
 });

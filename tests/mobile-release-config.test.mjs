@@ -46,7 +46,7 @@ test("release gate rejects a missing or malformed native Apple sign-in entitleme
 
 const productionPublicEnvironment = {
   DABBOBA_COMMERCE_MODE: "LIVE",
-  PAYMENT_PROVIDER: "PORTONE_V2_INICIS",
+  PAYMENT_PROVIDER: "PORTONE_V2_NICE",
   PORTONE_CHANNEL_ENVIRONMENT: "LIVE",
   EXPO_PUBLIC_COMMERCE_CAPABILITY: "LIVE",
   EXPO_PUBLIC_DABBOBA_API_URL: "https://api.dabboba.net",
@@ -59,6 +59,23 @@ const productionPublicEnvironment = {
   EXPO_PUBLIC_PORTONE_STORE_ID: "store-dabboba-production",
   EXPO_PUBLIC_PORTONE_CHANNEL_KEY: "channel-key-dabboba-production",
 };
+
+test("mobile LIVE gate accepts only NICE and rejects TEST or other new payment providers", () => {
+  for (const provider of ["PORTONE_V2_NICE"]) {
+    const environment = { ...productionPublicEnvironment, PAYMENT_PROVIDER: provider };
+    const report = inspectMobileReleaseConfig({ rootDir, environment });
+    assert.equal(report.errors.some(issue => issue.code === "PAYMENT_PROVIDER_NOT_READY"), false);
+    const testReport = inspectMobileReleaseConfig({ rootDir, environment: { ...environment, PORTONE_CHANNEL_ENVIRONMENT: "TEST" } });
+    assert.ok(testReport.errors.some(issue => issue.code === "PORTONE_LIVE_CHANNEL_REQUIRED"));
+  }
+});
+
+test("mobile LIVE gate rejects legacy providers for a new release", () => {
+  for (const provider of ["PORTONE_V2_KICC", "PORTONE_V2_INICIS", "TOSSPAYMENTS_DIRECT"]) {
+    const report = inspectMobileReleaseConfig({ rootDir, environment: { ...productionPublicEnvironment, PAYMENT_PROVIDER: provider } });
+    assert.ok(report.errors.some(issue => issue.code === "PAYMENT_PROVIDER_NOT_READY"));
+  }
+});
 
 test("mobile release structure is store-shaped without external credentials", () => {
   const report = inspectMobileReleaseConfig({

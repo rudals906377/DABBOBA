@@ -53,3 +53,15 @@ test("EAS packaged LIVE builds remain isolated even if NODE_ENV is not set to pr
   const config = metroConfigFor({ nodeEnv: "development", capability: "LIVE", easProfile: "pg-review" });
   assert.match(resolvedModule(config, "@/features/demo/demo-api"), /production-demo-api\.ts$/);
 });
+
+test("offline animation checks remain available locally but packaged builds resolve an empty module", () => {
+  const screen = "@/features/draw/DrawAnimationCheckScreen";
+  for (const capability of ["LIVE", "PRELAUNCH"]) {
+    const development = metroConfigFor({ nodeEnv: "development", capability });
+    assert.equal(resolvedModule(development, screen), screen);
+    const production = metroConfigFor({ nodeEnv: "production", capability });
+    assert.match(resolvedModule(production, screen), /production-animation-check\.tsx$/);
+    const packaged = metroConfigFor({ nodeEnv: "development", capability, easProfile: "pg-review" });
+    assert.match(resolvedModule(packaged, screen), /production-animation-check\.tsx$/);
+  }
+});

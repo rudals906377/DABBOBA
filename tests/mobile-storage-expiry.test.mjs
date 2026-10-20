@@ -82,8 +82,8 @@ test("expired inventory stays visible but is never actionable", () => {
     /UPDATE inventory_units iu SET status='POINT_RETURNED'[\s\S]*?storage_expires_at>now\(\)/,
   );
   assert.match(profileSectionSource, /item\.status === "OWNED" \|\| item\.status === "EXPIRED_HOLD"/);
-  assert.match(profileSectionSource, /item\.status === "EXPIRED_HOLD"[\s\S]*?자동 폐기되지 않아요/);
+  assert.match(profileSectionSource, /item\.status === "EXPIRED_HOLD"[\s\S]*?고객지원 확인 필요/);
   assert.match(profileSectionSource, /storageExpiryState\(item\.storageExpiresAt\)\?\.isExpired\) \?/);
-  assert.match(profileSectionSource, /보관 기간이 지난 상품은 자동으로 폐기하지 않아요/);
+  assert.doesNotMatch(profileSectionSource, /만료 상품은 적용 정책에 따라 포인트로 환급돼요/);
   assert.match(profileSectionSource, /selectable=\{commerceEnabled && item\.status === "OWNED"/);
 });

@@ -153,7 +153,7 @@ test(
       headers: { ...auth(owner.token), "idempotency-key": `gate-return-${suffix}` },
       payload: { inventoryUnitIds: [reviewedUnit] },
     });
-    assert.equal(pointReturn.statusCode, 409, pointReturn.body);
+    assert.equal(pointReturn.statusCode, 503, pointReturn.body);
     const untouched = await pool.query<{ status: string }>("SELECT status FROM inventory_units WHERE id=$1", [reviewedUnit]);
     assert.equal(untouched.rows[0]!.status, "OWNED");
 

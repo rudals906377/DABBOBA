@@ -1,0 +1,360 @@
+{
+  "ownerConfirmedAt": "2026-10-13",
+  "sourceProject": "rconfxsykttfvznakile",
+  "purchaseMode": "DRAW_ENTITLEMENT",
+  "status": "DRAFT_NOT_APPLIED",
+  "expectedSeriesCount": 8,
+  "expectedPrizeCount": 46,
+  "targetUnits": 920,
+  "preserveHistoricalDirectStock": true,
+  "products": [
+    {
+      "productId": "gacha-chiikawa-monitor-cupcake",
+      "unitPrice": 6000,
+      "saleStatus": "COMING_SOON",
+      "publish": false,
+      "entries": [
+        {
+          "prizeProductId": "gacha-chiikawa-monitor-cupcake-prize-01",
+          "weight": 1,
+          "quantity": 20,
+          "rarity": "구성 상품"
+        },
+        {
+          "prizeProductId": "gacha-chiikawa-monitor-cupcake-prize-02",
+          "weight": 1,
+          "quantity": 20,
+          "rarity": "구성 상품"
+        },
+        {
+          "prizeProductId": "gacha-chiikawa-monitor-cupcake-prize-03",
+          "weight": 1,
+          "quantity": 20,
+          "rarity": "구성 상품"
+        },
+        {
+          "prizeProductId": "gacha-chiikawa-monitor-cupcake-prize-04",
+          "weight": 1,
+          "quantity": 20,
+          "rarity": "구성 상품"
+        },
+        {
+          "prizeProductId": "gacha-chiikawa-monitor-cupcake-prize-05",
+          "weight": 1,
+          "quantity": 20,
+          "rarity": "구성 상품"
+        },
+        {
+          "prizeProductId": "gacha-chiikawa-monitor-cupcake-prize-06",
+          "weight": 1,
+          "quantity": 20,
+          "rarity": "구성 상품"
+        },
+        {
+          "prizeProductId": "gacha-chiikawa-monitor-cupcake-prize-07",
+          "weight": 1,
+          "quantity": 20,
+          "rarity": "구성 상품"
+        }
+      ],
+      "targetOnHand": 140
+    },
+    {
+      "productId": "gacha-death-note-collection-rich",
+      "unitPrice": 7000,
+      "saleStatus": "COMING_SOON",
+      "publish": false,
+      "entries": [
+        {
+          "prizeProductId": "gacha-death-note-collection-rich-prize-01",
+          "weight": 1,
+          "quantity": 20,
+          "rarity": "구성 상품"
+        },
+        {
+          "prizeProductId": "gacha-death-note-collection-rich-prize-02",
+          "weight": 1,
+          "quantity": 20,
+          "rarity": "구성 상품"
+        },
+        {
+          "prizeProductId": "gacha-death-note-collection-rich-prize-03",
+          "weight": 1,
+          "quantity": 20,
+          "rarity": "구성 상품"
+        },
+        {
+          "prizeProductId": "gacha-death-note-collection-rich-prize-04",
+          "weight": 1,
+          "quantity": 20,
+          "rarity": "구성 상품"
+        },
+        {
+          "prizeProductId": "gacha-death-note-collection-rich-prize-05",
+          "weight": 1,
+          "quantity": 20,
+          "rarity": "구성 상품"
+        }
+      ],
+      "targetOnHand": 100
+    },
+    {
+      "productId": "gacha-demon-slayer-onemutan-13",
+      "unitPrice": 6000,
+      "saleStatus": "COMING_SOON",
+      "publish": false,
+      "entries": [
+        {
+          "prizeProductId": "gacha-demon-slayer-onemutan-13-prize-01",
+          "weight": 1,
+          "quantity": 20,
+          "rarity": "구성 상품"
+        },
+        {
+          "prizeProductId": "gacha-demon-slayer-onemutan-13-prize-02",
+          "weight": 1,
+          "quantity": 20,
+          "rarity": "구성 상품"
+        },
+        {
+          "prizeProductId": "gacha-demon-slayer-onemutan-13-prize-03",
+          "weight": 1,
+          "quantity": 20,
+          "rarity": "구성 상품"
+        },
+        {
+          "prizeProductId": "gacha-demon-slayer-onemutan-13-prize-04",
+          "weight": 1,
+          "quantity": 20,
+          "rarity": "구성 상품"
+        },
+        {
+          "prizeProductId": "gacha-demon-slayer-onemutan-13-prize-05",
+          "weight": 1,
+          "quantity": 20,
+          "rarity": "구성 상품"
+        }
+      ],
+      "targetOnHand": 100
+    },
+    {
+      "productId": "gacha-demon-slayer-petatto-2",
+      "unitPrice": 7000,
+      "saleStatus": "COMING_SOON",
+      "publish": false,
+      "entries": [
+        {
+          "prizeProductId": "gacha-demon-slayer-petatto-2-prize-01",
+          "weight": 1,
+          "quantity": 20,
+          "rarity": "구성 상품"
+        },
+        {
+          "prizeProductId": "gacha-demon-slayer-petatto-2-prize-02",
+          "weight": 1,
+          "quantity": 20,
+          "rarity": "구성 상품"
+        },
+        {
+          "prizeProductId": "gacha-demon-slayer-petatto-2-prize-03",
+          "weight": 1,
+          "quantity": 20,
+          "rarity": "구성 상품"
+        },
+        {
+          "prizeProductId": "gacha-demon-slayer-petatto-2-prize-04",
+          "weight": 1,
+          "quantity": 20,
+          "rarity": "구성 상품"
+        },
+        {
+          "prizeProductId": "gacha-demon-slayer-petatto-2-prize-05",
+          "weight": 1,
+          "quantity": 20,
+          "rarity": "구성 상품"
+        }
+      ],
+      "targetOnHand": 100
+    },
+    {
+      "productId": "gacha-demon-slayer-petatto-3",
+      "unitPrice": 7000,
+      "saleStatus": "COMING_SOON",
+      "publish": false,
+      "entries": [
+        {
+          "prizeProductId": "gacha-demon-slayer-petatto-3-prize-01",
+          "weight": 1,
+          "quantity": 20,
+          "rarity": "구성 상품"
+        },
+        {
+          "prizeProductId": "gacha-demon-slayer-petatto-3-prize-02",
+          "weight": 1,
+          "quantity": 20,
+          "rarity": "구성 상품"
+        },
+        {
+          "prizeProductId": "gacha-demon-slayer-petatto-3-prize-03",
+          "weight": 1,
+          "quantity": 20,
+          "rarity": "구성 상품"
+        },
+        {
+          "prizeProductId": "gacha-demon-slayer-petatto-3-prize-04",
+          "weight": 1,
+          "quantity": 20,
+          "rarity": "구성 상품"
+        },
+        {
+          "prizeProductId": "gacha-demon-slayer-petatto-3-prize-05",
+          "weight": 1,
+          "quantity": 20,
+          "rarity": "구성 상품"
+        }
+      ],
+      "targetOnHand": 100
+    },
+    {
+      "productId": "gacha-hatsune-miku-petadoll",
+      "unitPrice": 16000,
+      "saleStatus": "COMING_SOON",
+      "publish": false,
+      "entries": [
+        {
+          "prizeProductId": "gacha-hatsune-miku-petadoll-prize-01",
+          "weight": 1,
+          "quantity": 20,
+          "rarity": "구성 상품"
+        },
+        {
+          "prizeProductId": "gacha-hatsune-miku-petadoll-prize-02",
+          "weight": 1,
+          "quantity": 20,
+          "rarity": "구성 상품"
+        },
+        {
+          "prizeProductId": "gacha-hatsune-miku-petadoll-prize-03",
+          "weight": 1,
+          "quantity": 20,
+          "rarity": "구성 상품"
+        },
+        {
+          "prizeProductId": "gacha-hatsune-miku-petadoll-prize-04",
+          "weight": 1,
+          "quantity": 20,
+          "rarity": "구성 상품"
+        },
+        {
+          "prizeProductId": "gacha-hatsune-miku-petadoll-prize-05",
+          "weight": 1,
+          "quantity": 20,
+          "rarity": "구성 상품"
+        },
+        {
+          "prizeProductId": "gacha-hatsune-miku-petadoll-prize-06",
+          "weight": 1,
+          "quantity": 20,
+          "rarity": "구성 상품"
+        }
+      ],
+      "targetOnHand": 120
+    },
+    {
+      "productId": "gacha-sanrio-can-figures",
+      "unitPrice": 5000,
+      "saleStatus": "COMING_SOON",
+      "publish": false,
+      "entries": [
+        {
+          "prizeProductId": "gacha-sanrio-can-figures-prize-01",
+          "weight": 1,
+          "quantity": 20,
+          "rarity": "구성 상품"
+        },
+        {
+          "prizeProductId": "gacha-sanrio-can-figures-prize-02",
+          "weight": 1,
+          "quantity": 20,
+          "rarity": "구성 상품"
+        },
+        {
+          "prizeProductId": "gacha-sanrio-can-figures-prize-03",
+          "weight": 1,
+          "quantity": 20,
+          "rarity": "구성 상품"
+        },
+        {
+          "prizeProductId": "gacha-sanrio-can-figures-prize-04",
+          "weight": 1,
+          "quantity": 20,
+          "rarity": "구성 상품"
+        },
+        {
+          "prizeProductId": "gacha-sanrio-can-figures-prize-05",
+          "weight": 1,
+          "quantity": 20,
+          "rarity": "구성 상품"
+        }
+      ],
+      "targetOnHand": 100
+    },
+    {
+      "productId": "gacha-sylvanian-adventure",
+      "unitPrice": 11000,
+      "saleStatus": "COMING_SOON",
+      "publish": false,
+      "entries": [
+        {
+          "prizeProductId": "gacha-sylvanian-adventure-prize-01",
+          "weight": 1,
+          "quantity": 20,
+          "rarity": "구성 상품"
+        },
+        {
+          "prizeProductId": "gacha-sylvanian-adventure-prize-02",
+          "weight": 1,
+          "quantity": 20,
+          "rarity": "구성 상품"
+        },
+        {
+          "prizeProductId": "gacha-sylvanian-adventure-prize-03",
+          "weight": 1,
+          "quantity": 20,
+          "rarity": "구성 상품"
+        },
+        {
+          "prizeProductId": "gacha-sylvanian-adventure-prize-04",
+          "weight": 1,
+          "quantity": 20,
+          "rarity": "구성 상품"
+        },
+        {
+          "prizeProductId": "gacha-sylvanian-adventure-prize-05",
+          "weight": 1,
+          "quantity": 20,
+          "rarity": "구성 상품"
+        },
+        {
+          "prizeProductId": "gacha-sylvanian-adventure-prize-06",
+          "weight": 1,
+          "quantity": 20,
+          "rarity": "구성 상품"
+        },
+        {
+          "prizeProductId": "gacha-sylvanian-adventure-prize-07",
+          "weight": 1,
+          "quantity": 20,
+          "rarity": "구성 상품"
+        },
+        {
+          "prizeProductId": "gacha-sylvanian-adventure-prize-08",
+          "weight": 1,
+          "quantity": 20,
+          "rarity": "구성 상품"
+        }
+      ],
+      "targetOnHand": 160
+    }
+  ]
+}

@@ -1,3 +1,4 @@
+import { historicalOrderFixture } from "../legacy-order.integration-fixtures.js";
 import assert from "node:assert/strict";
 import { createHmac, randomUUID } from "node:crypto";
 import test from "node:test";
@@ -126,7 +127,7 @@ test(
         "SELECT version FROM draw_probability_versions WHERE product_id=$1 AND status='ACTIVE'",
         [productId],
       );
-      const response = await app.inject({
+      const response = await historicalOrderFixture(app, pool, config, {
         method: "POST",
         url: "/v1/orders",
         headers: {

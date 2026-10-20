@@ -426,7 +426,7 @@ export function StorageHubContent({
   const snapshot = profileState.snapshot!;
   const { fontScale } = useWindowDimensions();
   const largeText = Number.isFinite(fontScale) && fontScale > 1.3;
-  const [mode, setMode] = useState<StorageMode>(initialMode);
+  const [mode, setMode] = useState<StorageMode>(initialMode === "point-return" ? "shipping" : initialMode);
   // A failed or partially failed inventory load closes every storage action:
   // selection, shipping, and point return all need the complete verified list.
   const inventoryFailure = profileSectionFailure(snapshot, "inventory");
@@ -449,11 +449,10 @@ export function StorageHubContent({
       <View accessibilityRole="tablist" style={styles.storageTabs}>
         <StorageModeTab label="보관 중" count={storedDrawItems?.length ?? null} selected={mode === "shipping"} largeText={largeText} onPress={() => setMode("shipping")} />
         <StorageModeTab label="교환 또는 배송 중인 상품" count={exchangeOrShippingItems?.length ?? null} wide selected={mode === "exchange-or-shipping"} largeText={largeText} onPress={() => setMode("exchange-or-shipping")} />
-        <StorageModeTab label="포인트 환급" count={pointReturnItems?.length ?? null} selected={mode === "point-return"} largeText={largeText} onPress={() => setMode("point-return")} />
       </View>
       {!commerceEnabled ? (
         <SeedInlineGuidance style={styles.prelaunchStorageGuidance}>
-          사전오픈 기간에는 보관 상품과 기존 진행 내역만 확인할 수 있어요. 배송·포인트 환급 신청은 정식 오픈 후 제공돼요.
+          사전오픈 기간에는 보관 상품과 기존 진행 내역만 확인할 수 있어요. 배송 신청은 정식 오픈 후 제공돼요.
         </SeedInlineGuidance>
       ) : null}
       {inventoryFailure || !storedDrawItems || !exchangeOrShippingItems || !pointReturnItems ? (
@@ -468,7 +467,7 @@ export function StorageHubContent({
       ) : mode === "exchange-or-shipping" ? (
         <ExchangeOrShipping profileState={profileState} items={exchangeOrShippingItems} assetBaseUrl={assetBaseUrl} rootLayout={rootLayout} rootScrollProps={rootScrollProps} />
       ) : (
-        <PointReturn profileState={profileState} items={pointReturnItems} assetBaseUrl={assetBaseUrl} commerceEnabled={commerceEnabled} rootLayout={rootLayout} rootScrollProps={rootScrollProps} />
+        <Shipping profileState={profileState} items={storedDrawItems} assetBaseUrl={assetBaseUrl} commerceEnabled={commerceEnabled} rootLayout={rootLayout} rootScrollProps={rootScrollProps} />
       )}
     </View>
   );
@@ -656,7 +655,7 @@ function Shipping({
       </View>
       {sortedItems.some((item) => item.status === "EXPIRED_HOLD" || storageExpiryState(item.storageExpiresAt)?.isExpired) ? (
         <SeedInlineGuidance style={styles.prelaunchStorageGuidance}>
-          보관 기간이 지난 상품은 자동으로 폐기하지 않아요. 고객센터에 문의해 주세요.
+          보관 기간이 만료된 상품은 고객센터에서 배송 가능 여부를 확인해 드려요.
         </SeedInlineGuidance>
       ) : null}
       {sortedItems.map((item) => {
@@ -670,7 +669,7 @@ function Shipping({
             selected={selected.includes(item.id)}
             storageExpiresAt={item.storageExpiresAt}
             caption={item.status === "EXPIRED_HOLD"
-              ? "보관 만료 보류 · 자동 폐기되지 않아요"
+              ? "보관 만료 · 고객지원 확인 필요"
               : typeof item.product.price === "number" && item.product.price > 0
                 ? undefined
                 : "가격 확정 후 배송 가능"}
@@ -1330,7 +1329,7 @@ function Faq({ title, body }: { title: string; body: string }) {
 
 function isStoredDrawInventory(item: InventoryUnit): boolean {
   return (item.status === "OWNED" || item.status === "EXPIRED_HOLD")
-    && (item.sourceType === "GACHA" || item.sourceType === "KUJI");
+    && (item.sourceType === "GACHA" || item.sourceType === "KUJI" || item.sourceType === "PURCHASE");
 }
 
 function isExchangeOrShippingInventory(item: InventoryUnit): boolean {

@@ -63,7 +63,7 @@ async function loadActions({ productCategory = "kuji", deny = false } = {}) {
       async adminApi(path, options) {
         apiCalls.push([path, options]);
         if (path === "/v1/admin/products" && options?.method === "POST") {
-          return { id: "new-kuji", category: productCategory, isPrizeOnly: false };
+          return { id: "new-kuji", category: productCategory, isPrizeOnly: false, metadata: {} };
         }
         if (options?.method === "POST") return { id: "draft-1" };
         return { id: "draw-product", category: productCategory };
@@ -110,7 +110,7 @@ test("kuji action re-reads authoritative category and sends the finite sealed-de
   assert.match(redirects.at(-1), /success=/);
 });
 
-test("new sellable kuji continues directly to its tier configuration", async () => {
+test("legacy kuji administration retains its tier configuration", async () => {
   const { actions, apiCalls, redirects } = await loadActions({ productCategory: "kuji" });
   await assert.rejects(() => actions.createProduct(form({
     returnTo: "/catalog/products",

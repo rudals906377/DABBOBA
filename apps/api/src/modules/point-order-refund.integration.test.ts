@@ -1,3 +1,4 @@
+import { historicalOrderFixture } from "../legacy-order.integration-fixtures.js";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
@@ -116,10 +117,12 @@ type OrderBody = { id: string; paymentId: string; status: string; total: number;
 
 async function placeOrder(
   app: FastifyInstance,
+  pool: DatabasePool,
+  config: ApiConfig,
   fixture: Fixture,
   input: { productId: string; quantity: number; pointAmount: number; kujiRoomEntryId?: string },
 ) {
-  const response = await app.inject({
+  const response = await historicalOrderFixture(app, pool, config, {
     method: "POST", url: "/v1/orders",
     headers: { ...fixture.customerAuth, "idempotency-key": randomUUID() },
     payload: {
@@ -179,7 +182,7 @@ test("an unused points-only gacha order is refunded once through the admin point
     label: "point-refund-gacha", price: 3_000, onHand: 6, prizeQuantity: 20, publisherId: publisher.rows[0]!.id,
   });
 
-  const order = await placeOrder(app, fixture, { productId, quantity: 2, pointAmount: 6_000 });
+  const order = await placeOrder(app, pool, config, fixture, { productId, quantity: 2, pointAmount: 6_000 });
   assert.equal(order.status, "PAID");
   assert.equal(order.total, 0);
   assert.equal(order.drawEntitlementIds.length, 2);
@@ -249,7 +252,7 @@ test("an unused points-only gacha order is refunded once through the admin point
   assert.equal((refundedDetail.json() as { refundActionAvailable: boolean }).refundActionAvailable, false);
 
   // A points-only order with one opened capsule is never refunded automatically.
-  const usedOrder = await placeOrder(app, fixture, { productId, quantity: 2, pointAmount: 6_000 });
+  const usedOrder = await placeOrder(app, pool, config, fixture, { productId, quantity: 2, pointAmount: 6_000 });
   const consumed = await app.inject({
     method: "POST", url: `/v1/draws/${usedOrder.drawEntitlementIds[0]}/consume`,
     headers: { ...fixture.customerAuth, "idempotency-key": randomUUID() }, payload: {},
@@ -325,7 +328,7 @@ test("a points-only kuji order refund cancels its ticket and releases the kuji r
   const room = await app.inject({ method: "POST", url: `/v1/kuji/rooms/${productId}/entries`, headers: fixture.customerAuth });
   assert.ok([200, 201].includes(room.statusCode), room.body);
   const entryId = (room.json() as { viewer: { entryId: string } }).viewer.entryId;
-  const order = await placeOrder(app, fixture, { productId, quantity: 1, pointAmount: 1_000, kujiRoomEntryId: entryId });
+  const order = await placeOrder(app, pool, config, fixture, { productId, quantity: 1, pointAmount: 1_000, kujiRoomEntryId: entryId });
   assert.equal(order.status, "PAID");
   const drawing = await pool.query<{ state: string }>("SELECT state FROM kuji_room_entries WHERE id=$1", [entryId]);
   assert.equal(drawing.rows[0]?.state, "DRAWING");
@@ -369,7 +372,7 @@ test("a full card refund of a mixed points-and-card gacha order returns the poin
   const productId = await createGachaProduct(pool, fixture, {
     label: "mixed-refund-gacha", price: 2_000, onHand: 3, prizeQuantity: 10, publisherId: publisher.rows[0]!.id,
   });
-  const order = await placeOrder(app, fixture, { productId, quantity: 1, pointAmount: 500 });
+  const order = await placeOrder(app, pool, config, fixture, { productId, quantity: 1, pointAmount: 500 });
   assert.equal(order.status, "PENDING_PAYMENT");
   assert.equal(order.total, 1_500);
   assert.equal(order.pointTotal, 500);

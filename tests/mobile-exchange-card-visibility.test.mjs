@@ -17,11 +17,11 @@ function inventory({ category = "gacha", sourceType = "GACHA", status = "OWNED" 
 }
 
 test("only current customer categories can be newly listed or offered", () => {
-  for (const category of ["gacha", "kuji"]) {
+  for (const category of ["gacha"]) {
     assert.equal(isCustomerEligibleExchangeInventory(inventory({ category })), true);
   }
 
-  for (const category of ["figure", "tcg"]) {
+  for (const category of ["kuji", "figure", "tcg"]) {
     assert.equal(isCustomerEligibleExchangeInventory(inventory({ category })), false);
   }
 
@@ -48,7 +48,7 @@ test("cached exchange projections also reject removed categories", () => {
   assert.equal(areCustomerVisibleExchangeProducts([
     { category: "gacha" },
     { category: "kuji" },
-  ]), true);
+  ]), false);
   assert.equal(areCustomerVisibleExchangeProducts([
     { category: "gacha" },
     { category: "figure" },

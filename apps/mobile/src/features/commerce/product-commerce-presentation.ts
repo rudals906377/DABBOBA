@@ -3,6 +3,7 @@ import type { CatalogProduct } from "@dabboba/contracts";
 type CommerceProduct = Pick<CatalogProduct, "price"> & {
   saleStatus?: "DRAFT" | "COMING_SOON" | "ON_SALE" | "PAUSED";
   purchasable?: boolean;
+  category?: CatalogProduct["category"];
   blockedReason?: string | null;
 };
 
@@ -33,7 +34,8 @@ export function isProductPurchasable(
   commerceEnabled: boolean,
 ): boolean {
   if (
-    !commerceEnabled
+    product.category === "kuji"
+    || !commerceEnabled
     || typeof product.price !== "number"
     || !Number.isFinite(product.price)
     || product.price <= 0

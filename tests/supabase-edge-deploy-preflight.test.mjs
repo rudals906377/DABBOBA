@@ -84,6 +84,25 @@ const fullLiveEdgeProfile = {
   DABBOBA_STORAGE_S3_SECRET_ACCESS_KEY: 's3-live-fixture-secret',
 };
 
+test('NICE and EasyPay LIVE profiles preserve both channels and reject staging-only credentials', () => {
+  for (const provider of ['PORTONE_V2_NICE', 'PORTONE_V2_KICC']) {
+    const values = { ...fullLiveEdgeProfile, DABBOBA_API_PAYMENT_PROVIDER: provider,
+      DABBOBA_API_PORTONE_CHANNEL_KEY: 'channel-key-primary-live',
+      [provider === 'PORTONE_V2_NICE' ? 'DABBOBA_API_PORTONE_KICC_CHANNEL_KEY' : 'DABBOBA_API_PORTONE_NICE_CHANNEL_KEY']: 'channel-key-secondary-live',
+      DABBOBA_API_PORTONE_INICIS_CHANNEL_KEY: 'channel-key-historical-inicis' };
+    assert.doesNotThrow(() => assertSupabaseEdgeReleaseConfiguration(values, { expectedCommerceMode: 'LIVE' }));
+    const serialized = serializeSupabaseEdgeProfile(values);
+    assert.match(serialized, /DABBOBA_API_PORTONE_(?:KICC|NICE)_CHANNEL_KEY=channel-key-secondary-live/);
+    assert.match(serialized, /DABBOBA_API_PORTONE_INICIS_CHANNEL_KEY=channel-key-historical-inicis/);
+    for (const override of [
+      { DABBOBA_API_PORTONE_CHANNEL_ENVIRONMENT: 'TEST' },
+      { DABBOBA_API_PORTONE_CHANNEL_KEY: 'channel-key-secondary-live' },
+      { DABBOBA_API_PAYMENT_REVIEW_LOGIN_ENABLED: 'true' },
+      { DABBOBA_API_TOSS_PAYMENTS_SECRET_KEY: 'test_sk_must_not_ship' },
+    ]) assert.throws(() => assertSupabaseEdgeReleaseConfiguration({ ...values, ...override }, { expectedCommerceMode: 'LIVE' }));
+  }
+});
+
 test('production Edge profile is isolated from historical QA credentials', () => {
   assert.match(SUPABASE_EDGE_PROFILE_FILE, /supabase-edge-production\.env$/);
   const source = 'postgresql://dabboba_runtime.rconfxsykttfvznakile:source@aws-0-ap-northeast-2.pooler.supabase.com:5432/postgres';

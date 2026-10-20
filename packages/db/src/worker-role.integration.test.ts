@@ -180,7 +180,7 @@ test("API and worker database identities are isolated around pgmq", {
       ["coupon_redemptions", new Set(["select", "update"])],
       ["coupons", new Set(["select", "update"])],
       ["point_ledger_entries", new Set(["insert"])],
-      ["point_accounts", new Set(["select", "update"])],
+      ["point_accounts", new Set(["select", "insert", "update"])],
       ["kuji_room_entries", new Set(["select", "update"])],
       ["kuji_rooms", new Set(["select", "update"])],
       ["catalog_products", new Set(["select"])],
@@ -207,6 +207,7 @@ test("API and worker database identities are isolated around pgmq", {
       ["inquiry_messages", new Set(["select"])],
       ["inventory_units", new Set(["select"])],
       ["inventory_storage_expiry_events", new Set(["select", "insert"])],
+      ["inventory_storage_point_returns", new Set(["select", "insert"])],
       ["user_blocks", new Set(["select", "delete"])],
       ["user_policy_acceptances", new Set(["select"])],
       ["user_profiles", new Set(["select"])],
@@ -393,11 +394,13 @@ test("API and worker database identities are isolated around pgmq", {
     // 0083's shared assessment stays owner-only behind them. 0086 adds the
     // account-deletion record separation, which the worker calls but whose
     // separated table it cannot read.
+    // 0093 also grants the invoker-only immutable storage snapshot trigger.
     // Exact names/signatures retain the failure on any extra callable routine.
     assert.deepEqual(publicCallable.rows, [
       { schema_name: "public", routine_name: "execute_commerce_retention", argument_types: "integer" },
       { schema_name: "public", routine_name: "preview_commerce_retention", argument_types: "integer" },
       { schema_name: "public", routine_name: "separate_deleted_account_records", argument_types: "uuid, uuid" },
+      { schema_name: "public", routine_name: "snapshot_inventory_storage_return", argument_types: "" },
     ]);
     const setVtDependency = await migrationPool.query<{
       timestamp_overload_exists: boolean;

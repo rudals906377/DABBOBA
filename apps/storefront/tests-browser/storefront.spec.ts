@@ -55,7 +55,7 @@ test("desktop storefront preserves the one-message-per-screen hierarchy", async 
   await expect(page.getByRole("navigation", { name: "페이지 안내" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "원하는 거 다 뽀바" })).toBeVisible();
   await page.getByRole("link", { name: "앱 화면 미리보기", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "취향에 맞는 뽑기를 한눈에" })).toBeInViewport();
+  await expect(page.getByRole("heading", { name: "포함된 상품 중 1개를 만나요" })).toBeInViewport();
   await expect(page.locator(".phone-preview")).toBeInViewport();
   await expectNoHorizontalOverflow(page);
 });

@@ -1,5 +1,7 @@
 # PG review web source
 
+2026-10-13 전환: 신규 심사 주문은 고객이 정확한 상품과 수량을 고르는 DIRECT 판매 SKU만 사용한다. 아래 PG·확률표 관련 내용은 당시 이력이다. 현재 범위와 배포 순서는 direct-purchase-2026-10-13.md를 따른다.
+
 The owner reports PG review submission complete. This is not PG approval.
 
 `/review/` provides the service, three actual product descriptions, shared

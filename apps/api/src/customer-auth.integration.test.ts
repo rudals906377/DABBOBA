@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { randomInt, randomUUID } from "node:crypto";
 import test from "node:test";
 import Fastify from "fastify";
+import {loadRequiredPolicyDocuments} from "./lib/legal-policy.js";
 import { assertDatabaseUrlForTier, type ApiConfig } from "@dabboba/config";
 import { createDatabasePool, createMigrationDatabasePool } from "@dabboba/db";
 import type { CustomerAuthProvider, VerifiedSupabaseCustomer } from "./lib/supabase-auth.js";
@@ -19,6 +20,7 @@ test("customer broker reuses one Supabase subject without merging email peers an
   assertDatabaseUrlForTier(runtimeDatabaseUrl!, "DABBOBA_RUNTIME_TEST_DATABASE_URL", "TEST");
   const ownerPool = createMigrationDatabasePool(migrationDatabaseUrl!, "customer-auth-fixtures");
   const runtimePool = createDatabasePool(runtimeDatabaseUrl!, "customer-auth-runtime", { runtimeEnvironment: "test" });
+  const {versions: requiredPolicies}=await loadRequiredPolicyDocuments(ownerPool);
   const suffix = randomUUID();
   // Four distinct phone numbers per run: a shared random base plus a fixed slot,
   // so no two fixtures can collapse onto the same zero-padded number.
@@ -127,7 +129,7 @@ test("customer broker reuses one Supabase subject without merging email peers an
       accessToken,
       loginProvider,
       ...(loginProvider === "APPLE" ? { appleRefreshToken: `apple-refresh-${"x".repeat(64)}` } : {}),
-      acceptedPolicies: { terms: "2026-10-07", privacy: "2026-10-07" },
+      acceptedPolicies: requiredPolicies,
     },
     });
   };
@@ -142,7 +144,7 @@ test("customer broker reuses one Supabase subject without merging email peers an
       accessToken,
       loginProvider,
       ...(appleRefreshToken ? { appleRefreshToken } : {}),
-      acceptedPolicies: { terms: "2026-10-07", privacy: "2026-10-07" },
+      acceptedPolicies: requiredPolicies,
     },
   });
 

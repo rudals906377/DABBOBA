@@ -431,6 +431,7 @@ export async function registerCatalogRoutes(app: FastifyInstance, context: ApiCo
     const filters = [
       "p.is_active = true",
       "p.is_prize_only = false",
+      "COALESCE(p.metadata->>'purchaseMode','') <> 'DIRECT'",
       "p.sale_status IN ('COMING_SOON','ON_SALE')",
       "i.is_active = true",
       `(p.sale_status <> 'ON_SALE' OR p.category NOT IN ('gacha','kuji') OR EXISTS (
@@ -540,6 +541,7 @@ export async function registerCatalogRoutes(app: FastifyInstance, context: ApiCo
        LEFT JOIN product_stock s ON s.product_id=p.id
        WHERE p.id=$1 AND p.is_active=true
          AND p.is_prize_only=false
+         AND COALESCE(p.metadata->>'purchaseMode','') <> 'DIRECT'
          AND p.sale_status IN ('COMING_SOON','ON_SALE')
          AND i.is_active=true
          AND (p.sale_status <> 'ON_SALE' OR p.category NOT IN ('gacha','kuji') OR EXISTS (
@@ -561,6 +563,7 @@ export async function registerCatalogRoutes(app: FastifyInstance, context: ApiCo
     const parent = await context.pool.query<{ id: string; sale_status: ProductSaleStatus }>(
       `SELECT p.id,p.sale_status FROM catalog_products p JOIN catalog_ips i ON i.id=p.ip_id
        WHERE p.id=$1 AND p.is_active=true AND p.is_prize_only=false
+         AND COALESCE(p.metadata->>'purchaseMode','') <> 'DIRECT'
          AND p.category IN ('gacha','kuji') AND p.sale_status IN ('COMING_SOON','ON_SALE')
          AND i.is_active=true
          AND (p.sale_status <> 'ON_SALE' OR EXISTS (

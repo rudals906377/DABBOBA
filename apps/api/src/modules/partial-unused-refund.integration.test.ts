@@ -1,3 +1,4 @@
+import { historicalOrderFixture } from "../legacy-order.integration-fixtures.js";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
@@ -108,8 +109,8 @@ async function createGachaProduct(pool: DatabasePool, fixture: Fixture, input: {
 
 type OrderBody = { id: string; paymentId: string; status: string; total: number; pointTotal: number; drawEntitlementIds: string[] };
 
-async function placeOrder(app: FastifyInstance, fixture: Fixture, input: { productId: string; quantity: number; pointAmount: number }) {
-  const response = await app.inject({
+async function placeOrder(app: FastifyInstance, pool: DatabasePool, config: ApiConfig, fixture: Fixture, input: { productId: string; quantity: number; pointAmount: number }) {
+  const response = await historicalOrderFixture(app, pool, config, {
     method: "POST", url: "/v1/orders",
     headers: { ...fixture.customerAuth, "idempotency-key": randomUUID() },
     payload: { items: [{ productId: input.productId, quantity: input.quantity, expectedDrawVersion: 1 }], pointAmount: input.pointAmount },
@@ -187,7 +188,7 @@ test("a partly used card and points gacha order refunds only its unused draws af
   t.after(async () => { await app.close(); await pool.end(); });
   const fixture = await createFixture(pool, config, "partial-refund", 3_000);
   const productId = await createGachaProduct(pool, fixture, { label: "partial-refund-gacha", price: 3_000, onHand: 5 });
-  const order = await placeOrder(app, fixture, { productId, quantity: 3, pointAmount: 1_000 });
+  const order = await placeOrder(app, pool, config, fixture, { productId, quantity: 3, pointAmount: 1_000 });
   assert.equal(order.total, 8_000);
   const attempt = await app.inject({ method: "POST", url: `/v1/payments/${order.paymentId}/attempt`, headers: fixture.customerAuth });
   assert.equal(attempt.statusCode, 200, attempt.body);
@@ -286,7 +287,7 @@ test("a partly used points-only gacha order returns the unused share as points w
   t.after(async () => { await app.close(); await pool.end(); });
   const fixture = await createFixture(pool, config, "partial-point-refund", 10_000);
   const productId = await createGachaProduct(pool, fixture, { label: "partial-point-gacha", price: 2_000, onHand: 4 });
-  const order = await placeOrder(app, fixture, { productId, quantity: 2, pointAmount: 4_000 });
+  const order = await placeOrder(app, pool, config, fixture, { productId, quantity: 2, pointAmount: 4_000 });
   assert.equal(order.status, "PAID");
   assert.equal((await consume(app, fixture, order.drawEntitlementIds[0]!)).statusCode, 200);
   const before = await state(pool, order.id, productId);
@@ -318,7 +319,7 @@ test("an unknown cancel outcome keeps the order frozen until a provider read sho
   t.after(async () => { await app.close(); await pool.end(); });
   const fixture = await createFixture(pool, config, "partial-release", 0);
   const productId = await createGachaProduct(pool, fixture, { label: "partial-release-gacha", price: 3_000, onHand: 4 });
-  const order = await placeOrder(app, fixture, { productId, quantity: 2, pointAmount: 0 });
+  const order = await placeOrder(app, pool, config, fixture, { productId, quantity: 2, pointAmount: 0 });
   const attempt = await app.inject({ method: "POST", url: `/v1/payments/${order.paymentId}/attempt`, headers: fixture.customerAuth });
   assert.equal(attempt.statusCode, 200, attempt.body);
   const timestamp = (await pool.query<{ now: Date }>("SELECT clock_timestamp() AS now")).rows[0]!.now.toISOString();

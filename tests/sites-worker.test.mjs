@@ -9,7 +9,7 @@ const accountDeletionRuntime = {
   SUPABASE_PUBLISHABLE_KEY: "sb_publishable_public_web_account_deletion_fixture",
 };
 
-const policyVersions = { terms: "2026-09-22", privacy: "2026-09-22" };
+const policyVersions = { terms: "2026-10-13-r2", privacy: "2026-10-13-r2" };
 const emptyBlockers = {
   pointBalance: 0,
   activeOrderCount: 0,
@@ -876,7 +876,8 @@ test("public storefront stays prelaunch-only and links every required policy sur
     + await readFile(new URL("../apps/storefront/src/launch-copy.ts", import.meta.url), "utf8");
   // The default build is prelaunch; only VITE_DABBOBA_COMMERCE_MODE=LIVE switches the copy.
   assert.match(source, /closingStatus: "PRELAUNCH"/);
-  assert.match(source, /OPENING SOON/);
+  assert.match(source, /쿠지샵/);
+  assert.match(source, /준비 중/);
   assert.match(source, /정식 오픈 후 적용 예정/);
   for (const href of ["/privacy", "/terms", "/support", "/account-deletion"]) {
     assert.match(source, new RegExp(`href=\"${href.replace("/", "\\/")}\"`));

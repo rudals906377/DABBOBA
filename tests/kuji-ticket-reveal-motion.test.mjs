@@ -124,20 +124,18 @@ test("the paper sampler keeps the prize fixed while the cover peels and its whit
   const wideFold = sampleKujiPeelPaperMotion(0.75);
   const opened = sampleKujiPeelPaperMotion(1);
 
-  assert.equal(sealed.coverTravelRatio, 0);
+  assert.equal(sealed.peelBoundaryRatio, 0);
   assert.equal(sealed.foldOpacity, 0);
   assert.ok(dragStarted.foldOpacity > 0,
     "the paper curl must appear as soon as a horizontal drag becomes active");
   assert.ok(dragStarted.foldShadowOpacity > 0,
     "the immediate curl should include its depth shadow");
-  assert.ok(firstFold.coverTravelRatio > 0);
+  assert.ok(firstFold.peelBoundaryRatio > 0);
   assert.ok(firstFold.foldOpacity > 0);
   assert.ok(wideFold.foldScaleX > firstFold.foldScaleX);
   assert.ok(wideFold.foldShadowOpacity > 0);
-  assert.equal(opened.coverTravelRatio, 1.12);
-  assert.ok(Math.abs(opened.coverOpacity - 0.1) < Number.EPSILON * 4);
-  assert.equal(opened.foldOpacity, 0);
-  assert.ok(opened.coverRotationDeg < 0 && opened.coverRotationDeg >= -0.8);
+  assert.equal(opened.peelBoundaryRatio, 1);
+  assert.equal(opened.foldOpacity, 1);
 
   assert.ok(
     sampleKujiPeelPaperMotion(0.5, true).edgeLightOpacity
@@ -152,9 +150,7 @@ test("paper peel samples stay finite, clamped, and spatially still under Reduced
     for (const [key, value] of Object.entries(frame)) {
       assert.ok(Number.isFinite(value), `${key} must remain finite at ${progress}`);
     }
-    assert.ok(frame.coverTravelRatio >= 0 && frame.coverTravelRatio <= 1.12);
-    assert.ok(frame.coverRotationDeg >= -0.8 && frame.coverRotationDeg <= 0);
-    assert.ok(frame.coverOpacity >= 0.1 - Number.EPSILON && frame.coverOpacity <= 1);
+    assert.ok(frame.peelBoundaryRatio >= 0 && frame.peelBoundaryRatio <= 1);
     assert.ok(frame.foldScaleX >= 0 && frame.foldScaleX <= 1);
     assert.ok(frame.foldOpacity >= 0 && frame.foldOpacity <= 1);
     assert.ok(frame.foldShadowOpacity >= 0 && frame.foldShadowOpacity <= 0.3);
@@ -164,23 +160,51 @@ test("paper peel samples stay finite, clamped, and spatially still under Reduced
   assert.deepEqual(sampleKujiPeelPaperMotion(-10), sampleKujiPeelPaperMotion(0));
   assert.deepEqual(sampleKujiPeelPaperMotion(10), sampleKujiPeelPaperMotion(1));
   assert.deepEqual(sampleKujiPeelPaperMotion(0.8, true, true), {
-    coverTravelRatio: 0,
-    coverRotationDeg: 0,
-    coverOpacity: 1,
+    peelBoundaryRatio: 0,
     foldScaleX: 0,
     foldOpacity: 0,
     foldShadowOpacity: 0,
     edgeLightOpacity: 0,
+    foldRotateYDeg: 0,
+    foldLiftRatio: 0,
+    foldSkewYDeg: 0,
+    foldFlightXRatio: 0,
+    foldFlightYRatio: 0,
+    foldRotateZDeg: 0,
+    coverClipInsetRatio: 0,
   });
   assert.deepEqual(sampleKujiPeelPaperMotion(1, true, true), {
-    coverTravelRatio: 1.12,
-    coverRotationDeg: 0,
-    coverOpacity: 0,
+    peelBoundaryRatio: 1,
     foldScaleX: 0,
     foldOpacity: 0,
     foldShadowOpacity: 0,
     edgeLightOpacity: 0,
+    foldRotateYDeg: 0,
+    foldLiftRatio: 0,
+    foldSkewYDeg: 0,
+    foldFlightXRatio: 0,
+    foldFlightYRatio: 0,
+    foldRotateZDeg: 0,
+    coverClipInsetRatio: 0,
   });
+});
+
+test("the paper lifts and bends during the tear, then rests without a repeating curl", () => {
+  const middle = sampleKujiPeelPaperMotion(0.5);
+  assert.ok(middle.foldLiftRatio > 0 && middle.foldLiftRatio <= 0.03);
+  assert.ok(middle.foldRotateYDeg < -20 && middle.foldRotateYDeg >= -40);
+  assert.ok(middle.foldSkewYDeg < 0 && middle.foldSkewYDeg >= -4);
+  for (const progress of [0, 1]) {
+    const edge = sampleKujiPeelPaperMotion(progress);
+    assert.ok(Math.abs(edge.foldLiftRatio) < 1e-8);
+    assert.ok(Math.abs(edge.foldSkewYDeg) < 1e-8);
+  }
+  for (let step = 0; step <= 100; step += 1) {
+    const frame = sampleKujiPeelPaperMotion(step / 100, true, true);
+    assert.equal(frame.foldRotateYDeg, 0);
+    assert.equal(frame.foldLiftRatio, 0);
+    assert.equal(frame.foldSkewYDeg, 0);
+  }
 });
 
 test("reset and unmount invalidate stale travel and payoff callbacks", () => {
@@ -214,12 +238,12 @@ test("the restrained edge cue follows the paper boundary and stays clipped", () 
   );
   assert.match(
     componentSource,
-    /frame\.coverTravelRatio \* ticketWidth - 10/,
+    /frame\.peelBoundaryRatio \* peelTravelWidth - 10/,
   );
   assert.match(componentSource, /styles\.ticketPeelEdgeGlow,[\s\S]*?peelEdgeGlowStyle/);
   assert.match(
     componentSource,
-    /withDelay\(\s*DRAW_MOTION\.kujiResultHoldMs,[\s\S]*?duration: DRAW_MOTION\.kujiImpactMs, easing: Easing\.out\(Easing\.cubic\)/,
+    /withDelay\(\s*DRAW_MOTION\.kujiResultHoldMs,[\s\S]*?duration: DRAW_MOTION\.kujiImpactMs, easing: Easing\.linear/,
   );
   assert.doesNotMatch(
     componentSource,
@@ -235,10 +259,10 @@ test("the peel claims early horizontal intent and tells the parent scroll when i
   assert.match(componentSource, /scheduleOnRN\(notifyDragActive, false\)/);
 });
 
-test("the stationary result underlay, orange cover, and three-tone paper fold keep stable stacking", () => {
+test("the stationary result underlay, orange cover, and curved paper fold keep stable stacking", () => {
   const resultIndex = componentSource.indexOf('<View style={styles.resultTicketLayer}>');
   const outerIndex = componentSource.indexOf('<View pointerEvents="none" style={styles.ticketOuterLayer}>');
-  const peelIndex = componentSource.indexOf('<Animated.View style={[styles.ticketPeelLayer, peelLayerStyle]}>');
+  const peelIndex = componentSource.indexOf('<Animated.View style={[styles.ticketPeelMask, peelMaskStyle]}>');
   assert.ok(resultIndex >= 0 && resultIndex < outerIndex && outerIndex < peelIndex);
   assert.match(
     componentSource,
@@ -254,8 +278,8 @@ test("the stationary result underlay, orange cover, and three-tone paper fold ke
   );
   assert.match(componentSource, /styles\.paperFold,[\s\S]*?paperFoldStyle/);
   assert.match(componentSource, /styles\.paperFoldShadow, paperFoldShadowStyle/);
-  assert.match(componentSource, /styles\.paperFoldMidtone/);
-  assert.match(componentSource, /styles\.paperFoldHighlight/);
+  assert.match(componentSource, /fill="url\(#kuji-paper-curl\)"/);
+  assert.match(componentSource, /fill="url\(#kuji-curl-shadow\)"/);
   assert.match(
     componentSource,
     /<View collapsable=\{false\} pointerEvents="none" style=\{styles\.ticketGlowClip\}>/,
@@ -267,4 +291,123 @@ test("the stationary result underlay, orange cover, and three-tone paper fold ke
   assert.match(componentSource, /ticketGlowClip: \{[\s\S]*?zIndex: 3,/);
   assert.match(componentSource, /ticketSurface: \{[\s\S]*?zIndex: 2,/);
   assert.doesNotMatch(componentSource, /ticketPayoffGlow|KUJI_TICKET_GLOW/);
+});
+
+test("the cover peels across the full width without leaving a right end piece", () => {
+  assert.match(componentSource, /const peelTravelWidth = peelSurfaceSize\.width;/);
+  assert.doesNotMatch(componentSource, /rightEdgeWidth|kuji-fixed-right-edge|ticketFixedRightEdge|ticketRightPerforation/);
+  assert.match(componentSource, /<View style=\{styles\.ticketPeelTravelClip\}>/);
+  assert.equal(sampleKujiPeelPaperMotion(1).peelBoundaryRatio, 1);
+  assert.ok(sampleKujiPeelPaperMotion(1).foldScaleX > 0);
+});
+
+
+test("the printed cover stays still and only its mask and paper curl advance", () => {
+  assert.match(componentSource, /<View\s+testID="kuji-stationary-cover"/);
+  assert.match(componentSource, /frame\.peelBoundaryRatio \* peelTravelWidth \+ frame\.coverClipInsetRatio \* paperFoldWidth/);
+  assert.match(componentSource, /width: peelSurfaceSize\.width \|\| "100%"/);
+  assert.doesNotMatch(componentSource, /peelLayerStyle|coverRotationDeg|coverOpacity/);
+});
+
+
+test("visible paper stays opaque through detachment and flies outside the ticket", () => {
+  for (let step = 1; step < 1000; step += 1) {
+    const frame = sampleKujiPeelPaperMotion(step / 1000);
+    assert.equal(frame.foldOpacity, 1, `paper became translucent at ${step}/1000`);
+    assert.ok(frame.foldScaleX > 0);
+  }
+  assert.equal(sampleKujiPeelPaperMotion(0).foldOpacity, 0);
+  const edge = sampleKujiPeelPaperMotion(1, false, false, 0);
+  const flight = sampleKujiPeelPaperMotion(1, false, false, 0.5);
+  const departed = sampleKujiPeelPaperMotion(1, false, false, 1);
+  assert.equal(edge.foldOpacity, 1);
+  assert.ok(edge.foldScaleX > 0.5, "the curl must detach without vanishing at the edge");
+  assert.equal(flight.foldOpacity, 1);
+  assert.ok(flight.foldFlightXRatio > 0);
+  assert.ok(flight.foldFlightYRatio < 0);
+  assert.ok(flight.foldRotateZDeg > 0);
+  assert.ok(departed.foldFlightXRatio >= 1, "paper must leave the ticket completely");
+  assert.equal(departed.foldOpacity, 0);
+  assert.equal(sampleKujiPeelPaperMotion(0.9, false, false, 0.5).foldFlightXRatio, 0);
+  assert.equal(sampleKujiPeelPaperMotion(1, false, true, 0.5).foldFlightXRatio, 0);
+  assert.ok(sampleKujiPeelPaperMotion(0.99).foldScaleX < sampleKujiPeelPaperMotion(0.9).foldScaleX);
+});
+
+
+test("paper detaches continuously and invalid flight inputs cannot escape bounds", () => {
+  const before = sampleKujiPeelPaperMotion(1 - 1e-6);
+  const edge = sampleKujiPeelPaperMotion(1, false, false, 0);
+  for (const key of Object.keys(edge)) {
+    assert.ok(Math.abs(before[key] - edge[key]) < 0.001, `${key} jumped at detachment`);
+  }
+  for (const progress of [NaN, -Infinity, Infinity, -1, 0, 0.1, 0.5, 1, 4]) {
+    const frame = sampleKujiPeelPaperMotion(1, false, false, progress);
+    assert.ok(Object.values(frame).every(Number.isFinite));
+    assert.ok(frame.foldFlightXRatio >= 0 && frame.foldFlightXRatio <= 1.2);
+    assert.ok(frame.foldFlightYRatio <= 0.81 && frame.foldFlightYRatio >= -0.12);
+  }
+});
+
+test("the same curl escapes the ticket clip and its flight is cancelled with the reveal", () => {
+  const shellStart = componentSource.indexOf('<Animated.View collapsable={false} pointerEvents="none" style={[styles.ticketSurface, ticketRevealStyle]}>');
+  const flightLayer = componentSource.indexOf('<View pointerEvents="none" style={styles.paperFlightLayer}>');
+  const curl = componentSource.indexOf('testID="kuji-paper-curl"');
+  assert.ok(shellStart < flightLayer && flightLayer < curl);
+  assert.equal(componentSource.match(/testID="kuji-paper-curl"/g).length, 1);
+  assert.match(componentSource, /paperFlightLayer: \{[\s\S]*?overflow: "visible"/);
+  assert.ok(componentSource.match(/cancelAnimation\(paperFlightProgress\)/g).length >= 5);
+});
+
+
+test("the printed cover starts inside the opaque curl instead of behind its concave edge", () => {
+  assert.equal(sampleKujiPeelPaperMotion(0).coverClipInsetRatio, 0);
+  for (const progress of [0.25, 0.5, 0.75, 0.9]) {
+    const frame = sampleKujiPeelPaperMotion(progress);
+    assert.ok(frame.coverClipInsetRatio / frame.foldScaleX >= 0.4,
+      "the cover boundary must overlap the solid center of the paper, beyond the curved left contour");
+  }
+  assert.equal(sampleKujiPeelPaperMotion(0.5, true, true).coverClipInsetRatio, 0);
+});
+
+
+test("detached paper coasts with drag, falls under gravity and limits its residual rotation", () => {
+  const at = (f) => sampleKujiPeelPaperMotion(1, false, false, f);
+  assert.ok(at(0.2).foldFlightYRatio < 0, "release gives a small upward impulse");
+  assert.ok(at(0.7).foldFlightYRatio > 0, "gravity brings the paper below its release height");
+  const firstTravel = at(0.2).foldFlightXRatio - at(0.1).foldFlightXRatio;
+  const lastTravel = at(0.9).foldFlightXRatio - at(0.8).foldFlightXRatio;
+  assert.ok(lastTravel < firstTravel, "paper must coast rather than accelerate like a projectile");
+  for (let i=0; i<=100; i++) {
+    assert.ok(Math.abs(at(i/100).foldRotateZDeg) <= 60);
+    assert.equal(at(i/100).foldOpacity, i === 100 ? 0 : 1);
+  }
+});
+
+test("the released curl compresses once, rebounds and settles its small torsion", () => {
+  const at = (f) => sampleKujiPeelPaperMotion(1, false, false, f);
+  const edge = at(0);
+  assert.ok(at(0.1).foldScaleX < edge.foldScaleX * 0.98,
+    "the newly released curl should briefly tighten before springing open");
+  assert.ok(at(0.35).foldScaleX > edge.foldScaleX,
+    "the paper should recover its width after release");
+  assert.ok(at(0.1).foldSkewYDeg > 0 && at(0.35).foldSkewYDeg < 0,
+    "the released paper should flex back once instead of turning rigidly");
+  let earlyTorsion = 0;
+  let lateTorsion = 0;
+  let largestFrameTurn = 0;
+  for (let i = 0; i <= 60; i += 1) {
+    const frame = at(i / 60);
+    if (i <= 24) earlyTorsion = Math.max(earlyTorsion, Math.abs(frame.foldSkewYDeg));
+    if (i >= 42) lateTorsion = Math.max(lateTorsion, Math.abs(frame.foldSkewYDeg));
+    assert.ok(frame.foldScaleX > edge.foldScaleX * 0.9 && frame.foldScaleX < edge.foldScaleX * 1.12);
+    assert.ok(Math.abs(frame.foldSkewYDeg) < 2, "flutter stays subtle");
+    if (i > 0) {
+      const previous = at((i - 1) / 60);
+      largestFrameTurn = Math.max(largestFrameTurn, Math.abs(frame.foldRotateYDeg - previous.foldRotateYDeg));
+    }
+  }
+  assert.ok(lateTorsion < earlyTorsion * 0.15, "flutter must settle before departure");
+  assert.ok(largestFrameTurn < 2, "release must not snap between adjacent animation frames");
+  assert.deepEqual(sampleKujiPeelPaperMotion(0.9, false, false, 0.35), sampleKujiPeelPaperMotion(0.9),
+    "the flex must never disturb paper still attached to the ticket");
 });

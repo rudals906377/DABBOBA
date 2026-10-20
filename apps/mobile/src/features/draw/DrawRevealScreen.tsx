@@ -84,7 +84,7 @@ import {
   resolveMobileRuntimeConfig,
   type MobilePlatform,
 } from "@/lib/runtime-config";
-import { readDrawSoundEnabled, writeDrawSoundEnabled } from "@/lib/local-database";
+import { readDrawSoundEnabled, writeDrawSoundEnabled, readDrawHapticsEnabled, writeDrawHapticsEnabled } from "@/lib/local-database";
 import { openCustomerLogin } from "@/features/auth/login-navigation";
 import { readAuthTokens, subscribeAuthTokens, type StoredAuthTokens } from "@/lib/session-store";
 import { colors } from "@/theme";
@@ -183,6 +183,8 @@ export function DrawRevealScreen() {
   const [reduceMotion, setReduceMotion] = useState(systemReduceMotion);
   const [soundEnabled, setSoundEnabled] = useState(false);
   const [soundPreferenceReady, setSoundPreferenceReady] = useState(false);
+  const [hapticsEnabled, setHapticsEnabled] = useState(false);
+  const [hapticsPreferenceReady, setHapticsPreferenceReady] = useState(false);
   const [kujiDragActive, setKujiDragActive] = useState(false);
   const requestInFlightRef = useRef(false);
   const skipRequestedRef = useRef(false);
@@ -269,6 +271,10 @@ export function DrawRevealScreen() {
       .finally(() => {
         if (active) setSoundPreferenceReady(true);
       });
+    void readDrawHapticsEnabled(db)
+      .then((enabled) => { if (active) setHapticsEnabled(enabled); })
+      .catch(() => { if (active) setHapticsEnabled(true); })
+      .finally(() => { if (active) setHapticsPreferenceReady(true); });
     return () => {
       active = false;
     };
@@ -758,6 +764,18 @@ export function DrawRevealScreen() {
     });
   }, [db, soundEnabled, soundPreferenceReady]);
 
+  const toggleDrawHaptics = useCallback(() => {
+    if (!hapticsPreferenceReady) return;
+    const previous = hapticsEnabled;
+    const next = !previous;
+    setHapticsEnabled(next);
+    void writeDrawHapticsEnabled(db, next).catch(() => {
+      if (!requestMountedRef.current) return;
+      setHapticsEnabled((current) => current === next ? previous : current);
+      Alert.alert("진동 설정", "진동 설정을 저장하지 못했어요. 다시 시도해 주세요.");
+    });
+  }, [db, hapticsEnabled, hapticsPreferenceReady]);
+
   const targetImage = snapshot
     ? resolveCatalogImageUrl(snapshot.product.imageUrl, runtime.assetBaseUrl, snapshot.product.version)
     : null;
@@ -890,26 +908,41 @@ export function DrawRevealScreen() {
                   sourceCategory === "gacha" && completed && styles.lightGachaStage,
                 ]}
               >
-                {sourceCategory === "gacha" && !drawSequenceFinished ? (
-                  <Pressable
-                    accessibilityRole="switch"
-                    accessibilityLabel="가챠 효과음"
-                    accessibilityState={{ checked: soundPreferenceReady && soundEnabled, disabled: !soundPreferenceReady }}
-                    disabled={!soundPreferenceReady}
-                    hitSlop={6}
-                    onPress={toggleDrawSound}
-                    style={({ pressed }) => [
-                      styles.soundToggle,
-                      !soundPreferenceReady && styles.soundToggleDisabled,
-                      pressed && styles.pressed,
-                    ]}
-                  >
-                    <DecorativeIonicon
-                      name={soundPreferenceReady && soundEnabled ? "volume-medium-outline" : "volume-mute-outline"}
-                      size={21}
-                      color={soundPreferenceReady && soundEnabled ? colors.brand : seed.color.inverted.foregroundMuted}
-                    />
-                  </Pressable>
+                {isDrawCategory && !drawSequenceFinished ? (
+                  <>
+                    <Pressable
+                      accessibilityRole="switch"
+                      accessibilityLabel={sourceCategory === "gacha" ? "가챠 효과음" : "쿠지 효과음"}
+                      accessibilityState={{ checked: soundPreferenceReady && soundEnabled, disabled: !soundPreferenceReady }}
+                      disabled={!soundPreferenceReady}
+                      hitSlop={6}
+                      onPress={toggleDrawSound}
+                      style={({ pressed }) => [
+                        styles.soundToggle,
+                        !soundPreferenceReady && styles.soundToggleDisabled,
+                        pressed && styles.pressed,
+                      ]}
+                    >
+                      <DecorativeIonicon
+                        name={soundPreferenceReady && soundEnabled ? "volume-medium-outline" : "volume-mute-outline"}
+                        size={21}
+                        color={soundPreferenceReady && soundEnabled ? colors.brand : seed.color.inverted.foregroundMuted}
+                      />
+                    </Pressable>
+                    <Pressable
+                      accessibilityRole="switch"
+                      accessibilityLabel={sourceCategory === "gacha" ? "가챠 진동" : "쿠지 진동"}
+                      accessibilityState={{ checked: hapticsPreferenceReady && hapticsEnabled, disabled: !hapticsPreferenceReady }}
+                      disabled={!hapticsPreferenceReady}
+                      hitSlop={6}
+                      onPress={toggleDrawHaptics}
+                      style={({ pressed }) => [styles.soundToggle, styles.hapticsToggle,
+                        !hapticsPreferenceReady && styles.soundToggleDisabled, pressed && styles.pressed]}
+                    >
+                      <DecorativeIonicon name="phone-portrait-outline" size={21}
+                        color={hapticsPreferenceReady && hapticsEnabled ? colors.brand : seed.color.inverted.foregroundMuted} />
+                    </Pressable>
+                  </>
                 ) : null}
                 {!(sourceCategory === "gacha" && completed) ? (
                   <StageAmbient sourceCategory={sourceCategory} reduceMotion={reduceMotion} seed={drawEmberSeed} />
@@ -922,6 +955,8 @@ export function DrawRevealScreen() {
                     settled={completed}
                     reduceMotion={reduceMotion}
                     resultReady={Boolean(result || batchResults.length)}
+                    soundEnabled={soundPreferenceReady && soundEnabled}
+                    hapticsEnabled={hapticsPreferenceReady && hapticsEnabled}
                     resultLabel={result?.rarity ?? batchResults[0]?.rarity ?? "RESULT"}
                     resultTitle={result?.prizeName
                       ?? batchResults[0]?.prizeName
@@ -955,6 +990,7 @@ export function DrawRevealScreen() {
                     reduceMotion={reduceMotion}
                     soundEnabled={soundPreferenceReady && soundEnabled}
                     resultReady={Boolean(result || batchResults.length)}
+                    hapticsEnabled={hapticsPreferenceReady && hapticsEnabled}
                     requestSignal={revealRequestSignal}
                     resetSignal={revealResetSignal}
                     onRequestOpen={requestStageOpen}
@@ -1433,6 +1469,7 @@ const styles = StyleSheet.create({
   skipText: { color: colors.brand, ...seed.typography.label, fontWeight: "800" },
   soundToggle: { position: "absolute", zIndex: 30, top: seed.spacing.x2, right: seed.spacing.x2, width: seed.size.touchTarget, height: seed.size.touchTarget, borderRadius: seed.radius.full, borderWidth: StyleSheet.hairlineWidth, borderColor: seed.color.inverted.strokeStrong, backgroundColor: seed.color.inverted.surfaceRaised, alignItems: "center", justifyContent: "center" },
   soundToggleDisabled: { opacity: 0.48 },
+  hapticsToggle: { right: seed.spacing.x2 + seed.size.touchTarget + seed.spacing.x3 },
   pressed: { opacity: seed.state.pressedOpacity },
   state: { flex: 1, paddingHorizontal: seed.spacing.globalGutter, alignItems: "center", justifyContent: "center", gap: seed.spacing.componentDefault },
   stateText: { maxWidth: 330, color: seed.color.inverted.foregroundMuted, ...seed.typography.body, textAlign: "center" },

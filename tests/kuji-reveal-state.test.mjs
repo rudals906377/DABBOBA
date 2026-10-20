@@ -54,7 +54,7 @@ test("untouched kuji auto-open follows the reference hold, slow tear, and faster
       + DRAW_MOTION.kujiFastTearMs
       + DRAW_MOTION.kujiResultHoldMs
       + DRAW_MOTION.kujiImpactMs,
-    1570,
+    1830,
   );
   assert.equal(resolveKujiTravelSegments(0.25).holdMs, 0,
     "a user's direct drag must not replay the automatic opening pause");
@@ -70,6 +70,15 @@ test("kuji peel opens only after a deliberate rightward release", () => {
   assert.equal(resolveKujiPeelRelease(-80, 100, 2), "reset");
   assert.equal(resolveKujiPeelRelease(80, 0, 2), "reset");
   assert.equal(resolveKujiPeelRelease(Number.NaN, 100, 2), "reset");
+});
+
+test("the post-tear result cadence leaves time for paper departure before completion", () => {
+  assert.ok(DRAW_MOTION.kujiResultHoldMs >= 200, "the fully opened ticket needs a short readable beat");
+  assert.ok(DRAW_MOTION.kujiResultHoldMs + DRAW_MOTION.kujiImpactMs >= 600,
+    "the 600 ms paper flight must finish before parent completion can remove the layer");
+  assert.ok(DRAW_MOTION.kujiAutoHoldMs + DRAW_MOTION.kujiSlowTearMs + DRAW_MOTION.kujiFastTearMs
+    + DRAW_MOTION.kujiResultHoldMs + DRAW_MOTION.kujiImpactMs <= 2000,
+  "the added breathing room must not turn into a long result wait");
 });
 
 test("kuji motion waits for both the committed result and travel before impact", () => {

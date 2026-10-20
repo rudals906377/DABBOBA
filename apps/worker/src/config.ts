@@ -104,7 +104,7 @@ export type WorkerConfig = {
   retention?: WorkerRetentionConfig;
   /** Disabled by default; PostgreSQL-approved policies are required even in EXECUTE mode. */
   commerceRetention?: CommerceRetentionConfig;
-  /** Disabled by default: storage reminders and EXPIRED_HOLD are not an approved policy yet. */
+  /** Approved policy; stays disabled until matching schema, terms and push checks are deployed. */
   inventoryStorageExpiry?: InventoryStorageExpiryMode;
   logLevel: "debug" | "info" | "warn" | "error";
 };

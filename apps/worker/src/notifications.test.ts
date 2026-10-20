@@ -98,12 +98,22 @@ test("only optional external deliveries are mapped to mutable user preferences",
     userId: "user-1",
     kind: "EXCHANGE_OFFER_CREATED",
   }), false);
-  assert.equal(preferenceQueries, 1);
+  assert.equal(preferenceQueries, 0);
   assert.equal(await shouldDeliverNotificationExternally(optedOutPool, {
     userId: "user-1",
-    kind: "ORDER_PAID",
-  }), true);
-  assert.equal(preferenceQueries, 1);
+    kind: "STORAGE_EXPIRY_REMINDER",
+  }), false);
+  assert.equal(preferenceQueries, 0);
+  for (const days of [3, 7]) {
+    assert.equal(await shouldDeliverNotificationExternally(optedOutPool, {
+      userId: "user-1", kind: "STORAGE_EXPIRY_REMINDER", data: { remainingDays: days },
+    }), true);
+  }
+  for (const days of [1, 14, 0]) {
+    assert.equal(await shouldDeliverNotificationExternally(optedOutPool, {
+      userId: "user-1", kind: "STORAGE_EXPIRY_REMINDER", data: { remainingDays: days },
+    }), false);
+  }
 });
 
 test("catalog decisions keep approval and non-approval copy distinct", () => {
@@ -137,10 +147,10 @@ test("HTTP notification delivery rejects redirects before the notification body 
   const notification: Notification = {
     id: "notification-redirect-test",
     userId: "user-1",
-    kind: "ORDER_PAID",
-    title: "결제가 완료됐어요",
-    body: "구매 내역에서 주문 상태를 확인해 주세요.",
-    data: {},
+    kind: "STORAGE_EXPIRY_REMINDER",
+    title: "보관 만료 7일 전이에요",
+    body: "보관함에서 만료일을 확인해 주세요.",
+    data: { remainingDays: 7 },
     createdAt: "2026-08-25T03:00:00.000Z",
   };
 
@@ -167,10 +177,10 @@ test("HTTP notification delivery preserves direct provider requests and idempote
   const notification: Notification = {
     id: "notification-direct-test",
     userId: "user-1",
-    kind: "ORDER_PAID",
+    kind: "STORAGE_EXPIRY_REMINDER",
     title: "결제가 완료됐어요",
     body: "구매 내역에서 주문 상태를 확인해 주세요.",
-    data: { orderId: "order-1" },
+    data: { remainingDays: 3 },
     createdAt: "2026-08-25T03:00:00.000Z",
   };
 

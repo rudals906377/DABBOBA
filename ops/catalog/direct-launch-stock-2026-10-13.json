@@ -1,0 +1,423 @@
+{
+  "ownerConfirmedAt": "2026-10-13",
+  "sourceProject": "rconfxsykttfvznakile",
+  "purchaseMode": "DIRECT",
+  "expectedProductCount": 46,
+  "targetUnits": 920,
+  "items": [
+    {
+      "productId": "direct-gacha-chiikawa-monitor-cupcake-prize-01",
+      "sourcePrizeProductId": "gacha-chiikawa-monitor-cupcake-prize-01",
+      "parentProductId": "gacha-chiikawa-monitor-cupcake",
+      "name": "먼작귀 모니터 컵케이크 피규어 · 1",
+      "unitPrice": 6000,
+      "targetOnHand": 20,
+      "saleStatus": "COMING_SOON"
+    },
+    {
+      "productId": "direct-gacha-chiikawa-monitor-cupcake-prize-02",
+      "sourcePrizeProductId": "gacha-chiikawa-monitor-cupcake-prize-02",
+      "parentProductId": "gacha-chiikawa-monitor-cupcake",
+      "name": "먼작귀 모니터 컵케이크 피규어 · 2",
+      "unitPrice": 6000,
+      "targetOnHand": 20,
+      "saleStatus": "COMING_SOON"
+    },
+    {
+      "productId": "direct-gacha-chiikawa-monitor-cupcake-prize-03",
+      "sourcePrizeProductId": "gacha-chiikawa-monitor-cupcake-prize-03",
+      "parentProductId": "gacha-chiikawa-monitor-cupcake",
+      "name": "먼작귀 모니터 컵케이크 피규어 · 3",
+      "unitPrice": 6000,
+      "targetOnHand": 20,
+      "saleStatus": "COMING_SOON"
+    },
+    {
+      "productId": "direct-gacha-chiikawa-monitor-cupcake-prize-04",
+      "sourcePrizeProductId": "gacha-chiikawa-monitor-cupcake-prize-04",
+      "parentProductId": "gacha-chiikawa-monitor-cupcake",
+      "name": "먼작귀 모니터 컵케이크 피규어 · 4",
+      "unitPrice": 6000,
+      "targetOnHand": 20,
+      "saleStatus": "COMING_SOON"
+    },
+    {
+      "productId": "direct-gacha-chiikawa-monitor-cupcake-prize-05",
+      "sourcePrizeProductId": "gacha-chiikawa-monitor-cupcake-prize-05",
+      "parentProductId": "gacha-chiikawa-monitor-cupcake",
+      "name": "먼작귀 모니터 컵케이크 피규어 · 5",
+      "unitPrice": 6000,
+      "targetOnHand": 20,
+      "saleStatus": "COMING_SOON"
+    },
+    {
+      "productId": "direct-gacha-chiikawa-monitor-cupcake-prize-06",
+      "sourcePrizeProductId": "gacha-chiikawa-monitor-cupcake-prize-06",
+      "parentProductId": "gacha-chiikawa-monitor-cupcake",
+      "name": "먼작귀 모니터 컵케이크 피규어 · 6",
+      "unitPrice": 6000,
+      "targetOnHand": 20,
+      "saleStatus": "COMING_SOON"
+    },
+    {
+      "productId": "direct-gacha-chiikawa-monitor-cupcake-prize-07",
+      "sourcePrizeProductId": "gacha-chiikawa-monitor-cupcake-prize-07",
+      "parentProductId": "gacha-chiikawa-monitor-cupcake",
+      "name": "먼작귀 모니터 컵케이크 피규어 · 7",
+      "unitPrice": 6000,
+      "targetOnHand": 20,
+      "saleStatus": "COMING_SOON"
+    },
+    {
+      "productId": "direct-gacha-death-note-collection-rich-prize-01",
+      "sourcePrizeProductId": "gacha-death-note-collection-rich-prize-01",
+      "parentProductId": "gacha-death-note-collection-rich",
+      "name": "데스노트 콜렉션 피규어 리치 · 니아",
+      "unitPrice": 7000,
+      "targetOnHand": 20,
+      "saleStatus": "COMING_SOON"
+    },
+    {
+      "productId": "direct-gacha-death-note-collection-rich-prize-02",
+      "sourcePrizeProductId": "gacha-death-note-collection-rich-prize-02",
+      "parentProductId": "gacha-death-note-collection-rich",
+      "name": "데스노트 콜렉션 피규어 리치 · 멜로",
+      "unitPrice": 7000,
+      "targetOnHand": 20,
+      "saleStatus": "COMING_SOON"
+    },
+    {
+      "productId": "direct-gacha-death-note-collection-rich-prize-03",
+      "sourcePrizeProductId": "gacha-death-note-collection-rich-prize-03",
+      "parentProductId": "gacha-death-note-collection-rich",
+      "name": "데스노트 콜렉션 피규어 리치 · 아마네 미사",
+      "unitPrice": 7000,
+      "targetOnHand": 20,
+      "saleStatus": "COMING_SOON"
+    },
+    {
+      "productId": "direct-gacha-death-note-collection-rich-prize-04",
+      "sourcePrizeProductId": "gacha-death-note-collection-rich-prize-04",
+      "parentProductId": "gacha-death-note-collection-rich",
+      "name": "데스노트 콜렉션 피규어 리치 · 야가미 라이토",
+      "unitPrice": 7000,
+      "targetOnHand": 20,
+      "saleStatus": "COMING_SOON"
+    },
+    {
+      "productId": "direct-gacha-death-note-collection-rich-prize-05",
+      "sourcePrizeProductId": "gacha-death-note-collection-rich-prize-05",
+      "parentProductId": "gacha-death-note-collection-rich",
+      "name": "데스노트 콜렉션 피규어 리치 · L",
+      "unitPrice": 7000,
+      "targetOnHand": 20,
+      "saleStatus": "COMING_SOON"
+    },
+    {
+      "productId": "direct-gacha-demon-slayer-onemutan-13-prize-01",
+      "sourcePrizeProductId": "gacha-demon-slayer-onemutan-13-prize-01",
+      "parentProductId": "gacha-demon-slayer-onemutan-13",
+      "name": "귀멸의 칼날 오네무탄 13형 · 굣코",
+      "unitPrice": 6000,
+      "targetOnHand": 20,
+      "saleStatus": "COMING_SOON"
+    },
+    {
+      "productId": "direct-gacha-demon-slayer-onemutan-13-prize-02",
+      "sourcePrizeProductId": "gacha-demon-slayer-onemutan-13-prize-02",
+      "parentProductId": "gacha-demon-slayer-onemutan-13",
+      "name": "귀멸의 칼날 오네무탄 13형 · 도우마",
+      "unitPrice": 6000,
+      "targetOnHand": 20,
+      "saleStatus": "COMING_SOON"
+    },
+    {
+      "productId": "direct-gacha-demon-slayer-onemutan-13-prize-03",
+      "sourcePrizeProductId": "gacha-demon-slayer-onemutan-13-prize-03",
+      "parentProductId": "gacha-demon-slayer-onemutan-13",
+      "name": "귀멸의 칼날 오네무탄 13형 · 카이가쿠",
+      "unitPrice": 6000,
+      "targetOnHand": 20,
+      "saleStatus": "COMING_SOON"
+    },
+    {
+      "productId": "direct-gacha-demon-slayer-onemutan-13-prize-04",
+      "sourcePrizeProductId": "gacha-demon-slayer-onemutan-13-prize-04",
+      "parentProductId": "gacha-demon-slayer-onemutan-13",
+      "name": "귀멸의 칼날 오네무탄 13형 · 키부츠지 무잔",
+      "unitPrice": 6000,
+      "targetOnHand": 20,
+      "saleStatus": "COMING_SOON"
+    },
+    {
+      "productId": "direct-gacha-demon-slayer-onemutan-13-prize-05",
+      "sourcePrizeProductId": "gacha-demon-slayer-onemutan-13-prize-05",
+      "parentProductId": "gacha-demon-slayer-onemutan-13",
+      "name": "귀멸의 칼날 오네무탄 13형 · 한텐구&조하쿠텐",
+      "unitPrice": 6000,
+      "targetOnHand": 20,
+      "saleStatus": "COMING_SOON"
+    },
+    {
+      "productId": "direct-gacha-demon-slayer-petatto-2-prize-01",
+      "sourcePrizeProductId": "gacha-demon-slayer-petatto-2-prize-01",
+      "parentProductId": "gacha-demon-slayer-petatto-2",
+      "name": "귀멸의 칼날 페탓토 태엽감기 마스코트 Vol.2 · 렌고쿠 쿄쥬로",
+      "unitPrice": 7000,
+      "targetOnHand": 20,
+      "saleStatus": "COMING_SOON"
+    },
+    {
+      "productId": "direct-gacha-demon-slayer-petatto-2-prize-02",
+      "sourcePrizeProductId": "gacha-demon-slayer-petatto-2-prize-02",
+      "parentProductId": "gacha-demon-slayer-petatto-2",
+      "name": "귀멸의 칼날 페탓토 태엽감기 마스코트 Vol.2 · 우즈이 텐겐",
+      "unitPrice": 7000,
+      "targetOnHand": 20,
+      "saleStatus": "COMING_SOON"
+    },
+    {
+      "productId": "direct-gacha-demon-slayer-petatto-2-prize-03",
+      "sourcePrizeProductId": "gacha-demon-slayer-petatto-2-prize-03",
+      "parentProductId": "gacha-demon-slayer-petatto-2",
+      "name": "귀멸의 칼날 페탓토 태엽감기 마스코트 Vol.2 · 츠유리 카나오",
+      "unitPrice": 7000,
+      "targetOnHand": 20,
+      "saleStatus": "COMING_SOON"
+    },
+    {
+      "productId": "direct-gacha-demon-slayer-petatto-2-prize-04",
+      "sourcePrizeProductId": "gacha-demon-slayer-petatto-2-prize-04",
+      "parentProductId": "gacha-demon-slayer-petatto-2",
+      "name": "귀멸의 칼날 페탓토 태엽감기 마스코트 Vol.2 · 코쵸우 시노부",
+      "unitPrice": 7000,
+      "targetOnHand": 20,
+      "saleStatus": "COMING_SOON"
+    },
+    {
+      "productId": "direct-gacha-demon-slayer-petatto-2-prize-05",
+      "sourcePrizeProductId": "gacha-demon-slayer-petatto-2-prize-05",
+      "parentProductId": "gacha-demon-slayer-petatto-2",
+      "name": "귀멸의 칼날 페탓토 태엽감기 마스코트 Vol.2 · 토미오카 기유",
+      "unitPrice": 7000,
+      "targetOnHand": 20,
+      "saleStatus": "COMING_SOON"
+    },
+    {
+      "productId": "direct-gacha-demon-slayer-petatto-3-prize-01",
+      "sourcePrizeProductId": "gacha-demon-slayer-petatto-3-prize-01",
+      "parentProductId": "gacha-demon-slayer-petatto-3",
+      "name": "귀멸의 칼날 페탓토 태엽감기 마스코트 Vol.3 · 시나즈가와 사네미",
+      "unitPrice": 7000,
+      "targetOnHand": 20,
+      "saleStatus": "COMING_SOON"
+    },
+    {
+      "productId": "direct-gacha-demon-slayer-petatto-3-prize-02",
+      "sourcePrizeProductId": "gacha-demon-slayer-petatto-3-prize-02",
+      "parentProductId": "gacha-demon-slayer-petatto-3",
+      "name": "귀멸의 칼날 페탓토 태엽감기 마스코트 Vol.3 · 이구로 오바나이",
+      "unitPrice": 7000,
+      "targetOnHand": 20,
+      "saleStatus": "COMING_SOON"
+    },
+    {
+      "productId": "direct-gacha-demon-slayer-petatto-3-prize-03",
+      "sourcePrizeProductId": "gacha-demon-slayer-petatto-3-prize-03",
+      "parentProductId": "gacha-demon-slayer-petatto-3",
+      "name": "귀멸의 칼날 페탓토 태엽감기 마스코트 Vol.3 · 칸로지 미츠리",
+      "unitPrice": 7000,
+      "targetOnHand": 20,
+      "saleStatus": "COMING_SOON"
+    },
+    {
+      "productId": "direct-gacha-demon-slayer-petatto-3-prize-04",
+      "sourcePrizeProductId": "gacha-demon-slayer-petatto-3-prize-04",
+      "parentProductId": "gacha-demon-slayer-petatto-3",
+      "name": "귀멸의 칼날 페탓토 태엽감기 마스코트 Vol.3 · 토키토 무이치로",
+      "unitPrice": 7000,
+      "targetOnHand": 20,
+      "saleStatus": "COMING_SOON"
+    },
+    {
+      "productId": "direct-gacha-demon-slayer-petatto-3-prize-05",
+      "sourcePrizeProductId": "gacha-demon-slayer-petatto-3-prize-05",
+      "parentProductId": "gacha-demon-slayer-petatto-3",
+      "name": "귀멸의 칼날 페탓토 태엽감기 마스코트 Vol.3 · 히메지와 교메이",
+      "unitPrice": 7000,
+      "targetOnHand": 20,
+      "saleStatus": "COMING_SOON"
+    },
+    {
+      "productId": "direct-gacha-hatsune-miku-petadoll-prize-01",
+      "sourcePrizeProductId": "gacha-hatsune-miku-petadoll-prize-01",
+      "parentProductId": "gacha-hatsune-miku-petadoll",
+      "name": "하츠네미쿠 페타돌 피어프로 캐릭터즈 · 메구리네 루카",
+      "unitPrice": 16000,
+      "targetOnHand": 20,
+      "saleStatus": "COMING_SOON"
+    },
+    {
+      "productId": "direct-gacha-hatsune-miku-petadoll-prize-02",
+      "sourcePrizeProductId": "gacha-hatsune-miku-petadoll-prize-02",
+      "parentProductId": "gacha-hatsune-miku-petadoll",
+      "name": "하츠네미쿠 페타돌 피어프로 캐릭터즈 · 메이코",
+      "unitPrice": 16000,
+      "targetOnHand": 20,
+      "saleStatus": "COMING_SOON"
+    },
+    {
+      "productId": "direct-gacha-hatsune-miku-petadoll-prize-03",
+      "sourcePrizeProductId": "gacha-hatsune-miku-petadoll-prize-03",
+      "parentProductId": "gacha-hatsune-miku-petadoll",
+      "name": "하츠네미쿠 페타돌 피어프로 캐릭터즈 · 카가미네 렌",
+      "unitPrice": 16000,
+      "targetOnHand": 20,
+      "saleStatus": "COMING_SOON"
+    },
+    {
+      "productId": "direct-gacha-hatsune-miku-petadoll-prize-04",
+      "sourcePrizeProductId": "gacha-hatsune-miku-petadoll-prize-04",
+      "parentProductId": "gacha-hatsune-miku-petadoll",
+      "name": "하츠네미쿠 페타돌 피어프로 캐릭터즈 · 카가미네 린",
+      "unitPrice": 16000,
+      "targetOnHand": 20,
+      "saleStatus": "COMING_SOON"
+    },
+    {
+      "productId": "direct-gacha-hatsune-miku-petadoll-prize-05",
+      "sourcePrizeProductId": "gacha-hatsune-miku-petadoll-prize-05",
+      "parentProductId": "gacha-hatsune-miku-petadoll",
+      "name": "하츠네미쿠 페타돌 피어프로 캐릭터즈 · 카이토",
+      "unitPrice": 16000,
+      "targetOnHand": 20,
+      "saleStatus": "COMING_SOON"
+    },
+    {
+      "productId": "direct-gacha-hatsune-miku-petadoll-prize-06",
+      "sourcePrizeProductId": "gacha-hatsune-miku-petadoll-prize-06",
+      "parentProductId": "gacha-hatsune-miku-petadoll",
+      "name": "하츠네미쿠 페타돌 피어프로 캐릭터즈 · 하츠네 미쿠",
+      "unitPrice": 16000,
+      "targetOnHand": 20,
+      "saleStatus": "COMING_SOON"
+    },
+    {
+      "productId": "direct-gacha-sanrio-can-figures-prize-01",
+      "sourcePrizeProductId": "gacha-sanrio-can-figures-prize-01",
+      "parentProductId": "gacha-sanrio-can-figures",
+      "name": "산리오 캐릭터즈 캔 속 피규어 · 1",
+      "unitPrice": 5000,
+      "targetOnHand": 20,
+      "saleStatus": "COMING_SOON"
+    },
+    {
+      "productId": "direct-gacha-sanrio-can-figures-prize-02",
+      "sourcePrizeProductId": "gacha-sanrio-can-figures-prize-02",
+      "parentProductId": "gacha-sanrio-can-figures",
+      "name": "산리오 캐릭터즈 캔 속 피규어 · 2",
+      "unitPrice": 5000,
+      "targetOnHand": 20,
+      "saleStatus": "COMING_SOON"
+    },
+    {
+      "productId": "direct-gacha-sanrio-can-figures-prize-03",
+      "sourcePrizeProductId": "gacha-sanrio-can-figures-prize-03",
+      "parentProductId": "gacha-sanrio-can-figures",
+      "name": "산리오 캐릭터즈 캔 속 피규어 · 3",
+      "unitPrice": 5000,
+      "targetOnHand": 20,
+      "saleStatus": "COMING_SOON"
+    },
+    {
+      "productId": "direct-gacha-sanrio-can-figures-prize-04",
+      "sourcePrizeProductId": "gacha-sanrio-can-figures-prize-04",
+      "parentProductId": "gacha-sanrio-can-figures",
+      "name": "산리오 캐릭터즈 캔 속 피규어 · 4",
+      "unitPrice": 5000,
+      "targetOnHand": 20,
+      "saleStatus": "COMING_SOON"
+    },
+    {
+      "productId": "direct-gacha-sanrio-can-figures-prize-05",
+      "sourcePrizeProductId": "gacha-sanrio-can-figures-prize-05",
+      "parentProductId": "gacha-sanrio-can-figures",
+      "name": "산리오 캐릭터즈 캔 속 피규어 · 5",
+      "unitPrice": 5000,
+      "targetOnHand": 20,
+      "saleStatus": "COMING_SOON"
+    },
+    {
+      "productId": "direct-gacha-sylvanian-adventure-prize-01",
+      "sourcePrizeProductId": "gacha-sylvanian-adventure-prize-01",
+      "parentProductId": "gacha-sylvanian-adventure",
+      "name": "실바니안 패밀리 아기 어드벤처 시리즈 · 시크릿",
+      "unitPrice": 11000,
+      "targetOnHand": 20,
+      "saleStatus": "COMING_SOON"
+    },
+    {
+      "productId": "direct-gacha-sylvanian-adventure-prize-02",
+      "sourcePrizeProductId": "gacha-sylvanian-adventure-prize-02",
+      "parentProductId": "gacha-sylvanian-adventure",
+      "name": "실바니안 패밀리 아기 어드벤처 시리즈 · 아기 라테네코 고양이와 헬멧&광차",
+      "unitPrice": 11000,
+      "targetOnHand": 20,
+      "saleStatus": "COMING_SOON"
+    },
+    {
+      "productId": "direct-gacha-sylvanian-adventure-prize-03",
+      "sourcePrizeProductId": "gacha-sylvanian-adventure-prize-03",
+      "parentProductId": "gacha-sylvanian-adventure",
+      "name": "실바니안 패밀리 아기 어드벤처 시리즈 · 아기 밀크 토끼와 선인장 코스튬",
+      "unitPrice": 11000,
+      "targetOnHand": 20,
+      "saleStatus": "COMING_SOON"
+    },
+    {
+      "productId": "direct-gacha-sylvanian-adventure-prize-04",
+      "sourcePrizeProductId": "gacha-sylvanian-adventure-prize-04",
+      "parentProductId": "gacha-sylvanian-adventure",
+      "name": "실바니안 패밀리 아기 어드벤처 시리즈 · 아기 초콜릿 토끼와 티아라",
+      "unitPrice": 11000,
+      "targetOnHand": 20,
+      "saleStatus": "COMING_SOON"
+    },
+    {
+      "productId": "direct-gacha-sylvanian-adventure-prize-05",
+      "sourcePrizeProductId": "gacha-sylvanian-adventure-prize-05",
+      "parentProductId": "gacha-sylvanian-adventure",
+      "name": "실바니안 패밀리 아기 어드벤처 시리즈 · 아기 팬더와 미라 코스튬",
+      "unitPrice": 11000,
+      "targetOnHand": 20,
+      "saleStatus": "COMING_SOON"
+    },
+    {
+      "productId": "direct-gacha-sylvanian-adventure-prize-06",
+      "sourcePrizeProductId": "gacha-sylvanian-adventure-prize-06",
+      "parentProductId": "gacha-sylvanian-adventure",
+      "name": "실바니안 패밀리 아기 어드벤처 시리즈 · 아기 허스키와 곡괭이",
+      "unitPrice": 11000,
+      "targetOnHand": 20,
+      "saleStatus": "COMING_SOON"
+    },
+    {
+      "productId": "direct-gacha-sylvanian-adventure-prize-07",
+      "sourcePrizeProductId": "gacha-sylvanian-adventure-prize-07",
+      "parentProductId": "gacha-sylvanian-adventure",
+      "name": "실바니안 패밀리 아기 어드벤처 시리즈 · 아기 호랑이와 카우보이 모자",
+      "unitPrice": 11000,
+      "targetOnHand": 20,
+      "saleStatus": "COMING_SOON"
+    },
+    {
+      "productId": "direct-gacha-sylvanian-adventure-prize-08",
+      "sourcePrizeProductId": "gacha-sylvanian-adventure-prize-08",
+      "parentProductId": "gacha-sylvanian-adventure",
+      "name": "실바니안 패밀리 아기 어드벤처 시리즈 · 엎드린 아기 물범과 악어 코스튬",
+      "unitPrice": 11000,
+      "targetOnHand": 20,
+      "saleStatus": "COMING_SOON"
+    }
+  ]
+}

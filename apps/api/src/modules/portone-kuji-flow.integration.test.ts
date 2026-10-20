@@ -1,3 +1,4 @@
+import { historicalOrderFixture } from "../legacy-order.integration-fixtures.js";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
@@ -92,7 +93,7 @@ test("verified PortOne kuji payment leads to sealed ticket results and owned inv
   assert.ok([200, 201].includes(room.statusCode), room.body);
   const entryId = (room.json() as { viewer: { entryId: string; state: string } }).viewer.entryId;
   assert.equal((room.json() as { viewer: { state: string } }).viewer.state, "CHECKOUT_PENDING");
-  const ordered = await app.inject({
+  const ordered = await historicalOrderFixture(app, pool, config, {
     method: "POST", url: "/v1/orders",
     headers: { ...auth(customer.token), "idempotency-key": randomUUID() },
     payload: { items: [{ productId, quantity: 2, expectedDrawVersion: 1 }], pointAmount: 0, kujiRoomEntryId: entryId },
@@ -288,7 +289,7 @@ test("PortOne payment outside a kuji checkout lease releases the room and requir
   assert.ok([200, 201].includes(waiting.statusCode), waiting.body);
   const waitingEntry = (waiting.json() as { viewer: { entryId: string; state: string } }).viewer;
   assert.equal(waitingEntry.state, "WAITING");
-  const ordered = await app.inject({
+  const ordered = await historicalOrderFixture(app, pool, config, {
     method: "POST", url: "/v1/orders",
     headers: { ...auth(customer.token), "idempotency-key": randomUUID() },
     payload: { items: [{ productId, quantity: 1, expectedDrawVersion: 1 }], pointAmount: 0, kujiRoomEntryId: room.viewer.entryId },

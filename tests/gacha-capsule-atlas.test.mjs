@@ -226,19 +226,25 @@ test("the production atlas holds perfectly still before the seal opens", () => {
 });
 
 test("supersampled closed sphere has a smooth antialiased contour without enlarging the native texture", () => {
-  assert.equal(manifest.generator.supersample, 2);
   const decoded = decodeRgbaPng(atlasPng);
   const frame = framePixels(decoded, 0);
   let antialiased = 0;
+  const coverageLevels = new Set();
   const solid = [];
   for (let y = 0; y < manifest.frameHeight; y += 1) {
     for (let x = 0; x < manifest.frameWidth; x += 1) {
       const alpha = frame[(y * manifest.frameWidth + x) * 4 + 3];
-      if (alpha > 0 && alpha < 255) antialiased += 1;
+      if (alpha > 0 && alpha < 255) {
+        antialiased += 1;
+        coverageLevels.add(alpha);
+      }
       if (alpha >= 128) solid.push({ x, y });
     }
   }
-  assert.ok(antialiased >= 80, "the 2× offline render must produce genuine smooth coverage at the silhouette");
+  assert.ok(coverageLevels.size >= 40,
+    `magnification needs fine silhouette coverage instead of a few hard alpha steps; found ${coverageLevels.size}`);
+  assert.ok(antialiased >= 80, "offline rendering must produce genuine smooth coverage at the silhouette");
+  assert.equal(manifest.generator.supersample, 8);
   const width = Math.max(...solid.map((point) => point.x)) - Math.min(...solid.map((point) => point.x)) + 1;
   const height = Math.max(...solid.map((point) => point.y)) - Math.min(...solid.map((point) => point.y)) + 1;
   assert.ok(Math.abs(width - height) <= 2, "the closed silhouette must remain round");
@@ -246,4 +252,44 @@ test("supersampled closed sphere has a smooth antialiased contour without enlarg
   assert.equal(manifest.frameWidth, 192);
   assert.equal(manifest.frameHeight, 256);
   assert.equal(decoded.width * decoded.height * 4, 15 * 1024 * 1024);
+});
+
+test("the opened upper shell has no saturated green coupling line", () => {
+  // Pose 35 cleanly separates the white upper cap from the green lower bowl.
+  // Check opaque upper-cap pixels, excluding the translucent inner-light halo.
+  const decoded = decodeRgbaPng(atlasPng);
+  const frame = framePixels(decoded, 35);
+  let greenRimPixels = 0;
+  for (let y = 48; y <= 128; y += 1) {
+    for (let x = 32; x < 160; x += 1) {
+      const offset = (y * manifest.frameWidth + x) * 4;
+      const [r, g, b, a] = frame.subarray(offset, offset + 4);
+      if (a >= 245 && g - r > 18 && g - b > 18) greenRimPixels += 1;
+    }
+  }
+  assert.equal(greenRimPixels, 0, "the white upper lip must not inherit the green bowl material");
+});
+
+test("the lower bowl's exposed mouth has no green speckles above its bright face", () => {
+  const frame = framePixels(decodeRgbaPng(atlasPng), 35);
+  let greenEdgePixels = 0;
+  let checked = 0;
+  for (let x = 55; x <= 140; x += 1) {
+    // Locate the rear lip after the transparent gap, separately in each column.
+    let edgeY = -1;
+    for (let y = 131; y < 160; y += 1) {
+      if (frame[(y * manifest.frameWidth + x) * 4 + 3] >= 245) { edgeY = y; break; }
+    }
+    assert.ok(edgeY >= 0);
+    for (let y = edgeY; y < edgeY + 2; y += 1) {
+      const offset = (y * manifest.frameWidth + x) * 4;
+      const [r, g, b, a] = frame.subarray(offset, offset + 4);
+      if (a >= 245 && g - r > 18 && g - b > 18) greenEdgePixels += 1;
+      checked += 1;
+    }
+  }
+  assert.equal(checked, 172);
+  assert.equal(greenEdgePixels, 0, "the exposed lower collar must blend into its bright mouth");
+  const bowl = (190 * manifest.frameWidth + 96) * 4;
+  assert.ok(frame[bowl + 1] - frame[bowl] > 25, "the actual bowl must remain green");
 });

@@ -1,6 +1,7 @@
 import { withTransaction, type DatabasePool } from "@dabboba/db";
 import type { Logger } from "./logger.js";
 import type { Notification, NotificationDelivery } from "./notifications.js";
+import { isStorageExpiryPush } from "./notifications.js";
 
 const EXPO_SEND_URL = "https://exp.host/--/api/v2/push/send";
 const EXPO_RECEIPTS_URL = "https://exp.host/--/api/v2/push/getReceipts";
@@ -63,6 +64,7 @@ export class ExpoPushNotificationDelivery implements NotificationDelivery {
   }
 
   async deliver(notification: Notification): Promise<void> {
+    if (!isStorageExpiryPush(notification)) return;
     await this.pool.query(
       `INSERT INTO push_notification_deliveries(notification_id,push_device_token_id)
        SELECT $1,device.id
@@ -89,6 +91,16 @@ export class ExpoPushNotificationDelivery implements NotificationDelivery {
 
   async #expireIneligibleAndRecoverStale(): Promise<void> {
     const staleBefore = new Date(this.#now().getTime() - STALE_SENDING_MS);
+    await this.pool.query(
+      `UPDATE push_notification_deliveries delivery
+          SET status='INVALID',completed_at=now(),last_error_code='OUTSIDE_STORAGE_REMINDER_SCOPE'
+         FROM notifications notification
+        WHERE notification.id=delivery.notification_id AND delivery.status IN ('PENDING','SENDING')
+          AND (notification.kind<>'STORAGE_EXPIRY_REMINDER'
+               OR COALESCE(notification.data->>'remainingDays','') NOT IN ('3','7')
+               OR (notification.data->>'storageExpiresAt')::timestamptz IS NULL
+               OR (notification.data->>'storageExpiresAt')::timestamptz<=now())`,
+    );
     await this.pool.query(
       `UPDATE push_notification_deliveries delivery
           SET status='INVALID',completed_at=now(),last_error_code='DEVICE_DISABLED'
@@ -139,6 +151,9 @@ export class ExpoPushNotificationDelivery implements NotificationDelivery {
             AND session.revoked_at IS NULL
             AND session.expires_at>now()
           WHERE delivery.status='PENDING'
+            AND notification.kind='STORAGE_EXPIRY_REMINDER'
+            AND notification.data->>'remainingDays' IN ('3','7')
+            AND (notification.data->>'storageExpiresAt')::timestamptz>now()
             AND delivery.next_attempt_at<=now()
             AND delivery.send_attempt_count<${MAX_ATTEMPTS}
             AND device.disabled_at IS NULL

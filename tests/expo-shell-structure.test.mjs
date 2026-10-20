@@ -266,12 +266,12 @@ test("Expo entry is native-first with typed routes, API contracts, secure tokens
   assert.match(
     tabsLayoutSource,
     /name="gacha"[\s\S]*?name="kuji"[\s\S]*?name="index"[\s\S]*?name="storage"[\s\S]*?name="profile"/,
-    "root navigation order must stay 가챠샵 → 쿠지샵 → 홈 → 보관함 → 내정보",
+    "root navigation keeps the hidden kuji route for old links",
   );
   assert.match(tabsLayoutSource, /name="gacha"[\s\S]*?title: "가챠샵"[\s\S]*?tabBarIcon: GachaCapsuleIcon/);
   assert.match(
     tabsLayoutSource,
-    /name="kuji"[\s\S]*?title: "쿠지샵"[\s\S]*?tabBarIcon: KujiTicketIcon[\s\S]*?tabBarActiveTintColor: colors\.kujiOrangeDark/,
+    /name="kuji"/,
   );
   assert.doesNotMatch(tabsLayoutSource, /name="exchange"|name="ppoba"/);
   assert.equal(existsSync(path.join(root, "apps/mobile/app/(tabs)/exchange.tsx")), false);
@@ -409,14 +409,14 @@ test("native Home follows the operator-defined editorial structure and layoutKin
   assert.match(homeSource, /collectionImageFrame:\s*\{\s*width:\s*"100%"/);
   assert.doesNotMatch(homeSource, /productGrid|flexWrap:\s*"wrap"/);
   assert.doesNotMatch(homeSource, /다뽀바 인기 작품|다뽀바 덕룸|fetchDukroomHomePreview/);
-  assert.match(homeSource, /buildConfiguredHomeCollections\(snapshot\.homeSections\.items\.map/);
+  assert.match(homeSource, /buildConfiguredHomeCollections\(snapshot\.homeSections\.items\.filter/);
   assert.doesNotMatch(homeSource, /seenProductIds/);
   assert.match(localDatabaseSource, /homeSections:\s*isCurrentHomeSectionList\(parsed\.homeSections\) \? parsed\.homeSections : null/);
   assert.match(announcementTickerSource, /Animated\.timing\(translateX/);
   assert.match(announcementTickerSource, /Animated\.timing\(translateY/);
   assert.match(announcementTickerSource, /AccessibilityInfo\.isReduceMotionEnabled/);
   assert.doesNotMatch(homeSource, /화면 예시|IMAGE READY/);
-  assert.match(homeSource, /<HomeIntroBanner[\s\S]*?<RecentDrawActivityPanel[\s\S]*?activity=\{recentDrawActivity\}[\s\S]*?\{homeCollections\.map/);
+  assert.match(homeSource, /<HomeIntroBanner[\s\S]*?\{homeCollections\.map/);
   assert.match(
     homeSource,
     /useFocusEffect\([\s\S]*?initialLoadCompleted\.current[\s\S]*?void load\(\)/,
@@ -882,11 +882,12 @@ test("native exchange room uses server records and opens registration, activity,
   assert.match(exchangeRoomSource, /writeExchangeRulesDismissed/);
   assert.match(localDatabaseSource, /DATABASE_VERSION = 4/);
   assert.match(localDatabaseSource, /CREATE TABLE IF NOT EXISTS app_preferences/);
-  assert.match(localDatabaseSource, /exchange\.rules\.dismissed\.v3/);
+  assert.match(localDatabaseSource, /exchange\.rules\.dismissed\.v4/);
   assert.match(localDatabaseSource, /exchange\.listings\.v3/);
   assert.match(exchangeRoomSource, /등록글은 7일 동안 공개/);
   assert.match(exchangeRoomSource, /남은 보관 기간이 14일보다 짧으면 14일로 연장/);
-  assert.match(exchangeRoomSource, /교환으로 받은 상품은 포인트 환급 대상이 아니며, 본인이 가챠에서 직접 뽑아 보관 중인 상품만 포인트로 환급/);
+  assert.doesNotMatch(exchangeRoomSource, /포인트로 환급/);
+  assert.match(exchangeRoomSource, /구매해 획득/);
   assert.doesNotMatch(exchangeRoomSource, /표시 금액은 판매가가 아닌 앱 기준가예요/);
   assert.doesNotMatch(exchangeRoomSource, /<ExchangeRuleCard/);
   assert.doesNotMatch(exchangeRoomSource, /가챠샵에서 구매해 보관함에 등록된 상품만 올릴 수 있어요/);
@@ -907,7 +908,7 @@ test("native exchange room uses server records and opens registration, activity,
   assert.match(exchangeRoomSource, /제안 \{item\.offerCount\}개 · D-\{daysLeft\}/);
   assert.doesNotMatch(exchangeRoomSource, /applyTile|>교환 신청</);
   assert.match(exchangeRoomSource, /animationType=\{reduceMotion \? "none" : "fade"\}/);
-  assert.match(exchangeRoomSource, /쿠지·피규어·카드 상품은 교환과 포인트 환급 대상이 아니에요\./);
+  assert.match(exchangeRoomSource, /쿠지·피규어·카드 상품은 교환 대상이 아니에요\./);
   assert.match(exchangeRoomSource, /accessibilityLabel="교환 상품 올리기"/);
   assert.match(exchangeRoomSource, /accessibilityLabel="내 교환 현황"/);
   assert.match(exchangeActivityRouteSource, /ExchangeActivityScreen/);
@@ -927,7 +928,7 @@ test("native exchange room uses server records and opens registration, activity,
   assert.doesNotMatch(exchangeCreateSource, /올릴 상품 선택/);
   assert.doesNotMatch(exchangeCreateSource, /등록하는 동안 이 상품은 교환용으로 안전하게 보관돼요/);
   assert.match(exchangeCreateSource, /등록 가능한 상품이 없어요/);
-  assert.match(exchangeCreateSource, /<BalancedParagraphText[\s\S]*?paragraphs=\{\[\s*"가챠로 뽑은 상품만 가능해요\.",\s*"배송을 신청했거나 이미 받은 상품, 포인트 환급·다른 교환에 사용 중인 상품은 표시되지 않아요\.",?\s*\]\}/);
+  assert.match(exchangeCreateSource, /<BalancedParagraphText[\s\S]*?paragraphs=\{\[\s*"본인이 구매해 획득한 적격 보관 상품만 가능해요\.",\s*"배송을 신청했거나 이미 받은 상품, 다른 교환에 사용 중인 상품은 표시되지 않아요\.",?\s*\]\}/);
   assert.match(exchangeCreateSource, /accessibilityRole="checkbox"/);
   assert.match(exchangeCreateSource, /선택 \{selectedIds\.length\}\/2개/);
   assert.match(exchangeCreateSource, /title\.trim\(\)/);
@@ -969,7 +970,7 @@ test("native exchange room uses server records and opens registration, activity,
   assert.match(exchangeOfferSource, /교환 아이템 선택/);
   assert.match(exchangeOfferSource, /fetchExchangeDetail/);
   assert.match(exchangeOfferSource, /accessibilityRole="checkbox"/);
-  assert.match(exchangeOfferSource, /가챠로 뽑은 상품만 가능해요/);
+  assert.match(exchangeOfferSource, /본인이 구매해 획득한 적격 보관 상품만 가능해요/);
   assert.match(exchangeOfferSource, /교환 신청 완료/);
   assert.doesNotMatch(exchangeOfferSource, /AppTextInput|TextInput|Keyboard/);
   assert.doesNotMatch(exchangeDetailSource, /교환 규칙|ruleBox/);
@@ -991,7 +992,7 @@ test("native customer screens omit repeated reference-price disclaimers", () => 
   assert.match(profileSectionSource, /예상 환급 포인트 · 구매가의 50%/);
 });
 
-test("native gacha and kuji shops coexist with the shared drawn-product storage root", () => {
+test("native shop hides kuji while preserving the storage root", () => {
   assert.match(gachaRouteSource, /<ShopScreen category="gacha" \/>/);
   assert.match(kujiRouteSource, /<ShopScreen category="kuji" \/>/);
   assert.doesNotMatch(`${gachaRouteSource}\n${kujiRouteSource}`, /MigrationScreen/);
@@ -1065,7 +1066,7 @@ test("native gacha and kuji shops coexist with the shared drawn-product storage 
   assert.match(profileHomeSource, /section === "exchange-activity"[\s\S]*?router\.push\("\/exchange\/activity"\)/);
   assert.match(profileSectionSource, /label="보관 중"/);
   assert.match(profileSectionSource, /label="교환 또는 배송 중인 상품"[\s\S]*?wide/);
-  assert.match(profileSectionSource, /label="포인트 환급"/);
+  assert.doesNotMatch(profileSectionSource, /label="포인트 환급"/);
   assert.match(profileSectionSource, /item\.status === "OWNED"/);
   assert.match(profileSectionSource, /item\.sourceType === "GACHA" \|\| item\.sourceType === "KUJI"/);
   assert.match(rootFloatingTabBarSource, /storage: "보관함"/);
@@ -1148,7 +1149,7 @@ test("native customer category surfaces share operator-managed availability and 
   assert.match(productCategoriesSource, /applyStorefrontCategorySettings/);
   assert.match(productCategoriesSource, /storefrontCategoryOptions\(surface/);
   assert.match(productCategoriesSource, /isCustomerVisibleProductCategory/);
-  assert.match(productCategoriesSource, /function isSupportedCustomerCategory[\s\S]*?category === "gacha" \|\| category === "kuji"/);
+  assert.match(productCategoriesSource, /function isSupportedCustomerCategory[\s\S]*?category === "gacha" \|\| category === "kuji";/);
   assert.doesNotMatch(productCategoriesSource, /category === "figure" \|\| category === "tcg"/);
   assert.match(shopSource, /useStorefrontCategorySettings\(\)/);
   assert.match(homeSource, /useStorefrontCategorySettings/);
@@ -1227,7 +1228,7 @@ test("native purchase Product Detail continues into a server-verified PortOne ch
   assert.match(checkoutScreenSource, /포인트 사용/);
   assert.match(checkoutScreenSource, /결제 수단/);
   assert.match(checkoutScreenSource, /신용\/체크카드/);
-  assert.match(checkoutScreenSource, /KG이니시스 카드 결제/);
+  assert.match(checkoutScreenSource, /신용카드 결제/);
   assert.match(checkoutScreenSource, /주문내용 확인 및 결제 동의/);
   assert.match(checkoutScreenSource, /EXPO_PUBLIC_PORTONE_STORE_ID/);
   assert.match(checkoutScreenSource, /결제 수단 준비 중/);
@@ -1268,7 +1269,7 @@ test("native my-info hub opens every account utility and nested member detail ou
   for (const label of ["상품 기록", "내 찜 목록", "보관함", "내 교환 현황", "배송 신청 내역", "구매 내역", "포인트 내역", "신청방", "고객센터", "사업자 정보", "회원정보 관리", "설정"]) {
     assert.match(profileHomeSource, new RegExp(label));
   }
-  assert.match(profileHomeSource, /배송 신청 · 포인트 환급/);
+  assert.match(profileHomeSource, /교환 · 배송 신청/);
   assert.match(profileHomeSource, /section: "product-history", label: "상품 기록"/);
   assert.match(profileHomeSource, /section === "product-history"[\s\S]*?router\.push\("\/product-history"\)/);
   assert.match(profileHomeSource, /section === "storage"[\s\S]*?router\.navigate\("\/\(tabs\)\/storage"\)/);
@@ -1333,7 +1334,7 @@ test("native my-info hub opens every account utility and nested member detail ou
   assert.match(profileSectionSource, /if \(section === "shipping"\) return <ShippingHistory/);
   assert.match(profileSectionSource, /<StorageModeTab label="보관 중"/);
   assert.match(profileSectionSource, /<StorageModeTab label="교환 또는 배송 중인 상품"[\s\S]*?wide/);
-  assert.match(profileSectionSource, /<StorageModeTab label="포인트 환급"/);
+  assert.doesNotMatch(profileSectionSource, /<StorageModeTab label="포인트 환급"/);
   assert.match(profileSectionSource, /inventory\?\.filter\(isExchangeOrShippingInventory\)/);
   assert.match(profileSectionSource, /item\.status === "EXCHANGE_LISTED"[\s\S]*?item\.status === "EXCHANGE_OFFERED"[\s\S]*?item\.status === "SHIPPING"/);
   assert.doesNotMatch(profileHomeSource, /주문·포인트·배송 상태는 내 계정의 최신 내역/);

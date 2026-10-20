@@ -2,6 +2,8 @@ type Environment = Record<string, string | undefined>;
 import { loadMediaStorageConfig, type MediaStorageConfiguration } from "./media-storage.js";
 import {
   loadPaymentReviewLogin,
+  assertPaymentReviewBoundary,
+  assertStoreReviewBoundary,
   loadPaymentReviewProxySecret,
   loadStoreReviewLogin,
   type PaymentReviewLogin,
@@ -94,10 +96,12 @@ export type ApiConfig = {
    */
   adminSessionIdleMinutes?: number;
   paymentProvider: string;
+  /** Direct Toss TEST rail only; production enablement awaits native/refund/reconciliation verification. */
+  tossPayments?: { clientKey: string; secretKey: string; merchantId: string; environment: "TEST" } | null;
   paymentWebhookSecret: string | null;
   /** Separate server-to-server key for the worker's bounded PortOne requery. */
   paymentReconciliationWorkerSecret?: string | null;
-  /** Server-only PortOne V2/KG INICIS credentials. Null unless the rail is fully configured. */
+  /** Server-only PortOne V2 card credentials. Null unless the rail is fully configured. */
   portOne?: {
     apiSecret: string;
     merchantId: string;
@@ -107,6 +111,10 @@ export type ApiConfig = {
     webhookSecret: string;
     /** Optional additional KCP V2 channel in the same merchant/store/environment. */
     kcpChannelKey?: string;
+    /** Historical INICIS channel retained for lookup only after a NICE cutover. */
+    inicisChannelKey?: string;
+    kiccChannelKey?: string;
+    niceChannelKey?: string;
   } | null;
   gcsBucket: string | null;
   gcsProjectId: string | null;
@@ -335,9 +343,25 @@ function paymentConfig(
   runtime: RuntimeEnvironment,
   sessionTokenPepper: string,
   proxyIdentitySecret: string | null,
-): Pick<ApiConfig, "paymentProvider" | "paymentWebhookSecret" | "portOne"> {
+): Pick<ApiConfig, "paymentProvider" | "paymentWebhookSecret" | "portOne" | "tossPayments"> {
   const paymentProvider = env.PAYMENT_PROVIDER?.trim() || "UNCONFIGURED";
   const paymentWebhookSecret = optional(env, "PAYMENT_WEBHOOK_SECRET");
+  const tossValues = { clientKey: optional(env, "TOSS_PAYMENTS_CLIENT_KEY"),
+    secretKey: optional(env, "TOSS_PAYMENTS_SECRET_KEY"), merchantId: optional(env, "TOSS_PAYMENTS_MERCHANT_ID") };
+  let tossPayments: ApiConfig["tossPayments"] = null;
+  if (paymentProvider === "TOSSPAYMENTS_DIRECT" || (paymentProvider === "PORTONE_V2_NICE" && Object.values(tossValues).some(Boolean))) {
+    if (env.DABBOBA_ENVIRONMENT_TIER !== "STAGING" || env.DABBOBA_RELEASE_ENVIRONMENT_TIER !== "STAGING"
+      || !/^test_ck_[A-Za-z0-9_-]{10,200}$/.test(tossValues.clientKey ?? "")
+      || !/^test_sk_[A-Za-z0-9_-]{10,200}$/.test(tossValues.secretKey ?? "")
+      || !/^[A-Za-z0-9_-]{1,100}$/.test(tossValues.merchantId ?? "")) {
+      throw new Error("TOSSPAYMENTS_DIRECT currently requires explicit STAGING tiers and matching Toss TEST credentials");
+    }
+    tossPayments = { clientKey: tossValues.clientKey!, secretKey: tossValues.secretKey!, merchantId: tossValues.merchantId!, environment: "TEST" };
+    assertPaymentReviewBoundary({ environmentTier: "STAGING", databaseUrl: required(env, "DATABASE_URL"),
+      supabaseUrl: optional(env, "SUPABASE_URL"), portOne: null, tossPayments });
+  } else if (Object.values(tossValues).some(Boolean)) {
+    throw new Error("Toss credentials require a direct Toss or NICE shared TEST review rail");
+  }
   const portOneValues = {
     apiSecret: optional(env, "PORTONE_API_SECRET"),
     merchantId: optional(env, "PORTONE_MERCHANT_ID"),
@@ -349,9 +373,32 @@ function paymentConfig(
   const portOneConfigured = Object.values(portOneValues).some(Boolean);
   const portOneComplete = Object.values(portOneValues).every(Boolean);
   const kcpChannelKey = optional(env, "PORTONE_KCP_CHANNEL_KEY");
-  if (kcpChannelKey && (!portOneComplete || paymentProvider !== "PORTONE_V2_INICIS"
+  const inicisChannelKey = optional(env, "PORTONE_INICIS_CHANNEL_KEY");
+  const portOneProvider = ["PORTONE_V2_INICIS", "PORTONE_V2_NICE", "PORTONE_V2_KICC"].includes(paymentProvider);
+  const kiccChannelKey = optional(env, "PORTONE_KICC_CHANNEL_KEY");
+  const niceChannelKey = optional(env, "PORTONE_NICE_CHANNEL_KEY");
+  const modernReview = ["PORTONE_V2_NICE", "PORTONE_V2_KICC"].includes(paymentProvider);
+  const extraChannels = [kiccChannelKey, niceChannelKey, kcpChannelKey, inicisChannelKey].filter((key): key is string => Boolean(key));
+  if ((kiccChannelKey || niceChannelKey) && (!modernReview || !portOneComplete
+    || extraChannels.some(key => !/^channel-key-[A-Za-z0-9-]{1,160}$/.test(key) || key === portOneValues.channelKey)
+    || new Set(extraChannels).size !== extraChannels.length
+    || (paymentProvider === "PORTONE_V2_NICE" && niceChannelKey)
+    || (paymentProvider === "PORTONE_V2_KICC" && kiccChannelKey))) throw new Error("Additional PortOne channels require complete distinct configuration and cannot replace the primary channel");
+  if (kcpChannelKey && (!portOneComplete || !portOneProvider
     || kcpChannelKey === portOneValues.channelKey || !/^channel-key-[A-Za-z0-9-]{1,160}$/.test(kcpChannelKey))) {
     throw new Error("PORTONE_KCP_CHANNEL_KEY requires a complete PortOne rail and a distinct valid channel key");
+  }
+  if (inicisChannelKey && (!portOneComplete || !modernReview
+    || !/^channel-key-[A-Za-z0-9-]{1,160}$/.test(inicisChannelKey)
+    || inicisChannelKey === portOneValues.channelKey || inicisChannelKey === kcpChannelKey)) {
+    throw new Error("PORTONE_INICIS_CHANNEL_KEY requires a NICE rail and a distinct historical channel");
+  }
+  if (modernReview) {
+    const staging = env.DABBOBA_ENVIRONMENT_TIER === "STAGING" && env.DABBOBA_RELEASE_ENVIRONMENT_TIER === "STAGING"
+      && portOneValues.channelEnvironment === "TEST";
+    const live = env.DABBOBA_ENVIRONMENT_TIER === "PRODUCTION" && env.DABBOBA_RELEASE_ENVIRONMENT_TIER === "PRODUCTION"
+      && portOneValues.channelEnvironment === "LIVE";
+    if (!staging && !live) throw new Error("NICE/EasyPay requires explicit matching STAGING TEST or PRODUCTION LIVE tiers");
   }
   const explicitSupabaseDemoTestRail = (
     env.DABBOBA_BACKEND_PROFILE?.trim() === "supabase-demo"
@@ -375,7 +422,7 @@ function paymentConfig(
   if (runtime === "production" && paymentProvider === "TEST_PG" && !explicitSupabaseDemoTestRail) {
     throw new Error("PAYMENT_PROVIDER=TEST_PG requires the explicit loopback supabase-demo STAGING profile");
   }
-  if (runtime === "production" && paymentProvider !== "UNCONFIGURED") {
+  if (runtime === "production" && paymentProvider !== "UNCONFIGURED" && paymentProvider !== "TOSSPAYMENTS_DIRECT") {
     const secretLength = paymentWebhookSecret ? Buffer.byteLength(paymentWebhookSecret, "utf8") : 0;
     if (!paymentWebhookSecret || secretLength < 32 || secretLength > 512 || /(?:change-me|local-development)/i.test(paymentWebhookSecret)) {
       throw new Error("PAYMENT_WEBHOOK_SECRET must be a unique 32-512 byte secret in production when PAYMENT_PROVIDER is configured");
@@ -395,11 +442,11 @@ function paymentConfig(
   ) {
     throw new Error("PORTONE_CHANNEL_ENVIRONMENT must be LIVE or TEST");
   }
-  if (paymentProvider === "PORTONE_V2_INICIS" && !portOneComplete) {
-    throw new Error("PAYMENT_PROVIDER=PORTONE_V2_INICIS requires a complete PortOne configuration");
+  if (portOneProvider && !portOneComplete) {
+    throw new Error(`PAYMENT_PROVIDER=${paymentProvider} requires a complete PortOne configuration`);
   }
-  if (paymentProvider !== "PORTONE_V2_INICIS" && portOneConfigured) {
-    throw new Error("PortOne credentials require PAYMENT_PROVIDER=PORTONE_V2_INICIS");
+  if (!portOneProvider && portOneConfigured) {
+    throw new Error("PortOne credentials require PAYMENT_PROVIDER=PORTONE_V2_INICIS or PORTONE_V2_NICE or PORTONE_V2_KICC");
   }
   if (
     runtime === "production"
@@ -424,6 +471,7 @@ function paymentConfig(
 
   return {
     paymentProvider,
+    tossPayments,
     paymentWebhookSecret,
     portOne: portOneComplete
       ? {
@@ -434,6 +482,9 @@ function paymentConfig(
           channelEnvironment: portOneValues.channelEnvironment as "LIVE" | "TEST",
           webhookSecret: portOneValues.webhookSecret!,
           ...(kcpChannelKey ? { kcpChannelKey } : {}),
+          ...(inicisChannelKey ? { inicisChannelKey } : {}),
+          ...(kiccChannelKey ? { kiccChannelKey } : {}),
+          ...(niceChannelKey ? { niceChannelKey } : {}),
         }
       : null,
   };
@@ -654,9 +705,15 @@ export function loadApiConfig(env: Environment = process.env): ApiConfig {
     }
   }
   const payment = paymentConfig(env, runtime, pepper, proxyIdentitySecret);
+  if (["PORTONE_V2_NICE", "PORTONE_V2_KICC"].includes(payment.paymentProvider)) {
+    const boundary = { environmentTier, databaseUrl: required(env, "DATABASE_URL"),
+      supabaseUrl: optional(env, "SUPABASE_URL"), portOne: payment.portOne ?? null, tossPayments: null };
+    if (payment.portOne?.channelEnvironment === "TEST") assertPaymentReviewBoundary(boundary);
+    else assertStoreReviewBoundary(boundary);
+  }
   const paymentReviewLogin = includesCustomer ? loadPaymentReviewLogin(env, {
     environmentTier, databaseUrl: required(env, "DATABASE_URL"),
-    supabaseUrl: supabaseAuth.supabaseUrl ?? null, portOne: payment.portOne ?? null,
+    supabaseUrl: supabaseAuth.supabaseUrl ?? null, portOne: payment.portOne ?? null, tossPayments: payment.tossPayments ?? null,
   }) : null;
   const storeReviewLogin = includesCustomer ? loadStoreReviewLogin(env, {
     environmentTier, databaseUrl: required(env, "DATABASE_URL"),
@@ -677,12 +734,12 @@ export function loadApiConfig(env: Environment = process.env): ApiConfig {
       || paymentReconciliationWorkerSecret === payment.portOne?.webhookSecret) {
       throw new Error("PAYMENT_RECONCILIATION_WORKER_SECRET must be a distinct 32-512 byte server-only secret");
     }
-    if (payment.paymentProvider !== "PORTONE_V2_INICIS" || commerceMode !== "LIVE") {
+    if (!["PORTONE_V2_INICIS", "PORTONE_V2_NICE", "PORTONE_V2_KICC"].includes(payment.paymentProvider) || commerceMode !== "LIVE") {
       throw new Error("PAYMENT_RECONCILIATION_WORKER_SECRET requires LIVE PortOne commerce");
     }
   }
   if (runtime === "production" && commerceMode === "LIVE"
-    && payment.paymentProvider === "PORTONE_V2_INICIS"
+    && ["PORTONE_V2_INICIS", "PORTONE_V2_NICE", "PORTONE_V2_KICC"].includes(payment.paymentProvider)
     && !paymentReconciliationWorkerSecret) {
     throw new Error("LIVE PortOne commerce requires PAYMENT_RECONCILIATION_WORKER_SECRET");
   }

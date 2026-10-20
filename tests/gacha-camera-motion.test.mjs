@@ -29,6 +29,16 @@ test("the 3D handoff finishes at pickup scale before the camera magnifies the sh
   assert.ok(sampleGachaCameraMotion(0.07, 340, 624).scale > handoff.scale);
 });
 
+test("the low-resolution cabinet leaves before closeup magnification exposes its pixels", () => {
+  for (const [width, height] of [[280, 440], [390, 670], [430, 932], [768, 1024]]) {
+    for (let step = 0; step <= 200; step += 1) {
+      const frame = sampleGachaCameraMotion(step / 200, width, height);
+      if (frame.scale <= 1.4) assert.equal(frame.machineOpacity, 1);
+      if (frame.scale >= 3) assert.equal(frame.machineOpacity, 0);
+    }
+  }
+});
+
 test("the pickup capsule rests inside the source-image aperture behind its front lip", () => {
   // The actual source image maps its black aperture to x109..133, with the lip at y267.
   assert.equal(restingX, 121);
@@ -157,5 +167,18 @@ test("invalid inputs and Reduced Motion keep deterministic finite frames without
     assert.equal(pickup.shadowOpacity, 0);
     assert.equal(pickup.opacity, progress >= 1 ? 1 : 0);
     assert.deepEqual(sampleGachaCameraMotion(progress, 390, 844, true), sampleGachaCameraMotion(0, 390, 844));
+  }
+});
+
+test("camera push and centering settle with continuous acceleration", () => {
+  const h = 0.00001;
+  for (const [key, boundaries] of [["capsuleDiameter", [0.04, 0.46]], ["capsuleX", [0.015, 0.25]], ["capsuleY", [0.015, 0.25]]]) {
+    for (const boundary of boundaries) {
+      const a = sampleGachaCameraMotion(boundary - h, 390, 844)[key];
+      const b = sampleGachaCameraMotion(boundary, 390, 844)[key];
+      const c = sampleGachaCameraMotion(boundary + h, 390, 844)[key];
+      assert.ok(Math.abs((c - a) / (2 * h)) < 0.01, `${key} has a velocity catch at ${boundary}`);
+      assert.ok(Math.abs((c - 2 * b + a) / h ** 2) < 2, `${key} has an acceleration catch at ${boundary}`);
+    }
   }
 });

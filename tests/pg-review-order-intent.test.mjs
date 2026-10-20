@@ -18,7 +18,8 @@ test('different product or quantity cannot replace an unresolved purchase',()=>{
  const intent=reviewOrderIntent(storage(),()=> 'test');intent.prepare(body);
  assert.throws(()=>intent.prepare({...body,items:[{...body.items[0],quantity:2}]}),/이전 주문/);
  assert.throws(()=>intent.prepare({...body,items:[{...body.items[0],productId:'other'}]}),/이전 주문/);
- assert.throws(()=>intent.prepare({...body,cardPg:'KCP'}),/이전 주문/);
+  assert.throws(()=>intent.prepare({...body,cardPg:'KCP'}),/이전 주문/);
+  assert.throws(()=>intent.prepare({...body,reviewPaymentProvider:'TOSSPAYMENTS_DIRECT'}),/이전 주문/);
 });
 test('persistence failure prevents POST and expired unknown intents stay recoverable',async()=>{
  const unavailable={getItem:()=>null,setItem:()=>{throw new Error('storage unavailable');}};
@@ -45,5 +46,7 @@ test('a refused order request is forgotten, while an unknown outcome stays repla
 test('a server-confirmed paid order releases the review session for the next purchase',async()=>{
  const {readFile}=await import('node:fs/promises');
  const app=await readFile(new URL('../public/review/app.js',import.meta.url),'utf8');
- assert.match(app,/if \(order\.id === pending\.id && \['PAID','FULFILLED'\]\.includes\(order\.status\)\) \{pending = null; intents\.clear\(\); sessionStorage\.removeItem\('dabboba-review-order'\);/);
+ assert.match(app,/if \(order\.id !== pending\.id \|\| order\.paymentId !== pending\.paymentId\) throw/);
+ assert.match(app,/\['PAID','FULFILLED'\]\.includes\(order\.status\)\) \{verifySelectedOrder\(order\); clear\(\)/);
+ assert.match(app,/const clear = \(\) => \{ pending = null; callback = null; intents\.clear\(\); sessionStorage\.removeItem\('dabboba-review-order'\)/);
 });

@@ -239,7 +239,7 @@ test("public Home sections are render-ready, stably ordered, and distinguish an 
   assert.equal(snapshot.observed.at(-1)?.sql, "COMMIT");
   assert.equal(snapshot.released(), true);
   assert.match(snapshot.observed.find(({ sql }) => sql.includes("FROM home_catalog_sections s"))!.sql, /ORDER BY s\.sort_order ASC, s\.id ASC/);
-  assert.match(snapshot.observed.find(({ sql }) => sql.includes("FROM home_catalog_sections s"))!.sql, /s\.layout_kind IS NOT NULL/);
+  assert.match(snapshot.observed.find(({ sql }) => sql.includes("FROM home_catalog_sections s"))!.sql, /s\.layout_kind = 'gacha'/);
   assert.match(snapshot.observed.find(({ sql }) => sql.includes("FROM section_targets section_target"))!.sql, /p\.category=section_target\.layout_kind/);
   assert.match(snapshot.observed.find(({ sql }) => sql.includes("FROM section_targets section_target"))!.sql, /p\.is_prize_only = false/);
   assert.match(snapshot.observed.find(({ sql }) => sql.includes("FROM section_targets section_target"))!.sql, /category_setting\.availability='active'/);
@@ -295,7 +295,7 @@ test("prelaunch Home cards do not expose unconfirmed stock or kuji tier counts",
   assert.deepEqual(result.items[0]?.products[0]?.remainingKujiTiers, []);
 });
 
-test("public Home sections isolate Gacha and Kuji products by section id even when they share one IP", async () => {
+test("public Home omits hidden Kuji sections and product discovery even for a shared IP", async () => {
   const { app, routes } = routeHarness();
   const gachaSection = {
     ...publicSectionRow,
@@ -304,24 +304,19 @@ test("public Home sections isolate Gacha and Kuji products by section id even wh
     layout_kind: "gacha" as const,
     sort_order: 10,
   };
-  const kujiSection = {
-    ...publicSectionRow,
-    id: "demon-slayer-kuji-home",
-    title: "귀멸의 칼날 쿠지",
-    layout_kind: "kuji" as const,
-    sort_order: 20,
-  };
   const snapshot = publicSnapshotPool(async (sql) => {
     if (sql.includes("information_schema.columns")) {
       return { rowCount: 1, rows: [{ configured: true, supports_section_sources: true }] };
     }
     if (sql.includes("GROUP BY click_event.product_id")) return { rowCount: 0, rows: [] };
-    if (sql.includes("FROM home_catalog_sections s")) return { rowCount: 2, rows: [gachaSection, kujiSection] };
+    if (sql.includes("FROM home_catalog_sections s")) {
+      assert.match(sql, /s\.layout_kind = 'gacha'/);
+      return { rowCount: 1, rows: [gachaSection] };
+    }
     if (sql.includes("FROM section_targets section_target")) return {
-      rowCount: 2,
+      rowCount: 1,
       rows: [
         { ...productRow, home_section_id: gachaSection.id, category: "gacha", remaining_kuji_tiers: [] },
-        { ...productRow, home_section_id: kujiSection.id, id: "demon-slayer-kuji", sku: "DS-KUJI", category: "kuji", remaining_kuji_tiers: [] },
       ],
     };
     throw new Error(`unexpected query: ${sql}`);
@@ -340,16 +335,15 @@ test("public Home sections isolate Gacha and Kuji products by section id even wh
     productCategories: section.products.map((product) => product.category),
   })), [
     { id: gachaSection.id, layoutKind: "gacha", productCategories: ["gacha"] },
-    { id: kujiSection.id, layoutKind: "kuji", productCategories: ["kuji"] },
   ]);
   assert.deepEqual(
     snapshot.observed.find(({ sql }) => sql.includes("FROM section_targets section_target"))?.values,
     [
-      [gachaSection.id, kujiSection.id],
-      ["demon-slayer", "demon-slayer"],
-      ["gacha", "kuji"],
-      ["IP", "IP"],
-      [20, 20],
+      [gachaSection.id],
+      ["demon-slayer"],
+      ["gacha"],
+      ["IP"],
+      [20],
       null,
       [...DEMO_SELLER_PRODUCT_IDS],
     ],
