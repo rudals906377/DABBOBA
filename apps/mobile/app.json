@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "DABBOBA",
+    "name": "다뽀바",
     "slug": "dabboba-mobile",
     "version": "1.0.0",
     "icon": "./assets/icons/app-icon.png",
@@ -15,14 +15,14 @@
       "entitlements": {
         "com.apple.developer.applesignin": ["Default"]
       },
-      "buildNumber": "6",
+      "buildNumber": "7",
       "config": {
         "usesNonExemptEncryption": false
       }
     },
     "android": {
       "package": "com.dabboba.mobile",
-      "versionCode": 1,
+      "versionCode": 2,
       "allowBackup": false,
       "blockedPermissions": [
         "android.permission.SYSTEM_ALERT_WINDOW",

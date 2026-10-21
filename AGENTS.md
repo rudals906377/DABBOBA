@@ -535,3 +535,7 @@ When any text-entry control loses focus, dismiss the simulated keyboard. If the 
 - Use NICE V2 through PortOne for new checkout and PG review. Remove EasyPay as a new payment choice and prepare NICE-only review materials. Preserve historical provider bindings, records, status queries and cancellations; never rewrite an unresolved order to NICE.
 - The owner requests the latest app upload and a usable store URL. Upload/testing, public store approval and NICE merchant approval remain separate evidence. Keep production payments closed until the existing LIVE gates pass. Do not label a TEST window as an approved production channel.
 - The owner explicitly approves publishing a browsing-first PRELAUNCH app with purchases marked as preparing, to obtain the store URL before NICE merchant approval. This supersedes the previous LIVE-first release order, while retaining all signing, authentication, store-review and later LIVE verification gates. Describe the submitted app's actual PRELAUNCH functionality truthfully.
+
+## Store And Launcher Names — 2026-10-21 Owner Decision
+
+- Use `다뽀바 DABBOBA` as the Apple App Store and Google Play listing name. Use `다뽀바` as the installed iOS and Android launcher display name, sourced from `apps/mobile/app.json` Expo name. Preserve the canonical DABBOBA wordmark, bundle/package identifiers, URL scheme, and account/project bindings. A metadata save does not rename an already submitted or installed native binary; the launcher name requires a new native build.

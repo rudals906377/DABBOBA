@@ -11,9 +11,11 @@ It is not proof that the values were entered or approved in either console.
 ## Product scope
 
 - Version: `1.0.0`
-- iOS build: `5` in current source and validated TestFlight upload; physical STORE-build testing and public review remain separate
-- Android versionCode: `1`
+- iOS build: `7` in the renamed launcher source; artifact upload, review and physical STORE-build verification are recorded separately
+- Android versionCode: `2` in the renamed launcher source; upload and review are recorded separately
 - Locale: Korean first
+- Store listing name (Apple and Google): `다뽀바 DABBOBA`
+- Installed launcher display name (iOS and Android): `다뽀바`; this requires a new native build and does not rename an already installed or submitted binary
 - Capability: product discovery, search, wishlist, notices, account settings,
   support, legal documents, and account deletion
 - Explicitly unavailable: purchase, payment, draw, kuji queue, exchange,
@@ -28,7 +30,7 @@ binary rather than later LIVE commerce plans.
 
 ### App Store Connect
 
-- Name: `DABBOBA`
+- Name: `다뽀바 DABBOBA`
 - Primary language: Korean
 - Bundle ID: `com.dabboba.mobile`
 - SKU: `DABBOBA-IOS-001`
@@ -52,7 +54,7 @@ verified friend-controlled business before this source is entered in a console.
 
 ### Google Play Console
 
-- App name: `DABBOBA`
+- App name: `다뽀바 DABBOBA`
 - Default language: Korean
 - App or game: App
 - Free or paid: Free
