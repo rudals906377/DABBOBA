@@ -94,7 +94,6 @@ test("storage removes the duplicate pills and reveals delivery details only afte
   assert.doesNotMatch(profileSectionSource, /AvailabilityPill|storageAvailabilityRow/);
   assert.match(profileSectionSource, />보관 중 \{items\.length\}개</);
   assert.match(profileSectionSource, />진행 중 \{items\.length\}개</);
-  assert.match(profileSectionSource, />환급 가능 \{items\.length\}개</);
   assert.match(profileSectionSource, /selectRow:\s*\{[^}]*borderWidth:\s*1/);
   assert.match(profileSectionSource, /selectRowActive:\s*\{\s*borderWidth:\s*2/);
   assert.match(profileSectionSource, /!selectedCount \? \([\s\S]*?styles\.shippingDefaultSummary[\s\S]*?: \([\s\S]*?styles\.shippingSelectionSummary/);

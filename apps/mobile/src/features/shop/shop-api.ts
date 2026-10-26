@@ -327,6 +327,3 @@ function drawOddsWithheld(error: unknown): boolean {
   const envelope = error as { error?: { code?: unknown } };
   return envelope.error?.code === "COMMERCE_NOT_AVAILABLE";
 }
-
-/** Used only by preserved direct-order screens; discovery no longer sells these SKUs. */
-export function isDirectPurchase(product: {metadata: Record<string, unknown>}): boolean { return product.metadata.purchaseMode === "DIRECT"; }

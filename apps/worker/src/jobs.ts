@@ -89,7 +89,7 @@ async function processOutboxEvent(dependencies: JobDependencies, event: OutboxEv
   assertMayContinue(dependencies);
   const notification = await ensureNotification(dependencies.pool, event);
   assertMayContinue(dependencies);
-  if (notification && await shouldDeliverNotificationExternally(dependencies.pool, notification)) {
+  if (notification && shouldDeliverNotificationExternally(notification)) {
     assertMayContinue(dependencies);
     await dependencies.notificationDelivery.deliver(notification);
   }

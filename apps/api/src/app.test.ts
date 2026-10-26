@@ -263,7 +263,6 @@ test("PRELAUNCH rejects every customer commerce mutation and live-stock read bef
     { method: "GET", url: "/v1/kuji/rooms/coming-soon-kuji/entries/50000000-0000-4000-8000-000000000001" },
     { method: "DELETE", url: "/v1/kuji/rooms/coming-soon-kuji/entries/50000000-0000-4000-8000-000000000001" },
     { method: "POST", url: "/v1/kuji/rooms/coming-soon-kuji/entries/50000000-0000-4000-8000-000000000001/slots" },
-    { method: "POST", url: "/v1/account/point-returns" },
     { method: "POST", url: "/v1/account/shipping-quotes" },
     { method: "POST", url: "/v1/account/shipping-requests" },
     { method: "GET", url: "/v1/exchange/inventory" },
@@ -283,6 +282,11 @@ test("PRELAUNCH rejects every customer commerce mutation and live-stock read bef
       assert.equal(response.statusCode, 503, `${request.method} ${request.url}: ${response.body}`);
       assert.equal(response.json().error.code, "COMMERCE_NOT_AVAILABLE");
     }
+    // Point returns are closed by their own feature gate in every commerce mode,
+    // so PRELAUNCH and LIVE callers receive the same answer.
+    const pointReturns = await app.inject({ method: "POST", url: "/v1/account/point-returns", headers: authorization });
+    assert.equal(pointReturns.statusCode, 503, pointReturns.body);
+    assert.equal(pointReturns.json().error.code, "FEATURE_UNAVAILABLE");
     // The shared-secret HMAC rail is not registered unless a local/test
     // provider is configured.
     const sharedSecretWebhook = await app.inject({ method: "POST", url: "/v1/payments/webhooks/provider", headers: authorization });

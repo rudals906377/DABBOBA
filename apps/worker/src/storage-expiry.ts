@@ -1,7 +1,6 @@
 import type { DatabasePool } from "@dabboba/db";
 import { withTransaction } from "@dabboba/db";
 import type { Logger } from "./logger.js";
-import { returnExpiredStoragePoints } from "./storage-point-returns.js";
 
 type ExchangeCleanupRow = {
   cancelled_listings: number | string;
@@ -224,6 +223,9 @@ export async function processInventoryStorageExpiryBatch(
     );
     const heldInventory = assertOutboxParity(held.rows[0], "Storage expiry hold");
     // Owner suspended point returns on 2026-10-13. Never auto-convert stored goods.
+    // The journal primitive (`returnExpiredStoragePoints` in storage-point-returns.ts)
+    // is retained and covered by its own tests, but this batch does not import or
+    // call it; reopening is a deliberate change behind the expiry mode seam above.
     const pointReturnedInventory = 0;
 
     if (!shouldContinue()) throw new Error("Worker run deadline reached before storage expiry reminders");

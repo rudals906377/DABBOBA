@@ -897,6 +897,28 @@ export function canonicalPointReturnInventoryIds(value: unknown): string[] {
   return canonicalInventoryUnitIds(value);
 }
 
+/**
+ * Owner decision 2026-10-13 ("Exchange Retained, Point Returns Hidden"):
+ * manual point-return requests are closed while balances, ledgers, history and
+ * the transactional handler stay in place for a later explicit reopening.
+ * This single constant is the only switch; while it is false every caller,
+ * in PRELAUNCH and LIVE alike, receives 503 FEATURE_UNAVAILABLE before the
+ * handler or its session lookup runs (the same position the commerce launch
+ * gate holds on other routes), and the LIVE commerce gate applies only once
+ * it is true.
+ */
+const POINT_RETURN_REQUESTS_ENABLED: boolean = false;
+
+export function pointReturnRequestsGate(context: Pick<ApiContext, "config">) {
+  const liveCommerce = requireLiveCommerce(context);
+  return async function pointReturnFeatureGate() {
+    if (!POINT_RETURN_REQUESTS_ENABLED) {
+      throw new AppError(503, "FEATURE_UNAVAILABLE", "현재 포인트 환급은 제공하지 않습니다.");
+    }
+    await liveCommerce();
+  };
+}
+
 function shippingQuoteInput(body: unknown) {
   const input = objectInput(body);
   assertOnlyKeys(input, ["inventoryUnitIds"]);
@@ -1475,7 +1497,7 @@ export async function registerAccountRoutes(app: FastifyInstance, context: ApiCo
     });
   });
 
-  app.post("/v1/account/point-returns", { preHandler: [requireLiveCommerce(context), context.auth.requireUser, async () => { throw new AppError(503,"FEATURE_UNAVAILABLE","현재 포인트 환급은 제공하지 않습니다."); }] }, async (request, reply) => {
+  app.post("/v1/account/point-returns", { preHandler: [pointReturnRequestsGate(context), context.auth.requireUser] }, async (request, reply) => {
     const body = objectInput(request.body);
     assertOnlyKeys(body, ["inventoryUnitIds"]);
     const inventoryUnitIds = canonicalPointReturnInventoryIds(body.inventoryUnitIds);
