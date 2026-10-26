@@ -35,15 +35,15 @@ test("shared NICE and Toss review issues included-product draw rights once, rele
     VALUES($1,$2::text,'경품',$2::text,$3,'figure','A',1,6,6)`, [version.id, prize, ip]);
   await pool.query("UPDATE draw_probability_versions SET status='ACTIVE',published_by=$2,published_at=now() WHERE id=$1", [version.id, user.id]);
   await pool.query("UPDATE catalog_products SET image_url='https://cdn.example.test/toss.png',sale_status='ON_SALE' WHERE id=$1", [product]);
-  let nicePaidId: string | null=null; let kiccPaidId:string|null=null; const niceLookups:string[]=[];
+  let nicePaidId: string | null=null; let secondNicePaidId:string|null=null; const niceLookups:string[]=[];
   const paid = new Map<string, Record<string, unknown>>(); let confirmCalls = 0; let loseResponse = false;
   globalThis.fetch = async (input, init) => {
     const url = new URL(String(input));
     if(url.origin==="https://api.portone.io") {
       const paymentId=url.pathname.split('/').at(-1)!;niceLookups.push(paymentId);
-      if(paymentId!==nicePaidId && paymentId!==kiccPaidId)return Response.json({type:"PAYMENT_NOT_FOUND",message:"fixture not submitted"},{status:404});
+      if(paymentId!==nicePaidId && paymentId!==secondNicePaidId)return Response.json({type:"PAYMENT_NOT_FOUND",message:"fixture not submitted"},{status:404});
       const now=new Date().toISOString();return Response.json({status:"PAID",id:paymentId,transactionId:`portone-shared-${paymentId}`,pgTxId:`portone-pg-${paymentId}`,
-        merchantId:"merchant-synthetic",storeId:"store-synthetic",version:"V2",channel:{key:paymentId===kiccPaidId?"channel-key-kicc":"channel-key-nice",type:"TEST",pgProvider:paymentId===kiccPaidId?"KICC_V2":"NICE_V2",pgMerchantId:"synthetic-mid"},
+        merchantId:"merchant-synthetic",storeId:"store-synthetic",version:"V2",channel:{key:"channel-key-nice",type:"TEST",pgProvider:"NICE_V2",pgMerchantId:"synthetic-mid"},
         method:{type:"PaymentMethodCard",card:{number:"fixture"}},amount:{total:7000,paid:7000,cancelled:0,taxFree:0,discount:0,cancelledTaxFree:0},currency:"KRW",requestedAt:now,updatedAt:now,statusChangedAt:now,paidAt:now});
     }
     assert.equal(url.origin, "https://api.tosspayments.com");
@@ -124,16 +124,20 @@ test("shared NICE and Toss review issues included-product draw rights once, rele
   assert.equal((await pool.query("SELECT count(*)::int AS n FROM draw_entitlements WHERE user_id=$1",[user.id])).rows[0].n,3);
   assert.equal((await pool.query("SELECT count(*)::int AS n FROM inventory_units WHERE owner_id=$1 AND source_type='PURCHASE'",[user.id])).rows[0].n,0);
 
+  // EasyPay (KICC) is retired for new payments: the API refuses it even with a configured channel key.
   const kiccPayload={...nicePayload,reviewPaymentProvider:"PORTONE_V2_KICC",cardPg:"KICC"};
   const kicc=await app.inject({method:"POST",url:"/v1/orders",headers:{...headers,"idempotency-key":randomUUID()},payload:kiccPayload});
-  assert.equal(kicc.statusCode,201,kicc.body);kiccPaidId=kicc.json().paymentId;
-  assert.equal(kicc.json().cardPayment.pgProvider,"KICC_V2");
-  assert.equal((await app.inject({method:"POST",url:`/v1/payments/${kiccPaidId}/attempt`,headers,payload:{}})).statusCode,200);
-  const kiccConfirmed=await app.inject({method:"POST",url:`/v1/payments/${kiccPaidId}/confirm`,headers,payload:{}});
-  assert.equal(kiccConfirmed.statusCode,200,kiccConfirmed.body);
-  const kiccOrder=await app.inject({method:"GET",url:`/v1/orders/${kicc.json().id}`,headers});
-  assert.equal(kiccOrder.json().drawEntitlementIds.length,1);
-  const entitlementId=kiccOrder.json().drawEntitlementIds[0];
+  assert.equal(kicc.statusCode,409,kicc.body);assert.equal(kicc.json().error.code,"PAYMENT_RAIL_RETIRED");
+  assert.equal((await pool.query("SELECT count(*)::int AS n FROM payments p JOIN orders o ON o.id=p.order_id WHERE o.user_id=$1 AND p.provider='PORTONE_V2_KICC'",[user.id])).rows[0].n,0);
+  const nicePaid2=await app.inject({method:"POST",url:"/v1/orders",headers:{...headers,"idempotency-key":randomUUID()},payload:nicePayload});
+  assert.equal(nicePaid2.statusCode,201,nicePaid2.body);secondNicePaidId=nicePaid2.json().paymentId;
+  assert.equal(nicePaid2.json().cardPayment.pgProvider,"NICE_V2");
+  assert.equal((await app.inject({method:"POST",url:`/v1/payments/${secondNicePaidId}/attempt`,headers,payload:{}})).statusCode,200);
+  const nicePaid2Confirmed=await app.inject({method:"POST",url:`/v1/payments/${secondNicePaidId}/confirm`,headers,payload:{}});
+  assert.equal(nicePaid2Confirmed.statusCode,200,nicePaid2Confirmed.body);
+  const nicePaid2Order=await app.inject({method:"GET",url:`/v1/orders/${nicePaid2.json().id}`,headers});
+  assert.equal(nicePaid2Order.json().drawEntitlementIds.length,1);
+  const entitlementId=nicePaid2Order.json().drawEntitlementIds[0];
   const consume=()=>app.inject({method:"POST",url:`/v1/draws/${entitlementId}/consume`,headers:{...headers,"idempotency-key":`included-consume-${suffix}`},payload:{}});
   const opened=await consume();assert.equal(opened.statusCode,200,opened.body);
   assert.equal(opened.json().prizeProductId,prize);

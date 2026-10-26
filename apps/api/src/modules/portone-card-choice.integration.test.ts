@@ -5,7 +5,7 @@ import type { ApiConfig } from "@dabboba/config";
 import { createDatabasePool } from "@dabboba/db";
 import { buildApp } from "../app.js";
 import { acceptRequiredPoliciesForIntegrationTest } from "../integration-test-fixtures.js";
-import { selectCardChannel } from "../lib/portone-channel-binding.js";
+import { configuredCardChannels, selectCardChannel } from "../lib/portone-channel-binding.js";
 import { issueSession } from "../plugins/auth.js";
 
 const databaseUrl = process.env.DABBOBA_TEST_DATABASE_URL;
@@ -99,10 +99,14 @@ test("card choice is server-configured, immutable, idempotent and reservation-bo
   const kiccUser=(await pool.query("INSERT INTO users(email,nickname) VALUES($1,'KICC reviewer') RETURNING id",[`kicc-${suffix}@example.test`])).rows[0];
   await acceptRequiredPoliciesForIntegrationTest(pool,kiccUser.id);
   const kiccSession=await issueSession(pool,config,{userId:kiccUser.id,kind:"USER",ip:"127.0.0.1",userAgent:"KICC test"});
+  // EasyPay is retired for new payments even when its channel key is configured.
   const kicc=await app.inject({method:"POST",url:"/v1/orders",headers:{authorization:`Bearer ${kiccSession.token}`,"idempotency-key":randomUUID()},payload:{...payload,cardPg:"KICC"}});
-  assert.equal(kicc.statusCode,201,kicc.body);
-  assert.equal(kicc.json().cardPayment.pgProvider,"KICC_V2");
+  assert.equal(kicc.statusCode,409,kicc.body);
+  assert.equal(kicc.json().error.code,"PAYMENT_RAIL_RETIRED");
+  assert.equal((await pool.query("SELECT count(*)::int AS n FROM orders WHERE user_id=$1",[kiccUser.id])).rows[0].n,0);
+  const stillVisible=await app.inject({method:"GET",url:"/v1/public/config"});
+  assert.deepEqual(stillVisible.json().cardPaymentOptions.map((option:{provider:string})=>option.provider),["PORTONE_V2_NICE"]);
   await assert.rejects(pool.query("INSERT INTO payments(order_id,provider,amount) VALUES($1,'PORTONE_V2_KICC',6000)",[order.id]),/constraint/);
-  const chosen=selectCardChannel(config,"KICC");
-  await assert.rejects(pool.query("INSERT INTO payments(order_id,provider,amount,portone_channel_binding) VALUES($1,'PORTONE_V2_KICC',6000,$2)",[order.id,JSON.stringify({...chosen,pgProvider:"NICE_V2"})]),/constraint/);
+  const historical=configuredCardChannels(config).find((channel)=>channel.provider==="PORTONE_V2_KICC")!;
+  await assert.rejects(pool.query("INSERT INTO payments(order_id,provider,amount,portone_channel_binding) VALUES($1,'PORTONE_V2_KICC',6000,$2)",[order.id,JSON.stringify({...historical,pgProvider:"NICE_V2"})]),/constraint/);
 });

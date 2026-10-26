@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ApiConfig } from "@dabboba/config";
+import { AppError } from "./errors.js";
 import { adapterOptionsForBinding, checkoutCardChannels, configuredCardChannels, selectCardChannel } from "./portone-channel-binding.js";
 
 const config = {
@@ -50,11 +51,20 @@ test("NICE is the only new checkout rail while historical INICIS/KCP remain quer
   assert.throws(() => adapterOptionsForBinding(nice, "PORTONE_V2_NICE", { ...selected, pgProvider: "INICIS_V2" }), /채널/);
 });
 
-test("EasyPay and NICE checkout use independent immutable PortOne channels",()=>{
+test("EasyPay is retired for new checkout but historical KICC bindings keep their channel",()=>{
  const modern={...config,paymentProvider:"PORTONE_V2_NICE",portOne:{...config.portOne!,channelKey:"channel-key-nice",kiccChannelKey:"channel-key-kicc",inicisChannelKey:config.portOne!.channelKey}} as ApiConfig;
- assert.deepEqual(checkoutCardChannels(modern).map(c=>c.provider),["PORTONE_V2_NICE","PORTONE_V2_KICC"]);
- const kicc=selectCardChannel(modern,"KICC");assert.equal(kicc.pgProvider,"KICC_V2");
+ // The configured KICC channel exists for status reads and cancellations of old orders...
+ const kicc=configuredCardChannels(modern).find(c=>c.provider==="PORTONE_V2_KICC")!;
+ assert.equal(kicc.pgProvider,"KICC_V2");
  assert.equal(adapterOptionsForBinding(modern,kicc.provider,kicc).channelKey,"channel-key-kicc");
  assert.throws(()=>adapterOptionsForBinding(modern,kicc.provider,{...kicc,pgProvider:"NICE_V2"}));
+ // ...but a new order can neither see nor select it.
+ assert.deepEqual(checkoutCardChannels(modern).map(c=>c.provider),["PORTONE_V2_NICE"]);
+ assert.throws(()=>selectCardChannel(modern,"KICC"),(error: unknown)=>error instanceof AppError&&error.statusCode===409&&error.code==="PAYMENT_RAIL_RETIRED");
  assert.throws(()=>selectCardChannel(modern,"INICIS"));
+ // A KICC-primary profile falls back to NICE for new orders and never defaults to EasyPay.
+ const {kiccChannelKey:_retired,...kiccPrimaryPortOne}=modern.portOne!;
+ const kiccPrimary={...modern,paymentProvider:"PORTONE_V2_KICC",portOne:{...kiccPrimaryPortOne,channelKey:"channel-key-kicc",niceChannelKey:"channel-key-nice"}} as ApiConfig;
+ assert.deepEqual(checkoutCardChannels(kiccPrimary).map(c=>c.provider),["PORTONE_V2_NICE"]);
+ assert.equal(selectCardChannel(kiccPrimary).pgProvider,"NICE_V2");
 });

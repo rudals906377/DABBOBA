@@ -234,7 +234,9 @@ export function PortOnePaymentScreen() {
 
   const assertPayableKujiOrder = useCallback(async (paymentOrder: CheckoutOrder, accessToken: string) => {
     const kujiLine = paymentOrder.lines.find((line) => line.category === "kuji");
-    if (!kujiLine || !paymentOrder.kujiRoomEntryId) return;
+    if (!kujiLine) return;
+    // Every kuji order must carry its room lease; the server no longer creates
+    // kuji-category orders without one, so a missing entry is never payable.
     if (paymentOrder.lines.length !== 1 || !paymentOrder.kujiRoomEntryId) {
       throw new KujiPaymentLeaseMismatchError();
     }

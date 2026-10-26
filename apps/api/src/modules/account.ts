@@ -620,10 +620,10 @@ const mapAccountInventory = (row: AccountInventoryRow) => ({
   sourceType: row.source_type,
   status: row.inventory_status,
   acquiredAt: iso(row.acquired_at),
+  // Point return is not offered to customers right now, so the row's server-side
+  // eligibility never surfaces: the contract exposes pointReturnAmount only
+  // alongside pointReturnEligible=true, and the POST route answers 503.
   pointReturnEligible: false,
-  ...(row.point_return_eligible && row.point_return_reference_amount !== null
-    ? { pointReturnAmount: pointReturnAmount(numberValue(row.point_return_reference_amount)) }
-    : {}),
   ...(row.storage_expires_at ? { storageExpiresAt: iso(row.storage_expires_at) } : {}),
 });
 
@@ -822,7 +822,7 @@ function profilePatch(body: unknown) {
 }
 
 export function normalizeBirthDate(value: unknown, today = new Date()): string {
-  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}(-r[1-9][0-9]*)?$/.test(value)) {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
     throw badRequest("birthDate는 YYYY-MM-DD 형식이어야 합니다.");
   }
   const [year, month, day] = value.split("-").map(Number) as [number, number, number];

@@ -533,6 +533,7 @@ When any text-entry control loses focus, dismiss the simulated keyboard. If the 
 ## NICE-Only Payment Review — 2026-10-20 Latest Owner Decision
 
 - Use NICE V2 through PortOne for new checkout and PG review. Remove EasyPay as a new payment choice and prepare NICE-only review materials. Preserve historical provider bindings, records, status queries and cancellations; never rewrite an unresolved order to NICE.
+- The API enforces that retirement itself, not only the `/review` Worker proxy: `POST /v1/orders` answers 409 `PAYMENT_RAIL_RETIRED` to `cardPg: "KICC"` or `reviewPaymentProvider: "PORTONE_V2_KICC"` in every tier, `checkoutCardChannels` never advertises or selects the KICC channel (a KICC-primary profile defaults new orders to NICE), while `configuredCardChannels` keeps the configured KICC binding so existing EasyPay payments keep their status reads and cancellations.
 - The owner requests the latest app upload and a usable store URL. Upload/testing, public store approval and NICE merchant approval remain separate evidence. Keep production payments closed until the existing LIVE gates pass. Do not label a TEST window as an approved production channel.
 - The owner explicitly approves publishing a browsing-first PRELAUNCH app with purchases marked as preparing, to obtain the store URL before NICE merchant approval. This supersedes the previous LIVE-first release order, while retaining all signing, authentication, store-review and later LIVE verification gates. Describe the submitted app's actual PRELAUNCH functionality truthfully.
 
