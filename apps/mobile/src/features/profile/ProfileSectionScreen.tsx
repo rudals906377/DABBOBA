@@ -35,7 +35,6 @@ import { useCommerceCapability } from "@/features/commerce/CommerceCapabilityPro
 import { catalogPriceLabel } from "@/features/commerce/product-commerce-presentation";
 import {
   categoryLabel,
-  createPointReturn,
   createShippingQuote,
   createShippingRequest,
   formatDate,
@@ -45,7 +44,6 @@ import {
   type ShippingQuote,
   updateAccountProfile,
 } from "@/features/profile/profile-api";
-import { isPointReturnEligibleInventory } from "@/features/profile/point-return-eligibility";
 import { PaidDrawRecovery } from "@/features/profile/PaidDrawRecovery";
 import { ProfileSectionErrorState } from "@/features/profile/ProfileSectionErrorState";
 import { profileSectionFailure } from "@/features/profile/profile-section-state";
@@ -68,7 +66,7 @@ type AccountOrder = components["schemas"]["AccountOrder"];
 type PointLedgerEntry = components["schemas"]["PointLedgerEntry"];
 type InventoryUnit = components["schemas"]["InventoryUnit"];
 type WantedRequest = components["schemas"]["WantedRequest"];
-type StorageMode = "shipping" | "exchange-or-shipping" | "point-return";
+type StorageMode = "shipping" | "exchange-or-shipping";
 
 const SECTION_META = {
   edit: { title: "프로필 수정" },
@@ -426,17 +424,13 @@ export function StorageHubContent({
   const snapshot = profileState.snapshot!;
   const { fontScale } = useWindowDimensions();
   const largeText = Number.isFinite(fontScale) && fontScale > 1.3;
-  const [mode, setMode] = useState<StorageMode>(initialMode === "point-return" ? "shipping" : initialMode);
+  const [mode, setMode] = useState<StorageMode>(initialMode);
   // A failed or partially failed inventory load closes every storage action:
-  // selection, shipping, and point return all need the complete verified list.
+  // selection and shipping both need the complete verified list.
   const inventoryFailure = profileSectionFailure(snapshot, "inventory");
   const inventory = inventoryFailure ? null : snapshot.inventory;
   const storedDrawItems = useMemo(
     () => inventory?.filter(isStoredDrawInventory) ?? null,
-    [inventory],
-  );
-  const pointReturnItems = useMemo(
-    () => inventory?.filter(isPointReturnEligibleInventory) ?? null,
     [inventory],
   );
   const exchangeOrShippingItems = useMemo(
@@ -455,7 +449,7 @@ export function StorageHubContent({
           사전오픈 기간에는 보관 상품과 기존 진행 내역만 확인할 수 있어요. 배송 신청은 정식 오픈 후 제공돼요.
         </SeedInlineGuidance>
       ) : null}
-      {inventoryFailure || !storedDrawItems || !exchangeOrShippingItems || !pointReturnItems ? (
+      {inventoryFailure || !storedDrawItems || !exchangeOrShippingItems ? (
         <StorageLoadFailure
           message={inventoryFailure ?? "보관함을 불러오지 못했어요."}
           profileState={profileState}
@@ -464,10 +458,8 @@ export function StorageHubContent({
         />
       ) : mode === "shipping" ? (
         <Shipping profileState={profileState} items={storedDrawItems} assetBaseUrl={assetBaseUrl} commerceEnabled={commerceEnabled} rootLayout={rootLayout} rootScrollProps={rootScrollProps} />
-      ) : mode === "exchange-or-shipping" ? (
-        <ExchangeOrShipping profileState={profileState} items={exchangeOrShippingItems} assetBaseUrl={assetBaseUrl} rootLayout={rootLayout} rootScrollProps={rootScrollProps} />
       ) : (
-        <Shipping profileState={profileState} items={storedDrawItems} assetBaseUrl={assetBaseUrl} commerceEnabled={commerceEnabled} rootLayout={rootLayout} rootScrollProps={rootScrollProps} />
+        <ExchangeOrShipping profileState={profileState} items={exchangeOrShippingItems} assetBaseUrl={assetBaseUrl} rootLayout={rootLayout} rootScrollProps={rootScrollProps} />
       )}
     </View>
   );
@@ -871,150 +863,6 @@ function ShippingHistoryRow({ request }: { request: AccountShippingRequest }) {
   );
 }
 
-function PointReturn({
-  profileState,
-  items,
-  assetBaseUrl,
-  commerceEnabled,
-  rootLayout = false,
-  rootScrollProps,
-}: {
-  profileState: ReturnType<typeof useProfileSnapshot>;
-  items: InventoryUnit[];
-  assetBaseUrl: string | null;
-  commerceEnabled: boolean;
-  rootLayout?: boolean;
-  rootScrollProps?: Pick<ScrollViewProps, "onScroll" | "scrollEventThrottle">;
-}) {
-  const snapshot = profileState.snapshot!;
-  const [selected, setSelected] = useState<string[]>([]);
-  const [submitting, setSubmitting] = useState(false);
-  const selectedItems = useMemo(
-    () => items.filter((item) => selected.includes(item.id)),
-    [items, selected],
-  );
-  const selectedInventoryUnitIds = useMemo(
-    () => selectedItems.map((item) => item.id),
-    [selectedItems],
-  );
-  const estimatedPointAmount = useMemo(
-    () => selectedItems.reduce((total, item) => (
-      total + (item.pointReturnAmount ?? 0)
-    ), 0),
-    [selectedItems],
-  );
-  const toggle = (id: string) => {
-    if (selected.includes(id)) {
-      setSelected((current) => current.filter((value) => value !== id));
-      return;
-    }
-    if (selected.length >= 20) {
-      Alert.alert("한 번에 최대 20개까지 선택할 수 있어요");
-      return;
-    }
-    setSelected((current) => [...current, id]);
-  };
-
-  const completePointReturn = async () => {
-    if (!profileState.accessToken) return;
-    try {
-      setSubmitting(true);
-      const result = await createPointReturn(
-        profileState.runtime.apiBaseUrl,
-        profileState.accessToken,
-        selectedInventoryUnitIds,
-      );
-      setSelected([]);
-      await profileState.reload();
-      Alert.alert(
-        "포인트 환급이 완료됐어요",
-        `${result.totalPointAmount.toLocaleString("ko-KR")}P가 적립됐어요. 현재 잔액은 ${result.balance.toLocaleString("ko-KR")}P예요.`,
-      );
-    } catch (error) {
-      Alert.alert("포인트 환급을 신청하지 못했어요", error instanceof Error ? error.message : "잠시 후 다시 시도해 주세요.");
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const submit = () => {
-    if (!selectedInventoryUnitIds.length) {
-      Alert.alert("환급할 상품을 선택해 주세요");
-      return;
-    }
-
-    const summary = `${selectedInventoryUnitIds.length}개 · 예상 ${estimatedPointAmount.toLocaleString("ko-KR")}P\n교환으로 받은 상품은 포인트 환급 대상이 아니며, 본인이 가챠에서 직접 뽑아 보관 중인 상품만 가능해요.\n환급한 상품은 다시 배송하거나 교환할 수 없어요.`;
-    if (snapshot.isExample || !profileState.accessToken) {
-      Alert.alert(
-        "로그인 후 포인트 환급을 신청할 수 있어요",
-        `${summary}\n\n로그인하면 선택한 상품으로 환급 신청을 진행할 수 있어요.`,
-      );
-      return;
-    }
-
-    Alert.alert("포인트 환급을 신청할까요?", summary, [
-      { text: "취소", style: "cancel" },
-      { text: "환급 신청", onPress: () => void completePointReturn() },
-    ]);
-  };
-
-  const content = (
-    <>
-      {commerceEnabled ? <View style={styles.pointReturnSummary}>
-        <View>
-          <Text style={styles.shippingPolicyCaption}>선택 상품</Text>
-          <Text style={styles.shippingPolicyAmount}>{selectedInventoryUnitIds.length}개</Text>
-        </View>
-        <View style={styles.shippingPolicyResultBlock}>
-          <Text style={styles.shippingPolicyCaption}>예상 환급 포인트 · 구매가의 50%</Text>
-          <Text style={[styles.shippingPolicyResult, styles.shippingPolicyResultFree]}>{estimatedPointAmount.toLocaleString("ko-KR")}P</Text>
-        </View>
-      </View> : null}
-      <View style={styles.storageListHeader}>
-        <Text style={styles.storageTotal}>환급 가능 {items.length}개</Text>
-        {commerceEnabled ? <Text style={styles.pointReturnSelected}>선택 {selectedInventoryUnitIds.length}개</Text> : null}
-      </View>
-      {items.map((item) => {
-        const ipName = snapshot.ipNames[item.product.ipId] ?? "작품 정보 없음";
-        return (
-          <SelectableInventoryRow
-            key={item.id}
-            product={item.product}
-            ipName={ipName}
-            assetBaseUrl={assetBaseUrl}
-            selected={selected.includes(item.id)}
-            caption={`예상 ${item.pointReturnAmount!.toLocaleString("ko-KR")}P`}
-            storageExpiresAt={item.storageExpiresAt}
-            selectable={commerceEnabled}
-            onSelect={() => toggle(item.id)}
-          />
-        );
-      })}
-      {commerceEnabled && items.length ? (
-        <PrimaryButton
-          label={submitting ? "환급 중" : `${selectedInventoryUnitIds.length}개 포인트 환급 신청`}
-          disabled={submitting || !selectedInventoryUnitIds.length}
-          onPress={submit}
-        />
-      ) : (
-        <CompactStorageEmpty label="포인트 환급 가능한 상품이 없어요" />
-      )}
-    </>
-  );
-
-  if (!rootLayout) return content;
-  return (
-    <ScrollView
-      {...rootScrollProps}
-      style={styles.storageModeBody}
-      contentContainerStyle={styles.storageScrollContent}
-      refreshControl={<RefreshControl refreshing={profileState.refreshing} onRefresh={profileState.reload} tintColor={colors.ink} />}
-    >
-      {content}
-    </ScrollView>
-  );
-}
-
 /** Failure state for orders; loaded lists render through `profileListSpec`. */
 function Orders({ profileState }: { profileState: ReturnType<typeof useProfileSnapshot> }) {
   const failure = profileSectionFailure(profileState.snapshot!, "orders");
@@ -1263,7 +1111,7 @@ function SelectableInventoryRow({
         <View style={styles.selectText}>
           <Text numberOfLines={1} style={styles.productSub}>{ipName} · {categoryLabel(product.category)}</Text>
           <Text numberOfLines={2} style={styles.productName}>{productSubjectTitle(product.name, ipName)}</Text>
-          {caption ? <Text numberOfLines={1} style={styles.pointReturnEstimate}>{caption}</Text> : null}
+          {caption ? <Text numberOfLines={1} style={styles.selectableRowCaption}>{caption}</Text> : null}
           <Text style={styles.storageExpiryPolicy}>보관 만료 60일</Text>
           {storageExpiry && storageExpiresAt ? (
             <Text style={[styles.storageExpiryDetail, storageExpiry.isExpired && styles.storageExpiryDetailExpired]}>
@@ -1417,7 +1265,6 @@ const styles = StyleSheet.create({
   selectAllLabel: { color: colors.ink, fontSize: 11, lineHeight: 16, fontWeight: "700" },
   storageSortLabel: { flexDirection: "row", alignItems: "center", gap: seed.spacing.x1 },
   storageSortText: { color: colors.muted, fontSize: 11, lineHeight: 16, fontWeight: "700" },
-  pointReturnSelected: { color: colors.muted, fontSize: 11, lineHeight: 16, fontWeight: "700" },
   formCard: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: seed.color.stroke.neutral, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: seed.color.stroke.neutral, paddingVertical: seed.spacing.x4, backgroundColor: seed.color.layer.default },
   fieldLabelRow: { flexDirection: "row", justifyContent: "space-between", marginTop: 8, marginBottom: 7 },
   fieldLabel: { color: colors.ink, fontSize: 12, fontWeight: "900" },
@@ -1443,16 +1290,10 @@ const styles = StyleSheet.create({
   statusBadgeSuccess: { color: colors.greenInk, backgroundColor: seed.color.background.brandWeak },
   statusBadgeCritical: { color: seed.color.foreground.critical, backgroundColor: seed.color.background.criticalWeak },
   statusBadgeRefund: { color: seed.color.info.ink, backgroundColor: seed.color.info.weak },
-  pointReturnSummary: { flexDirection: "row", alignItems: "flex-end", justifyContent: "space-between", gap: seed.spacing.x3, borderRadius: seed.radius.r4, borderWidth: 1, borderColor: seed.color.stroke.neutral, padding: seed.spacing.x4, marginBottom: seed.spacing.x3_5, backgroundColor: seed.color.layer.default },
-  pointReturnEstimate: { color: colors.greenInk, fontSize: 11, lineHeight: 17, fontWeight: "800", marginTop: seed.spacing.x1 },
+  selectableRowCaption: { color: colors.greenInk, fontSize: 11, lineHeight: 17, fontWeight: "800", marginTop: seed.spacing.x1 },
   storageExpiryPolicy: { color: colors.muted, ...seed.typography.finePrint, fontWeight: "700", marginTop: seed.spacing.x1_5 },
   storageExpiryDetail: { color: colors.ink, ...seed.typography.catalogMetadata, fontWeight: "800", marginTop: seed.spacing.x0_5 },
   storageExpiryDetailExpired: { color: seed.color.foreground.critical },
-  shippingPolicyCaption: { color: colors.muted, ...seed.typography.catalogMetadata },
-  shippingPolicyAmount: { color: colors.ink, ...seed.typography.subtitle, marginTop: seed.spacing.x1 },
-  shippingPolicyResultBlock: { flex: 1, alignItems: "flex-end" },
-  shippingPolicyResult: { color: colors.ink, fontSize: 12, fontWeight: "900", marginTop: seed.spacing.x1, textAlign: "right" },
-  shippingPolicyResultFree: { color: colors.greenInk },
   shippingDock: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: seed.color.stroke.neutral, paddingTop: seed.spacing.x2_5, paddingBottom: seed.spacing.x2, backgroundColor: seed.color.layer.default },
   shippingDefaultSummary: { color: colors.muted, ...seed.typography.finePrint, fontWeight: "700", textAlign: "center", marginBottom: seed.spacing.x2_5 },
   shippingProgressRow: { minHeight: 34, flexDirection: "row", alignItems: "center", gap: seed.spacing.x2, paddingTop: seed.spacing.x2 },

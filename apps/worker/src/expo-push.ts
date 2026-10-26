@@ -1,7 +1,7 @@
 import { withTransaction, type DatabasePool } from "@dabboba/db";
 import type { Logger } from "./logger.js";
 import type { Notification, NotificationDelivery } from "./notifications.js";
-import { isStorageExpiryPush } from "./notifications.js";
+import { EXTERNAL_PUSH_REMINDER_DAYS, isStorageExpiryPush } from "./notifications.js";
 
 const EXPO_SEND_URL = "https://exp.host/--/api/v2/push/send";
 const EXPO_RECEIPTS_URL = "https://exp.host/--/api/v2/push/getReceipts";
@@ -97,9 +97,10 @@ export class ExpoPushNotificationDelivery implements NotificationDelivery {
          FROM notifications notification
         WHERE notification.id=delivery.notification_id AND delivery.status IN ('PENDING','SENDING')
           AND (notification.kind<>'STORAGE_EXPIRY_REMINDER'
-               OR COALESCE(notification.data->>'remainingDays','') NOT IN ('3','7')
+               OR COALESCE(notification.data->>'remainingDays','') <> ALL($1::text[])
                OR (notification.data->>'storageExpiresAt')::timestamptz IS NULL
                OR (notification.data->>'storageExpiresAt')::timestamptz<=now())`,
+      [[...EXTERNAL_PUSH_REMINDER_DAYS]],
     );
     await this.pool.query(
       `UPDATE push_notification_deliveries delivery
@@ -152,7 +153,7 @@ export class ExpoPushNotificationDelivery implements NotificationDelivery {
             AND session.expires_at>now()
           WHERE delivery.status='PENDING'
             AND notification.kind='STORAGE_EXPIRY_REMINDER'
-            AND notification.data->>'remainingDays' IN ('3','7')
+            AND notification.data->>'remainingDays' = ANY($3::text[])
             AND (notification.data->>'storageExpiresAt')::timestamptz>now()
             AND delivery.next_attempt_at<=now()
             AND delivery.send_attempt_count<${MAX_ATTEMPTS}
@@ -161,7 +162,7 @@ export class ExpoPushNotificationDelivery implements NotificationDelivery {
           ORDER BY delivery.next_attempt_at,delivery.id
           FOR UPDATE OF delivery SKIP LOCKED
           LIMIT $2`,
-        [notificationId, SEND_BATCH_SIZE],
+        [notificationId, SEND_BATCH_SIZE, [...EXTERNAL_PUSH_REMINDER_DAYS]],
       );
       if (!selected.rowCount) return [];
       const deliveryIds = selected.rows.map((row) => row.delivery_id);

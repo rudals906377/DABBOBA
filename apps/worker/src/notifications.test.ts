@@ -5,12 +5,13 @@ import test from "node:test";
 import type { DatabasePool } from "@dabboba/db";
 import {
   ensureNotification,
-  externalPreferenceForNotification,
+  EXTERNAL_PUSH_REMINDER_DAYS,
   HttpNotificationDelivery,
   notificationTemplate,
   shouldDeliverNotificationExternally,
   type Notification,
 } from "./notifications.js";
+import { STORAGE_REMINDER_MILESTONE_DAYS } from "./storage-expiry.js";
 import type { OutboxEvent } from "./types.js";
 
 async function listen(server: Server): Promise<string> {
@@ -64,55 +65,17 @@ test("user-facing events map to stable in-app notification kinds", () => {
   assert.equal(notificationTemplate(event("inventory.storage_expired_hold"))?.kind, "STORAGE_EXPIRED_HOLD");
 });
 
-test("only optional external deliveries are mapped to mutable user preferences", async () => {
-  assert.equal(externalPreferenceForNotification("EXCHANGE_OFFER_CREATED"), "exchange_updates");
-  assert.equal(externalPreferenceForNotification("CATALOG_REQUEST_APPROVED"), "request_updates");
-  assert.equal(externalPreferenceForNotification("RESTOCK_AVAILABLE"), "restock_updates");
-  assert.equal(externalPreferenceForNotification("MARKETING_SMS_CAMPAIGN"), "marketing_sms");
-  assert.equal(externalPreferenceForNotification("ORDER_PAID"), null);
-  assert.equal(externalPreferenceForNotification("SHIPPING_SHIPPED"), null);
-  assert.equal(externalPreferenceForNotification("INQUIRY_ANSWERED"), null);
-  assert.equal(externalPreferenceForNotification("USER_WARNING"), null);
-  assert.equal(externalPreferenceForNotification("STORAGE_EXPIRY_REMINDER"), null);
-  assert.equal(externalPreferenceForNotification("STORAGE_EXPIRED_HOLD"), null);
-
-  let preferenceQueries = 0;
-  const optedOutPool = {
-    async query() {
-      preferenceQueries += 1;
-      return {
-        rowCount: 1,
-        rows: [{
-          exchange_updates: false,
-          request_updates: false,
-          restock_updates: false,
-          marketing_sms: false,
-          marketing_email: false,
-          marketing_push: false,
-          personalized_recommendations: false,
-        }],
-      };
-    },
-  } as unknown as DatabasePool;
-  assert.equal(await shouldDeliverNotificationExternally(optedOutPool, {
-    userId: "user-1",
-    kind: "EXCHANGE_OFFER_CREATED",
-  }), false);
-  assert.equal(preferenceQueries, 0);
-  assert.equal(await shouldDeliverNotificationExternally(optedOutPool, {
-    userId: "user-1",
-    kind: "STORAGE_EXPIRY_REMINDER",
-  }), false);
-  assert.equal(preferenceQueries, 0);
-  for (const days of [3, 7]) {
-    assert.equal(await shouldDeliverNotificationExternally(optedOutPool, {
-      userId: "user-1", kind: "STORAGE_EXPIRY_REMINDER", data: { remainingDays: days },
-    }), true);
+test("external delivery is a synchronous storage-reminder allowlist shared with the worker milestones", () => {
+  assert.deepEqual([...EXTERNAL_PUSH_REMINDER_DAYS], STORAGE_REMINDER_MILESTONE_DAYS.map(String));
+  for (const kind of ["EXCHANGE_OFFER_CREATED", "ORDER_PAID", "SHIPPING_SHIPPED", "INQUIRY_ANSWERED", "USER_WARNING", "STORAGE_EXPIRED_HOLD"]) {
+    assert.equal(shouldDeliverNotificationExternally({ kind, data: { remainingDays: 7 } }), false);
+  }
+  assert.equal(shouldDeliverNotificationExternally({ kind: "STORAGE_EXPIRY_REMINDER" }), false);
+  for (const days of STORAGE_REMINDER_MILESTONE_DAYS) {
+    assert.equal(shouldDeliverNotificationExternally({ kind: "STORAGE_EXPIRY_REMINDER", data: { remainingDays: days } }), true);
   }
   for (const days of [1, 14, 0]) {
-    assert.equal(await shouldDeliverNotificationExternally(optedOutPool, {
-      userId: "user-1", kind: "STORAGE_EXPIRY_REMINDER", data: { remainingDays: days },
-    }), false);
+    assert.equal(shouldDeliverNotificationExternally({ kind: "STORAGE_EXPIRY_REMINDER", data: { remainingDays: days } }), false);
   }
 });
 

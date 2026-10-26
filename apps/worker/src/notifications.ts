@@ -1,6 +1,7 @@
 import type { DatabaseClient, DatabasePool } from "@dabboba/db";
 import { withTransaction } from "@dabboba/db";
 import type { Logger } from "./logger.js";
+import { STORAGE_REMINDER_MILESTONE_DAYS } from "./storage-expiry.js";
 import type { OutboxEvent } from "./types.js";
 
 type NotificationTemplate = { kind: string; title: string; body: string };
@@ -26,18 +27,6 @@ type NotificationRow = {
   data: Record<string, unknown>;
   created_at: Date;
 };
-
-type ExternalPreferenceRow = {
-  exchange_updates: boolean;
-  request_updates: boolean;
-  restock_updates: boolean;
-  marketing_sms: boolean;
-  marketing_email: boolean;
-  marketing_push: boolean;
-  personalized_recommendations: boolean;
-};
-
-type ExternalPreferenceKey = keyof ExternalPreferenceRow;
 
 function stringPayload(event: OutboxEvent, key: string): string | null {
   const value = event.payload[key];
@@ -68,7 +57,7 @@ export function notificationTemplate(event: OutboxEvent): NotificationTemplate |
       return { kind: "SHIPPING_CANCELLED", title: "배송 신청이 취소됐어요", body: "배송 신청 내역에서 처리 결과를 확인해 주세요." };
     case "inventory.storage_expiry_reminder": {
       const remainingDays = event.payload.remainingDays;
-      if (typeof remainingDays !== "number" || ![7, 3].includes(remainingDays)) return null;
+      if (typeof remainingDays !== "number" || !isStorageReminderMilestone(remainingDays)) return null;
       return {
         kind: "STORAGE_EXPIRY_REMINDER",
         title: `보관 만료 ${remainingDays}일 전이에요`,
@@ -110,29 +99,31 @@ export function notificationTemplate(event: OutboxEvent): NotificationTemplate |
   }
 }
 
-export function externalPreferenceForNotification(kind: string): ExternalPreferenceKey | null {
-  if (kind.startsWith("EXCHANGE_")) return "exchange_updates";
-  if (kind.startsWith("CATALOG_REQUEST_") || kind.startsWith("WANTED_REQUEST_")) return "request_updates";
-  if (kind.startsWith("RESTOCK_")) return "restock_updates";
-  if (kind.startsWith("MARKETING_SMS_")) return "marketing_sms";
-  if (kind.startsWith("MARKETING_EMAIL_")) return "marketing_email";
-  if (kind.startsWith("MARKETING_PUSH_")) return "marketing_push";
-  if (kind.startsWith("PERSONALIZED_RECOMMENDATION_")) return "personalized_recommendations";
-  return null;
-}
+/**
+ * Owner decision 2026-10-12: external push carries storage-expiry reminders
+ * only, at the D-7 / D-3 milestones defined once in storage-expiry.ts. Those
+ * reminders are mandatory account notices, so no `notification_preferences`
+ * lookup applies; when an optional kind is ever allowed out, its opt-out check
+ * belongs here, next to the allowlist, so the two cannot drift apart.
+ */
+export const EXTERNAL_PUSH_REMINDER_DAYS: readonly string[] = Object.freeze(
+  STORAGE_REMINDER_MILESTONE_DAYS.map(String),
+);
 
-export async function shouldDeliverNotificationExternally(
-  _pool: DatabasePool,
-  notification: Pick<Notification, "userId" | "kind"> & { data?: Record<string, unknown> },
-): Promise<boolean> {
-  // Launch scope: all events still enter the in-app inbox, but only D-7/D-3
-  // storage reminders may reach an external delivery provider.
-  return isStorageExpiryPush(notification);
+export function isStorageReminderMilestone(remainingDays: number): boolean {
+  return (STORAGE_REMINDER_MILESTONE_DAYS as readonly number[]).includes(remainingDays);
 }
 
 export function isStorageExpiryPush(notification: { kind: string; data?: Record<string, unknown> }): boolean {
   return notification.kind === "STORAGE_EXPIRY_REMINDER"
-    && [3, 7].includes(Number(notification.data?.remainingDays));
+    && isStorageReminderMilestone(Number(notification.data?.remainingDays));
+}
+
+/** All events still enter the in-app inbox; only the push allowlist above leaves it. */
+export function shouldDeliverNotificationExternally(
+  notification: Pick<Notification, "kind"> & { data?: Record<string, unknown> },
+): boolean {
+  return isStorageExpiryPush(notification);
 }
 
 function notificationData(event: OutboxEvent): Record<string, unknown> {

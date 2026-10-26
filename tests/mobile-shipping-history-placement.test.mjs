@@ -41,7 +41,7 @@ test("shipping history moves from the storage task into a dedicated My Info entr
   const shippingHistory = sourceBetween(
     profileSectionSource,
     "function ShippingHistory({",
-    "function PointReturn({",
+    "function Orders({",
   );
   assert.match(shippingHistory, /\/profile\/shipping\/\$\{encodeURIComponent\(request\.id\)\}/);
   // The loaded history renders through the virtualized profile list.

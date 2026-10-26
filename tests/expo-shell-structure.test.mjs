@@ -989,7 +989,6 @@ test("native customer screens omit repeated reference-price disclaimers", () => 
   assert.doesNotMatch(customerSource, /표시 금액은 판매가가 아닌 앱 기준가예요/);
   assert.doesNotMatch(customerSource, /사용자가 정한 판매가가 아니라 앱에 등록된 상품 기준가예요/);
   assert.doesNotMatch(customerSource, /판매 상태와 가챠샵 기준가를 확인/);
-  assert.match(profileSectionSource, /예상 환급 포인트 · 구매가의 50%/);
 });
 
 test("native shop hides kuji while preserving the storage root", () => {
@@ -1312,7 +1311,6 @@ test("native my-info hub opens every account utility and nested member detail ou
     "/v1/account/inventory",
     "/v1/account/orders",
     "/v1/account/points",
-    "/v1/account/point-returns",
     "/v1/account/shipping-requests",
     "/v1/wanted-requests",
     "/v1/notices",
@@ -1326,9 +1324,7 @@ test("native my-info hub opens every account utility and nested member detail ou
   assert.match(profileHomeSource, /로그인하면 주문·포인트·배송 내역과 나의 수집 기록을 확인할 수 있어요/);
   assert.doesNotMatch(profileSectionSource, /로그인 전 화면 예시/);
   assert.match(profileSectionSource, /배송 신청/);
-  assert.match(profileSectionSource, /포인트 환급/);
-  assert.match(profileSectionSource, /createPointReturn/);
-  assert.match(profileSectionSource, /item\.pointReturnAmount/);
+  assert.doesNotMatch(profileSectionSource, /createPointReturn|pointReturnItems|function PointReturn\(/);
   assert.doesNotMatch(profileSectionSource, /Math\.floor\(item\.product\.price \/ 2\)/);
   assert.match(profileSectionSource, /if \(section === "storage"\)[\s\S]*?<StorageHubContent/);
   assert.match(profileSectionSource, /if \(section === "shipping"\) return <ShippingHistory/);

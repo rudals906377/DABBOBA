@@ -31,7 +31,6 @@ function canonicalRow(event: OutboxEvent) {
 
 test("optional opt-out skips external delivery only after the in-app notification is persisted", async () => {
   const insertedKinds: string[] = [];
-  let preferenceQueries = 0;
   const client = {
     async query(sql: string, params: unknown[] = []) {
       if (sql === "BEGIN" || sql === "COMMIT") return { rowCount: null, rows: [] };
@@ -78,21 +77,6 @@ test("optional opt-out skips external delivery only after the in-app notificatio
           });
         return { rowCount: 1, rows: [canonicalRow(canonical)] };
       }
-      if (sql.includes("FROM notification_preferences")) {
-        preferenceQueries += 1;
-        return {
-          rowCount: 1,
-          rows: [{
-            exchange_updates: false,
-            request_updates: false,
-            restock_updates: false,
-            marketing_sms: false,
-            marketing_email: false,
-            marketing_push: false,
-            personalized_recommendations: false,
-          }],
-        };
-      }
       throw new Error(`Unexpected pool query: ${sql}`);
     },
   } as unknown as DatabasePool;
@@ -119,7 +103,6 @@ test("optional opt-out skips external delivery only after the in-app notificatio
   });
   assert.deepEqual(insertedKinds, ["EXCHANGE_OFFER_CREATED"]);
   assert.deepEqual(deliveredKinds, []);
-  assert.equal(preferenceQueries, 0);
 
   await processWorkerJob(dependencies, {
     kind: "outbox.event",
@@ -135,7 +118,6 @@ test("optional opt-out skips external delivery only after the in-app notificatio
   });
   assert.deepEqual(insertedKinds, ["EXCHANGE_OFFER_CREATED", "ORDER_PAID"]);
   assert.deepEqual(deliveredKinds, []);
-  assert.equal(preferenceQueries, 0);
 });
 
 test("forged outbox jobs without a canonical PostgreSQL row are rejected before processing", async () => {

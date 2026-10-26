@@ -84,14 +84,6 @@ export type ProfileSnapshotSection =
 
 export type { ProfileSnapshotScope } from "@/features/profile/profile-snapshot-scope";
 
-export type PointReturnResult = {
-  id: string;
-  inventoryUnitIds: string[];
-  totalPointAmount: number;
-  balance: number;
-  returnedAt: string;
-};
-
 export class ProfileApiError extends Error {
   readonly status: number;
 
@@ -434,20 +426,6 @@ export async function createShippingRequest(
     body: { quoteId: input.id, addressVersion: input.addressVersion },
   });
   if (!result.data) throw new Error(errorMessage(result.error, "배송을 신청하지 못했어요."));
-  return result.data;
-}
-
-export async function createPointReturn(
-  apiBaseUrl: string,
-  accessToken: string,
-  inventoryUnitIds: string[],
-): Promise<PointReturnResult> {
-  const client = authorizedClient(apiBaseUrl, accessToken);
-  const result = await client.POST("/v1/account/point-returns", {
-    params: { header: { "Idempotency-Key": randomUUID() } },
-    body: { inventoryUnitIds },
-  });
-  if (!result.data) throw new Error(errorMessage(result.error, "포인트 환급을 신청하지 못했어요."));
   return result.data;
 }
 

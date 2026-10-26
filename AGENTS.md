@@ -475,6 +475,7 @@ When any text-entry control loses focus, dismiss the simulated keyboard. If the 
 
 - Keep Exchange Room available for the current owner's own paid DIRECT gacha-category purchases still stored, together with eligible historical gacha draws. Verify source order, original purchaser, exact SKU, paid state, deadline and inventory lock; transferred purchases do not qualify as original purchases.
 - Hide manual point-return tabs/actions and stop new point-return requests and automatic expiry point conversion. Preserve balances, existing ledgers and historical records. Order cancellation restores used points normally. Shipping and exchange stay available.
+- In code this is one switch: `POINT_RETURN_REQUESTS_ENABLED` in `apps/api/src/modules/account.ts` keeps `POST /v1/account/point-returns` answering 503 `FEATURE_UNAVAILABLE` to every caller in every commerce mode while the transactional handler and its tests stay in place; the worker batch keeps `returnExpiredStoragePoints` unimported and reports `pointReturnedInventory: 0`; the native app carries no point-return screen, client call or eligibility filter.
 - All current legal, checkout, review and support copy follows this exact scope.
 
 ## Direct Stock Confirmation — 2026-10-13 Owner Follow-up
