@@ -91,3 +91,10 @@ overrides:
   # GHSA-pqg4-j6r4-53mv (shell-quote quote() command injection via a line terminator),
   # reached only through react-devtools-core in the Expo/React Native toolchain.
   shell-quote@>=1.8.4 <1.11.0: 1.11.0
+  # GHSA-mrhx-c7xc-m3w5 (zod memory exhaustion on oversized constrained collections);
+  # no 3.x patch exists. Expo CLI is the only zod dependent and uses only
+  # z.object/.strict/.optional/.describe, z.enum, z.array().min, z.union, z.literal,
+  # z.string().min/.url, z.number and z.boolean in its dev-tools plugin schemas,
+  # all retained by zod 4. Scoped to that caller so an unrelated future zod 3 user
+  # is reported by the audit gate instead of being silently moved to zod 4.
+  '@expo/cli@57.0.27>zod': 4.6.7
