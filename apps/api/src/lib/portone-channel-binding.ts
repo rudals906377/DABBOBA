@@ -28,14 +28,25 @@ export function configuredCardChannels(config: ApiConfig): PortOneChannelBinding
   }
   return modern ? bindings : bindings.filter(c=>c.provider === "PORTONE_V2_INICIS" || c.provider === "PORTONE_V2_KCP");
 }
+/**
+ * Channels a NEW order may bind to. The 2026-10-20 owner decision retired
+ * EasyPay (KICC) as a new payment choice: it stays in configuredCardChannels so
+ * historical KICC orders keep their status reads and cancellations, but it is
+ * never advertised in cardPaymentOptions or selectable at checkout.
+ */
 export function checkoutCardChannels(config: ApiConfig): PortOneChannelBinding[] {
-  const channels = configuredCardChannels(config);
+  const channels = configuredCardChannels(config).filter((channel) => channel.provider !== "PORTONE_V2_KICC");
   return ["PORTONE_V2_NICE", "PORTONE_V2_KICC"].includes(config.paymentProvider)
-    ? channels.filter(channel=>["PORTONE_V2_NICE", "PORTONE_V2_KICC"].includes(channel.provider)) : channels;
+    ? channels.filter(channel=>channel.provider === "PORTONE_V2_NICE") : channels;
+}
+export const RETIRED_NEW_PAYMENT_RAIL_MESSAGE = "신규 결제는 나이스페이만 지원합니다. 이전 이지페이 주문은 고객지원에서 확인해 주세요.";
+export function retiredNewPaymentRail(): AppError {
+  return new AppError(409, "PAYMENT_RAIL_RETIRED", RETIRED_NEW_PAYMENT_RAIL_MESSAGE);
 }
 export function selectCardChannel(config: ApiConfig, pg?: CardPg): PortOneChannelBinding {
-  const chosen = pg ?? (config.paymentProvider === "PORTONE_V2_KICC" ? "KICC" : config.paymentProvider === "PORTONE_V2_NICE" ? "NICE" : "INICIS");
-  if (!["INICIS", "KCP", "NICE", "KICC"].includes(chosen)) throw conflict("지원하지 않는 카드 결제사입니다.");
+  const chosen = pg ?? (["PORTONE_V2_KICC", "PORTONE_V2_NICE"].includes(config.paymentProvider) ? "NICE" : "INICIS");
+  if (chosen === "KICC") throw retiredNewPaymentRail();
+  if (!["INICIS", "KCP", "NICE"].includes(chosen)) throw conflict("지원하지 않는 카드 결제사입니다.");
   const channel = checkoutCardChannels(config).find((item) => item.pgProvider === `${chosen}_V2`);
   if (!channel) throw new AppError(503, "PAYMENT_NOT_CONFIGURED", "선택한 카드 결제사가 구성되지 않았습니다.");
   return channel;

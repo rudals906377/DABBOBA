@@ -447,6 +447,7 @@ test("account basics validate real, plausible birth dates and mask verified phon
   assert.throws(() => normalizeBirthDate("1899-12-31", today), AppError);
   assert.throws(() => normalizeBirthDate("2026-09-01", today), AppError);
   assert.throws(() => normalizeBirthDate("2000/02/29", today), AppError);
+  assert.throws(() => normalizeBirthDate("2000-01-01-r1", today), AppError);
   assert.equal(maskAccountPhone("01012345678"), "010-****-5678");
   assert.equal(maskAccountPhone("+82 (10) 1234-5678"), "+82-10-****-5678");
   assert.equal(maskAccountPhone("123"), "****");
@@ -598,7 +599,10 @@ test("account inventory includes direct purchases and preserved draw or exchange
           source_type: "KUJI",
           inventory_status: "EXCHANGE_LISTED",
           acquired_at: acquiredAt,
-          point_return_eligible: false,
+          // The SQL flag may be true for an eligible row, but the response never
+          // exposes an amount while point return is withheld from customers.
+          point_return_eligible: true,
+          point_return_reference_amount: "9900",
           sku: "PRIZE-KUJI-001",
           ip_id: "test-ip",
           character_ids: ["cccccccc-cccc-4ccc-8ccc-cccccccccccc"],

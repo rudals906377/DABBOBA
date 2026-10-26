@@ -36,7 +36,7 @@ import { KUJI_SLOT_SELECTION_ALGORITHM, loadSealedKujiSlotForConsume } from "./k
 import { registerPortOnePaymentRoutes } from "./portone-payments.js";
 import { selectReviewPaymentRail } from "../lib/review-payment-selection.js";
 import { registerTossReviewPaymentRoutes } from "./toss-review-payments.js";
-import { isPortOneCardProvider, selectCardChannel, type PortOneChannelBinding } from "../lib/portone-channel-binding.js";
+import { isPortOneCardProvider, retiredNewPaymentRail, selectCardChannel, type PortOneChannelBinding } from "../lib/portone-channel-binding.js";
 import { applyPlannedPartialUnusedRefund } from "./partial-unused-refund-apply.js";
 
 type ProductOrderRow = {
@@ -342,7 +342,7 @@ async function orderResponse(queryable: Queryable, orderId: string, ownerId?: st
 }
 
 function parseOrderInput(body: unknown) {
-  const input=objectInput(body);const reviewPaymentProvider=input.reviewPaymentProvider===undefined?undefined:enumInput(input,"reviewPaymentProvider",["PORTONE_V2_NICE","PORTONE_V2_KICC","TOSSPAYMENTS_DIRECT"] as const);const cardPg=input.cardPg===undefined?undefined:enumInput(input,"cardPg",["INICIS","KCP","NICE","KICC"] as const);if(!Array.isArray(input.items)||input.items.length<1||input.items.length>20)throw badRequest("주문 상품을 확인해 주세요.");
+  const input=objectInput(body);const reviewPaymentProvider=input.reviewPaymentProvider===undefined?undefined:enumInput(input,"reviewPaymentProvider",["PORTONE_V2_NICE","PORTONE_V2_KICC","TOSSPAYMENTS_DIRECT"] as const);const cardPg=input.cardPg===undefined?undefined:enumInput(input,"cardPg",["INICIS","KCP","NICE","KICC"] as const);if(reviewPaymentProvider==="PORTONE_V2_KICC"||cardPg==="KICC")throw retiredNewPaymentRail();if(!Array.isArray(input.items)||input.items.length<1||input.items.length>20)throw badRequest("주문 상품을 확인해 주세요.");
   const combined=new Map<string,{quantity:number;expectedDrawVersion:number|null}>();for(const raw of input.items){const item=objectInput(raw);const productId=slugIdInput(item.productId,"productId");const quantity=integerInput(item,"quantity",{min:1,max:20})!;const expectedDrawVersion=integerInput(item,"expectedDrawVersion",{min:1,max:2_147_483_647,optional:true})??null;const existing=combined.get(productId);if(existing&&existing.expectedDrawVersion!==expectedDrawVersion)throw badRequest("같은 상품의 확률표 버전이 일치하지 않습니다.");combined.set(productId,{quantity:(existing?.quantity||0)+quantity,expectedDrawVersion});}
   for(const item of combined.values())if(item.quantity>20)throw badRequest("상품별 최대 수량은 20개입니다.");
   return {...(reviewPaymentProvider?{reviewPaymentProvider}:{}),...(cardPg?{cardPg}:{}),items:[...combined.entries()].map(([productId,item])=>({productId,...item})).sort((a,b)=>a.productId.localeCompare(b.productId)),couponCode:nullableStringInput(input,"couponCode",{max:60}),pointAmount:integerInput(input,"pointAmount",{min:0,max:2_147_483_647,optional:true})||0,kujiRoomEntryId:input.kujiRoomEntryId===undefined?null:uuidInput(input.kujiRoomEntryId,"kujiRoomEntryId")};
@@ -755,7 +755,7 @@ export async function registerCommerceRoutes(app:FastifyInstance,context:ApiCont
   });
 
   app.post("/v1/orders",{preHandler:[requireLiveCommerce(context),context.auth.requireUser]},async(request,reply)=>{
-    const input=parseOrderInput(request.body);if(input.reviewPaymentProvider&&(input.items.length!==1||input.pointAmount!==0||input.couponCode||input.kujiRoomEntryId||(input.cardPg&&!((input.reviewPaymentProvider==="PORTONE_V2_NICE"&&input.cardPg==="NICE")||(input.reviewPaymentProvider==="PORTONE_V2_KICC"&&input.cardPg==="KICC")))))throw badRequest("심사 결제는 확인한 단일 상품 구성의 카드 결제만 가능합니다.");const key=idempotencyKey(request.headers);const hash=requestHash(input);
+    const input=parseOrderInput(request.body);if(input.reviewPaymentProvider&&(input.items.length!==1||input.pointAmount!==0||input.couponCode||input.kujiRoomEntryId||(input.cardPg&&!(input.reviewPaymentProvider==="PORTONE_V2_NICE"&&input.cardPg==="NICE"))))throw badRequest("심사 결제는 확인한 단일 상품 구성의 카드 결제만 가능합니다.");const key=idempotencyKey(request.headers);const hash=requestHash(input);
     const result=await withTransaction(context.pool,async(client)=>{const idem=await beginIdempotency(client,{actorId:request.actor!.userId,scope:"CREATE_ORDER",key,hash});if(!idem.fresh)return {replay:true,statusCode:idem.statusCode,body:idem.body};
       await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1::text,0))",[`checkout:${request.actor!.userId}`]);
       if(input.kujiRoomEntryId&&input.items.length!==1)throw badRequest("쿠지는 한 상품만 단독으로 주문할 수 있습니다.");
